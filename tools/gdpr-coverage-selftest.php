@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 43;
+const EXPECTED_CHECKS = 60;
 
 $failures = 0;
 $passes   = 0;
@@ -1064,6 +1064,330 @@ check(
     'the pages do not promise an email that is never sent, do not state one country\'s law as fact, and say the person stays signed in',
     $deleteForm !== '' && $confirmPage !== '' && $untrueWords === [],
     implode('; ', $untrueWords)
+);
+
+// -----------------------------------------------------------------------------
+// Roll-out package A2b: giving records that keep a donor's name for a set time.
+//
+// These read the SOURCE. They cannot show the feature works - the real-database
+// test (tools/gdpr-eraser-selftest.php, sections 11 to 13) and
+// tools/giving-retention-selftest.php do that. What they hold is the SHAPE that
+// makes it safe, so that a later tidy-up cannot quietly take it apart.
+// -----------------------------------------------------------------------------
+$core            = __DIR__ . '/../web/_core/';
+$eraserCode      = $codeOnly($eraser);
+$retentionSource = (string) @file_get_contents($core . 'GivingRetention.php');
+$retentionCode   = $codeOnly($retentionSource);
+$givingCode      = $codeOnly((string) @file_get_contents($core . 'Giving.php'));
+$sweepCode       = $codeOnly((string) @file_get_contents(__DIR__ . '/../web/_apps/cron/_retention-sweep.php'));
+$settingsPage    = (string) @file_get_contents(__DIR__ . '/../web/_apps/admin/settings/giving-records/index.php');
+$settingsSave    = $codeOnly((string) @file_get_contents(__DIR__ . '/../web/_apps/admin/settings/giving-records/save.php'));
+$migration209    = (string) @file_get_contents(__DIR__ . '/../web/_sql/209_giving_kept_donors.sql');
+$method          = static function (string $code, string $name): string {
+    // The text of one method, from its name to the next NAMED method or
+    // function. (A closure inside it, `static function () {`, has no name
+    // and must not end it: the first version of this cut there.)
+    $start = strpos($code, 'function ' . $name . '(');
+    if ($start === false) {
+        return '';
+    }
+    $next = preg_match('/\n\s*(?:(?:public|private|protected)\s+)?(?:static\s+)?function\s+\w+\s*\(/', $code, $m, PREG_OFFSET_CAPTURE, $start + 10) === 1
+        ? $m[0][1]
+        : false;
+
+    return $next === false ? substr($code, $start) : substr($code, $start, $next - $start);
+};
+
+// The step that copies the name out has to run BEFORE the walk that empties
+// the account, and outside the try that lets a failed step carry on.
+$run     = $method($eraserCode, 'execute');
+$keepAt  = strpos($run, 'self::keepGivingRecords(');
+$walkAt  = strpos($run, 'foreach (self::catalogue()');
+$tryAt   = strpos($run, "\$steps  = 2;");
+check(
+    'the giving-records step runs before the table walk empties the account, and outside the try that lets a failed step carry on',
+    $keepAt !== false && $walkAt !== false && $tryAt !== false && $keepAt < $tryAt && $tryAt < $walkAt
+    && str_contains($method($eraserCode, 'keepGivingRecords'), 'self::putBackToPendingReview(')
+    && str_contains($method($eraserCode, 'keepGivingRecords'), 'throw new \RuntimeException('),
+    'keepGivingRecords() must be called before `$steps = 2;` and the walk, and must put the request back and throw on any failure'
+);
+
+// THE GUARD IS INSIDE THE CLEARING ROUTINE. Nothing may be deleted or changed
+// in it before it has asked "is this due?" and left on any other answer.
+$clear     = $method($eraserCode, 'clearKeptGivingIdentity');
+$guardAt   = strpos($clear, "if (\$state['state'] !== 'due')");
+$firstHarm = min(array_filter([strpos($clear, 'unlink('), strpos($clear, 'UPDATE '), strpos($clear, 'DELETE ')], static fn ($at): bool => $at !== false) ?: [PHP_INT_MAX]);
+check(
+    'the routine that clears a kept name asks the one deciding function first, and leaves on any answer but "due", before it deletes a file or changes a row',
+    $guardAt !== false && $guardAt < $firstHarm && str_contains($clear, 'GivingRetention::stateOfKeptRow(')
+    && str_contains(substr($clear, $guardAt, 120), 'return $state[\'state\'];') && str_contains($clear, 'DELETE FROM') === false,
+    'clearKeptGivingIdentity() must test stateOfKeptRow() === "due" before its first unlink() or UPDATE, and must never delete a row'
+);
+
+// THE FOUR RULES OF THE FIX ROUND (independent check, 12 October 2026). Each
+// is proved on a real database in tools/gdpr-eraser-selftest.php section 14;
+// these checks are the quick ones that need no database.
+//
+// Rules 1 and 2: the question the clearing asks looks at the ACCOUNT and at
+// the gifts still linked, not only at the date stored on the kept row.
+$rowState   = $method($retentionCode, 'stateOfKeptRow');
+$emptiedSql = $method($eraserCode, 'emptiedAccountSql');
+check(
+    'a kept record is "due" only when the account has really been emptied, and its date is counted from the later of the stored date, the newest linked gift and the newest envelope; "emptied" is defined once and means inactive AND the made-up name AND the made-up address',
+    $rowState !== '' && str_contains($rowState, "GdprEraser::emptiedAccountSql('u')")
+    && str_contains($rowState, 'max($storedLastGift, (string) ($found[\'newestGift\'] ?? \'\'), (string) ($found[\'newestEnvelope\'] ?? \'\'))')
+    && str_contains($rowState, 'self::stateFor($rule, $from, $today)')
+    && preg_match('/if \(\$state\[\'accountEmptied\'\] === false && \$state\[\'state\'\] !== \'unreadable\'\) \{\s*\$state\[\'state\'\] = \'not-erased\';/', $rowState) === 1
+    && str_contains($emptiedSql, '.isActive = 0 AND ') && str_contains($emptiedSql, 'self::TOMBSTONE_NAME') && str_contains($emptiedSql, 'self::TOMBSTONE_EMAIL')
+    && substr_count($emptiedSql, ' AND ') === 2 && str_contains($emptiedSql, ' OR ') === false
+    && str_contains($method($retentionCode, 'keptDonorsForSite'), 'self::stateOfKeptRow('),
+    'GivingRetention::stateOfKeptRow() must ask GdprEraser::emptiedAccountSql() and count from the latest of the three dates'
+);
+// Rule 3: a later run works the row out again, and the statement that could
+// write a made-up name over a real one does not exist.
+$atSite = $method($eraserCode, 'keepGivingRecordsAtSite');
+// (The second fix round, after the narrow check of 12 October 2026: beside an
+// emptied account the stored rule sorts the gifts, is never overwritten, and
+// the row is never emptied here. Proved in section 15 of the database test.)
+check(
+    'a later run of an erasure works the kept record out again; when the account is already emptied the name, address, postcode AND the stored rule are not in the statement at all, the wider of the stored rule and today\'s sorts the gifts and the envelopes, and the "nothing to keep" branch is closed',
+    $atSite !== '' && str_contains($atSite, "'UPDATE tblGivingKeptDonors SET lastGiftDate = ?, keptGiftCount = ? WHERE keptDonorID = ?'")
+    && str_contains($atSite, '$keptAlready = $earlierRun === true && $emptiedAlready === true;')
+    // Beside an emptied account the WIDER of the stored rule and today's
+    // sorts (third fix round): the stored "every gift" wins over a narrower
+    // setting, and today's "every gift" wins over a narrower stored rule.
+    && str_contains($atSite, "if (\$keptAlready === true && (string) \$existing['scope'] === GivingRetention::SCOPE_ALL) {")
+    && str_contains($atSite, "\$scope = (string) \$rule['scope'];")
+    && str_contains($atSite, 'self::$everyGiftSites[] = $siteId;')
+    && str_contains($method($eraserCode, 'unnameCountEnvelopes'), "' OR cs.siteID IN (' . implode(', ', array_map('intval', self::\$everyGiftSites)) . ')'")
+    && str_contains($atSite, 'if ($keptAlready === false && $keptGifts === 0 && $declarationCount === 0 && $statementCount === 0 && $envelopeCount === 0) {')
+    && strpos($atSite, '$keptAlready = $earlierRun === true') < strpos($atSite, 'GivingRetention::keptGiftSql($scope')
+    && str_contains($atSite, "'UPDATE tblGivingKeptDonors SET erasureRequestID = ?, fullName = ?, address = ?, postcode = ?, scope = ?, '")
+    && strpos($atSite, 'if ($emptiedAlready === true) {') !== false
+    && strpos($atSite, 'if ($emptiedAlready === true) {') < strpos($atSite, "'UPDATE tblGivingKeptDonors SET lastGiftDate = ?")
+    && str_contains($atSite, "if (\$earlierRun === true && (string) \$existing['lastGiftDate'] > \$lastGift) {")
+    && str_contains($atSite, 'left exactly as it is') === false,
+    'keepGivingRecordsAtSite() must update an earlier run\'s row, with no name columns when the account is already emptied, and never move the date earlier'
+);
+// A record already past its date is cleared at the END of the run, after the
+// account is emptied (the clearing would refuse before then).
+$dueAt     = strpos($run, 'self::clearGivingRecordDueAtErasure(');
+$imagesAt  = strpos($run, 'self::eraseProfileImages(');
+$closeAt   = strpos($run, 'self::closeRequest(');
+check(
+    'a record already past its date on the day of the erasure is cleared at the END of the run, after the walk has emptied the account and before the request is closed, by the guarded routine and nothing else',
+    $dueAt !== false && $imagesAt !== false && $closeAt !== false && $walkAt < $dueAt && $imagesAt < $dueAt && $dueAt < $closeAt
+    && str_contains($method($eraserCode, 'keepGivingRecords'), 'clearKeptGivingIdentity(') === false
+    && str_contains($method($eraserCode, 'clearGivingRecordDueAtErasure'), 'self::clearKeptGivingIdentity($keptDonorId)'),
+    'execute() must call clearGivingRecordDueAtErasure() after eraseProfileImages() and before closeRequest()'
+);
+// Rule 4: the cancel is refused before anything is written.
+$processCode = $codeOnly((string) @file_get_contents(__DIR__ . '/../web/_apps/admin/erasure/process.php'));
+$askAt       = strpos($processCode, '$stillWaiting === true && GdprEraser::runHasChangedAnything($requestId) === true');
+$cancelAt    = strpos($processCode, 'UPDATE tblErasureRequest SET status = "cancelled"');
+$hasRun      = $method($eraserCode, 'givingStepHasRun');
+$hasChanged  = $method($eraserCode, 'runHasChangedAnything');
+$trailLine   = $method($eraserCode, 'trailHasLine');
+check(
+    'a request whose run has changed ANYTHING cannot be cancelled: the page asks before it writes "cancelled", leaves with a message, and the question covers a deleted row, an emptied column and a kept name, and answers "yes" when it cannot tell',
+    $askAt !== false && $cancelAt !== false && $askAt < $cancelAt && str_contains(substr($processCode, $askAt, 1100), 'exit();')
+    && str_contains($processCode, 'This request cannot be cancelled') && str_contains($processCode, 'Run the request again to finish')
+    && str_contains($processCode, 'GdprEraser::givingStepHasRun(') === false
+    && str_contains($hasChanged, 'self::givingStepHasRun($requestId) === true')
+    && str_contains($hasChanged, "action IN ('delete', 'anonymise', 'partial')")
+    && str_contains($hasRun, "tableName IN ('GivingRecords', 'CountEnvelopes') AND action IN ('retain', 'anonymise')")
+    && substr_count($trailLine, 'return true;') === 2,
+    'process.php must call GdprEraser::runHasChangedAnything() and leave before the UPDATE that cancels'
+);
+// The clearing decides INSIDE its transaction, with the kept row and the
+// donor's gifts locked, and deletes nothing before that. (Proved with a
+// second connection in section 15 of the database test.)
+$lockRowAt   = strpos($clear, 'FROM tblGivingKeptDonors WHERE keptDonorID = ? FOR UPDATE');
+$lockGiftsAt = strpos($clear, "'SELECT entryID FROM tblGivingEntry WHERE siteID = ? AND donorID = ? FOR UPDATE'");
+$decideAt    = strrpos($clear, 'GivingRetention::stateOfKeptRow(');
+$stepAt      = strpos($clear, 'self::asOneStep(');
+check(
+    'the clearing locks the kept row and the donor\'s gifts, reads the rule and the state again, and only then deletes a file or changes a row',
+    $stepAt !== false && $lockRowAt !== false && $lockGiftsAt !== false && $decideAt !== false
+    && $stepAt < $lockRowAt && $lockRowAt < $lockGiftsAt && $lockGiftsAt < $decideAt && $decideAt < $firstHarm
+    && substr_count($clear, 'GivingRetention::stateOfKeptRow(') === 2 && substr_count($clear, "if (\$state['state'] !== 'due') {") === 2
+    && strpos($clear, 'GivingRetention::ruleForSite($siteId)', $lockGiftsAt) !== false,
+    'clearKeptGivingIdentity() must decide again after its two FOR UPDATE reads and before its first unlink() or UPDATE'
+);
+// The general settings editor: refused in the save (edit and add) and in the
+// delete, before anything is written.
+$generalSave  = $codeOnly((string) @file_get_contents(__DIR__ . '/../web/_apps/settings/save.php'));
+$generalIndex = $codeOnly((string) @file_get_contents(__DIR__ . '/../web/_apps/settings/index.php'));
+$lockFn       = $method($retentionCode, 'lockedInGeneralEditor');
+$editLockAt   = strpos($generalSave, 'GivingRetention::lockedInGeneralEditor($storedKey, $isPortalWideRow, $isGlobalAdmin) === true');
+$addLockAt    = strpos($generalSave, 'GivingRetention::lockedInGeneralEditor($settingKey, false, $isGlobalAdmin) === true');
+$firstWrite   = min(array_filter([strpos($generalSave, 'UPDATE tblSettings'), strpos($generalSave, 'INSERT INTO tblSettings')], static fn ($at): bool => $at !== false) ?: [0]);
+$deleteAt     = strpos($generalIndex, 'DELETE FROM tblSettings');
+$deleteLockAt = strpos($generalIndex, 'GivingRetention::LOCKED_MESSAGE');
+check(
+    'the general settings editor cannot change, add or delete a giving-records setting: each is refused before the first write, and the only row left open is the installation-wide hold for a global administrator',
+    $editLockAt !== false && $addLockAt !== false && $firstWrite > 0 && $editLockAt < $firstWrite && $deleteAt !== false && $deleteLockAt !== false && $deleteLockAt < $deleteAt
+    && substr_count($generalSave, 'GivingRetention::LOCKED_MESSAGE') === 2
+    && str_contains($lockFn, "strncasecmp(\$key, 'giving.retention.', 17) !== 0")
+    && str_contains($lockFn, 'self::KEY_HOLD') && str_contains($lockFn, '$portalWideRow === true') && str_contains($lockFn, '$globalAdmin === true'),
+    'web/_apps/settings/save.php and index.php must ask GivingRetention::lockedInGeneralEditor() before any write'
+);
+// The kept-names table is asked for before anything else, for everybody.
+$keepStep = $method($eraserCode, 'keepGivingRecords');
+$probeAt  = strpos($keepStep, "\$db->query('SELECT 1 FROM tblGivingKeptDonors LIMIT 0')");
+$sitesAt  = strpos($keepStep, "'SELECT siteID FROM tblGivingEntry WHERE donorID = ? '");
+check(
+    'the giving step asks for the kept-names table before anything else, donor or not, and a missing table is answered with "run the database upgrade"',
+    $probeAt !== false && $sitesAt !== false && $probeAt < $sitesAt && str_contains($keepStep, '(int) $e->getCode() === 1146')
+    && str_contains($keepStep, 'run the database upgrade, then run this request again')
+    // The only way out with "done" is after the envelope step, so a person
+    // with no giving records still has their envelopes looked at.
+    && substr_count($keepStep, 'return $changed;') === 1
+    && strpos($keepStep, 'return $changed;') > strpos($keepStep, 'self::unnameCountEnvelopes('),
+    'keepGivingRecords() must probe tblGivingKeptDonors first and must not return early for a person with no giving records'
+);
+$decide = $method($retentionCode, 'stateFor');
+check(
+    'the deciding function tests the hold first, then "confirmed", then the date, and only then says "due"',
+    ($holdAt = strpos($decide, "\$rule['hold'] !== false")) !== false
+    && ($confirmedAt = strpos($decide, "\$rule['confirmed'] !== true")) !== false
+    && ($dateAt = strpos($decide, "\$today <= \$date['keepUntil']")) !== false
+    && ($dueAt = strpos($decide, "\$state = 'due';")) !== false
+    && $holdAt < $confirmedAt && $confirmedAt < $dateAt && $dateAt < $dueAt && substr_count($decide, "'due'") === 1,
+    'stateFor() must be: hold, then not confirmed, then today <= keepUntil, else due'
+);
+
+// The job hands every record to that routine and decides nothing itself; and
+// a cleared name is never counted as a deletion.
+$sweepFn = $method($sweepCode, 'run_giving_identity_sweep');
+$total   = '';
+if (preg_match("/'totalDeleted'\s*=>\s*([^,\]]+)/", $sweepCode, $m) === 1) {
+    $total = $m[1];
+}
+check(
+    'the scheduled job decides nothing itself (it calls the guarded routine for every kept record), and a cleared name is not added to "deleted N rows"',
+    str_contains($sweepFn, 'GdprEraser::clearKeptGivingIdentity(') && str_contains($sweepFn, 'stateFor') === false
+    && str_contains($sweepFn, "'due'") === false && $total !== '' && str_contains($total, 'giving') === false
+    && str_contains($total, '$activityDeleted + $errorsDeleted + $registrationsDeleted'),
+    'totalDeleted is: ' . $total
+);
+
+// Kept gifts are not emptied again by the walk. Nor is an envelope: the
+// giving step decides which envelopes keep their giver (those in a count that
+// is not yet closed, whose gift will be a kept gift) and takes it off the rest
+// itself. (Until 12 October 2026 the walk always took it off, and the gift
+// made from such an envelope when the count was closed had no donor.)
+$giftLine     = '';
+$envelopeLine = '';
+foreach ($instructions as $instruction) {
+    if ($instruction['table'] === 'tblGivingEntry' && $instruction['userCol'] === 'donorID') {
+        $giftLine = (string) $instruction['action'];
+    }
+    if ($instruction['table'] === 'tblCountEnvelopes' && $instruction['userCol'] === 'giverID') {
+        $envelopeLine = (string) $instruction['action'] . ':' . implode(',', (array) ($instruction['nullCols'] ?? []));
+    }
+}
+$envelopeStep = $method($eraserCode, 'unnameCountEnvelopes');
+check(
+    'the table walk does not take the donor off a KEPT gift or a kept envelope again (both instructions are "keep"); the giving step takes the giver and any typed name off every envelope except one in a count not yet closed with an uncleared kept record; and the clearing takes it off those',
+    $giftLine === 'retain' && $envelopeLine === 'retain:'
+    && str_contains($envelopeStep, "cs.status <> 'closed' AND k.keptDonorID IS NOT NULL")
+    && str_contains($envelopeStep, 'k.clearedAt IS NULL')
+    && str_contains($envelopeStep, "SET ce.giverID = NULL, ce.giverName = NULL WHERE ce.giverID = ? AND NOT ' . \$keptEnvelope")
+    && strpos($keepStep, 'self::unnameCountEnvelopes(') > strpos($keepStep, 'self::keepGivingRecordsAtSite(')
+    && preg_match('/UPDATE tblCountEnvelopes ce.*?SET ce\.giverID = NULL, ce\.giverName = NULL/s', $clear) === 1
+    && in_array('giverID', \Portal\Core\GdprEraser::LINK_COLUMNS, true) === true
+    && in_array('giverID', \Portal\Core\GdprEraser::ACTOR_COLUMNS, true) === false,
+    'gift: ' . $giftLine . '; envelope: ' . $envelopeLine
+);
+
+// The claim file reads the kept name; an erased donor is never rendered,
+// listed, or regenerated over.
+check(
+    'the tax claim file reads the KEPT name when there is one, and an erased donor is never rendered for, listed for, or regenerated over',
+    str_contains($method($givingCode, 'buildHmrcCsv'), 'COALESCE(k.fullName, u.fullName)')
+    && str_contains($method($givingCode, 'buildHmrcCsv'), 'k.clearedAt IS NULL')
+    // The kept name is read only beside an EMPTIED account, and "an erased
+    // donor" is one whose account is emptied: a kept row beside a live
+    // member (an erasure that stopped) is neither.
+    && str_contains($method($givingCode, 'buildHmrcCsv'), "GdprEraser::emptiedAccountSql('u')")
+    && str_contains($method($givingCode, 'erasedDonorSql'), "GdprEraser::emptiedAccountSql('ku')")
+    && str_contains($method($givingCode, 'isErasedDonor'), "self::erasedDonorSql('?', '?')")
+    && str_contains($method($givingCode, 'renderStatementPdf'), 'self::isErasedDonor($siteId, $donorId) === true')
+    && str_contains($method($givingCode, 'statementsPreview'), "NOT ' . self::erasedDonorSql(")
+    && substr_count($method($givingCode, 'renderStatementBatch'), "NOT ' . self::erasedDonorSql(") === 3
+    && substr_count($givingCode, 'FROM tblGivingKeptDonors') === 1,
+    'Giving.php must join tblGivingKeptDonors in buildHmrcCsv() beside an emptied account, and leave erased donors out of the three statement routines through erasedDonorSql()'
+);
+
+// NO COUNTRY IS BUILT IN. The installation's one address is "GB" unless
+// changed; reading it would make every organisation look British.
+$countryLiterals = [];
+foreach (['GivingRetention.php' => $retentionCode, 'giving-records/index.php' => $codeOnly($settingsPage), 'giving-records/save.php' => $settingsSave] as $where => $code) {
+    if (preg_match('/org\.address|[\'"](GB|UK|US|IE)[\'"]|HMRC|United Kingdom/', $code) === 1) {
+        $countryLiterals[] = $where;
+    }
+}
+check(
+    'no country is built in: the giving-records code never reads the installation\'s own address, and names no country, no tax office and no figure of its own',
+    $retentionCode !== '' && $countryLiterals === [] && str_contains($retentionCode, "'giving.retention.countryCode'")
+    && preg_match("/giving\.retention\.countryCode',\s*'',\s*''/", $migration209) === 1
+    && preg_match("/giving\.retention\.countryCode',\s*'',\s*''/", $schemaText) === 1
+    && preg_match("/giving\.retention\.confirmed',\s*'false',\s*'false'/", $schemaText) === 1,
+    'a country or tax office is named in: ' . implode(', ', $countryLiterals)
+);
+
+// The words on the settings page.
+$pageText = (string) preg_replace('/\s+/', ' ', strip_tags((string) preg_replace('/<\?php.*?\?>/s', ' ', $settingsPage)));
+$claims   = [];
+foreach (['the law requires', 'required by law', 'legally required', 'you must keep', 'must be kept for', 'the legal period'] as $phrase) {
+    if (stripos($pageText, $phrase) !== false) {
+        $claims[] = $phrase;
+    }
+}
+check(
+    'the settings page never reads as if the portal knows the law: it says "suggestion", "placeholder, not a finding" and "not legal advice", asks for an adviser, and has the wording for a weak or unclear exception',
+    $claims === [] && str_contains($pageText, 'Our suggestion for') && str_contains($pageText, 'placeholder, not a finding')
+    && str_contains($pageText, 'This is our reading of the rules, not legal advice. Please check it with your accountant or adviser.')
+    && str_contains($pageText, 'we could not confirm that the law lets an organisation keep these records after somebody has asked to be erased')
+    && str_contains($pageText, 'Please take local legal advice before relying on this page')
+    && str_contains($pageText, 'We found no general right to be erased')
+    && str_contains($pageText, 'disagree, or are weak') && str_contains($pageText, 'nothing is cleared before then')
+    && str_contains($settingsPage, 'GivingRetention::STRENGTH_WORDS'),
+    'claims found: ' . implode(', ', $claims)
+);
+$isAdminAt = strpos($settingsSave, 'App::isAdmin() === false');
+$tokenAt   = strpos($settingsSave, 'Auth::verifyCsrf(');
+$saveAt    = strpos($settingsSave, 'GivingRetention::saveForSite($mysqli, $siteId, $posted)');
+check(
+    'the save handler checks who is asking and the form token before it saves, saves only for the administrator\'s own organisation, and logs it',
+    $isAdminAt !== false && $tokenAt !== false && $saveAt !== false && $isAdminAt < $tokenAt && $tokenAt < $saveAt
+    && str_contains($settingsSave, '$siteId = Site::id();') && str_contains($settingsSave, "\$_POST['siteID']") === false
+    && str_contains($settingsSave, 'Logger::activity(') && str_contains($settingsSave, '.php\'') === false
+    && str_contains($settingsPage, 'App::isAdmin() === false'),
+    'save.php must be: administrator, POST, form token, then saveForSite() for Site::id()'
+);
+
+// The privacy page every member can read. It used to print one installation-
+// wide number of years beside one country's tax office.
+$privacyPage = (string) @file_get_contents(__DIR__ . '/../web/_apps/privacy/policy.php');
+$privacyCode = $codeOnly($privacyPage);
+$yearsAt     = strpos($privacyCode, "\$givingRule['years']");
+$guardAt     = strpos($privacyCode, "\$givingRule !== null && \$givingRule['confirmed'] === true");
+$elseAt      = strpos($privacyCode, '<?php else: ?>', (int) $guardAt);
+check(
+    'the privacy page gives a number of years only when the organisation has CONFIRMED one, reads that organisation\'s own rule, and names no country\'s tax office',
+    $privacyCode !== '' && $guardAt !== false && $yearsAt !== false && $elseAt !== false && $guardAt < $yearsAt && $yearsAt < $elseAt
+    && substr_count($privacyCode, "\$givingRule['years']") === 2
+    && str_contains($privacyCode, 'GivingRetention::ruleForSite(Site::id())')
+    && preg_match('/HMRC|financialRetentionYears/', $privacyCode) !== 1
+    && str_contains($privacyCode, 'has not yet confirmed how many years')
+    // Both branches say so when the organisation keeps the name on EVERY
+    // gift. The unconfirmed one used to say "gifts covered by a tax
+    // declaration..." whatever the organisation had chosen.
+    && substr_count($privacyPage, "['scope'] === GivingRetention::SCOPE_ALL ? ' (for this organisation, every gift)' : ''") === 2
+    && strpos($privacyPage, "\$givingRule !== null && \$givingRule['scope'] === GivingRetention::SCOPE_ALL") > strpos($privacyPage, '<?php else: ?>', (int) strpos($privacyPage, "\$givingRule['confirmed'] === true")),
+    'policy.php must print $givingRule[\'years\'] only inside the "confirmed" branch'
 );
 
 // -----------------------------------------------------------------------------

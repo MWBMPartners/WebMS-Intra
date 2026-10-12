@@ -54,6 +54,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#roles" class="badge text-bg-secondary text-decoration-none">User Roles</a>
             <a href="#groups-departments" class="badge text-bg-secondary text-decoration-none">Groups and Departments</a>
             <a href="#gatekeeper" class="badge text-bg-secondary text-decoration-none">Dev Site Access (Gatekeeper)</a>
+            <a href="#giving-records" class="badge text-bg-secondary text-decoration-none">Giving Records and Erasure</a>
             <a href="#logs" class="badge text-bg-secondary text-decoration-none">Viewing Logs</a>
             <a href="#csv-export" class="badge text-bg-secondary text-decoration-none">CSV Export</a>
             <a href="#ms365-shared-mailbox" class="badge text-bg-secondary text-decoration-none">MS365 Shared Mailbox</a>
@@ -571,6 +572,65 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div>Displays the <strong>403 Access Denied</strong> error page.</div>
         </div>
     </div>
+</div>
+
+<!-- Giving records and the right to be forgotten (roll-out package A2b).
+     Every sentence here was checked against web/_core/GivingRetention.php and
+     the settings page it describes. It must never read as if the portal knows
+     the law: the figures are suggestions. -->
+<div class="portal-card p-4 mb-4" id="giving-records">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-receipt me-2 text-primary"></i>Giving Records and Erasure</h2>
+
+    <p>
+        When somebody asks to be erased, the portal erases their details. One thing is different:
+        tax and accounting rules make most organisations keep some giving records, with the donor's
+        name, for a number of years. Each organisation sets what it keeps, and for how long, at
+        <strong>Admin &rarr; Giving records</strong>.
+    </p>
+
+    <h3 class="h6 mt-3">What you set</h3>
+    <ul>
+        <li><strong>Your country.</strong> The portal uses it only to suggest a number of years. Until you choose one, it suggests a cautious 10 years.</li>
+        <li><strong>Which gifts keep the donor's name.</strong> Only gifts with a tax declaration, a tax receipt or a giving statement (recommended), or every gift. Every other gift keeps its amount, date and method and loses the name straight away.</li>
+        <li><strong>How many years.</strong> Counted from the end of the financial year of the donor's last such gift.</li>
+        <li><strong>When your financial year ends.</strong> Until you say, the portal counts from one year after the last gift, which may keep a record up to a year longer than needed.</li>
+        <li><strong>Hold.</strong> Switch this on while an audit or tax enquiry is open. Nothing is cleared until you switch it off. A global administrator can also hold the whole installation; the page shows that separately, and it cannot be changed from your organisation's page.</li>
+    </ul>
+    <p>
+        These settings can only be changed on that page. The general settings list shows them and
+        refuses to edit or delete them, because a change there could clear kept records with no
+        warning.
+    </p>
+
+    <div class="alert alert-warning">
+        <strong>The number of years is a suggestion, not legal advice.</strong> It comes from research
+        of mixed strength. The page shows how strong the source is and links to what was read. Please
+        check it with your accountant or adviser, then tick <em>We have confirmed this figure with
+        our adviser</em>. <strong>Nothing is ever cleared until that box is ticked.</strong>
+    </div>
+
+    <h3 class="h6 mt-3">What happens when the time is up</h3>
+    <p>
+        The nightly retention job removes the donor's name, their home address, the link to them and
+        the copies of statements kept with those records. The gift, the tax declaration and the
+        statement record all stay, with their amounts and dates. A line is added to the report of the
+        original erasure request, so one report tells the whole story. This cannot be undone.
+    </p>
+    <p>
+        If the nightly job has not been switched on, nothing is cleared until a global administrator
+        runs it from <strong>Admin &rarr; Retention</strong>. The Giving records page says so when that
+        is the case.
+    </p>
+
+    <h3 class="h6 mt-3">If an erasure stops part way</h3>
+    <p class="mb-0">
+        An erasure works through many steps. It deals with the giving records first and empties the
+        account about half way through. If it stops part way, run the request again: every step is
+        safe to repeat. Until the account has been emptied, the person is still treated as a member
+        and nothing kept for them is cleared. Once a run has removed or changed anything, the request
+        <strong>cannot be cancelled</strong>, because what it changed cannot be put back. A request
+        that has never changed anything can be cancelled as before.
+    </p>
 </div>
 
 <!-- Section 4: Viewing Logs -->

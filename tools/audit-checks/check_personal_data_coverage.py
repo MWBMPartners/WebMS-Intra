@@ -132,6 +132,11 @@ PERSONAL_COLUMNS = re.compile(
     # upgrade record (tblMigrations) now has an entry: without the name here,
     # that entry could be deleted and this check would still pass.
     r"|submittedByID|statusChangedByID|resolvedByID|executedByID"
+    # Added by roll-out package A2b (12 October 2026): who a counted envelope
+    # was from. `tblCountEnvelopes` had no catalogue entry and this check
+    # could not see it, because neither name was here (`giverName` is a name
+    # typed by hand when the envelope matched no member).
+    r"|giverID|giverName"
     r")$",
     re.IGNORECASE,
 )

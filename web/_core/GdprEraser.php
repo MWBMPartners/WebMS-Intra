@@ -6,7 +6,7 @@
  * -----------------------------------------------------------------------------
  * Right-to-erasure orchestrator. Walks the catalogue of PII-bearing tables,
  * deletes rows where lawful, anonymises rows that must be retained for a
- * legitimate-interest reason (e.g. financial records → HMRC 6-year rule).
+ * legitimate-interest reason (financial records, for example).
  *
  * Every action lands in tblErasureAudit as one line, and each line carries a
  * fingerprint (SHA-256) of itself and of the line before it. Changing or
@@ -89,14 +89,33 @@
  * each instruction: a "delete" matched on a column that says the person acted
  * on a record is refused by construction.
  *
+ * GIVING RECORDS KEEP THE DONOR'S NAME FOR A SET TIME (roll-out package A2b,
+ * Salem874's decisions of 11 October 2026)
+ * -------------------------------------------------------------------
+ * Tax and accounting law makes most organisations keep some giving records
+ * WITH the donor's name for a number of years. So an erasure keeps the name
+ * and home address, in `tblGivingKeptDonors`, for the gifts the person's
+ * organisation has chosen to keep identified, and takes the name off every
+ * other gift at once. The account itself is still emptied. When the
+ * organisation's "keep until" date has passed, the retention job calls
+ * clearKeptGivingIdentity(), which removes the name, the address, the link
+ * and the kept statement files together, and adds a line to this erasure's
+ * audit trail. See keepGivingRecords() and Portal\Core\GivingRetention.
+ *
+ * NOTHING IS CLEARED before an administrator has confirmed the number of
+ * years, and nothing while a hold is on. The numbers of years are the
+ * portal's SUGGESTIONS from research, never legal fact; no line written here
+ * says otherwise.
+ *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.2.0
+ * @version   1.3.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/235
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/510
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/535
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/574
  * -----------------------------------------------------------------------------
  */
 
@@ -157,7 +176,40 @@ class GdprEraser
             // Expense claims live in `tblExpenseClaims`.`userID` — there is
             // no `tblExpenseClaim` (singular) table or `submittedByID` column.
             ['table' => 'tblExpenseClaims',    'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'UK HMRC requires 6-year retention of expense records'],
-            ['table' => 'tblGivingEntry',       'userCol' => 'donorID',      'action' => 'anonymise', 'nullCols' => [], 'reason' => 'UK HMRC requires 6-year retention of financial records'],
+            // 🧾 KEPT, since roll-out package A2b (Salem874, 11 October 2026).
+            //    This line said 'anonymise' until then: every gift lost its
+            //    donor at once. A gift given before the erasure but not yet
+            //    claimed then dropped out of the organisation's next tax
+            //    claim, because the claim matches a gift to its declaration
+            //    by account number (Giving::buildHmrcCsv()), and nothing
+            //    reported it.
+            //
+            //    By the time the walk reaches this line, keepGivingRecords()
+            //    has already run: the gifts that do NOT keep the donor's name
+            //    have lost their account number, so the only gifts this line
+            //    can still find are the kept ones. It changes nothing; it
+            //    writes down that they are kept. The retention job removes
+            //    the number later (clearKeptGivingIdentity()).
+            //
+            //    It also said "UK HMRC requires 6-year retention", which was
+            //    one country's rule stated as fact about every customer.
+            ['table' => 'tblGivingEntry',       'userCol' => 'donorID',      'action' => 'retain', 'nullCols' => [], 'reason' => 'these gifts keep the donor\'s name and address for tax reasons until the organisation\'s keep-until date; see the "GivingRecords" line of this report for the date and how it was worked out. Every other gift of this person\'s has already lost their name'],
+            // ✉️ A counted envelope. KEPT in the walk, like a gift, because the
+            //    giving-records step has already dealt with every envelope by
+            //    the time the walk gets here (unnameCountEnvelopes()): it
+            //    takes the giver off all of them EXCEPT one in a count that
+            //    is not yet closed whose gift, when the count is closed, will
+            //    be a gift that keeps the donor's name.
+            //
+            //    This line first said 'anonymise' for every envelope. The
+            //    independent check of 12 October 2026 pointed out what that
+            //    did: closing the count afterwards made a gift with NO donor
+            //    from it, so that gift dropped out of the organisation's tax
+            //    claim although the same donor's other gifts were kept.
+            //
+            //    What it cannot do: find an envelope that names the person
+            //    ONLY by a typed name (`giverName`), with no account number.
+            ['table' => 'tblCountEnvelopes',    'userCol' => 'giverID',      'action' => 'retain', 'nullCols' => [], 'reason' => 'an envelope in an offering count that is not yet closed, whose gift will keep the donor\'s name for tax reasons when the count is closed; see the "CountEnvelopes" line of this report. Every other envelope of this person\'s has already lost its giver'],
             ['table' => 'tblPayment',           'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'Payment processor reconciliation requires retention'],
             ['table' => 'tblPrayerRequests',    'userCol' => 'submitterID',  'action' => 'anonymise', 'nullCols' => ['submitterName','submitterEmail','submitterIP'], 'reason' => 'request body preserved for congregational continuity; PII blanked'],
             ['table' => 'tblAnnouncements',    'userCol' => 'createdByID',  'action' => 'anonymise', 'nullCols' => [], 'reason' => 'authorship attribution detached'],
@@ -280,20 +332,21 @@ class GdprEraser
             //    asking to be forgotten destroyed the organisation's evidence
             //    for tax it had already reclaimed on their gifts.
             //
-            //    Kept for tax reasons: HMRC can ask to see a declaration for
-            //    six years after the last gift claimed under it. THAT PERIOD
-            //    HAS NOT BEEN CONFIRMED WITH AN ACCOUNTANT; it is the
-            //    project's understanding of HMRC's guidance, written down so
-            //    that somebody checks it rather than trusts it.
+            //    Not one column of a declaration changes at erasure. HOW LONG
+            //    it is kept is the organisation's own setting (roll-out
+            //    package A2b): this comment and the reason below used to say
+            //    "six years" and name the United Kingdom's tax office, as if
+            //    that were true of every customer, and noted that there was
+            //    no timer and that the donor's NAME was kept nowhere. Both
+            //    are put right: the name and address are kept in
+            //    `tblGivingKeptDonors`, and the retention job empties the
+            //    address, postcode, signature and notes here when the
+            //    keep-until date has passed (clearKeptGivingIdentity()).
             //
-            //    What this does NOT do: nothing removes a declaration when
-            //    those six years are up (there is no timer), and the donor's
-            //    NAME is not on this row - it is on the account, which the
-            //    last step empties. So what is kept is the address, postcode,
-            //    dates and signature, linked to an account that names nobody.
-            //    Whether that is enough for HMRC is part of what an
-            //    accountant needs to confirm.
-            ['table' => 'tblGiftAidDeclaration','userCol' => 'donorID', 'action' => 'retain', 'nullCols' => [], 'reason' => 'a Gift Aid declaration is the evidence for tax already reclaimed. Kept for tax reasons: HMRC can ask to see it for six years after the last gift claimed under it'],
+            //    What that later step does NOT do: empty `donorID`. The
+            //    database does not allow it to be empty on this table, so the
+            //    row goes on pointing at an account that names nobody.
+            ['table' => 'tblGiftAidDeclaration','userCol' => 'donorID', 'action' => 'retain', 'nullCols' => [], 'reason' => 'a tax declaration is the organisation\'s evidence for tax relief claimed on a donor\'s gifts. Kept unchanged, with the donor\'s giving records, until the organisation\'s keep-until date; see the "GivingRecords" line of this report'],
             // The person's own connection to Zoom: their Zoom account's number
             // and the keys that let the portal act as them. Deleted.
             //
@@ -744,6 +797,11 @@ class GdprEraser
         // person the invitation was FOR, and that row holds their own email
         // address. An accepted invitation is deleted with its person.
         'acceptedByID',
+        // `giverID` (roll-out package A2b): who a counted envelope was FROM.
+        // The envelope is about the giver, not something they did to
+        // somebody else's record. It is here, in the first group, so that it
+        // is emptied only where it names this person.
+        'giverID',
         // The person ACTED on this, or is merely named on it.
         'assignedToID', 'targetUserID',
         'uploadedByUserID', 'approverID', 'reviewedByID', 'startedByID',
@@ -1233,6 +1291,10 @@ class GdprEraser
      *   1. Read the person's email address, while the account still has it.
      *   2. The Demo Data step (#498). It stops everything by itself if it
      *      fails, and puts the request back; see its own docblock.
+     *   2b. The giving-records step (keepGivingRecords()). It copies the
+     *      donor's name and address to where they are kept for tax reasons,
+     *      so it MUST run before the walk empties the account, and it too
+     *      stops everything if it fails.
      *   3. Every instruction in catalogue(), then the dedicated steps
      *      (giving statements, the email send log, the person's photo). A
      *      step that fails is written down and the rest still run.
@@ -1280,7 +1342,19 @@ class GdprEraser
         //    that behaviour was settled over five review rounds.
         $changed = self::eraseDemoDataRegisterEntries($requestId, $userId) > 0;
 
-        $steps  = 1; // the Demo Data step, which succeeded or we would not be here
+        // 🧾 The giving records an organisation keeps WITH the donor's name
+        //    for tax reasons (roll-out package A2b). BEFORE the catalogue,
+        //    because it reads the name and address and the catalogue's last
+        //    instruction empties them. Outside the try below for the same
+        //    reason as the Demo Data step: if it fails it puts the request
+        //    back and throws its own message, and NOTHING after it runs. A
+        //    failed step normally lets a run carry on; here that would empty
+        //    the account and destroy the very name this step exists to keep.
+        if (self::keepGivingRecords($requestId, $userId) === true) {
+            $changed = true;
+        }
+
+        $steps  = 2; // the Demo Data step and the giving-records step; each succeeded or we would not be here
         $failed = 0;
         $status = '';
 
@@ -1308,6 +1382,17 @@ class GdprEraser
             // 🖼️ The person's photo: the image file, and the two columns on
             //    the account that say where it is.
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseProfileImages($requestId, $userId));
+            // ⏳ Giving records that were ALREADY past their keep-until date
+            //    when this run met them. Cleared here, after the walk,
+            //    because the routine that clears refuses until the account
+            //    has really been emptied, and one instruction of the walk is
+            //    what empties it. (They were first cleared inside the
+            //    giving-records step, before the account was emptied. That
+            //    is exactly the order the guard now forbids.)
+            foreach (self::$dueAtErasure as $keptDonorId) {
+                $outcomes[] = self::clearGivingRecordDueAtErasure($db, $requestId, $keptDonorId);
+            }
+            self::$dueAtErasure = [];
 
             foreach ($outcomes as $outcome) {
                 $steps++;
@@ -2539,11 +2624,1225 @@ class GdprEraser
     }
 
     /**
-     * 🧾 Giving statements: delete every rendered PDF for this person, across
-     *    every organisation (the organisation is in the folder name, not the
-     *    file name - see Portal\Core\Giving::renderStatementPdf()), then empty
-     *    the address each statement was mailed to
+     * 🧍 THE ONE DEFINITION of "this account has been emptied by an erasure",
+     *    as a piece of SQL about a row of `tblUsers`.
+     *
+     * Three things, all of them: the account is switched off, its name is the
+     * made-up one, and its address is the made-up one. One instruction of
+     * the table walk sets all three in one statement, so an account can never
+     * show only some of them because a run stopped.
+     *
+     * THAT INSTRUCTION IS NOT THE LAST. It comes about half way through the
+     * walk, and more of the walk and four further steps follow it. So an
+     * account that shows all three HAS been emptied, but its request may
+     * still be unfinished (a later step failed, or the run was stopped).
+     * This comment used to say "the last instruction" and "run to the end".
+     * That mistaken belief is where the fault described at "1b" in
+     * keepGivingRecordsAtSite() came from.
+     *
+     * Everything that treats a donor as ERASED asks this, and nothing else:
+     * the guard that clears a kept name, the tax claim file, the statements
+     * list, and Portal\Core\Giving::isErasedDonor(). "A kept row exists" is
+     * NOT the same question: the kept row is written near the start of an
+     * erasure and the account is emptied about half way through it, and a
+     * run can stop in between.
+     *
+     * FIXED TEXT: `$alias` is the name a query gives `tblUsers`, always
+     * written in code.
+     */
+    public static function emptiedAccountSql(string $alias): string
+    {
+        return '(' . $alias . '.isActive = 0 AND ' . $alias . ".fullName = '" . self::TOMBSTONE_NAME . "' AND "
+            . $alias . ".emailAddress LIKE '" . str_replace('{rid}', '%', self::TOMBSTONE_EMAIL) . "')";
+    }
+
+    /** Has this account been emptied by an erasure? See emptiedAccountSql(). False when it cannot be read. */
+    public static function accountIsEmptied(\mysqli $db, int $userId): bool
+    {
+        try {
+            $stmt = $db->prepare('SELECT 1 FROM tblUsers u WHERE u.userID = ? AND ' . self::emptiedAccountSql('u') . ' LIMIT 1');
+            if ($stmt === false) {
+                return false;
+            }
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            $emptied = $stmt->get_result()->fetch_row() !== null;
+            $stmt->close();
+
+            return $emptied;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Has any run of this request already CHANGED something: deleted a row,
+     * emptied a column, deleted a file, or kept a donor's name?
+     *
+     * The erasure page asks before it CANCELS a request. Once this is true a
+     * cancel cannot be made safe, because nothing a run does can be put
+     * back: rows are deleted, and the gifts that lost their donor are not
+     * listed anywhere. A run that stops part way leaves the person with
+     * some of their records gone, and about half way through the walk the
+     * account itself is emptied. The request has to be run again to its end
+     * instead.
+     *
+     * It reads the request's own audit trail. Every step that changes
+     * something writes its line in the same transaction as the change, so a
+     * change with no line cannot exist (deleted FILES are the one exception:
+     * see asOneStep()).
+     *
+     * WHAT WAS WRONG (found by the narrow check of 12 October 2026): the
+     * first version of this, givingStepHasRun() below, asked only about the
+     * giving records. A person with no giving records whose run had stopped
+     * after deleting their organisation membership could be cancelled, and
+     * was then a member no longer with a request that said nothing happened.
+     *
+     * @return bool True as well when the trail cannot be read: the cautious
+     *   answer, which refuses the cancel.
+     */
+    public static function runHasChangedAnything(int $requestId): bool
+    {
+        return self::givingStepHasRun($requestId) === true
+            || self::trailHasLine($requestId, "action IN ('delete', 'anonymise', 'partial')") === true;
+    }
+
+    /**
+     * Has a run of this request already dealt with the person's giving
+     * records (kept some, or taken the donor off some)? One part of
+     * runHasChangedAnything(), kept apart because "retain" means "a name was
+     * written to the kept-names table" only for these two labels; for every
+     * other table it means nothing was touched.
+     */
+    public static function givingStepHasRun(int $requestId): bool
+    {
+        return self::trailHasLine($requestId, "tableName IN ('GivingRecords', 'CountEnvelopes') AND action IN ('retain', 'anonymise')");
+    }
+
+    /**
+     * Does a request's audit trail hold a line that matches? True as well
+     * when the trail cannot be read.
+     *
+     * FIXED TEXT: `$where` is written in code by the two callers above.
+     */
+    private static function trailHasLine(int $requestId, string $where): bool
+    {
+        try {
+            $stmt = App::db()->prepare('SELECT 1 FROM tblErasureAudit WHERE requestID = ? AND ' . $where . ' LIMIT 1');
+            if ($stmt === false) {
+                // Cannot tell: say it has, so that the cancel is refused.
+                return true;
+            }
+            $stmt->bind_param('i', $requestId);
+            $stmt->execute();
+            $found = $stmt->get_result()->fetch_row() !== null;
+            $stmt->close();
+
+            return $found;
+        } catch (\Throwable $e) {
+            // Cannot tell, for the same reason and with the same answer.
+            error_log('[WebMS-Intra] GdprEraser: could not read the audit trail of erasure #' . $requestId . ': ' . $e->getMessage());
+
+            return true;
+        }
+    }
+
+    /**
+     * The dates of the gifts THIS run took the donor off, organisation by
+     * organisation, for the statement-file step that follows in the same run.
+     * Null for an organisation means "an earlier run had already sorted the
+     * gifts there, so it is not known". Emptied at the start of every run.
+     *
+     * @var array<int, string[]|null>
+     */
+    private static array $unkeptGiftDates = [];
+
+    /**
+     * The organisations whose gifts THIS run sorted by "every gift keeps the
+     * donor's name", for the envelope step that follows in the same run.
+     * Emptied at the start of every run.
+     *
+     * @var int[]
+     */
+    private static array $everyGiftSites = [];
+
+    /**
+     * 🧾 Keep what the organisation must keep of a donor's giving records, and
+     *    take the donor's name off the rest (roll-out package A2b).
+     *
+     * For each organisation where the person has gifts, a tax declaration,
+     * a giving statement or a named envelope in a count, in ONE transaction
+     * with its audit line:
+     *
+     *   1. read that organisation's rule (Portal\Core\GivingRetention);
+     *   2. work out which gifts keep the donor's name, and the last of them;
+     *   3. if anything is kept, write the name and home address to
+     *      `tblGivingKeptDonors` (a row an earlier run left is worked out
+     *      again: see "A LATER RUN" below);
+     *   4. take the account number and any typed name off every OTHER gift.
+     *
+     * Then, once for all organisations, the giver comes off every counted
+     * envelope except one in a count that is not yet closed whose gift will
+     * be a kept gift (unnameCountEnvelopes()).
+     *
+     * The kept gifts, the declarations and the statement records are not
+     * touched: they keep the account number, and the name now lives in the
+     * kept row. The account is emptied later in the run, as it always was.
+     *
+     * A LATER RUN WORKS THE KEPT ROW OUT AGAIN, AND NEVER WRITES A MADE-UP
+     * NAME OVER A REAL ONE. A request can be run more than once (a step
+     * failed, or the host killed the page, and it was run again). What the
+     * account looks like by then depends on WHERE the earlier run stopped:
+     *
+     *   - It stopped AFTER the account was emptied (the walk empties it about
+     *     half way through; a later step failed, or the run was stopped).
+     *     The account now says "[Deleted User]", the donor IS erased, and
+     *     the kept row holds the only copy of the name. The name and address
+     *     on the row are left exactly as they are; the gifts and envelopes
+     *     are sorted by the WIDER of the rule stored on the row and today's
+     *     setting, and the stored rule is not changed; and the row is never
+     *     emptied here, only by the retention job under its guard.
+     *   - It stopped BEFORE the account was emptied (inside this step, or
+     *     earlier in the walk). The account still holds the real name, and
+     *     the person may have gone on giving in between. This run is the
+     *     erasure: the name and address are read again from the account,
+     *     and today's rule sorts the gifts, as on a first run.
+     *
+     *   In both cases the counts are worked out again: which gifts are kept,
+     *   the last of them, how many, and any gift recorded since the earlier
+     *   run that is not kept loses its donor. The date is never moved
+     *   EARLIER than the one already recorded.
+     *
+     * This comment used to say that on a second run "the account has already
+     * been emptied" and that a row that exists "is left exactly as it is".
+     * The first is not always true, and the second meant a gift recorded
+     * between two runs was never counted, so its donor's name was due to be
+     * cleared a year early (found by the independent check, 12 October 2026).
+     *
+     * IF THIS STEP FAILS THE WHOLE ERASURE STOPS HERE. The request goes back
+     * to "pending review" and the caller is told. The walk that follows
+     * empties the account; letting it run after this step failed would
+     * destroy the name with nowhere holding it.
+     *
+     * A record whose keep-until date has ALREADY passed is cleared at the END
+     * of the same run, after the account has been emptied, by the same
+     * routine the retention job uses, so it is held to the same conditions
+     * (the account emptied, no hold, a confirmed number of years, the date
+     * passed). Without that, an organisation that never switched the
+     * scheduled job on would keep such a name for ever. (It used to be
+     * cleared inside this step. The clearing now refuses while the account
+     * still names the person, and this step runs before that.)
+     *
+     * What this cannot do:
+     *   - Keep a name that is already gone. An account emptied before this
+     *     feature existed has only "[Deleted User]" left; the kept row is
+     *     then written with an empty name and the line says so.
+     *   - Find a gift that names the donor only by a typed name with no
+     *     account number (`donorName` on a row with no `donorID`, #492).
+     *   - Know which gifts were really claimed for tax. Nothing records that,
+     *     so a gift is treated as kept when a declaration or a statement of
+     *     the donor's covers its date.
+     *   - Run on a database that has not had migration 209. It checks for the
+     *     kept-names table before anything else and stops the run if it is
+     *     missing, for EVERYBODY, with the advice to run the upgrade. (It
+     *     first met the missing table only when the person had giving
+     *     records; anybody else's erasure carried on and emptied the account
+     *     before a later step failed.)
+     *
+     * @return bool Whether anything was changed: a gift or an envelope lost
+     *   its donor.
+     *
+     * @throws \RuntimeException When the step could not be completed. The
+     *   message says what state the request is in.
+     */
+    private static function keepGivingRecords(int $requestId, int $userId): bool
+    {
+        $db      = App::db();
+        $changed = false;
+        $doing   = 'checking that this database has been upgraded for this version';
+        self::$unkeptGiftDates = [];
+        self::$everyGiftSites  = [];
+        self::$dueAtErasure    = [];
+
+        try {
+            // The table the kept names go in. Asked for BEFORE anything else
+            // and for everybody, donor or not: a database without it has not
+            // had migration 209, and no erasure should start on one.
+            $probe = $db->query('SELECT 1 FROM tblGivingKeptDonors LIMIT 0');
+            if ($probe instanceof \mysqli_result) {
+                $probe->free();
+            }
+
+            $doing = 'finding which organisations hold giving records for this person';
+            $sites = [];
+            $stmt  = $db->prepare(
+                'SELECT siteID FROM tblGivingEntry WHERE donorID = ? '
+                . 'UNION SELECT siteID FROM tblGiftAidDeclaration WHERE donorID = ? '
+                . 'UNION SELECT siteID FROM tblGivingStatementLog WHERE donorID = ? '
+                // An organisation where the person is named only on a counted
+                // envelope: the gift made from it when the count is closed
+                // may be one that keeps the donor's name.
+                . 'UNION SELECT cs.siteID FROM tblCountEnvelopes ce INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID '
+                . 'WHERE ce.giverID = ? ORDER BY siteID'
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException((string) $db->error);
+            }
+            $stmt->bind_param('iiii', $userId, $userId, $userId, $userId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            while ($row = $result->fetch_row()) {
+                $sites[] = (int) $row[0];
+            }
+            $stmt->close();
+
+            if ($sites === []) {
+                // Written down, like every other step: without a line nothing
+                // could show that this step ran at all.
+                self::asOneStep($db, static function () use ($db, $requestId): bool {
+                    self::logAudit($db, $requestId, 'none', 'GivingRecords', null, 'no giving records are held for this person');
+
+                    return true;
+                });
+            }
+
+            $dueNow = [];
+            foreach ($sites as $siteId) {
+                $doing   = 'keeping the giving records at organisation #' . $siteId;
+                $outcome = self::asOneStep(
+                    $db,
+                    static fn (): array => self::keepGivingRecordsAtSite($db, $requestId, $userId, $siteId)
+                );
+                if ($outcome['changed'] === true) {
+                    $changed = true;
+                }
+                if ($outcome['due'] !== null) {
+                    $dueNow[] = $outcome['due'];
+                }
+            }
+
+            // ✉️ Counted envelopes, AFTER every organisation's kept row is
+            //    written, because which envelopes keep their giver depends on
+            //    those rows.
+            $doing = 'taking the giver off counted envelopes';
+            if (self::asOneStep($db, static fn (): bool => self::unnameCountEnvelopes($db, $requestId, $userId)) === true) {
+                $changed = true;
+            }
+
+            // A record whose keep-until date has ALREADY passed is cleared at
+            // the END of the run, by clearGivingRecordDueAtErasure(): the routine
+            // that clears refuses until the account has really been emptied,
+            // which the walk that follows this step does. The numbers are
+            // kept on the class for it.
+            self::$dueAtErasure = $dueNow;
+        } catch (\Throwable $e) {
+            // Abandon anything half done, so the two writes below are not
+            // part of a transaction that is about to be thrown away.
+            try {
+                $db->rollback();
+            } catch (\Throwable $ignored) {
+                // Nothing was open, or the connection has gone.
+            }
+
+            $problem = ($e instanceof \mysqli_sql_exception ? 'Error ' . (int) $e->getCode() . ': ' : '') . $e->getMessage();
+            // A database that has not had migration 209 has no table to keep
+            // the name in. Say what to do, not just what went wrong.
+            $advice = $e instanceof \mysqli_sql_exception && (int) $e->getCode() === 1146
+                ? ' The database has not been upgraded for this version: run the database upgrade, then run this request again.'
+                : '';
+
+            try {
+                self::logAudit(
+                    $db,
+                    $requestId,
+                    'failed',
+                    'GivingRecords',
+                    null,
+                    mb_substr('Erasure stopped while ' . $doing . '; nothing after this step was done in this run, '
+                        . 'so the account was not touched by it. ' . $problem . $advice, 0, 600)
+                );
+            } catch (\Throwable $auditProblem) {
+                error_log('[WebMS-Intra] GdprEraser: could not record the stopped erasure #' . $requestId . ': ' . $auditProblem->getMessage());
+            }
+
+            $status = self::putBackToPendingReview($db, $requestId);
+            error_log('[WebMS-Intra] GdprEraser: erasure #' . $requestId . ' stopped while ' . $doing . ': ' . $problem);
+
+            throw new \RuntimeException(
+                'Erasure request #' . $requestId . ' stopped before it finished, while ' . $doing . ' (' . $problem . '). Nothing after this '
+                . 'step was done in this run, so the account was not touched by it. Every step is safe to repeat.'
+                . $advice . ' ' . self::statusSentence($status),
+                0,
+                $e
+            );
+        }
+
+        return $changed;
+    }
+
+    /**
+     * The kept records that were ALREADY past their keep-until date when this
+     * run met them. execute() clears them as its last act before closing the
+     * request, once the account has been emptied.
+     *
+     * @var int[]
+     */
+    private static array $dueAtErasure = [];
+
+    /**
+     * 🏢 The giving-records step for ONE organisation. Runs inside the
+     *    transaction keepGivingRecords() opened, and writes exactly one audit
+     *    line. Anything it throws undoes what it did here and stops the run.
+     *
+     * It does the same work whether or not an earlier run has been here:
+     * count what is kept, write or bring up to date the kept row, take the
+     * donor off every gift that is not kept. See keepGivingRecords() for what
+     * differs on a later run, and why.
+     *
+     * No line it writes holds the donor's name.
+     *
+     * @return array{changed: bool, due: ?int} `due`: the kept row's number
+     *   when its keep-until date has already passed and nothing but the
+     *   account not being emptied yet holds the clearing back; otherwise null.
+     */
+    private static function keepGivingRecordsAtSite(\mysqli $db, int $requestId, int $userId, int $siteId): array
+    {
+        $rule  = GivingRetention::ruleForSite($siteId);
+        $where = 'organisation #' . $siteId;
+        $one   = static function (string $sql, string $types, array $values) use ($db): ?array {
+            $stmt = $db->prepare($sql);
+            if ($stmt === false) {
+                throw new \RuntimeException((string) $db->error);
+            }
+            $stmt->bind_param($types, ...$values);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+
+            return $row;
+        };
+        $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($n === 1 ? $one : $many);
+
+        // 1. The row an earlier run left, if any. Locked, so two runs cannot
+        //    both decide there is no row and both write one.
+        $existing = $one(
+            'SELECT keptDonorID, scope, lastGiftDate, clearedAt FROM tblGivingKeptDonors WHERE siteID = ? AND donorID = ? FOR UPDATE',
+            'ii',
+            [$siteId, $userId]
+        );
+        if ($existing !== null && $existing['clearedAt'] !== null) {
+            self::$unkeptGiftDates[$siteId] = null;
+            self::logAudit(
+                $db,
+                $requestId,
+                'retain',
+                'GivingRecords',
+                $where,
+                'Giving records at ' . $where . ' were already dealt with by an earlier run, and the name and address '
+                . 'kept then have since been cleared. Nothing was changed.'
+            );
+
+            return ['changed' => false, 'due' => null];
+        }
+        $earlierRun = $existing !== null;
+
+        // 1b. The account, as it is now. "Already emptied" is deliberately
+        //     WIDER here than emptiedAccountSql(): either the made-up name or
+        //     the made-up address is enough, because the mistakes to avoid
+        //     at this point are writing "[Deleted User]" over a real name and
+        //     re-deciding what an already-erased donor's record keeps.
+        $account = $one('SELECT fullName, emailAddress, displayAddress FROM tblUsers WHERE userID = ?', 'i', [$userId]);
+        $emptiedAlready = $account === null
+            || (string) $account['fullName'] === self::TOMBSTONE_NAME
+            || self::isTombstoneAddress((string) $account['emailAddress']) === true;
+
+        // 🛑 AN EARLIER RUN KEPT A NAME HERE, AND THE ACCOUNT IS ALREADY
+        //    EMPTIED. The walk empties the account about half way through a
+        //    run, so a run that stops after that leaves exactly this. The
+        //    donor IS erased; the kept row is the only copy of their name,
+        //    and what it keeps was decided on the day the account was
+        //    emptied. So this run:
+        //      - sorts the gifts (and the envelopes) by the WIDER of the rule
+        //        stored on the kept row and today's setting: if either says
+        //        "every gift", every gift is kept. Never by a narrower rule
+        //        than either;
+        //      - never changes that stored rule;
+        //      - never takes the "nothing to keep" branch below. If nothing
+        //        is linked any more the row is left for the retention job,
+        //        which clears it only under its guard (no hold, a confirmed
+        //        figure, the date passed).
+        //    WHAT WAS WRONG (found by the narrow check of 12 October 2026):
+        //    the first version of "work the row out again" sorted by today's
+        //    setting in every case. An organisation that kept every gift,
+        //    with a hold on, had a donor's run stop after the account was
+        //    emptied; "which gifts" was then narrowed; and running the
+        //    request again emptied the kept name at once, hold or no hold.
+        //    The first fix then sorted by the STORED rule alone, which was
+        //    the same fault the other way round: stored "tax gifts only",
+        //    widened to "every gift", and a gift matched to the erased donor
+        //    afterwards lost its donor on the later run, though the same gift
+        //    kept it for a donor whose erasure had finished (found by the
+        //    re-check of 12 October 2026). A donor taken off a gift cannot
+        //    be put back, so the wider rule wins.
+        //    When the account is NOT yet emptied, today's rule is the right
+        //    one: this run is the erasure, as a first run would be.
+        $keptAlready = $earlierRun === true && $emptiedAlready === true;
+
+        // 2. Which gifts keep the name, and the last of them. The same piece
+        //    of SQL decides here and in the update further down.
+        //    `$scope` is the rule that SORTS. Beside an emptied account it is
+        //    the wider of the two (1b); it is only ever WRITTEN to the row
+        //    when the account is not yet emptied, where it is today's.
+        $scope = (string) $rule['scope'];
+        if ($keptAlready === true && (string) $existing['scope'] === GivingRetention::SCOPE_ALL) {
+            $scope = GivingRetention::SCOPE_ALL;
+        }
+        if ($scope === GivingRetention::SCOPE_ALL) {
+            // For the envelope step that follows all the organisations.
+            self::$everyGiftSites[] = $siteId;
+        }
+        $kept  = GivingRetention::keptGiftSql($scope, 'e');
+        $gifts = $one(
+            'SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN ' . $kept . ' THEN 1 ELSE 0 END), 0) AS kept, '
+            . 'MAX(CASE WHEN ' . $kept . ' THEN e.donatedAt END) AS lastKept '
+            . 'FROM tblGivingEntry e WHERE e.siteID = ? AND e.donorID = ?',
+            'ii',
+            [$siteId, $userId]
+        );
+        $declarations = $one('SELECT COUNT(*) AS n, MAX(validFrom) AS newest FROM tblGiftAidDeclaration WHERE siteID = ? AND donorID = ?', 'ii', [$siteId, $userId]);
+        $statements   = $one('SELECT COUNT(*) AS n, MAX(toDate) AS newest FROM tblGivingStatementLog WHERE siteID = ? AND donorID = ?', 'ii', [$siteId, $userId]);
+        // Named envelopes in a count that is not closed yet, whose gift will
+        // be a kept gift when it is (see unnameCountEnvelopes()).
+        $envelopes = $one(
+            'SELECT COUNT(*) AS n, MAX(cs.serviceDate) AS newest FROM tblCountEnvelopes ce '
+            . 'INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID '
+            . "WHERE cs.siteID = ? AND ce.giverID = ? AND cs.status <> 'closed' AND "
+            . GivingRetention::keptWhenSql($scope, 'cs.siteID', 'ce.giverID', 'cs.serviceDate'),
+            'ii',
+            [$siteId, $userId]
+        );
+
+        $keptGifts        = (int) $gifts['kept'];
+        $otherGifts       = (int) $gifts['total'] - $keptGifts;
+        $declarationCount = (int) $declarations['n'];
+        $statementCount   = (int) $statements['n'];
+        $envelopeCount    = (int) $envelopes['n'];
+        $scopeWords       = $scope === GivingRetention::SCOPE_ALL
+            ? 'this organisation keeps the donor\'s name on every gift'
+            : 'this organisation keeps the donor\'s name only on gifts that have a tax declaration, receipt or statement';
+
+        // The dates of the gifts about to lose their donor, for the
+        // statement-file step later in this run: a statement the donor made
+        // for themselves is kept only when none of these falls inside it. On
+        // a later run the gifts the EARLIER run took the donor off cannot be
+        // listed any more, so "not known" is recorded instead.
+        if ($earlierRun === true) {
+            self::$unkeptGiftDates[$siteId] = null;
+        } else {
+            $dates = [];
+            $stmt  = $db->prepare('SELECT DISTINCT e.donatedAt FROM tblGivingEntry e WHERE e.siteID = ? AND e.donorID = ? AND NOT ' . $kept);
+            if ($stmt === false) {
+                throw new \RuntimeException((string) $db->error);
+            }
+            $stmt->bind_param('ii', $siteId, $userId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            while ($row = $result->fetch_row()) {
+                $dates[] = (string) $row[0];
+            }
+            $stmt->close();
+            self::$unkeptGiftDates[$siteId] = $dates;
+        }
+
+        // 3. Every gift that is NOT kept loses the donor at once.
+        $stmt = $db->prepare(
+            'UPDATE tblGivingEntry e SET e.donorID = NULL, e.donorName = NULL WHERE e.siteID = ? AND e.donorID = ? AND NOT ' . $kept
+        );
+        if ($stmt === false) {
+            throw new \RuntimeException((string) $db->error);
+        }
+        $stmt->bind_param('ii', $siteId, $userId);
+        $stmt->execute();
+        $emptied = (int) $stmt->affected_rows;
+        $stmt->close();
+        if ($emptied !== $otherGifts) {
+            // The count and the update use one rule, so they can only differ
+            // if a gift was recorded between the two. Stop and undo, rather
+            // than write a line that does not match what was done.
+            throw new \RuntimeException('the gifts at ' . $where . ' changed while they were being sorted (' . $otherGifts
+                . ' counted, ' . $emptied . ' changed); nothing was kept or changed there');
+        }
+        $otherWords = $otherGifts === 0
+            ? 'No other gift of theirs is held there.'
+            : $plural($otherGifts, 'other gift keeps', 'other gifts keep') . ' the amount, date and method and no longer '
+                . ($otherGifts === 1 ? 'names' : 'name') . ' the donor.';
+
+        // 4. Nothing to keep. (Never for a record already kept beside an
+        //    emptied account: see 1b.)
+        if ($keptAlready === false && $keptGifts === 0 && $declarationCount === 0 && $statementCount === 0 && $envelopeCount === 0) {
+            if ($earlierRun === true) {
+                // An earlier run kept a name here and nothing needs it any
+                // more. The name and address go; the row stays as the record.
+                $stmt = $db->prepare(
+                    'UPDATE tblGivingKeptDonors SET fullName = NULL, address = NULL, postcode = NULL, keptGiftCount = 0, '
+                    . 'clearedAt = UTC_TIMESTAMP() WHERE keptDonorID = ?'
+                );
+                if ($stmt === false) {
+                    throw new \RuntimeException((string) $db->error);
+                }
+                $keptDonorId = (int) $existing['keptDonorID'];
+                $stmt->bind_param('i', $keptDonorId);
+                $stmt->execute();
+                $stmt->close();
+            }
+            self::logAudit(
+                $db,
+                $requestId,
+                'anonymise',
+                'GivingRecords',
+                $where,
+                'Giving records at ' . $where . ': nothing has to be kept with the donor\'s name. '
+                . $plural($emptied, 'gift keeps', 'gifts keep') . ' the amount, date and method and no longer '
+                . ($emptied === 1 ? 'names' : 'name') . ' the donor. Why: ' . $scopeWords . ', and this donor has none of those there.'
+                . ($earlierRun === true ? ' An earlier run had kept a name and address here; nothing needs them any more, so they were emptied.' : '')
+            );
+
+            return ['changed' => $emptied > 0 || $earlierRun === true, 'due' => null];
+        }
+
+        // 5. The date everything is counted from: the last kept gift (or the
+        //    service date of a kept envelope in an open count, if later), or,
+        //    with neither, the newest statement or declaration. On a later
+        //    run it is never moved EARLIER than the date already recorded.
+        $lastGift = max($gifts['lastKept'] !== null ? (string) $gifts['lastKept'] : '', $envelopes['newest'] !== null ? (string) $envelopes['newest'] : '');
+        $from     = 'last such gift ' . GivingRetention::dateInWords($lastGift);
+        if ($lastGift === '') {
+            $lastGift = max((string) ($statements['newest'] ?? ''), (string) ($declarations['newest'] ?? ''));
+            $from     = 'no gift is kept, so it is counted from the newest statement or declaration, ' . GivingRetention::dateInWords($lastGift);
+        }
+        if ($earlierRun === true && (string) $existing['lastGiftDate'] > $lastGift) {
+            $lastGift = (string) $existing['lastGiftDate'];
+            $from     = 'the date recorded by the earlier run, ' . GivingRetention::dateInWords($lastGift);
+        }
+
+        // 6. The name and home address, as they are now (the account was
+        //    read at 1b).
+        $name     = $emptiedAlready === true ? null : (string) $account['fullName'];
+        $declared = $one(
+            "SELECT address, postcode FROM tblGiftAidDeclaration WHERE siteID = ? AND donorID = ? AND address IS NOT NULL AND address <> '' "
+            . 'ORDER BY validFrom DESC, declarationID DESC LIMIT 1',
+            'ii',
+            [$siteId, $userId]
+        );
+        $address  = $declared !== null ? (string) $declared['address'] : ($emptiedAlready === true ? null : ($account['displayAddress'] ?? null));
+        $postcode = $declared !== null && $declared['postcode'] !== null ? (string) $declared['postcode'] : null;
+
+        if ($earlierRun === false) {
+            $stmt = $db->prepare(
+                'INSERT INTO tblGivingKeptDonors (siteID, donorID, erasureRequestID, fullName, address, postcode, scope, lastGiftDate, keptGiftCount, createdAt) '
+                . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())'
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException((string) $db->error);
+            }
+            $stmt->bind_param('iiisssssi', $siteId, $userId, $requestId, $name, $address, $postcode, $scope, $lastGift, $keptGifts);
+            $stmt->execute();
+            $keptDonorId = (int) $stmt->insert_id;
+            $stmt->close();
+        } else {
+            // 🛑 NEVER a made-up name over a real one. When the account has
+            //    already been emptied, the three columns that hold the
+            //    donor's details are not in the statement at all.
+            $keptDonorId = (int) $existing['keptDonorID'];
+            if ($emptiedAlready === true) {
+                // Nor is the stored rule: "which gifts kept the name on the
+                // day" must stay what it was on the day.
+                $stmt = $db->prepare('UPDATE tblGivingKeptDonors SET lastGiftDate = ?, keptGiftCount = ? WHERE keptDonorID = ?');
+                if ($stmt === false) {
+                    throw new \RuntimeException((string) $db->error);
+                }
+                $stmt->bind_param('sii', $lastGift, $keptGifts, $keptDonorId);
+            } else {
+                // The earlier run stopped before the account was emptied.
+                // THIS request is the one
+                // that is erasing the person now, so the row is tied to it:
+                // the line written when the name is cleared goes on the trail
+                // of the request that really did the erasing. (The earlier
+                // one may be a different request, since cancelled, or gone.)
+                $stmt = $db->prepare(
+                    'UPDATE tblGivingKeptDonors SET erasureRequestID = ?, fullName = ?, address = ?, postcode = ?, scope = ?, '
+                    . 'lastGiftDate = ?, keptGiftCount = ? WHERE keptDonorID = ?'
+                );
+                if ($stmt === false) {
+                    throw new \RuntimeException((string) $db->error);
+                }
+                $stmt->bind_param('isssssii', $requestId, $name, $address, $postcode, $scope, $lastGift, $keptGifts, $keptDonorId);
+            }
+            $stmt->execute();
+            $stmt->close();
+        }
+
+        // 7. The line. Dates in words; never the donor's name.
+        $state = GivingRetention::stateFor($rule, $lastGift);
+        $what  = [];
+        if ($keptGifts > 0) {
+            $what[] = $plural($keptGifts, 'gift', 'gifts');
+        }
+        if ($declarationCount > 0) {
+            $what[] = $plural($declarationCount, 'tax declaration', 'tax declarations');
+        }
+        if ($statementCount > 0) {
+            $what[] = $plural($statementCount, 'giving statement', 'giving statements');
+        }
+        if ($envelopeCount > 0) {
+            $what[] = $plural($envelopeCount, 'envelope in a count that is not yet closed', 'envelopes in a count that is not yet closed');
+        }
+        $total = $keptGifts + $declarationCount + $statementCount + $envelopeCount;
+        $list  = $what === [] ? '' : (count($what) > 1 ? implode(', ', array_slice($what, 0, -1)) . ' and ' . end($what) : $what[0]);
+
+        $line = $earlierRun === true
+            ? 'Giving records at ' . $where . ' were already dealt with by an earlier run, and were worked out again by this one. '
+            : 'Giving records at ' . $where . ': ';
+        if ($what === []) {
+            // Only reachable for a record already kept beside an emptied
+            // account (1b): everything else with nothing to keep left at 4.
+            $line .= 'Nothing there now keeps this donor\'s name. The name and address kept by the earlier run are left '
+                . 'in place all the same: only the retention job removes them, '
+                . ($state['state'] === 'unreadable'
+                    ? 'and THE KEEP-UNTIL DATE COULD NOT BE WORKED OUT from this organisation\'s settings, so nothing will be '
+                        . 'cleared until that is put right.'
+                    : 'after ' . GivingRetention::dateInWords($state['keepUntil']) . '.');
+        } elseif ($state['state'] === 'unreadable') {
+            $line .= ucfirst($list) . ' ' . ($total === 1 ? 'keeps' : 'keep')
+                . ' this donor\'s name and address. THE KEEP-UNTIL DATE COULD NOT BE WORKED OUT from this '
+                . 'organisation\'s settings, so nothing will be cleared until that is put right.';
+        } else {
+            $line .= ($earlierRun === true ? ucfirst($list) : $list) . ' ' . ($total === 1 ? 'keeps' : 'keep')
+                . ' this donor\'s name and address until ' . GivingRetention::dateInWords($state['keepUntil'])
+                . '. After that date the retention job removes them.';
+        }
+        $line .= ' ' . $otherWords . ' Why these: ' . $scopeWords . '.';
+        if ($keptAlready === true && $scope !== (string) $rule['scope']) {
+            $line .= ' (That is the rule that was in force when the name was kept. The organisation has changed its '
+                . 'setting since, which does not change what an already-erased donor\'s record keeps.)';
+        } elseif ($keptAlready === true && $scope !== (string) $existing['scope']) {
+            $line .= ' (The name was first kept under the narrower rule. The organisation keeps the name on every gift '
+                . 'now, and for an already-erased donor the wider of the two is used. The rule recorded with the name '
+                . 'is not changed.)';
+        }
+        if ($state['state'] !== 'unreadable') {
+            $years = (int) $rule['years'];
+            $line .= ' How the date was worked out: ' . $from . '; '
+                . ($state['usedFallback'] === true
+                    ? 'no financial year end is set, so one year after that was used (' . GivingRetention::dateInWords($state['countedFrom'])
+                        . '), which may keep the record up to a year longer than needed'
+                    : 'financial year ends ' . GivingRetention::yearEndInWords((string) $rule['yearEnd'])
+                        . ' (' . GivingRetention::dateInWords($state['countedFrom']) . ')')
+                . '; plus ' . $years . ' ' . ($years === 1 ? 'year' : 'years') . '.';
+        }
+        $line .= ' ' . GivingRetention::figureSentence($rule);
+        if ($rule['hold'] !== false) {
+            $line .= ' A hold is switched on (an audit or enquiry is open), so nothing will be cleared until it is switched off.';
+        }
+        if ($earlierRun === true) {
+            $line .= $emptiedAlready === true
+                ? ' The account had already been emptied, so the name and address kept by the earlier run were left as they are: what was kept was not overwritten.'
+                : ' The earlier run stopped before the account was emptied, so the name and address held were read again from the account.';
+        } elseif ($emptiedAlready === true) {
+            $line .= ' This account had ALREADY been emptied before this run, so no name could be recorded: the record kept holds '
+                . ($address !== null ? 'the address from the tax declaration and no name.' : 'no name and no address.');
+        }
+
+        self::logAudit($db, $requestId, 'retain', 'GivingRecords', $where, $line);
+
+        return ['changed' => $emptied > 0, 'due' => $state['state'] === 'due' ? $keptDonorId : null];
+    }
+
+    /**
+     * ✉️ Take the giver off the person's counted envelopes, except the ones
+     *    whose gift will be a kept gift. One audit line. Runs inside the
+     *    transaction keepGivingRecords() opened, after every organisation's
+     *    kept row has been written.
+     *
+     * An envelope is the counting sheet, not the financial record: the
+     * gift-log line made from it when the count is CLOSED is that
+     * (giving/count/close.php, which copies the envelope's giver onto the
+     * gift). So:
+     *
+     *   - an envelope in a CLOSED count loses its giver. Its gift is already
+     *     in the gift log, where it was sorted like any other gift;
+     *   - an envelope in a count that is NOT yet closed loses its giver too,
+     *     UNLESS the gift it will become is one that keeps the donor's name:
+     *     that organisation is keeping this donor's name, and it keeps every
+     *     gift, or a tax declaration or statement of the donor's covers the
+     *     count's service date. Then the giver stays, so that closing the
+     *     count makes a gift the tax claim can still match.
+     *
+     * A kept envelope's giver is taken off later, with everything else, by
+     * clearKeptGivingIdentity(); and its service date counts as a gift date
+     * when the keep-until date is worked out
+     * (Portal\Core\GivingRetention::stateOfKeptRow()).
+     *
+     * What this cannot do: an envelope that names the person only by a typed
+     * name, with no account number, cannot be found.
+     *
+     * @return bool Whether any envelope lost its giver.
+     */
+    private static function unnameCountEnvelopes(\mysqli $db, int $requestId, int $userId): bool
+    {
+        // FIXED TEXT: the same question the gift-sorting asks, put to the
+        // envelope's organisation, giver and service date.
+        //
+        // "Every gift" is true of an organisation when the rule stored on
+        // the kept row says so, OR when this run sorted that organisation's
+        // gifts by "every gift" (today's rule, or the wider of the two
+        // beside an emptied account: keepGivingRecordsAtSite(), 1b). The
+        // numbers in the list are organisation numbers read from the
+        // database by this run, never anything typed.
+        $everyGiftHere = self::$everyGiftSites === []
+            ? ''
+            : ' OR cs.siteID IN (' . implode(', ', array_map('intval', self::$everyGiftSites)) . ')';
+        $keptEnvelope = "(cs.countSessionID IS NOT NULL AND cs.status <> 'closed' AND k.keptDonorID IS NOT NULL AND (k.scope = '"
+            . GivingRetention::SCOPE_ALL . "'" . $everyGiftHere . ' OR '
+            . GivingRetention::keptWhenSql(GivingRetention::SCOPE_RECEIPTED, 'cs.siteID', 'ce.giverID', 'cs.serviceDate') . '))';
+        $joins = 'tblCountEnvelopes ce '
+            . 'LEFT JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID '
+            . 'LEFT JOIN tblGivingKeptDonors k ON k.siteID = cs.siteID AND k.donorID = ce.giverID AND k.clearedAt IS NULL ';
+
+        $kept = 0;
+        $stmt = $db->prepare('SELECT COUNT(*) FROM ' . $joins . 'WHERE ce.giverID = ? AND ' . $keptEnvelope);
+        if ($stmt === false) {
+            throw new \RuntimeException((string) $db->error);
+        }
+        $stmt->bind_param('i', $userId);
+        $stmt->execute();
+        $stmt->bind_result($kept);
+        $stmt->fetch();
+        $stmt->close();
+
+        $stmt = $db->prepare('UPDATE ' . $joins . 'SET ce.giverID = NULL, ce.giverName = NULL WHERE ce.giverID = ? AND NOT ' . $keptEnvelope);
+        if ($stmt === false) {
+            throw new \RuntimeException((string) $db->error);
+        }
+        $stmt->bind_param('i', $userId);
+        $stmt->execute();
+        $unnamed = (int) $stmt->affected_rows;
+        $stmt->close();
+
+        $keptWords = (int) $kept . ' envelope(s) in a count that is not yet closed keep the giver, because the gift made from each '
+            . 'when the count is closed is one that keeps the donor\'s name; the retention job takes the giver off with the rest';
+        if ($unnamed > 0) {
+            self::logAudit($db, $requestId, 'anonymise', 'CountEnvelopes', $unnamed . ' rows',
+                'counted envelopes no longer name the giver; each keeps its amount' . ((int) $kept > 0 ? '. ' . $keptWords : ''));
+        } elseif ((int) $kept > 0) {
+            self::logAudit($db, $requestId, 'retain', 'CountEnvelopes', (int) $kept . ' rows', $keptWords);
+        } else {
+            self::logAudit($db, $requestId, 'none', 'CountEnvelopes', null, 'no counted envelope names this person');
+        }
+
+        return $unnamed > 0;
+    }
+
+    /**
+     * One record that was already past its keep-until date at erasure, as a
+     * step of the run. clearKeptGivingIdentity() writes its own line when it
+     * clears. When it cannot (a kept file would not delete), that is a FAILED
+     * step, written down here, so the request is not closed and the next run
+     * tries again. Any other answer (a hold switched on a moment ago, say)
+     * simply leaves the record for the retention job.
+     *
+     * @return string One of the STEP_ constants.
+     */
+    private static function clearGivingRecordDueAtErasure(\mysqli $db, int $requestId, int $keptDonorId): string
+    {
+        $answer = self::clearKeptGivingIdentity($keptDonorId);
+        if ($answer === 'cleared') {
+            return self::STEP_CHANGED;
+        }
+        if ($answer !== 'failed') {
+            return self::STEP_UNCHANGED;
+        }
+
+        return self::asOneStep($db, static function () use ($db, $requestId): string {
+            self::logAudit($db, $requestId, 'failed', 'GivingRecords', null,
+                'a giving record that was already past its keep-until date could not be cleared (the reason is in the '
+                . 'server\'s error log). Nothing of it was changed; running the request again tries once more.');
+
+            return self::STEP_FAILED;
+        });
+    }
+
+    /**
+     * ⏳ Remove a donor's name, address and link from the giving records one
+     *    organisation was keeping, because the keep-until date has passed.
+     *
+     * Called by the retention job (web/_apps/cron/_retention-sweep.php), and
+     * at the end of an erasure run, by clearGivingRecordDueAtErasure(), for a
+     * record already past its date.
+     *
+     * 🛑 THE GUARD IS IN HERE, NOT IN THE CALLERS. Nothing is cleared unless
+     *    Portal\Core\GivingRetention::stateOfKeptRow() answers "due", which
+     *    needs all FOUR: the donor's account has really been emptied; no
+     *    hold; a number of years an administrator has confirmed; and a
+     *    keep-until date that has passed where the organisation is, counted
+     *    from the LATER of the date on the kept row and the newest gift still
+     *    linked to the donor. A caller cannot clear early by forgetting a
+     *    test, because there is no test for it to forget.
+     *
+     *    The first of the four was missing until the independent check of
+     *    12 October 2026: a kept row is written near the start of an erasure
+     *    and the account is emptied about half way through it, and a run
+     *    that stopped in between left a kept row beside a live member, which
+     *    this routine would then have cleared, gifts and declaration
+     *    included.
+     *
+     * 🔒 THE DECISION IS MADE INSIDE THE TRANSACTION, WITH THE ROWS LOCKED.
+     *    It used to be made before the transaction began, and the files
+     *    were deleted before it too. A gift recorded for the donor in that
+     *    gap lost its donor, and the name was cleared, although the gift
+     *    made the record no longer due (found by the narrow check of 12
+     *    October 2026, with a second connection holding the gap open). Now
+     *    the kept row and the donor's gifts at that organisation are locked
+     *    first, the rule and the state are read again, and nothing is
+     *    deleted or changed unless the answer is still "due".
+     *
+     * What goes, together:
+     *   - the kept statement PDFs for that donor at that organisation;
+     *   - the account number and any typed name on their gifts there;
+     *   - the giver on any counted envelope of theirs there;
+     *   - the address, postcode, signature, sender address and notes on
+     *     their tax declarations there;
+     *   - the file path on their statement records there;
+     *   - the name, address and postcode on the kept row, which is stamped
+     *     with the moment and stays as the record that this happened.
+     * NO ROW IS DELETED, and no amount, date or method changes.
+     *
+     * The line is added to the ORIGINAL erasure request's audit trail, so one
+     * report tells the whole story of that person's erasure.
+     *
+     * THE FILES GO FIRST, the rows second, both after the decision. A file
+     * cannot be un-deleted, so the order is chosen for the failure it leaves
+     * behind: if the rows then
+     * cannot be changed, files that were due anyway are gone and the next run
+     * finishes the job. The other order could leave the rows saying
+     * "cleared" with a PDF naming the donor still on disk, and nothing would
+     * ever look at it again. A file that cannot be deleted stops this record
+     * being cleared at all; the next run tries again.
+     *
+     * What this cannot do:
+     *   - Empty `donorID` on a declaration or a statement record. The
+     *     database does not allow it there. The account it points at names
+     *     nobody, and the line says so.
+     *   - Bring a name back.
+     *   - Notice a hold switched on, or a figure un-confirmed, in the
+     *     instant after the rule is read again: the settings are not locked.
+     *   - Hold a new gift back on a database server set to "read committed".
+     *     The lock on the gap a new gift would go into exists at MySQL's
+     *     default setting ("repeatable read"), which is what the portal
+     *     runs on.
+     *   - Lock the counted envelopes. A count being closed makes a gift,
+     *     and that gift is held back by the lock on the gifts.
+     *   - Tell the organisation that owns the records, when the erasure
+     *     request was filed at a different organisation: the line is on that
+     *     request's trail. The job also writes one activity-log line per
+     *     organisation for that reason.
+     *
+     * @param int         $keptDonorId The row of `tblGivingKeptDonors`.
+     * @param string|null $today       `YYYY-MM-DD` where the organisation is. Null means now. For tests.
+     *
+     * @return string 'cleared', or why not: 'not-erased' (the account has not
+     *   been emptied: no run of the erasure got that far), 'on-hold', 'not-confirmed',
+     *   'not-due', 'unreadable' (the date could not be worked out),
+     *   'already-cleared', 'gone' (no such row), or 'failed' (a file or a
+     *   write failed; the reason is in the error log and nothing was cleared
+     *   in the database).
+     */
+    public static function clearKeptGivingIdentity(int $keptDonorId, ?string $today = null): string
+    {
+        $db = App::db();
+
+        try {
+            $stmt = $db->prepare('SELECT siteID, donorID, erasureRequestID, lastGiftDate, clearedAt FROM tblGivingKeptDonors WHERE keptDonorID = ?');
+            if ($stmt === false) {
+                throw new \RuntimeException((string) $db->error);
+            }
+            $stmt->bind_param('i', $keptDonorId);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] GdprEraser: kept giving record #' . $keptDonorId . ' could not be read: ' . $e->getMessage());
+
+            return 'failed';
+        }
+        if ($row === null) {
+            return 'gone';
+        }
+        if ($row['clearedAt'] !== null) {
+            return 'already-cleared';
+        }
+
+        $siteId  = (int) $row['siteID'];
+        $donorId = (int) $row['donorID'];
+        $rule    = GivingRetention::ruleForSite($siteId);
+        $state   = GivingRetention::stateOfKeptRow($db, $rule, $siteId, $donorId, (string) $row['lastGiftDate'], $today);
+
+        // A first look, with nothing locked. It only saves work: most
+        // records are not due, and this answers for them at once. It is NOT
+        // the decision. That is made again inside the transaction below.
+        if ($state['state'] !== 'due') {
+            return $state['state'];
+        }
+
+        try {
+            return self::asOneStep($db, static function () use ($db, $keptDonorId, $siteId, $donorId, $today): string {
+                // 🔒 Lock the kept row, then the donor's gifts at this
+                //    organisation, and only THEN decide.
+                $stmt = $db->prepare('SELECT erasureRequestID, lastGiftDate, clearedAt FROM tblGivingKeptDonors WHERE keptDonorID = ? FOR UPDATE');
+                $stmt->bind_param('i', $keptDonorId);
+                $stmt->execute();
+                $now = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                if ($now === null || $now['clearedAt'] !== null) {
+                    return 'already-cleared';
+                }
+                // The lock covers the rows that are there AND the gap a new
+                // gift for this donor would go into, so nobody can record one
+                // between the decision below and the update that follows it.
+                $stmt = $db->prepare('SELECT entryID FROM tblGivingEntry WHERE siteID = ? AND donorID = ? FOR UPDATE');
+                $stmt->bind_param('ii', $siteId, $donorId);
+                $stmt->execute();
+                $stmt->get_result()->free();
+                $stmt->close();
+
+                // 🛑 THE GUARD. The rule and the state are read again, now
+                //    that nothing can change under them.
+                $rule  = GivingRetention::ruleForSite($siteId);
+                $state = GivingRetention::stateOfKeptRow($db, $rule, $siteId, $donorId, (string) $now['lastGiftDate'], $today);
+                if ($state['state'] !== 'due') {
+                    return $state['state'];
+                }
+
+                // Never clear with nowhere to write that it was done.
+                if ($now['erasureRequestID'] === null) {
+                    error_log('[WebMS-Intra] GdprEraser: kept giving record #' . $keptDonorId . ' is due, but the erasure request it '
+                        . 'belongs to no longer exists, so there is no audit trail to record the clearing on. Nothing was cleared.');
+
+                    return 'failed';
+                }
+                $requestId = (int) $now['erasureRequestID'];
+
+                // The files, only now that the decision is final.
+                $gone = 0;
+                foreach (self::statementFilesOf($donorId, $siteId) as $path) {
+                    if (@unlink($path) === false) {
+                        error_log('[WebMS-Intra] GdprEraser: kept giving record #' . $keptDonorId . ' is due, but a kept statement '
+                            . 'file could not be deleted (' . basename($path) . '). Nothing was cleared; the next run tries again.');
+
+                        return 'failed';
+                    }
+                    $gone++;
+                }
+
+                $count = static function (string $table) use ($db, $siteId, $donorId): int {
+                    $n    = 0;
+                    $stmt = $db->prepare('SELECT COUNT(*) FROM `' . $table . '` WHERE siteID = ? AND donorID = ?');
+                    $stmt->bind_param('ii', $siteId, $donorId);
+                    $stmt->execute();
+                    $stmt->bind_result($n);
+                    $stmt->fetch();
+                    $stmt->close();
+
+                    return (int) $n;
+                };
+                $gifts        = $count('tblGivingEntry');
+                $declarations = $count('tblGiftAidDeclaration');
+
+                foreach ([
+                    'UPDATE tblGivingEntry SET donorID = NULL, donorName = NULL WHERE siteID = ? AND donorID = ?',
+                    'UPDATE tblGiftAidDeclaration SET address = NULL, postcode = NULL, acceptedIP = NULL, signaturePath = NULL, '
+                        . 'notes = NULL WHERE siteID = ? AND donorID = ?',
+                    'UPDATE tblGivingStatementLog SET pdfPath = NULL, emailedTo = NULL WHERE siteID = ? AND donorID = ?',
+                    // An envelope kept in a count that was still open at the
+                    // erasure. Its gift, if the count has been closed since,
+                    // is one of the gifts above.
+                    'UPDATE tblCountEnvelopes ce INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID '
+                        . 'SET ce.giverID = NULL, ce.giverName = NULL WHERE cs.siteID = ? AND ce.giverID = ?',
+                ] as $sql) {
+                    $stmt = $db->prepare($sql);
+                    $stmt->bind_param('ii', $siteId, $donorId);
+                    $stmt->execute();
+                    $stmt->close();
+                }
+                $stmt = $db->prepare(
+                    'UPDATE tblGivingKeptDonors SET fullName = NULL, address = NULL, postcode = NULL, clearedAt = UTC_TIMESTAMP() '
+                    . 'WHERE keptDonorID = ? AND clearedAt IS NULL'
+                );
+                $stmt->bind_param('i', $keptDonorId);
+                $stmt->execute();
+                $stmt->close();
+
+                $years = (int) $rule['years'];
+                self::logAudit(
+                    $db,
+                    $requestId,
+                    'anonymise',
+                    'GivingRecords',
+                    'organisation #' . $siteId,
+                    'The keep-until date for this donor\'s giving records at organisation #' . $siteId . ' was '
+                    . GivingRetention::dateInWords($state['keepUntil']) . ' and has passed. The name and address were removed from '
+                    . $gifts . ' ' . ($gifts === 1 ? 'gift' : 'gifts') . ', ' . $declarations . ' tax '
+                    . ($declarations === 1 ? 'declaration' : 'declarations') . ' and the record that held them, and '
+                    . $gone . ' kept statement ' . ($gone === 1 ? 'file was' : 'files were') . ' deleted. Amounts, dates and '
+                    . 'methods are kept, and no record was deleted. The tax declarations and statement records still carry '
+                    . 'the account number, because the database does not allow it to be empty there; the account it '
+                    . 'points at names nobody. Worked out from: last gift ' . GivingRetention::dateInWords((string) $state['countedFromGift']) . '; '
+                    . ($state['usedFallback'] === true
+                        ? 'no financial year end set, so one year after it was used'
+                        : 'financial year ends ' . GivingRetention::yearEndInWords((string) $rule['yearEnd']))
+                    . '; ' . $years . ' ' . ($years === 1 ? 'year' : 'years') . ', confirmed'
+                    . ((string) $rule['confirmedOn'] !== '' ? ' on ' . GivingRetention::dateInWords((string) $rule['confirmedOn']) : '') . '.'
+                );
+
+                return 'cleared';
+            });
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] GdprEraser: kept giving record #' . $keptDonorId . ' could not be cleared: ' . $e->getMessage());
+
+            return 'failed';
+        }
+    }
+
+    /**
+     * 📄 Is one rendered statement PDF kept with the tax evidence?
+     *
+     * Only asked about a file at an organisation that IS keeping the donor's
+     * name. See eraseGivingStatementFiles() for the rule and its reasons.
+     *
+     * @param string $scope    The rule that organisation applied: 'receipted' or 'all'.
+     * @param string $fileName `statement-{donor}-{from}_{to}.pdf`.
+     */
+    private static function statementFileIsKept(\mysqli $db, int $siteId, int $donorId, string $scope, string $fileName): bool
+    {
+        if ($scope === GivingRetention::SCOPE_ALL) {
+            return true;
+        }
+        $prefix = 'statement-' . $donorId . '-';
+        $period = substr($fileName, strlen($prefix), -4);
+        if (str_starts_with($fileName, $prefix) === false
+            || preg_match('/^(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/', $period, $m) !== 1
+        ) {
+            // The name does not give a period, so it cannot be matched to a
+            // statement record. Kept: see eraseGivingStatementFiles().
+            return true;
+        }
+
+        $stmt = $db->prepare('SELECT 1 FROM tblGivingStatementLog WHERE siteID = ? AND donorID = ? AND periodKey = ? LIMIT 1');
+        if ($stmt === false) {
+            throw new \RuntimeException((string) $db->error);
+        }
+        $stmt->bind_param('iis', $siteId, $donorId, $period);
+        $stmt->execute();
+        $issued = $stmt->get_result()->fetch_row() !== null;
+        $stmt->close();
+        if ($issued === true) {
+            return true;
+        }
+
+        // A statement the donor made for themselves ("my statement"), with no
+        // statement record behind it. Kept when EVERY gift on it is a kept
+        // gift: at least one gift in its period still carries the donor, and
+        // none of the gifts this run took the donor off falls inside it.
+        [, $from, $to] = $m;
+        $linked = 0;
+        $stmt   = $db->prepare('SELECT COUNT(*) FROM tblGivingEntry WHERE siteID = ? AND donorID = ? AND donatedAt BETWEEN ? AND ?');
+        if ($stmt === false) {
+            throw new \RuntimeException((string) $db->error);
+        }
+        $stmt->bind_param('iiss', $siteId, $donorId, $from, $to);
+        $stmt->execute();
+        $stmt->bind_result($linked);
+        $stmt->fetch();
+        $stmt->close();
+        if ((int) $linked === 0) {
+            return false;
+        }
+        foreach (self::$unkeptGiftDates[$siteId] ?? [] as $date) {
+            // Dates written YYYY-MM-DD compare as text in calendar order.
+            if ($date >= $from && $date <= $to) {
+                return false;
+            }
+        }
+
+        // Either no gift in its period lost the donor in this run, or an
+        // EARLIER run sorted the gifts and which ones it took the donor off
+        // is no longer known. Kept in both cases: keeping can be put right.
+        return true;
+    }
+
+    /**
+     * 📁 The rendered statement PDFs on disk for one donor: at one
+     *    organisation, or at every one when `$siteId` is null.
+     *
+     * The organisation is the FOLDER's name and the donor's account number is
+     * in the file's (see Portal\Core\Giving::renderStatementPdf()). Both are
+     * whole numbers here, so nothing typed by anybody reaches the pattern.
+     *
+     * @return string[] Full paths.
+     */
+    private static function statementFilesOf(int $donorId, ?int $siteId = null): array
+    {
+        $base = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'giving'
+              . DIRECTORY_SEPARATOR . 'statements';
+        if (is_dir($base) === false) {
+            return [];
+        }
+        $found = glob($base . DIRECTORY_SEPARATOR . ($siteId === null ? '*' : (string) $siteId) . DIRECTORY_SEPARATOR
+            . 'statement-' . $donorId . '-*.pdf');
+
+        return $found === false ? [] : $found;
+    }
+
+    /**
+     * 🧾 Giving statements: the rendered PDFs for this person, across every
+     *    organisation (the organisation is in the folder name, not the file
+     *    name - see Portal\Core\Giving::renderStatementPdf()), then the
+     *    address each statement was mailed to
      *    (`tblGivingStatementLog.emailedTo`, SEC-02).
+     *
+     * A STATEMENT FILE FOR KEPT GIFTS IS KEPT (Salem874, 11 October 2026). It
+     * is a copy of what the donor was given, and a copy cannot be made again
+     * once the account is emptied. So a file is kept, until the retention job
+     * removes it with the names, when BOTH are true:
+     *
+     *   - that organisation is keeping this donor's name (keepGivingRecords()
+     *     wrote a kept row there earlier in this run, or on an earlier one);
+     *   - EVERY gift on the file is a kept gift. That is so when the
+     *     organisation keeps the name on every gift; when its statement log
+     *     has a row for this donor and exactly this period (under the "tax
+     *     gifts only" rule a statement record is what makes its period's
+     *     gifts kept gifts); and, for a statement the donor made for
+     *     themselves from "my statement", when at least one gift in its
+     *     period still carries the donor and none of the gifts this run took
+     *     the donor off falls inside it.
+     *
+     * Every other file is deleted, as all of them used to be: a file at an
+     * organisation that keeps nothing of this donor's, and a self-made
+     * statement that lists a gift which has just lost the donor's name (it
+     * would name them against that gift). A file whose name does not give a
+     * period cannot be sorted either way; it is KEPT, because keeping is the
+     * mistake that can be put right.
+     *
+     * (A self-made statement was first ALWAYS deleted. The owner's reason
+     * for keeping statement files, that a copy cannot be made again, applies
+     * to it too when everything on it is tax evidence; the independent check
+     * of 12 October 2026 said so.)
+     *
+     * What this cannot do: on a LATER run of a request whose first run had
+     * already sorted an organisation's gifts, it is no longer known which
+     * gifts lost the donor. A self-made statement there is kept if any gift
+     * in its period still carries the donor, even if another gift on it did
+     * not keep the name.
      *
      * The statement-log ROW stays: its amounts and period are kept like
      * `tblGivingEntry`'s. Not a catalogue() entry, because
@@ -2553,7 +3852,9 @@ class GdprEraser
      * Two steps, each with exactly one audit line, including "nothing held".
      * A file that could not be deleted, or an update that failed, is a FAILED
      * step. Both used to be passed over in silence: the PDF with the person's
-     * name on it stayed on disk and the erasure was reported complete.
+     * name on it stayed on disk and the erasure was reported complete. If it
+     * cannot be found out which files to keep, NO file is deleted and the
+     * step fails.
      *
      * @return string[] Two STEP_ constants: the files, then the addresses.
      */
@@ -2563,38 +3864,73 @@ class GdprEraser
 
         $removed = 0;
         $stuck   = 0;
-        $base = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'giving'
-              . DIRECTORY_SEPARATOR . 'statements';
-        if (is_dir($base) === true) {
-            $pattern = $base . DIRECTORY_SEPARATOR . '*' . DIRECTORY_SEPARATOR . 'statement-' . $userId . '-*.pdf';
-            $matches = glob($pattern);
-            if ($matches !== false) {
-                foreach ($matches as $path) {
-                    if (@unlink($path) === true) {
-                        $removed++;
-                    } else {
-                        $stuck++;
-                    }
+        $kept    = 0;
+        $problem = null;
+        try {
+            // Where this donor's name is being kept, and under which rule.
+            $keptAt = [];
+            $stmt   = $db->prepare('SELECT siteID, scope FROM tblGivingKeptDonors WHERE donorID = ? AND clearedAt IS NULL');
+            if ($stmt === false) {
+                throw new \RuntimeException((string) $db->error);
+            }
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            while ($row = $result->fetch_assoc()) {
+                $keptAt[(int) $row['siteID']] = (string) $row['scope'];
+            }
+            $stmt->close();
+
+            // Sort every file BEFORE deleting any, so a failure part way
+            // through the sorting cannot leave some deleted on a guess.
+            $delete = [];
+            foreach (self::statementFilesOf($userId) as $path) {
+                $folder = basename(dirname($path));
+                $siteId = ctype_digit($folder) === true ? (int) $folder : 0;
+                if (isset($keptAt[$siteId]) === true
+                    && self::statementFileIsKept($db, $siteId, $userId, $keptAt[$siteId], basename($path)) === true
+                ) {
+                    $kept++;
+                    continue;
+                }
+                $delete[] = $path;
+            }
+            foreach ($delete as $path) {
+                if (@unlink($path) === true) {
+                    $removed++;
+                } else {
+                    $stuck++;
                 }
             }
+        } catch (\Throwable $e) {
+            $problem = $e->getMessage();
         }
+        $keptWords = $kept . ' rendered statement PDF(s) kept with the donor\'s giving records as tax evidence, until the '
+            . 'keep-until date on the "GivingRecords" line of this report, when the retention job removes them';
         // Not a real table name — deliberately NOT `tblXxx`-shaped so
         // check_php_table_refs.py doesn't need an allowlist entry for
         // this filesystem-only sweep's audit label.
-        if ($stuck > 0) {
+        if ($problem !== null) {
+            self::logAudit($db, $requestId, 'failed', 'GivingStatementPdfFiles', null, mb_substr('it could not be found out which rendered statement PDFs must be kept, so none was deleted: ' . $problem, 0, 250));
+            $files = self::STEP_FAILED;
+        } elseif ($stuck > 0) {
             self::logAudit($db, $requestId, 'failed', 'GivingStatementPdfFiles', (string) $removed . ' file(s)', $stuck . ' rendered statement PDF(s) could not be deleted and are still on disk');
             $files = self::STEP_FAILED;
         } elseif ($removed > 0) {
-            self::logAudit($db, $requestId, 'delete', 'GivingStatementPdfFiles', (string) $removed . ' file(s)', 'rendered statement PDFs have no retention duty once the subject is erased');
+            self::logAudit($db, $requestId, 'delete', 'GivingStatementPdfFiles', (string) $removed . ' file(s)', 'rendered statement PDF(s) deleted: no giving record that keeps this donor\'s name needs them'
+                . ($kept > 0 ? '. ' . $keptWords : ''));
             $files = self::STEP_CHANGED;
+        } elseif ($kept > 0) {
+            self::logAudit($db, $requestId, 'retain', 'GivingStatementPdfFiles', (string) $kept . ' file(s) kept', $keptWords);
+            $files = self::STEP_UNCHANGED;
         } else {
             self::logAudit($db, $requestId, 'none', 'GivingStatementPdfFiles', null, 'no rendered statement PDF found for this person');
             $files = self::STEP_UNCHANGED;
         }
 
-        // 🔐 SEC-02 — the rendered PDF is gone above, but the raw mailed-to
-        // address still survives in `tblGivingStatementLog.emailedTo` even
-        // after erasure. Null it (prepared, donor-scoped) while keeping
+        // 🔐 SEC-02 — whatever happened to the files above, the raw mailed-to
+        // address is not tax evidence and must not survive an erasure in
+        // `tblGivingStatementLog.emailedTo`. Null it (prepared, donor-scoped) while keeping
         // the row's totals/period for the run-history/audit trail.
         $nulled  = 0;
         $problem = null;
@@ -2615,7 +3951,7 @@ class GdprEraser
             self::logAudit($db, $requestId, 'failed', 'tblGivingStatementLog', null, mb_substr('the mailed-to address could not be emptied: ' . $problem, 0, 250));
             $addresses = self::STEP_FAILED;
         } elseif ($nulled > 0) {
-            self::logAudit($db, $requestId, 'anonymise', 'tblGivingStatementLog', (string) $nulled . ' rows', 'emailedTo PII detached; totals/period run-history retained (statement PDFs already unlinked above)');
+            self::logAudit($db, $requestId, 'anonymise', 'tblGivingStatementLog', (string) $nulled . ' rows', 'the address each statement was mailed to is emptied; the statement record, its totals and its period are kept');
             $addresses = self::STEP_CHANGED;
         } else {
             self::logAudit($db, $requestId, 'none', 'tblGivingStatementLog', null, 'no mailed-to address held for this person');

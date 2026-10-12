@@ -25,6 +25,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -284,6 +285,26 @@ if ($settingId > 0) {
     $isPortalWideRow = ($existing['siteID'] === null);
     $storedKey       = (string) $existing['settingKey'];
 
+    // 🔒 The giving-records rule is changed on its own page, never here
+    //    (roll-out package A2b). That page un-ticks "confirmed" when the
+    //    figure changes and refuses a change that would clear kept donor
+    //    records until a second box is ticked. Here an administrator could
+    //    have shortened a confirmed figure, or switched a hold off, in one
+    //    click with no warning, and the next retention run would have
+    //    cleared names for good. The one exception, and the reasons, are in
+    //    GivingRetention::lockedInGeneralEditor().
+    if (GivingRetention::lockedInGeneralEditor($storedKey, $isPortalWideRow, $isGlobalAdmin) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" is part of the giving-records rule and can only be changed on its own page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = GivingRetention::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /settings');
+        exit();
+    }
+
     if ($isPortalWideRow === true && $isGlobalAdmin === false) {
         Logger::activity(
             'SettingsUpdateRefused',
@@ -456,6 +477,24 @@ if ($settingId > 0) {
         $_SESSION['flash_msg']  = 'A setting name can only contain the letters A to Z, '
             . 'numbers, full stops (.), hyphens (-) and underscores (_). Spaces, '
             . 'accented letters and other symbols are not allowed.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /settings');
+        exit();
+    }
+
+    // 🔒 Nor may one of the giving-records settings be ADDED here for this
+    //    organisation: adding its own "confirmed" row is exactly how an
+    //    organisation that has confirmed nothing would start having kept
+    //    donor records cleared. See the note in the edit branch above. (This
+    //    branch only ever writes a row for the current organisation, so the
+    //    installation-wide exception does not arise.)
+    if (GivingRetention::lockedInGeneralEditor($settingKey, false, $isGlobalAdmin) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $settingKey . '" is part of the giving-records rule and can only be set on its own page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = GivingRetention::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: /settings');
         exit();

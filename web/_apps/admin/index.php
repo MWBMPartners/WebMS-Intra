@@ -592,6 +592,17 @@ $keysLiveNow = ReservedKeys::keysAreAddresses();
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
+                <!-- 🧾 Roll-out package A2b: each organisation's rule for
+                     how long giving records keep a donor's name after the
+                     donor has asked to be erased. Beside "Retention" because
+                     that sweep is what acts on the rule. A new link, so it
+                     uses Site::url(), as the Roles tile above does. -->
+                <a href="<?php echo htmlspecialchars(Site::url('admin/settings/giving-records'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-receipt fa-lg"></i>
+                    <span class="small">Giving records</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
                 <a href="/admin/system-info" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-server fa-lg"></i>
                     <span class="small">Server Info</span>

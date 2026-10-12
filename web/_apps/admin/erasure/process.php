@@ -73,6 +73,44 @@ if ($action === 'cancel') {
     // said the erasure had not happened, when it had. The test is in the
     // UPDATE itself, so a request that changes state between the page being
     // read and the button being pressed is still refused.
+    //
+    // 🧾 AND NOT ONE WHOSE RUN HAS ALREADY CHANGED SOMETHING (roll-out
+    //    package A2b, after the two independent checks of 12 October 2026).
+    //    A run that stops part way puts its request back to "pending
+    //    review", which the test below allows to be cancelled. But by then
+    //    the run may have deleted the person's organisation membership,
+    //    taken their name off gifts, or (about half way through) emptied
+    //    their account. None of that can be put back: rows are gone, and
+    //    which gifts lost their donor is recorded nowhere. Cancelling would
+    //    leave a request that says nothing happened beside a person with
+    //    part of their records gone. So the cancel is refused, with the
+    //    reason, and the request has to be run again to its end.
+    //
+    //    The first version of this refused only when the GIVING records had
+    //    been dealt with. A member with no giving records whose run had
+    //    already deleted their membership could still be cancelled.
+    //
+    //    What this cannot do: stop somebody changing the status by hand in
+    //    the database. Nothing kept for tax reasons is cleared in that case
+    //    either, for as long as the account has not been emptied
+    //    (GivingRetention::stateOfKeptRow()).
+    //
+    //    Asked only of a request the cancel below would otherwise accept. A
+    //    completed request is refused further down, in its own words: "run
+    //    it again to finish it" would be the wrong thing to tell somebody
+    //    about a request that has finished.
+    $stillWaiting = in_array((string) $row['status'], ['pending_confirmation', 'pending_review'], true);
+    if ($stillWaiting === true && GdprEraser::runHasChangedAnything($requestId) === true) {
+        Logger::activity('GdprErasureCancelRefused', 'Refused to cancel erasure request #' . $requestId
+            . ': a run of it has already changed some of the person\'s records', $adminId);
+        $_SESSION['flash_msg']  = 'This request cannot be cancelled: a run of it has already removed or changed some of '
+            . 'this person\'s records and then stopped. What that run changed cannot be put back, so cancelling would '
+            . 'leave them with part of their records gone and a request that says nothing happened. '
+            . 'Run the request again to finish it. Nothing was changed.';
+        $_SESSION['flash_type'] = 'warning';
+        header('Location: /admin/erasure-requests');
+        exit();
+    }
     $cancelled = false;
     $u = $db->prepare(
         'UPDATE tblErasureRequest SET status = "cancelled", processedAt = NOW(), processedByID = ? '

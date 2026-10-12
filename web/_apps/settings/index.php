@@ -26,6 +26,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -89,6 +90,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
     // so a row belonging to another organisation reads as "not found".
     $deleteId     = (int) ($_POST['settingID'] ?? 0);
     $deleteSiteId = Site::id();
+
+    // 🔒 The giving-records rule cannot be deleted here by ANYBODY, a global
+    //    administrator included (roll-out package A2b). Deleting an
+    //    organisation's own "hold" row switches its hold off; deleting its
+    //    year-end row moves every keep-until date. Either can put kept donor
+    //    records past their date with no warning, and the next retention run
+    //    then clears names for good. The rule is changed at Admin, Giving
+    //    records, which checks for exactly that. Looked up for everybody, so
+    //    it sits before the global-administrator branch below.
+    if ($deleteId > 0) {
+        $lockedKey = null;
+        $lookup    = $mysqli->prepare('SELECT settingKey FROM tblSettings WHERE settingID = ? AND (siteID = ? OR siteID IS NULL) LIMIT 1');
+        if ($lookup !== false) {
+            $lookup->bind_param('ii', $deleteId, $deleteSiteId);
+            $lookup->execute();
+            $lockedKey = $lookup->get_result()->fetch_assoc();
+            $lookup->close();
+        }
+        if ($lockedKey !== null && strncasecmp((string) $lockedKey['settingKey'], 'giving.retention.', 17) === 0) {
+            Logger::activity(
+                'SettingsDeleteRefused',
+                'Refused: "' . (string) $lockedKey['settingKey'] . '" is part of the giving-records rule and cannot be deleted here',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = GivingRetention::LOCKED_MESSAGE;
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: /settings');
+            exit();
+        }
+    }
 
     if ($deleteId > 0 && $isRoot === false) {
         $target = null;
@@ -370,6 +401,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <?php echo htmlspecialchars($row['updatedAt'] ?? '', ENT_QUOTES, 'UTF-8'); ?>
                                 </div>
                                 <div class="col-12 col-md-2 text-md-end mt-2 mt-md-0">
+                                    <?php
+                                    // 🔒 The giving-records rule is changed on its own page, not
+                                    //    here: see GivingRetention::lockedInGeneralEditor(). No
+                                    //    Edit or Delete button is shown for those rows, so nobody
+                                    //    fills a form in only to be refused; the refusal itself is
+                                    //    in the save and delete handlers, not in this hiding.
+                                    $isGivingRule = strncasecmp((string) $row['settingKey'], 'giving.retention.', 17) === 0;
+                                    $givingLocked = GivingRetention::lockedInGeneralEditor((string) $row['settingKey'], $row['siteID'] === null, $isRoot);
+                                    ?>
+                                    <?php if ($givingLocked === true): ?>
+                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/giving-records'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Giving records</a>
+                                    <?php else: ?>
                                     <button class="btn btn-sm btn-outline-primary me-1" data-bs-toggle="modal" data-bs-target="#editModal"
                                             data-id="<?php echo (int) $row['settingID']; ?>"
                                             data-key="<?php echo htmlspecialchars($row['settingKey'], ENT_QUOTES, 'UTF-8'); ?>"
@@ -377,7 +420,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                             data-sensitive="<?php echo $isSensitive ? '1' : '0'; ?>">
                                         <i class="fa-solid fa-pen"></i>
                                     </button>
-                                    <?php if ($isRoot === true): ?>
+                                    <?php endif; ?>
+                                    <?php if ($isRoot === true && $isGivingRule === false): ?>
                                         <form method="post" action="/settings" class="d-inline">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                             <input type="hidden" name="action" value="delete">

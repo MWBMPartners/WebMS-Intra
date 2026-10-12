@@ -4959,6 +4959,36 @@ CREATE TABLE IF NOT EXISTS `tblErasureAudit` (
     CONSTRAINT `fk_ea_request` FOREIGN KEY (`requestID`) REFERENCES `tblErasureRequest`(`requestID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- ── from 209_giving_kept_donors.sql (roll-out package A2b) ───────────────────
+-- The name and home address of a donor who has asked to be erased, kept for
+-- tax reasons until a keep-until date, then cleared by the retention job.
+-- It sits HERE, after the erasure tables and not with the giving tables,
+-- because it links to tblErasureRequest and this file runs top to bottom.
+-- See that migration's header for why the table exists and what was rejected.
+CREATE TABLE IF NOT EXISTS `tblGivingKeptDonors` (
+    `keptDonorID`      INT          NOT NULL AUTO_INCREMENT,
+    `siteID`           INT          NOT NULL COMMENT 'Which organisation these giving records belong to. Each organisation has its own rule for how long the name is kept',
+    `donorID`          INT          NOT NULL COMMENT 'The emptied account that the kept gifts, declarations and statements still point at. The account names nobody; the name is only on this row',
+    `erasureRequestID` INT          DEFAULT NULL COMMENT 'The erasure request that made this row. The line written when the name is finally cleared goes on that request''s audit trail, so one report tells the whole story',
+    `fullName`         VARCHAR(255) DEFAULT NULL COMMENT 'The donor''s name as it was when they were erased. Emptied by the retention job when the keep-until date has passed. Empty from the start if the account had already been emptied by other means',
+    `address`          VARCHAR(500) DEFAULT NULL COMMENT 'Home address when erased: from the newest tax declaration at this organisation, otherwise from the account. Emptied by the retention job with the name',
+    `postcode`         VARCHAR(20)  DEFAULT NULL COMMENT 'Postcode when erased, from the same declaration. Emptied by the retention job with the name',
+    `scope`            ENUM('receipted','all') NOT NULL COMMENT 'Which gifts kept the name on the day: only those with a tax declaration, receipt or statement (receipted), or every gift (all). Kept for the record; changing the setting later does not change this',
+    `lastGiftDate`     DATE         NOT NULL COMMENT 'A DATE ON A CALENDAR, not a moment in time: the day of the donor''s last kept gift. The keep-until date is worked out from this each time it is needed, from the organisation''s settings as they are then; it is never stored',
+    `keptGiftCount`    INT          NOT NULL DEFAULT 0 COMMENT 'How many gifts kept the donor''s name when this row was made. For the settings page and the audit lines',
+    `createdAt`        DATETIME     NOT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when the erasure made this row. Shown only; nothing is worked out from it',
+    `clearedAt`        DATETIME     DEFAULT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(). Empty means the name is still kept. Set when the retention job removes the name; the row itself stays as the record that it happened',
+    PRIMARY KEY (`keptDonorID`),
+    UNIQUE KEY `uq_gkd_site_donor` (`siteID`, `donorID`),
+    KEY `idx_gkd_site_cleared` (`siteID`, `clearedAt`),
+    KEY `idx_gkd_donor` (`donorID`),
+    KEY `idx_gkd_request` (`erasureRequestID`),
+    CONSTRAINT `fk_gkd_site`    FOREIGN KEY (`siteID`)           REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_gkd_donor`   FOREIGN KEY (`donorID`)          REFERENCES `tblUsers`(`userID`) ON DELETE RESTRICT,
+    CONSTRAINT `fk_gkd_request` FOREIGN KEY (`erasureRequestID`) REFERENCES `tblErasureRequest`(`requestID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='The name and home address of a donor who asked to be erased, kept for tax reasons until a keep-until date (roll-out package A2b)';
+
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('account/my-data',           'account/my-data.php',           1),
     ('account/erasure-request',   'account/erasure-request.php',   1),
@@ -9663,4 +9693,28 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- here. No data is changed and no link between tables is touched.
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('208_erasure_keeps_others_records.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 209_giving_kept_donors.sql (roll-out package A2b) ───────────────────
+-- The table itself is above, straight after tblErasureAudit. Here: the seven
+-- per-organisation settings, as installation-wide defaults, and the two
+-- addresses of the settings page. `giving.retention.countryCode` is EMPTY by
+-- default on purpose: see the migration's header.
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'giving.retention.countryCode', '',          '',          0),
+    (NULL, 'giving.retention.scope',       'receipted', 'receipted', 0),
+    (NULL, 'giving.retention.years',       '',          '',          0),
+    (NULL, 'giving.retention.confirmed',   'false',     'false',     0),
+    (NULL, 'giving.retention.confirmedOn', '',          '',          0),
+    (NULL, 'giving.retention.yearEnd',     '',          '',          0),
+    (NULL, 'giving.retention.hold',        'false',     'false',     0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/settings/giving-records',      'admin/settings/giving-records/index.php', 1),
+    ('admin/settings/giving-records/save', 'admin/settings/giving-records/save.php',  1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('209_giving_kept_donors.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

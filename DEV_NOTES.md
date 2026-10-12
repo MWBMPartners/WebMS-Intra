@@ -4309,13 +4309,23 @@ reminders.php`'s header documents.
 ### GDPR erasure
 
 `tblGivingStatementLog` rows are left alone by an erasure (donorID is
-`NOT NULL` there, and the run history is retained like `tblGivingEntry`'s
-own HMRC-adjacent 6-year rationale) — but `GdprEraser::execute()` now
-also unlinks the erased user's rendered statement PDF files from disk
-(`_uploads/giving/statements/*/statement-{userID}-*.pdf`) via a small,
-filesystem-only `eraseGivingStatementFiles()` step: a rendered PDF is a
-name-bearing document with no retention duty once its subject is erased,
-even though the underlying ledger entries stay anonymised-in-place.
+`NOT NULL` there), apart from the address a statement was mailed to, which
+is emptied at once.
+
+**The statement FILES changed in roll-out package A2b.** This note used to
+say every rendered PDF of the erased donor's was deleted, "a name-bearing
+document with no retention duty once its subject is erased". That stopped
+being true: a statement the organisation ISSUED for gifts that keep the
+donor's name is a copy of what the donor was given, and it cannot be made
+again once the account is emptied. `eraseGivingStatementFiles()` now keeps a
+file when the organisation is keeping that donor's name AND every gift on
+the file is a kept gift: it keeps every gift, or its statement log has a row
+for that donor and exactly that period, or (a statement the donor made for
+themselves) at least one gift in its period still carries the donor and none
+of the gifts this run took the donor off falls inside it. Every other file
+is still deleted. The kept
+files are removed by the retention job with the names. See "Giving records
+keep a donor's name for a set time" below.
 
 #### How an erasure runs (#510, #535, 11 October 2026)
 
@@ -4428,6 +4438,155 @@ audit trail cannot be written the run stops and throws.
 - **Deploy order.** Migration 208 must run before an erasure can be started:
   Execute refuses on a database with no `claimedAt` column and says to run
   the upgrade.
+
+#### Giving records keep a donor's name for a set time (roll-out package A2b, 12 October 2026)
+
+The owner's rule (11 October 2026): on erasure everything about the person
+goes at once, EXCEPT the giving records the organisation's country requires
+it to keep. Those keep the donor's identity until a keep-until date, and the
+retention job then clears them.
+
+- **Where the name lives.** `tblGivingKeptDonors`, one row per organisation
+  and erased donor (migration 209). The kept gifts keep `donorID`, so the
+  tax claim file still matches each gift to its declaration by account
+  number and date; the account that number points at is emptied as before.
+  *Rejected:* putting the name on the declaration (most countries have no
+  declaration), and emptying the number on every gift and linking kept gifts
+  to the kept row instead (a gift given before the erasure and not yet
+  claimed would drop out of the next claim, silently).
+- **The order matters.** `GdprEraser::keepGivingRecords()` runs before the
+  table walk, because it reads the name and the walk empties it (about half
+  way through: the account's instruction is not the walk's last). **If it fails, the whole run stops**, the request goes back to
+  "pending review" and nothing after it runs. It checks for the kept-names
+  table first, for everybody, so no erasure starts on a database without
+  migration 209.
+- **The invariant (after the independent check of 12 October 2026).** The
+  kept row is written near the START of an erasure; the account is emptied
+  about HALF WAY through the table walk, with more of the walk and four
+  further steps after it; a run can stop anywhere. (This note first said "at
+  its END". That mistake is where the fault fixed under 3 below came from.)
+  So:
+  1. A kept name is cleared, and a donor is treated as erased, ONLY when the
+     account has really been emptied. One definition:
+     `GdprEraser::emptiedAccountSql()` (switched off, the made-up name, the
+     made-up address). The clearing guard, the claim file, the statements
+     list and `Giving::isErasedDonor()` all use it. "A kept row exists" is
+     not the same question.
+  2. The keep-until date is counted from the LATER of the date on the kept
+     row and the newest gift (or open-count envelope) still linked to the
+     donor there: `GivingRetention::stateOfKeptRow()`.
+  3. Every later run of a request works the kept row out again, and never
+     writes a made-up name over a real one. (This note used to say that on a
+     second run "the account already says [Deleted User]". That is true only
+     when the earlier run got as far as emptying it.)
+     When the account had not been emptied yet, the row is also tied to the
+     request now doing the erasing, so the line written at the clearing goes
+     on the trail of the request that really erased the person.
+     When the account HAS been emptied (the earlier run stopped after that
+     step), the donor is already erased and the row is what was decided on
+     that day: the later run sorts the gifts and the envelopes by the WIDER
+     of the rule stored on the row and today's setting (if either says
+     "every gift", every gift is kept), never changes the stored rule, and
+     never empties the row. Only the retention job clears it, under its
+     guard. (The first version sorted by today's setting in every case, so
+     narrowing "which gifts" between two runs emptied a kept name at once,
+     even under a hold. The second sorted by the stored rule alone, so
+     WIDENING it between two runs took the donor off a gift that today's
+     rule keeps. Both found by the checks of 12 October 2026. A donor taken
+     off a gift cannot be put back, so the wider rule wins.)
+  4. A request whose run has already CHANGED ANYTHING cannot be cancelled
+     (`GdprEraser::runHasChangedAnything()`, asked by
+     `admin/erasure/process.php` of a request that is still waiting). It
+     reads the request's audit trail: a deleted row, an emptied column or a
+     kept name. Nothing a run does can be put back. (It first asked only
+     about the giving records, so a member with none whose run had already
+     deleted their membership could still be cancelled.)
+  The clearing decides INSIDE its transaction: it locks the kept row and the
+  donor's gifts at that organisation, reads the rule and the state again, and
+  deletes files and changes rows only if the answer is still "due". (It used
+  to decide first and lock afterwards, and a gift recorded in that gap lost
+  its donor.) What it cannot do: hold a new gift back on a server set to
+  "read committed", where the lock on the gap does not exist.
+  A record already past its keep-until date at erasure is cleared at the END
+  of the run, once the account is emptied, not inside the giving step.
+- **Counted envelopes** are handled by the giving step
+  (`GdprEraser::unnameCountEnvelopes()`), not by the walk. An envelope in a
+  count that is not yet closed keeps its giver when the gift it will become
+  is a kept gift, so that closing the count makes a gift the tax claim can
+  match. Its giver goes with the rest when the keep-until date has passed.
+- **The seven settings are locked in the general settings editor**
+  (`GivingRetention::lockedInGeneralEditor()`), which knows nothing of the
+  un-tick or the second tick. A global administrator may still change the
+  installation-wide `hold` row there.
+- **One class decides everything.** `Portal\Core\GivingRetention`:
+  `suggestionFor()` (what the portal suggests for a country), `ruleForSite()`
+  (one organisation's rule, read fresh), `keepUntil()` and `stateFor()`
+  (until when, and whether it may be cleared now). The erasure, the job, its
+  preview and the settings page all call it. **Do not write a second date
+  rule or a second "is it due" test.**
+- **The guard is inside the clearing routine.**
+  `GdprEraser::clearKeptGivingIdentity()` clears only when `stateFor()`
+  answers `due`, which needs all three: no hold, a confirmed number of
+  years, and the keep-until date passed where the organisation is. The job
+  hands it every kept record and decides nothing itself. The files go first
+  and the rows second: see that method's docblock for why.
+- **Dates are calendar dates.** "Keep until" is text, `YYYY-MM-DD`, worked
+  out with whole numbers for year, month and day. Nothing adds hours, so the
+  two clock-change nights cannot move it. The one moment involved is "what
+  is today's date where the organisation is" (`tblSites.timezone`). A zone
+  that is empty or is not a NAMED zone answers the date at UTC minus twelve
+  hours, so a bad zone can only clear late. (PHP accepts a bare offset such
+  as "GMT+25" as a zone; the first version trusted that and was a day ahead
+  of everywhere. The self-test found it.)
+- **The keep-until date is never stored.** The kept row stores the fact (the
+  last kept gift's date); the date is worked out from today's settings each
+  time. A stored date would be left behind by a changed setting.
+- **Counted from the end of the financial year**, not from the gift: most
+  countries' rules start at a year end. With no year end set, one full year
+  after the last gift is used, which is never earlier than any real year end
+  would give (the self-test tries every day of the year).
+- **A country per organisation**: `giving.retention.countryCode`, empty by
+  default. `org.address.countryCode` is deliberately NOT read: it is one
+  value for the installation and "GB" unless changed.
+- **An organisation's rule is read from its OWN settings rows only**
+  (`GivingRetention::ruleForSite()`), not through `App::settingForSite()`,
+  which would fall back to the installation-wide row. Otherwise one edit to
+  the installation-wide `giving.retention.confirmed` row in the general
+  settings editor would "confirm" a figure for every organisation that had
+  never opened the page, and start clearing their kept records. The one
+  exception is `giving.retention.hold`: a hold on the organisation OR on the
+  whole installation holds.
+- **The data file.** `web/_core/data/giving-retention-countries.json`, with
+  its schema beside it, checked by
+  `tools/audit-checks/check_giving_retention_data.py`. To update a country,
+  edit its row and `updatedOn`, run the check, commit; no code changes. An
+  organisation that has confirmed keeps its own figure; one that has not
+  follows the new suggestion at once, and nothing of its is cleared until it
+  confirms. The PHP reader applies the schema's rules itself: a bad row
+  counts as "nothing found", an unreadable file gives everybody the
+  placeholder. The four research reports are in
+  `docs/research/giving-retention/`.
+- **The settings are saved by `GivingRetention::saveForSite()`**, not by the
+  page, so the rules are tested without a browser: a value outside its list
+  refuses the whole save; ticking "confirmed" writes the figure into the
+  organisation's own setting; changing the figure or the country un-ticks
+  it; a change that would make kept records due needs a second tick.
+- **Tests.** `tools/giving-retention-selftest.php` (no database): the
+  suggestions, the dates, both clock-change nights, the guard.
+  `tools/gdpr-eraser-selftest.php` sections 11 to 13 (a database): linked
+  giving data at two organisations, the scheduled clearing, the settings.
+  `tools/erasure-pages-selftest.php` section G: the page. Set
+  `SELFTEST_SNAPSHOT_FILE` on that last one to have it hold the page still
+  for a browser.
+- **Deploy order.** Migration 209 must run before an erasure: without it the
+  giving-records step stops the run, puts the request back and says to
+  upgrade. The claim file and the statements pages also read the new table.
+- **Not built.** Nothing records which gifts were actually claimed, so a
+  gift counts as kept when a declaration (whatever its status) or a
+  statement of the donor's covers its date. A gift that names its donor only
+  by a typed name cannot be found. The pull-request workflow does not run
+  the new self-test or the data-file check yet (the owner has agreed to that
+  edit as its own change).
 
 ### User reminders cron (#439, migration 171)
 

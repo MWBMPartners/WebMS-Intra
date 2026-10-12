@@ -40,6 +40,7 @@
  * @version   1.0.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/497
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/491
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/574
  * -----------------------------------------------------------------------------
  */
 
@@ -47,6 +48,9 @@ declare(strict_types=1);
 
 use Portal\Core\AnonymousCheckins;
 use Portal\Core\App;
+use Portal\Core\GdprEraser;
+use Portal\Core\GivingRetention;
+use Portal\Core\Logger;
 
 /**
  * 📏 The rule that decides whether one registration is past its keep-by date.
@@ -200,6 +204,52 @@ function anon_checkin_sweep_sites(): array
 }
 
 /**
+ * 🧾 The donors whose names each organisation is still keeping on its giving
+ *    records after they asked to be erased, one organisation at a time, each
+ *    with whether it may be cleared now (roll-out package A2b).
+ *
+ * One organisation at a time with ITS OWN rule, for exactly the reason set out
+ * at length in run_retention_sweep() for registrations: this is run by a
+ * scheduled job that has no current organisation, and one organisation's
+ * number of years, hold switch or "confirmed" tick must never decide what
+ * happens to another's records.
+ *
+ * The preview and the run both read this, and the decision itself is made in
+ * ONE place (Portal\Core\GivingRetention::stateFor()), so the number an
+ * administrator is shown and what the job then does cannot be decided by two
+ * different rules.
+ *
+ * Every organisation is included, in use or not: an organisation being closed
+ * down is not a reason to keep a donor's name for ever.
+ *
+ * @return array<int, array<int, array<string, mixed>>> Organisation number => its kept donors.
+ */
+function giving_identity_sweep_rows(): array
+{
+    $db  = App::db();
+    $out = [];
+
+    $result = $db->query('SELECT siteID FROM tblSites ORDER BY siteID');
+    if ($result === false) {
+        return $out;
+    }
+    $siteIds = [];
+    while ($row = $result->fetch_assoc()) {
+        $siteIds[] = (int) $row['siteID'];
+    }
+    $result->free();
+
+    foreach ($siteIds as $siteId) {
+        $rows = GivingRetention::keptDonorsForSite($db, $siteId);
+        if ($rows !== []) {
+            $out[$siteId] = $rows;
+        }
+    }
+
+    return $out;
+}
+
+/**
  * Count rows that WOULD be deleted at the current window.
  *
  * `checkinDetail` is the odd one out and is named differently on purpose:
@@ -209,12 +259,24 @@ function anon_checkin_sweep_sites(): array
  * held only a browser description; migration 201 removed that column, so
  * the scrambled address is the only detail left to count.)
  *
- * @return array{activity:int,errors:int,registrations:int,checkinDetail:int}
+ * The `givingIdentity…` figures are not deletions either. They count donors
+ * whose name is kept on giving records: how many would have it removed now,
+ * and how many are being held back, and why. `givingIdentityUnfinished` is
+ * the ones whose ACCOUNT HAS NOT BEEN EMPTIED YET: an erasure kept the name
+ * and stopped before it emptied the account, so the person is still a
+ * member. (A request can also be unfinished with the account already
+ * emptied. Those are erased donors and are counted with the others.)
+ *
+ * @return array{activity:int,errors:int,registrations:int,checkinDetail:int,
+ *               givingIdentityDue:int,givingIdentityOnHold:int,givingIdentityWaiting:int,givingIdentityNotDue:int,
+ *               givingIdentityUnfinished:int}
  */
 function preview_retention_counts(int $activityDays, int $errorDays): array
 {
     $db = App::db();
-    $out = ['activity' => 0, 'errors' => 0, 'registrations' => 0, 'checkinDetail' => 0];
+    $out = ['activity' => 0, 'errors' => 0, 'registrations' => 0, 'checkinDetail' => 0,
+        'givingIdentityDue' => 0, 'givingIdentityOnHold' => 0, 'givingIdentityWaiting' => 0, 'givingIdentityNotDue' => 0,
+        'givingIdentityUnfinished' => 0];
 
     $stmt = $db->prepare(
         'SELECT COUNT(*) AS cnt FROM tblActivityLogs '
@@ -267,7 +329,108 @@ function preview_retention_counts(int $activityDays, int $errorDays): array
         $out['checkinDetail'] += AnonymousCheckins::countDetailToClear($db, $siteId, $days);
     }
 
+    // 🧾 Erased donors whose name is still kept on giving records. Counted
+    //    from the same list, by the same decision, as the run itself.
+    foreach (giving_identity_sweep_rows() as $rows) {
+        foreach ($rows as $row) {
+            $key = match ((string) $row['state']) {
+                'due'           => 'givingIdentityDue',
+                'on-hold'       => 'givingIdentityOnHold',
+                'not-confirmed' => 'givingIdentityWaiting',
+                // The erasure that made the row stopped before it emptied
+                // the account. Never cleared; shown so that somebody runs
+                // that request again.
+                'not-erased'    => 'givingIdentityUnfinished',
+                default         => 'givingIdentityNotDue',
+            };
+            $out[$key]++;
+        }
+    }
+
     return $out;
+}
+
+/**
+ * 🧾 Remove erased donors' names from giving records whose keep-until date has
+ *    passed (roll-out package A2b). Part of run_retention_sweep(); a function
+ *    of its own so that it can be tested without also deleting old log rows.
+ *
+ * NOT A DELETE. When an organisation's keep-until date for a donor has
+ * passed, the donor's name, address and account number are taken off that
+ * organisation's giving records, and the statement files kept with them are
+ * removed. Every gift, declaration and statement record stays, with its
+ * amount and date.
+ *
+ * THIS LOOP DECIDES NOTHING. It hands every kept record to
+ * GdprEraser::clearKeptGivingIdentity(), which clears one only when all four
+ * are true: the donor's account has really been emptied; and, for the
+ * organisation that owns the record, no hold is on, an administrator has
+ * confirmed the number of years, and the keep-until date has passed where
+ * that organisation is. The test is inside that method on
+ * purpose, so that no caller - this one included - can clear early by leaving
+ * a test out.
+ *
+ * One organisation at a time, each by its own rule: see
+ * giving_identity_sweep_rows().
+ *
+ * What it cannot do: clear anything while nobody runs it. With the scheduled
+ * job switched off (an empty `maintenance.cronToken`) a name stays until a
+ * global administrator presses the button on the page.
+ *
+ * @return array{cleared: int, onHold: int, waiting: int, failed: int} `failed`: records that were
+ *   due and could not be cleared. Nothing was changed for them.
+ */
+function run_giving_identity_sweep(): array
+{
+    $givingIdentityCleared = 0;
+    $givingIdentityOnHold  = 0;
+    $givingIdentityWaiting = 0;
+    $givingIdentityFailed  = 0;
+    foreach (giving_identity_sweep_rows() as $siteId => $rows) {
+        $clearedHere = 0;
+        foreach ($rows as $row) {
+            switch (GdprEraser::clearKeptGivingIdentity((int) $row['keptDonorID'])) {
+                case 'cleared':
+                    $clearedHere++;
+                    break;
+                case 'on-hold':
+                    $givingIdentityOnHold++;
+                    break;
+                case 'not-confirmed':
+                    $givingIdentityWaiting++;
+                    break;
+                case 'failed':
+                case 'unreadable':
+                    $givingIdentityFailed++;
+                    break;
+                default:
+                    // Not yet due; or no run of the erasure this record
+                    // belongs to has emptied the account yet, so it still
+                    // names the person ("not-erased"); or cleared by another
+                    // run a moment ago.
+                    break;
+            }
+        }
+        if ($clearedHere > 0) {
+            $givingIdentityCleared += $clearedHere;
+            // One line per organisation, because the audit line for each
+            // donor is on the trail of the erasure request, and that request
+            // may have been filed at a different organisation.
+            Logger::activity(
+                'GivingIdentityCleared',
+                'Organisation #' . $siteId . ': the keep-until date had passed for ' . $clearedHere
+                . ' erased donor(s), so their names and addresses were removed from its giving records. '
+                . 'No gift, declaration or statement record was deleted.'
+            );
+        }
+    }
+
+    return [
+        'cleared' => $givingIdentityCleared,
+        'onHold'  => $givingIdentityOnHold,
+        'waiting' => $givingIdentityWaiting,
+        'failed'  => $givingIdentityFailed,
+    ];
 }
 
 /**
@@ -277,8 +440,15 @@ function preview_retention_counts(int $activityDays, int $errorDays): array
  * mistakes them for any: `checkinDaysStored` and `checkinDetailCleared`. See
  * the note beside them at the bottom of this function.
  *
+ * Four more are not deletions either: the `givingIdentity…` figures. A donor
+ * who asked to be erased may have their name kept on some giving records for
+ * tax reasons, until their organisation's keep-until date. When that date has
+ * passed the name, address and link are REMOVED FROM rows that all stay.
+ *
  * @return array{activityDeleted:int,errorsDeleted:int,registrationsDeleted:int,
- *               checkinDaysStored:int,checkinDetailCleared:int,totalDeleted:int}
+ *               checkinDaysStored:int,checkinDetailCleared:int,
+ *               givingIdentityCleared:int,givingIdentityOnHold:int,givingIdentityWaiting:int,
+ *               givingIdentityFailed:int,totalDeleted:int}
  */
 function run_retention_sweep(): array
 {
@@ -407,17 +577,32 @@ function run_retention_sweep(): array
         $checkinDetailCleared += (int) $result['rowsCleared'];
     }
 
+    // 🧾 Giving records that kept an erased donor's name for tax reasons.
+    //    Not a delete either: see run_giving_identity_sweep() above.
+    $giving = run_giving_identity_sweep();
+    $givingIdentityCleared = $giving['cleared'];
+    $givingIdentityOnHold  = $giving['onHold'];
+    $givingIdentityWaiting = $giving['waiting'];
+    $givingIdentityFailed  = $giving['failed'];
+
     return [
         'activityDeleted'      => $activityDeleted,
         'errorsDeleted'        => $errorsDeleted,
         'registrationsDeleted' => $registrationsDeleted,
-        // 🚫 NEITHER of these two is added to totalDeleted, on purpose. Nothing
-        //    was deleted: personal detail was emptied out of rows that remain.
-        //    Adding them would make the scheduled job's own "deleted N rows"
-        //    line untrue, and that line is what somebody reads when they are
-        //    trying to work out what a sweep did.
+        // 🚫 NONE of the figures from here down to totalDeleted is added to
+        //    it, on purpose. Nothing was deleted: personal detail was emptied
+        //    out of rows that remain. Adding them would make the scheduled
+        //    job's own "deleted N rows" line untrue, and that line is what
+        //    somebody reads when they are trying to work out what a sweep did.
         'checkinDaysStored'    => $checkinDaysStored,
         'checkinDetailCleared' => $checkinDetailCleared,
+        'givingIdentityCleared' => $givingIdentityCleared,
+        'givingIdentityOnHold'  => $givingIdentityOnHold,
+        'givingIdentityWaiting' => $givingIdentityWaiting,
+        // Records that were due and could not be cleared (a file that would
+        // not delete, a write that failed). Nothing was changed for them; the
+        // reason is in the server's error log and the next run tries again.
+        'givingIdentityFailed'  => $givingIdentityFailed,
         'totalDeleted'         => $activityDeleted + $errorsDeleted + $registrationsDeleted,
     ];
 }

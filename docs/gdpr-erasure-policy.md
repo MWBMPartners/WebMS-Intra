@@ -9,10 +9,12 @@ an Article 17 erasure request, and the sealed-audit posture proving compliance.
 |---|---|---|---|
 | **Authentication artefacts** | `tblSessions`, `tblTotpBackupCodes`, `tblWebauthnCredentials`, `tblZoomAccount`, `tblPaymentMethod` | **Delete** | No legitimate-interest retention |
 | **App membership** | `tblUserSites`, `tblUserRoles`, `tblUserSmsPreference`, `tblNewsletterSubscription`, `tblUserTranslationPref` | **Delete** | Settings only — no archival value |
-| **Gift Aid declarations** | `tblGiftAidDeclaration` | **Kept, unchanged** | The organisation's evidence for tax it has reclaimed on the donor's gifts. This row said "Delete" until 11 October 2026, which stopped being true that day. How long it is kept has not been confirmed with an accountant |
+| **Tax declarations** (Gift Aid in the United Kingdom) | `tblGiftAidDeclaration` | **Kept, unchanged**, until the organisation's keep-until date. Its address, postcode, signature and notes are then emptied | The organisation's evidence for tax relief claimed on the donor's gifts. This row said "Delete" until 11 October 2026 |
+| **Gifts that keep the donor's name** | `tblGivingEntry`, `tblGivingStatementLog`, the statement files, and the name and home address in `tblGivingKeptDonors` | **Kept with the donor's name** until the organisation's keep-until date, then the name, address and link are removed. Nothing is deleted | Tax and accounting rules in most countries. By default only gifts with a tax declaration, receipt or statement; an organisation may choose every gift. See "Giving records" below |
+| **Every other gift, and counted envelopes** | `tblGivingEntry`, `tblCountEnvelopes` | **Anonymise** at once (the donor's number and any typed name are removed). One exception: an envelope in a count that is not yet closed keeps its giver when the gift it will become is one that keeps the donor's name; it loses it with the rest when the keep-until date passes | The amount, date and method are the organisation's accounts. The exception exists because the gift made from such an envelope would otherwise have no donor and drop out of the tax claim |
 | **Records the person only worked on** | Visitors, salvation cards, tasks and rota slots given to them; follow-up notes, pastoral visits, payments, files, check-ins, room bookings and loans they made | **Kept**; only their account number is removed | The record is somebody else's, or the organisation's. Until 11 October 2026 the first four were deleted |
 | **An invitation the person accepted** | `tblInvitation` | **Delete** | It holds their own email address. One they only sent is kept |
-| **Financial records** | `tblExpenseClaim`, `tblGivingEntry`, `tblPayment` | **Anonymise** (null `userID`) | UK HMRC: 6-year retention required |
+| **Other financial records** | `tblExpenseClaim`, `tblPayment` | **Anonymise** (null `userID`) | The organisation's accounts. (This row used to give one country's rule, "UK HMRC: 6-year retention required", as the reason for every customer.) |
 | **User-generated content** | `tblAnnouncements`, `tblEvents`, `tblRecording`, `tblPrayerRequests` | **Anonymise** (null `userID`; for prayer requests, also blank `submitterName/Email/IP`) | Body retained for congregational continuity; authorship detached |
 | **Attendance / engagement** | `tblAttendanceCheckIns` | **Anonymise** | Aggregate stats retained |
 | **User row itself** | `tblUsers` | **Anonymise** (replace `fullName` with `[Deleted User]`, blank PII, set `isActive=0`) | FK integrity for historical attribution we want to keep |
@@ -33,6 +35,58 @@ an Article 17 erasure request, and the sealed-audit posture proving compliance.
    audit rows, then status → `completed`.
 6. Per-request report at `/admin/erasure-requests/report?id=N` shows every action
    taken and verifies the **sealed audit chain**.
+
+## Giving records
+
+Each organisation sets its own rule at Admin, Giving records
+(`/admin/settings/giving-records`):
+
+- **which gifts keep the donor's name** (only those with a tax declaration,
+  receipt or statement, or every gift);
+- **for how many years**, counted from the end of the financial year of the
+  donor's last kept gift;
+- **its country**, which the portal uses only to SUGGEST a figure;
+- **its financial year end**; and
+- a **hold**, for while an audit or tax enquiry is open.
+
+The figures the portal suggests are from research of mixed strength
+(`docs/research/giving-retention/`, merged into
+`web/_core/data/giving-retention-countries.json`). **None is legal fact.** The
+page shows how strong each source is and asks an administrator to confirm the
+figure with the organisation's own adviser.
+
+Nothing is cleared before that confirmation, and nothing while a hold is on.
+When the keep-until date has passed, the retention job removes the name, the
+address, the link to the donor and the kept statement files together, and
+writes a line to the original erasure's audit trail.
+
+Four rules protect a person whose erasure stopped part way (added 12 October
+2026, after two independent checks):
+
+1. A kept name is cleared, and a donor is treated as erased, only when the
+   account has really been emptied. The kept name is written near the start
+   of an erasure and the account is emptied about half way through it; a run
+   that stops in between leaves the person still a member.
+2. The keep-until date is counted from the later of the date written on the
+   kept record and the newest gift still linked to the donor there.
+3. A request that is run again works the kept record out afresh, and never
+   writes "[Deleted User]" over a real name. If the account was already
+   emptied by the earlier run, the gifts are sorted by the wider of the rule
+   recorded that day and the organisation's rule now: a later change to
+   "which gifts" never takes the donor off a gift that either rule keeps,
+   and only the retention job clears the kept name.
+4. A request whose run has already removed or changed anything cannot be
+   cancelled. Deleted records cannot be put back, and nothing records which
+   gifts lost their donor. The request has to be run again to its end.
+
+A statement the donor downloaded for themselves is kept, like the ones the
+organisation issued, when every gift on it is a kept gift.
+
+The seven settings can be changed only on the Giving records page. The general
+settings editor (`/settings`) refuses them, because it has neither the un-tick
+nor the second tick. The one exception is the installation-wide hold, which a
+global administrator sets there; the page shows it apart from the
+organisation's own hold.
 
 ## Sealed audit chain
 

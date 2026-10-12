@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "giving-retention-countries.schema.json",
+  "title": "How long to keep a donor's name on giving records, country by country",
+  "description": "The researched figures the portal SUGGESTS to an organisation, from its country, for how many years giving records keep a donor's name and address after that donor has asked to be erased. Every figure is a suggestion from research of mixed strength. None is legal fact, and the portal never presents one as such: the settings page shows the figure, how strong its source is and the links, and asks an administrator to confirm it with their own adviser. Read by Portal\\Core\\GivingRetention (web/_core/GivingRetention.php), and checked by tools/audit-checks/check_giving_retention_data.py.",
+  "$comment": "FOR MAINTAINERS. JSON has no comments, so every explanation lives in this file. To update a country: edit its row in giving-retention-countries.json (figure, strength, sources, note, checkedOn), set updatedOn, run the check, commit. No code changes. What then happens for customers: an organisation that has ticked 'confirmed' keeps its own figure; one that has not follows the new suggestion at once, but nothing of its is ever cleared until it does confirm. The PHP reader applies the same rules as this schema: a row that breaks them counts as 'no figure found', and a file that cannot be read gives every organisation the flagged placeholder. The research behind every row is kept in docs/research/giving-retention/. The links under 'sources' are citations of other people's pages, not addresses of this product, so the project's rule against building in a web address does not apply to them.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "updatedOn", "placeholderYears", "minimumSuggestedYears", "countries"],
+  "properties": {
+    "schemaVersion": {
+      "description": "The version of this file's shape. 1 today. The reader refuses any other number and falls back to the placeholder for everybody.",
+      "type": "integer",
+      "const": 1
+    },
+    "updatedOn": {
+      "description": "The calendar date this file was last changed, as YYYY-MM-DD. For people reading the file; the portal does not act on it.",
+      "type": "string",
+      "format": "date",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "placeholderYears": {
+      "description": "The cautious number of years suggested when the portal has no figure: the organisation has not set its country, the country is not in this file, or nothing was found for it. 10, on the owner's decision of 11 October 2026. It is always shown as a placeholder to confirm and lower, never as a finding.",
+      "type": "integer",
+      "minimum": 6,
+      "maximum": 50
+    },
+    "minimumSuggestedYears": {
+      "description": "The portal never SUGGESTS fewer years than this, whatever was found. 6, on the owner's decision of 11 October 2026: several countries came back at three or four years only because a tax time limit or a small-business rule was all the research found. It limits the suggestion only; an administrator may still set a lower figure on purpose. Must not be more than placeholderYears.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50
+    },
+    "countries": {
+      "description": "One row per country or territory, keyed by its two-letter ISO 3166-1 code in capitals (Kosovo is XK). A country missing from here gets the placeholder.",
+      "type": "object",
+      "minProperties": 200,
+      "propertyNames": { "pattern": "^[A-Z]{2}$" },
+      "additionalProperties": { "$ref": "#/$defs/country" }
+    }
+  },
+  "$defs": {
+    "country": {
+      "description": "What the research found for one country.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "yearsFound", "sourceStrength", "needsAdvice", "erasureException", "sources", "note", "report", "checkedOn"],
+      "properties": {
+        "name": {
+          "description": "The country's name in English, as shown to an administrator.",
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "yearsFound": {
+          "description": "The longest ordinary fixed period, in whole years, that the research found for accounting or tax records in this country, counted from the end of a financial or tax year. null when nothing reliable was found. This is what was FOUND; what the portal suggests may be higher (see minimumSuggestedYears). Must be null exactly when sourceStrength is 'not-found'.",
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 50
+        },
+        "sourceStrength": {
+          "description": "How strong the source behind the figure is. 'read': the researcher read the law or the official page itself. 'summary': an official or authoritative page, seen only in summary. 'secondary': a law firm, accountant, news report or survey, not the law itself. 'not-found': no figure was found.",
+          "enum": ["read", "summary", "secondary", "not-found"]
+        },
+        "needsAdvice": {
+          "description": "true when the SOURCES are doubtful: they disagree, the figure is only a tax time limit, it is a very long figure meant for company books, or nothing was found. The settings page then says so. It is NOT set merely because a well-sourced figure is below the portal's minimum: the page has its own sentence for that.",
+          "type": "boolean"
+        },
+        "erasureException": {
+          "description": "Whether the country's data-protection law lets an organisation keep records it must keep by law after somebody has asked to be erased. 'written': the research found such a clause. 'weak': the wording is weak or unclear. 'none': no general right to be erased was found, or no such law is in force. 'not-found': the research could not tell. For 'weak' and 'not-found' the settings page asks the organisation to take local legal advice.",
+          "enum": ["written", "weak", "none", "not-found"]
+        },
+        "sources": {
+          "description": "Every page the research read for this country, with the page behind the figure first where the research said which it was. Some are about the data-protection law and not the retention period. At least one, unless nothing was found.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/source" }
+        },
+        "note": {
+          "description": "In plain words, what the figure is counted from and anything an administrator should know before relying on it. The researchers' own words, tidied. Shown on the settings page.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 900
+        },
+        "report": {
+          "description": "Which research report the figure and its strength come from: 1, 2 or 3 (docs/research/giving-retention/), or 'recheck' when the re-check of 11 October 2026 replaced them.",
+          "enum": [1, 2, 3, "recheck"]
+        },
+        "checkedOn": {
+          "description": "The calendar date the sources were last read, as YYYY-MM-DD.",
+          "type": "string",
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "No figure and 'not-found' always go together.",
+          "if": { "properties": { "sourceStrength": { "const": "not-found" } } },
+          "then": { "properties": { "yearsFound": { "type": "null" } } },
+          "else": { "properties": { "yearsFound": { "type": "integer" }, "sources": { "minItems": 1 } } }
+        }
+      ]
+    },
+    "source": {
+      "description": "One page the research read.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "url"],
+      "properties": {
+        "title": {
+          "description": "What the page is, in a few words. Where a research report recorded only the site and the document's name, the title says so and the link goes to the site.",
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 300
+        },
+        "url": {
+          "description": "The page's address. Always https. A citation of somebody else's page, never an address of this product.",
+          "type": "string",
+          "pattern": "^https://[^\\s]+$",
+          "maxLength": 500
+        }
+      }
+    }
+  }
+}

@@ -5,7 +5,14 @@
  * Cron — Audit-Log Retention Sweep 🧹 (#491, #497)
  * -----------------------------------------------------------------------------
  * The scheduled job that hard-deletes old activity-log rows, old error rows
- * and children's event registrations that are past their keep-by date. It is
+ * and children's event registrations that are past their keep-by date. It
+ * also does two things that delete nothing: it empties the scrambled sender
+ * address out of old anonymous check-ins, and (roll-out package A2b) it
+ * removes an erased donor's name from the giving records an organisation was
+ * keeping for tax reasons, once that organisation's keep-until date has
+ * passed. The JSON answer reports those separately (`givingIdentityCleared`,
+ * `givingIdentityOnHold`, `givingIdentityWaiting`, `givingIdentityFailed`) and
+ * never adds them to `totalDeleted`. It is
  * meant to be called once a night by the hosting company's scheduler:
  *
  *   curl -fsS "https://<your-portal>/cron/retention-sweep?token=<TOKEN>"

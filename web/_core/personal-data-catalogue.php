@@ -251,6 +251,22 @@ return [
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['userID', 'sessionID', 'ipAddress', 'userAgent'],
     ],
+    'tblCountEnvelopes' => [
+        'decision' => 'retain',
+        // Roll-out package A2b. This table had no entry at all, so the giver
+        // of a counted envelope stayed on it for ever.
+        //
+        // 'retain', like the gift table, and for the same reason: the
+        // erasure's giving-records step (GdprEraser::unnameCountEnvelopes())
+        // takes the giver off every envelope EXCEPT one in a count that is
+        // not yet closed whose gift will keep the donor's name. This said
+        // 'unlink' for a few hours, and every envelope lost its giver: the
+        // gift made when such a count was closed then had no donor and
+        // dropped out of the tax claim.
+        'reason'   => 'One named envelope on an offering count sheet. The sheet is a financial control record and stays with its amount. Who the envelope was from is removed at once, unless the count is not yet closed and the gift it will become is one that keeps the donor\'s name; then the giver stays until the organisation\'s keep-until date, like that gift.',
+        'period'   => 'set by each organisation, in years after the end of the financial year of the donor\'s last kept gift: Admin, Settings, Giving records',
+        'columns'  => ['giverID', 'giverName'],
+    ],
     'tblCountSessions' => [
         'decision' => 'unlink',
         'reason'   => 'A two-person offering count - a FINANCIAL control record, deliberately requiring two people. Deleting it on one person\'s request defeats the whole point of it.',
@@ -414,24 +430,51 @@ return [
         //    list names Gift Aid declarations as the first example of
         //    something to KEEP; this entry said the opposite.
         //
-        //    THE SIX YEARS BELOW HAVE NOT BEEN CONFIRMED WITH AN ACCOUNTANT.
-        //    They are the project's understanding of HMRC's guidance. Nothing
-        //    deletes a declaration when the period is up, either: there is no
-        //    timer for this table.
+        //    HOW LONG is each organisation's own setting since roll-out
+        //    package A2b. This entry used to say "six years" and name the
+        //    United Kingdom's tax office, as if that were true of every
+        //    customer, and to warn that nothing ever removed a declaration's
+        //    details. The retention job now empties the address, postcode,
+        //    signature and notes when the organisation's keep-until date has
+        //    passed (GdprEraser::clearKeptGivingIdentity()). The row itself,
+        //    its dates and its account number stay.
         //
         //    The erasure's audit trail records each of these as kept on
         //    purpose, with this reason. tools/gdpr-coverage-selftest.php and
         //    tools/gdpr-eraser-selftest.php both fail if it is ever set back.
-        'reason'   => 'A Gift Aid declaration is the organisation\'s evidence for tax it has reclaimed on a donor\'s '
-                    . 'gifts. Kept for tax reasons: HMRC can ask to see it for six years after the last gift claimed '
-                    . 'under it. The donor\'s name is on their account, not on this row, and the account is emptied',
-        'period'   => 'six years after the last gift claimed under the declaration (not confirmed with an accountant)',
+        'reason'   => 'A tax declaration is the organisation\'s evidence for tax relief it has claimed on a donor\'s '
+                    . 'gifts. Kept unchanged, with the donor\'s name and home address held beside it, until the '
+                    . 'organisation\'s keep-until date; its address and notes are then emptied',
+        'period'   => 'set by each organisation, in years after the end of the financial year of the donor\'s last kept gift: Admin, Settings, Giving records',
         'columns'  => ['donorID', 'address', 'postcode', 'notes'],
     ],
     'tblGivingEntry' => [
-        'decision' => 'unlink',
-        'reason'   => 'A contribution record. Financial records must be kept, so the entry stays and the donor\'s name is removed. If the gift was given towards a pledge, the pledge is deleted and the gift loses only its link to it.',
+        'decision' => 'retain',
+        // (`'decision'` stays on the line straight after the opening one:
+        // tools/audit-checks/check_personal_data_coverage.py reads it there.)
+        // 🧾 'retain' since roll-out package A2b (it said 'unlink'). The
+        //    gifts an organisation keeps identified for tax reasons keep the
+        //    donor's account number until its keep-until date; every OTHER
+        //    gift of the person's loses it at once, in the erasure's
+        //    giving-records step (GdprEraser::keepGivingRecords()), which
+        //    runs before the table walk. No gift is ever deleted and no
+        //    amount, date or method changes. Who typed a gift in
+        //    (`recordedByID`) is still detached, by an instruction of its own.
+        'reason'   => 'A contribution record. The gift always stays, with its amount, date and method. Gifts with a tax declaration, receipt or statement (or every gift, if the organisation has chosen that) keep the donor\'s name until the organisation\'s keep-until date; every other gift loses the donor\'s name at once. If the gift was given towards a pledge, the pledge is deleted and the gift loses only its link to it.',
+        'period'   => 'set by each organisation, in years after the end of the financial year of the donor\'s last kept gift: Admin, Settings, Giving records',
         'columns'  => ['donorID', 'donorName', 'notes', 'recordedByID'],
+    ],
+    'tblGivingKeptDonors' => [
+        'decision' => 'retain',
+        // Roll-out package A2b. Written BY an erasure, never erased by one:
+        // it is where a donor's name and home address are held, for tax
+        // reasons, once their account has been emptied. The retention job
+        // empties the name, address and postcode when the organisation's
+        // keep-until date has passed, and the row stays as the record that
+        // it happened.
+        'reason'   => 'The name and home address of a donor who asked to be erased, kept only for the giving records their organisation must keep for tax reasons',
+        'period'   => 'set by each organisation, in years after the end of the financial year of the donor\'s last kept gift: Admin, Settings, Giving records. Never cleared before an administrator has confirmed that number, or while a hold is on',
+        'columns'  => ['donorID', 'fullName', 'address', 'postcode'],
     ],
     'tblInvitation' => [
         'decision' => 'erase',
@@ -1370,8 +1413,11 @@ return [
     ],
     'tblGivingStatementLog' => [
         'decision' => 'retain',
-        'reason'   => 'Proof of what was issued to whom, and when',
-        'period'   => '6 years',
+        // The period said '6 years', with nothing to say whose rule that was
+        // and nothing that ever acted on it. It is each organisation's own
+        // setting since roll-out package A2b.
+        'reason'   => 'Proof of what was issued to whom, and when. Kept with the donor\'s giving records; the address it was mailed to is emptied at once, and the statement file is removed when the organisation\'s keep-until date has passed',
+        'period'   => 'set by each organisation, in years after the end of the financial year of the donor\'s last kept gift: Admin, Settings, Giving records',
         'columns'  => ['donorID', 'createdByID'],
     ],
 

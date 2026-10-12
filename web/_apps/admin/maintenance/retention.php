@@ -68,11 +68,18 @@
  * numbers are reported separately and are deliberately NOT added to the
  * "deleted N rows" total.
  *
+ * NOR DOES ANOTHER (roll-out package A2b). A donor who asked to be erased may
+ * have their name kept on some giving records for tax reasons, until their
+ * organisation's keep-until date. This sweep removes the name once that date
+ * has passed. It clears nothing for an organisation that has not confirmed
+ * its number of years, or that has a hold switched on; those two tests are
+ * made inside GdprEraser::clearKeptGivingIdentity(), not on this page.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/491
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/495
  * -----------------------------------------------------------------------------
@@ -145,7 +152,8 @@ if (App::isRootAdmin() === false) {
         registrations — including children's names, dates of birth, allergies
         and medical notes — across every organisation on this installation,
         not only yours. It also empties the scrambled sender address out of
-        old anonymous check-ins, again across every organisation. So only a
+        old anonymous check-ins, and removes erased donors' names from giving
+        records past their keep-until date, again across every organisation. So only a
         global administrator can use this page. Nothing has been changed.
     </div>
     <?php
@@ -181,8 +189,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                    . 'Also stored the sender figure for ' . $result['checkinDaysStored']
                    . ' event-day(s) of anonymous check-ins and then emptied the scrambled address '
                    . 'out of ' . $result['checkinDetailCleared']
-                   . ' check-in row(s). Those rows and their counts were not deleted.';
-        $flashType = 'success';
+                   . ' check-in row(s). Those rows and their counts were not deleted.'
+                   // 🧾 Its own sentence, and "removed the name", never
+                   //    "deleted": every gift, declaration and statement
+                   //    record is still there with its amount and date.
+                   . ' Giving records: removed the name and address of ' . $result['givingIdentityCleared']
+                   . ' erased donor(s) whose keep-until date had passed. Left alone: ' . $result['givingIdentityOnHold']
+                   . ' because their organisation has a hold switched on, and ' . $result['givingIdentityWaiting']
+                   . ' because their organisation has not yet confirmed its number of years.'
+                   . ($result['givingIdentityFailed'] > 0
+                       ? ' ' . $result['givingIdentityFailed'] . ' could NOT be cleared; nothing was changed for them, '
+                           . 'the reason is in the server\'s error log, and the next run tries again.'
+                       : '');
+        // A sweep that could not do part of its work is not a plain success.
+        $flashType = $result['givingIdentityFailed'] > 0 ? 'warning' : 'success';
     }
 }
 
@@ -282,13 +302,43 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </div>
     </div>
+    <!-- 🧾 Giving records that kept an erased donor's name. Its own card,
+         like the check-ins above, because nothing is deleted here either,
+         and because the three "left alone" figures are how an administrator
+         finds out that an organisation still has to confirm its figure. -->
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h2 class="h6"><i class="fa-solid fa-receipt me-1"></i>Giving records that kept an erased donor's name (<code>tblGivingKeptDonors</code>)</h2>
+                <p class="text-muted small mb-2">
+                    Each organisation sets how long, at
+                    <a href="/admin/settings/giving-records">Admin, Settings, Giving records</a>.
+                    Counted from the end of the financial year of the donor's last kept gift.
+                </p>
+                <p class="mb-1">Erased donors whose name would be removed now: <strong><?php echo number_format($preview['givingIdentityDue']); ?></strong></p>
+                <p class="mb-1">Left alone because their organisation has a hold switched on: <strong><?php echo number_format($preview['givingIdentityOnHold']); ?></strong></p>
+                <p class="mb-1">Left alone because their organisation has not yet confirmed its number of years: <strong><?php echo number_format($preview['givingIdentityWaiting']); ?></strong></p>
+                <p class="mb-1">Not yet due: <strong><?php echo number_format($preview['givingIdentityNotDue']); ?></strong></p>
+                <p class="mb-2">Left alone because the person's account has not been emptied yet (run that erasure request again at Admin, Erasure requests): <strong><?php echo number_format($preview['givingIdentityUnfinished']); ?></strong></p>
+                <p class="small text-muted mb-0">
+                    <strong>Nothing is deleted here.</strong> When a donor asks to be erased, most
+                    organisations still have to keep some giving records with the donor's name for a
+                    number of years. When that time is up, this sweep removes the name, the home
+                    address and the link to the donor from those records, and deletes the statement
+                    files kept with them. Every gift, declaration and statement record stays, with its
+                    amount and date. A name is never removed while its organisation has a hold on, or
+                    before an administrator there has confirmed the number of years.
+                </p>
+            </div>
+        </div>
+    </div>
 </div>
 
 <form method="post" action="/admin/maintenance/retention"
-      data-confirm="About <?php echo number_format($preview['activity'] + $preview['errors']); ?> log row(s) and <?php echo number_format($preview['registrations']); ?> event registration(s) are currently eligible, including any children's details they hold, and <?php echo number_format($preview['checkinDetail']); ?> anonymous check-in row(s) would have their scrambled sender address emptied out (those rows and their counts are kept). The exact numbers may differ slightly, because more records become eligible as time passes. This cannot be undone. Continue?"
+      data-confirm="About <?php echo number_format($preview['activity'] + $preview['errors']); ?> log row(s) and <?php echo number_format($preview['registrations']); ?> event registration(s) are currently eligible, including any children's details they hold, and <?php echo number_format($preview['checkinDetail']); ?> anonymous check-in row(s) would have their scrambled sender address emptied out (those rows and their counts are kept). <?php echo number_format($preview['givingIdentityDue']); ?> erased donor(s) would have their name and address removed from giving records whose keep-until date has passed (the gifts and their amounts are kept). The exact numbers may differ slightly, because more records become eligible as time passes. This cannot be undone. Continue?"
       data-confirm-destructive="true">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
-    <button type="submit" class="btn btn-warning" <?php echo ($preview['activity'] + $preview['errors'] + $preview['registrations'] + $preview['checkinDetail']) === 0 ? 'disabled' : ''; ?>>
+    <button type="submit" class="btn btn-warning" <?php echo ($preview['activity'] + $preview['errors'] + $preview['registrations'] + $preview['checkinDetail'] + $preview['givingIdentityDue']) === 0 ? 'disabled' : ''; ?>>
         <i class="fa-solid fa-broom me-1"></i> Run Sweep Now
     </button>
     <a href="/settings" class="btn btn-outline-secondary">Adjust retention settings</a>

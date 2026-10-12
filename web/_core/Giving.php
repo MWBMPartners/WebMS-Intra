@@ -99,6 +99,15 @@ class Giving
      * Only includes entries from donors with an `active` declaration that
      * was valid on the donation date.
      *
+     * A DONOR WHO HAS SINCE BEEN ERASED still appears, under their real name,
+     * for as long as this organisation is keeping it (roll-out package A2b).
+     * Their account is emptied and says "[Deleted User]", so the name is read
+     * from `tblGivingKeptDonors` when there is an uncleared row there. Before
+     * that, a gift given before the erasure and claimed after it would have
+     * gone to the tax office under a made-up name. Once the retention job has
+     * cleared the kept row the gift has no account number left, so it is not
+     * in this file at all.
+     *
      * @link https://www.gov.uk/claim-gift-aid-online
      */
     public static function buildHmrcCsv(int $siteId, string $fromDate, string $toDate): string
@@ -106,7 +115,7 @@ class Giving
         $db = App::db();
         $rows = [];
         $stmt = $db->prepare(
-            'SELECT u.userID, u.fullName, u.emailAddress, '
+            'SELECT u.userID, COALESCE(k.fullName, u.fullName) AS fullName, u.emailAddress, '
             . '       e.donatedAt, e.amountPence, '
             . '       d.address, d.postcode '
             . 'FROM tblGivingEntry e '
@@ -116,8 +125,14 @@ class Giving
             . '    AND d.status = "active" '
             . '    AND d.validFrom <= e.donatedAt '
             . '    AND (d.validTo IS NULL OR d.validTo >= e.donatedAt) '
+            // The kept name is used only for a donor whose account has
+            // really been emptied. A kept row beside a LIVE member (an
+            // erasure that stopped part way) is not that: their name is
+            // still on their account, and is read from there.
+            . 'LEFT JOIN tblGivingKeptDonors k ON k.siteID = e.siteID AND k.donorID = e.donorID AND k.clearedAt IS NULL '
+            . '    AND ' . GdprEraser::emptiedAccountSql('u') . ' '
             . 'WHERE e.siteID = ? AND e.donatedAt BETWEEN ? AND ? '
-            . 'ORDER BY u.fullName, e.donatedAt'
+            . 'ORDER BY COALESCE(k.fullName, u.fullName), e.donatedAt'
         );
         if ($stmt !== false) {
             $stmt->bind_param('iss', $siteId, $fromDate, $toDate);
@@ -195,6 +210,16 @@ class Giving
         }
 
         $db = App::db();
+
+        // 🚫 Never render for a donor who has been erased (roll-out package
+        //    A2b). Their account says "[Deleted User]", so a new statement
+        //    would carry a made-up name - and it would be written to the SAME
+        //    file name as the statement kept as tax evidence, replacing the
+        //    one copy that still shows who the donor was.
+        if (self::isErasedDonor($siteId, $donorId) === true) {
+            return false;
+        }
+
         $donor = null;
         $stmt = $db->prepare(
             'SELECT u.userID, u.fullName, u.emailAddress FROM tblUsers u '
@@ -315,6 +340,58 @@ class Giving
     }
 
     /**
+     * "This donor has been erased, with giving records kept (or once kept)
+     * at this organisation", as a piece of SQL: a kept row exists AND the
+     * account it points at has really been emptied.
+     *
+     * BOTH halves matter. A kept row alone is not enough: it is written near
+     * the start of an erasure, and a run that stops before the account is
+     * emptied leaves it beside a live member. Asking only "is there a kept
+     * row" refused that member their own statement and left them out of
+     * statement runs (found by the independent check, 12 October 2026).
+     * What "emptied" means is defined once, in GdprEraser::emptiedAccountSql().
+     *
+     * FIXED TEXT. `$site` and `$donor` are column names written in code, or
+     * a question mark for a bound value.
+     */
+    private static function erasedDonorSql(string $site, string $donor): string
+    {
+        return 'EXISTS (SELECT 1 FROM tblGivingKeptDonors k INNER JOIN tblUsers ku ON ku.userID = k.donorID '
+            . 'WHERE k.siteID = ' . $site . ' AND k.donorID = ' . $donor . ' AND ' . GdprEraser::emptiedAccountSql('ku') . ')';
+    }
+
+    /**
+     * Has this donor been erased, with giving records kept (or once kept) at
+     * this organisation? True whether or not the kept name has since been
+     * cleared: either way the account names nobody. FALSE for a live member
+     * who merely has a kept row left by an erasure that stopped before it
+     * emptied their account; see erasedDonorSql().
+     *
+     * A database not yet upgraded to migration 209 has no such table and so
+     * has no such donor: that answers false, not an error.
+     */
+    public static function isErasedDonor(int $siteId, int $donorId): bool
+    {
+        try {
+            $stmt = App::db()->prepare('SELECT ' . self::erasedDonorSql('?', '?'));
+            if ($stmt === false) {
+                return false;
+            }
+            $stmt->bind_param('ii', $siteId, $donorId);
+            $stmt->execute();
+            $answer = $stmt->get_result()->fetch_row();
+            $stmt->close();
+
+            return $answer !== null && (int) $answer[0] === 1;
+        } catch (\mysqli_sql_exception $e) {
+            if ((int) $e->getCode() === 1146) {
+                return false;
+            }
+            throw $e;
+        }
+    }
+
+    /**
      * Canonical `{from}_{to}` key used by filenames, tblGivingStatementLog,
      * and dedupe. Callers MUST validate the dates first (see
      * renderStatementPdf() above) — this is a pure string builder, not a
@@ -358,6 +435,13 @@ class Giving
      * individually download their statement; they are simply never
      * queued for bulk email (enforced separately by the email handler).
      *
+     * A donor who has been ERASED is left out altogether (roll-out package
+     * A2b). They would be listed as "[Deleted User]", and "Generate" would
+     * then write a statement under that name over the one kept as tax
+     * evidence. The statement issued to them before the erasure is still on
+     * disk and on its log row; it is listed at Admin, Settings, Giving
+     * records, not here.
+     *
      * @return array<int, array{donorID:int, fullName:string, emailAddress:string,
      *   usActive:bool, optedOut:bool, entryCount:int, totalPence:int,
      *   giftAidPence:int, pdfPath:?string, queuedAt:?string, emailedAt:?string,
@@ -381,6 +465,7 @@ class Giving
             . 'INNER JOIN tblUsers u ON u.userID = e.donorID '
             . 'LEFT JOIN tblUserSites us ON us.userID = e.donorID AND us.siteID = e.siteID AND us.isActive = 1 '
             . 'WHERE e.siteID = ? AND e.donorID IS NOT NULL AND e.donatedAt BETWEEN ? AND ? '
+            . '  AND NOT ' . self::erasedDonorSql('e.siteID', 'e.donorID') . ' '
             . 'GROUP BY e.donorID, u.fullName, u.emailAddress, u.notifyPrefs '
             . 'HAVING SUM(e.amountPence) > 0 '
             . 'ORDER BY u.fullName '
@@ -544,7 +629,11 @@ class Giving
      * dispatch pattern, Newsletter::dispatch()) until nothing remains.
      * `$regenerate = true` first nulls every pdfPath for the period (a
      * post-correction refresh) — it never touches emailedAt, so dedupe
-     * survives a regenerate. A row whose render fails gets `errorMsg` set
+     * survives a regenerate. An ERASED donor's rows are left out of both the
+     * reset and the rendering (roll-out package A2b): their statement is
+     * kept as tax evidence exactly as it was issued, and rendering it again
+     * would replace it with one in the name "[Deleted User]".
+     * A row whose render fails gets `errorMsg` set
      * and is excluded from the next batch's selection (manual retry only —
      * never auto-retried, so a systemic failure can't loop forever).
      *
@@ -557,7 +646,10 @@ class Giving
         $periodLabel = self::periodLabel($from, $to);
 
         if ($regenerate === true) {
-            $u = $db->prepare('UPDATE tblGivingStatementLog SET pdfPath = NULL WHERE siteID = ? AND periodKey = ?');
+            $u = $db->prepare(
+                'UPDATE tblGivingStatementLog l SET l.pdfPath = NULL WHERE l.siteID = ? AND l.periodKey = ? '
+                . 'AND NOT ' . self::erasedDonorSql('l.siteID', 'l.donorID')
+            );
             if ($u !== false) {
                 $u->bind_param('is', $siteId, $periodKey);
                 $u->execute();
@@ -567,9 +659,10 @@ class Giving
 
         $pending = [];
         $stmt = $db->prepare(
-            'SELECT logID, donorID FROM tblGivingStatementLog '
-            . 'WHERE siteID = ? AND periodKey = ? AND pdfPath IS NULL AND errorMsg IS NULL '
-            . 'ORDER BY donorID LIMIT ?'
+            'SELECT l.logID, l.donorID FROM tblGivingStatementLog l '
+            . 'WHERE l.siteID = ? AND l.periodKey = ? AND l.pdfPath IS NULL AND l.errorMsg IS NULL '
+            . '  AND NOT ' . self::erasedDonorSql('l.siteID', 'l.donorID') . ' '
+            . 'ORDER BY l.donorID LIMIT ?'
         );
         if ($stmt !== false) {
             $stmt->bind_param('isi', $siteId, $periodKey, $batchCap);
@@ -609,7 +702,8 @@ class Giving
 
         $remaining = 0;
         $stmt = $db->prepare(
-            'SELECT COUNT(*) FROM tblGivingStatementLog WHERE siteID = ? AND periodKey = ? AND pdfPath IS NULL AND errorMsg IS NULL'
+            'SELECT COUNT(*) FROM tblGivingStatementLog l WHERE l.siteID = ? AND l.periodKey = ? AND l.pdfPath IS NULL AND l.errorMsg IS NULL '
+            . 'AND NOT ' . self::erasedDonorSql('l.siteID', 'l.donorID')
         );
         if ($stmt !== false) {
             $stmt->bind_param('is', $siteId, $periodKey);

@@ -2,6 +2,82 @@
 
 
 ## [Unreleased] (alpha)
+- feat(erasure): giving records keep a donor's name for a set time, then
+  clear it by themselves (roll-out package A2b; the owner's decisions of
+  11 October 2026). **Until this change an erasure took the donor off every
+  gift at once, kept a tax declaration with no name anywhere, and nothing
+  ever cleared what was kept.**
+  - **What is kept.** When a donor is erased, the gifts their organisation
+    has chosen to keep identified keep the donor's account number, and the
+    donor's name and home address are held in a new table,
+    `tblGivingKeptDonors`. By default that is only gifts covered by a tax
+    declaration, a tax receipt or a giving statement; an organisation can
+    choose every gift. Every other gift keeps its amount, date and method and
+    loses the name at once, and so does a counted envelope (with the one
+    exception further down). The account is emptied exactly as before.
+  - **Until when.** A number of years, set by each organisation, counted
+    from the END OF THE FINANCIAL YEAR of the donor's last kept gift. The
+    portal had no financial-year setting; there is one now, and until it is
+    filled in one full year after the last gift is used, which can keep a
+    record up to a year longer than needed and never clears early.
+  - **A country per organisation.** Each organisation says which country's
+    rules it follows; the portal SUGGESTS a figure for it from a data file
+    of researched figures (211 countries), shows how strong the source is
+    and links to what was read. The installation's own address ("GB" unless
+    changed) is deliberately not used. No country set, or no figure found:
+    10 years, flagged as a cautious placeholder. The portal never suggests
+    fewer than 6. **Every figure is a suggestion, not legal advice.**
+  - **Nothing is cleared before an administrator ticks "confirmed with our
+    adviser", and nothing while "hold" is on.** A change to the settings
+    that would clear kept records straight away is refused until a second
+    box is ticked. An organisation's rule is read from its own settings
+    only: nothing set for the whole installation can confirm a figure, or
+    choose a country, for an organisation. (A hold set for the whole
+    installation does hold everybody.)
+  - **When the time is up** the retention job removes the name, the address,
+    the link to the donor and the kept statement files together, and adds a
+    line to the original erasure's audit trail. No record is deleted and no
+    amount changes. The job reports these figures separately and does not
+    count them as deletions.
+  - **Statement files** for kept gifts are kept with them, where they used
+    to be deleted at erasure.
+  - **The tax claim file** names an erased donor from the kept record while
+    it is kept; it used to send "[Deleted User]". An erased donor is never
+    offered, or sent, a new statement.
+  - **New page:** Admin, Giving records (`/admin/settings/giving-records`),
+    for an organisation's administrators.
+  - **Migration 209** adds the table, seven settings and the page's two
+    addresses. **Run the database upgrade after deploying:** until it has
+    run, every erasure, of a donor or not, stops at its giving-records step
+    before anything of the person's is changed by it, puts the request back
+    and says to upgrade. A donor erased before this release has no name kept
+    anywhere, and that cannot be put back.
+  - **A kept name is cleared only once the donor's account has really been
+    emptied.** The kept name is written near the start of an erasure and the
+    account is emptied about half way through it, and a run can stop
+    anywhere. So the clearing asks whether the account has been emptied,
+    counts from the newest gift still linked to the donor, not only from the
+    date written down at the time, and decides with the records locked. A
+    request that is run again works the kept record out afresh; if the
+    account was already emptied, it uses the wider of the rule in force on
+    that day and the rule now, and never empties the kept name itself. A request whose run has already
+    removed or changed anything **cannot be cancelled**: what a run changes
+    cannot be put back, so it has to be run again to its end.
+  - **An envelope in a count that is not yet closed keeps its giver** when
+    the gift it will become is one that keeps the donor's name; every other
+    envelope loses its giver at once.
+  - **A statement a donor downloaded for themselves is kept** when every
+    gift on it is a kept gift.
+  - **The seven settings can only be changed on the Giving records page.**
+    The general settings editor refuses them (a global administrator may
+    still set the installation-wide hold there). The page shows an
+    installation-wide hold separately from the organisation's own.
+  - The privacy page no longer tells every member that financial records are
+    kept "to comply with HMRC requirements" for one installation-wide number
+    of years.
+  - **Not done:** the scheduled job still has to be switched on by a global
+    administrator; the page says so when it is off. Codex has not reviewed
+    this.
 - fix(erasure): erasing a person no longer deletes other people's records, and
   "Delete my account" now files an ordinary erasure request (roll-out package
   A2a; the owner's decisions of 11 October 2026). **Until this fix, erasing a
