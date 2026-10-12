@@ -2,6 +2,52 @@
 
 
 ## [Unreleased] (alpha)
+- **fix(expenses): withdrawing an expense claim now works (#587).** The Withdraw button set a
+  claim's status to "Withdrawn", and the database column did not allow that value. On a database
+  server with strict checking (MySQL 8's default) the person saw "Error withdrawing claim". On a
+  server without it, the page said "withdrawn" and stored an EMPTY status: the claim then dropped
+  off the approver's list and the dashboard, and showed elsewhere with a blank status. The button
+  had never worked.
+  - Migration `211_expense_claim_withdrawn.sql` adds "Withdrawn" to the end of the list of
+    choices of `tblExpenseClaims.status`, and `full_schema.sql` has the same list. It also turns
+    an empty status into "Withdrawn" (owner's decision, 12 October 2026); such a claim keeps its
+    "last changed" time, which is the moment the person pressed the button. On a server with
+    strict checking no row changes. Safe to run twice.
+  - The rules, as the owner set them: only the person who made the claim may withdraw it, only
+    while it is pending, and it is final. A claim that one of two approvers has approved is still
+    pending, so it can be withdrawn. The claim, its receipts and any approvals already given are
+    kept.
+  - Somebody else's claim is now answered exactly as a claim that does not exist ("Claim not
+    found"). It used to say "Access denied", which told anybody signed in which claim numbers
+    were in use.
+  - The person is told what happened on the page they are sent to. The claim's page and the
+    submit page now show the one-off message another Expenses page left ("withdrawn
+    successfully", "cannot be withdrawn", "Claim not found"); before, it turned up later on some
+    other page. The submit page shows its own save page's refusals the same way.
+  - If the e-mail to approvers, or the activity line, fails after the withdrawal is stored, the
+    person still reads "withdrawn" and the failure is filed under Admin, Errors. It used to say
+    "Please try again" about a claim that was already withdrawn.
+  - A claim's page names the stage its stored document was last made with (read from
+    `tblExpenseClaimFiles.stage`), not the claim's current status. A withdrawn claim's document
+    is the one made when it was submitted, and the page says it was not remade.
+  - A withdrawn claim counts in Admin, Reports under "Expense Claims" and "Total value", as a
+    rejected claim does, and has its own bar under "by status".
+  - The API's list accepts `?status=Withdrawn` (it answered 400), and the report builder can
+    filter on it.
+  - An approver who decides a claim a moment after it was withdrawn is told "This claim is no
+    longer waiting for a decision…" instead of "already been decided by another approver".
+  - The Expenses guide ("Status Meanings") and the FAQ ("What does each expense status mean?")
+    each have an entry for Withdrawn.
+  - New test `tools/expense-withdraw-selftest.php` (37 checks): the list of choices is the same
+    in all four places, and the upgrade, run by the real upgrader on real rows, changes only
+    claims with an empty status.
+  - `tools/access-pages-selftest.php`: 240 to 278 checks (new part M). It presses the real
+    button with real sign-ins and reads the STORED status back; presses with no form token, a
+    made-up one and another person's are refused; each message is read from the page the person
+    lands on, once, and not again on a reload. The check it replaces looked only at the address
+    the person was sent to, which is how this went unnoticed.
+  - Run on MySQL 8.0.36 and 8.4.11. Not run on MariaDB. Checked by a fresh Claude agent standing
+    in for Codex; not reviewed by Codex yet.
 - fix(core): **the portal's own backup works again once a calendar has been
   imported, and a snapshot it takes can be put back** (#577, #578, #579).
   Three faults, found by running a real restore:

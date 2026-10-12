@@ -5155,6 +5155,35 @@ untrue where another required approver exists, because an administrator's
 approval alone leaves such a claim waiting. A claimant who holds approval
 authority is told the same on the claim's own page.
 
+#### Withdrawing a claim (#587, migration 211)
+
+`211_expense_claim_withdrawn.sql` adds 'Withdrawn' to the end of the choices of
+`tblExpenseClaims.status` and turns an empty status into 'Withdrawn';
+`full_schema.sql` has the same list. `tools/expense-withdraw-selftest.php`
+(37 checks) needs a throwaway database whose name starts with `selftest_`, and
+**it changes the shape of `tblExpenseClaims` while it runs** (it takes
+'Withdrawn' off the list to stand for an older database, then lets the
+migration put it back), so nothing else may use that database at the same
+time. `tools/access-pages-selftest.php` now has 278 checks (part M presses the
+real button and reads the stored status back).
+
+Three things worth keeping, because each is the shape of a fault found here:
+
+- **A column that is a fixed list of choices stores an EMPTY value, and reports
+  success, when it is given a choice it does not know and the server is not in
+  strict mode.** A new choice goes on the END of the list (the server stores a
+  choice as its position), in a numbered migration and in `full_schema.sql`,
+  and every place that lists the choices has to learn it: for claims that is
+  `expenses/api/list.php` and `ReportRegistry.php`.
+- **Anything a save page does after its commit belongs outside the block that
+  rolls back.** Inside it, a failed e-mail showed "try again" about work that
+  was already stored. `expenses/approve/save.php`, `expenses/treasury/save.php`
+  and `expenses/submit/save.php` still have that shape (read, not run) and were
+  not changed here.
+- **A page shows the one-off message another page left only if it reads
+  `$_SESSION['flash_msg']` itself.** There is no shared place that does it. In
+  Expenses, the approvals, treasury, claim and submit pages now do.
+
 ### Why the seeded `expense_approval` workflow stays dormant
 
 Migration 034 seeded ONE `tblWorkflows` row (`expense_approval`, zero

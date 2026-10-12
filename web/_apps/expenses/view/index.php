@@ -8,11 +8,17 @@
  * approval history, payment records, and PDF download links.
  * Accessible to: the claimant, approvers for the dept, treasury, and admins.
  *
+ * It also shows the one-off message another Expenses page left for this
+ * person (#587): the withdraw page sends people here, and until 12 October
+ * 2026 this page showed no such message, so "withdrawn successfully", "cannot
+ * be withdrawn" and an out-of-date form were all met with silence here and
+ * then turned up later on some other page.
+ *
  * @package   Portal\Expenses
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.4.1
+ * @version   0.4.2
  * -----------------------------------------------------------------------------
  */
 
@@ -181,6 +187,37 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
+// 📄 The stage the stored document was LAST MADE WITH (#587).
+//    The line under "Generated PDF" used to print the claim's CURRENT status
+//    there, which was true only while every change of status remade the
+//    document. Withdrawing a claim does not remake it, so a withdrawn claim's
+//    page said "last generated for status: Withdrawn" beside a document
+//    stamped PENDING. ExpensePdf::generate() records the stage each time it
+//    writes the file (`tblExpenseClaimFiles.stage`: Pending, Approved, Not
+//    Approved or Complete), so the newest such row for this file is the
+//    truth. The highest fileID is the newest: `uploadedAt` holds whole
+//    seconds, and two rows can share one.
+//    When no row says, the page says nothing about the stage rather than
+//    guess.
+$pdfStage  = '';
+$pdfFileId = 0;
+if ((string) $claim['fileName'] !== '') {
+    foreach ($files as $f) {
+        if ($f['storedFilename'] === $claim['fileName'] && (string) $f['stage'] !== '' && (int) $f['fileID'] > $pdfFileId) {
+            $pdfFileId = (int) $f['fileID'];
+            $pdfStage  = (string) $f['stage'];
+        }
+    }
+}
+
+// 📋 The one-off message another page left for this person, read and cleared
+//    exactly as the approvals page does (approve/index.php). Read HERE, after
+//    the "not found" and "not allowed" answers above, so that a refused page
+//    does not swallow a message the person has not yet been shown.
+$flashMsg  = $_SESSION['flash_msg']  ?? '';
+$flashType = $_SESSION['flash_type'] ?? 'info';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+
 // 📊 Status badge mapping
 $statusClass = match ($claim['status']) {
     'Pending'    => 'warning',
@@ -194,6 +231,13 @@ $statusClass = match ($claim['status']) {
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
+
+<?php if ($flashMsg !== ''): ?>
+    <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?> alert-dismissible fade show">
+        <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+<?php endif; ?>
 
 <!-- 📄 Claim Header -->
 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -434,7 +478,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <p class="mb-0">
             <i class="fa-solid fa-download me-1"></i>
             <strong><?php echo htmlspecialchars($claim['fileName'], ENT_QUOTES, 'UTF-8'); ?></strong>
-            <small class="text-muted ms-2">(Last generated for status: <?php echo htmlspecialchars($claim['status'], ENT_QUOTES, 'UTF-8'); ?>)</small>
+            <?php if ($pdfStage !== ''): ?>
+                <small class="text-muted ms-2">(Last generated for status: <?php echo htmlspecialchars($pdfStage, ENT_QUOTES, 'UTF-8'); ?><?php echo $claim['status'] === 'Withdrawn' ? '. It was not remade when the claim was withdrawn.' : ''; ?>)</small>
+            <?php endif; ?>
         </p>
     </div>
 </div>

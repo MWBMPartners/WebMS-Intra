@@ -438,7 +438,9 @@ Full claim lifecycle with multi-approver, treasury, PDF, CSV.
 - Approve (`/expenses/approve`) — multi-approver workflow with comments.
 - Treasury (`/expenses/treasury`) — record reimbursement, payment reference.
 - **Nobody approves, rejects or pays their own claim (#545)** — a lead, a treasurer and an administrator are all refused; a claim does not wait for its own claimant; a person's own claims are left out of both lists. The rule is `Portal\Core\ExpenseRules`.
-- Withdraw (`/expenses/withdraw`) — claimant can cancel pre-approval (#73).
+- Withdraw — the claimant can take back their own claim while it is still pending (a button on the claim's
+  page; final; the claim, its receipts and any approvals already given are kept). Statuses: Pending, Approved,
+  Rejected, Reimbursed, Withdrawn. Did not work until migration 211 (#73, #587).
 - View (`/expenses/view`) — claim detail + audit trail.
 - API endpoints: `/expenses/api/list`, `/expenses/api/export`.
 

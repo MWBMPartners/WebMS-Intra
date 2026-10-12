@@ -57,7 +57,7 @@
  *   harmless (the signed-in account's number overwritten, say). The
  *   real-pages test above is what catches that.
  * - Two people approving at the same moment (the handler's row lock).
- * - MariaDB, and MySQL 8.4: this has only been run on MySQL 8.0.36.
+ * - MariaDB: not run. MySQL 8.0.36 and 8.4.11: run on both.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_x SELFTEST_DB_PORT=… SELFTEST_DB_PASS=… php tools/expense-rules-selftest.php
  *         SELFTEST_DB_HOST (default 127.0.0.1), SELFTEST_DB_USER (default root).
@@ -493,10 +493,18 @@ check(
     at($approveSave, "'Access denied — Approver or Admin role required.'") >= 0
         && at($approveSave, "'Access denied — Approver or Admin role required.'") < at($approveSave, 'FROM tblExpenseClaims EC')
 );
+// The answer under the lock was reworded on 12 October 2026 (#587). It used to
+// say "already been decided by another approver", which is untrue when the
+// claim left Pending because its claimant withdrew it. The test under the lock
+// itself is pinned here too, word for word: it is the only thing that stops a
+// decision being recorded on a claim that was withdrawn a moment earlier, and
+// no test that sends one request at a time can see it go missing.
 check(
-    'the row lock and the "already decided by another approver" answer are still there',
+    'the row lock, the "still Pending?" question asked under it, and its answer (true of a decided claim AND of a withdrawn one) are still there',
     str_contains($approveSave, 'WHERE claimID = ? AND siteID = ? FOR UPDATE') === true
-        && str_contains($approveSave, "'This claim has already been decided by another approver.'") === true
+        && str_contains($approveSave, "if (\$lockedClaim === null || \$lockedClaim['status'] !== 'Pending') {") === true
+        && str_contains($approveSave, "'This claim is no longer waiting for a decision. Another approver has decided it, or the person who made it has withdrawn it.'") === true
+        && str_contains($approveSave, 'already been decided by another approver') === false
 );
 
 // --- the payment handler -----------------------------------------------------

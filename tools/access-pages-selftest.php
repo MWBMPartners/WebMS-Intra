@@ -3,7 +3,7 @@
 /**
  * -----------------------------------------------------------------------------
  * Who may see and do what, on the REAL pages — self-test 🚪💷
- * (#478, #570, #545, and the access gaps of roll-out package B2a)
+ * (#478, #570, #545, #587, and the access gaps of roll-out package B2a)
  * -----------------------------------------------------------------------------
  * `tools/app-switch-selftest.php` and `tools/expense-rules-selftest.php`
  * prove the rules and read the code as text. Reading text cannot see a
@@ -75,6 +75,28 @@
  *   L. A treasurer is told who pays their own approved claim; and the
  *      Expenses addresses stay inside the organisation's own address.
  *
+ * Roll-out package H1 (12 October 2026, #587) added part M:
+ *   M. Withdrawing a claim, through the real page, reading back what is
+ *      STORED. The claimant withdraws a pending claim and its status reads
+ *      Withdrawn; a second press, and an approved, a paid and a rejected
+ *      claim, are each refused with nothing changed; somebody else's claim
+ *      and another organisation's claim get exactly the answer a made-up
+ *      number gets; a claim one approver had already approved keeps that
+ *      approval and can no longer be decided or paid; and the approver's
+ *      list, the treasurer's list, both dashboard numbers, Admin → Reports,
+ *      the API list and its status filter, and the export are compared
+ *      before and after. Until then the only check of this page looked at
+ *      the address the person was sent to, which is how a button that had
+ *      never once worked went unnoticed.
+ *      Its fix round the same day added: a press with no form token, a
+ *      made-up one and another signed-in person's is refused and the claim
+ *      stays Pending; every message the withdraw page leaves is read from
+ *      the page the person is SENT TO, where it must appear once and not
+ *      again on a reload, with its characters written as text; the line
+ *      about a withdrawn claim's stored document names the stage that
+ *      document was made with; and when the e-mail to approvers fails after
+ *      the withdrawal is stored, the person is still told "withdrawn".
+ *
  * SAFETY
  * ------
  * - It writes rows, so it REFUSES unless the database's name starts with
@@ -111,11 +133,24 @@
  * - Apache: the router only imitates `.htaccess`.
  * - Organisations told apart any other way than the first part of the
  *   address.
- * - MariaDB and MySQL 8.4: it has been run on MySQL 8.0.36 only.
+ * - MariaDB: not run. MySQL 8.0.36 and 8.4.11: run on both.
  * - An API key whose organisation has NO row for an app's switch, anywhere:
  *   that needs a portal-wide row deleted, so it is checked instead inside a
  *   rolled-back transaction by `tools/app-switch-selftest.php` (part 9).
- * - That mail is sent, or what the dashboard shows.
+ * - That mail is sent, or what the dashboard shows beyond the two expense
+ *   numbers part M reads.
+ * - Part M: a database server started WITHOUT strict checking, where the
+ *   fault of #587 was a stored EMPTY status and a page that said
+ *   "withdrawn". This file passes or fails there like anywhere else (its
+ *   failure line prints what was stored), but it is not started that way by
+ *   itself. `tools/expense-withdraw-selftest.php` plants that case.
+ * - Part M: that the e-mail step can really fail the way the test makes it
+ *   fail. The test makes its scratch copy's `ExpenseMailer::notify()` throw
+ *   on request; what a mail service does when it is down is not tried. Nor
+ *   is a failure of the activity line, which has the same guard.
+ * - Part M: a message left by a page other than the withdraw page. The two
+ *   "written as text" checks put their own words into the person's session
+ *   file, which is where every page's message waits.
  * - Two people deciding at the same moment.
  * - Part I: that a BROWSER sends its sign-in cookie with the chat box's
  *   requests. The test sends the cookie itself; the script that decides it
@@ -149,18 +184,19 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.2.0
+ * @version   1.4.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/478
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/545
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/570
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/548
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/587
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 240;
+const EXPECTED_CHECKS = 278;
 
 function refuse(string $why): never
 {
@@ -269,6 +305,7 @@ const ADM  = 916013; // a site administrator of A
 const TRS  = 916014; // member of A; a treasurer of A
 const MEM  = 916015; // member of A; in DEPT with no flag
 const DEPT = 916101;
+const DEPT_B = 916102; // a department of B, so that part M can give a member of A a claim in B
 // Roll-out package B2a (12 October 2026): the "other organisation" people, and
 // the rows parts F to L need.
 const BMEM = 916021; // member of B ONLY, nothing else
@@ -300,6 +337,9 @@ const VENUE_MARK = 'ACCESS-VENUE';
 const UNLISTED_FOLDER = 'zz-selftest-unlisted';
 const PLANTED_ACTION  = 'zz-selftest-ping';
 const PLANTED_MARK    = 'ZZ-SELFTEST-HANDLER-RAN';
+/** Part M: the file that, while it exists in the scratch copy's `_core`, makes that copy's e-mail step throw; and what it throws. */
+const MAIL_FAILS_FILE = '.access-pages-selftest-mail-fails';
+const MAIL_FAILS_MARK = 'ACCESS-W-THE-EMAIL-STEP-WAS-MADE-TO-FAIL';
 
 function removeWorld(): void
 {
@@ -790,6 +830,26 @@ foreach ([UNLISTED_FOLDER, 'tours'] as $folder) {
     q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (NULL, ?, 'true', 'true', 0)", 's', ['api.' . $folder . '.' . PLANTED_ACTION . '.enabled']);
 }
 
+// 🧪 Part M's planted failure, in the SCRATCH COPY only: the copy's
+//    `ExpenseMailer::notify()` throws for as long as a marker file exists
+//    beside it. Nothing in the portal can be asked to make the e-mail step
+//    fail, and "what does the person read when it does?" is exactly the
+//    question (it used to be "Please try again", about a claim that WAS
+//    withdrawn). If the method no longer opens the way this expects, the run
+//    stops here rather than carry on with a check that could not fail.
+$mailerFile = $child . $sep . 'web' . $sep . '_core' . $sep . 'ExpenseMailer.php';
+$mailerOpen = "    public static function notify(int \$claimID, string \$event, array \$extra = []): void\n    {\n";
+$mailerNow  = str_replace(
+    $mailerOpen,
+    $mailerOpen . "        if (is_file(__DIR__ . DIRECTORY_SEPARATOR . '" . MAIL_FAILS_FILE . "') === true) { throw new \\RuntimeException('" . MAIL_FAILS_MARK . "'); } // planted by tools/access-pages-selftest.php\n",
+    (string) file_get_contents($mailerFile),
+    $mailerPlanted
+);
+if ($mailerPlanted !== 1) {
+    refuse('the scratch copy\'s e-mail step could not be made to fail on request: ExpenseMailer::notify() no longer opens the way part M expects');
+}
+file_put_contents($mailerFile, $mailerNow);
+
 // The router: imitates web/public_html/.htaccess and marks every answer.
 $router = <<<'ROUTER'
 <?php
@@ -840,7 +900,7 @@ if (portAnswers($port) === false) {
     refuse('the web server never answered on port ' . $port);
 }
 
-echo "Who may see and do what, on the real pages — self-test (#478, #570, #545, roll-out package B2a)\n";
+echo "Who may see and do what, on the real pages — self-test (#478, #570, #545, #587, roll-out package B2a)\n";
 echo 'server process ' . (int) proc_get_status($state['proc'])['pid'] . ', port ' . $port . ', PHP ' . PHP_VERSION . ', database ' . (string) one('SELECT VERSION() AS v')['v'] . ', ' . gmdate('Y-m-d H:i:s') . " UTC\n";
 
 /** Sign one account in through the real sign-in page of one organisation's address; returns its cookie jar. */
@@ -1780,9 +1840,394 @@ $page = req($jar['mem'], 'GET', ADDR_A . '/expenses/submit')['body'];
 ok('the submit page posts its form inside A\'s own address', str_contains($page, 'action="' . ADDR_A . '/expenses/submit/save"') === true);
 $answer = post($jar['trs'], $treasury, $treasury . '/save', ['claimID' => 916308, 'payRef' => ['BACS-L'], 'comments' => '']);
 ok('recording a payment on A\'s address lands back on A\'s own treasury page', $answer['status'] === 302 && $answer['location'] === $treasury && claimState(916308) === 'Reimbursed, 0 approval(s), 1 payment(s)', 'HTTP ' . $answer['status'] . ' Location: ' . $answer['location'] . '; claim: ' . claimState(916308));
-claim(916310, MEM, 'ACCESS claim to withdraw');
-$answer = post($jar['mem'], ADDR_A . '/expenses/view?id=916310', ADDR_A . '/expenses/withdraw/save', ['claimID' => 916310]);
-ok('withdrawing a claim on A\'s address lands inside A\'s own address', $answer['status'] === 302 && str_starts_with($answer['location'], ADDR_A . '/expenses/') === true, 'HTTP ' . $answer['status'] . ' Location: ' . $answer['location']);
+// (A check used to end this part: withdraw a claim, and look at the address
+// the person was sent to. It passed for as long as the button had never
+// worked (#587), because being sent back to the claim's page is also what
+// happens when the withdrawal FAILS. Part M replaces it.)
+
+// =============================================================================
+head('M. #587 — withdrawing a claim through the real page, reading back what is STORED');
+// =============================================================================
+/** One claim for this part, in any state and either organisation. */
+$mClaim = static function (int $id, int $by, string $title, string $status = 'Pending', int $site = ORG_A, int $dept = DEPT): void {
+    q(
+        'INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status) VALUES (?, ?, ?, ?, ?, CURDATE(), 12.50, ?)',
+        'iiiiss', [$id, $site, $by, $dept, $title, $status]
+    );
+};
+/** Everything stored about one claim: every column of its row, and every approval, payment, receipt and line item. Equal before and after = nothing changed. */
+$storedAll = static fn (int $id): string => (string) json_encode([
+    one('SELECT * FROM tblExpenseClaims WHERE claimID = ?', 'i', [$id]),
+    q('SELECT * FROM tblExpenseClaimApprovals WHERE claimID = ? ORDER BY approvalID', 'i', [$id]),
+    q('SELECT * FROM tblExpenseClaimPayments WHERE claimID = ? ORDER BY payID', 'i', [$id]),
+    q('SELECT * FROM tblExpenseClaimFiles WHERE claimID = ? ORDER BY fileID', 'i', [$id]),
+    q('SELECT * FROM tblExpenseClaimItems WHERE claimID = ? ORDER BY itemID', 'i', [$id]),
+]);
+/** The stored status, in quotes, so an EMPTY one (what a server without strict checking stored before migration 211) shows as ''. */
+$storedStatus = static fn (int $id): string => var_export(one('SELECT status FROM tblExpenseClaims WHERE claimID = ?', 'i', [$id])['status'] ?? '(no such claim)', true);
+/** The one-off messages a page shows, each as "type: words". Every Expenses page draws them with the same block. */
+$alerts = static function (string $body): array {
+    preg_match_all('#<div class="alert alert-(\w+) alert-dismissible fade show">\s*(.*?)\s*<button#s', $body, $found, PREG_SET_ORDER);
+
+    return array_map(static fn (array $one): string => $one[1] . ': ' . html_entity_decode(trim($one[2]), ENT_QUOTES, 'UTF-8'), $found);
+};
+/**
+ * The one-off message waiting for this person, read (and so cleared) from
+ * the approvals page. Used to clear anything left over, and for what the
+ * approver's and treasurer's own save pages say.
+ */
+$message = static fn (string $who): string => $alerts(req($who, 'GET', $approve)['body'])[0] ?? '(no message)';
+/**
+ * Press Withdraw as a browser would, then go where the portal sends the
+ * person, as a browser does. Gives back where that was and what THAT PAGE
+ * told them. The page is then loaded a second time: a one-off message must
+ * not be there again, and if it is, the answer says so (and so no longer
+ * matches what a check expects). Two messages on one page show as two.
+ *
+ * `$token`: null sends a fresh form token read from the person's own page;
+ * '' sends none; anything else is sent exactly as given.
+ *
+ * (Until the fix round of 12 October 2026 this read the message from the
+ * approvals page, because the claim's page and the submit page showed no
+ * messages at all. So it proved the words were left, not that anybody was
+ * shown them.)
+ */
+$withdraw = static function (string $who, int $id, ?string $token = null) use ($message, $alerts): string {
+    $message($who); // read, and so clear, anything an earlier request left
+    $to     = ADDR_A . '/expenses/withdraw/save';
+    $answer = $token === null
+        ? post($who, ADDR_A . '/expenses/submit', $to, ['claimID' => $id])
+        : req($who, 'POST', $to, $token === '' ? ['claimID' => $id] : ['claimID' => $id, 'csrf_token' => $token]);
+    if ($answer['location'] === '') {
+        return 'HTTP ' . $answer['status'] . ', sent nowhere';
+    }
+    $shown = $alerts(req($who, 'GET', $answer['location'])['body']);
+    $again = $alerts(req($who, 'GET', $answer['location'])['body']);
+
+    return 'HTTP ' . $answer['status'] . ' to ' . $answer['location'] . ' — ' . ($shown === [] ? '(no message)' : implode(' | ', $shown))
+        . ($again === [] ? '' : ' — AND AGAIN ON A RELOAD: ' . implode(' | ', $again));
+};
+/**
+ * Leave a one-off message waiting for a signed-in person, by adding it to
+ * their session file: the same two values a save page sets before it sends
+ * them on. The session is found from the person's own cookie. False when it
+ * could not be done, which the check using it reports.
+ */
+$leave = static function (string $who, string $words) use ($child, $sep): bool {
+    foreach ((array) file($who, FILE_IGNORE_NEW_LINES) as $line) {
+        $cells = explode("\t", (string) $line);
+        $file  = $child . $sep . 'sessions' . $sep . 'sess_' . ($cells[6] ?? '');
+        if (count($cells) === 7 && preg_match('/^[A-Za-z0-9,-]+$/', $cells[6]) === 1 && is_file($file) === true) {
+            return file_put_contents($file, 'flash_msg|' . serialize($words) . 'flash_type|' . serialize('warning'), FILE_APPEND) !== false;
+        }
+    }
+
+    return false;
+};
+/** The claim numbers a list page shows, in order. */
+$listed = static function (string $who, string $address): array {
+    preg_match_all('#</span>\#(\d+)#', req($who, 'GET', $address)['body'], $found);
+    $ids = array_map('intval', $found[1]);
+    sort($ids);
+
+    return $ids;
+};
+/** The number on one of the dashboard's cards, or null when the card is not shown. */
+$card = static function (string $who, string $label): ?int {
+    $body = req($who, 'GET', ADDR_A . '/dashboard')['body'];
+
+    return preg_match('#<div class="h4 mb-0 fw-bold">(\d+)</div>\s*<small class="text-muted">' . preg_quote($label, '#') . '</small>#', $body, $m) === 1 ? (int) $m[1] : null;
+};
+/** Admin → Reports, as the administrator sees it: the two totals, and the "by status" bars. */
+$reports = static function () use ($jar): array {
+    $body    = req($jar['adm'], 'GET', ADDR_A . '/admin/reports')['body'];
+    $section = preg_match('#Expense Claims by Status</h5>(.*?)<!-- 📊 Top Activity Types#s', $body, $m) === 1 ? $m[1] : '';
+    preg_match_all('#<span>([A-Za-z]*)</span>\s*<span>(\d+) \(\d+%\)</span>#', $section, $bars);
+
+    return [
+        'claims' => preg_match('#<div class="h3 mb-0 text-warning">([\d,]+)</div>\s*<small class="text-muted">Expense Claims</small>#', $body, $m) === 1 ? $m[1] : '(not shown)',
+        'value'  => preg_match('#Total value: <strong>&pound;([\d,.]+)</strong>#', $section, $m) === 1 ? $m[1] : '(not shown)',
+        'bars'   => array_combine($bars[1], array_map('intval', $bars[2])),
+    ];
+};
+/** The claimant's own claims from the API, as claim number => status; `$filter` is the `status` filter, or '' for none. */
+$api = static function (string $filter) use ($jar): array {
+    $answer = req($jar['mem'], 'GET', ADDR_A . '/api/expenses/list?limit=100' . ($filter === '' ? '' : '&status=' . $filter));
+
+    return ['http' => $answer['status'], 'claims' => array_column((array) (data($answer)['claims'] ?? []), 'status', 'claimID')];
+};
+/** One claim's status in the export an administrator downloads, or a word saying why there is none. */
+$exported = static function (int $id) use ($jar, $approve): string {
+    $answer = req($jar['adm'], 'GET', ADDR_A . '/expenses/api/export?csrf_token=' . token(req($jar['adm'], 'GET', $approve)['body']));
+    foreach ((array) preg_split('/\R/', $answer['body']) as $line) {
+        $cells = str_getcsv((string) $line, ',', '"', '');
+        if ((string) ($cells[0] ?? '') === (string) $id) {
+            return (string) end($cells);
+        }
+    }
+
+    return $answer['status'] === 200 ? '(not in the export)' : 'HTTP ' . $answer['status'];
+};
+/** Everything a withdrawal should and should not move, read in one go. */
+$picture = static fn (): array => [
+    'approver'  => $listed($jar['appr'], $approve),
+    'treasurer' => $listed($jar['trs'], $treasury),
+    'admCard'   => $card($jar['adm'], 'Pending Claims'),
+    'memCard'   => $card($jar['mem'], 'My Pending Claims'),
+    'reports'   => $reports(),
+    'api'       => $api(''),
+    'apiW'      => $api('Withdrawn'),
+    'apiP'      => $api('Pending'),
+    'export'    => $exported(916311),
+];
+
+q("INSERT INTO tblDepts (deptID, siteID, deptName, deptCode, isActive) VALUES (?, ?, 'Selftest access dept B', 'SADB', 1)", 'ii', [DEPT_B, ORG_B]);
+$mClaim(916311, MEM, 'ACCESS-W claim to withdraw');
+$mClaim(916312, MEM, 'ACCESS-W approved claim', 'Approved');
+$mClaim(916313, MEM, 'ACCESS-W paid claim', 'Reimbursed');
+$mClaim(916314, MEM, 'ACCESS-W rejected claim', 'Rejected');
+$mClaim(916315, LEAD, 'ACCESS-W somebody else\'s claim');
+$mClaim(916316, MEM, 'ACCESS-W own claim in organisation B', 'Pending', ORG_B, DEPT_B);
+$mClaim(916317, MEM, 'ACCESS-W part-approved claim');
+$mClaim(916318, MEM, 'ACCESS-W claim pressed with no form token');
+$mClaim(916319, MEM, 'ACCESS-W claim pressed with a made-up form token');
+$mClaim(916320, MEM, 'ACCESS-W claim pressed with another person\'s form token');
+// The history each of those would really have, so "nothing changed" has something to lose.
+q("INSERT INTO tblExpenseClaimApprovals (claimID, userID, decision, approverRole) VALUES (916312, ?, 'Approved', 'dept_lead'), (916313, ?, 'Approved', 'dept_lead'), (916314, ?, 'Rejected', 'dept_approver')", 'iii', [LEAD, LEAD, APPR]);
+q("INSERT INTO tblExpenseClaimPayments (claimID, payReference, payAmount, paidByID) VALUES (916313, 'ACCESS-W-BACS', 12.50, ?)", 'i', [TRS]);
+q("INSERT INTO tblExpenseClaimFiles (claimID, originalFilename, storedFilename) VALUES (916311, 'receipt.jpg', 'access-w-receipt.jpg')");
+q("INSERT INTO tblExpenseClaimItems (claimID, itemName, unitCost, quantity, lineTotal) VALUES (916311, 'ACCESS-W item', 12.50, 1, 12.50)");
+// "Last changed" two days back, so that a claim which was written to shows it.
+q('UPDATE tblExpenseClaims SET updatedAt = DATE_SUB(NOW(), INTERVAL 2 DAY) WHERE claimID BETWEEN 916311 AND 916320');
+
+// --- M1: the claimant withdraws a pending claim -------------------------------
+$before  = $picture();
+$rowWas  = (array) one('SELECT * FROM tblExpenseClaims WHERE claimID = 916311');
+$kidsWas = [q('SELECT * FROM tblExpenseClaimFiles WHERE claimID = 916311'), q('SELECT * FROM tblExpenseClaimItems WHERE claimID = 916311')];
+$said    = $withdraw($jar['mem'], 916311);
+ok(
+    'the claimant presses Withdraw on their own pending claim: sent to that claim\'s page inside A\'s own address, and THAT PAGE says "withdrawn successfully", once (a reload does not say it again)',
+    $said === 'HTTP 302 to ' . ADDR_A . '/expenses/view?id=916311 — success: Claim #916311 has been withdrawn successfully.',
+    $said
+);
+ok(
+    '…and the STORED status reads back Withdrawn (#587: it used to stay Pending, or be stored EMPTY on a server without strict checking)',
+    $storedStatus(916311) === "'Withdrawn'",
+    'stored status: ' . $storedStatus(916311) . ($storedStatus(916311) === "''" ? ' — an EMPTY status, which the approver\'s list and the dashboard do not show' : '')
+);
+$rowNow = (array) one('SELECT * FROM tblExpenseClaims WHERE claimID = 916311');
+ok(
+    '…its "last changed" time moved, every other column of the claim is as it was, and its receipt and line item are still there',
+    $rowNow['updatedAt'] !== $rowWas['updatedAt'] && array_diff_key($rowNow, ['status' => 1, 'updatedAt' => 1]) === array_diff_key($rowWas, ['status' => 1, 'updatedAt' => 1])
+        && [q('SELECT * FROM tblExpenseClaimFiles WHERE claimID = 916311'), q('SELECT * FROM tblExpenseClaimItems WHERE claimID = 916311')] === $kidsWas && count($kidsWas[0]) === 1 && count($kidsWas[1]) === 1
+);
+$after = $picture();
+$page  = $view($jar['mem'], 916311);
+ok(
+    'the claimant\'s page for it shows a grey "Withdrawn" badge and no Withdraw button',
+    preg_match('#<span class="badge bg-secondary fs-5">\s*Withdrawn\s*</span>#', $page) === 1 && str_contains($page, 'Withdraw Claim') === false && str_contains($page, 'expenses/withdraw/save') === false
+);
+$all = $storedAll(916311);
+$said = $withdraw($jar['mem'], 916311);
+ok(
+    'a SECOND press is refused, the claim\'s page says why (once), and not one thing stored about the claim changes (its "last changed" time included)',
+    $said === 'HTTP 302 to ' . ADDR_A . '/expenses/view?id=916311 — warning: This claim cannot be withdrawn — it is no longer in Pending status.' && $storedAll(916311) === $all,
+    $said . '; stored status: ' . $storedStatus(916311)
+);
+
+// --- M2: before and after that ONE withdrawal ---------------------------------
+ok(
+    'the approver\'s list held the claim before and does not now; every other claim on it is still there',
+    array_values(array_diff($before['approver'], $after['approver'])) === [916311] && array_diff($after['approver'], $before['approver']) === [] && in_array(916317, $after['approver'], true) === true,
+    'before: ' . json_encode($before['approver']) . ' after: ' . json_encode($after['approver'])
+);
+ok(
+    'the treasurer\'s list is exactly as it was (it never held the claim), and still lists the approved one',
+    $before['treasurer'] === $after['treasurer'] && in_array(916312, $after['treasurer'], true) === true && in_array(916311, $after['treasurer'], true) === false,
+    'before: ' . json_encode($before['treasurer']) . ' after: ' . json_encode($after['treasurer'])
+);
+ok(
+    'the dashboard: the administrator\'s "Pending Claims" and the claimant\'s "My Pending Claims" are each one fewer',
+    is_int($before['admCard']) === true && $after['admCard'] === $before['admCard'] - 1 && is_int($before['memCard']) === true && $after['memCard'] === $before['memCard'] - 1,
+    'administrator: ' . json_encode($before['admCard']) . ' then ' . json_encode($after['admCard']) . '; claimant: ' . json_encode($before['memCard']) . ' then ' . json_encode($after['memCard'])
+);
+$barsWas = $before['reports']['bars'];
+$barsNow = $after['reports']['bars'];
+ok(
+    'Admin → Reports, "by status": Withdrawn has a bar of its own showing 1 (there was none), Pending is one fewer, and every other bar is as it was',
+    isset($barsWas['Withdrawn']) === false && ($barsNow['Withdrawn'] ?? null) === 1 && ($barsNow['Pending'] ?? null) === ($barsWas['Pending'] ?? 0) - 1
+        && array_diff_key($barsNow, ['Withdrawn' => 1, 'Pending' => 1]) === array_diff_key($barsWas, ['Pending' => 1]) && count($barsWas) >= 3,
+    'before: ' . json_encode($barsWas) . ' after: ' . json_encode($barsNow)
+);
+// The owner's decision (Salem874, 12 October 2026): a withdrawn claim still
+// counts in "Total claims" and "Total value", exactly as a rejected claim
+// already does. Those two figures count every claim ever made.
+ok(
+    '…and "Expense Claims" and "Total value" are UNCHANGED: a withdrawn claim still counts in both, as a rejected one does (owner\'s decision, 12 October 2026)',
+    $before['reports']['claims'] === $after['reports']['claims'] && $before['reports']['value'] === $after['reports']['value']
+        && preg_match('/^[\d,]+$/', $after['reports']['claims']) === 1 && preg_match('/^[\d,]+\.\d\d$/', $after['reports']['value']) === 1 && (float) str_replace(',', '', $after['reports']['value']) >= 12.5,
+    'claims: ' . $before['reports']['claims'] . ' then ' . $after['reports']['claims'] . '; value: ' . $before['reports']['value'] . ' then ' . $after['reports']['value']
+);
+ok(
+    'the API list showed the claim as Pending and now shows it as Withdrawn',
+    $before['api']['http'] === 200 && ($before['api']['claims'][916311] ?? null) === 'Pending' && $after['api']['http'] === 200 && ($after['api']['claims'][916311] ?? null) === 'Withdrawn',
+    'before: HTTP ' . $before['api']['http'] . ' ' . json_encode($before['api']['claims'][916311] ?? null) . '; after: HTTP ' . $after['api']['http'] . ' ' . json_encode($after['api']['claims'][916311] ?? null)
+);
+ok(
+    '…its filter accepts ?status=Withdrawn (200, where it used to answer 400): nothing before, exactly this claim after',
+    $before['apiW'] === ['http' => 200, 'claims' => []] && $after['apiW'] === ['http' => 200, 'claims' => [916311 => 'Withdrawn']],
+    'before: ' . json_encode($before['apiW']) . ' after: ' . json_encode($after['apiW'])
+);
+ok(
+    '…and ?status=Pending listed the claim before and does not now',
+    isset($before['apiP']['claims'][916311]) === true && isset($after['apiP']['claims'][916311]) === false && isset($after['apiP']['claims'][916317]) === true
+);
+ok('the export an administrator downloads said Pending for it and now says Withdrawn', $before['export'] === 'Pending' && $after['export'] === 'Withdrawn', 'before: ' . $before['export'] . ' after: ' . $after['export']);
+$page = $view($jar['appr'], 916311);
+ok('an approver who opens the withdrawn claim sees the Withdrawn badge and is offered no "Go to Approvals"', str_contains($page, 'ACCESS-W claim to withdraw') === true && preg_match('#<span class="badge bg-secondary fs-5">\s*Withdrawn\s*</span>#', $page) === 1 && str_contains($page, 'Go to Approvals') === false);
+$page = $view($jar['trs'], 916311);
+ok('a treasurer who opens it is offered no "Go to Treasury"', str_contains($page, 'ACCESS-W claim to withdraw') === true && str_contains($page, 'Go to Treasury') === false);
+
+// --- M3: only while it is pending ----------------------------------------------
+$notPending = 'HTTP 302 to ' . ADDR_A . '/expenses/view?id=%d — warning: This claim cannot be withdrawn — it is no longer in Pending status.';
+foreach ([916312 => 'an APPROVED claim', 916313 => 'a PAID claim', 916314 => 'a REJECTED claim'] as $id => $what) {
+    $all  = $storedAll($id);
+    $said = $withdraw($jar['mem'], $id);
+    ok(
+        $what . ' is refused, and not one thing stored about it changes: status, "last changed" time, approvals and payments',
+        $said === sprintf($notPending, $id) && $storedAll($id) === $all,
+        $said . '; stored status: ' . $storedStatus($id)
+    );
+}
+
+// --- M4: only the claimant, and only in their own organisation ------------------
+$noSuchClaim = 'HTTP 302 to ' . ADDR_A . '/expenses/submit — danger: Claim not found.';
+$said = $withdraw($jar['mem'], 916399);
+ok('a claim number that matches no claim: sent back to the submit page, and THAT PAGE says "Claim not found", once (a reload does not say it again)', $said === $noSuchClaim, $said);
+foreach (['mem' => 'an ordinary member', 'appr' => 'an approver of its department', 'adm' => 'an ADMINISTRATOR'] as $who => $what) {
+    $all  = $storedAll(916315);
+    $said = $withdraw($jar[$who], 916315);
+    ok(
+        'somebody else\'s pending claim, tried by ' . $what . ': answered EXACTLY as a claim that does not exist, and nothing stored changes',
+        $said === $noSuchClaim && $storedAll(916315) === $all && $storedStatus(916315) === "'Pending'",
+        $said . '; stored status: ' . $storedStatus(916315)
+    );
+}
+$all  = $storedAll(916316);
+$said = $withdraw($jar['mem'], 916316);
+ok(
+    'the person\'s OWN pending claim in organisation B, asked for on A\'s address: answered exactly as a claim that does not exist, and nothing stored changes',
+    $said === $noSuchClaim && $storedAll(916316) === $all && $storedStatus(916316) === "'Pending'",
+    $said . '; stored status: ' . $storedStatus(916316)
+);
+
+// --- M5: a claim one approver has already approved ------------------------------
+post($jar['appr'], $approve, $approve . '/save', ['claimID' => 916317, 'decision' => 'Approved', 'comments' => 'ok']);
+ok('a claim one approver has approved is still Pending (its lead has not), with that approval on record', claimState(916317) === 'Pending, 1 approval(s), 0 payment(s)', claimState(916317));
+$said = $withdraw($jar['mem'], 916317);
+ok(
+    '…its claimant may still withdraw it: Withdrawn, and the approval already given is KEPT, as that approver\'s',
+    claimState(916317) === 'Withdrawn, 1 approval(s), 0 payment(s)' && (one('SELECT userID, decision FROM tblExpenseClaimApprovals WHERE claimID = 916317') ?? []) === ['userID' => APPR, 'decision' => 'Approved'],
+    $said . '; claim: ' . claimState(916317)
+);
+$all = $storedAll(916317);
+$message($jar['lead']);
+post($jar['lead'], $approve, $approve . '/save', ['claimID' => 916317, 'decision' => 'Approved', 'comments' => 'late']);
+$said = $message($jar['lead']);
+ok('the lead it was waiting for can no longer APPROVE it: refused, nothing recorded', $storedAll(916317) === $all && $said === 'warning: Claim not found or not in Pending status.', $said . '; claim: ' . claimState(916317));
+post($jar['lead'], $approve, $approve . '/save', ['claimID' => 916317, 'decision' => 'Rejected', 'comments' => 'late']);
+ok('…nor REJECT it: nothing recorded', $storedAll(916317) === $all, claimState(916317));
+$message($jar['trs']);
+post($jar['trs'], $treasury, $treasury . '/save', ['claimID' => 916317, 'payRef' => ['ACCESS-W-LATE'], 'comments' => '']);
+$said = $message($jar['trs']);
+ok('…and a treasurer cannot record a payment for it: refused, nothing recorded', $storedAll(916317) === $all && str_contains($said, 'not in Approved status') === true, $said . '; claim: ' . claimState(916317));
+
+// --- M6: the form token -------------------------------------------------------
+// Until the fix round of 12 October 2026 every press in this part carried a
+// fresh, valid token, so the page could lose its form-token test and this
+// file still passed. Without that test any other website could make a
+// signed-in claimant's browser withdraw their own pending claim, and a
+// withdrawal cannot be undone.
+$badToken   = 'HTTP 302 to ' . ADDR_A . '/expenses/view?id=%d — danger: Invalid CSRF token.';
+$otherToken = token(req($jar['appr'], 'GET', $approve)['body']);
+foreach ([
+    916318 => ['with NO form token', ''],
+    916319 => ['with a MADE-UP form token', bin2hex(random_bytes(32))],
+    916320 => ['with ANOTHER signed-in person\'s form token', $otherToken],
+] as $id => [$what, $sent]) {
+    $all  = $storedAll($id);
+    $said = $withdraw($jar['mem'], $id, $sent);
+    ok(
+        'the claimant presses Withdraw on their own pending claim ' . $what . ': refused, the claim\'s page says so (once), and the STORED status still reads Pending with nothing else changed',
+        $said === sprintf($badToken, $id) && $storedStatus($id) === "'Pending'" && $storedAll($id) === $all && ($sent === '' || strlen($sent) === 64),
+        $said . '; stored status: ' . $storedStatus($id) . '; token sent: ' . strlen($sent) . ' characters'
+    );
+}
+$said = $withdraw($jar['mem'], 916318);
+ok(
+    'control: the first of those three claims, pressed with the person\'s OWN fresh token, IS withdrawn (so only the token refused it)',
+    $said === 'HTTP 302 to ' . ADDR_A . '/expenses/view?id=916318 — success: Claim #916318 has been withdrawn successfully.' && $storedStatus(916318) === "'Withdrawn'",
+    $said . '; stored status: ' . $storedStatus(916318)
+);
+
+// --- M7: a waiting message is written as text, on both pages people land on ----
+// None of the withdraw page's own messages holds a character that matters in
+// HTML, so these two leave one that does.
+$nasty = '<b>ACCESS-W "left" & \'waiting\'</b>';
+foreach ([ADDR_A . '/expenses/view?id=916311' => 'the claim\'s page', ADDR_A . '/expenses/submit' => 'the submit page'] as $address => $what) {
+    $message($jar['mem']);
+    $left = $leave($jar['mem'], $nasty);
+    $body = req($jar['mem'], 'GET', $address)['body'];
+    ok(
+        $what . ' shows a waiting message with its <, >, &, " and \' written as text, never as markup',
+        $left === true && $alerts($body) === ['warning: ' . $nasty] && str_contains($body, htmlspecialchars($nasty, ENT_QUOTES, 'UTF-8')) === true && str_contains($body, '<b>ACCESS-W') === false,
+        $left === true ? 'the page showed: ' . json_encode($alerts($body)) . (str_contains($body, '<b>ACCESS-W') === true ? ' — and the raw <b> is in the page' : '') : 'the message could not be left in the session file'
+    );
+}
+
+// --- M8: the line about the stored document --------------------------------------
+// A document is made when a claim is submitted, approved, rejected or paid,
+// and NOT when it is withdrawn. Rows as ExpensePdf::generate() writes them:
+// a withdrawn claim has the one made at submission; an approved claim has
+// two; and the paid claim is given a document with no row at all.
+q("UPDATE tblExpenseClaims SET fileName = CONCAT('claim_', claimID, '.pdf') WHERE claimID IN (916311, 916312, 916313)");
+q(
+    "INSERT INTO tblExpenseClaimFiles (claimID, originalFilename, storedFilename, fileType, stage) VALUES "
+    . "(916311, 'Claim_916311_Pending.pdf', 'claim_916311.pdf', 'application/pdf', 'Pending'), "
+    . "(916312, 'Claim_916312_Pending.pdf', 'claim_916312.pdf', 'application/pdf', 'Pending'), "
+    . "(916312, 'Claim_916312_Approved.pdf', 'claim_916312.pdf', 'application/pdf', 'Approved')"
+);
+$page = $view($jar['mem'], 916311);
+ok(
+    'a WITHDRAWN claim\'s page says its stored document was last generated for status Pending and was not remade, and nowhere says it was generated for Withdrawn',
+    str_contains($page, '(Last generated for status: Pending. It was not remade when the claim was withdrawn.)') === true && str_contains($page, 'Last generated for status: Withdrawn') === false,
+    preg_match('#\(Last generated for status:[^)]*\)#', $page, $m) === 1 ? 'the page says: ' . $m[0] : 'the page has no such line'
+);
+$pageApproved = $view($jar['mem'], 916312);
+$pagePaid     = $view($jar['mem'], 916313);
+ok(
+    '…an approved claim\'s page names the NEWEST document\'s stage (Approved, not the earlier Pending), and a document with no recorded stage gets no such line at all',
+    str_contains($pageApproved, '(Last generated for status: Approved)') === true && str_contains($pagePaid, 'claim_916313.pdf') === true && str_contains($pagePaid, 'Last generated for status') === false,
+    (preg_match('#\(Last generated for status:[^)]*\)#', $pageApproved, $m) === 1 ? 'approved claim: ' . $m[0] : 'approved claim: no such line')
+        . (preg_match('#\(Last generated for status:[^)]*\)#', $pagePaid, $m) === 1 ? '; paid claim: ' . $m[0] : '; paid claim: no such line')
+);
+
+// --- M9: the e-mail to approvers fails AFTER the withdrawal is stored ---------------
+// The scratch copy's e-mail step throws while the marker file exists (see
+// where the copy is made). By then the claim is withdrawn, so that is what
+// the person must read; and the failure must be on record for the
+// administrator, not lost.
+$mailMarker = dirname($mailerFile) . $sep . MAIL_FAILS_FILE;
+file_put_contents($mailMarker, '1');
+$said = $withdraw($jar['mem'], 916319);
+unlink($mailMarker);
+ok(
+    'the e-mail step fails after the withdrawal is stored: the claim IS stored Withdrawn, and the claim\'s page says "withdrawn successfully", not "Please try again"',
+    $storedStatus(916319) === "'Withdrawn'" && $said === 'HTTP 302 to ' . ADDR_A . '/expenses/view?id=916319 — success: Claim #916319 has been withdrawn successfully.',
+    $said . '; stored status: ' . $storedStatus(916319)
+);
+$filed = (int) (one('SELECT COUNT(*) AS n FROM tblErrors WHERE siteID = ? AND errorTitle = ?', 'is', [ORG_A, MAIL_FAILS_MARK])['n'] ?? 0);
+ok('…and that failure is on record for the administrator: exactly one line, filed against this organisation (so the step really did fail)', $filed === 1, $filed . ' line(s) found');
 
 // =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');

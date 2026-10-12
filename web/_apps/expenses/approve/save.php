@@ -215,10 +215,13 @@ try {
         $lockStmt->close();
     }
 
-    // 🛡️ Verify claim is still Pending (another approver may have changed it)
+    // 🛡️ Verify claim is still Pending. Between the first look above and
+    //    this lock, another approver may have decided it, or its claimant may
+    //    have withdrawn it (#587). The message used to say "already been
+    //    decided by another approver", which is untrue of a withdrawn claim.
     if ($lockedClaim === null || $lockedClaim['status'] !== 'Pending') {
         $mysqli->rollback();
-        $_SESSION['flash_msg']  = 'This claim has already been decided by another approver.';
+        $_SESSION['flash_msg']  = 'This claim is no longer waiting for a decision. Another approver has decided it, or the person who made it has withdrawn it.';
         $_SESSION['flash_type'] = 'warning';
         header('Location: ' . Router::url('expenses/approve'));
         exit();

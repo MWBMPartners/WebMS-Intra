@@ -669,7 +669,13 @@ CREATE TABLE IF NOT EXISTS `tblExpenseClaims` (
     `claimTitle`  VARCHAR(255)   COLLATE utf8mb4_general_ci DEFAULT NULL,
     `claimDate`   DATE           DEFAULT NULL,
     `totalAmount` DECIMAL(10,2)  DEFAULT NULL,
-    `status`      ENUM('Pending','Approved','Rejected','Reimbursed')
+    -- 'Withdrawn' was added by migration 211 (#587): the Withdraw button had
+    -- always set it, and the list did not allow it. It is LAST on purpose and
+    -- must stay there. The server stores each choice as its position in this
+    -- list, so a new choice goes on the END, in a numbered migration as well
+    -- as here. One put anywhere else changes what stored claims mean.
+    -- A withdrawn claim is final (owner's decision, 12 October 2026).
+    `status`      ENUM('Pending','Approved','Rejected','Reimbursed','Withdrawn')
                   COLLATE utf8mb4_general_ci DEFAULT 'Pending',
     `fileName`    VARCHAR(255)   COLLATE utf8mb4_general_ci DEFAULT NULL,
     `createdAt`   DATETIME       DEFAULT CURRENT_TIMESTAMP,
@@ -9855,4 +9861,19 @@ SET @sql := IF(@fk_exists = 0,
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('210_upgrade_gaps.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 211_expense_claim_withdrawn.sql (roll-out package H1, #587) ─────────
+-- The new choice, 'Withdrawn', is written inline in tblExpenseClaims above
+-- (last in the list of the `status` column). Nothing is repeated here.
+--
+-- The migration's second part, which turns an EMPTY status into 'Withdrawn',
+-- is not copied either. A database this file builds from nothing has no
+-- claims. And when the installer runs this file over a database that already
+-- holds claims ("carry on with the existing database"), it replays every
+-- numbered migration afterwards, 211 included, and that is what repairs them.
+-- What this file alone CANNOT do: add the choice to a table that already
+-- exists. CREATE TABLE IF NOT EXISTS leaves an existing table as it is.
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('211_expense_claim_withdrawn.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

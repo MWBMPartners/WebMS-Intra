@@ -12,7 +12,7 @@
  * Query parameters:
  *   page     (int)    Page number, default 1
  *   limit    (int)    Items per page, default 20, max 100
- *   status   (string) Filter by status: Pending|Approved|Rejected|Reimbursed
+ *   status   (string) Filter by status: Pending|Approved|Rejected|Reimbursed|Withdrawn
  *   all      (bool)   If "true" and user is admin, return all users' claims
  *
  * Response (200):
@@ -44,8 +44,13 @@ $limit  = min(100, max(1, (int) ($_GET['limit'] ?? 20)));
 $status = $_GET['status'] ?? '';
 $showAll = ($_GET['all'] ?? '') === 'true';
 
-// 🛡️ Validate status filter if provided
-$validStatuses = ['Pending', 'Approved', 'Rejected', 'Reimbursed'];
+// 🛡️ Validate status filter if provided.
+//    These are the choices of the column `tblExpenseClaims.status`, in the
+//    column's own order, and must stay the same list. 'Withdrawn' was added
+//    with migration 211 (#587): without it, the unfiltered list returned a
+//    withdrawn claim while `?status=Withdrawn` was refused with 400.
+//    tools/expense-withdraw-selftest.php compares this list with the column.
+$validStatuses = ['Pending', 'Approved', 'Rejected', 'Reimbursed', 'Withdrawn'];
 if ($status !== '' && in_array($status, $validStatuses, true) === false) {
     ApiResponse::error('Invalid status filter. Valid values: ' . implode(', ', $validStatuses), 400);
 }

@@ -205,6 +205,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <span class="portal-badge portal-badge-paid"><i class="fa-solid fa-sterling-sign"></i> Reimbursed</span>
                         <span>Payment has been processed by treasury.</span>
                     </div>
+                    <?php
+                    // #587: the fifth status, added with the fix that made
+                    // withdrawing a claim work. The grey is Bootstrap's own
+                    // "secondary" pair, as on the Expenses guide's entry: the
+                    // stylesheet has no portal-badge colour for this status.
+                    ?>
+                    <div class="list-group-item d-flex align-items-center gap-3 px-0">
+                        <span class="portal-badge bg-secondary-subtle text-secondary-emphasis"><i class="fa-solid fa-rotate-left"></i> Withdrawn</span>
+                        <span>Taken back by the person who made it, before a final decision. It will not be approved or paid, and it cannot be reopened.</span>
+                    </div>
                 </div>
                 <p class="mt-2 mb-0 small text-secondary">For more detail, see the <a href="/help/expenses#statuses">Expenses Guide -- Status Meanings</a>.</p>
             </div>

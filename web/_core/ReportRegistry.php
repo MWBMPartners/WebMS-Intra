@@ -184,8 +184,14 @@ final class ReportRegistry
             'columns' => [
                 'claimTitle'  => ['expr' => 'ec.claimTitle',  'label' => 'Claim title', 'type' => 'string'],
                 'claimDate'   => ['expr' => 'ec.claimDate',   'label' => 'Claim date',  'type' => 'date'],
+                // The choices of the column `tblExpenseClaims.status`, in
+                // the column's own order. 'Withdrawn' was added with
+                // migration 211 (#587): without it a report could show
+                // withdrawn claims but could not be filtered to them, or
+                // away from them. tools/expense-withdraw-selftest.php
+                // compares this list with the column.
                 'status'      => ['expr' => 'ec.status',      'label' => 'Status',      'type' => 'enum',
-                                  'enum' => ['Pending', 'Approved', 'Rejected', 'Reimbursed']],
+                                  'enum' => ['Pending', 'Approved', 'Rejected', 'Reimbursed', 'Withdrawn']],
                 // Financial gate parity with Giving::canManage(): treasurer
                 // OR site admin. Filtering on this column without the gate
                 // is refused identically to selecting it (§3.4) — a

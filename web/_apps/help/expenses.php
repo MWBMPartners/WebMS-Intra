@@ -206,6 +206,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="portal-badge portal-badge-paid"><i class="fa-solid fa-sterling-sign"></i> Reimbursed</span>
             <span>The treasury team has processed the payment. A payment reference number is attached for your records.</span>
         </div>
+        <?php
+        // #587: this entry was missing, because withdrawing a claim had never
+        // worked. The grey is Bootstrap's own "secondary" pair, the colour of
+        // the badge on a withdrawn claim's page: the stylesheet has no
+        // portal-badge colour for this status, and one entry did not seem
+        // worth a new one.
+        ?>
+        <div class="list-group-item d-flex align-items-center gap-3">
+            <span class="portal-badge bg-secondary-subtle text-secondary-emphasis"><i class="fa-solid fa-rotate-left"></i> Withdrawn</span>
+            <span>You took the claim back before a final decision was made. It will not be approved or paid. This cannot be undone: if you still need the money, submit a new claim. The claim, its receipts and any approvals already given are kept on record.</span>
+        </div>
     </div>
 </div>
 
@@ -327,7 +338,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="alert alert-warning d-flex gap-2" role="alert">
         <i class="fa-solid fa-triangle-exclamation mt-1"></i>
         <div>
-            <strong>Important:</strong> You can only withdraw claims that are still <strong>Pending</strong>. Once a claim has been approved, rejected, or reimbursed, it cannot be withdrawn. If you need to correct an approved claim, contact your administrator.
+            <strong>Important:</strong> You can only withdraw your own claims, and only while they are still <strong>Pending</strong>. Once a claim has been approved, rejected, or reimbursed, it cannot be withdrawn. If you need to correct an approved claim, contact your administrator. A withdrawn claim cannot be reopened: submit a new claim instead. The withdrawn claim, its receipts and any approvals already given stay on record.
         </div>
     </div>
 </div>

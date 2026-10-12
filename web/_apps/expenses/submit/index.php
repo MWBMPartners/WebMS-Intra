@@ -7,6 +7,13 @@
  * Reworked to drop <table> tags in favour of Bootstrap's flexbox/grid layout so
  * the item list adapts elegantly on phones, tablets, and desktops.  Column
  * labels collapse into inline placeholders on narrow viewports for optimal UX.
+ *
+ * It also shows the one-off message another Expenses page left for this
+ * person (#587). The withdraw page sends people here with "Claim not found",
+ * and this page's own save handler sends them back here with every one of its
+ * refusals ("Total must be greater than zero", for one). Until 12 October
+ * 2026 this page showed none of them: the form simply came back empty, and
+ * the words turned up later on some other page.
  * -----------------------------------------------------------------------------
  */
 
@@ -21,6 +28,12 @@ use Portal\Core\Site;
 $pageTitle   = 'Submit Expense Claim';
 $pageSection = 'expenses';
 $breadcrumbs = ['Dashboard' => Router::url(''), 'Expenses' => Router::url('expenses/submit'), 'Submit Claim' => ''];
+
+// 📋 The one-off message another page left for this person, read and cleared
+//    exactly as the approvals page does (approve/index.php).
+$flashMsg  = $_SESSION['flash_msg']  ?? '';
+$flashType = $_SESSION['flash_type'] ?? 'info';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 /* -------------------------------------------------------------------------- */
 /* 🏢 Active departments                                                      */
@@ -41,6 +54,13 @@ if ($stmt !== false) {
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
+
+<?php if ($flashMsg !== ''): ?>
+    <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?> alert-dismissible fade show">
+        <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+<?php endif; ?>
 
 <!-- 💸 Expense Claim Submission Form -->
 <h1 class="mb-4">Submit Expense Claim</h1>
