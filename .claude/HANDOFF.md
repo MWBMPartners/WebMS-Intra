@@ -19,6 +19,12 @@ package by ITS OWN file list — never from `git status`, which now mixes packag
 
 ## WHERE THINGS ARE, 12 OCTOBER 2026, 06:47 — package C committed; three jobs running; two owner answers; one trap
 
+**Package D is committed and pushed as `ce66fc1`** (#488; eight files). It had a full check, a fix round, a narrow check of the
+fix round, and four last small fixes made on proofs in `.claude-work/resume/rollout-D--fix2-evidence/` (run them again with the two
+scripts there). Small follow-ups are #590. **Two corrections to the runbook are still owed:** G's `RUNBOOK-CORRECTIONS.md` when G
+lands, and section 7.7 (plus row 17 of its "What was tested" table) when B2a lands, because B2a ends a switched-off account's
+session. Each corrected sentence marked "Tested" must be run first.
+
 **Package C is committed and pushed as `a34bb77`** (#547, #568, #563; issues commented, kept open until the merge). Its one check
 found the three fixes right and two faults in the NEW TESTS; both were fixed in the same commit on planted-fault proofs, with no
 further round (evidence `.claude-work/resume/rollout-C--fix-evidence/`). What it found and did not fix is in #575 (the noticeboard
@@ -28,7 +34,6 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 
 | Package | What | Where it works | Report |
 | --- | --- | --- | --- |
-| D | recovery runbook and backup documents (#488) — first check NOT CLEAN; fix round DONE (it wrote its own design for the script, not the checker's); a NARROW check of the fix round is running | MAIN folder: the same five uncommitted files | `rollout-D--fix.md`, `rollout-D--check2.md` |
 | B2a + B2b | access gaps — B2a's one check came back NOT CLEAN (none HIGH); ONE FIX ROUND is running in the same checkout, and it also builds B2b (plan item 10), so one narrow check covers both. It makes two more commits on `ro-b2a-build` after `1953360` | its own checkout `.claude-work/worktrees/b2a` | `rollout-B2a--check.md` (the work list), `rollout-B2a--fix.md` |
 | E | older databases (#553, #555, #554) — check NOT CLEAN (the migrations held on every shape tried; one HIGH side effect on backups, routed to G; three MEDIUM about what the new test cannot see and the install script missing the link). ONE FIX ROUND is running; it adds a commit after `28ff8f3` | its own checkout `.claude-work/worktrees/e` | `rollout-E--check.md` (the work list), `rollout-E--fix.md` |
 | G | the backup faults (#577, #578, #579, plus prune and freshness) — plan written (`rollout-G--plan.md`, 236 lines); BUILD running | its own checkout `.claude-work/worktrees/g`, branch `ro-g-build` | `rollout-G--build.md` |
