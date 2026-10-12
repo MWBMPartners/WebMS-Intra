@@ -831,6 +831,20 @@ class Logger
      * text in logs. Mirrors the csrf_token/oauth_state/oauth_nonce scrub
      * already applied to session snapshots in activity() above.
      *
+     *
+     * 🔗 THE ADDRESS THE BROWSER CAME FROM (the "Referer" header) is kept, but
+     * only up to its "?" (#580). WHAT WAS WRONG: a password-reset link is an
+     * address with the secret after the "?". When the reset form was sent and
+     * refused (passwords that differ, one too weak, an expired form), the
+     * browser named the page it came from, and this stored the whole link in
+     * tblActivityLogs: unused and still good for the rest of its hour, to
+     * anybody who could read that table or a backup of it. Found by running
+     * it on 12 October 2026. The page a request came from is still worth
+     * knowing; what follows the "?" (or a "#") is not, on any page.
+     *
+     * WHAT THIS CANNOT DO: it does not clean rows already written. A link
+     * stored before this change stays there until it is used or runs out.
+     *
      * @param array<string, string> $headers
      * @return array<string, string>
      */
@@ -838,8 +852,12 @@ class Logger
     {
         static $sensitive = ['authorization', 'cookie', 'x-csrf-token', 'x-api-key'];
         foreach ($headers as $name => $value) {
-            if (in_array(strtolower((string) $name), $sensitive, true) === true) {
+            $lower = strtolower((string) $name);
+            if (in_array($lower, $sensitive, true) === true) {
                 $headers[$name] = '[redacted]';
+            } elseif ($lower === 'referer') {
+                // strcspn(): how many characters come before the first "?" or "#".
+                $headers[$name] = substr((string) $value, 0, strcspn((string) $value, '?#'));
             }
         }
         return $headers;

@@ -59,15 +59,31 @@ if (isset($_GET['reset']) === true && $_GET['reset'] === '1') {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
+    // 🧾 Who refused this try. The two flags decide which record, if any, this
+    //    page writes at the end (see "One record per refused try" below).
+    $addressBlocked = false; // this address already has too many failed tries
+    $signInRefused  = false; // Auth::loginLocal() said no, and wrote its own record
+
+    // 🧵 A form field is text or it is nothing (#580). A browser sends text;
+    //    a request written by hand can send a LIST instead ("username[]=x"),
+    //    and handing a list to trim() stopped this page with an error 500.
+    //    Anything that is not text is read as empty and answered like any
+    //    other empty or wrong value.
+    $text = static fn (mixed $value): string => is_string($value) === true ? $value : '';
+
     // 🚦 Rate-limit check (block brute-force attempts)
     if (RateLimiter::isBlocked() === true) {
-        $remaining = RateLimiter::lockoutRemaining();
-        $errorMsg  = t('auth.too_many_attempts', ['minutes' => $remaining]);
+        // At least 1: in the last second of a block the time left rounds to
+        // 0, and "try again in 0 minute(s)" was shown to somebody who had
+        // just been refused (#580).
+        $remaining      = max(1, RateLimiter::lockoutRemaining());
+        $errorMsg       = t('auth.too_many_attempts', ['minutes' => $remaining]);
+        $addressBlocked = true;
     }
 
     // 🔒 CSRF check
     if ($errorMsg === '') {
-        if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+        if (Auth::verifyCsrf($text($_POST['csrf_token'] ?? '')) === false) {
             $errorMsg = t('auth.invalid_session_token');
         }
     }
@@ -81,8 +97,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // 📝 Validate required fields
     if ($errorMsg === '') {
-        $username = trim($_POST['username'] ?? '');
-        $password = $_POST['password'] ?? '';
+        $username = trim($text($_POST['username'] ?? ''));
+        $password = $text($_POST['password'] ?? '');
         if ($username === '' || $password === '') {
             $errorMsg = t('auth.enter_credentials');
         }
@@ -115,11 +131,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: ' . $target, true, 302);
             exit();
         }
-        $errorMsg = t('auth.invalid_credentials');
+        // 🚦 Refused. Say WHY truthfully (#580): a limit that was reached, or
+        //    a wrong name or password.
+        //
+        //    WHAT WAS WRONG. When the limit for one NAME was reached (ten
+        //    failures, from any number of addresses), this said "Invalid
+        //    credentials." to the account's real owner typing the RIGHT
+        //    password, with nothing to say that waiting would help.
+        //
+        //    Saying "Too many failed attempts" gives nothing away: a made-up
+        //    name is counted, blocked and answered in exactly the same way.
+        //    The same message covers a try that Auth::loginLocal() found the
+        //    address blocked for (tries sent at the same moment get past the
+        //    check at the top of this page, and are caught there).
+        $waitMinutes   = Auth::localSignInWaitMinutes();
+        $errorMsg      = $waitMinutes > 0
+            ? t('auth.too_many_attempts', ['minutes' => $waitMinutes])
+            : t('auth.invalid_credentials');
+        $signInRefused = true;
     }
 
+    // 🧾 One record per refused try (#580).
+    //
+    //    WHAT WAS WRONG. This page used to write a 'LoginFailed' record for
+    //    EVERY refusal. Two faults came out of that one line:
+    //
+    //    1. A wrong password was counted twice. Auth::loginLocal() already
+    //       writes a 'LoginFailed' record when it refuses (and that one names
+    //       the person, which the per-name limit depends on). This page then
+    //       wrote a second. The limit is 5 records in 15 minutes for one
+    //       address, so THREE wrong passwords blocked an address, not five.
+    //    2. A try made while the address was already blocked wrote one more
+    //       'LoginFailed' record. Each one pushed the end of the block further
+    //       away, so somebody who kept trying stayed blocked, and the "try
+    //       again in N minutes" on screen promised less than the real wait.
+    //
+    //    WHAT IT DOES NOW.
+    //    - Auth::loginLocal() refused: nothing is written here. It has already
+    //      written the record for this try: 'LoginFailed' for an unknown name
+    //      or a wrong password, 'LoginBlocked' when a limit was reached (the
+    //      name's own, or this address's when tries arrive together).
+    //    - The address is already blocked: 'LoginBlocked', the name
+    //      Auth::loginLocal() uses for the same thing. RateLimiter counts
+    //      'LoginFailed' only, so this record is kept for the audit trail and
+    //      does not make the block last longer. No password was checked.
+    //    - This page's own refusals (an expired form, a failed captcha, an
+    //      empty field): one 'LoginFailed' record, exactly as before.
+    //
+    //    WHEN A BLOCK ENDS. The address is blocked while five 'LoginFailed'
+    //    records are less than 15 minutes old (both numbers are settings), so
+    //    it ends when the OLDEST of the five turns 15 minutes old. Five wrong
+    //    passwords typed one after another therefore block for 15 minutes; if
+    //    they were spread over ten minutes, the block lasts the five that are
+    //    left. That is the figure RateLimiter::lockoutRemaining() shows on
+    //    screen, and it is now true.
+    //
+    //    REJECTED: taking the record out of Auth::loginLocal() instead. That
+    //    record is the one that names the person, so the per-name limit (ten
+    //    wrong passwords for one name, from any number of addresses) would
+    //    have stopped working.
     if ($errorMsg !== '') {
-        Logger::activity('LoginFailed', $errorMsg);
+        if ($addressBlocked === true) {
+            Logger::activity('LoginBlocked', 'Sign-in try refused: too many failed tries from this address. No password was checked.');
+        } elseif ($signInRefused === false) {
+            Logger::activity('LoginFailed', $errorMsg);
+        }
     }
 }
 

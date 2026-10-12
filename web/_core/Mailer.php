@@ -59,6 +59,132 @@ class Mailer
     private static string $token    = '';
     private static int    $tokenExp = 0;
 
+    /** @var string The Google route: the Gmail API, through a service account. */
+    private const ROUTE_GOOGLE = 'google';
+
+    /** @var string The Microsoft 365 route: Microsoft Graph. Also what any other value of `mail.provider` means. */
+    private const ROUTE_MS365 = 'ms365';
+
+    /**
+     * 🧭 Which route send() will use: ROUTE_GOOGLE or ROUTE_MS365.
+     *
+     * `mail.provider = 'google'` means Google. Every other value, including an
+     * empty one and the 'smtp' that some screens offer, means Microsoft 365,
+     * because that is what send() has always done with it. There is no SMTP
+     * route in this portal today.
+     *
+     * Reads the same `$SETTINGS` array send() read before this function
+     * existed, in the same way, so nothing about sending changed.
+     */
+    private static function route(): string
+    {
+        global $SETTINGS;
+
+        return strtolower($SETTINGS['mail']['provider'] ?? self::ROUTE_MS365) === self::ROUTE_GOOGLE
+            ? self::ROUTE_GOOGLE
+            : self::ROUTE_MS365;
+    }
+
+    /**
+     * ✅ Is a mail route set up that can send? (#580)
+     *
+     * THE ONE PLACE this question is answered. A page that needs to know
+     * whether an e-mail can go out asks here, and never tests a provider's
+     * settings itself.
+     *
+     * WHY IT EXISTS. "Forgot password" used to make its own test: a Microsoft
+     * client ID and a "from" address. An organisation that sent through Google
+     * has neither, so the page told people a reset link had been sent and sent
+     * nothing, although the Google route worked.
+     *
+     * ADDING A ROUTE (SMTP, a queue, anything else) IS DONE HERE: teach
+     * route() to choose it, send() to hand the message to it, and
+     * sendingRoute() what it needs before it can send. No page has to change,
+     * and none should: do not add a second test anywhere.
+     *
+     * WHAT THIS CANNOT TELL YOU. It reads settings and looks for one file. It
+     * does not contact the provider, so "yes" means "everything send() insists
+     * on is filled in", NOT "the provider will accept the message". A wrong
+     * secret, a mailbox the application may not send as, or a provider that is
+     * down all still answer "yes" here. Only a real send proves delivery:
+     * Admin, Integrations, Email has a "Send test" button for that.
+     *
+     * @return bool True when the chosen route has everything send() needs.
+     */
+    public static function canSend(): bool
+    {
+        return self::sendingRoute()['missing'] === [];
+    }
+
+    /**
+     * 🧾 The route send() will use, and what it still needs before it can send.
+     *
+     * canSend() is built on this, so the two cannot disagree. It is public
+     * because the administrator's pages show the route's name and the list of
+     * what is missing (Admin, Integrations, Email, and the health page).
+     *
+     * It describes the CHOSEN route only, because that is the only one send()
+     * tries first. Settings filled in for the other route do not count: with
+     * `mail.provider` left on Microsoft 365 and only Google filled in, send()
+     * fails, so this says "not ready" and lists what Microsoft 365 needs.
+     * (`mail.fallbackProvider` does not change that: the fallback is tried
+     * only after Microsoft has refused a message, which cannot happen until
+     * the Microsoft settings are filled in.)
+     *
+     * Each list below is exactly what the sending code refuses to work
+     * without: accessToken() and effectiveSender() here for Microsoft 365,
+     * MailerGoogle::send() and MailerGoogle::accessToken() for Google. If one
+     * of those starts needing something more, add it here too.
+     *
+     * The same limits as canSend(): settings and one file, nothing more.
+     *
+     * @return array{route: string, label: string, missing: list<string>}
+     *         route:   'ms365' or 'google'.
+     *         label:   the route's name for a person to read.
+     *         missing: what is still needed, in plain words. Empty = ready.
+     */
+    public static function sendingRoute(): array
+    {
+        global $SETTINGS;
+
+        $missing = [];
+
+        if (self::route() === self::ROUTE_GOOGLE) {
+            $keyFile = trim((string) ($SETTINGS['mail']['google']['serviceAccountKeyFile'] ?? ''));
+            if ($keyFile === '') {
+                $missing[] = 'the name of the Google service account key file';
+            } elseif (is_readable(PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . $keyFile) === false) {
+                // The name is set but the file is not where MailerGoogle
+                // looks for it. Without this, a half-finished set-up read
+                // as ready and every send failed.
+                $missing[] = 'the Google key file itself: "' . $keyFile . '" is not in the portal\'s _auth_keys folder, or cannot be read';
+            }
+            if (trim((string) ($SETTINGS['mail']['google']['delegateUser'] ?? '')) === '') {
+                $missing[] = 'the Google address to send from (the delegate user)';
+            }
+
+            return ['route' => self::ROUTE_GOOGLE, 'label' => 'Google', 'missing' => $missing];
+        }
+
+        if (trim((string) ($SETTINGS['auth']['ms365']['tenantID'] ?? '')) === '') {
+            $missing[] = 'the Microsoft 365 tenant ID';
+        }
+        if (trim((string) ($SETTINGS['auth']['ms365']['appwide']['clientID'] ?? '')) === '') {
+            $missing[] = 'the Microsoft 365 application (client) ID';
+        }
+        if (trim((string) ($SETTINGS['auth']['ms365']['appwide']['clientSecret'] ?? '')) === '') {
+            $missing[] = 'the Microsoft 365 client secret';
+        }
+        // The same rule send() uses for the sender, asked quietly: this runs on
+        // the health page, which monitors load every few minutes, and must not
+        // write an error record each time.
+        if (self::effectiveSender(true) === null) {
+            $missing[] = 'an address to send from (the "from" address, or a shared mailbox)';
+        }
+
+        return ['route' => self::ROUTE_MS365, 'label' => 'Microsoft 365', 'missing' => $missing];
+    }
+
     /**
      * 📧 Send an email via the configured provider.
      *
@@ -74,8 +200,6 @@ class Mailer
      */
     public static function send(string|array $to, string $subj, string $body, array $files = []): bool
     {
-        global $SETTINGS;
-
         // 🪞 Normalise $to to an array so callers can pass a single
         //    string without thinking about it.
         $recipients = is_array($to) ? $to : [$to];
@@ -98,10 +222,10 @@ class Mailer
             ? self::htmlToPlain($body)
             : $body;
 
-        // 🔀 Dispatch to the configured provider
-        $provider = strtolower($SETTINGS['mail']['provider'] ?? 'ms365');
-
-        if ($provider === 'google') {
+        // 🔀 Dispatch to the configured provider. route() is the one place
+        //    that reads the choice, so that sendingRoute() and canSend()
+        //    below can never describe a different route from the one used here.
+        if (self::route() === self::ROUTE_GOOGLE) {
             return MailerGoogle::send($recipients, $subj, $htmlBody, $files);
         }
 
@@ -245,9 +369,13 @@ class Mailer
      * this path ever reads `$_POST`/`$_GET` — a caller cannot pick an
      * arbitrary mailbox to send as.
      *
+     * @param bool $quiet True when only asking WHETHER there is a sender
+     *                    (sendingRoute() does): rule 2 then writes no error
+     *                    record. A real send leaves it false.
+     *
      * @return array{mailbox: string, address: string, name: string, isShared: bool}|null
      */
-    private static function effectiveSender(): ?array
+    private static function effectiveSender(bool $quiet = false): ?array
     {
         global $SETTINGS;
 
@@ -266,13 +394,15 @@ class Mailer
             // 🩹 Hand-edited to something invalid — never a hard failure,
             //    fall back to the legacy address so portal mail keeps
             //    flowing while an admin fixes the setting.
-            Logger::errorPlatform(
-                'Graph',
-                'Error',
-                'BAD_SHARED_MAILBOX',
-                'mail.ms365.sharedMailbox is not a valid email address — falling back to mail.defaultFromAddress',
-                $shared
-            );
+            if ($quiet === false) {
+                Logger::errorPlatform(
+                    'Graph',
+                    'Error',
+                    'BAD_SHARED_MAILBOX',
+                    'mail.ms365.sharedMailbox is not a valid email address — falling back to mail.defaultFromAddress',
+                    $shared
+                );
+            }
         }
 
         $fromAddr = trim((string) ($SETTINGS['mail']['defaultFromAddress'] ?? ''));

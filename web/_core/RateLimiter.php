@@ -52,6 +52,25 @@ class RateLimiter
     /** @var int Default time window in minutes for counting failures */
     private const DEFAULT_WINDOW_MINUTES = 15;
 
+    /**
+     * @var string How Auth::loginLocal() words a failed sign-in for a name with
+     *      no usable account, and for a wrong password. The name the failure
+     *      is counted under follows each. They live HERE because the limit for
+     *      one name finds its records by this exact wording
+     *      (nameFailuresSql()): the writer and the counter must not drift
+     *      apart, so both use these two constants.
+     */
+    public const FAILED_NO_ACCOUNT     = 'Failed login attempt for: ';
+    public const FAILED_WRONG_PASSWORD = 'Incorrect password for: ';
+
+    /**
+     * @var string The record a completed password reset writes for the
+     *      account's name (clearNameFailures()). Failures recorded BEFORE the
+     *      newest such record are no longer counted against that name.
+     */
+    private const NAME_CLEARED_TYPE   = 'LoginNameCountCleared';
+    private const NAME_CLEARED_PREFIX = 'Failed sign-in count cleared for: ';
+
     /** @var string The default forwarded header: the standard chain of hops. */
     private const HEADER_FORWARDED_FOR = 'x-forwarded-for';
 
@@ -120,13 +139,15 @@ class RateLimiter
      *     per-username limit (DEFAULT_MAX_ATTEMPTS_BY_USERNAME, default 10 /
      *     15min) — this is the case that pure IP-based limiting misses.
      *
-     * Also defends multi-user shared NAT scenarios: when ONE user behind a
-     * shared NAT fumbles their password, the per-username limit fires on
-     * THEIR account only, not on the NAT IP — so the rest of the office
-     * stays unblocked.
+     * WHAT THIS DOES NOT DO for people who share one address (an office, a
+     * school, a household): the limit for one address counts everybody behind
+     * it together. Five failed tries from that address block the WHOLE
+     * address for the rest of the 15 minutes, whoever typed them. (This
+     * comment used to say the rest of the office stays unblocked. That was
+     * never true: the address limit trips first, at five.)
      *
-     * @param string      $username Submitted username / email (case-folded
-     *                              internally before matching)
+     * @param string      $username The name the failures are counted under:
+     *                              see isNameBlocked()
      * @param string|null $ip       Client IP (null = auto-detect)
      *
      * @return bool True if either limit has tripped
@@ -143,21 +164,137 @@ class RateLimiter
         }
 
         // 🛡️ Username-only check (across all IPs)
-        $username = trim(strtolower($username));
-        if ($username === '') {
+        return self::isNameBlocked($username);
+    }
+
+    /**
+     * Is this NAME blocked: ten failed sign-ins for it, from any number of
+     * addresses, less than 15 minutes old (both numbers are settings)?
+     *
+     * WHICH NAME (#580). Auth::loginLocal() counts a failure under ONE fixed
+     * form for an account, its user name, whichever of the user name and the
+     * e-mail address was typed. It used to count under the text as typed, so
+     * one account could be tried ten times by its user name and ten more by
+     * its e-mail address. A name with no account is counted under the text
+     * typed, so a made-up name is limited and answered exactly like a real
+     * one.
+     *
+     * @param string $name The account's user name, or the text typed when
+     *                     there is no account. Capitals and outer spaces are
+     *                     folded here.
+     *
+     * @return bool True when the limit for one name has been reached
+     */
+    public static function isNameBlocked(string $name): bool
+    {
+        $name = self::nameKey($name);
+        if ($name === '') {
             return false;  // nothing to match; behave like pure IP limiter
         }
 
-        $maxByUsername  = self::getMaxAttemptsByUsername();
-        $windowMinutes  = self::getWindowMinutes();
-        $userFailures   = self::countRecentFailuresByUsername($username, $windowMinutes);
+        return self::countRecentFailuresByUsername($name, self::getWindowMinutes()) >= self::getMaxAttemptsByUsername();
+    }
 
-        return $userFailures >= $maxByUsername;
+    /**
+     * Minutes until a block on a NAME ends; 0 when the name is not blocked.
+     *
+     * The name is blocked while ten of its failures are less than 15 minutes
+     * old. So the block ends when the TENTH NEWEST of them turns 15 minutes
+     * old: from then on fewer than ten are left. (Not the oldest: tries from
+     * several addresses at one moment can leave more than ten on record, and
+     * the oldest ageing out would then still leave ten.) The database works
+     * the time out, on the clock it counts by; lockoutRemaining() has the
+     * story of why.
+     *
+     * @param string $name As for isNameBlocked().
+     *
+     * @return int Whole minutes, rounded up; never 0 while blocked.
+     */
+    public static function nameLockoutRemaining(string $name): int
+    {
+        $name = self::nameKey($name);
+        if ($name === '' || self::isNameBlocked($name) === false) {
+            return 0;
+        }
+
+        $windowMinutes = self::getWindowMinutes();
+        $skip          = max(0, self::getMaxAttemptsByUsername() - 1);
+        $stmt = App::db()->prepare(
+            'SELECT TIMESTAMPDIFF(SECOND, NOW(), DATE_ADD(timestamp, INTERVAL ? MINUTE)) AS secondsLeft '
+            . self::nameFailuresSql()
+            . ' ORDER BY timestamp DESC, logID DESC LIMIT 1 OFFSET ?'
+        );
+        if ($stmt === false) {
+            return $windowMinutes; // Assume the full wait on DB error
+        }
+        [$failed, $noAccount, $wrongPassword, $cleared, $clearedFor] = self::nameFailuresValues($name);
+        $stmt->bind_param('isissssi', $windowMinutes, $failed, $windowMinutes, $noAccount, $wrongPassword, $cleared, $clearedFor, $skip);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return max(1, (int) ceil(((int) ($row['secondsLeft'] ?? 0)) / 60));
+    }
+
+    /**
+     * Stop counting the failures recorded so far against one name. Called
+     * when that account's password reset is completed (owner, Salem874,
+     * 12 October 2026): the person has just proved they can read the
+     * account's mailbox, and without this a stranger could keep the real
+     * owner out for as long as they kept sending wrong passwords, reset or
+     * no reset.
+     *
+     * Nothing is deleted. One record is written, and the count for a name
+     * ignores failures older than its newest such record. So the audit trail
+     * keeps every failed try.
+     *
+     * WHAT IT DOES NOT DO: it does not touch the limit for an ADDRESS. That
+     * block belongs to the address, not to one person: clearing it would let
+     * somebody with one account of their own wipe the count for their address
+     * and go on guessing other people's passwords.
+     *
+     * @param string $name The account's user name.
+     */
+    public static function clearNameFailures(string $name): void
+    {
+        $name = self::nameKey($name);
+        if ($name !== '') {
+            Logger::activity(self::NAME_CLEARED_TYPE, self::NAME_CLEARED_PREFIX . $name);
+        }
+    }
+
+    /** The one form a name is counted under: no outer spaces, no capitals. */
+    private static function nameKey(string $name): string
+    {
+        return strtolower(trim($name));
     }
 
     /**
      * Get the number of minutes remaining in the lockout period.
      * Returns 0 if the IP is not currently blocked.
+     *
+     * WHAT WAS WRONG (#580). The time of the oldest failure was read from the
+     * database as text and turned into a moment by PHP, then compared with
+     * PHP's own clock. The database writes that time by ITS clock; PHP reads
+     * it in the organisation's time zone. Whenever the two zones differ (a
+     * database server keeps its own clock, whatever zone an organisation
+     * chooses), the answer was hours out: with the portal on New Zealand time
+     * and the database on UTC the sign-in page said "try again in 0
+     * minute(s)" to somebody with 15 minutes to wait (run on 12 October
+     * 2026). The block itself was never affected, only the number shown.
+     *
+     * WHAT THIS STILL CANNOT DO. The window is counted in times that carry no
+     * zone, on the database server's clock. On a server whose clock changes
+     * twice a year, the hour of the change is counted wrongly, here and in
+     * isBlocked(). That was so before #580 and is not changed by it.
+     *
+     * NOW the database works out the time left itself, so both ends of the
+     * sum come from one clock: the same clock isBlocked() counts by. The
+     * number therefore always agrees with when the block really ends.
+     *
+     * NEVER 0 WHILE BLOCKED. In the last second of a block the time left
+     * rounds to 0, and the screen said "try again in 0 minute(s)" to somebody
+     * who was still refused. A blocked address is now told at least 1.
      *
      * @param string|null $ip The IP address to check (null = auto-detect)
      *
@@ -173,12 +310,13 @@ class RateLimiter
             return 0;
         }
 
-        // 🔍 Find the timestamp of the oldest failure in the current window
+        // 🔍 Seconds from now until the oldest failure in the current window
+        //    is a whole window old, worked out by the database (see above).
         $windowMinutes = self::getWindowMinutes();
         $db = App::db();
 
         $stmt = $db->prepare(
-            'SELECT MIN(timestamp) AS earliest '
+            'SELECT TIMESTAMPDIFF(SECOND, NOW(), DATE_ADD(MIN(timestamp), INTERVAL ? MINUTE)) AS secondsLeft '
             . 'FROM tblActivityLogs '
             . 'WHERE visitorIP = ? '
             . 'AND activityType = ? '
@@ -190,22 +328,16 @@ class RateLimiter
         }
 
         $type = 'LoginFailed';
-        $stmt->bind_param('ssi', $ip, $type, $windowMinutes);
+        $stmt->bind_param('issi', $windowMinutes, $ip, $type, $windowMinutes);
         $stmt->execute();
         $result = $stmt->get_result();
         $row = $result->fetch_assoc();
         $stmt->close();
 
-        if ($row === null || $row['earliest'] === null) {
-            return 0;
-        }
-
-        // ⏱️ Calculate minutes remaining from the earliest failure + window
-        $earliestTime = strtotime($row['earliest']);
-        $expiryTime   = $earliestTime + ($windowMinutes * 60);
-        $remaining    = (int) ceil(($expiryTime - time()) / 60);
-
-        return max(0, $remaining);
+        // ⏱️ Rounded UP to whole minutes, so the screen never promises less
+        //    than the real wait, and never less than 1: isBlocked() said this
+        //    address IS blocked a moment ago (see "NEVER 0 WHILE BLOCKED").
+        return max(1, (int) ceil(((int) ($row['secondsLeft'] ?? 0)) / 60));
     }
 
     /**
@@ -247,41 +379,74 @@ class RateLimiter
     }
 
     /**
-     * Count recent LoginFailed entries whose activityDescription mentions
-     * the given username — across ALL source IPs.
+     * Count the recent failed sign-ins recorded for one name, from ALL
+     * addresses.
      *
-     * The login handler logs failures as e.g.
-     *   "Failed login attempt for: alice@example.com"
-     *   "Incorrect password for: alice@example.com"
-     * so a LIKE '%username%' match catches both forms.
+     * WHAT WAS WRONG (#580). This matched any record whose text CONTAINED the
+     * name (LIKE '%name%'). So ten failures for "joann" also blocked "ann",
+     * and anybody could lock a short name out by failing as a longer one.
+     * NOW the record must be exactly one of the two sentences
+     * Auth::loginLocal() writes for that name (FAILED_NO_ACCOUNT,
+     * FAILED_WRONG_PASSWORD). The table's own rules for comparing text still
+     * fold capitals and accents.
      *
-     * The username is bound via prepared statement parameter so SQL
-     * injection is impossible. To prevent the user's literal '%' / '_'
-     * from broadening the LIKE pattern, we escape them before binding.
+     * Failures recorded before the name's newest "count cleared" record are
+     * left out: see clearNameFailures().
+     *
+     * WHAT THIS CANNOT DO. It reads the activity log, which has no index for
+     * this, so every sign-in try scans the log (as it always has). And for
+     * the first 15 minutes after this change is installed, failures recorded
+     * the old way under an e-mail address are not counted against the
+     * account.
+     *
+     * @param string $name          Already folded by nameKey().
+     * @param int    $windowMinutes Time window in minutes
      */
-    private static function countRecentFailuresByUsername(string $username, int $windowMinutes): int
+    private static function countRecentFailuresByUsername(string $name, int $windowMinutes): int
     {
-        // 🛡️ Escape SQL LIKE metacharacters
-        $pattern = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $username) . '%';
-
-        $db = App::db();
-        $stmt = $db->prepare(
-            'SELECT COUNT(*) AS failCount '
-            . 'FROM tblActivityLogs '
-            . 'WHERE activityType = ? '
-            . 'AND timestamp >= DATE_SUB(NOW(), INTERVAL ? MINUTE) '
-            . 'AND LOWER(activityDescription) LIKE ?'
-        );
+        $stmt = App::db()->prepare('SELECT COUNT(*) AS failCount ' . self::nameFailuresSql());
         if ($stmt === false) {
             return 0;  // fail open on DB error
         }
-        $type = 'LoginFailed';
-        $stmt->bind_param('sis', $type, $windowMinutes, $pattern);
+        [$failed, $noAccount, $wrongPassword, $cleared, $clearedFor] = self::nameFailuresValues($name);
+        $stmt->bind_param('sissss', $failed, $windowMinutes, $noAccount, $wrongPassword, $cleared, $clearedFor);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();
 
         return (int) ($row['failCount'] ?? 0);
+    }
+
+    /**
+     * The part of a query that picks out the failures counted against one
+     * name. One copy, so the count and the time left can never disagree
+     * about which records they mean. Its six values, in order: the record
+     * type, the window in minutes, then the rest of nameFailuresValues().
+     */
+    private static function nameFailuresSql(): string
+    {
+        return 'FROM tblActivityLogs '
+            . 'WHERE activityType = ? '
+            . 'AND timestamp >= DATE_SUB(NOW(), INTERVAL ? MINUTE) '
+            . 'AND activityDescription IN (?, ?) '
+            . 'AND logID > (SELECT COALESCE(MAX(C.logID), 0) FROM tblActivityLogs C '
+            . 'WHERE C.activityType = ? AND C.activityDescription = ?)';
+    }
+
+    /**
+     * The values nameFailuresSql() is given for one name, without the window.
+     *
+     * @return array{0: string, 1: string, 2: string, 3: string, 4: string}
+     */
+    private static function nameFailuresValues(string $name): array
+    {
+        return [
+            'LoginFailed',
+            self::FAILED_NO_ACCOUNT . $name,
+            self::FAILED_WRONG_PASSWORD . $name,
+            self::NAME_CLEARED_TYPE,
+            self::NAME_CLEARED_PREFIX . $name,
+        ];
     }
 
     /**
@@ -477,6 +642,11 @@ class RateLimiter
      * populate a Retry-After response header. Returns 0 if the bucket is
      * not currently over the limit.
      *
+     * The database works the time out itself (#580). It used to be worked
+     * out in PHP from a time the database had written, which is hours wrong
+     * whenever the organisation's time zone is not the database server's;
+     * lockoutRemaining() above has the whole story.
+     *
      * @param string $bucket        Limiter bucket key, e.g. 'apikey:42'
      * @param int    $maxHits       Maximum hits allowed within the window
      * @param int    $windowSeconds Sliding window size, in seconds
@@ -491,7 +661,7 @@ class RateLimiter
 
         $db = App::db();
         $stmt = $db->prepare(
-            'SELECT MIN(hitAt) AS earliest '
+            'SELECT TIMESTAMPDIFF(SECOND, NOW(), DATE_ADD(MIN(hitAt), INTERVAL ? SECOND)) AS secondsLeft '
             . 'FROM tblApiRateLimits '
             . 'WHERE bucket = ? '
             . 'AND hitAt >= NOW() - INTERVAL ? SECOND'
@@ -499,20 +669,16 @@ class RateLimiter
         if ($stmt === false) {
             return $windowSeconds; // Assume the full window on DB error
         }
-        $stmt->bind_param('si', $bucket, $windowSeconds);
+        $stmt->bind_param('isi', $windowSeconds, $bucket, $windowSeconds);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();
 
-        if ($row === null || $row['earliest'] === null) {
+        if ($row === null || $row['secondsLeft'] === null) {
             return 0;
         }
 
-        $earliestTime = strtotime((string) $row['earliest']);
-        $expiryTime   = $earliestTime + $windowSeconds;
-        $remaining    = $expiryTime - time();
-
-        return max(0, $remaining);
+        return max(0, (int) $row['secondsLeft']);
     }
 
     /**

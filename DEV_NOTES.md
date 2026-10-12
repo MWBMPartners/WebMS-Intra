@@ -5640,6 +5640,23 @@ philosophy, same "no oracle" security reasoning:
 
 ---
 
+## Sign-in limits and password reset (#580)
+
+- **`Mailer::canSend()` is the one place that answers "can the portal send e-mail?"** `Mailer::sendingRoute()` beside it gives the route's name and what is still missing. A page must never test a provider's settings itself. A new mail route is added in `Mailer::route()` and `Mailer::sendingRoute()` and nowhere else. "Yes" is not proof of delivery.
+- **Sign-in records.** `LoginFailed` is what the limits count: one per wrong password (written by `Auth::loginLocal()`) or per refusal by the page itself (expired form, captcha, empty field). `LoginBlocked` is a try refused because a limit was already reached; it is never counted. `LoginNameCountCleared` is written when a password reset is completed: failures for that name older than it are no longer counted (nothing is deleted).
+- **The limit for one name is counted by account.** `Auth::loginLocal()` records a failure under the account's user name, whichever of the name and the e-mail address was typed, using `RateLimiter::FAILED_NO_ACCOUNT` and `FAILED_WRONG_PASSWORD`. The counter matches those sentences exactly. Change the wording in those two constants only.
+- **One sign-in try at a time for each visitor address.** `Auth::loginLocal()` holds a named database lock (`GET_LOCK`) for the address from the count to the record. MySQL frees it when the request's connection closes, so a dead request cannot leave an address locked. A try that cannot have the lock within 5 seconds is refused as blocked. Tries at one NAME from many addresses at once do not take turns.
+- **`Auth::NO_ACCOUNT_HASH`** is the made-up fingerprint checked when a name has no usable account. Its cost must equal what `password_hash(…, PASSWORD_DEFAULT)` gives; the self-test fails when they differ. Accounts whose password was last set under PHP 8.3 or older (cost 10) are checked faster than it and can be told apart until the password is next changed.
+- **Reset links.** `Auth::storeResetLink()` and `Auth::findResetLink()` are the only code that writes or judges a link. `tblPasswordResets.expiresAt` is a moment in UTC (rows written before this version held the page's local time; the changed fingerprint makes those rows unreachable). `tokenHash` is the SHA-256 of a fixed prefix plus the link's secret. Both column comments in `full_schema.sql` should say so at the next database change.
+- **"Forgot password" answers first.** It uses `fastcgi_finish_request()` (PHP-FPM) or `litespeed_finish_request()`, and otherwise sends a complete, zero-length answer and carries on. A web server that holds PHP's output until the script ends (Apache with mod_fcgid, CGI) still makes the person wait for the e-mail, so the time still differs there. Closing that on every host needs the e-mail to be queued and sent by the scheduled job.
+- **`Logger::redactSensitiveHeaders()` cuts the `Referer` header at its "?" or "#"**, for every record. Rows written before this version are not cleaned.
+- **Reset limits** use the general counter (`RateLimiter::tooMany()` / `recordHit()`), buckets `pwreset:ask:<fingerprint of the address>` and `pwreset:use:<…>`.
+- **`RateLimiter::lockoutRemaining()`, `nameLockoutRemaining()` and `retryAfter()` ask the database for the time left**, so both ends of the sum use one clock. Do not go back to `strtotime()` on a time the database wrote.
+- **Self-test:** `tools/sign-in-limits-selftest.php` (114 checks; needs a `selftest_` database that knows time zones by name, and nine free ports: the web port, the mail port and the seven after it; starts its own stand-in for the mail services). Run on MySQL 8.0.36 and 8.4.11. It is not run on GitHub, like the other page self-tests.
+- **New activity record types:** `PasswordResetMailFailed` (the provider refused the message; it used to be recorded as sent) and `LoginNameCountCleared`.
+
+---
+
 ## The mail library (`web/_core/maillib/`, #592)
 
 Part one of six. **Nothing calls it yet**, so no user can reach it; the queue and the

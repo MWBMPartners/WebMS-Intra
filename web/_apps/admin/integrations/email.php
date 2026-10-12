@@ -25,6 +25,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Mailer;
+use Portal\Core\Router;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -51,6 +52,15 @@ if ($activeProvider === 'google') {
     $sharedMailbox = trim((string) ($settings['mail']['ms365']['sharedMailbox'] ?? ''));
     $senderEmail   = $sharedMailbox !== '' ? $sharedMailbox : (string) ($settings['mail']['defaultFromAddress'] ?? '');
 }
+// 🧭 Can the portal send e-mail at all? (#580)
+//    Asked of Mailer, the one place that knows, and shown at the top of the
+//    page. Before this, nothing told an administrator that mail was not set
+//    up: "Forgot password" went on telling people a link had been sent, and
+//    the first anybody heard of it was a person who could not get back in.
+//    It reads settings only, so "ready" is not proof that a message arrives;
+//    the notice says so and points at "Send test".
+$mailRoute = Mailer::sendingRoute();
+
 $senderDomain = '';
 if ($senderEmail !== '' && str_contains($senderEmail, '@')) {
     $senderDomain = substr($senderEmail, strpos($senderEmail, '@') + 1);
@@ -184,6 +194,51 @@ $csrf = Auth::csrfToken();
 
 <?php if ($flash !== ''): ?>
     <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($flash, ENT_QUOTES, 'UTF-8'); ?></div>
+<?php endif; ?>
+
+<?php if ($mailRoute['missing'] !== []): ?>
+    <!-- 🚫 No mail route can send. Said plainly, with what to do about it. -->
+    <div class="alert alert-danger" role="alert" data-mail-status="not-ready">
+        <h2 class="h5 alert-heading"><i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>This portal cannot send e-mail yet</h2>
+        <p>
+            Password-reset links are not being sent. A person who asks for one is still told it was sent,
+            so that nobody can use that page to find out who has an account. Until this is put right,
+            somebody who forgets their password needs an administrator to reset it for them.
+        </p>
+        <p class="mb-1">
+            E-mail is set to go through <strong><?php echo htmlspecialchars($mailRoute['label'], ENT_QUOTES, 'UTF-8'); ?></strong>.
+            Still needed:
+        </p>
+        <ul>
+            <?php foreach ($mailRoute['missing'] as $missingItem): ?>
+                <li><?php echo htmlspecialchars($missingItem, ENT_QUOTES, 'UTF-8'); ?></li>
+            <?php endforeach; ?>
+        </ul>
+        <?php
+        // 📍 Where these are really typed (#580). This notice used to send the
+        //    administrator to the Integrations page for all of them. That page
+        //    SHOWS the mail settings, but the only ones it lets anybody type
+        //    are the shared mailbox and its name. The rest are typed on the
+        //    Settings page, and a Google key file is not typed anywhere: it is
+        //    a file put on the server.
+        ?>
+        <p class="mb-0">
+            Fill these in on the <a href="<?php echo htmlspecialchars(Router::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">Settings page</a>.
+            Two exceptions: a shared mailbox to send from is typed on the
+            <a href="<?php echo htmlspecialchars(Router::url('admin/integrations'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">Integrations page</a>,
+            and a Google key file is a file that has to be put in the portal&rsquo;s <code>_auth_keys</code> folder on the server.
+            The portal can send through Microsoft 365 or Google; which one is used is the
+            <code>mail.provider</code> setting, also on the Settings page
+            (<code>ms365</code> or <code>google</code>). Then come back here and use &ldquo;Send test&rdquo;.
+        </p>
+    </div>
+<?php else: ?>
+    <!-- ✅ Everything the chosen route needs is filled in. That is all this can know. -->
+    <div class="alert alert-success" role="status" data-mail-status="ready">
+        <i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>
+        E-mail is set to go through <strong><?php echo htmlspecialchars($mailRoute['label'], ENT_QUOTES, 'UTF-8'); ?></strong>, and its settings are filled in.
+        That does not prove a message arrives: use &ldquo;Send test&rdquo; below to check.
+    </div>
 <?php endif; ?>
 
 <div class="row g-3">

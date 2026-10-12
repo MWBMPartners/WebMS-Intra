@@ -258,12 +258,12 @@ Local + SSO + multi-factor sign-in.
 | MS365 OAuth (PKCE + ID-token validation) | ✅ |
 | Google OAuth | ✅ |
 | WebAuthn / PassKey registration + login | ✅ |
-| Forgot password → email reset link | ✅ |
+| Forgot password → email reset link — links last 60 minutes (a setting), are stored only as a fingerprint, work once, and are refused for a switched-off account; it stays open, under its own limit, to somebody blocked from signing in (#580) | ✅ |
 | Reset password (token verified, single-use) | ✅ |
 | Account page (profile, change password, linked accounts, WebAuthn keys, unlink) | ✅ |
 | 2FA TOTP setup / verify / disable | ✅ |
 | **Password policy** — min 12 chars (configurable), independent complexity flags, max length, **client-side strength meter** | ✅ (#132) |
-| Login rate limiting — composite username+IP (`RateLimiter::isUserOrIpBlocked`) | ✅ (#52) |
+| Sign-in limit — 5 failed tries from one address, or 10 for one account (by user name or e-mail address), in 15 minutes; the screen says how long is left; a completed password reset frees the account's name | ✅ (#52, #580) |
 
 **Tables:** `tblUsers`, `tblLocalAccounts`, `tblPasswordResets`, `tblLinkedAccounts`, `tblWebAuthnCredentials`, `tblUserTotp`
 **Settings:** `auth.password.minLength`, `auth.password.maxLength`, `auth.password.requireUppercase`, `auth.password.requireLowercase`, `auth.password.requireNumber`, `auth.password.requireSpecial`, `auth.passwordReset.tokenExpiry`, `auth.ms365.*`, `auth.google.*`, `auth.turnstile.*`, `auth.recaptcha.*`, `auth.hcaptcha.*`, `auth.captcha.priority`
@@ -716,7 +716,7 @@ Self-contained 6-step setup wizard (bootstrap-free).
 | Password policy hardened (min 12, independent complexity, max length, full-flow validation) | ✅ (#132) |
 | Multi-provider Captcha with admin priority | ✅ (#130) |
 | Debug mode refused in production (logged, exception traces don't leak) | ✅ (#54) |
-| Login rate limiting on composite IP+username | ✅ (#52) |
+| Sign-in limit: 5 failed tries from one address, or 10 for one account, in 15 minutes | ✅ (#52, #580) |
 | Signed commits enforced | 🔜 (#106) |
 | Prod secrets behind GitHub Environment + reviewer gate | 🔜 (#105) |
 | Privacy / GDPR helpers | 🔜 (#47) |

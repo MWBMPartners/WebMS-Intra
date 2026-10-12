@@ -35,43 +35,55 @@ if (Auth::check() === true) {
     exit();
 }
 
+// 🔗 This page's address IS the reset link, so the browser is told never to
+//    pass it on (#580). Without this the browser names the page it came from
+//    when the form is sent, and a refused save used to store the whole link
+//    in the activity log (see Logger::redactSensitiveHeaders()). This
+//    replaces, for this page only, the policy the portal's start-up sets.
+//    WHAT IT CANNOT DO: it is a request to the browser. An old browser, or
+//    one set up otherwise, may ignore it; the logger's own cut is what the
+//    portal relies on.
+header('Referrer-Policy: no-referrer');
+
 // -----------------------------------------------------------------------------
 // 2. 🔑 Validate the reset token
 // -----------------------------------------------------------------------------
 
-$plaintextToken = $_GET['token'] ?? '';
+// Text or nothing: a list sent in its place ("token[]=x") is read as empty.
+$plaintextToken = (isset($_GET['token']) === true && is_string($_GET['token']) === true) ? $_GET['token'] : '';
 $tokenValid     = false;
 $errorMsg       = '';
 
 if ($plaintextToken === '') {
     $errorMsg = 'No reset token provided.';
 } else {
-    $tokenHash = hash('sha256', $plaintextToken);
+    // Auth::findResetLink() is the one place that decides. This page used to
+    // carry its own copy of the test, on the page's own clock (#580).
+    try {
+        $linkState = Auth::findResetLink($mysqli, $plaintextToken)['state'];
+    } catch (\Throwable $ex) {
+        $linkState = 'error';
+    }
 
-    $stmt = $mysqli->prepare(
-        'SELECT PR.resetID, PR.userID, PR.expiresAt '
-        . 'FROM tblPasswordResets PR '
-        . 'WHERE PR.tokenHash = ? AND PR.usedAt IS NULL '
-        . 'LIMIT 1'
-    );
-
-    if ($stmt === false) {
+    if ($linkState === 'usable') {
+        $tokenValid = true;
+    } elseif ($linkState === 'expired') {
+        $errorMsg = 'This reset link has expired. Please request a new one.';
+    } elseif ($linkState === 'error') {
         $errorMsg = 'A system error occurred. Please try again later.';
     } else {
-        $stmt->bind_param('s', $tokenHash);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $reset  = $result->fetch_assoc();
-        $stmt->close();
-
-        if ($reset === null) {
-            $errorMsg = 'This reset link is invalid or has already been used.';
-        } elseif (strtotime($reset['expiresAt']) < time()) {
-            $errorMsg = 'This reset link has expired. Please request a new one.';
-        } else {
-            $tokenValid = true;
-        }
+        $errorMsg = 'This reset link is invalid or has already been used.';
     }
+}
+
+// ⏳ Sent back here by the save page because this address has tried to use
+//    reset links too many times (#580). `wait` is a number of minutes the save
+//    page worked out. It arrives in the address, so a visitor can change it,
+//    but only what their own screen says: the limit itself is kept in the
+//    database. Held to 1 to 60 so that nothing odd can be printed.
+$waitMinutes = 0;
+if (isset($_GET['wait']) === true && is_string($_GET['wait']) === true && ctype_digit($_GET['wait']) === true) {
+    $waitMinutes = max(1, min(60, (int) $_GET['wait']));
 }
 
 // -----------------------------------------------------------------------------
@@ -119,6 +131,17 @@ $policyItems = $policy['rules'];
         <i class="fa-solid fa-lock-open fa-2x text-muted mb-2"></i>
         <h1 class="h4 mb-1">Reset Password</h1>
     </div>
+
+    <?php if ($waitMinutes > 0): ?>
+        <!-- ⏳ Too many tries from this address. Shown whether or not the link
+             is a real one, so it gives nothing away about the link. -->
+        <div class="alert alert-warning small" role="alert">
+            <i class="fa-solid fa-hourglass-half me-1" aria-hidden="true"></i>
+            Too many tries from this connection, so your password has not been changed.
+            Please wait about <?php echo $waitMinutes; ?> minute(s) and try again.
+            A reset link that has not run out will still work then.
+        </div>
+    <?php endif; ?>
 
     <?php if ($tokenValid === false): ?>
         <!-- ❌ Invalid or expired token -->

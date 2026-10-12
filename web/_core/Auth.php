@@ -1446,28 +1446,177 @@ class Auth
     /* ====================================================================== */
 
     /**
+     * A password fingerprint that belongs to nobody, checked when a sign-in
+     * name has no usable account (#580).
+     *
+     * WHAT WAS WRONG. A name with no account, or a switched-off one, was
+     * refused before any password was checked: about 24 ms, against about
+     * 570 ms for a name that has an account (measured 12 October 2026). The
+     * words on screen were the same, so the SPEED told a stranger which
+     * names and e-mail addresses have accounts.
+     *
+     * NOW password_verify() runs against this fingerprint instead, so both
+     * roads cost one check. Its answer is thrown away: it was made from
+     * random text nobody kept, and no account holds it.
+     *
+     * WHAT THIS CANNOT DO. The two roads cost the same only while accounts'
+     * own fingerprints have the cost written here ("12", the third field).
+     * That is what password_hash(…, PASSWORD_DEFAULT) gives on PHP 8.4 and
+     * 8.5. An account whose password was last set under an older PHP (cost
+     * 10) is checked about four times FASTER than this, and can be told
+     * apart until its password is next changed. If PHP raises its default,
+     * raise this with it: tools/sign-in-limits-selftest.php fails when the
+     * two differ.
+     *
+     * @see https://www.php.net/manual/en/function.password-hash.php
+     */
+    private const NO_ACCOUNT_HASH = '$2y$12$drQh0whqjEooC7q5gAX6y.PSGYIHj6Ydav0K7s1BHBHyhIRcgtyqC';
+
+    /**
+     * The name of the database lock one visitor address holds while one
+     * sign-in try is counted, checked and recorded: see loginLocal(). Its one
+     * value is the address. The database's own name is mixed in because these
+     * locks are shared by every database on a server, and two installations
+     * on one server (a test copy beside the live one) must not make each
+     * other wait. The result is 47 characters; MySQL allows 64.
+     */
+    private const SIGN_IN_LOCK_SQL = "CONCAT('signin:', SHA1(CONCAT(IFNULL(DATABASE(), ''), ':', ?)))";
+
+    /** How long, in seconds, a sign-in try waits for that lock before it is refused. */
+    private const SIGN_IN_LOCK_WAIT = 5;
+
+    /** Minutes to wait, set by the last loginLocal() when it refused because of a limit; otherwise 0. */
+    private static int $localSignInWait = 0;
+
+    /**
+     * Why the last loginLocal() said no. Above 0: a limit was reached (for
+     * the address or for the name) and no password was checked; the number is
+     * the minutes to wait, for the "Too many failed attempts" message. 0: the
+     * name or the password was wrong.
+     *
+     * It is asked for separately, and loginLocal() still answers yes or no,
+     * so a caller that only wants to know whether the person is signed in
+     * cannot get it wrong.
+     */
+    public static function localSignInWaitMinutes(): int
+    {
+        return self::$localSignInWait;
+    }
+
+    /**
      * Authenticate a user with username or email and password (local account).
      * Queries tblLocalAccounts (joined with tblUsers) for the password hash,
      * checks rate limiting, verifies the hash, and creates a session.
      *
+     * ONE TRY AT A TIME FOR EACH VISITOR ADDRESS (#580).
+     * WHAT WAS WRONG: the count of failures was read, the password was
+     * checked (about half a second), and only then was the failure written.
+     * Tries sent at the same moment all read the same count, so forty at once
+     * from one address had 5, 5, 8, 7 and 10 passwords checked in five runs,
+     * against a limit of five.
+     * NOW "count, check, record" is one step for an address: the try holds a
+     * named database lock for its address from before the count until after
+     * the record is written, so the next try from that address counts the
+     * failure this one wrote.
+     *
+     * - The lock is always let go, in the `finally` below. If the request
+     *   dies first, MySQL frees a named lock itself when the connection that
+     *   holds it closes, and this portal opens a new connection for every
+     *   request. So a dead request cannot leave an address locked.
+     * - A try that cannot have the lock within SIGN_IN_LOCK_WAIT seconds is
+     *   refused as blocked, with no password checked. Refusing is the safe
+     *   answer: letting it through would be the old fault again.
+     * - GET_LOCK() is the same on MySQL 8.0 and 8.4, needs no table and no
+     *   special permission, and so works on shared hosting.
+     *
+     * REJECTED: writing the failure record first and counting afterwards.
+     * The right password would then need its record taken back, and a
+     * request that died in between would leave a failure nobody made.
+     *
+     * WHAT THIS CANNOT DO. It makes tries from ONE address take turns. Tries
+     * at ONE name from many addresses at the same moment still do not, so the
+     * limit for a name (ten) can be passed by about as many tries as arrive
+     * together. And another database user on the same server who learns the
+     * lock's name could hold it; people at that address would then be told
+     * "too many failed attempts" until it was let go.
+     *
      * @see https://www.php.net/manual/en/function.password-verify.php
+     * @see https://dev.mysql.com/doc/refman/8.0/en/locking-functions.html
      *
      * @param string $identifier The user's username or email address
      * @param string $password   The plaintext password to verify
      *
-     * @return bool True if login succeeded, false otherwise
+     * @return bool True if login succeeded, false otherwise. After a false,
+     *              localSignInWaitMinutes() says whether a limit was the reason.
      */
     public static function loginLocal(string $identifier, string $password): bool
     {
         self::ensureSession();
         global $mysqli;
 
+        self::$localSignInWait = 0;
         $identifier = strtolower(trim($identifier));
+        $ip         = RateLimiter::clientIp();
 
-        // 🛡️ Check rate limiting BOTH per-IP AND per-username (composite).
-        // The composite check defends single-account-targeted attacks that
-        // rotate IPs to evade the per-IP threshold (#52).
-        if (RateLimiter::isUserOrIpBlocked($identifier) === true) {
+        if (self::signInLock($mysqli, $ip, true) === false) {
+            self::$localSignInWait = 1;
+            Logger::activity('LoginBlocked', 'Sign-in try refused: another try from this address was still being checked. No password was checked.');
+            return false;
+        }
+
+        try {
+            return self::loginLocalOneAtATime($mysqli, $identifier, $password, $ip);
+        } finally {
+            self::signInLock($mysqli, $ip, false);
+        }
+    }
+
+    /**
+     * Take, or let go of, the sign-in lock for one visitor address.
+     *
+     * @param bool $take True to take it (waiting up to SIGN_IN_LOCK_WAIT
+     *                   seconds), false to let it go.
+     *
+     * @return bool True when the lock was taken, or let go. False on a
+     *              time-out and on any database error. This never throws: a
+     *              try that cannot have the lock is refused by loginLocal(),
+     *              and a lock that cannot be let go is freed when the
+     *              request's connection closes.
+     */
+    private static function signInLock(\mysqli $db, string $ip, bool $take): bool
+    {
+        try {
+            if ($take === true) {
+                $wait = self::SIGN_IN_LOCK_WAIT;
+                $stmt = $db->prepare('SELECT GET_LOCK(' . self::SIGN_IN_LOCK_SQL . ', ?) AS done');
+                $stmt->bind_param('si', $ip, $wait);
+            } else {
+                $stmt = $db->prepare('SELECT RELEASE_LOCK(' . self::SIGN_IN_LOCK_SQL . ') AS done');
+                $stmt->bind_param('s', $ip);
+            }
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+
+            // 1 = done; 0 = timed out (or not ours to let go); NULL = an error.
+            return (int) ($row['done'] ?? 0) === 1;
+        } catch (\Throwable $ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * The sign-in try itself. Only loginLocal() calls this, holding the lock
+     * for the visitor's address, which is what makes the counts below true
+     * at the moment the password is checked.
+     */
+    private static function loginLocalOneAtATime(\mysqli $mysqli, string $identifier, string $password, string $ip): bool
+    {
+        // 🛡️ The limit for this ADDRESS: five failures less than 15 minutes
+        //    old. (The sign-in page asks this too, before it reads the form.
+        //    This is the answer that counts, because the lock is held.)
+        if (RateLimiter::isBlocked($ip) === true) {
+            self::$localSignInWait = max(1, RateLimiter::lockoutRemaining($ip));
             Logger::activity('LoginBlocked', 'Rate-limited login attempt for: ' . $identifier);
             return false;
         }
@@ -1476,7 +1625,7 @@ class Auth
         // Accepts either a username (tblLocalAccounts.username) or an email
         // (tblUsers.emailAddress) so users can sign in with either one.
         $stmt = $mysqli->prepare(
-            'SELECT LA.localID, LA.passwordHash, '
+            'SELECT LA.localID, LA.username, LA.passwordHash, '
             . 'U.userID, U.fullName, U.emailAddress, U.isActive '
             . 'FROM tblLocalAccounts LA '
             . 'JOIN tblUsers U ON U.userID = LA.userID '
@@ -1495,17 +1644,42 @@ class Auth
         $row    = $result->fetch_assoc();
         $stmt->close();
 
+        // 🧮 The name this try is counted under (#580): the account's user
+        //    name when there is an account, whichever of the user name and
+        //    the e-mail address was typed; otherwise the text typed.
+        //    WHAT WAS WRONG: it was always the text typed, so an account
+        //    could be tried ten times by its user name and ten more by its
+        //    e-mail address. A column for the account's number would do the
+        //    same job and needs a database change; this needs none.
+        //    WHAT THIS GIVES AWAY, knowingly: somebody who uses up the ten
+        //    tries on an e-mail address and then finds a user name blocked
+        //    too has learned that the two belong to one account. Counting by
+        //    account cannot avoid that.
+        $countedAs = $row !== null ? strtolower(trim((string) $row['username'])) : $identifier;
+
+        // 🛡️ The limit for this NAME: ten failures from any number of
+        //    addresses (#52). A made-up name is counted and refused in
+        //    exactly the same way, so this gives nothing away.
+        if (RateLimiter::isNameBlocked($countedAs) === true) {
+            self::$localSignInWait = max(1, RateLimiter::nameLockoutRemaining($countedAs));
+            Logger::activity('LoginBlocked', 'Rate-limited login attempt for: ' . $countedAs);
+            return false;
+        }
+
         // 🔐 Verify the user exists, is active, and has a password hash
         if ($row === null || (int) $row['isActive'] !== 1 || ($row['passwordHash'] ?? '') === '') {
+            // ⏱️ Spend the time a real check would take: see NO_ACCOUNT_HASH.
+            //    The answer is deliberately not used.
+            password_verify($password, self::NO_ACCOUNT_HASH);
             // 📝 Log the failed attempt (used by RateLimiter)
-            Logger::activity('LoginFailed', 'Failed login attempt for: ' . $identifier);
+            Logger::activity('LoginFailed', RateLimiter::FAILED_NO_ACCOUNT . $countedAs);
             return false;
         }
 
         // 🔑 Verify password using PHP's built-in password_verify
         // See: https://www.php.net/manual/en/function.password-verify.php
         if (password_verify($password, $row['passwordHash']) === false) {
-            Logger::activity('LoginFailed', 'Incorrect password for: ' . $identifier);
+            Logger::activity('LoginFailed', RateLimiter::FAILED_WRONG_PASSWORD . $countedAs);
             return false;
         }
 
@@ -1534,6 +1708,119 @@ class Auth
         Logger::activity('LoginLocal', 'User logged in with local account');
 
         return true;
+    }
+
+    /* ====================================================================== */
+    /* Password-reset links                                                   */
+    /* ====================================================================== */
+
+    /**
+     * Fixed text put in front of a reset link's secret before it is
+     * fingerprinted for storage (#580). It is load-bearing; do not tidy it
+     * away.
+     *
+     * WHY. Until 12 October 2026 a link's expiry was written on the PAGE's
+     * clock, in the organisation's time zone (see storeResetLink()). Rows
+     * written that way cannot be told from rows written in UTC, and read as
+     * UTC they would stay good for hours in a zone ahead of UTC. Those rows
+     * hold the fingerprint WITHOUT this text, so no link matches them any
+     * more: a link sent before the change simply reads as not valid, and the
+     * person asks for a new one. At most an hour's worth of links is
+     * affected, once.
+     */
+    private const RESET_LINK_FORM = 'reset-link-utc:';
+
+    /**
+     * What is stored for a reset link: a SHA-256 fingerprint, never the link
+     * itself. Somebody who reads the table cannot work a link back out of it.
+     *
+     * @param string $token The secret part of the link (64 characters).
+     */
+    public static function resetLinkFingerprint(string $token): string
+    {
+        return hash('sha256', self::RESET_LINK_FORM . $token);
+    }
+
+    /**
+     * Store a new reset link for one person, good for `$minutes` minutes.
+     *
+     * THE EXPIRY IS A MOMENT IN UTC, WRITTEN AND READ BY THE DATABASE (#580).
+     * WHAT WAS WRONG: it was written with PHP's date() and read back with
+     * strtotime(), both on the page's clock in the organisation's time zone.
+     * A time written that way has no zone, so on the night the clocks go
+     * back a link asked for at 00:50 in London was good for 120 minutes, and
+     * one asked for at 01:30 in New York for none (worked out on 12 October
+     * 2026). NOW the database adds the minutes to its own UTC clock here, and
+     * findResetLink() compares with that same clock. UTC has no clock
+     * changes, and neither PHP's time zone nor the database's takes part.
+     *
+     * WHAT THIS CANNOT DO: it trusts the database server's clock to be right.
+     *
+     * @param \mysqli $db      The connection to write through.
+     * @param string  $token   The secret part of the link.
+     * @param int     $minutes How long the link is good for.
+     * @param string  $ip      The address that asked, for the record.
+     *
+     * @throws \mysqli_sql_exception when the row cannot be written.
+     */
+    public static function storeResetLink(\mysqli $db, int $userId, string $token, int $minutes, string $ip): void
+    {
+        $fingerprint = self::resetLinkFingerprint($token);
+        $stmt = $db->prepare(
+            'INSERT INTO tblPasswordResets (userID, tokenHash, expiresAt, createdIP) '
+            . 'VALUES (?, ?, UTC_TIMESTAMP() + INTERVAL ? MINUTE, ?)'
+        );
+        $stmt->bind_param('isis', $userId, $fingerprint, $minutes, $ip);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    /**
+     * Look a reset link up. The ONE place that decides whether a link can be
+     * used; the reset page and its save page both ask here, so they cannot
+     * disagree.
+     *
+     * - 'usable':  not used, not past its time, and the account is switched on.
+     * - 'expired': a real, unused link that is past its time.
+     * - 'none':    anything else. That includes a link for an account that
+     *              has been switched off since the link was sent (#580: such
+     *              a link used to change the password, which then stood when
+     *              the account was switched back on). It is answered exactly
+     *              like a link that never existed.
+     *
+     * @return array{state: string, resetID: int, userID: int} The two numbers
+     *         are 0 unless the state is 'usable'.
+     *
+     * @throws \mysqli_sql_exception when the table cannot be read.
+     */
+    public static function findResetLink(\mysqli $db, string $token): array
+    {
+        $none = ['state' => 'none', 'resetID' => 0, 'userID' => 0];
+        if ($token === '') {
+            return $none;
+        }
+
+        $fingerprint = self::resetLinkFingerprint($token);
+        $stmt = $db->prepare(
+            'SELECT PR.resetID, PR.userID, (PR.expiresAt > UTC_TIMESTAMP()) AS inTime '
+            . 'FROM tblPasswordResets PR '
+            . 'JOIN tblUsers U ON U.userID = PR.userID AND U.isActive = 1 '
+            . 'WHERE PR.tokenHash = ? AND PR.usedAt IS NULL '
+            . 'LIMIT 1'
+        );
+        $stmt->bind_param('s', $fingerprint);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null) {
+            return $none;
+        }
+        if ((int) $row['inTime'] !== 1) {
+            return ['state' => 'expired', 'resetID' => 0, 'userID' => 0];
+        }
+
+        return ['state' => 'usable', 'resetID' => (int) $row['resetID'], 'userID' => (int) $row['userID']];
     }
 
     /* ====================================================================== */

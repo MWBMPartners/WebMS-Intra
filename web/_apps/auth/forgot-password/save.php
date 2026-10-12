@@ -10,9 +10,27 @@
  *
  * Security:
  *   - Always shows the same generic message to prevent email enumeration.
- *   - Token is hashed before storage — a DB breach never exposes valid tokens.
+ *   - The answer is sent BEFORE the address is looked up (section 3), so how
+ *     long it takes does not depend on whether the address has an account.
+ *     The comment on $answerNow in section 2 says how, and on which hosts
+ *     that cannot be promised.
+ *   - The link is stored only as a fingerprint (SHA-256), so reading
+ *     tblPasswordResets does not give anybody a link they can use. (This
+ *     used to say "a DB breach never exposes valid tokens". That was untrue:
+ *     the activity log kept whole links, in the address the browser said it
+ *     came from. Logger::redactSensitiveHeaders() now cuts that off, #580.)
  *   - Existing unused tokens for the same user are invalidated.
- *   - Rate-limited via RateLimiter to prevent abuse.
+ *   - A limit of its own: 5 requests from one address in 15 minutes (#580).
+ *     It is separate from the sign-in limit on purpose, so that somebody
+ *     blocked from signing in can still ask for a link. See section 2.
+ *
+ * WHAT THIS CANNOT DO
+ *   - On a host where the answer cannot be sent early, the time it takes
+ *     still gives a known address away.
+ *   - "Sent" on screen is not proof of delivery. Mailer::canSend() reads
+ *     settings; only the provider knows whether a message arrived.
+ *   - Activity records written before #580 may still hold a whole link, for
+ *     the rest of that link's hour.
  *
  * @see https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html
  * -----------------------------------------------------------------------------
@@ -50,7 +68,13 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 Auth::ensureSession();
 
-if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+// 🧵 A form field is text or it is nothing (#580). A request written by hand
+//    can send a LIST where text is expected ("email[]=x"), which stopped this
+//    page with an error 500. Anything that is not text is read as empty, and
+//    answered like any other address that is not valid.
+$text = static fn (mixed $value): string => is_string($value) === true ? $value : '';
+
+if (Auth::verifyCsrf($text($_POST['csrf_token'] ?? '')) === false) {
     Logger::activity('PasswordResetFailed', 'Invalid CSRF token on forgot-password');
     header('Location: /forgot-password', true, 302);
     exit();
@@ -62,116 +86,204 @@ if (Captcha::verify($_POST) === false) {
     exit();
 }
 
-if (RateLimiter::isBlocked() === true) {
-    Logger::activity('PasswordResetBlocked', 'Rate-limited forgot-password request');
-    // 🛡️ Still redirect to success page to prevent enumeration
+// 📮 ANSWER FIRST, WORK AFTERWARDS: the one function that answers this page.
+//
+// ⏱️ WHAT WAS WRONG (#580). The answer was sent last. For an address with an
+//    account the page first stored a link and called the mail provider; for
+//    any other address it did neither. The words were the same, the wait was
+//    not: 86 ms against 45 ms with a stand-in mail service on the same
+//    machine (12 October 2026), and far more through a real provider across
+//    the internet. A comment here called that "timing-safe". It was not: the
+//    wait told a stranger which addresses have accounts.
+//
+//    NOW every request that passes the form's own checks is answered by this
+//    one function, in the same words, and the person's browser is let go.
+//    Only then does the page look the address up, store a link and send the
+//    e-mail. Nothing after that can change the answer or when it arrived. A
+//    request over the limit is answered by the same function, so it cannot
+//    be told from any other.
+//
+//    The session is saved and closed first. PHP lets one request at a time
+//    use a session, so otherwise the page the browser goes to next would
+//    wait for the e-mail to be sent, and its wait would give the same thing
+//    away. Nothing below writes to the session.
+//
+//    HOW THE BROWSER IS LET GO, AND WHERE THAT CANNOT BE PROMISED
+//    - fastcgi_finish_request() where PHP has it (PHP-FPM), or
+//      litespeed_finish_request() on LiteSpeed: the answer is complete and
+//      sent, and this script carries on unseen.
+//    - Anywhere else: the answer is given its exact length (it has no body)
+//      and the connection is marked to be closed, then pushed out. A browser
+//      that has the whole answer does not wait for more.
+//      ignore_user_abort() keeps the script going after the browser has left.
+//      That is how PHP's built-in server, used by the self-tests, behaves.
+//    - WHAT THIS CANNOT GUARANTEE: a web server that holds PHP's output back
+//      until the script has ended. Apache running PHP through mod_fcgid or as
+//      a CGI program can do that, and so can anything in front that
+//      compresses or buffers. There the person still gets the same words,
+//      but only after the e-mail has gone, so the wait still differs. A host
+//      like that needs PHP-FPM to close the gap; nothing in this page can.
+//
+//    REJECTED: sleeping for a fixed or random time. It slows everybody down
+//    and only blurs the difference; enough tries average it away.
+$answerNow = static function (): void {
     header('Location: /forgot-password?sent=1', true, 302);
+    session_write_close();
+    ignore_user_abort(true);
+    if (function_exists('fastcgi_finish_request') === true) {
+        fastcgi_finish_request();
+    } elseif (function_exists('litespeed_finish_request') === true) {
+        litespeed_finish_request();
+    } else {
+        header('Content-Length: 0');
+        header('Connection: close');
+        while (ob_get_level() > 0) {
+            ob_end_flush();
+        }
+        flush();
+    }
+};
+
+// 🚦 This page's OWN limit: 5 requests from one address in 15 minutes (#580).
+//
+//    WHAT WAS WRONG. This used to ask RateLimiter::isBlocked(), which is the
+//    SIGN-IN tally: five failed sign-ins from this address in 15 minutes. That
+//    was wrong in both directions.
+//      - Somebody who had just been blocked for typing the wrong password was
+//        told "sent" here and sent nothing. "Forgot password" is the only way
+//        back in without an administrator, and it was closed to exactly the
+//        people who needed it.
+//      - Somebody who only ever asked for reset links never added to that
+//        tally, so nothing slowed a flood of reset e-mails to one mailbox.
+//
+//    NOW it counts its own requests, through the limiter's general counter
+//    (the one the two-step code page uses). A reset link is no use to somebody
+//    who cannot read the mailbox, so letting a blocked person ask for one
+//    gives a password-guesser nothing. Decided by the owner (Salem874) on
+//    12 October 2026.
+//
+//    Every request that gets this far is counted, whether or not the address
+//    turns out to belong to anybody: counting only real accounts would let the
+//    limit itself say which addresses exist. A request refused here is NOT
+//    counted, so the wait ends 15 minutes after the first of the five and
+//    asking again does not make it longer.
+//
+//    The address is stored as a fingerprint (SHA-256), as the public forms do.
+//    The third argument lets the counter clear out old rows for every address,
+//    not only this one; every bucket with this prefix uses the same window.
+$resetAskFamily = 'pwreset:ask:';
+$resetAskBucket = $resetAskFamily . hash('sha256', RateLimiter::clientIp());
+$resetAskMax    = 5;
+$resetAskWindow = 900; // 15 minutes, in seconds
+
+if (RateLimiter::tooMany($resetAskBucket, $resetAskMax, $resetAskWindow) === true) {
+    // 🛡️ The same answer as always, sent the same way (section 3), so that
+    //    being over the limit cannot be told from an ordinary request.
+    $answerNow();
+    Logger::activity('PasswordResetBlocked', 'Rate-limited forgot-password request');
     exit();
 }
+RateLimiter::recordHit($resetAskBucket, $resetAskWindow, $resetAskFamily);
 
 // -----------------------------------------------------------------------------
-// 3. 📧 Look up user by email (must have a local account)
+// 3. 📮 Answer the browser NOW, before anything is looked up
 // -----------------------------------------------------------------------------
 
-$email = strtolower(trim($_POST['email'] ?? ''));
+$email = strtolower(trim($text($_POST['email'] ?? '')));
+
+// Every request that gets this far is answered here, whatever the address
+// turns out to be. $answerNow is written out above the limit in section 2,
+// with the reasons.
+$answerNow();
+
+// =============================================================================
+// From here on the browser has its answer. Do NOT send a header or print
+// anything below: it would go nowhere, and PHP would log a warning.
+// =============================================================================
 
 if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-    // 🛡️ Invalid email — still redirect to success to prevent enumeration
-    header('Location: /forgot-password?sent=1', true, 302);
+    // 🛡️ Not an e-mail address: nothing to look up.
     exit();
 }
 
-$stmt = $mysqli->prepare(
-    'SELECT U.userID, U.fullName, U.emailAddress '
-    . 'FROM tblUsers U '
-    . 'JOIN tblLocalAccounts LA ON LA.userID = U.userID '
-    . 'WHERE U.emailAddress = ? AND U.isActive = 1 '
-    . 'LIMIT 1'
-);
+try {
+    // -------------------------------------------------------------------------
+    // 4. 📧 Look up user by email (must have a local account, switched on)
+    // -------------------------------------------------------------------------
+    $stmt = $mysqli->prepare(
+        'SELECT U.userID, U.fullName, U.emailAddress '
+        . 'FROM tblUsers U '
+        . 'JOIN tblLocalAccounts LA ON LA.userID = U.userID '
+        . 'WHERE U.emailAddress = ? AND U.isActive = 1 '
+        . 'LIMIT 1'
+    );
+    $stmt->bind_param('s', $email);
+    $stmt->execute();
+    $user = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
 
-if ($stmt === false) {
-    Logger::errorPlatform('MySQL', 'Error', 'RESET_PREP_FAIL', $mysqli->error, '');
-    header('Location: /forgot-password?sent=1', true, 302);
-    exit();
-}
+    // 🛡️ No such account, or one that is switched off: nothing is stored and
+    //    nothing is sent. The person has already been given the usual answer.
+    if ($user === null) {
+        Logger::activity('PasswordResetNoUser', 'Reset requested for unknown email');
+        exit();
+    }
 
-$stmt->bind_param('s', $email);
-$stmt->execute();
-$result = $stmt->get_result();
-$user   = $result->fetch_assoc();
-$stmt->close();
+    // -------------------------------------------------------------------------
+    // 5. 🔑 Generate token and store its fingerprint in tblPasswordResets
+    // -------------------------------------------------------------------------
+    $userId = (int) $user['userID'];
 
-// 🛡️ If user not found, still redirect to same success page (timing-safe)
-if ($user === null) {
-    Logger::activity('PasswordResetNoUser', 'Reset requested for unknown email');
-    header('Location: /forgot-password?sent=1', true, 302);
-    exit();
-}
-
-// -----------------------------------------------------------------------------
-// 4. 🔑 Generate token and store hash in tblPasswordResets
-// -----------------------------------------------------------------------------
-
-$userId = (int) $user['userID'];
-
-// 🧹 Invalidate any existing unused tokens for this user
-$invalidateStmt = $mysqli->prepare(
-    'UPDATE tblPasswordResets SET usedAt = NOW() WHERE userID = ? AND usedAt IS NULL'
-);
-if ($invalidateStmt !== false) {
+    // 🧹 Invalidate any existing unused tokens for this user
+    $invalidateStmt = $mysqli->prepare(
+        'UPDATE tblPasswordResets SET usedAt = NOW() WHERE userID = ? AND usedAt IS NULL'
+    );
     $invalidateStmt->bind_param('i', $userId);
     $invalidateStmt->execute();
     $invalidateStmt->close();
-}
 
-// 🔐 Generate a cryptographically secure plaintext token (64-char hex)
-$plaintextToken = bin2hex(random_bytes(32));
-$tokenHash      = hash('sha256', $plaintextToken);
+    // 🔐 Generate a cryptographically secure plaintext token (64-char hex)
+    $plaintextToken = bin2hex(random_bytes(32));
 
-// 🕐 Calculate expiry based on setting (default 60 minutes)
-$expiryMinutes = (int) (App::settings('auth.passwordReset.tokenExpiry') ?? '60');
-$expiresAt     = date('Y-m-d H:i:s', time() + ($expiryMinutes * 60));
+    // 🕐 How long the link is good for (a setting; 60 minutes unless changed).
+    //    The expiry itself is worked out by the database, in UTC: see
+    //    Auth::storeResetLink() for why it is no longer worked out here.
+    $expiryMinutes = (int) (App::settings('auth.passwordReset.tokenExpiry') ?? '60');
 
-// 🌐 Capture the requester's IP for audit trail
-// 🛑 This used to read the Cloudflare and X-Forwarded-For headers directly and
-//    believe them. Anybody can send those headers, so anybody could claim any
-//    address they liked. RateLimiter::clientIp() is now the ONE place in the
-//    portal that decides which address to believe: it trusts those headers only
-//    when the request really arrived through a proxy listed in the
-//    portal.trustedProxies setting, and otherwise uses the address the
-//    connection actually came from. Delegating means a fix to that rule reaches
-//    this code too, instead of this copy quietly drifting out of step - which is
-//    exactly how it went wrong. Here the address is written into the
-//    password-reset request's audit record, a record that is only worth keeping
-//    if it is true.
-$createdIP = RateLimiter::clientIp();
+    // 🌐 The requester's address, for the audit record.
+    // 🛑 This used to read the Cloudflare and X-Forwarded-For headers directly and
+    //    believe them. Anybody can send those headers, so anybody could claim any
+    //    address they liked. RateLimiter::clientIp() is now the ONE place in the
+    //    portal that decides which address to believe: it trusts those headers only
+    //    when the request really arrived through a proxy listed in the
+    //    portal.trustedProxies setting, and otherwise uses the address the
+    //    connection actually came from. Delegating means a fix to that rule reaches
+    //    this code too, instead of this copy quietly drifting out of step - which is
+    //    exactly how it went wrong. Here the address is written into the
+    //    password-reset request's audit record, a record that is only worth keeping
+    //    if it is true.
+    Auth::storeResetLink($mysqli, $userId, $plaintextToken, $expiryMinutes, RateLimiter::clientIp());
 
-$insertStmt = $mysqli->prepare(
-    'INSERT INTO tblPasswordResets (userID, tokenHash, expiresAt, createdIP) '
-    . 'VALUES (?, ?, ?, ?)'
-);
-
-if ($insertStmt === false) {
-    Logger::errorPlatform('MySQL', 'Error', 'RESET_INSERT_FAIL', $mysqli->error, '');
-    header('Location: /forgot-password?sent=1', true, 302);
+    Logger::activity('PasswordResetRequested', 'Password reset token created for: ' . $email);
+} catch (\Throwable $ex) {
+    // 📝 The database refused. The person already has the usual answer; the
+    //    administrator gets the error.
+    Logger::errorPlatform('MySQL', 'Error', 'RESET_STORE_FAIL', $ex->getMessage(), '');
     exit();
 }
 
-$insertStmt->bind_param('isss', $userId, $tokenHash, $expiresAt, $createdIP);
-$insertStmt->execute();
-$insertStmt->close();
-
-Logger::activity('PasswordResetRequested', 'Password reset token created for: ' . $email);
-
 // -----------------------------------------------------------------------------
-// 5. 📨 Send reset email (if Mailer is configured)
+// 6. 📨 Send reset email (if a mail route is set up)
 // -----------------------------------------------------------------------------
 
-$mailerClientID  = App::settings('auth.ms365.appwide.clientID') ?? '';
-$mailerFromAddr  = App::settings('mail.defaultFromAddress') ?? '';
-$mailerConfigured = ($mailerClientID !== '' && $mailerFromAddr !== '');
-
-if ($mailerConfigured === true) {
+// 🧭 Mailer::canSend() is the one place that knows whether mail can go out.
+//
+//    WHAT WAS WRONG (#580). This page used to test for a Microsoft 365 client
+//    ID and a "from" address itself. An organisation that sends through Google
+//    has neither, so it was told "sent" and nothing was sent, although the
+//    Google route worked. Do not put a test of a provider's settings back
+//    here: a new mail route is taught to Mailer, and this page then follows.
+if (Mailer::canSend() === true) {
     // 🔗 Build the reset link
     $protocol  = (isset($_SERVER['HTTPS']) === true && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
     $host      = $_SERVER['HTTP_HOST'] ?? 'localhost';
@@ -200,24 +312,30 @@ if ($mailerConfigured === true) {
         . '</body></html>';
 
     try {
-        Mailer::send(
+        $mailSent = Mailer::send(
             [$user['emailAddress']],
             'Password Reset Request – ' . $siteName,
             $htmlBody
         );
-        Logger::activity('PasswordResetEmailed', 'Reset email sent to: ' . $email);
+        // 📝 Only say "sent" when the provider took the message. This used to
+        //    write 'PasswordResetEmailed' whatever send() answered, so the
+        //    record said an e-mail had gone when the provider had refused it.
+        if ($mailSent === true) {
+            Logger::activity('PasswordResetEmailed', 'Reset email sent to: ' . $email);
+        } else {
+            Logger::activity('PasswordResetMailFailed', 'Reset email was refused by the mail provider for: ' . $email);
+        }
     } catch (\Throwable $ex) {
         // 📝 Log the error but don't expose it to the user
         Logger::errorPlatform('Mailer', 'Error', 'RESET_MAIL_FAIL', $ex->getMessage(), '');
     }
 } else {
-    // 📝 Log that mailer is not configured — admin must reset manually
+    // 📝 No mail route is set up, so nothing can be sent and an administrator
+    //    must reset the password by hand. The person asking is told the same as
+    //    always. The health page counts these records, so the administrator
+    //    learns that people are asking and getting nothing.
     Logger::activity('PasswordResetNoMailer', 'Reset requested but mailer not configured for: ' . $email);
 }
 
-// -----------------------------------------------------------------------------
-// 6. 🔀 Always redirect to the same success page (prevents enumeration)
-// -----------------------------------------------------------------------------
-
-header('Location: /forgot-password?sent=1', true, 302);
+// The browser was answered in section 3; there is nothing left to send.
 exit();

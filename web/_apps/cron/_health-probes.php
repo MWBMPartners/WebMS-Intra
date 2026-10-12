@@ -234,6 +234,58 @@ function maintenance_health_probes(\mysqli $db): array
         $probes['Errors (24h)'] = ['state' => 'warn', 'label' => 'Query failed', 'detail' => $e->getMessage()];
     }
 
+    // 4b. Email — can the portal send at all? (#580)
+    //     Both pages that draw these checks have always said they check
+    //     e-mail, and until now neither did. So an installation with no mail
+    //     set up looked healthy while "Forgot password" told people a link
+    //     had been sent and sent nothing.
+    //
+    //     Mailer::sendingRoute() is the one place that knows which mail route
+    //     is chosen and what it still needs. It reads settings only, so "Set
+    //     up" means the settings are filled in, NOT that a message arrives;
+    //     the text says so.
+    //
+    //     Not set up is a WARNING, not a critical fault: the portal still
+    //     works, and an installation may run without mail on purpose. It is a
+    //     warning rather than a green light with a note because the harm is
+    //     real today: nobody who forgets a password can get back in without
+    //     an administrator. The count shows whether that has already happened.
+    try {
+        $mailRoute = \Portal\Core\Mailer::sendingRoute();
+        if ($mailRoute['missing'] === []) {
+            $probes['Email'] = [
+                'state'  => 'ok',
+                'label'  => 'Set up (' . $mailRoute['label'] . ')',
+                'detail' => 'The settings are filled in. That does not prove a message arrives: use Send test at Admin → Integrations → Email.',
+            ];
+        } else {
+            // People who asked for a reset link in the last 7 days and were
+            // sent nothing. Only counted on this branch, so a healthy portal
+            // never pays for the query.
+            $rs = $db->query(
+                "SELECT COUNT(*) AS c FROM tblActivityLogs WHERE activityType = 'PasswordResetNoMailer' "
+                . 'AND timestamp > DATE_SUB(NOW(), INTERVAL 7 DAY)'
+            );
+            $unsent = $rs !== false ? (int) ($rs->fetch_assoc()['c'] ?? 0) : 0;
+            if ($rs !== false) {
+                $rs->free();
+            }
+            $probes['Email'] = [
+                'state'  => 'warn',
+                'label'  => 'Not set up',
+                'detail' => 'Password-reset e-mails cannot be sent. A person who asks for one is still told it was sent. '
+                    . sprintf('Asked for and not sent in the last 7 days: %d. ', $unsent)
+                    . 'Still needed for ' . $mailRoute['label'] . ': ' . implode('; ', $mailRoute['missing'])
+                    // Admin → Settings is where these are typed. This used to
+                    // say Admin → Integrations, which only shows them (#580).
+                    . '. Fill these in at Admin → Settings (a shared mailbox is typed at Admin → Integrations instead), '
+                    . 'then use Send test at Admin → Integrations → Email.',
+            ];
+        }
+    } catch (\Throwable $e) {
+        $probes['Email'] = ['state' => 'warn', 'label' => 'Check failed', 'detail' => $e->getMessage()];
+    }
+
     // 5. Sessions — PHP native sessions, count files in the configured save_path
     $sessSavePath = (string) (session_save_path() ?: sys_get_temp_dir());
     $sessCount = 0;

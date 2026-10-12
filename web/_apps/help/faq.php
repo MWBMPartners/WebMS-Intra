@@ -83,11 +83,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </h2>
         <div id="faqLogin2" class="accordion-collapse collapse" data-bs-parent="#accordionLogin">
             <div class="accordion-body">
-                <p>The portal has a rate-limiting feature to protect against brute-force attacks. If you have been locked out:</p>
+                <?php /* Reworded 12 October 2026 (#580). This used to say the Microsoft 365 button gets round the
+                         limit; it does not, because that button reads the same count for a connection. It also sent
+                         people to an administrator, when "Forgot password" works while sign-in is paused. */ ?>
+                <p>To stop somebody guessing passwords, the portal pauses sign-in after too many wrong tries: five from one connection, or ten for one account, within 15 minutes. If that has happened to you:</p>
                 <ul>
-                    <li><strong>Wait a few minutes</strong> -- the lockout is temporary and will expire automatically.</li>
-                    <li>Try the <strong>Microsoft 365 SSO</strong> button instead, which bypasses the local login rate limiter.</li>
-                    <li>If you have forgotten your local password, contact your administrator to have it reset.</li>
+                    <li><strong>Wait</strong> -- the sign-in page says how many minutes are left. It is never more than 15, and trying again while you wait does not make it longer.</li>
+                    <li>If you have forgotten your password, use <strong>Forgot password</strong> on the sign-in page. It works while sign-in is paused.</li>
+                    <li>If no reset e-mail arrives, contact your administrator.</li>
                 </ul>
             </div>
         </div>

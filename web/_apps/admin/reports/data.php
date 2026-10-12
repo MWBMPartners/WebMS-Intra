@@ -62,7 +62,7 @@ switch ($report) {
         //    Passkey, then a code:                 LoginWebAuthnPending2fa, TotpVerified
         //    Microsoft 365 / Google, no second step: LoginMS365 / LoginGoogle
         //    Microsoft 365 / Google, then a code:  Login...Pending2fa, TotpVerified
-        //    Wrong password:          LoginFailed (twice). Refused by the limiter: LoginBlocked
+        //    Wrong password:          LoginFailed (once; it was twice until #580). Refused by the limiter: LoginBlocked
         //    Passkey refused:         no activity row at all
         //
         //    So a completed sign-in is one of:

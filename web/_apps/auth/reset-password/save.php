@@ -26,6 +26,12 @@ use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\Logger;
 use Portal\Core\RateLimiter;
+use Portal\Core\Router;
+
+// 🧵 A form field is text or it is nothing (#580). A request written by hand
+//    can send a LIST where text is expected ("token[]=x"), which stopped this
+//    page with an error 500. Anything that is not text is read as empty.
+$text = static fn (mixed $value): string => is_string($value) === true ? $value : '';
 
 // -----------------------------------------------------------------------------
 // 1. 🛡️ Only accept POST
@@ -42,13 +48,58 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 Auth::ensureSession();
 
-// 🚦 Rate-limit check
-if (RateLimiter::isBlocked() === true) {
-    header('Location: /forgot-password', true, 302);
+// 🚦 This page's OWN limit: 10 tries to use a reset link from one address in
+//    15 minutes (#580).
+//
+//    WHAT WAS WRONG. This used to ask RateLimiter::isBlocked(), the SIGN-IN
+//    tally. Somebody blocked for typing the wrong password five times, with a
+//    reset link already in their inbox, could open the form but not save it:
+//    they were sent to "Forgot password" with no message and the password was
+//    not changed. The link is the only way back in without an administrator,
+//    and holding it already proves they can read the mailbox.
+//
+//    NOW it counts its own tries, through the limiter's general counter, the
+//    same way "Forgot password" counts its requests (owner, Salem874,
+//    12 October 2026). Every POST that gets this far is one try, whatever
+//    comes of it: a link that is wrong, a password that does not meet the
+//    rules, or a success. Ten leaves room for somebody struggling with the
+//    password rules. A try refused here is not counted, so the wait ends 15
+//    minutes after the first of the ten.
+//
+//    A successful reset does NOT clear a sign-in block on an ADDRESS. That
+//    block belongs to the address, not to one person: clearing it would let
+//    somebody with one account of their own wipe the tally for that address
+//    and carry on guessing other people's passwords. So after a reset, a
+//    person at a blocked address still has to wait out what is left of the
+//    15 minutes; the sign-in page says how long.
+//
+//    It DOES clear the count kept for the account's own NAME (section 5).
+$resetUseFamily = 'pwreset:use:';
+$resetUseBucket = $resetUseFamily . hash('sha256', RateLimiter::clientIp());
+$resetUseMax    = 10;
+$resetUseWindow = 900; // 15 minutes, in seconds
+
+if (RateLimiter::tooMany($resetUseBucket, $resetUseMax, $resetUseWindow) === true) {
+    Logger::activity('PasswordResetBlocked', 'Rate-limited reset-password save');
+    // Back to the form, which says how long to wait. The link has not been
+    // used up. The refusal is about the address, so it says nothing about
+    // whether the link is a real one.
+    $waitMinutes = (int) ceil(RateLimiter::retryAfter($resetUseBucket, $resetUseMax, $resetUseWindow) / 60);
+    // Only something shaped like a real link (64 characters, 0-9 and a-f) is
+    // passed back. Anything else is dropped, so a made-up value of any length
+    // cannot be bounced into the address.
+    $rawToken  = $text($_POST['token'] ?? '');
+    $backToken = preg_match('/^[0-9a-f]{64}\z/', $rawToken) === 1 ? $rawToken : '';
+    header(
+        'Location: ' . Router::url('reset-password') . '?token=' . $backToken . '&wait=' . max(1, $waitMinutes),
+        true,
+        302
+    );
     exit();
 }
+RateLimiter::recordHit($resetUseBucket, $resetUseWindow, $resetUseFamily);
 
-if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+if (Auth::verifyCsrf($text($_POST['csrf_token'] ?? '')) === false) {
     Logger::activity('PasswordResetFailed', 'Invalid CSRF token on reset-password');
     header('Location: /forgot-password', true, 302);
     exit();
@@ -64,7 +115,7 @@ if (Captcha::verify($_POST) === false) {
 // 3. 🔑 Validate the reset token
 // -----------------------------------------------------------------------------
 
-$plaintextToken = $_POST['token'] ?? '';
+$plaintextToken = $text($_POST['token'] ?? '');
 
 if ($plaintextToken === '') {
     Logger::activity('PasswordResetFailed', 'Empty token on reset-password submit');
@@ -72,43 +123,36 @@ if ($plaintextToken === '') {
     exit();
 }
 
-$tokenHash = hash('sha256', $plaintextToken);
-
-$stmt = $mysqli->prepare(
-    'SELECT PR.resetID, PR.userID, PR.expiresAt '
-    . 'FROM tblPasswordResets PR '
-    . 'WHERE PR.tokenHash = ? AND PR.usedAt IS NULL '
-    . 'LIMIT 1'
-);
-
-if ($stmt === false) {
-    Logger::errorPlatform('MySQL', 'Error', 'RESET_VALIDATE_FAIL', $mysqli->error, '');
+// 🔎 Auth::findResetLink() is the one place that decides whether a link can
+//    be used (#580). This page used to carry its own copy of the test, which
+//    compared the expiry on the page's own clock and never looked at whether
+//    the account was still switched on. A link for an account switched off
+//    since it was sent is now answered exactly like a link that never
+//    existed.
+try {
+    $reset = Auth::findResetLink($mysqli, $plaintextToken);
+} catch (\Throwable $ex) {
+    Logger::errorPlatform('MySQL', 'Error', 'RESET_VALIDATE_FAIL', $ex->getMessage(), '');
     header('Location: /forgot-password', true, 302);
     exit();
 }
 
-$stmt->bind_param('s', $tokenHash);
-$stmt->execute();
-$result = $stmt->get_result();
-$reset  = $result->fetch_assoc();
-$stmt->close();
-
-if ($reset === null || strtotime($reset['expiresAt']) < time()) {
+if ($reset['state'] !== 'usable') {
     Logger::activity('PasswordResetFailed', 'Invalid or expired token used');
     // 🔀 Redirect back to the reset page with the (now-invalid) token so it shows the error
     header('Location: /reset-password?token=' . urlencode($plaintextToken), true, 302);
     exit();
 }
 
-$resetId = (int) $reset['resetID'];
-$userId  = (int) $reset['userID'];
+$resetId = $reset['resetID'];
+$userId  = $reset['userID'];
 
 // -----------------------------------------------------------------------------
 // 4. 📝 Validate the new password
 // -----------------------------------------------------------------------------
 
-$password        = $_POST['password'] ?? '';
-$passwordConfirm = $_POST['password_confirm'] ?? '';
+$password        = $text($_POST['password'] ?? '');
+$passwordConfirm = $text($_POST['password_confirm'] ?? '');
 
 if ($password === '' || $passwordConfirm === '') {
     // 🔀 Redirect back with token to re-show the form
@@ -184,6 +228,33 @@ try {
 
     // 📝 Log the successful password reset
     Logger::activity('PasswordResetCompleted', 'Password reset completed for userID: ' . $userId);
+
+    // 🧹 Stop counting the failed sign-ins recorded so far against this
+    //    account's NAME (#580; owner, Salem874, 12 October 2026).
+    //
+    //    WHAT WAS WRONG. A stranger sending ten wrong passwords for a name,
+    //    from several addresses, blocked that name. Its owner reset the
+    //    password and was still refused with the new one, and the stranger
+    //    could keep that up for as long as they kept sending.
+    //
+    //    The person has just proved they can read the account's mailbox, so
+    //    the name starts again from nothing. The count for an ADDRESS is not
+    //    touched: see section 2. It runs after the commit, on its own, so a
+    //    problem here cannot undo a password that has already been changed.
+    try {
+        $nameStmt = $mysqli->prepare('SELECT username FROM tblLocalAccounts WHERE userID = ? LIMIT 1');
+        $nameStmt->bind_param('i', $userId);
+        $nameStmt->execute();
+        $nameRow = $nameStmt->get_result()->fetch_assoc();
+        $nameStmt->close();
+        if ($nameRow !== null) {
+            RateLimiter::clearNameFailures((string) $nameRow['username']);
+        }
+    } catch (\Throwable $nameEx) {
+        // The password IS changed. The worst case is that the name stays
+        // blocked for what is left of its 15 minutes.
+        Logger::errorPlatform('Auth', 'Warning', 'RESET_NAME_CLEAR_FAIL', $nameEx->getMessage(), '');
+    }
 
 } catch (\Throwable $ex) {
     $mysqli->rollback();

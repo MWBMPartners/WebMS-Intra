@@ -115,7 +115,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="alert alert-warning d-flex gap-2" role="alert">
         <i class="fa-solid fa-triangle-exclamation mt-1"></i>
         <div>
-            <strong>Lockout protection:</strong> After several failed login attempts, your account will be temporarily locked for security. Wait a few minutes and try again, or contact your administrator.
+            <strong>Lockout protection:</strong> After five wrong sign-in tries from one connection, or ten for one account, sign-in is paused for up to 15 minutes. The sign-in page says how long is left. "Forgot password" still works while you wait.
         </div>
     </div>
 </div>
