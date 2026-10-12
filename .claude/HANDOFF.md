@@ -181,6 +181,16 @@ inside the lock; files deleted after), C2-3, plus: refuse to cancel whenever an 
 member lost their membership row), and behaviour tests for the two key details. **THEN the same checker (`a6aac53c844c9c476`)
 re-runs its own two proofs against the fix — minutes, not a round — and A2b is committed.**
 
+**RUNNING SIDE BY SIDE since 12 Oct ~06:15 (owner's decision above):**
+- **A2b fix round 2** (Opus builder `a25b4240c3ddf008d`; report `.claude-work/resume/rollout-A2b--build.md`; watchdog) — at 05:56 its
+  fixes passed on both versions (220 + 57 + 54 + 60); planting faults. Then the checker `a6aac53c844c9c476` re-runs `c2-scenario.php`
+  and `c2-race.php`; then commit. **A2b's file list for staging: `.claude-work/resume/rollout-A2b-snapshot2/FINGERPRINTS.txt` plus
+  whatever the builder's last addendum adds — NOT `git status`.**
+- **Package C build** (Sonnet; #547, #568, #563; report `.claude-work/resume/rollout-C--build.md`; own container `roC-mysql`, ports
+  33410-33419; must not touch the shared documents — its entries go to `…/rollout-C--build-evidence/DOC-ENTRIES.md`; watchdog).
+- **The plan for B2, D and E** (Opus, read-only; `.claude-work/resume/rollout-B2-D-E--plan.md`; watchdog) — it states each package's
+  files and what each can run beside. B2 includes ending an erased or switched-off person's session (`Auth::check()`).
+
 **SEEN ON THE LIVE ADDRESS (12 Oct ~03:40, read-only curl): the example customer's live address answers EVERY path with the
 installer's "Install — Welcome" page** — so that installation is NOT installed (which answers "fresh install or upgrade?": fresh),
 and the install wizard is open to anybody who visits. Told the owner. Nothing was sent to the server.
