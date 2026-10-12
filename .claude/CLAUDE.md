@@ -231,6 +231,8 @@ Two parts, and the second is the one that gets missed:
    changes, which may shift under it; and the checker verifies exactly which
    files have changed, so anything else editing the tree muddies that test.
 
+**Packages that share no files may run side by side (owner, 12 October 2026).** Asked how to speed up, the owner chose this: a package may be planned, built and checked while another is in flight, as long as the two change no file in common. Where files overlap, one at a time still holds. In practice: each builder is given its exact file list and told which shared files it must not touch; the shared documents (`CHANGELOG.md`, `DEV_NOTES.md`, `FEATURES.md`) are never edited by two packages at once — a builder working alongside another writes its entries to a note in its evidence folder, and the commissioning session adds them when that package is committed; each package is staged by its own file list, never from `git status`; each uses its own named containers and ports. Analysis and planning judgements about ONE package still happen one agent at a time.
+
 Stopping a run to keep the order is cheap: relaunch with `resumeFromRunId` and
 the script path, and every agent that already finished returns its cached answer
 immediately.

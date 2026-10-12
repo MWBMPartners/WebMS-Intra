@@ -143,6 +143,8 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    than the build. *(`.claude/CLAUDE.md` → "Deep analysis: sequential, one
    run at a time".)*
 
+   **Packages that share no files may run side by side (owner, 12 October 2026).** Asked how to speed up, the owner chose this: a package may be planned, built and checked while another is in flight, as long as the two change no file in common. Where files overlap, one at a time still holds. In practice: each builder is given its exact file list and told which shared files it must not touch; the shared documents (`CHANGELOG.md`, `DEV_NOTES.md`, `FEATURES.md`) are never edited by two packages at once — a builder working alongside another writes its entries to a note in its evidence folder, and the commissioning session adds them when that package is committed; each package is staged by its own file list, never from `git status`; each uses its own named containers and ports. Analysis and planning judgements about ONE package still happen one agent at a time.
+
 4. **Switching AI systems when one runs out.** If whatever is doing a piece
    of work becomes unavailable — out of credit, rate limited, or down — hand
    the work to another suitable system rather than stopping, then return to

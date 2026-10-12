@@ -9,6 +9,14 @@ proceeds, so the session can be picked up at any point).
 
 ## Read this first — where we are right now
 
+## OWNER DECISION, 12 OCTOBER 2026, ~06:05 — packages that share no files run SIDE BY SIDE; work autonomously
+
+The owner, on the pace: "Let packages that share no files run side by side. Also run autonomously, but do ask me questions if you
+need any clarifications or decisions." Written into `.claude/CLAUDE.md` ("Deep analysis"), `.OpenAI/CONTEXT.md` rule 3 and memory.
+How it is run: each builder gets its exact file list; `CHANGELOG.md`, `DEV_NOTES.md` and `FEATURES.md` are never edited by two
+packages at once (a builder working alongside another writes its entries to `<evidence>/DOC-ENTRIES.md`, added at commit); **stage each
+package by ITS OWN file list — never from `git status`, which now mixes packages**; own named containers and ports.
+
 ## OWNER DECISIONS, 11 OCTOBER 2026 — THE ROLL-OUT PLAN (final; this is the queue now)
 
 The owner: "we really are wanting to get through this so we can try and finalise and begin roll-out usage — so lets focus on this and
