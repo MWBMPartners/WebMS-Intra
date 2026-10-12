@@ -19,6 +19,25 @@ package by ITS OWN file list — never from `git status`, which now mixes packag
 
 ## WHERE THINGS ARE, 12 OCTOBER 2026, 06:47 — package C committed; three jobs running; two owner answers; one trap
 
+**Packages B2a and B2b are committed and pushed as `716581f`** (60 files; #534, #548, #574, part of #511 and #536). Three check
+rounds; the last small fix round was committed on its builder's proofs. On the merged branch I ran `access-pages-selftest` (240
+of 240) and `erasure-pages-selftest` (66 of 66); evidence in `.claude-work/resume/rollout-B2a--merge-evidence/`. Runbook 7.7 is
+corrected. The checkout `.claude-work/worktrees/b2a` and branch `ro-b2a-build` can be removed. Opened #591: an erasure has no
+time allowance of its own (the erasure test hit PHP's 30-second limit when this machine's load average was over 400, and passed
+with a longer allowance). **So H1 and F1 now wait only for E.**
+
+**The owner's answers on mail, 12 October, about 13:25 (final; word for word in the brief of the second plan):**
+1. Our own small mailer client, which also sends through the non-SMTP services (Microsoft 365, Google Workspace) "based on our
+   previously defined requirements re emails"; shaped so it can later be lifted out as a standalone library for the owner's other
+   PHP web applications; and PHPMailer allowed as a fallback.
+2. One mail route for the installation for now; per-organisation later, with the global administrator still able to choose
+   per-installation or per-organisation.
+3. Always encrypted, certificate always checked. If the check fails: the global administrator is told, the unsent messages are
+   queued, and the administrator may send a queued message with the check skipped, one at a time, or switch checking off behind
+   a clear warning. No unencrypted choice.
+4. A mail queue is built now, not after roll-out.
+Not yet asked: whether the new mail self-tests run on GitHub.
+
 **Package F7 is committed and pushed as `a9d8569`** (#500; `tools/deploy/resolve-settings.sh` and its self-test, 366 checks; no
 workflow uses it yet). Its fix round was not given a second check (refuse-side changes, nothing calls it, and the workflow is
 checked again before placing). The corrected proposal is `rollout-F7--fix-evidence/proposed-deploy.yml`, with
@@ -68,11 +87,10 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 
 | Package | What | Where it works | Report |
 | --- | --- | --- | --- |
-| B2a + B2b | access gaps — the narrow check found NO security gap and no wrong behaviour; LOW only (untrue comment sentences, seven planted faults the tests let through, three shapes the address check misses). A LAST small fix round is running: one more commit after `b6c1b67`. **No further check: commit on its proofs.** Then bring all four commits across as one, with the `DOC-ENTRIES.md` it writes for the whole of B2a and B2b | its own checkout `.claude-work/worktrees/b2a` | `rollout-B2a--check2.md`, `rollout-B2a--fix2.md` |
 | E | older databases (#553, #555, #554) — the narrow check found three MEDIUM (with the events table missing the install script emptied every session's pointer, silently; the test passed when the install script's own guard was broken; the data check passed an UPDATE that also soft-deleted sessions). SECOND fix round running: one more commit after `917382c`. **No further check: commit on its proofs**, after reading the install script's block myself. Release only together with G | its own checkout `.claude-work/worktrees/e` | `rollout-E--check2.md`, `rollout-E--fix2.md` |
 | G | the backup faults (#577, #578, #579 and more) — fix round DONE: commit `23b5440` on `ro-g-build`, after `daeb31e` (11 files). A NARROW check of that commit is running, because the fix changed how every restore talks to the database (it replaces the session's strictness setting and treats any warning as a failure). Corrected notes to place are in `rollout-G--fix-evidence/` | its own checkout `.claude-work/worktrees/g` | `rollout-G--fix.md`, `rollout-G--check2.md` |
 | F6 part 1 | the zip package's guards (#499) — the narrow check found two HIGH (a secret inside an `.svg`, `.gif` or `.woff2`, or after a picture's first bytes, still shipped, because the secrets search skips those kinds; PHP could reach the web folder under a double ending or through a planted `.htaccess`). SECOND fix round running: one more commit after `0089a78`. **No further check for part 1**: nothing can be published until part 2 (the guide, after F5), and part 2's check looks at the whole guard again | its own checkout `.claude-work/worktrees/f6` | `rollout-F6--check2.md`, `rollout-F6--fix2.md` |
-| S (plan only) | a plain SMTP mail route, which the owner decided is needed for roll-out | reads the MAIN folder; changes nothing | `rollout-S--plan.md` |
+| S (second plan) | the portal's mail: one client with several routes (our own SMTP, Microsoft 365, Google, PHPMailer as a fallback), a queue, and a certificate-failure flow, as the owner asked on 12 October | reads the MAIN folder; changes nothing | `rollout-S--plan-r2.md` (the first plan, `rollout-S--plan.md`, is superseded where they differ) |
 
 B2a and E each make ONE commit on their own branch and do not push. Bring each across with `git cherry-pick <hash>` onto
 `claude/alpha-wip` after its one check, then remove the checkout (`git worktree remove`) and delete its branch. B2b (plan item 10, the
