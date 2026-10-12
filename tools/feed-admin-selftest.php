@@ -316,7 +316,7 @@ if (($argv[1] ?? '') === '--hold-lock') {
 // =============================================================================
 const EXPECTED_S      = 11;   // part S: S1 pages never write around the service layer (4); S2 the importer's UTC writes (2, fix round 1); S3 the server filter (1, chunk P8-3, + its call site 2, P8-3 fix round 1) and S4 message boxes (2, chunk P8-3)
 const EXPECTED_D      = 526;  // part D: 500 from chunk P8-1, + D25's R13-L1 case and D33's three (chunk P8-2), + D34 (chunk P8-3), + D35 (2) and D36 (2) (P8-3 fix round 1), + D37 (3) (fix round 2), + D38 (fix round 3), + D39 (6, chunk P8-4; + 2 in its fix round 1; + 1 in fix round 2; + 1 after the final fault run, m-X05; + 3 after the final whole-part check, F1 and F3)
-const EXPECTED_W      = 298;  // part W: 81 for chunk P8-2's pages (W0-W16, W18-W25); chunk P8-3 grows W21 by 6 and adds W26-W38 (82); its fix round 1 adds a W31 check, W39 (4) and W40 (4); fix round 2 adds W41 (5); fix round 3 adds W42 (3); fix round 4 grows W21 by 2 and adds W43 (1); chunk P8-4 grows W21 by 5 and adds W44 (5), W45 (6), W46 (5), W47 (2), W48 (5), W49 (5), W50 (4), W51 (2) and W52 (5); its fix round 1 adds 2 to W45, 3 to W46, 3 to W48, 1 to W49, 1 to W50, 1 to W52, and W53 (2) and W54 (1); fix round 2 adds 2 to W45, 1 to W48 and 1 to W53; fix round 3 adds 1 to W45; the final whole-part check's fixes add 1 to W50, and W55 (2) and W56 (1); the last narrow check's fixes add 1 to W55, and W57 (4) and W58 (1); W59, the #534 table (roll-out package B, 11 October 2026), adds 32: its set-up (1), six viewers by four addresses (24), its own control (2), an API key answered as before (2, added after the independent check) and the venue booking card (3); roll-out package B2a (12 October 2026) adds a seventh W59 viewer, on a crew (4), and changes the Team Hub and venue card rows it made stricter
+const EXPECTED_W      = 303;  // part W: 81 for chunk P8-2's pages (W0-W16, W18-W25); chunk P8-3 grows W21 by 6 and adds W26-W38 (82); its fix round 1 adds a W31 check, W39 (4) and W40 (4); fix round 2 adds W41 (5); fix round 3 adds W42 (3); fix round 4 grows W21 by 2 and adds W43 (1); chunk P8-4 grows W21 by 5 and adds W44 (5), W45 (6), W46 (5), W47 (2), W48 (5), W49 (5), W50 (4), W51 (2) and W52 (5); its fix round 1 adds 2 to W45, 3 to W46, 3 to W48, 1 to W49, 1 to W50, 1 to W52, and W53 (2) and W54 (1); fix round 2 adds 2 to W45, 1 to W48 and 1 to W53; fix round 3 adds 1 to W45; the final whole-part check's fixes add 1 to W50, and W55 (2) and W56 (1); the last narrow check's fixes add 1 to W55, and W57 (4) and W58 (1); W59, the #534 table (roll-out package B, 11 October 2026), adds 32: its set-up (1), six viewers by four addresses (24), its own control (2), an API key answered as before (2, added after the independent check) and the venue booking card (3); roll-out package B2a (12 October 2026) adds a seventh W59 viewer, on a crew (4), and changes the Team Hub and venue card rows it made stricter; roll-out package F2 adds 5 "W59 at the door" checks (the members-only gate put back)
 const EXPECTED_CHECKS = EXPECTED_S + EXPECTED_D + EXPECTED_W;
 
 // 🧩 One part only (SELFTEST_ONLY=S, D or W), or all of them. A one-part run
@@ -2026,6 +2026,54 @@ function pw_req(string $jar, string $method, string $path, ?array $post = null, 
 }
 
 /** The form token on a page: a form's hidden field, else the page's meta tag. */
+/**
+ * 🚪 Stand the members-only gate down, or put it back, in THIS RUN'S SCRATCH
+ * COPY only (roll-out package F2, 12 October 2026, #511).
+ *
+ * WHY. Since F2 a signed-in person who is not a member of the organisation
+ * an address opens is refused at the door (web/_core/SiteGate.php, HTTP 403)
+ * before any page runs. Part W sends two such outsiders to organisation A's
+ * pages: SB (an administrator of B only) and PB (a member of B only). With
+ * the gate in place every one of their requests is answered 403 by the gate,
+ * so a check that expects the PAGE to refuse them would go on passing with
+ * the page's own rule taken out, and the checks that expect the page to
+ * SHOW them A's public event would fail.
+ *
+ * So part W runs with the gate stood down, and what answers is the rule
+ * inside each page, exactly as these checks were written. Then, at the end
+ * of W59, the gate is put back and the same two outsiders are sent to the
+ * same addresses: each is refused at the door ("W59 at the door" checks).
+ * With only the door tested, a page's own rule could be removed and nothing
+ * here would fail.
+ *
+ * WHAT THAT COSTS: the members' own requests in part W also run with the
+ * gate stood down. `tools/site-modes-selftest.php` is the gate's own test,
+ * members included.
+ *
+ * Standing it down swaps the one line that refuses a non-member for a plain
+ * `return`; everything else the gate does stays. The file's time stamp is
+ * moved on with each write, so the server reads the new text at once (see
+ * the two opcache settings where the server is started). The run is refused
+ * if that line is not there exactly once.
+ */
+function pw_membersGate(bool $inPlace): void
+{
+    $pw   =& $GLOBALS['pw'];
+    $file = $pw['child'] . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'SiteGate.php';
+    if (isset($pw['gateFile']) === false) {
+        $pw['gateFile'] = (string) file_get_contents($file);
+        $pw['gateTime'] = (int) filemtime($file);
+    }
+    $refusal = 'self::notAMember($db, $userId, $own, $path);';
+    if (substr_count($pw['gateFile'], $refusal) !== 1) {
+        pw_refuse('web/_core/SiteGate.php does not hold the line "' . $refusal . '" exactly once, so the members-only gate cannot be stood down for the page checks');
+    }
+    file_put_contents($file, $inPlace === true ? $pw['gateFile'] : str_replace($refusal, 'return;', $pw['gateFile']));
+    $pw['gateTime'] += 60;
+    touch($file, $pw['gateTime']);
+    clearstatcache(true, $file);
+}
+
 function pw_token(string $html): string
 {
     if (preg_match('/name="csrf_token" value="([0-9a-f]{64})"/', $html, $m) === 1) {
@@ -2640,6 +2688,8 @@ function pw_run(): void
 
     try {
         pw_setup();
+        // 🚪 F2: part W asks the pages themselves. See pw_membersGate().
+        pw_membersGate(false);
         $sa  = pw_signIn('sa');
         $m   = pw_signIn('m');
         $la  = pw_signIn('la');
@@ -5851,6 +5901,34 @@ function pw_run(): void
             'W59 venue booking, SA (who manages bookings): still gets the form, with the organisation\'s events to choose from, the draft included',
             str_contains($form59, 'name="eventID"') === true && str_contains($form59, 'w59mark' . $w59['draft']) === true && str_contains($form59, 'w59mark' . $w59['internal']) === true
         );
+
+        // 🚪 F2, AT THE DOOR. Everything above ran with the members-only gate
+        //    stood down in the scratch copy. Here it is put back, as the
+        //    portal really runs, and the two outsiders are sent to the same
+        //    addresses again. See pw_membersGate().
+        pw_membersGate(true);
+        $door59 = pw_req($sb, 'GET', $evUrl($e34));
+        pa_ok(
+            'W59 at the door: SB (an administrator of B only) is refused (403) on A\'s public imported event, and its title is not shown',
+            $door59['status'] === 403 && str_contains($door59['body'], 'W34 public event') === false,
+            'HTTP ' . $door59['status']
+        );
+        $door59 = pw_req($sb, 'POST', $act, ['csrf_token' => pw_freshToken($sb, PW_B . '/account')]);
+        pa_ok('W59 at the door: SB, with a form token from their own organisation\'s page, is refused (403) by A\'s decision handler', $door59['status'] === 403, 'HTTP ' . $door59['status']);
+        $notRefused59 = [];
+        foreach (['page', 'download', 'hub-resources', 'hub-videos'] as $address59) {
+            foreach ($kinds59 as $kind59) {
+                $got59 = $ask59($pb59, $address59, $kind59);
+                if ($got59 !== '403') {
+                    $notRefused59[] = $address59 . ', ' . $kind59 . ': ' . $got59;
+                }
+            }
+        }
+        pa_ok('W59 at the door: PB (a member of B only) is refused (403) on all four addresses for all five events, the public one included, and none is shown', $notRefused59 === [], implode('; ', $notRefused59));
+        $pbCards59 = [$card59($pb59, 919131), $card59($pb59, 919132), $card59($pb59, 919133)];
+        pa_ok('W59 at the door: PB is refused (403) on all three venue booking cards', $pbCards59 === ['403', '403', '403'], implode(', ', $pbCards59));
+        // A control, so that "refused" above cannot be a server that refuses everybody.
+        pa_ok('W59 at the door, control: with the gate back, M (a member) is still shown the public and the internal event', $ask59((string) $pw['jars']['m'], 'page', 'public') === '200+shown' && $ask59((string) $pw['jars']['m'], 'page', 'internal') === '200+shown');
 
         // ---------------------------------------------------------------------
         pa_heading('W14 — no error recorded about any part 8 file');

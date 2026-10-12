@@ -31,13 +31,17 @@ use Portal\Core\Auth;
 use Portal\Core\Gatekeeper;
 use Portal\Core\Maintenance;
 use Portal\Core\Router;
+use Portal\Core\SiteGate;
 
 // 🔑 Start (or resume) the session BEFORE the maintenance gate below.
 //    Maintenance::currentUserCanBypass() → App::isUmbrellaAdmin() → App::user()
 //    reads $_SESSION, but only if session_status() === PHP_SESSION_ACTIVE
-//    (see App::user()) — and nothing upstream in bootstrap.php starts a
-//    session (it's started lazily by individual app pages via this same
-//    Auth::ensureSession() call). Without it here, a logged-in admin's
+//    (see App::user()) — and nothing upstream in bootstrap.php leaves a
+//    session started. (Since 12 October 2026, #502, start-up does take one
+//    read-only look at the session when organisations are told apart by the
+//    sign-in session, and closes it again at once: Auth::peekSession(). No
+//    session is active when start-up finishes, in any of the three ways.)
+//    Without this call here, a logged-in admin's
 //    session cookie is never read this early, App::user() caches a null
 //    "not logged in" result for the rest of the request (self::$userLoaded
 //    latches true on first call), and currentUserCanBypass() always
@@ -157,5 +161,27 @@ $portalChannelSource = defined('PORTAL_ENV_SOURCE') === true ? (string) PORTAL_E
 if (Gatekeeper::shouldEnforce(PORTAL_ENV, $portalChannelSource) === true) {
     Gatekeeper::enforce(PORTAL_ENV);
 }
+
+// 🚪 The organisation gate (#502).
+//    With several organisations on one installation, bootstrap.php has by now
+//    worked out which organisation this request belongs to
+//    (Site::preDetect()). SiteGate stops the request here when it must not
+//    reach a page: the organisation could not be worked out; a person with
+//    several organisations has not chosen one yet; or (#511) the signed-in
+//    person is not a member of the organisation this request belongs to.
+//    That last one used to be nobody's job: the router below asks only
+//    "signed in?", so a member of one organisation could open another's
+//    pages and data. Its own header comment has the full list.
+//
+//    WHY HERE. After Auth::ensureSession() above, because it needs to know
+//    who is signed in. After the maintenance and pre-release gates, so an
+//    upgrade in progress still shows the holding page. And immediately
+//    before Router::dispatch(), because that one call answers every address
+//    there is, the data addresses under /api/ included: nothing can reach a
+//    page or a handler without passing this line.
+//
+//    With one organisation (the ordinary installation) it returns at once
+//    and changes nothing.
+SiteGate::enforce($mysqli);
 
 Router::dispatch($mysqli);

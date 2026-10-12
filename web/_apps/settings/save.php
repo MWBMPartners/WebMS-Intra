@@ -305,6 +305,24 @@ if ($settingId > 0) {
         exit();
     }
 
+    // 🔒 Nor are the two settings that decide how organisations are told
+    //    apart changed here (#502), by anybody, global administrator
+    //    included. They have their own page, which refuses a way that would
+    //    leave an organisation unreachable; here one typed word would change
+    //    which organisation every address on the installation opens. See
+    //    Site::lockedInGeneralEditor().
+    if (Site::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" decides how organisations are told apart and can only be changed on its own page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = Site::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
     if ($isPortalWideRow === true && $isGlobalAdmin === false) {
         Logger::activity(
             'SettingsUpdateRefused',
@@ -497,6 +515,22 @@ if ($settingId > 0) {
         $_SESSION['flash_msg']  = GivingRetention::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: /settings');
+        exit();
+    }
+
+    // 🔒 Nor may either of the two "how organisations are told apart"
+    //    settings be ADDED here as one organisation's own row (#502).
+    //    Nothing reads such a row, so it would only mislead whoever found
+    //    it. See Site::lockedInGeneralEditor().
+    if (Site::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $settingKey . '" decides how organisations are told apart and can only be set on its own page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = Site::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
         exit();
     }
 

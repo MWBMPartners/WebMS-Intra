@@ -350,6 +350,14 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     (`check_maillib_stands_alone.py` only starts it). Its test is `php
     tools/maillib/tests/run.php`. Nothing calls it yet.
 
+    **Several organisations (#502, #511).** `Site::preDetect()` is the ONE place
+    the organisation of a request is decided, and `SiteGate` (called in
+    `web/public_html/index.php` just before the router) is the ONE gate that
+    refuses a signed-in person who is not a member. A page reached without the
+    router (`error.php`) must ask `SiteGate::wouldStop()` itself. Do not write a
+    second membership test in a page; `Site::organisationsFor()` is the one list
+    of "your organisations". Test: `tools/site-modes-selftest.php`.
+
 15. **The ApiRouter trap.** Any address starting `api/` is intercepted
     before the normal routing table is ever consulted, and resolved purely
     by naming convention to `_apps/{appName}/api/{action}.php`. A handler

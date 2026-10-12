@@ -41,11 +41,21 @@ $isLoggedIn = Auth::check();
 $navSiteName = Site::branding('name') ?? App::settings('site.name') ?? 'Portal';
 $navSiteLogo = Site::branding('logo') ?? '/assets/images/logo.svg';
 
-// 🌐 Multi-site switcher data (only when multisite enabled and user has 2+ sites)
+// 🌐 The organisation switcher: shown when several organisations are on and
+//    the person has two or more. The list is Site::organisationsFor(), the
+//    same list the chooser page and the members-only gate use. It used to be
+//    Site::userSites(), membership rows only, so a global administrator with
+//    no row of their own never saw a switcher (#502). If the list cannot be
+//    read the switcher is simply left out; a menu must not fail the page.
 $navShowSiteSwitcher = false;
 $navUserSites        = [];
+$navSiteMode         = Site::detectionMode();
 if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== null) {
-    $navUserSites = Site::userSites((int) $navUser['userID'], App::db());
+    try {
+        $navUserSites = Site::organisationsFor((int) $navUser['userID'], App::db());
+    } catch (\Throwable) {
+        $navUserSites = [];
+    }
     $navShowSiteSwitcher = (count($navUserSites) > 1);
 }
 ?>
@@ -256,28 +266,66 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                 <!-- 🌐 Language switcher -->
                 <?php echo I18n::languageSwitcher(); ?>
 
-                <?php if ($navShowSiteSwitcher === true): ?>
-                <!-- 🌐 Site switcher -->
+                <?php
+                // 🌐 The organisation switcher (#502). Three shapes, one per way of
+                //    telling organisations apart: a form that posts to /site/switch
+                //    (sign-in session), or a plain link to the other organisation's
+                //    own prefix or own address. It used to post to /site/switch in
+                //    every way, which in the two address ways changed nothing the
+                //    person could see.
+                //    The current organisation's name is shown at EVERY screen width.
+                //    It was hidden below desktop width, so on a phone nothing said
+                //    which organisation you were in. A long name is cut short with
+                //    "…" (at most 10rem, and at most 30% of a narrow screen) rather
+                //    than pushing the other buttons off the bar.
+                //    (A PHP comment on purpose: an HTML one would be sent to every
+                //    browser.)
+                if ($navShowSiteSwitcher === true): ?>
+                <!-- 🌐 Organisation switcher -->
                 <div class="dropdown">
                     <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
-                            data-bs-toggle="dropdown" aria-expanded="false" aria-label="Switch site">
+                            data-bs-toggle="dropdown" aria-expanded="false" aria-label="Switch organisation">
                         <i class="fa-solid fa-building me-1"></i>
-                        <span class="d-none d-lg-inline"><?php echo htmlspecialchars($navSiteName, ENT_QUOTES, 'UTF-8'); ?></span>
+                        <span class="d-inline-block text-truncate align-bottom" style="max-width: min(10rem, 30vw);"><?php echo htmlspecialchars($navSiteName, ENT_QUOTES, 'UTF-8'); ?></span>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end">
                         <?php foreach ($navUserSites as $navSiteItem): ?>
+                        <?php
+                        $navSiteIsCurrent = ((int) $navSiteItem['siteID'] === Site::id());
+                        $navSiteAddress   = Site::addressOf($navSiteItem);
+                        $navSiteColour    = htmlspecialchars((string) ($navSiteItem['primaryColor'] ?? '#0d6efd'), ENT_QUOTES, 'UTF-8');
+                        ?>
                         <li>
-                            <form method="post" action="/site/switch" class="d-inline w-100">
+                            <?php if ($navSiteMode === Site::MODE_SESSION): ?>
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('site/switch'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline w-100">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="site_id" value="<?php echo (int) $navSiteItem['siteID']; ?>">
-                                <button type="submit" class="dropdown-item<?php echo ((int) $navSiteItem['siteID'] === Site::id()) ? ' active' : ''; ?>">
-                                    <i class="fa-solid fa-building me-1" style="color:<?php echo htmlspecialchars($navSiteItem['primaryColor'] ?? '#0d6efd', ENT_QUOTES, 'UTF-8'); ?>"></i>
+                                <button type="submit" class="dropdown-item<?php echo ($navSiteIsCurrent === true) ? ' active' : ''; ?>"<?php echo ($navSiteIsCurrent === true) ? ' aria-current="true"' : ''; ?>>
+                                    <i class="fa-solid fa-building me-1" style="color:<?php echo $navSiteColour; ?>"></i>
                                     <?php echo htmlspecialchars($navSiteItem['siteName'], ENT_QUOTES, 'UTF-8'); ?>
-                                    <?php if ((int) $navSiteItem['siteID'] === Site::id()): ?>
+                                    <?php if ($navSiteIsCurrent === true): ?>
                                     <i class="fa-solid fa-check ms-2 text-success"></i>
                                     <?php endif; ?>
                                 </button>
                             </form>
+                            <?php elseif ($navSiteIsCurrent === true || $navSiteAddress !== ''): ?>
+                            <a class="dropdown-item<?php echo ($navSiteIsCurrent === true) ? ' active' : ''; ?>"<?php echo ($navSiteIsCurrent === true) ? ' aria-current="true"' : ''; ?>
+                               href="<?php echo htmlspecialchars($navSiteIsCurrent === true ? Site::url('') : $navSiteAddress, ENT_QUOTES, 'UTF-8'); ?>">
+                                <i class="fa-solid fa-building me-1" style="color:<?php echo $navSiteColour; ?>"></i>
+                                <?php echo htmlspecialchars($navSiteItem['siteName'], ENT_QUOTES, 'UTF-8'); ?>
+                                <?php if ($navSiteIsCurrent === true): ?>
+                                <i class="fa-solid fa-check ms-2 text-success"></i>
+                                <?php elseif ($navSiteMode === Site::MODE_HOST): ?>
+                                <span class="d-block small text-secondary">You will sign in again there</span>
+                                <?php endif; ?>
+                            </a>
+                            <?php else: ?>
+                            <span class="dropdown-item disabled" aria-disabled="true">
+                                <i class="fa-solid fa-building me-1" style="color:<?php echo $navSiteColour; ?>"></i>
+                                <?php echo htmlspecialchars($navSiteItem['siteName'], ENT_QUOTES, 'UTF-8'); ?>
+                                <span class="d-block small">No address set yet</span>
+                            </span>
+                            <?php endif; ?>
                         </li>
                         <?php endforeach; ?>
                     </ul>

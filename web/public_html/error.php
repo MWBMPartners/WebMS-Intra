@@ -12,6 +12,22 @@
  * front controller can intervene — bootstrap may not have run, or the
  * triggering error may be ABOUT the bootstrap path.
  *
+ * SEVERAL ORGANISATIONS ON ONE INSTALLATION (#502, #511). Because this file
+ * is reached without index.php, the organisation gate (SiteGate::enforce())
+ * never runs for it. The themed page draws the shared header, which holds
+ * the menu of the organisation the address belongs to. So this file asks
+ * SiteGate::wouldStop() first, and anybody the gate would stop gets the
+ * plain page at the bottom instead: the error's number and title, no menu,
+ * and no organisation's name or apps. Nothing changes for a member, for a
+ * signed-out visitor, or on an installation with one organisation. The one
+ * exception: when the organisation could not be worked out at all (a failed
+ * look-up), everybody gets the plain page, as everybody gets "try again"
+ * from the gate.
+ *
+ * WHAT IT CANNOT DO: tell that person WHY the page is plain, or offer them
+ * their own organisations. The gate's refusal page does that, on the next
+ * address they open that goes through index.php.
+ *
  * @package   Portal
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/243
  * -----------------------------------------------------------------------------
@@ -34,8 +50,17 @@ if (is_readable($bootstrap) === true) {
     try {
         require_once $bootstrap;
         if (class_exists('Portal\\Core\\Router') === true) {
-            \Portal\Core\Router::renderError($code);
-            $rendered = true;
+            // 🚪 Ask the organisation gate before drawing anything with a
+            //    menu (see the note at the top of this file). The session is
+            //    started here because the gate reads who is signed in; the
+            //    themed page started it anyway, a few lines later, in the
+            //    shared header. No database connection means no answer, and
+            //    no answer means the plain page.
+            \Portal\Core\Auth::ensureSession();
+            if (($mysqli ?? null) instanceof \mysqli && \Portal\Core\SiteGate::wouldStop($mysqli) === false) {
+                \Portal\Core\Router::renderError($code);
+                $rendered = true;
+            }
         }
     } catch (\Throwable $e) {
         // 🪞 Bootstrap broken — fall through to the minimal page below so

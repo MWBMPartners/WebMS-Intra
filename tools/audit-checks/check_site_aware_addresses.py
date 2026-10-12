@@ -147,6 +147,20 @@ LISTED = [
     "_apps/account/my-data.php",
     "_apps/auth/account/delete.php",
     "_apps/auth/account/delete-confirm.php",
+    # Roll-out package F1, 12 October 2026 (#502): the pages that move a
+    # person between organisations. A bare address here is the worst place
+    # for one: it would drop somebody who has just chosen an organisation
+    # into the default one. `_apps/site` is the whole folder (the chooser
+    # and the switch handler). The set-up page and its save handler are
+    # single files, because the rest of `_apps/admin/sites` belongs to #536.
+    "_apps/site",
+    "_apps/admin/sites/setup.php",
+    "_apps/admin/sites/setup-save.php",
+    "_core/SiteGate.php",
+    # Roll-out package F2, 12 October 2026 (#511): the refusal page. Its
+    # links lead a person who was refused back to their OWN organisations,
+    # so a bare address here would send them to the default one instead.
+    "_core/templates/not-a-member.php",
 ]
 
 # A bare address: a single "/" followed by something that is not another "/"

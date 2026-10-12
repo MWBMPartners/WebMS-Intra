@@ -812,7 +812,15 @@ another repo, ever**.
 ### 🌍 Multi-site (Phase 10) ✅
 
 - Umbrella → sites → users with 4-tier permission hierarchy (Umbrella / Site Root / Site Admin / Legacy).
-- Detection modes: subdomain, path-prefix, session.
+- How organisations are told apart, set by a global administrator on Admin → Organisations (#502): by sign-in
+  session, or by each organisation's own address. Both are built and tested. "First part of the address" exists
+  but cannot be chosen yet (#536).
+- A person with several organisations chooses one after signing in (`/site/choose`) and can switch later; a person
+  with one is put straight into it.
+- **Only an organisation's own members get in (#511):** one gate before every page refuses a signed-in person who
+  is not a member of the organisation the address opens, in every way of telling organisations apart. A global
+  administrator is let in everywhere. Still open in #511: coordinator grants across organisations, and the older
+  portal-wide administrator flag.
 - Per-site `tblSites.primaryColor` + `tblSites.faviconPath` drive branding.
 
 ### 🌐 Internationalisation (Phase 8) ✅

@@ -119,6 +119,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
             header('Location: /settings');
             exit();
         }
+
+        // 🔒 Nor can the two settings that decide how organisations are told
+        //    apart be deleted here (#502), by anybody, a global administrator
+        //    included. See Site::lockedInGeneralEditor().
+        //
+        //    WHAT WAS WRONG. The save handler refused to CHANGE them, but
+        //    this delete did not ask. A global administrator could delete
+        //    the portal-wide "multisite.enabled" row, and multi-organisation
+        //    went off at once: every member of every organisation was in the
+        //    default organisation, and the members-only gate was off (ran on
+        //    12 October 2026). Deleting "multisite.detectionMode" dropped an
+        //    installation using own addresses into sign-in session mode. So
+        //    Site::LOCKED_MESSAGE, "It can only be changed at…", was untrue.
+        //
+        //    It uses the row looked up just above, so a row belonging to
+        //    another organisation still reads as "not found" further down.
+        if ($lockedKey !== null && Site::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
+            Logger::activity(
+                'SettingsDeleteRefused',
+                'Refused: "' . (string) $lockedKey['settingKey'] . '" decides how organisations are told apart and cannot be deleted here',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = Site::LOCKED_MESSAGE;
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('settings'));
+            exit();
+        }
     }
 
     if ($deleteId > 0 && $isRoot === false) {
@@ -409,8 +436,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     //    in the save and delete handlers, not in this hiding.
                                     $isGivingRule = strncasecmp((string) $row['settingKey'], 'giving.retention.', 17) === 0;
                                     $givingLocked = GivingRetention::lockedInGeneralEditor((string) $row['settingKey'], $row['siteID'] === null, $isRoot);
+                                    // 🔒 The same for the two settings that decide how organisations
+                                    //    are told apart (#502): no Edit and no Delete button, because
+                                    //    both handlers refuse them. Only a global administrator can
+                                    //    open the page that changes them, so only they get the link.
+                                    $organisationsLocked = Site::lockedInGeneralEditor((string) $row['settingKey']);
                                     ?>
-                                    <?php if ($givingLocked === true): ?>
+                                    <?php if ($organisationsLocked === true && $isRoot === true): ?>
+                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/sites/setup'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Organisations</a>
+                                    <?php elseif ($organisationsLocked === true): ?>
+                                        <span class="small text-secondary">Changed by a global administrator, at Admin, Organisations</span>
+                                    <?php elseif ($givingLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/giving-records'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Giving records</a>
                                     <?php else: ?>
                                     <button class="btn btn-sm btn-outline-primary me-1" data-bs-toggle="modal" data-bs-target="#editModal"
@@ -421,7 +457,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         <i class="fa-solid fa-pen"></i>
                                     </button>
                                     <?php endif; ?>
-                                    <?php if ($isRoot === true && $isGivingRule === false): ?>
+                                    <?php if ($isRoot === true && $isGivingRule === false && $organisationsLocked === false): ?>
                                         <form method="post" action="/settings" class="d-inline">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                             <input type="hidden" name="action" value="delete">

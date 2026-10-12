@@ -97,6 +97,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 <?php endif; ?>
 
+<?php
+// 🌐 #502 — how this installation tells its organisations apart, and the way
+// to the page that changes it. Taken from Site, which holds what the portal
+// worked out when this request started.
+$setupLabel = Site::isMultisiteEnabled() === true
+    ? (Site::MODE_LABELS[Site::detectionMode()] ?? Site::detectionMode())
+    : 'One organisation only (multi-organisation is switched off)';
+?>
+<div class="alert alert-secondary d-flex flex-wrap align-items-center gap-2" role="note">
+    <span class="me-auto">
+        <i class="fa-solid fa-route me-1"></i>
+        <strong>How organisations are told apart:</strong>
+        <?php echo htmlspecialchars($setupLabel, ENT_QUOTES, 'UTF-8'); ?>
+    </span>
+    <a class="btn btn-sm btn-outline-primary" href="<?php echo htmlspecialchars(Site::url('admin/sites/setup'), ENT_QUOTES, 'UTF-8'); ?>">
+        <i class="fa-solid fa-sliders me-1"></i> Change
+    </a>
+</div>
+
 <?php if (count($sites) === 0): ?>
 <div class="alert alert-info">
     <i class="fa-solid fa-info-circle me-1"></i> No sites configured yet.
@@ -145,7 +164,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php endif; ?>
                     </dd>
 
-                    <dt class="col-5">Host Pattern</dt>
+                    <dt class="col-5">Own address</dt>
                     <dd class="col-7"><?php echo $sHost; ?></dd>
 
                     <dt class="col-5">Timezone</dt>
@@ -202,9 +221,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="form-text">Machine-readable slug (e.g. <code>cambridge</code>, <code>leeds</code>)</div>
                 </div>
                 <div class="mb-3">
-                    <label for="formHostPattern" class="form-label">Host Pattern</label>
-                    <input type="text" class="form-control" id="formHostPattern" name="hostPattern" maxlength="255">
-                    <div class="form-text">For subdomain detection (e.g. <code>cambridge.portal.example.com</code>)</div>
+                    <label for="formHostPattern" class="form-label">Own address</label>
+                    <input type="text" class="form-control" id="formHostPattern" name="hostPattern" maxlength="253"
+                           autocapitalize="none" spellcheck="false">
+                    <div class="form-text">Only used when each organisation has an address of its own. A plain host name, with no
+                        <code>https://</code> and no <code>/</code>. Example: <code>cambridge.portal.example.org</code>. No two
+                        organisations may share one.</div>
                 </div>
                 <div class="row">
                     <div class="col-md-6 mb-3">

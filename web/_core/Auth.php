@@ -85,7 +85,8 @@ class Auth
      *   login_redirect  where to go back to after signing in
      *   oauth_state     a random value for a Microsoft or Google sign-in in progress
      *   portal_locale   the language a visitor chose
-     *   active_site_id  which organisation's pages are being shown
+     *   active_site_id  which organisation's pages are being shown (session
+     *                   mode: the one the person chose; see setSessionSiteId())
      * Flash messages are deliberately NOT here, because they can repeat back
      * what a visitor typed. But what that achieves is narrower than it sounds:
      * the decision is made when the headers are sent, so a flash that is STILL
@@ -510,6 +511,24 @@ class Auth
             return;
         }
 
+        self::prepareSessionStart();
+        session_start();
+        self::endSessionOfInactiveAccount();
+    }
+
+    /**
+     * Everything that has to be settled BEFORE a session is started: the
+     * cookie's rules, and dropping a session cookie PHP would refuse.
+     *
+     * Moved out of ensureSession() word for word on 12 October 2026, so that
+     * peekSession() below starts its read-only look under exactly the same
+     * rules. Two copies would drift, and the copy that drifted would be the
+     * one deciding which organisation a person is in.
+     *
+     * @return void
+     */
+    private static function prepareSessionStart(): void
+    {
         // 🔒 Set secure cookie parameters before starting the session
         // See: https://www.php.net/manual/en/function.session-set-cookie-params.php
         session_set_cookie_params([
@@ -551,9 +570,96 @@ class Auth
         ) {
             unset($_COOKIE[$cookieName]);
         }
+    }
 
-        session_start();
-        self::endSessionOfInactiveAccount();
+    /**
+     * 👀 A read-only look at the session, for Site::preDetect() in session
+     * mode (#502): who is signed in, and which organisation they chose.
+     *
+     * WHY IT EXISTS. The organisation has to be decided while the portal is
+     * starting up, because it decides whose settings are loaded. The session
+     * is only started afterwards, by web/public_html/index.php. So in
+     * session mode the organisation was decided without ever seeing the
+     * session, and came out as organisation 1 on every request.
+     *
+     * WHAT IT DOES. It opens the session, copies two numbers out, and closes
+     * it again at once (PHP's `read_and_close`), then puts `$_SESSION` back
+     * to "not there". The rest of start-up therefore runs exactly as it does
+     * in the other two ways, with no session active; index.php then starts
+     * the session properly through ensureSession().
+     *
+     * It does nothing at all, and starts nothing, when:
+     *   - the request sent no session cookie. Somebody with no cookie cannot
+     *     be signed in. So a signed-out visitor, a scheduled job and a
+     *     request made with an API key are never given a session by this.
+     *   - PHP is running from the command line.
+     *
+     * WHY IT DOES NOT CALL ensureSession()
+     *   - ensureSession() looks the account up (endSessionOfInactiveAccount())
+     *     through App, and App does not exist yet at this point in start-up.
+     *     Today that look-up would quietly skip and run again later, but the
+     *     protection of every signed-in page should not rest on the order of
+     *     two lines in two files. This method never touches that look-up, so
+     *     index.php's call is always the first and runs in full.
+     *     (Site::detectFromSession() makes its own check that the account is
+     *     active before it honours anything read here.)
+     *   - Leaving the session ACTIVE during start-up would change start-up
+     *     itself, in session mode only: the block in bootstrap.php that
+     *     loads a person's saved language runs only when a session is
+     *     active, and never has been at that point. The language shown
+     *     would then differ between the three ways.
+     *
+     * WHAT IT CANNOT DO
+     *   - It cannot see a change made to the session between this look and
+     *     the real start a moment later (a sign-out in another tab, say).
+     *     Site::resolvedUserId() records who the organisation was worked out
+     *     for, and SiteGate refuses the request if somebody else is signed
+     *     in by then.
+     *   - It writes nothing back. A saved organisation the person no longer
+     *     belongs to stays in the session; it is simply never honoured.
+     *   - It cannot hide that the session is opened twice in one request
+     *     (this look, then the real start): in session mode PHP therefore
+     *     sends a `Set-Cookie` for the same session on every signed-in
+     *     answer, which is harmless, because it carries the identifier the
+     *     browser already holds, under the same rules, and has no lifetime
+     *     of its own (it ends with the browser), so nothing is renewed,
+     *     lengthened or handed to anybody new.
+     *
+     * @return array{userId:int, siteId:int} 0 for "nobody" and "none chosen".
+     */
+    public static function peekSession(): array
+    {
+        $nobody = ['userId' => 0, 'siteId' => 0];
+        if (PHP_SAPI === 'cli') {
+            return $nobody;
+        }
+
+        // Some other code already started it (a server with
+        // session.auto_start on): read it where it is, and leave it alone.
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            return [
+                'userId' => (int) ($_SESSION['user_id'] ?? 0),
+                'siteId' => (int) ($_SESSION['active_site_id'] ?? 0),
+            ];
+        }
+
+        self::prepareSessionStart();
+        if (isset($_COOKIE[session_name()]) === false) {
+            return $nobody;
+        }
+
+        if (session_start(['read_and_close' => true]) === false) {
+            return $nobody;
+        }
+        $seen = [
+            'userId' => (int) ($_SESSION['user_id'] ?? 0),
+            'siteId' => (int) ($_SESSION['active_site_id'] ?? 0),
+        ];
+        // Back to "no session yet", as in the other two ways. The session's
+        // stored data is untouched; ensureSession() reads it again.
+        unset($_SESSION);
+
+        return $seen;
     }
 
     /**
@@ -2850,16 +2956,6 @@ class Auth
     }
 
     /**
-     * 🌐 Set the active site ID in the session after login.
-     * Uses the pre-detected site if the user belongs to it, otherwise
-     * falls back to the user's first assigned site.
-     *
-     * @param int     $userId User ID
-     * @param \mysqli $db     Database connection
-     *
-     * @return void
-     */
-    /**
      * 🌐 Public wrapper for setSessionSiteId — for use outside Auth class
      * (e.g. WebAuthn login handler in separate file).
      *
@@ -2873,8 +2969,58 @@ class Auth
         self::setSessionSiteId($userId, $db);
     }
 
+    /**
+     * 🌐 Record, at sign-in, which organisation the person is in. Every way
+     * of signing in ends here: a password, the second step, Microsoft,
+     * Google, and a passkey (through initSessionSite() above).
+     *
+     * SESSION MODE (#502). The saved number is what Site::detectFromSession()
+     * reads on the next request, so this is where the choice at sign-in is
+     * made:
+     *   - one organisation: that one is saved, and the person never sees
+     *     the chooser;
+     *   - two or more: NOTHING is saved, so the next request finds no
+     *     choice and SiteGate sends the person to /site/choose. An
+     *     organisation left in the session by whoever used this browser
+     *     before is removed, for the same reason;
+     *   - none: nothing is saved, and SiteGate refuses every page.
+     * It used to save "the organisation this address opens, if they belong
+     * to it, else their first by number". In session mode the address opens
+     * the default organisation for everybody, so a person in several
+     * organisations was put in organisation 1 or their lowest-numbered one
+     * without being asked.
+     *
+     * THE OTHER TWO WAYS, AND ONE ORGANISATION ONLY: unchanged. Nothing
+     * reads the saved number there; the address decides.
+     *
+     * If the list of organisations cannot be read, nothing is saved. In
+     * session mode that leaves the person with no organisation chosen,
+     * which is the safe side: the next request asks again.
+     *
+     * @param int     $userId User ID
+     * @param \mysqli $db     Database connection
+     *
+     * @return void
+     */
     private static function setSessionSiteId(int $userId, \mysqli $db): void
     {
+        if (Site::isMultisiteEnabled() === true && Site::detectionMode() === Site::MODE_SESSION) {
+            unset($_SESSION['active_site_id']);
+            try {
+                $own = Site::organisationsFor($userId, $db);
+            } catch (\Throwable $e) {
+                error_log('[WebMS-Intra] Auth: could not read the organisations of account ' . $userId
+                    . ' at sign-in; none was chosen: ' . $e->getMessage());
+
+                return;
+            }
+            if (count($own) === 1) {
+                $_SESSION['active_site_id'] = $own[0]['siteID'];
+            }
+
+            return;
+        }
+
         $currentSiteId = Site::id();
 
         // 🔍 Check if the user belongs to the current (pre-detected) site

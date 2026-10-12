@@ -356,6 +356,22 @@ try {
 // Returns siteID=1 if multisite is disabled or detection fails.
 // See: _core/Site.php — preDetect() method
 //
+// Since 12 October 2026 (#502) this is the ONE place the organisation is
+// decided, in all three ways of telling organisations apart. Two things
+// follow that the lines above do not say:
+//   - When organisations are told apart by the sign-in session, preDetect()
+//     takes a read-only look at the session here (Auth::peekSession()) and
+//     closes it again at once. No session is left active, so the rest of
+//     this file runs exactly as before; web/public_html/index.php starts the
+//     session properly afterwards. A request with no session cookie, and
+//     anything run from the command line, is not given a session at all.
+//   - "Returns siteID=1 if detection fails" is still what this file gets,
+//     because the lines below need a number. But a failed detection is now
+//     remembered (Site::detectionFailed()), and web/public_html/index.php
+//     then shows a "try again" page (SiteGate) instead of organisation 1's
+//     pages. A front controller that does not call SiteGate does not get
+//     that protection.
+//
 // 🛡️ Wrapped in try/catch because this runs BEFORE the global exception
 //    handler is registered (line ~420) and BEFORE settings are loaded. Under
 //    PHP 8.1+ strict mysqli mode any error in the detection queries (tblSites

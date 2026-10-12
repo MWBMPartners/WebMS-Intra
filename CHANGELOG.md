@@ -2,6 +2,58 @@
 
 
 ## [Unreleased] (alpha)
+- **Several organisations on one installation: "sign-in session" mode now works (#502).**
+  The organisation was worked out before the session had started, so everybody was in
+  organisation 1 on every page and the switcher did nothing. A person with one
+  organisation is now put in it at sign-in. A person with several chooses one on a new
+  page (`/site/choose`) and sees nothing else until they have. Somebody taken out of an
+  organisation is out of it on their next click, whether their membership was deleted or
+  switched off.
+- **The organisation switcher works in all three ways.** It used to post to
+  `/site/switch` and go back to the front page whatever the set-up, which changed nothing
+  where the organisation is part of the address. It now links to the other
+  organisation's prefix or address. A global administrator with no membership row of
+  their own is offered every organisation that is switched on. The current
+  organisation's name shows at every screen width.
+- **An organisation's own address is checked.** Only a plain host name is accepted, and
+  an address another organisation holds is refused. A port, capitals or a trailing dot in
+  the address a browser sends no longer stop it matching. Migration 212 tidies stored
+  addresses and adds a "no two organisations share an address" rule to the database,
+  unless two already do, in which case it changes neither and the set-up page says which.
+- **Only an organisation's own members get in (#511, main hole).** A signed-in person
+  who is not a member of the organisation an address opens now gets a refusal page
+  (HTTP 403) on every address of it, data addresses included. Before, a member of one
+  organisation could read another's internal events, attendance and dashboard.
+- **The web server's own error page no longer shows another organisation's menu.**
+  `/error.php` is reached without the gate. Anybody the gate would stop now gets a plain
+  page there: the error's number and title, no menu, and no organisation's name.
+- **Admin, Organisations, "How organisations are told apart"**: a set-up page for global
+  administrators. One way is in use at a time: sign-in session (recommended), own
+  address each, or first part of the address. The page refuses a way that would leave an
+  organisation unreachable and says what each way cannot do. "First part of the address"
+  is marked not ready and cannot be chosen until the link sweep (#536) is finished. "One
+  organisation only" says that members of the other organisations then work in the
+  default one.
+- `tools/site-modes-selftest.php`: drives the real pages in each of the three ways and
+  with one organisation (136 checks).
+- The two settings `multisite.enabled` and `multisite.detectionMode` can no longer be
+  changed, added or deleted in the general settings editor, by anybody; they are changed
+  on the set-up page. The list shows no Edit or Delete button for them. A row for one
+  organisation with either name is no longer read.
+- **The last organisation that is switched on cannot be switched off.** With none on,
+  nobody who signed in could open any page, administrators included.
+- **While organisations are told apart by their own addresses, an organisation that is
+  switched on cannot be saved with no address**: nobody could open it. The default
+  organisation is the exception, because it answers at every address no other
+  organisation holds.
+- An account that belongs to no organisation, on an installation with several, is
+  refused everywhere and told to ask an administrator.
+- With several organisations in "sign-in session" mode, a global administrator who
+  belongs to more than one chooses an organisation after signing in, before any other
+  page except the database upgrade page.
+- When the portal cannot work out which organisation a request belongs to, it shows a
+  "try again" page (HTTP 503) and writes one line to PHP's error log.
+- Several-organisations work above (#502, #511): one independent check by a fresh Claude agent standing in for Codex (about 190 hand-made requests got a member of one organisation nothing of another), then one round of fixes with no second check. Run on MySQL 8.0.36 and 8.4.11; not on MariaDB, Apache or in a real browser. Not reviewed by Codex yet. Follow-ups: #599.
 - **Sign-in: five wrong passwords now means five (#580).** Each wrong password was counted twice, so three blocked an address, and a try made while blocked also counted, so the block kept moving forward. Now one wrong password is one record, and trying again while blocked does not make the block longer. An address is blocked while five failed sign-ins from it are less than 15 minutes old.
 - **Sign-in: tries sent at the same moment no longer get past the limit (#580).** Forty tries at once from one address used to have up to 13 passwords checked. Tries from one address now take turns, so no more than five are checked.
 - **Sign-in: the limit for one account is ten tries, not twenty (#580).** Tries by user name and tries by e-mail address were counted apart. They are now counted together, under the account.

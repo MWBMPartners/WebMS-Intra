@@ -84,7 +84,12 @@ CREATE TABLE IF NOT EXISTS `tblSites` (
     `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`siteID`),
-    UNIQUE KEY `uq_site_key` (`siteKey`)
+    UNIQUE KEY `uq_site_key` (`siteKey`),
+    -- No two organisations may share an address (#502, migration 212). Any
+    -- number of organisations may have NO address: a unique key allows many
+    -- NULLs. Migration 212 adds this key to an existing database only when no
+    -- address is held twice there.
+    UNIQUE KEY `uq_site_host` (`hostPattern`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Multi-site definitions. Each row represents a portal site/division.';
 
@@ -2446,6 +2451,16 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('site/switch', 'site/switch.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+-- ─── Which organisation (from migration 212, #502) ──────────────────────────
+-- The chooser a person with several organisations sees after signing in, and
+-- the set-up page where a global administrator chooses how organisations are
+-- told apart, with its save handler. The statement is migration 212's own.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('site/choose',            'site/choose.php',            1),
+    ('admin/sites/setup',      'admin/sites/setup.php',      1),
+    ('admin/sites/setup/save', 'admin/sites/setup-save.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 -- ─── Help Centre ─────────────────────────────────────────────────────────────
@@ -9876,4 +9891,13 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- exists. CREATE TABLE IF NOT EXISTS leaves an existing table as it is.
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('211_expense_claim_withdrawn.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 212_which_organisation.sql (roll-out package F1, #502) ──────────────
+-- Everything that migration adds is already written above: the key
+-- `uq_site_host` inside CREATE TABLE `tblSites`, and the three addresses in the
+-- "Which organisation" block of the address seeds. Its first step, tidying
+-- addresses already stored, has nothing to do on a new database. (Migration 211
+-- belongs to another package and is recorded by that package.)
+INSERT INTO `tblMigrations` (`filename`) VALUES ('212_which_organisation.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

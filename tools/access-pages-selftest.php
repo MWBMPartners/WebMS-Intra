@@ -97,6 +97,28 @@
  *      document was made with; and when the e-mail to approvers fails after
  *      the withdrawal is stored, the person is still told "withdrawn".
  *
+ * Roll-out package F2 (12 October 2026, #511) put ONE gate in front of every
+ * page: a signed-in person who is not a member of the organisation an
+ * address opens is refused there (HTTP 403) before any page runs. So the
+ * outsiders in parts F to I now meet two locks, the gate at the door and
+ * the rule inside each page, and a request can only ever show the first.
+ * So those four parts are proved in two steps:
+ *   - Parts F to I run with the gate stood down in the SCRATCH COPY only
+ *     (membersGate()), so that what answers is the rule inside each page.
+ *     Those are the checks package B2a wrote, unchanged. (An outsider's
+ *     "403" there would otherwise come from the gate, and the check would
+ *     go on passing with the page's own rule taken out.)
+ *   - Then part "F to I, at the door" puts the gate back, as the portal
+ *     really runs, and sends the same outsiders to the same addresses: each
+ *     is refused (403) with none of A's data, and nothing is written.
+ * Why both: with only the door tested, a page's own rule could be removed
+ * and no check here would fail; the next change to the gate would then
+ * reopen the page with nothing to say so.
+ * WHAT THAT COSTS: in parts F to I the members' own requests (the controls)
+ * also run with the gate stood down. Every other part runs on the code
+ * exactly as shipped, and `tools/site-modes-selftest.php` is the gate's own
+ * test, members included.
+ *
  * SAFETY
  * ------
  * - It writes rows, so it REFUSES unless the database's name starts with
@@ -117,6 +139,9 @@
  *   statements. So the database account must be allowed to do that (the
  *   root account of a throwaway server is), and nothing else should be
  *   using that server while this runs: its statements would be counted too.
+ * - For parts F to I it rewrites ONE line of `web/_core/SiteGate.php` in
+ *   its scratch copy, and puts the file back before the "at the door" part. The repository's file is never written. It
+ *   refuses to go on if that line is not found exactly once.
  * - The scratch folder is a NEW child of `SELFTEST_WEB_DIR` (or the system's
  *   temporary folder). It refuses if that folder contains the repository or
  *   is inside it. The child is deleted at the end only if it still holds
@@ -196,7 +221,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 278;
+const EXPECTED_CHECKS = 285;
 
 function refuse(string $why): never
 {
@@ -542,6 +567,36 @@ function req(string $jar, string $method, string $path, ?array $post = null, str
     ];
 }
 
+/**
+ * 🚪 Stand the members-only gate down, or put it back, in the SCRATCH COPY
+ * only (roll-out package F2, #511). See the note in this file's header for
+ * why the outsiders' requests are made both ways.
+ *
+ * Standing it down swaps the one line that refuses a non-member for a plain
+ * `return`, so the request reaches the page as it did before the gate
+ * existed. Everything else the gate does stays in place.
+ */
+function membersGate(bool $inPlace): void
+{
+    global $child, $sep, $state;
+    $file = $child . $sep . 'web' . $sep . '_core' . $sep . 'SiteGate.php';
+    if (isset($state['gateFile']) === false) {
+        $state['gateFile'] = (string) file_get_contents($file);
+    }
+    $refusal = 'self::notAMember($db, $userId, $own, $path);';
+    if (substr_count($state['gateFile'], $refusal) !== 1) {
+        refuse('web/_core/SiteGate.php does not hold the line "' . $refusal . '" exactly once, so the members-only gate cannot be stood down for the page-level checks');
+    }
+    file_put_contents($file, $inPlace === true ? $state['gateFile'] : str_replace($refusal, 'return;', $state['gateFile']));
+    clearstatcache();
+}
+
+/** Is this what the gate's refusal looks like: HTTP 403, and nothing of organisation A's in it? */
+function refusedAtTheDoor(array $answer): bool
+{
+    return $answer['status'] === 403 && str_contains($answer['body'], 'ACCESS') === false && str_contains($answer['body'], 'Selftest access A') === false;
+}
+
 /** The form token on a page. */
 function token(string $html): string
 {
@@ -883,7 +938,7 @@ unset($env['PHP_CLI_SERVER_WORKERS']);
 $env['PORTAL_ENV'] = 'prod';
 $state['proc']     = proc_open(
     [PHP_BINARY, '-d', 'session.save_path=' . $child . $sep . 'sessions', '-d', 'error_log=' . $child . $sep . 'php-errors.log', '-d', 'log_errors=1',
-        '-d', 'display_errors=0', '-S', '127.0.0.1:' . $port, '-t', $child . $sep . 'web' . $sep . 'public_html', $child . $sep . 'router.php'],
+        '-d', 'display_errors=0', '-d', 'opcache.enable=0', '-S', '127.0.0.1:' . $port, '-t', $child . $sep . 'web' . $sep . 'public_html', $child . $sep . 'router.php'],
     [0 => ['file', '/dev/null', 'r'], 1 => ['file', $child . $sep . 'server-output.log', 'a'], 2 => ['file', $child . $sep . 'server-output.log', 'a']],
     $pipes,
     $child,
@@ -1120,6 +1175,12 @@ ok('an ordinary claimant, who never had the button, is shown neither the button 
 // they named belong to the organisation in the address?". Each part sends
 // the request an outsider would send, then the one an insider would.
 
+// 🚪 Parts F to I: the members-only gate is stood down in the scratch copy,
+//    so that what answers each outsider is the rule inside the page. It is
+//    put back, and the same outsiders are sent again, in the part after I.
+//    See the note about roll-out package F2 at the top of this file.
+membersGate(false);
+
 // -----------------------------------------------------------------------------
 head('F. Registrations: an administrator of one organisation cannot decide another organisation\'s registration');
 // -----------------------------------------------------------------------------
@@ -1184,6 +1245,7 @@ $venuePages = [
     'the CSV export'         => '/venues/export?venue=' . VENUE . '&year=' . $year,
     'the printable schedule' => '/venues/schedule-pdf?venue=' . VENUE . '&year=' . $year,
 ];
+$range        = '?from=' . $today . '&to=' . $today;
 foreach ($venuePages as $what => $path) {
     $outsider = req($jar['bmem'], 'GET', ADDR_A . $path);
     $insider  = req($jar['mem'], 'GET', ADDR_A . $path);
@@ -1194,7 +1256,6 @@ foreach ($venuePages as $what => $path) {
     );
     ok(sprintf('control, %s: a member of A still sees it', $what), $insider['status'] === 200 && str_contains($insider['body'], VENUE_MARK) === true, 'HTTP ' . $insider['status']);
 }
-$range        = '?from=' . $today . '&to=' . $today;
 $availability = ADDR_A . '/api/venues/availability' . $range;
 $unknownVenue = req($jar['mem'], 'GET', $availability . '&venueID=916799');
 foreach (['naming A\'s venue' => '&venueID=' . VENUE, 'naming no venue (every venue of A)' => ''] as $what => $extra) {
@@ -1563,6 +1624,68 @@ foreach (['/api/api/livestream-ping' => '404: API endpoint not found', '/api/liv
         said($answer)
     );
 }
+
+// -----------------------------------------------------------------------------
+head('F to I, at the door: with the members-only gate back, the same outsiders are refused before any page runs (#511)');
+// -----------------------------------------------------------------------------
+membersGate(true);
+// F. B's administrator, with a form token from their own organisation's page, posts to A's handler.
+$regBefore = $regState(916502);
+$answer    = post($jar['badm'], ADDR_B . '/account', $actA, ['registrationID' => 916502, 'eventID' => EV_B, 'action' => 'approve']);
+ok('at the door, F: B\'s administrator posting to A\'s registrations handler is refused (403), and nothing is changed', refusedAtTheDoor($answer) === true && $regState(916502) === $regBefore, 'HTTP ' . $answer['status'] . '; row: ' . $regState(916502));
+// G. A member of B at A's attendance form and its two handlers.
+$doorAnswers = [
+    req($jar['bmem'], 'GET', $record),
+    post($jar['bmem'], ADDR_B . '/account', $record . '/save', $newSession('ACCESS-ATT at the door')),
+    post($jar['bmem'], ADDR_B . '/account', $record . '/delete', ['sessionID' => 916611]),
+];
+ok(
+    'at the door, G: a member of B is refused (403) on A\'s attendance form, its save address and its delete address, and no session is written',
+    array_filter($doorAnswers, 'refusedAtTheDoor') === $doorAnswers && $sessionsNoted('ACCESS-ATT at the door') === 0,
+    implode(', ', array_column($doorAnswers, 'status')) . '; sessions written: ' . $sessionsNoted('ACCESS-ATT at the door')
+);
+// H. Every venue address, and the calendar page, for a member of B and for an account with no membership.
+$notRefused = [];
+foreach ([$jar['bmem'], $jar['nomem']] as $outsiderJar) {
+    foreach (array_merge(array_values($venuePages), [
+        '/api/venues/availability' . $range . '&venueID=' . VENUE, '/api/venues/availability' . $range,
+        '/api/venues/check?start=' . $today . 'T09:30&end=' . $today . 'T10:30&tz=UTC&venueID=' . VENUE,
+        '/venues/venue?id=' . VENUE, '/venues/venue?id=916799',
+    ]) as $path) {
+        $atDoor = req($outsiderJar, 'GET', ADDR_A . $path);
+        if (refusedAtTheDoor($atDoor) === false) {
+            $notRefused[] = $path . ' gave HTTP ' . $atDoor['status'];
+        }
+    }
+}
+ok('at the door, H: a member of B and an account with no membership are refused (403) on every venue address of A, with none of A\'s data', $notRefused === [], implode('; ', $notRefused));
+$notRefused = [];
+foreach (['month', 'week', 'day', 'year'] as $calendarView) {
+    foreach ([$jar['bmem'], $jar['nomem']] as $outsiderJar) {
+        $atDoor = req($outsiderJar, 'GET', ADDR_A . '/calendar?view=' . $calendarView . '&date=' . $eventDay);
+        if (refusedAtTheDoor($atDoor) === false) {
+            $notRefused[] = $calendarView . ' view gave HTTP ' . $atDoor['status'];
+        }
+    }
+}
+ok('at the door, H: the same two are refused (403) on A\'s calendar page in every view, public though it is (they can sign out to see it)', $notRefused === [], implode('; ', $notRefused));
+// I. The chat's three addresses and the /live page, for a member of B.
+$tok         = $newTok();
+$doorAnswers = [
+    req($jar['bmem'], 'GET', $chat . '/list?eventID=' . EV_INT . '&sinceID=0', null, '', null, $fromPortal),
+    postJson($jar['bmem'], $ping, ['sessionToken' => $tok, 'eventID' => EV_INT], $fromPortal),
+    postJson($jar['bmem'], $chat . '/send', ['sessionToken' => $tok, 'eventID' => EV_INT, 'displayName' => 'ACCESS at the door viewer', 'body' => 'should never be stored'], $fromPortal),
+];
+ok(
+    'at the door, I: a signed-in member of B is refused (403) on A\'s chat list, viewer ping and chat send, and nothing is stored',
+    array_filter($doorAnswers, 'refusedAtTheDoor') === $doorAnswers && $sentBy('ACCESS at the door viewer') === 0,
+    implode(', ', array_column($doorAnswers, 'status'))
+);
+$boxes = [$box($jar['bmem'], EV_INT), $box($jar['bmem'], EV_DRAFT), $box($jar['bmem'], EV_NONE), $box($jar['bmem'], EV_PUB)];
+ok('at the door, I: the /live page refuses a member of B (403) for A\'s internal event, its draft, a made-up number and the public event alike', $boxes === ['403', '403', '403', '403'], 'internal, draft, made-up, public: ' . implode(', ', $boxes));
+// A control, so that "refused" above cannot be a server that refuses everybody.
+$answer = req($jar['mem'], 'GET', ADDR_A . '/venues/venue?id=' . VENUE);
+ok('at the door, control: with the gate back, a member of A still opens the venue\'s page', $answer['status'] === 200 && str_contains($answer['body'], VENUE_MARK) === true, 'HTTP ' . $answer['status']);
 
 // -----------------------------------------------------------------------------
 head('J. A child\'s check-in and a decision card are never lost over a bad event number');

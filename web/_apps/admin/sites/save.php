@@ -23,6 +23,7 @@ use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\ReservedKeys;
 use Portal\Core\Roles;
+use Portal\Core\Site;
 
 // 🛡️ POST only
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -83,6 +84,87 @@ if (preg_match('/^[a-z0-9\-]+$/', $siteKey) !== 1) {
 // 🔍 Validate timezone
 if (in_array($timezone, timezone_identifiers_list(), true) === false) {
     $timezone = 'UTC';
+}
+
+// 🔒 #502 — the organisation's OWN ADDRESS, used when each organisation has
+// an address of its own. It used to be stored exactly as typed, with no check
+// at all, and nothing stopped two organisations being given the same one.
+// Either mistake fails silently: "https://north.example.org/" can never equal
+// the host name a browser sends, so that organisation quietly came out as the
+// default one; and with one address on two organisations, which of them
+// answered was whichever the database happened to return first.
+//
+// So: only a plain host name is accepted (Site::cleanHostName() tidies
+// capitals and a trailing dot, and refuses everything else rather than
+// repairing it), and an address another organisation holds is refused, by
+// name, before anything is written. Both run ONCE, before the create and the
+// update branches, so neither path can skip them.
+//
+// The database has the same "one address each" rule since migration 212
+// (the key uq_site_host), except on a database that already held a shared
+// address when it was upgraded. This check does not depend on that key.
+//
+// An EMPTY address is a separate question, answered just below this block.
+$cleanHost = Site::cleanHostName($hostPattern);
+if ($cleanHost === null) {
+    $_SESSION['flash_msg'] = 'The organisation\'s own address must be a plain host name, such as north.example.org: '
+        . 'no "https://", no "/", no port number and no spaces. Nothing was saved.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('admin/sites'), true, 302);
+    exit();
+}
+$hostPattern = $cleanHost;
+if ($hostPattern !== '') {
+    $holderStmt = $db->prepare('SELECT siteName FROM tblSites WHERE hostPattern = ? AND siteID <> ? LIMIT 1');
+    if ($holderStmt === false) {
+        $_SESSION['flash_msg'] = 'The portal could not check whether that address is already in use, so nothing was saved. Try again.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('admin/sites'), true, 302);
+        exit();
+    }
+    $holderStmt->bind_param('si', $hostPattern, $siteID);
+    $holderStmt->execute();
+    $holder = $holderStmt->get_result()->fetch_assoc();
+    $holderStmt->close();
+    if ($holder !== null) {
+        $_SESSION['flash_msg'] = 'The address ' . $hostPattern . ' already belongs to the organisation "' . $holder['siteName']
+            . '". Each organisation needs an address of its own. Nothing was saved.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('admin/sites'), true, 302);
+        exit();
+    }
+}
+
+// 🔒 #502 — while organisations are told apart by their own addresses, an
+// organisation that is switched on must HAVE an address.
+//
+// WHAT WAS WRONG. Clearing the address of an active organisation was saved
+// without a word. From then on no address opened it: its own members were
+// refused everywhere (the members-only gate), and nothing on screen said
+// why (found by the builder and confirmed by the independent check,
+// 12 October 2026). The set-up page already refuses to switch this way ON
+// in that state; this is the same rule for a change made afterwards. It runs
+// before the create and the update branches, so neither can skip it.
+//
+// THE DEFAULT ORGANISATION (number 1) IS LEFT ALONE, on purpose. It is not
+// unreachable without an address: it answers at every address that no other
+// organisation holds (Site::detectFromSubdomain()). An installation put into
+// this way straight in the database, before the set-up page existed, runs
+// like that today, and refusing here would stop its administrator saving
+// that organisation's name or logo.
+//
+// WHAT IT DOES NOT DO: mend an organisation that is already active with no
+// address. It says so the next time that organisation is saved, and until
+// then nothing warns anybody. Switching an organisation off with no address
+// is always allowed.
+if ($hostPattern === '' && $isActive === 1 && $siteID !== 1
+    && Site::isMultisiteEnabled() === true && Site::detectionMode() === Site::MODE_HOST) {
+    $_SESSION['flash_msg'] = 'The organisations on this installation are told apart by their own addresses, so an organisation '
+        . 'that is switched on needs one: without an address nobody can open it, its own members included. '
+        . 'Give "' . $siteName . '" an address, or switch it off. Nothing was saved.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('admin/sites'), true, 302);
+    exit();
 }
 
 // 🔒 #515 — refuse a key that would take over an address the portal itself
@@ -157,6 +239,49 @@ if ($siteID > 0) {
     // administrator changes it (see the health probe, admin dashboard and
     // organisations-page badge this package also adds), never rename or
     // break it automatically.
+    // 🔒 #502 — at least one organisation must stay switched on.
+    //
+    // WHAT WAS WRONG. Nothing stopped the last active organisation being
+    // switched off. On an installation that serves several organisations,
+    // everybody who signed in was then refused on every page, global
+    // administrators included, the upgrade and set-up pages too, and only
+    // somebody with access to the database could put it right (ran by the
+    // independent check, 12 October 2026).
+    //
+    // If the count cannot be made, nothing is saved: a switch-off is never
+    // allowed on a check that did not run.
+    //
+    // WHAT IT CANNOT DO: stop two administrators each switching off one of
+    // the last two organisations in the same instant; each would see the
+    // other's still on. And it does not stop the DEFAULT organisation being
+    // switched off while another stays on.
+    if ($isActive === 0 && $storedActive === 1) {
+        $othersOn  = null;
+        $countStmt = $db->prepare('SELECT COUNT(*) AS n FROM tblSites WHERE isActive = 1 AND siteID <> ?');
+        if ($countStmt !== false) {
+            $countStmt->bind_param('i', $siteID);
+            $countStmt->execute();
+            // 🔢 A count from a prepared statement is a number; cast, never compare with text.
+            $othersOn = (int) ($countStmt->get_result()->fetch_assoc()['n'] ?? 0);
+            $countStmt->close();
+        }
+        if ($othersOn === null) {
+            $_SESSION['flash_msg'] = 'The portal could not check whether another organisation is switched on, so nothing was saved. Try again.';
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('admin/sites'), true, 302);
+            exit();
+        }
+        if ($othersOn === 0) {
+            $_SESSION['flash_msg'] = 'At least one organisation must stay switched on, and "' . $siteName . '" is the only one that is. '
+                . 'If an installation that serves several organisations has none switched on, nobody who signs in can open any page, '
+                . 'administrators included, and only somebody with access to the database can put that right. '
+                . 'Switch another organisation on first. Nothing was saved.';
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('admin/sites'), true, 302);
+            exit();
+        }
+    }
+
     $keyChanged  = ($siteKey !== $storedKey);
     $switchingOn = ($isActive === 1 && $storedActive === 0);
     if ($reservedKinds !== [] && ($keyChanged === true || $switchingOn === true)) {

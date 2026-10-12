@@ -5640,6 +5640,52 @@ philosophy, same "no oracle" security reasoning:
 
 ---
 
+## Several organisations on one installation, and the members-only gate (#502, #511)
+
+- **Which organisation is decided in ONE place**: `Site::preDetect()`. In session mode
+  it takes a read-only look at the session (`Auth::peekSession()`) and closes it again,
+  so the rest of start-up runs with no session active, as in the other two ways. One
+  side effect: in session mode every signed-in answer carries a `Set-Cookie` for the
+  session the browser already holds. It is harmless (same identifier, no lifetime).
+- **Whether the request may go on is decided in ONE place**: `SiteGate::enforce()`,
+  called by `web/public_html/index.php` just before `Router::dispatch()`. A new front
+  controller must call it too, or it has neither the "could not work out the
+  organisation" stop nor the members-only gate.
+- **`web/public_html/error.php` cannot call `enforce()`** (it has to keep the web
+  server's status code), so it asks `SiteGate::wouldStop()` and shows its plain page on
+  a yes. `wouldStop()` repeats the gate's rules without the passes for particular
+  addresses. A rule added to `enforce()` belongs in `wouldStop()` too; checks E01 to E04
+  of the self-test hold the two together. `/api-docs/index.php` asks the gate nothing.
+- **"Your organisations" is ONE list**: `Site::organisationsFor()`. The chooser, the
+  switcher, the switch handler and the gate all use it. It uses only columns that have
+  existed since migration 015; keep it that way, because it runs before the upgrade page.
+- **`Site::FIRST_PART_MODE_READY`** is the one line the link-sweep package switches on.
+- A failed organisation look-up shows a "try again" page (HTTP 503) instead of
+  organisation 1, and reaches PHP's error log in all three ways. A database older than
+  migration 015 (no organisation column in the settings table) is treated as
+  "multi-organisation off", not as a failure.
+- Links to another organisation come from `Site::addressOf()`. The redirect after the
+  set-up is saved comes from `Site::urlUnder()`.
+- **`Site::lockedInGeneralEditor()` is asked in three places** of the general settings
+  editor: change and add (`settings/save.php`) and delete (`settings/index.php`).
+- **Two self-tests changed with the gate** (`tools/access-pages-selftest.php`, which has
+  285 checks on this branch, and `tools/feed-admin-selftest.php`): their outsider parts
+  run with the gate's one refusing line stood down in the scratch copy, so the page's own
+  rule answers; then the same outsiders are sent again with the gate back ("at the door"
+  checks). A new test that sends an outsider to a page should do the same, or its
+  "refused" will come from the gate and prove nothing about the page.
+- **The gate shows the chooser itself** (it does not go through the address table), and a
+  global administrator who has not chosen an organisation yet may still open
+  `admin/upgrade`. Both exist so that an upgrade can never be locked behind the chooser.
+- **`tools/site-modes-selftest.php` has two test-only extras in its router**: one hands
+  PHP another session's data on its second read (a session that changes between the
+  early look and the real start), and one answers with the portal's start-up alone.
+  It also makes a look-up fail for one request by renaming a table away. A test that
+  searches a whole page for a short number must ask for the number standing on its own:
+  every page carries a random form token, and "7919" turned up inside one by chance.
+
+---
+
 ## Sign-in limits and password reset (#580)
 
 - **`Mailer::canSend()` is the one place that answers "can the portal send e-mail?"** `Mailer::sendingRoute()` beside it gives the route's name and what is still missing. A page must never test a provider's settings itself. A new mail route is added in `Mailer::route()` and `Mailer::sendingRoute()` and nowhere else. "Yes" is not proof of delivery.
