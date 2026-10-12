@@ -80,7 +80,7 @@ Foundational classes loaded by every request via `bootstrap.php`. All ✅.
 | `Site` | Multi-site context — detection, branding, per-site settings overrides; product-brand resolution helpers `productName()` / `productTagline()` / `productPublisher()` (#296) |
 | `AppRegistry` | Single source of truth for installable apps; powers `/admin/apps` toggle + Router enablement gating + industry filter (#255). Since #478 a switched-off app's `/api/…` endpoints are refused too (`ApiRouter`, 403 "The <app> app is switched off for this organisation."; for an API key the key's own organisation's switch decides), and its pages under an address of their own (`/attend`, `/calendar.ics`, `/account/calendar-feed`, `/recordings.rss`, `/visit`) follow the switch. `/unsubscribe` deliberately does not. Two hand-written lists: `API_FOLDER_APPS`, `ROUTES_OUTSIDE_PREFIX` |
 | `Captcha` | Provider-agnostic — Turnstile / reCAPTCHA v2+v3 / hCaptcha with admin-configurable priority |
-| `Mailer`, `MailerGoogle` | Microsoft Graph app-only send (direct or admin-configured shared mailbox, #234) + Google Workspace SendAs; every send logged to `tblEmailLog` |
+| `Mailer`, `MailerGoogle`, `MailRoutes` | The one door for sending e-mail: Microsoft 365 (direct or shared mailbox, #234), Google Workspace, or an SMTP mailbox through the portal's own mail library (#592). `MailRoutes` is the one place that reads the SMTP settings and the installation's choice of route, and decrypts the mailbox's password. Every attempt is logged to `tblEmailLog`. No queue yet. |
 | `ExpenseMailer`, `ExpensePdf`, `Pdf` | Expense email notifier, PDF generator, dompdf wrapper |
 | `Logger` | Activity + error logging into `tblActivityLogs` / `tblErrors` |
 | `Migrator` | Web-based SQL migration runner |
@@ -259,6 +259,7 @@ Local + SSO + multi-factor sign-in.
 | Google OAuth | ✅ |
 | WebAuthn / PassKey registration + login | ✅ |
 | Forgot password → email reset link — links last 60 minutes (a setting), are stored only as a fingerprint, work once, and are refused for a switched-off account; it stays open, under its own limit, to somebody blocked from signing in (#580) | ✅ |
+| Send e-mail through an SMTP mailbox — settings, route choice and "Send test" at Admin, Integrations, Email (global administrator only, as are the Integrations page's own three tests); certificate always checked; optional hourly limit (not exact); no queue yet (#592, part 2) | ✅ |
 | Reset password (token verified, single-use) | ✅ |
 | Account page (profile, change password, linked accounts, WebAuthn keys, unlink) | ✅ |
 | 2FA TOTP setup / verify / disable | ✅ |

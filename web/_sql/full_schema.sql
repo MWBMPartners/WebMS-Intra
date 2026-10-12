@@ -1510,18 +1510,21 @@ COMMENT='Centralised error log for all platforms/libraries. See core/Logger.php.
 CREATE TABLE IF NOT EXISTS `tblEmailLog` (
     `emailLogID`      INT           NOT NULL AUTO_INCREMENT COMMENT 'Unique send-log record identifier',
     `siteID`          INT           DEFAULT NULL COMMENT 'Site::id() at send time; NULL when sent outside site context (e.g. cron)',
-    `provider`        VARCHAR(20)   NOT NULL COMMENT 'ms365, ms365-shared, or google',
+    `provider`        VARCHAR(20)   NOT NULL COMMENT 'The route the attempt was made through: ms365, ms365-shared, google or smtp',
     `fromAddress`     VARCHAR(255)  NOT NULL DEFAULT '' COMMENT 'Effective sender address at send time',
     `toRecipients`    TEXT          NOT NULL COMMENT 'Comma-joined recipient address list',
     `subject`         VARCHAR(500)  NOT NULL DEFAULT '' COMMENT 'Truncated subject line',
     `attachmentCount` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Number of files actually attached',
     `status`          ENUM('sent','failed') NOT NULL,
-    `httpCode`        SMALLINT      DEFAULT NULL COMMENT 'Provider HTTP response code, when one was received',
+    `httpCode`        SMALLINT      DEFAULT NULL COMMENT 'The number the mail service answered with, when it gave one: an HTTP status from Microsoft 365 or Google, an SMTP reply code from a mail server',
     `errorCode`       VARCHAR(100)  NOT NULL DEFAULT '' COMMENT 'Provider error code, e.g. Graph ErrorAccessDenied',
     `errorDetail`     VARCHAR(500)  NOT NULL DEFAULT '' COMMENT 'Truncated error message. Never token or secret material',
     `sentAt`          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `sentAtUtc`       DATETIME      DEFAULT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when this attempt was recorded. The hourly limit counts on it. Empty for rows from before migration 213, which are not counted. (sentAt beside it is the database server''s own clock, not UTC.)',
+    `recipientCount`  SMALLINT UNSIGNED NOT NULL DEFAULT 1 COMMENT 'How many addresses the message was for. The hourly limit adds these up',
     PRIMARY KEY (`emailLogID`),
     KEY `idx_emaillog_site_sent` (`siteID`, `sentAt`),
+    KEY `idx_emaillog_sent_utc` (`sentAtUtc`),
     CONSTRAINT `fk_emaillog_site` FOREIGN KEY (`siteID`)
         REFERENCES `tblSites` (`siteID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
@@ -3394,9 +3397,7 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'portal.alerts.recipients',       '',                '',                0),
     (NULL, 'portal.alerts.severities',       'Critical,Fatal',  'Critical,Fatal',  0),
-    (NULL, 'portal.alerts.cooldown_minutes', '30',              '30',              0),
-    (NULL, 'email.provider',                 'smtp',            'smtp',            0),
-    (NULL, 'email.from',                     '',                '',                0)
+    (NULL, 'portal.alerts.cooldown_minutes', '30',              '30',              0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
@@ -9902,4 +9903,38 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- addresses already stored, has nothing to do on a new database. (Migration 211
 -- belongs to another package and is recorded by that package.)
 INSERT INTO `tblMigrations` (`filename`) VALUES ('212_which_organisation.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 213_smtp_mail_route.sql (mail package M2, #592 part 2) ──────────────
+-- What the SMTP mail route needs. The two new columns of tblEmailLog
+-- (`sentAtUtc`, `recipientCount`), its new key and its two corrected column
+-- descriptions are written inline in that table above. Nothing of those is
+-- repeated here: CREATE TABLE IF NOT EXISTS leaves an existing table as it
+-- is, and when the installer runs this file over a database that already
+-- exists it replays every numbered migration afterwards, 213 included, which
+-- is what adds them there.
+--
+-- The six settings below are the migration's own, word for word. The password
+-- row is seeded EMPTY and marked as a secret; the page at Admin,
+-- Integrations, Email writes it, encrypted, and the mail code uses a stored
+-- value only when it is marked as a secret and decrypts.
+--
+-- The DELETE removes two settings nothing reads (`email.provider`,
+-- `email.from`). This file used to seed them, in the block copied from
+-- migration 067 above; those two lines were taken out when this block was
+-- added. The DELETE is still here for the installer's "carry on with the
+-- existing database" choice, where the rows may already be stored.
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'mail.smtp.host',     '',         '',         0),
+    (NULL, 'mail.smtp.port',     '587',      '587',      0),
+    (NULL, 'mail.smtp.security', 'starttls', 'starttls', 0),
+    (NULL, 'mail.smtp.username', '',         '',         0),
+    (NULL, 'mail.smtp.password', '',         '',         1),
+    (NULL, 'mail.limit.perHour', '',         '',         0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+DELETE FROM `tblSettings` WHERE `settingKey` IN ('email.provider', 'email.from');
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('213_smtp_mail_route.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

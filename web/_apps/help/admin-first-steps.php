@@ -83,13 +83,15 @@ endif;
         </h2>
         <div id="step2" class="accordion-collapse collapse" data-bs-parent="#adminFirstSteps">
             <div class="accordion-body">
-                <p>Without email, password resets and notifications don't work. Two options:</p>
+                <p>Without e-mail, password resets and notifications do not work. The portal can send in one of three ways, and one way serves every organisation on the installation:</p>
                 <ul>
-                    <li><strong>SMTP</strong> — use the existing shared-hosting mail server. Quickest. Higher chance of spam-folder landing.</li>
-                    <li><strong>MS365 Graph (delegate)</strong> — send from a shared mailbox via Microsoft 365. Best deliverability if your org has 365 (issue #234 — implementation pending).</li>
+                    <li><strong>An SMTP mailbox</strong> — an ordinary mailbox on a mail server, of the kind most hosting and e-mail providers include. Usually the quickest to set up. A global administrator types the server&rsquo;s name, the port, the mailbox&rsquo;s user name and its password at <a href="/admin/integrations/email">Admin, Integrations, Email</a>. The connection is always encrypted and the mail server&rsquo;s certificate is always checked; if the certificate fails that check, nothing is sent and the page says why.</li>
+                    <li><strong>Microsoft 365</strong> — for an organisation that already has it. Mail can go out from a shared mailbox. Its settings are typed on the Settings and Integrations pages.</li>
+                    <li><strong>Google</strong> — for an organisation on Google Workspace. It needs a key file put on the server.</li>
                 </ul>
-                <p>Configure at <a href="/admin/integrations/email">/admin/integrations/email</a>. Send a test email to yourself to confirm.</p>
-                <p>Also verify SPF / DKIM / DMARC on your sending domain — the DNS probe on the email admin page tells you what's missing.</p>
+                <p>Choose the route, and see what it still needs, at <a href="/admin/integrations/email">Admin, Integrations, Email</a>. Then use &ldquo;Send test&rdquo; there to send yourself a message.</p>
+                <p>Two things to know. A message the portal cannot send straight away is <strong>not kept and not tried again</strong>: it is listed on that page as not sent, with the reason. And if you set a limit on how many recipients an hour the portal may send to, mail over the limit is not sent either.</p>
+                <p>Also check the three DNS records (SPF, DKIM and DMARC) on the domain you send from. They tell other mail systems that the portal may send as your domain, and without them mail tends to land in junk folders. The same page shows which it found.</p>
             </div>
         </div>
     </div>

@@ -348,7 +348,14 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     nothing of the portal; `php tools/maillib/tests/stands-alone.php` enforces
     that from a list of what the library may use
     (`check_maillib_stands_alone.py` only starts it). Its test is `php
-    tools/maillib/tests/run.php`. Nothing calls it yet.
+    tools/maillib/tests/run.php`.
+    Since part two (#592) `Mailer::send()` uses it for the SMTP route, through
+    `web/_core/MailRoutes.php`, the ONE place that reads the SMTP settings and
+    the installation's choice of route, and decrypts the mailbox's password
+    (never read `$SETTINGS['mail']['provider']`). Its page test is `tools/mail-
+    pages-selftest.php`. No queue yet; the certificate is always checked.
+    Sending a test, from the e-mail page or the Integrations page, is for a
+    global administrator only: one mail route serves every organisation.
 
     **Several organisations (#502, #511).** `Site::preDetect()` is the ONE place
     the organisation of a request is decided, and `SiteGate` (called in

@@ -18,7 +18,7 @@ A modular internal portal platform for organisations, providing centralised acce
 | **Multi-Site**     | Umbrella multi-site with subdomain, path-prefix, and session detection modes     | One install serves multiple locations/divisions  |
 | **UI**             | Bootstrap 5.3.3 + design tokens; light/dark/auto theme + CB-safe palette         | Responsive, WCAG-conscious, per-site themable    |
 | **PDF**            | dompdf 3.1.5 (fetched at deploy time by `tools/download-dompdf.sh`)              | Server-side PDF; pinned version vendored in CI   |
-| **Email**          | Microsoft Graph "SendAs" via shared mailbox                                      | DKIM/DMARC compliance, modern auth               |
+| **Email**          | Microsoft 365, Google Workspace, or an ordinary SMTP mailbox (set at Admin, Integrations, Email) | One route for the installation; certificate always checked |
 | **Bot Protection** | CloudFlare Turnstile (preferred) / reCAPTCHA                                     | Reduces spam without degrading UX                |
 
 ---
@@ -49,7 +49,7 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     │   ├── ExpensePdf.php           # Expense claim PDF generator
     │   ├── Gatekeeper.php           # Dev/channel access control
     │   ├── Logger.php               # Activity and error logging
-    │   ├── Mailer.php               # Email via Microsoft Graph API
+    │   ├── Mailer.php               # The one door for sending e-mail (Microsoft 365, Google, SMTP)
     │   ├── Migrator.php             # Web-based SQL migration runner
     │   ├── Pdf.php                  # dompdf wrapper (conditional load)
     │   ├── RateLimiter.php          # Login rate limiting

@@ -58,6 +58,50 @@ $flashType = $_SESSION['flash_type'] ?? '';
 unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 // ============================================================================
+// 🚧 This page's three tests are for a global administrator only (#592)
+// ============================================================================
+// Each of them acts for the WHOLE installation, not for one organisation: two
+// send a real message through the installation's mail route, and the third
+// signs in to Microsoft with the installation's own secret. Until the portal
+// could send through an SMTP mailbox that mattered less; since then "Send
+// Test Email" reaches that mailbox, so an administrator of ONE organisation
+// could send mail from it to any address, held back only by the hourly limit
+// that every organisation shares. The e-mail page (email.php) already kept
+// its own test for a global administrator; this page had been left open.
+//
+// Anybody else is refused, told why, and the refusal is written to the
+// activity log, the way the e-mail page does it. The forms are also not shown
+// to them further down, but it is this refusal that enforces the rule: a
+// request can be posted without the form.
+$isGlobalAdmin = App::isRootAdmin();
+/**
+ * Stop here unless the person is a global administrator. Called by each of the
+ * three tests AFTER its form-token check, so that a forged request from
+ * another website cannot fill the activity log with refusals.
+ *
+ * @param string $what What was asked for, in words, for the activity log.
+ *                     Always one of this page's own three phrases, never
+ *                     anything a visitor sent.
+ */
+$globalAdminOnly = static function (string $what) use ($isGlobalAdmin): void {
+    if ($isGlobalAdmin === true) {
+        return;
+    }
+    // Who is asking. Logger::activity() does not work this out for itself.
+    $actorId = isset($_SESSION['user_id']) === true ? (int) $_SESSION['user_id'] : null;
+    Logger::activity(
+        'SettingsGroupSaveRefused',
+        'Refused: ' . $what . ' on the Integrations page is for a global administrator only',
+        $actorId
+    );
+    $_SESSION['flash_msg'] = 'These tests use the mail and sign-in settings of the whole installation, which every organisation shares, '
+        . 'not only yours. Only a global administrator can run them. Nothing was sent or tested.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: /admin/integrations');
+    exit();
+};
+
+// ============================================================================
 // 📧 Handle test-email POST
 // ============================================================================
 $emailResult = null;
@@ -70,6 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) === true &&
         header('Location: /admin/integrations');
         exit();
     }
+    $globalAdminOnly('sending a test message');
 
     $testRecipient = trim($_POST['test_recipient'] ?? '');
 
@@ -93,6 +138,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) === true &&
         header('Location: /admin/integrations');
         exit();
     }
+    $globalAdminOnly('testing the sign-in to Microsoft 365 for sending mail');
 
     $tokenResult = testGraphToken();
 }
@@ -110,6 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) === true &&
         header('Location: /admin/integrations');
         exit();
     }
+    $globalAdminOnly('sending a test message through Google');
 
     $testRecipient = trim($_POST['test_recipient'] ?? '');
 
@@ -392,6 +439,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
             <?php endif; ?>
 
+            <?php // 🚧 Shown to a global administrator only: anybody else who posted it would be refused (see the top of this file). ?>
+            <?php if ($isGlobalAdmin === true): ?>
             <form method="POST" action="/admin/integrations" class="d-inline">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="test_token">
@@ -399,6 +448,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <i class="fa-solid fa-key me-1" aria-hidden="true"></i>Test Token Acquisition
                 </button>
             </form>
+            <?php else: ?>
+                <p class="small text-muted mb-0" data-global-admin-only="test_token">This test uses the whole installation&rsquo;s Microsoft 365 settings, so only a global administrator can run it.</p>
+            <?php endif; ?>
         <?php endif; ?>
 
         <!-- 🏢 Shared-mailbox sending (#234) -->
@@ -524,6 +576,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
             <?php endif; ?>
 
+            <?php // 🚧 Shown to a global administrator only: this sends a real message through the installation's mail route. ?>
+            <?php if ($isGlobalAdmin === true): ?>
             <form method="POST" action="/admin/integrations" class="row g-2 align-items-end">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="send_test_email">
@@ -539,6 +593,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </button>
                 </div>
             </form>
+            <?php else: ?>
+                <p class="small text-muted mb-0" data-global-admin-only="send_test_email">A test sends a real message through the mail route every organisation on this installation shares, so only a global administrator can send one.</p>
+            <?php endif; ?>
         <?php endif; ?>
     </div>
 </div>
@@ -669,6 +726,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
             <?php endif; ?>
 
+            <?php // 🚧 Shown to a global administrator only: this sends a real message as the installation's Google sender. ?>
+            <?php if ($isGlobalAdmin === true): ?>
             <form method="POST" action="/admin/integrations" class="row g-2 align-items-end">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="send_google_test_email">
@@ -684,6 +743,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </button>
                 </div>
             </form>
+            <?php else: ?>
+                <p class="small text-muted mb-0" data-global-admin-only="send_google_test_email">A test sends a real message as the Google sender every organisation on this installation shares, so only a global administrator can send one.</p>
+            <?php endif; ?>
         <?php endif; ?>
     </div>
 </div>

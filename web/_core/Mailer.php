@@ -5,8 +5,16 @@
  * Portal Mailer — Multi-Provider Dispatcher ✉️
  * -----------------------------------------------------------------------------
  * Sends HTML email (optionally with attachments) via the configured provider.
- * Dispatches to either Microsoft Graph (MS365) or Gmail API (Google Workspace)
- * based on the `mail.provider` setting.
+ * Dispatches to Microsoft Graph (MS365), the Gmail API (Google Workspace) or
+ * an ordinary mailbox on a mail server (SMTP), by the `mail.provider` setting.
+ *
+ * THE SMTP ROUTE (#592, 12 October 2026) goes through the portal's own mail
+ * library (`_core/maillib/`). Everything about it that touches the settings
+ * or the mailbox's password is in MailRoutes.php; this class only asks it.
+ * WHAT THAT ROUTE DOES NOT HAVE YET: a queue. A message that cannot be sent
+ * now (the server is down, its certificate fails the check, the hourly limit
+ * is reached) is NOT kept and NOT tried again. send() answers false and the
+ * attempt is in the send log with its reason.
  *
  * The MS365 backend uses application-level OAuth2 (client credentials) and
  * Microsoft Graph. By default it sends as `mail.defaultFromAddress`
@@ -26,6 +34,7 @@
  * Provider selection:
  *   mail.provider = 'ms365'   → Microsoft Graph (default)
  *   mail.provider = 'google'  → Gmail API via service account
+ *   mail.provider = 'smtp'    → a mailbox on a mail server, see MailRoutes.php
  *
  * On a Graph failure, `mail.fallbackProvider = 'google'` (default '' =
  * off) makes one additional attempt via MailerGoogle::send() rather than
@@ -43,8 +52,9 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/234
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/592
  * -----------------------------------------------------------------------------
  */
 
@@ -65,24 +75,58 @@ class Mailer
     /** @var string The Microsoft 365 route: Microsoft Graph. Also what any other value of `mail.provider` means. */
     private const ROUTE_MS365 = 'ms365';
 
+    /** @var string The SMTP route: a mailbox on a mail server, through the portal's own mail library (#592). */
+    private const ROUTE_SMTP = MailRoutes::SMTP;
+
     /**
-     * 🧭 Which route send() will use: ROUTE_GOOGLE or ROUTE_MS365.
+     * @var array<string, string> Every route, with its name for a person to
+     *      read. The e-mail page offers exactly these, so a route cannot be
+     *      offered that send() does not know.
+     */
+    public const ROUTES = [
+        self::ROUTE_MS365  => 'Microsoft 365',
+        self::ROUTE_GOOGLE => 'Google',
+        self::ROUTE_SMTP   => MailRoutes::SMTP_LABEL,
+    ];
+
+    // What became of the last message given to send(): see lastOutcome().
+    public const OUTCOME_SENT       = 'sent';
+    public const OUTCOME_NOT_SET_UP = 'not-set-up';
+    public const OUTCOME_REFUSED    = 'refused';
+    public const OUTCOME_NOT_SENT   = 'not-sent';
+
+    /** @var string One of the OUTCOME_ values above. */
+    private static string $lastOutcome = self::OUTCOME_NOT_SENT;
+
+    /**
+     * 🧭 Which route send() will use: ROUTE_GOOGLE, ROUTE_SMTP or ROUTE_MS365.
      *
-     * `mail.provider = 'google'` means Google. Every other value, including an
-     * empty one and the 'smtp' that some screens offer, means Microsoft 365,
-     * because that is what send() has always done with it. There is no SMTP
-     * route in this portal today.
+     * `mail.provider = 'google'` means Google and `'smtp'` means SMTP. Every
+     * other value, including an empty one, means Microsoft 365, because that
+     * is what send() has always done with it.
      *
-     * Reads the same `$SETTINGS` array send() read before this function
-     * existed, in the same way, so nothing about sending changed.
+     * UNTIL 12 OCTOBER 2026 'smtp' meant Microsoft 365 as well: there was no
+     * SMTP route, although some screens offered one. An installation that had
+     * 'smtp' stored and was really sending through Microsoft 365 now needs
+     * `mail.provider` set to 'ms365'; the e-mail page shows which route is in
+     * use and what it still needs. (`mail.provider` is seeded as 'ms365', and
+     * no page of the portal ever wrote 'smtp' into it.)
+     *
+     * The CHOICE is the installation's own `mail.provider` row, read through
+     * MailRoutes::chosenRoute(). It used to be read from `$SETTINGS`, where
+     * one organisation's row lies over the installation's: the e-mail page,
+     * "Use this route" and send() could then each describe a different route.
+     * The settings the Microsoft 365 and Google routes need are still read
+     * from `$SETTINGS`, as they always were.
      */
     private static function route(): string
     {
-        global $SETTINGS;
+        $chosen = MailRoutes::chosenRoute();
+        if ($chosen === self::ROUTE_GOOGLE) {
+            return self::ROUTE_GOOGLE;
+        }
 
-        return strtolower($SETTINGS['mail']['provider'] ?? self::ROUTE_MS365) === self::ROUTE_GOOGLE
-            ? self::ROUTE_GOOGLE
-            : self::ROUTE_MS365;
+        return $chosen === self::ROUTE_SMTP ? self::ROUTE_SMTP : self::ROUTE_MS365;
     }
 
     /**
@@ -133,21 +177,45 @@ class Mailer
      *
      * Each list below is exactly what the sending code refuses to work
      * without: accessToken() and effectiveSender() here for Microsoft 365,
-     * MailerGoogle::send() and MailerGoogle::accessToken() for Google. If one
-     * of those starts needing something more, add it here too.
+     * MailerGoogle::send() and MailerGoogle::accessToken() for Google, and
+     * MailRoutes::smtpMissing() for SMTP (which asks the mail library's own
+     * check). If one of those starts needing something more, add it here too.
+     *
+     * ONE THING IS ASKED OF EVERY ROUTE: that the hourly limit, if one is
+     * stored, is a number. See MailRoutes::limitProblem().
      *
      * The same limits as canSend(): settings and one file, nothing more.
      *
      * @return array{route: string, label: string, missing: list<string>}
-     *         route:   'ms365' or 'google'.
+     *         route:   'ms365', 'google' or 'smtp'.
      *         label:   the route's name for a person to read.
      *         missing: what is still needed, in plain words. Empty = ready.
      */
     public static function sendingRoute(): array
     {
+        $found = self::routeAndItsNeeds();
+        $limit = MailRoutes::limitProblem();
+        if ($limit !== '') {
+            $found['missing'][] = $limit;
+        }
+
+        return $found;
+    }
+
+    /**
+     * What sendingRoute() answers, before the one check every route shares.
+     *
+     * @return array{route: string, label: string, missing: list<string>}
+     */
+    private static function routeAndItsNeeds(): array
+    {
         global $SETTINGS;
 
         $missing = [];
+
+        if (self::route() === self::ROUTE_SMTP) {
+            return ['route' => self::ROUTE_SMTP, 'label' => self::ROUTES[self::ROUTE_SMTP], 'missing' => MailRoutes::smtpMissing()];
+        }
 
         if (self::route() === self::ROUTE_GOOGLE) {
             $keyFile = trim((string) ($SETTINGS['mail']['google']['serviceAccountKeyFile'] ?? ''));
@@ -191,14 +259,22 @@ class Mailer
      * Checks `mail.provider` setting and dispatches to the appropriate backend.
      * Defaults to MS365 (Microsoft Graph) for backward compatibility.
      *
-     * @param string|array $to    Recipient (single email or array)
-     * @param string       $subj  Email subject line
-     * @param string       $body  Body — auto-detected as HTML if it contains `<` tags
-     * @param array        $files File paths to attach
+     * @param string|array $to      Recipient (single email or array)
+     * @param string       $subj    Email subject line
+     * @param string       $body    Body — auto-detected as HTML if it contains `<` tags
+     * @param array        $files   File paths to attach
+     * @param array        $options For the queue that package M3 adds:
+     *                              `priority` ('urgent', 'normal' or 'bulk'),
+     *                              `expiresAt` (a moment in UTC after which
+     *                              sending is pointless) and `repeatSafe` (a
+     *                              second copy does no harm). NOTHING READS IT
+     *                              YET: with no queue, every message is tried
+     *                              once, now, whatever is passed. It is here so
+     *                              that callers can already say what they mean.
      *
-     * @return bool True if sent successfully
+     * @return bool True if sent successfully. lastOutcome() says more.
      */
-    public static function send(string|array $to, string $subj, string $body, array $files = []): bool
+    public static function send(string|array $to, string $subj, string $body, array $files = [], array $options = []): bool
     {
         // 🪞 Normalise $to to an array so callers can pass a single
         //    string without thinking about it.
@@ -222,15 +298,124 @@ class Mailer
             ? self::htmlToPlain($body)
             : $body;
 
-        // 🔀 Dispatch to the configured provider. route() is the one place
-        //    that reads the choice, so that sendingRoute() and canSend()
-        //    below can never describe a different route from the one used here.
-        if (self::route() === self::ROUTE_GOOGLE) {
-            return MailerGoogle::send($recipients, $subj, $htmlBody, $files);
+        // 🧾 What lastOutcome() says if nothing below changes it. A route
+        //    that is not set up may still throw further down, as the Microsoft
+        //    365 route always has; the caller who catches that can still ask.
+        $route             = self::route();
+        self::$lastOutcome = self::canSend() === true ? self::OUTCOME_NOT_SENT : self::OUTCOME_NOT_SET_UP;
+
+        // ⏳ The hourly limit, for every route (#592). Empty, which is how it
+        //    is seeded, means the portal applies none, and then this changes
+        //    nothing. Over it, the message is NOT sent and NOT kept: there is
+        //    no queue yet. The send log says so, with the numbers.
+        $over = MailRoutes::overLimit(count($recipients));
+        if ($over !== '') {
+            self::logSend($route, '', implode(', ', $recipients), $subj, 0, 'failed', null, MailRoutes::OVER_LIMIT, $over);
+
+            return false;
         }
 
-        // 📧 Default: Microsoft Graph (MS365)
-        return self::sendViaGraph($recipients, $subj, $htmlBody, $files);
+        // 🔀 Dispatch to the configured provider. route() is the one place
+        //    that reads the choice, so that sendingRoute() and canSend()
+        //    above can never describe a different route from the one used here.
+        if ($route === self::ROUTE_SMTP) {
+            // 🚫 This route never throws. With nothing filled in it answers
+            //    false and logs "not set up". (The Microsoft 365 route throws
+            //    there, which ends a page that sends without a try/catch, such
+            //    as an event broadcast, in an error.)
+            return self::sendViaSmtp($recipients, $subj, $htmlBody, $plainBody, $files)['sent'];
+        }
+
+        $sent = $route === self::ROUTE_GOOGLE
+            ? MailerGoogle::send($recipients, $subj, $htmlBody, $files)
+            // 📧 Default: Microsoft Graph (MS365)
+            : self::sendViaGraph($recipients, $subj, $htmlBody, $files);
+        self::$lastOutcome = $sent === true ? self::OUTCOME_SENT : self::OUTCOME_NOT_SENT;
+
+        return $sent;
+    }
+
+    /**
+     * 🧾 What became of the last message given to send(), for a page that
+     * wants to say more than yes or no.
+     *
+     *   'sent'        a mail service accepted it. Not the same as delivered.
+     *   'not-set-up'  the chosen route is missing something; nothing was tried.
+     *   'refused'     SMTP only: the mail server, or the mail library, said no
+     *                 in a way that trying again would not change (this
+     *                 address, this sender, this message, the sign-in).
+     *   'not-sent'    it did not go, for any other reason: the service could
+     *                 not be reached, its certificate failed the check, the
+     *                 hourly limit was reached, or Microsoft 365 or Google
+     *                 said no.
+     *
+     * WHAT IT CANNOT SAY YET. The plan for this work names two more answers,
+     * 'queued' and 'held', for a message that is being kept to try again or
+     * kept for a person to look at. Neither is returned, because nothing is
+     * kept: there is no queue until package M3. 'not-sent' is the true word
+     * for both until then.
+     *
+     * It describes the LAST call in this request only.
+     */
+    public static function lastOutcome(): string
+    {
+        return self::$lastOutcome;
+    }
+
+    /**
+     * 📮 Send through the SMTP route, and record the attempt.
+     *
+     * MailRoutes does the sending and never throws; this adds what Mailer
+     * does for every route, the send log, and a line in the error log for a
+     * real failure. "Not set up" gets no error-log line: it is a state, the
+     * health page reports it, and a broadcast to 200 people would otherwise
+     * write 200 of them.
+     *
+     * @param list<string> $to
+     * @param list<string> $files
+     *
+     * @return array{sent: bool, outcome: string, reason: string, code: int|null, words: string, from: string,
+     *               attachments: int, steps: list<string>, certificate: bool} See MailRoutes::sendSmtp().
+     */
+    private static function sendViaSmtp(array $to, string $subj, string $html, string $plain, array $files): array
+    {
+        $answer            = MailRoutes::sendSmtp($to, $subj, $plain, $html, $files);
+        self::$lastOutcome = $answer['outcome'];
+
+        if ($answer['sent'] === true) {
+            self::logSend(self::ROUTE_SMTP, $answer['from'], implode(', ', $to), $subj, $answer['attachments'], 'sent', $answer['code'], '', '');
+
+            return $answer;
+        }
+        // `words` never holds the mailbox's password: the mail library takes
+        // it out of everything it returns, and MailRoutes adds none.
+        self::logSend(self::ROUTE_SMTP, $answer['from'], implode(', ', $to), $subj, $answer['attachments'], 'failed', $answer['code'], $answer['reason'], $answer['words']);
+        if ($answer['outcome'] !== self::OUTCOME_NOT_SET_UP) {
+            Logger::errorPlatform('SMTP', 'Error', $answer['reason'], 'Mail send fail', $answer['words']);
+        }
+
+        return $answer;
+    }
+
+    /**
+     * 🧪 "Send test" for the SMTP settings, WHATEVER route is in use.
+     *
+     * So an administrator can find out whether a mailbox works before
+     * switching the portal over to it. The e-mail page shows what comes back:
+     * how far the conversation with the mail server got, and its last line.
+     *
+     * It is recorded in the send log like any other message, and counts
+     * toward the hourly limit, but the limit does not stop it: one message,
+     * sent by an administrator to find out why mail is not going.
+     *
+     * The caller has checked that the person is a global administrator.
+     *
+     * @return array{sent: bool, outcome: string, reason: string, code: int|null, words: string, from: string,
+     *               attachments: int, steps: list<string>, certificate: bool} See MailRoutes::sendSmtp().
+     */
+    public static function testSmtp(string $to, string $subject, string $text): array
+    {
+        return self::sendViaSmtp([$to], $subject, self::renderBase($text), $text, []);
     }
 
     /**
@@ -593,6 +778,16 @@ class Mailer
      * Opportunistically prunes rows older than `mail.log.retentionDays`
      * (default 90) on roughly 1-in-50 writes, so no separate cron
      * endpoint is needed for retention.
+     *
+     * SINCE MIGRATION 213 (#592) each row also carries the moment in UTC
+     * (`sentAtUtc`, from the database's own UTC clock) and how many addresses
+     * the message was for (`recipientCount`, counted from `$toRecipients`,
+     * so the callers did not have to change). The hourly limit counts on
+     * those two: see MailRoutes::recipientsInTheLastHour().
+     *
+     * `$httpCode` is whatever number the mail service answered with: an HTTP
+     * status from Microsoft 365 or Google, an SMTP reply code from a mail
+     * server.
      */
     public static function logSend(
         string $provider,
@@ -615,29 +810,44 @@ class Mailer
             $errorCodeTrunc   = mb_substr($errorCode, 0, 100);
             $errorDetailTrunc = mb_substr($errorDetail, 0, 500);
 
-            $stmt = $db->prepare(
-                'INSERT INTO tblEmailLog ' .
-                '(siteID, provider, fromAddress, toRecipients, subject, attachmentCount, status, httpCode, errorCode, errorDetail) ' .
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-            );
-            if ($stmt === false) {
-                return;
+            // 👥 One address per comma. The column holds at most 65,535.
+            $recipientCount = min(65535, count(array_filter(
+                array_map('trim', explode(',', $toRecipients)),
+                static fn (string $address): bool => $address !== ''
+            )));
+
+            // ✍️ One row, written with or without the two columns of migration 213.
+            $write = static function (bool $withNewColumns) use ($db, $siteId, $provider, $fromAddress, $toRecipients, $subjectTrunc, $attachmentCount, $status, $httpCode, $errorCodeTrunc, $errorDetailTrunc, $recipientCount): void {
+                $stmt = $db->prepare(
+                    'INSERT INTO tblEmailLog ' .
+                    '(siteID, provider, fromAddress, toRecipients, subject, attachmentCount, status, httpCode, errorCode, errorDetail'
+                    . ($withNewColumns === true ? ', sentAtUtc, recipientCount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), ?)' : ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                );
+                if ($stmt === false) {
+                    return;
+                }
+                $values = [$siteId, $provider, $fromAddress, $toRecipients, $subjectTrunc, $attachmentCount, $status, $httpCode, $errorCodeTrunc, $errorDetailTrunc];
+                if ($withNewColumns === true) {
+                    $values[] = $recipientCount;
+                }
+                $stmt->bind_param('issssisiss' . ($withNewColumns === true ? 'i' : ''), ...$values);
+                $stmt->execute();
+                $stmt->close();
+            };
+            try {
+                $write(true);
+            } catch (\mysqli_sql_exception $e) {
+                // 🩹 Error 1054 is "unknown column": the portal's files have
+                //    been updated and the database upgrade (migration 213) has
+                //    not been run yet. Without this, nothing sent in that gap
+                //    would be logged at all. The row is written the way it was
+                //    before the two columns existed, and so is not counted by
+                //    the hourly limit, like every other row from before 213.
+                if ($e->getCode() !== 1054) {
+                    throw $e;
+                }
+                $write(false);
             }
-            $stmt->bind_param(
-                'issssisiss',
-                $siteId,
-                $provider,
-                $fromAddress,
-                $toRecipients,
-                $subjectTrunc,
-                $attachmentCount,
-                $status,
-                $httpCode,
-                $errorCodeTrunc,
-                $errorDetailTrunc
-            );
-            $stmt->execute();
-            $stmt->close();
 
             // 🧹 Opportunistic retention prune — no dedicated cron needed.
             if (random_int(1, 50) === 1) {
@@ -719,13 +929,16 @@ class Mailer
     }
 
     /**
-     * 🔍 Get the currently configured mail provider.
+     * 🔍 The route send() will use: 'ms365', 'google' or 'smtp'.
      *
-     * @return string 'ms365' or 'google'
+     * It used to hand back whatever `mail.provider` held, in small letters,
+     * so a mistyped value was shown on the e-mail page as if it were a route
+     * while send() quietly used Microsoft 365. It now gives route()'s answer,
+     * so the two cannot differ.
      */
     public static function provider(): string
     {
-        return strtolower(App::settings('mail.provider') ?? 'ms365');
+        return self::route();
     }
 
     /** Obtain / cache app token (MS365 client credentials) */

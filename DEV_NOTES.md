@@ -5727,8 +5727,22 @@ philosophy, same "no oracle" security reasoning:
 
 ## The mail library (`web/_core/maillib/`, #592)
 
-Part one of six. **Nothing calls it yet**, so no user can reach it; the queue and the
-pages that use it come in the next mail packages.
+Parts one and two of six. Since part two the portal sends through it when the SMTP route is chosen;
+the queue (part three) and the certificate choices (part four) are still to come.
+
+### Wired into the portal (part two, `MailRoutes`)
+
+- **Who calls it.** Only `web/_core/MailRoutes.php` names the library. `Mailer::send()` asks `MailRoutes` when `mail.provider` is `smtp`. No page reads the SMTP settings itself.
+- **Why `MailRoutes` reads the database and not `$SETTINGS`.** (1) The portal's start-up never decrypts a secret setting (#597), so `$SETTINGS` holds the encrypted text. (2) `$SETTINGS` has one organisation's own rows laid over the installation's; a mail server's name must never come from an organisation's row. Every query in `MailRoutes` says `siteID IS NULL`. **The choice of route is read the same way**, through `MailRoutes::chosenRoute()`: do not read `$SETTINGS['mail']['provider']` anywhere.
+- **The password's rules.** `MailRoutes::saveSmtp()` is the place meant to write it (encrypted, marked as a secret), **but it is not the only thing that can**: the general Settings page can change the same row for a global administrator. What is promised is about reading: a stored value is used only when its row is marked as a secret AND it decrypts with the installation's key. Do not loosen either test: an unmarked value is what the Settings page's Edit box leaves behind, in plain text. (A request to the Settings page that asks for the value to be encrypted and marked passes both tests, and that one is used.)
+- **A refused sign-in is remembered for the rest of the request** (`MailRoutes::sendSmtp()`), and only that: a refused recipient or sender says nothing about the next message. Later messages are logged with the reason `sign-in-not-repeated`. The queue's job (M3) has to decide what to do across requests; today each new request signs in once more.
+- **The certificate notice** (`MailRoutes::certificateProblem()`) reads the newest SMTP line of the send log, passing over lines for messages stopped before the mail server was tried (`over-hourly-limit`, `not-set-up`, `message-refused`). A new reason of that kind must be added to that query.
+- **When #597 is fixed** (start-up decrypting secrets), `$SETTINGS['mail']['smtp']['password']` will hold the real password in memory on every request. Anything that prints `$SETTINGS` must be checked in that package.
+- **Time limits.** Sends use shorter limits than the library's defaults (27 seconds at most for one message), because every send is still inside a web request. That is per message, not per request: a page that sends to many people in turn can still run past the host's limit (to be cured by the queue, M3).
+- **The hourly limit** counts `tblEmailLog.sentAtUtc`, never `sentAt` (the database server's own clock, which repeats an hour when the clocks go back). It is counted before each send and is not locked, so sends at the same moment can pass it.
+- **Run its test:** `SELFTEST_DB_NAME=selftest_x SELFTEST_DB_PORT=… SELFTEST_DB_PASS=… SELFTEST_WEB_DIR=/a/quiet/folder php tools/mail-pages-selftest.php`. It starts the library's own stand-in mail servers and trusts their made-up authority through PHP's `openssl.cafile` setting, so no file of the portal is changed for the test.
+
+### The library itself (part one)
 
 - **Where it is.** Code in `web/_core/maillib/` (`autoload.php` and 15 classes under `src/`); its README and tests in `tools/maillib/`. Two folders because only `web/` deploys and the zip package allows documents in one named place. Lifting it out means copying both, keeping their places; the whole test passes from such a copy.
 - **The rule that keeps it liftable, and its check.** Nothing under `web/_core/maillib/` may reach for the portal. `tools/maillib/tests/stands-alone.php` reads each file as PHP's own tokens and works from a list of what the library MAY use: every function it calls and class it names must be on the list or the library's own, and nothing may be reached by a name worked out at run time (no `$f()`, no `new $class`, no `$$name`). It proves itself on 44 planted files first. `tools/audit-checks/check_maillib_stands_alone.py` only starts it, so it needs PHP. **A new PHP function used in the library fails the check until it is added to the list in that file.** What it cannot see is said in its header.
@@ -5900,7 +5914,7 @@ doesn't attempt a send.
 `admin/integrations/email.php` (#230's deliverability page) was reading
 `email.provider` / `email.from` — settings seeded in `full_schema.sql`
 but never written by any save handler anywhere in the codebase — so it
-permanently reported "smtp" regardless of what was actually configured.
+permanently reported "smtp" regardless of what was actually configured. (Since #592 part two `Mailer::provider()` gives the route `send()` will really use, and those two settings are deleted by migration 213.)
 Fixed to read `Mailer::provider()` + the same effective-sender
 resolution order as `effectiveSender()` (duplicated as a 5-line
 display-only mirror, since `effectiveSender()` itself is `private` to

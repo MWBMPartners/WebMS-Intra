@@ -57,6 +57,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#giving-records" class="badge text-bg-secondary text-decoration-none">Giving Records and Erasure</a>
             <a href="#logs" class="badge text-bg-secondary text-decoration-none">Viewing Logs</a>
             <a href="#csv-export" class="badge text-bg-secondary text-decoration-none">CSV Export</a>
+            <a href="#smtp-mailbox" class="badge text-bg-secondary text-decoration-none">SMTP Mailbox</a>
             <a href="#ms365-shared-mailbox" class="badge text-bg-secondary text-decoration-none">MS365 Shared Mailbox</a>
             <a href="#server-info" class="badge text-bg-secondary text-decoration-none">Server Information</a>
             <a href="#developer" class="badge text-bg-secondary text-decoration-none">Developer Tools</a>
@@ -716,11 +717,49 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p>To export, click the <span class="badge text-bg-success"><i class="fa-solid fa-file-csv me-1"></i>Export CSV</span> button located near the top of the relevant list. The file will download to your browser's default downloads folder.</p>
 </div>
 
+<!-- Section: Sending e-mail through an SMTP mailbox (#592).
+     Every statement here is held true by tools/mail-pages-selftest.php. If the
+     page at Admin, Integrations, Email changes, change this with it. -->
+<div class="portal-card p-4 mb-4" id="smtp-mailbox">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-envelope-open-text me-2 text-primary"></i>Sending E-mail Through an SMTP Mailbox</h2>
+
+    <p>The portal can send its e-mail through an ordinary mailbox on a mail server, of the kind most hosting and e-mail providers include. (SMTP is the usual way a program hands mail to a mail server.) It is one of three routes; the others are Microsoft 365 and Google. <strong>One route serves every organisation on the installation</strong>, so only a global administrator can set it up, choose it, or send a test.</p>
+
+    <h3 class="h5 mt-4 mb-3">Setting it up</h3>
+    <ol class="mb-3">
+        <li class="mb-2">Go to <a href="/admin/integrations/email">Admin, Integrations, Email</a> and find <strong>SMTP mailbox</strong>.</li>
+        <li class="mb-2">Type in what your mail provider gives you: the mail server&rsquo;s name, the port, the kind of encryption, the mailbox&rsquo;s user name and its password. Add the address the mail should come from, and save.</li>
+        <li class="mb-2">Use <strong>Send test</strong> and choose to send through the SMTP mailbox. This tests the mailbox <em>without</em> switching the portal over to it. The page shows how far it got (reached the server, encryption on and the certificate checked, signed in, message accepted) and the mail server&rsquo;s own last line.</li>
+        <li class="mb-2">When the test is accepted and the message has arrived, choose <strong>An SMTP mailbox</strong> under <strong>Route in use</strong>.</li>
+    </ol>
+
+    <h3 class="h5 mt-4 mb-3">The password</h3>
+    <ul class="mb-3">
+        <li>It is stored encrypted, and it is never shown again, on that page or anywhere else. The page says only whether one is stored.</li>
+        <li>Leave the password box empty when you save to keep the one that is stored.</li>
+        <li><strong>Type it only on that page.</strong> A password typed into the general Settings page is not used, and the e-mail page will ask for it again.</li>
+        <li>Use a long password that is not an ordinary word.</li>
+    </ul>
+
+    <h3 class="h5 mt-4 mb-3">What the portal insists on</h3>
+    <ul class="mb-3">
+        <li><strong>Encryption, always.</strong> There is no unencrypted choice.</li>
+        <li><strong>The mail server&rsquo;s certificate is always checked</strong>, and this cannot be switched off. If the check fails (the certificate has expired, is for another server name, or cannot be traced to a trusted authority), nothing is sent. The e-mail page then shows a notice saying what the check found. Ask whoever runs the mail server to put the certificate right, or correct the server name in the settings, then use Send test.</li>
+    </ul>
+
+    <h3 class="h5 mt-4 mb-3">What it does not do yet</h3>
+    <ul class="mb-3">
+        <li><strong>It does not keep mail to try again.</strong> If a message cannot be sent at that moment (the mail server is down, its certificate fails the check, the sign-in is refused), it is not sent and not kept. It is listed under <strong>Recent sends</strong> on the e-mail page as not sent, with the reason.</li>
+        <li><strong>The hourly limit drops mail too.</strong> You can set the most recipients an hour the portal may send to, across every route; many hosting companies allow only so many. A message that would pass the limit is not sent and not kept, and is listed as not sent. Leave the limit empty for none. For the first hour after the upgrade that added the limit, mail sent before the upgrade is not counted.</li>
+        <li>A person who asks for a password-reset link is told it was sent whether or not it was, so that nobody can use that page to find out who has an account. The health page and the e-mail page are where an administrator finds out that mail is not going.</li>
+    </ul>
+</div>
+
 <!-- Section: Sending email via a Microsoft 365 shared mailbox (#234) -->
 <div class="portal-card p-4 mb-4" id="ms365-shared-mailbox">
     <h2 class="h4 mb-3"><i class="fa-solid fa-users-rectangle me-2 text-primary"></i>Sending Email via a Microsoft 365 Shared Mailbox</h2>
 
-    <p>By default the portal sends every email through Microsoft Graph as <code>mail.defaultFromAddress</code>. An admin can instead route sending through a dedicated <strong>shared mailbox</strong> — e.g. <code>office@yourchurch.org</code> — so mail arrives with that identity and, optionally, keeps a copy in the shared mailbox's own Sent Items.</p>
+    <p>Unless another route is chosen at <a href="/admin/integrations/email">Admin, Integrations, Email</a>, the portal sends every email through Microsoft Graph as <code>mail.defaultFromAddress</code>. An admin can instead route sending through a dedicated <strong>shared mailbox</strong> — e.g. <code>office@yourchurch.org</code> — so mail arrives with that identity and, optionally, keeps a copy in the shared mailbox's own Sent Items.</p>
 
     <div class="alert alert-info d-flex gap-2" role="alert">
         <i class="fa-solid fa-circle-info mt-1"></i>
@@ -794,7 +833,7 @@ Test-ApplicationAccessPolicy -AppId &lt;clientID&gt; -Identity office@yourchurch
         </li>
     </ul>
 
-    <p>Every send attempt — successful or failed, either provider — is recorded to a send log visible on the <a href="/admin/integrations/email">Email Deliverability</a> page's "Recent sends" list, kept for 90 days by default.</p>
+    <p>Every send attempt — successful or failed, whichever route it went by — is recorded to a send log visible on the <a href="/admin/integrations/email">Email Deliverability</a> page's "Recent sends" list, kept for 90 days by default.</p>
 </div>
 
 <!-- Section 6: Developer Tools -->

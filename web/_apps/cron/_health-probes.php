@@ -278,8 +278,14 @@ function maintenance_health_probes(\mysqli $db): array
                     . 'Still needed for ' . $mailRoute['label'] . ': ' . implode('; ', $mailRoute['missing'])
                     // Admin → Settings is where these are typed. This used to
                     // say Admin → Integrations, which only shows them (#580).
-                    . '. Fill these in at Admin → Settings (a shared mailbox is typed at Admin → Integrations instead), '
-                    . 'then use Send test at Admin → Integrations → Email.',
+                    // An SMTP mailbox is typed on the e-mail page, and its
+                    // password must be: one typed at Admin → Settings is not
+                    // used (see MailRoutes.php). The other two routes are typed
+                    // where this line has always said.
+                    . ($mailRoute['route'] === \Portal\Core\MailRoutes::SMTP
+                        ? '. Fill these in at Admin → Integrations → Email, then use Send test there.'
+                        : '. Fill these in at Admin → Settings (a shared mailbox is typed at Admin → Integrations instead), '
+                            . 'then use Send test at Admin → Integrations → Email.'),
             ];
         }
     } catch (\Throwable $e) {

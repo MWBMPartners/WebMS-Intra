@@ -332,14 +332,23 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 //    initial setup checklist. Detection is heuristic — looks at a
 //    handful of "has the portal been customised?" signals.
 $showFirstRun = false;
+// ✉️ Can the portal send e-mail? Asked of Mailer, the one place that knows
+//    (#580, #592), and only for an administrator who has not dismissed the
+//    checklist, because nobody else is shown the answer.
+//    This used to look for a setting called `email.from`. Nothing ever wrote
+//    that setting or sent with it (migration 213 deletes it), so the step
+//    stayed "to do" on a portal whose mail worked, and an address typed into
+//    it ticked the step on a portal that could send nothing.
+$mailCanSend = false;
 if (\Portal\Core\App::isAdmin() === true) {
     $dismissed = (string) ($SETTINGS['portal']['first_run']['dismissed'] ?? '0');
     if ($dismissed !== '1') {
+        $mailCanSend = \Portal\Core\Mailer::canSend();
         // Signal 1: site name still at default
         $siteNameDefault = (string) ($SETTINGS['site']['name'] ?? '') === ''
                         || (string) ($SETTINGS['site']['name'] ?? '') === 'WebMS Intra';
-        // Signal 2: no email.from configured
-        $noEmailFrom = (string) ($SETTINGS['email']['from'] ?? '') === '';
+        // Signal 2: no mail route is set up
+        $noEmailFrom = $mailCanSend === false;
         // Signal 3: no announcements posted yet
         $noAnnouncements = count($pinnedAnnouncements) === 0;
         $signals = (int) $siteNameDefault + (int) $noEmailFrom + (int) $noAnnouncements;
@@ -360,10 +369,14 @@ $firstRunSteps = [
                 && (string) ($SETTINGS['site']['name'] ?? '') !== 'WebMS Intra',
     ],
     'email_delivery' => [
-        'label' => 'Set up email delivery (SMTP or MS365 Graph)',
+        'label' => 'Set up e-mail (Microsoft 365, Google or an SMTP mailbox)',
         'href'  => '/admin/integrations/email',
-        'done'  => (string) ($SETTINGS['portal']['first_run']['steps']['email_delivery'] ?? '0') === '1'
-                || (string) ($SETTINGS['email']['from'] ?? '') !== '',
+        // Done ONLY when a route is really set up. The stored "done" mark the
+        // other steps accept is not read for this one: with it set, the step
+        // was ticked while password-reset e-mails went nowhere.
+        // WHAT IT CANNOT SHOW: that a message arrives. The e-mail page's
+        // "Send test" is for that.
+        'done'  => $mailCanSend,
     ],
     'test_backup' => [
         'label' => 'Run a test backup',
