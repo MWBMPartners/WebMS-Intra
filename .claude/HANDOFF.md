@@ -123,7 +123,7 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 | Package | What | Where it works | Report |
 | --- | --- | --- | --- |
 | E | older databases (#553, #555, #554) — the narrow check found three MEDIUM (with the events table missing the install script emptied every session's pointer, silently; the test passed when the install script's own guard was broken; the data check passed an UPDATE that also soft-deleted sessions). SECOND fix round running: one more commit after `917382c`. **No further check: commit on its proofs**, after reading the install script's block myself. Release only together with G | its own checkout `.claude-work/worktrees/e` | `rollout-E--check2.md`, `rollout-E--fix2.md` |
-| G | the backup faults (#577, #578, #579 and more) — fix round DONE: commit `23b5440` on `ro-g-build`, after `daeb31e` (11 files). A NARROW check of that commit is running, because the fix changed how every restore talks to the database (it replaces the session's strictness setting and treats any warning as a failure). Corrected notes to place are in `rollout-G--fix-evidence/` | its own checkout `.claude-work/worktrees/g` | `rollout-G--fix.md`, `rollout-G--check2.md` |
+| G | the backup faults (#577, #578, #579 and more) — the narrow check found NOTHING HIGH and no way to lose data on a normally set up server; two medium and six small points. The LAST fix round is running: one more commit after `23b5440`. **No further check: commit on its proofs**, after running both self-tests myself on the merged branch. Use the notes in `rollout-G--fix2-evidence/` (they replace the earlier ones). **Commit E and G together or G first** | its own checkout `.claude-work/worktrees/g` | `rollout-G--check2.md` (the work list), `rollout-G--fix2.md` |
 | M1 | the mail library's core and its own SMTP route (new files only: `web/_core/maillib/`, namespace `MWBM\Mail`, tests and README in `tools/maillib/`); nothing in the portal calls it yet | its own checkout `.claude-work/worktrees/m1`, branch `ro-m1-build` | `rollout-M1--build.md` |
 
 B2a and E each make ONE commit on their own branch and do not push. Bring each across with `git cherry-pick <hash>` onto
@@ -279,6 +279,21 @@ summary and its section 4.1, "what runs beside what"). The short of it:
   refused before anything changes; the two Restore buttons leave a portal closed if an administrator had closed it.
 - The corrected `RUNBOOK-CORRECTIONS.md`, `DOC-ENTRIES.md` and workflow pieces will be in `rollout-G--fix-evidence/`; use THOSE,
   not the builder's.
+
+**G's narrow check, 12 October, about 15:00 — what the last fix round was told, and one question for the owner:**
+
+- On a database server that is run loosely, a value that is not on its column's list of choices is stored as an empty text, and
+  a snapshot holding one can never be put back whole (the restore refuses it on purpose; a strict session will not take it in any
+  form). Nobody was told until the restore was needed. The fix round makes `snapshot()` count such cells and say so, on the
+  backup page, the upgrade page and the health page; my lean, given to the builder, is that the upgrade page stops when its own
+  snapshot carries that warning, with a deliberate way on for a global administrator.
+- **The portal never sets the database's strictness itself** (it runs with whatever the host has), which is how a loose host
+  can store such a value at all, and how #587 stored an empty status. Whether the portal should make its OWN connection strict
+  is a decision for the owner (asked; recommended yes, as a small package of its own, before F1 takes `bootstrap.php`).
+- Also in the fix round: the server's notes are switched on for the restore's session; a row larger than the server's limit is
+  refused in words before it is sent; Inspect refuses a link; an outside table that points at itself is counted; a proof for
+  outside tables followed onward. The code will say truthfully which changes of column type a restore cannot see (seven kinds
+  are known); the durable fix, recording each column's type in the manifest, is a later issue.
 
 **Trap, learned the hard way today:** the Agent tool's own "separate checkout" option (`isolation: worktree`) cuts the checkout from
 `main`, which is about 400 commits behind the working branch, and refuses writes to the main folder. A builder started that way found
