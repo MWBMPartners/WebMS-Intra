@@ -21,8 +21,7 @@
  * job moved to its own address, and the verdict moved here so the page and the
  * job always agree about whether the backups are fresh.
  *
- * The code below is moved unchanged from the staff page; only the indentation
- * changed, because it now sits inside a function. Sending the alert email is
+ * The code below was moved from the staff page. Sending the alert email is
  * NOT here: only the scheduled job sends it, so that an administrator who is
  * simply looking at the page is not emailed as well.
  *
@@ -33,9 +32,10 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/142
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/497
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/577
  * -----------------------------------------------------------------------------
  */
 
@@ -47,9 +47,14 @@ use Portal\Core\DbBackup;
 /**
  * Work out how old the newest backup snapshot is, and what that means.
  *
- * @return array{snapshots: array<int, array<string, mixed>>, thresholdHours: int, recipients: array<int, string>, state: string, message: string, ageHours: int|null}
+ * Only a FINISHED snapshot counts. This used to read the first folder in the
+ * list, and a folder left behind by a snapshot that FAILED is the newest folder
+ * there is, so the day backups stopped working this said they were fresh.
+ *
+ * @return array{snapshots: array<int, array<string, mixed>>, thresholdHours: int, recipients: array<int, string>, state: string, message: string, ageHours: int|null, unfinished: int}
  *         state is 'ok', 'stale' or 'critical'. ageHours is null when there is
- *         no snapshot, or its time could not be read.
+ *         no finished snapshot, or its time could not be read. unfinished is
+ *         how many snapshot folders were never finished.
  */
 function backup_freshness_check(): array
 {
@@ -62,14 +67,15 @@ function backup_freshness_check(): array
     $recipientsRaw  = (string) (App::settings()['portal']['backups']['alert_recipients'] ?? '');
     $recipients     = array_filter(array_map('trim', explode(',', $recipientsRaw)));
 
-    $mostRecent = $snapshots[0] ?? null;
+    $mostRecent = $backup->newestFinished();
+    $unfinished = $backup->unfinishedCount();
     $ageHours   = null;
     $state      = 'ok';
     $message    = '';
 
     if ($mostRecent === null) {
         $state   = 'critical';
-        $message = 'No snapshots found in web/_backups/.';
+        $message = 'No finished snapshot found in web/_backups/.';
     } else {
         $createdAt = strtotime((string) $mostRecent['created_at']);
         if ($createdAt === false) {
@@ -95,7 +101,20 @@ function backup_freshness_check(): array
         }
     }
 
+    // 🚧 An unfinished folder means a snapshot failed or was cut off (or one
+    //    is being taken at this moment). The verdict above is about the last
+    //    snapshot that WORKED, so say this as well: a run of failures would
+    //    otherwise stay quiet until the last good one grew stale.
+    if ($unfinished > 0) {
+        $message .= sprintf(
+            ' %d unfinished snapshot folder%s found: a snapshot failed or was cut off. See Backup Management.',
+            $unfinished,
+            $unfinished === 1 ? ' was' : 's were'
+        );
+    }
+
     return [
+        'unfinished'     => $unfinished,
         'snapshots'      => $snapshots,
         'thresholdHours' => $thresholdHours,
         'recipients'     => $recipients,

@@ -36,9 +36,12 @@ Four limits. Each one matters:
    (`_auth_keys/`) are not in it. Keep your own copies of those. Without
    `_auth_keys/enc.key`, the secrets inside a restored database cannot be
    read.
-3. **It can only send a snapshot the portal managed to make.** The runbook's
-   [section 2.1](disaster-recovery-runbook.md#21-three-things-the-portals-own-backup-cannot-do-today)
-   lists three cases where it cannot. Keep a full dump as well
+3. **It can only send a snapshot the portal managed to make, and it does not
+   judge it.** The runbook's
+   [section 2.1](disaster-recovery-runbook.md#21-what-the-portals-own-backup-still-cannot-do)
+   says when the portal cannot make one, and when one it made cannot be put
+   back whole (item 8); such a snapshot is sent like any other. Keep a full
+   dump as well
    ([runbook section 9](disaster-recovery-runbook.md#9-the-second-kind-of-backup-a-full-dump)).
 4. **It does not check that the snapshot is sound.** A snapshot folder whose
    name is not `upgrade-YYYYMMDD-HHMMSS` is never sent. One that has its
@@ -131,7 +134,7 @@ it back** (runbook 8.6) before you rely on it.
 | --- | --- | --- |
 | `Encryption key not found` | Step 2 was not finished. | Make the key. |
 | `No complete snapshot ... found` | No snapshot exists yet. | Press **Run snapshot now**. |
-| `WARNING: skipped unfinished snapshot(s)` | A newer snapshot failed while being made. An older, finished one was sent. | Find out why: runbook 2.1. Delete the unfinished one on `/admin/maintenance/backup`. |
+| `WARNING: skipped unfinished snapshot(s)` | A newer snapshot failed while being made, or is being made at this moment. An older, finished one was sent. | If it is still there tomorrow, find out why: the health page says "a snapshot failed". Delete the unfinished one on `/admin/maintenance/backup`; the portal also removes it at the next upgrade once it is a day old. |
 | `rclone not installed` / `aws CLI not installed` / `scp not installed` | The program for your destination is missing. | Install it, or ask your host. *Your host.* |
 | `DESTINATION is ... but ... is not set` | Step 4 was not finished: the address line for your destination still has a `#` in front. | Take the `#` off and set it. |
 | `KEEP_WEEKLY and KEEP_MONTHLY must be whole numbers` | One of the two keep numbers in the script is not a plain whole number (`8.5`, or a word). Nothing was sent. | Set both to whole numbers. `08` is read as eight. |

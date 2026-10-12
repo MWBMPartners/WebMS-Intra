@@ -2993,16 +2993,105 @@ ignore rules remain the first wall; these guards are the second.
 - **A full restore is all or nothing, and that is now proved**: planted bad
   snapshots, changes of table shape, and a restore killed half way each left
   the database identical before and after.
-- **Three known faults of `DbBackup`**: #577 (raw bytes in a column stop every
-  snapshot, so one imported calendar event blocks upgrades), #578 (a row that
-  points at a later row of its own table cannot be put back), #579 (a whole
-  table is held in memory). Until they are fixed, the runbook tells
-  administrators to keep a full dump as well.
+- **The three faults this proof found in `DbBackup`** (#577, #578, #579) were fixed the same day; see "The portal's own
+  snapshots" below. The runbook says what is still true.
 - **When changing a document under `docs/`**, run
   `python3 tools/audit-checks/check_docs_table_refs.py --strict`. A made-up
   example name goes in its `ALLOWED_EXAMPLE_NAMES`, with the reason.
 - **When changing a command in the runbook, run it first.** The mark "Tested"
   is a statement about that exact text.
+
+### The portal's own snapshots (`Portal\Core\DbBackup`)
+
+- **Form.** A snapshot is a folder `_backups/upgrade-YYYYMMDD-HHMMSS/` holding
+  `tblName.jsonl` per table and `_manifest.json`, written last by rename. A
+  folder without a readable manifest is unfinished and is never a backup. The
+  two shapes are described property by property in
+  `web/_core/data/backup-manifest.schema.json` and
+  `backup-table-file.schema.json`. Snapshots made before October 2026 hold one
+  `tblName.json` per table and no `format` in the manifest; they still
+  restore, at their old cost in memory.
+- **Adding a column type.** `DbBackup::TEXT_TYPES` and `BYTE_TYPES` list the
+  types the backup carries. A type on neither is refused at snapshot time, so
+  a migration that adds one breaks backups for every customer. The check
+  `check_backup_column_types.py` fails on the pull request. To teach the
+  backup a type: add it to a list AND to the scratch table in proof 14 of
+  `tools/backup-restore-selftest.php`, which fails if a type is listed without
+  being proved. BIT and FLOAT are left off on purpose: neither survives.
+- **A table that points at itself** must do so through a column that may be
+  empty, and must have a primary key. The restore writes such rows with the
+  pointer empty and fills it in afterwards. The same check fails otherwise.
+- **Never switch the database's link checking off in a restore.** It was
+  tried in #472 and reverted: a restore could then succeed with rows pointing
+  at nothing.
+- **The check-only run is a full rehearsal** (owner, 12 October 2026). The
+  choice is one constant, `DbBackup::CHECK_ONLY_IS_REHEARSAL`.
+- **A pointer at a row that is not in the snapshot** is emptied only when the
+  link's own rule is ON DELETE SET NULL, and is counted in
+  `pointers_emptied`. Any other rule refuses the restore.
+- **Running the tests.** Both need a database built from `full_schema.sql`
+  whose name starts with `selftest_`, and a user with rights on that one
+  database:
+  `SELFTEST_DB_NAME=… SELFTEST_DB_PORT=… SELFTEST_DB_USER=… SELFTEST_DB_PASS=… php tools/backup-restore-selftest.php`
+  and the same with `SELFTEST_WEB_PORT=…` for `tools/backup-page-selftest.php`.
+  Each prints `REACHED THE END` as its last line. If the snapshot's shape
+  changes, run the first with `--write-samples` and bring the schema files
+  into line (proof 1 fails until you do).
+- **A restore runs in a strict session of its own.** `pinStrictness()` sets
+  the connection's `sql_mode` to `DbBackup::RESTORE_SQL_MODE` and switches
+  `sql_notes` on, in one statement, for the length of a restore, and
+  `putStrictnessBack()` puts both back in the same `finally` as the time
+  zone. Do not add `NO_ZERO_DATE` or `NO_ZERO_IN_DATE` to the mode: a database
+  that was ever run loosely holds dates of zero, and they must go back as
+  they were. A statement that succeeds with a warning OR a note is treated as
+  a failure (`tryStatement()`), because that is how the database reports a
+  value it rounded or trimmed; that is why the notes must be on.
+- **What a restore cannot notice.** Some changes the database makes with no
+  error, no warning and no note when a column's kind was altered after the
+  snapshot. Seven are known (the list is in the header of `DbBackup.php`):
+  fewer digits of a second, a decimal into a whole-number column, a wider
+  fixed-width BINARY column, end spaces into a CHAR column, DOUBLE into FLOAT
+  and BIGINT into DOUBLE, a two-digit number into a YEAR column, and (with
+  `explicit_defaults_for_timestamp` off) "no value" into a TIMESTAMP column
+  that may no longer be empty. Recording each column's type in the manifest,
+  and refusing at restore when it has changed, would close all of them; it
+  is not done.
+- **A value that is not on its column's list of choices.** A loosely run
+  database stores it as an empty text (the database numbers it 0), and a
+  restore refuses it. `snapshot()` looks for these as it reads (see
+  `dumpTable()`): it sends one extra statement only for a table where an ENUM
+  column handed over an empty text. What it finds goes in the result
+  (`warnings`, `unlisted_values`) and in the manifest (`unlisted_values`,
+  always present, empty when none). `DbBackup::unlistedIn()` reads that list
+  out of a manifest safely and `unlistedWarning()` is the ONE sentence every
+  page shows; do not write a second. The upgrade page stops on it; its second
+  button posts `go_on_without_way_back=1`. It does not prune older snapshots
+  when the new one carries the warning.
+- **A name from a browser** goes through `DbBackup::isSnapshotName()` and
+  nothing else, before anything is closed, changed or deleted. Deleting is
+  `DbBackup::deleteSnapshot()`, which never follows a link. Reading a
+  manifest for a page is `DbBackup::manifestOf()`, which refuses a link that
+  leads out of the backups folder; do not read `_manifest.json` directly.
+- **`connection_closed` in a restore's result** means the class closed the
+  database connection: to be sure unfinished work was undone, or because the
+  session's settings could not be put back afterwards. It can be true on a
+  SUCCESSFUL result. The caller must not use the connection again in that
+  request; `backup.php` shows a bare page and stops.
+- **A row larger than `max_allowed_packet`** is refused in words before it is
+  sent (`tooLargeProblem()`), so the connection stays open and the ordinary
+  undo runs.
+- **Tables outside the snapshot.** `outsideTables()` finds every table that
+  is not in the snapshot and is linked, directly or onward, to one that is;
+  their rows and their linking columns (links to themselves included) are
+  counted inside the transaction before and after, and any difference is
+  reported in `other_tables_changed` and a warning.
+- **The standing check and `ALTER TABLE`.** `check_backup_column_types.py`
+  reads an `ALTER TABLE` that adds a column, a link, a primary key or an
+  index, with or without the database's name in front of the table's. Any
+  other form, and any statement whose table name it cannot read, is a
+  finding. Put a change into the table's `CREATE TABLE` in the install script.
+- **Zip package.** Two new files live under `web/_core/data/`. Whoever owns
+  the package's file list should confirm it takes that folder whole.
 
 ---
 

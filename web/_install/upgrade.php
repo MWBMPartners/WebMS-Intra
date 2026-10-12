@@ -18,7 +18,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/84
  * -----------------------------------------------------------------------------
  */
@@ -61,6 +61,10 @@ $pending  = $migrator->pending();
 $results  = [];
 $error    = '';
 $ranMigrations = false;
+// 🚩 Set when this run went ahead although its own snapshot cannot be put back
+//    whole (see "A SNAPSHOT THAT CANNOT BE PUT BACK WHOLE" below): the words to
+//    show beside the results.
+$ranWithoutWayBack = '';
 $unplacedAfterUpgrade = 0; // #533 — only computed for real after a run; see below
 $apiNotice = ['calendars' => 0, 'organisations' => 0]; // #514 part 8 — see below
 
@@ -97,30 +101,126 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'Applying database migrations — please wait.'
     );
 
-    // 📦 Auto-backup before running migrations. JSON per table, written
-    //    to web/_backups/upgrade-YYYYMMDD-HHMMSS/. See DbBackup.php.
-    //    Honoured per the portal.upgrade.backup.enabled setting (default
-    //    on); errors are surfaced but do not block the upgrade by
-    //    default — the admin should review the surfaced error and
-    //    decide whether to proceed.
+    // 📦 A snapshot is taken before any migration runs, one file per table,
+    //    in web/_backups/upgrade-YYYYMMDD-HHMMSS/. See DbBackup.php. It is
+    //    taken unless the portal.upgrade.backup.enabled setting is 0
+    //    (default: on).
+    //
+    //    IF THE SNAPSHOT FAILS, THE UPGRADE STOPS. Nothing is migrated, the
+    //    portal is reopened, and the reason is stored and shown at the top
+    //    of this page when it is drawn again (see "Show, once, the message"
+    //    further down). Until October 2026 the reason was stored and NEVER
+    //    shown: the page simply came back with the migration still waiting.
+    //    (This comment also used to say a failed backup did not block the
+    //    upgrade. The code below has always blocked it, and that is the
+    //    right way round: an upgrade with no way back is the thing the
+    //    snapshot exists to prevent.)
+    //
+    //    ⏱️ A snapshot of a large database takes longer than PHP's ordinary
+    //    limit of 30 seconds, and until #579 nothing here asked for more.
+    //    TimeLimit never lowers a limit. What it cannot do is stop the HOST
+    //    ending the request; if that happens no migration has run, and the
+    //    unfinished snapshot folder is listed as unfinished and removed by a
+    //    later upgrade once it is a day old.
     $backupSetting = (string) (\Portal\Core\App::settings()['portal']['upgrade']['backup']['enabled'] ?? '1');
     $backupResult  = null;
     if ($backupSetting === '1') {
+        \Portal\Core\TimeLimit::atLeast(900);
         $backup = new \Portal\Core\DbBackup($mysqli);
         $backupResult = $backup->snapshot('pre-upgrade-' . PORTAL_VERSION);
         if ($backupResult['success'] === false) {
-            $_SESSION['flash_msg']  = 'Backup failed: ' . ($backupResult['error'] ?? 'unknown')
-                                    . ' — aborting upgrade. Set '
-                                    . 'portal.upgrade.backup.enabled = 0 to '
-                                    . 'force-run without a backup.';
+            // 💬 What went wrong, and what to do about the CAUSE. This used
+            //    to end by naming the setting that skips the backup. That
+            //    invited the one thing the backup is there to prevent, an
+            //    upgrade with no way back, at the very moment somebody was
+            //    stuck and in a hurry. The recovery guide is where that
+            //    switch is described, with when it is acceptable to use it.
+            //    (The reason can name a folder on the server. Only a global
+            //    administrator reaches this page, and they need it.)
+            $reason = rtrim((string) ($backupResult['error'] ?? 'The backup gave no reason.'));
+            if (in_array(substr($reason, -1), ['.', '!', '?'], true) === false) {
+                $reason .= '.';
+            }
+            $_SESSION['flash_msg']  = 'Backup failed, so the upgrade was not started. Nothing has been changed. '
+                                    . 'The reason: ' . $reason . ' What to do: put that right, then press the '
+                                    . 'button again. If the reason names a folder, check that the folder exists, '
+                                    . 'that the portal is allowed to write to it, and that the disk is not full. '
+                                    . 'The recovery guide covers the other causes.';
             $_SESSION['flash_type'] = 'danger';
             \Portal\Core\Maintenance::setActive(false);
             header('Location: /admin/upgrade');
             exit();
         }
-        // 🗄️ Prune old snapshots per retention policy.
-        $keepN = (int) (\Portal\Core\App::settings()['portal']['upgrade']['backup']['keep_last_n'] ?? 10);
-        $backup->prune($keepN);
+
+        // 🚩 A SNAPSHOT THAT CANNOT BE PUT BACK WHOLE STOPS THE UPGRADE TOO.
+        //
+        //    The snapshot was taken, but it holds a value that is not on its
+        //    column's list of choices, and a restore refuses such a value
+        //    (DbBackup::unlistedWarning() explains). So if a migration went
+        //    wrong there would be NO way back, which is the one thing this
+        //    snapshot is taken to prevent, and until October 2026 nobody
+        //    would have known until they tried to put it back. The upgrade
+        //    stops here, nothing is migrated, and the page says which table
+        //    and column, how many values, and what to do.
+        //
+        //    A global administrator may go on all the same, deliberately: the
+        //    page then offers a second button that sends
+        //    `go_on_without_way_back=1`. That is for somebody who has another
+        //    backup they trust (the host's own, say) and cannot mend the rows
+        //    first. It is written to the activity log and said on the page.
+        //    (What is acted on is that field in a request carrying a valid
+        //    form token from a global administrator, not the session mark
+        //    that makes the button appear: the mark only decides what the
+        //    page shows.)
+        //    Carrying on with only a warning was considered and not done: a
+        //    warning shown AFTER the migrations have run is too late to act
+        //    on. Refusing with no way forward was not done either: the mend
+        //    needs a database tool some customers do not have to hand.
+        if ($backupResult['warnings'] !== []) {
+            $cannotGoBack = implode(' ', $backupResult['warnings']);
+            $snapshotName = basename((string) $backupResult['directory']);
+            if ((string) (is_string($_POST['go_on_without_way_back'] ?? null) === true ? $_POST['go_on_without_way_back'] : '') !== '1') {
+                $_SESSION['flash_msg']  = 'The upgrade was NOT started, and nothing has been changed. The snapshot taken '
+                                        . 'just now (' . $snapshotName . ') is meant to be the way back if the upgrade goes '
+                                        . 'wrong, and it could not be used for that. ' . $cannotGoBack . ' Once the rows '
+                                        . 'are mended, press the upgrade button again: it takes a new snapshot of its own. '
+                                        . 'If you have another backup of the database that you trust, you may go on '
+                                        . 'without this one: use the second button below.';
+                $_SESSION['flash_type'] = 'danger';
+                // Shown once, like the message: the second button appears
+                // only on the page this refusal leads to.
+                $_SESSION['upgrade_may_go_on'] = true;
+                \Portal\Core\Maintenance::setActive(false);
+                header('Location: /admin/upgrade');
+                exit();
+            }
+            // Going on, deliberately. Recorded first, so that the record does
+            // not depend on how the migrations end; a failure to record must
+            // not be what stops (or seems to stop) the upgrade.
+            $ranWithoutWayBack = 'This upgrade was run WITHOUT a way back, because a global administrator chose to go on. '
+                               . 'Its snapshot (' . $snapshotName . ') was taken, but: ' . $cannotGoBack;
+            try {
+                \Portal\Core\Logger::activity(
+                    'UpgradeWithoutWayBack',
+                    'The upgrade was run although its own snapshot (' . $snapshotName . ') cannot be put back whole. '
+                    . $cannotGoBack,
+                    $userId
+                );
+            } catch (\Throwable $ignored) {
+                unset($ignored);
+            }
+        } else {
+            // 🗄️ Keep the newest N FINISHED snapshots and remove older ones.
+            //    The one just taken is the newest, so it is always kept.
+            //    Unfinished folders are not counted and are removed only once
+            //    nothing in them has changed for 24 hours (see DbBackup::prune()).
+            //
+            //    NOT done when the new snapshot cannot be put back whole (the
+            //    branch above): an older snapshot must never be removed to
+            //    make room for one that is no use as a way back.
+            $keepN = (int) (\Portal\Core\App::settings()['portal']['upgrade']['backup']['keep_last_n'] ?? 10);
+            $backup->prune($keepN);
+        }
     }
 
     $results = $migrator->runAll($userId);
@@ -235,6 +335,26 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="container py-4">
     <h1 class="h3 mb-4">Upgrade Portal</h1>
 
+    <?php
+    // 💬 Show, once, the message a redirect left behind: a backup that failed,
+    //    or a form token that had expired. It used to be stored and never
+    //    shown by anything, so a refused upgrade looked exactly as if the
+    //    button had done nothing. It is removed as it is read, so it does not
+    //    come back on the next visit.
+    $flashMsg  = is_string($_SESSION['flash_msg'] ?? null) === true ? $_SESSION['flash_msg'] : '';
+    $flashType = in_array($_SESSION['flash_type'] ?? '', ['danger', 'warning', 'success', 'info'], true) === true
+        ? (string) $_SESSION['flash_type']
+        : 'info';
+    // 🚩 Was this page reached from "the snapshot cannot be put back whole"?
+    //    Then, and only then, the second button is offered (see the Pending
+    //    migrations card). Read once and removed, like the message.
+    $mayGoOn = ($_SESSION['upgrade_may_go_on'] ?? false) === true;
+    unset($_SESSION['flash_msg'], $_SESSION['flash_type'], $_SESSION['upgrade_may_go_on']);
+    ?>
+    <?php if ($flashMsg !== ''): ?>
+        <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?></div>
+    <?php endif; ?>
+
     <div class="row">
         <div class="col-lg-8">
 
@@ -255,6 +375,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </p>
                 </div>
             </div>
+
+            <?php if ($ranWithoutWayBack !== ''): ?>
+                <!-- 🚩 This run went ahead although its snapshot cannot be put back whole -->
+                <div class="alert alert-warning" id="upgrade-without-way-back"><?php echo htmlspecialchars($ranWithoutWayBack, ENT_QUOTES, 'UTF-8'); ?></div>
+            <?php endif; ?>
 
             <!-- Migration results (if just ran) -->
             <?php if ($ranMigrations === true && count($results) > 0): ?>
@@ -376,6 +501,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 Run <?php echo count($pending); ?> Pending Migration<?php echo count($pending) > 1 ? 's' : ''; ?>
                             </button>
                         </form>
+
+                        <?php if ($mayGoOn === true): ?>
+                            <?php // 🚩 Offered only straight after the refusal above, and worded so that nobody presses it by habit. ?>
+                            <form method="post" class="mt-3" id="upgrade-go-on-anyway" data-confirm="Run the upgrade WITHOUT a way back? The snapshot the portal has just taken cannot be put back whole, so if a migration goes wrong the portal will not be able to undo it. Only go on if you have another backup of the database that you trust." data-confirm-destructive="true" data-confirm-confirm-label="Upgrade without a way back">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="go_on_without_way_back" value="1">
+                                <button type="submit" class="btn btn-outline-danger btn-sm">
+                                    Upgrade anyway, without a way back
+                                </button>
+                                <span class="text-muted small ms-2">Only if you have another backup of the database that you trust.</span>
+                            </form>
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php endif; ?>

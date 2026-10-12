@@ -4,8 +4,8 @@
  * -----------------------------------------------------------------------------
  * Admin — Backup Freshness Check + Alert 🔔
  * -----------------------------------------------------------------------------
- * Reads the web/_backups/ directory via DbBackup::listSnapshots(), determines
- * the age of the most-recent snapshot, and alerts (email) the configured
+ * Reads the web/_backups/ directory via DbBackup, determines the age of the
+ * most recent FINISHED snapshot, and alerts (email) the configured
  * admin recipients if that age exceeds the `portal.backups.max_age_hours`
  * threshold.
  *
@@ -83,7 +83,7 @@ $badgeClass = match ($state) {
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
     <div>
         <h1 class="mb-1"><i class="fa-solid fa-box-archive me-2"></i>Backup Freshness</h1>
-        <p class="text-secondary mb-0">Current state of the JSON snapshot store in <code>web/_backups/</code>.</p>
+        <p class="text-secondary mb-0">Current state of the snapshots kept in <code>web/_backups/</code>.</p>
     </div>
     <a href="/admin/maintenance" class="btn btn-outline-secondary btn-sm">&larr; Maintenance</a>
 </div>
@@ -104,8 +104,13 @@ $badgeClass = match ($state) {
                     <div class="row py-2 border-bottom">
                         <div class="col-md-4"><code><?php echo htmlspecialchars($snap['name'], ENT_QUOTES, 'UTF-8'); ?></code></div>
                         <div class="col-md-3"><?php echo htmlspecialchars($snap['created_at'], ENT_QUOTES, 'UTF-8'); ?></div>
-                        <div class="col-md-2"><?php echo (int) $snap['tables']; ?> tables</div>
-                        <div class="col-md-3"><?php echo number_format((int) $snap['rows']); ?> rows</div>
+                        <?php if ($snap['complete'] === true): ?>
+                            <div class="col-md-2"><?php echo (int) $snap['tables']; ?> tables</div>
+                            <div class="col-md-3"><?php echo number_format((int) $snap['rows']); ?> rows</div>
+                        <?php else: ?>
+                            <?php // 🚧 No readable manifest: a snapshot that failed or was cut off. It is listed so it can be seen, and it is never counted as a backup above. ?>
+                            <div class="col-md-5"><span class="badge text-bg-warning">Unfinished</span> <span class="small text-muted">not a backup</span></div>
+                        <?php endif; ?>
                     </div>
                 <?php endforeach; ?>
             </div>

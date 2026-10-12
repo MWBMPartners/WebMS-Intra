@@ -2,6 +2,120 @@
 
 
 ## [Unreleased] (alpha)
+- fix(core): **the portal's own backup works again once a calendar has been
+  imported, and a snapshot it takes can be put back** (#577, #578, #579).
+  Three faults, found by running a real restore:
+  an imported calendar event keeps raw bytes that the old snapshot could not
+  write, so from the first imported event no snapshot could be taken and the
+  upgrade page refused to run; a record pointing at a newer record of the same
+  table (a venue agreement replaced by a later one) made a snapshot that could
+  never be restored; and a large activity log needed four times the memory a
+  shared host allows. `DbBackup` now writes one file per table with one row per
+  line (`tblName.jsonl`), reads and writes a row at a time (60,000 rows under a
+  32 MB limit, 4 MB used), carries raw bytes as base64 and says which columns
+  those are, writes self-pointing rows with the pointer empty and fills it in
+  afterwards without disturbing "last changed" dates, reads every table as it
+  stood at one moment, and carries moments in UTC whatever time zone the
+  host's database uses. Snapshots in the old form still restore. A column type
+  the backup has not been taught (BIT, FLOAT) is refused by name when the
+  snapshot is taken, not copied wrongly.
+- feat(admin): **"Check this snapshot" on Backup Management** (#578). It
+  rehearses the whole restore: every row is written and then taken out again,
+  so the answer is the restore's own answer and nothing is changed. It takes
+  as long as a restore and closes the portal while it runs. The old check only
+  read the files and said "fine" about snapshots that could not be restored.
+- fix(admin): **a failed snapshot is no longer counted as a backup** (#577).
+  The health page and the freshness alert read the newest folder, and a failed
+  snapshot leaves the newest folder there is, so the day backups stopped
+  working both said "Fresh". Both now read the newest FINISHED snapshot and
+  say how many unfinished folders there are. The clean-up after an upgrade
+  kept the unfinished folders and deleted the real backups; it now counts
+  finished snapshots only, removes an unfinished folder only after 24 hours
+  untouched, and never touches a folder the portal did not make. A snapshot
+  that fails removes its own folder.
+- fix(core): **a snapshot taken before an upgrade can be put back after it
+  when the upgrade added a link between two tables** (found by package E's
+  check). A row pointing at a row that is not in the snapshot is put back with
+  that pointer empty, but only where the link's own rule in the database is
+  "empty the pointer when the other row is deleted"; each one is counted and
+  named in the result and the activity log. For any other rule the restore is
+  refused, naming the table, the column and the missing row.
+- fix(admin): the backup, check and restore pages ask PHP for 15 minutes
+  (#579), a check or restore carries on if the browser stops waiting, and each
+  leaves a line in the activity log saying how it ended. The confirmation
+  boxes no longer say TRUNCATE.
+- fix(core): **a restore no longer says yes when the database says it changed
+  a value** (found by the independent checks of #577). The portal never set
+  how strict the database is, so a restore ran with the host's setting, and on
+  a loosely run host a value that no longer fitted its column (after an
+  upgrade changed the column) was cut short, replaced or rounded while the
+  restore reported success. A restore, a one-table restore and "Check this
+  snapshot" now run in a strict session of their own on every server, with
+  the database's notes switched on, refuse such a value naming the column
+  (also when the database only notes that it changed it), and put the
+  connection's own settings back afterwards; if those cannot be put back the
+  connection is closed and the result says so. Dates of zero and a record
+  numbered 0 go back exactly. What this cannot catch: some changes the
+  database makes without any word at all when a column's kind was changed
+  after the snapshot (seven kinds are known and listed at the top of
+  `DbBackup.php` and in the recovery guide).
+- fix(core): **a snapshot that cannot be put back whole now says so the
+  moment it is taken.** On a host that runs its database loosely, a value
+  that is not on its column's list of choices is stored as an empty text
+  without a word, and a restore refuses it, so one such value made every
+  snapshot of that database impossible to put back and nobody was told until
+  the day it was needed. The snapshot is still taken; its result and its
+  manifest (`unlisted_values`) name each table and column and how many, and
+  "Run snapshot now", the snapshot list, the snapshot's own page and the
+  health page all say that it cannot be put back whole and what to do (mend
+  the rows, take a new snapshot). **The upgrade page stops before changing
+  anything** when its own snapshot carries this warning, and offers a global
+  administrator a second button to go on deliberately, which is recorded in
+  the activity log. A database with no such value pays for no extra statement.
+- fix(admin): **the Delete button on Backup Management removed files it should
+  not** (older code). Given a shortcut (link) in the backups folder it deleted
+  every file in the folder the link pointed at, and given the name "." it
+  deleted the loose files in the backups folder. Every button that takes a
+  snapshot's name now uses one test (letters, digits, hyphens and underscores
+  only), applied before anything is closed or deleted; Delete removes a link
+  as a link. A name holding a zero byte no longer leaves the portal closed.
+  Inspect refuses a link that leads out of the backups folder, as the check
+  and the restore do; it used to show the outside folder's manifest.
+- fix(admin): **a restore or a check leaves the portal as it found it.** The
+  two Restore buttons reopened a portal an administrator had closed and
+  replaced their closing message; now the portal is still closed, with their
+  message, afterwards. The portal is put back in every case, including when
+  something goes wrong, except the one where the database connection had to
+  be closed: the page then says so plainly, says where the portal stands,
+  and says how to reopen it.
+- fix(admin): **the upgrade page shows why an upgrade did not start.** "Backup
+  failed" and "Invalid or expired form token" were stored and never shown, so
+  the page simply came back unchanged. Both are now shown, once. The "Backup
+  failed" message says what went wrong and what to do about the cause, and no
+  longer names the setting that skips the backup.
+- fix(core): **a restore says what it does to tables that are not in the
+  snapshot.** A table added after the snapshot was taken can lose records
+  linked to the ones being replaced, by the database's own rule for the link.
+  That is now counted (following the links onward, and counting a table's
+  links to itself), named in a warning and in the activity log, and shown
+  beforehand by "Check this snapshot". A restore that fails now confirms that
+  it was undone before saying so; a table that cannot undo (not InnoDB) is
+  refused before anything is touched; a large record that the database
+  accepts by itself goes back even when smaller ones were waiting with it,
+  and costs about four times its size in memory to put back, not six; a
+  record larger than the database's limit is refused in words before it is
+  sent (it used to end the connection, and the page could only say "MySQL
+  server has gone away"); and on the night the clocks go back a second
+  snapshot an hour after the first is no longer refused for having the same
+  name.
+- test: new `tools/backup-restore-selftest.php` (real snapshots and restores,
+  every value of every table compared by a reader that shares no code with the
+  class; MySQL 8.0.36 and 8.4.11) and `tools/backup-page-selftest.php` (the
+  real pages). New check `tools/audit-checks/check_backup_column_types.py`
+  fails when the install script gains a column type or a link the backup
+  cannot carry, or an `ALTER TABLE` or `CREATE TABLE` statement it cannot
+  read (a table named with its database in front is read), and checks a
+  sample snapshot against two new schema files in `web/_core/data/`.
 - fix(upgrade): an older database no longer stops part-way through upgrading,
   and ends up the same as a new install (roll-out package E; #553, #554, #555).
   - **The upgrade stopped at migration 124 on any database installed before

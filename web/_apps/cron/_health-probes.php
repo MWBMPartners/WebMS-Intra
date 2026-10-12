@@ -31,7 +31,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/228
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/497
  * -----------------------------------------------------------------------------
@@ -144,20 +144,45 @@ function maintenance_health_probes(\mysqli $db): array
     $probes['Disk space'] = ['state' => $diskState, 'label' => $diskState === 'ok' ? 'Healthy' : ucfirst($diskState), 'detail' => rtrim($diskDetail, ' · ')];
 
     // 3. Backups
-    $backup    = new DbBackup($db);
-    $snapshots = $backup->listSnapshots();
-    if (count($snapshots) === 0) {
-        $probes['Backups'] = ['state' => 'crit', 'label' => 'None', 'detail' => 'No snapshots in _backups/.'];
+    //    Only a FINISHED snapshot counts. This used to read the first folder
+    //    in the list, and the folder a FAILED snapshot leaves behind is the
+    //    newest one there is, so a failed backup showed as "Fresh" (#577).
+    //    DbBackup::newestFinished() is the one answer the freshness job uses
+    //    too, so the two cannot disagree.
+    $backup     = new DbBackup($db);
+    $finished   = count(array_filter($backup->listSnapshots(), static fn (array $s): bool => $s['complete'] === true));
+    $newest     = $backup->newestFinished();
+    $unfinished = $backup->unfinishedCount();
+    //    An unfinished folder means a snapshot failed or was cut off, which
+    //    is worth a warning even while the last good one is still fresh.
+    $unfinishedNote = $unfinished > 0 ? sprintf(' · %d unfinished (a snapshot failed)', $unfinished) : '';
+    //    🚩 A finished snapshot can still be one that CANNOT BE PUT BACK
+    //    WHOLE: it holds a value that is not on its column's list of choices,
+    //    which a restore refuses (DbBackup::unlistedWarning() has the whole
+    //    story, and its sentence is used here word for word so that this
+    //    page, the backup page and the upgrade page all say the same thing).
+    //    That is a warning even while the snapshot is fresh: "we have a
+    //    backup" is not true in the sense people mean it.
+    $unlistedNote = $newest !== null ? DbBackup::unlistedWarning($newest['unlisted_values'] ?? []) : '';
+    if ($unlistedNote !== '') {
+        $unlistedNote = ' · The newest snapshot (' . $newest['name'] . '): ' . $unlistedNote;
+    }
+    if ($newest === null) {
+        $probes['Backups'] = ['state' => 'crit', 'label' => 'None', 'detail' => 'No finished snapshot in _backups/.' . $unfinishedNote];
     } else {
         $threshold = (int) (App::settings()['portal']['backups']['max_age_hours'] ?? 36);
-        $createdAt = strtotime((string) $snapshots[0]['created_at']);
+        $createdAt = strtotime((string) $newest['created_at']);
         $ageHrs    = $createdAt !== false ? (int) round((time() - $createdAt) / 3600) : -1;
         if ($ageHrs < 0) {
-            $probes['Backups'] = ['state' => 'warn', 'label' => 'Timestamp unparseable', 'detail' => $snapshots[0]['name']];
+            $probes['Backups'] = ['state' => 'warn', 'label' => 'Timestamp unparseable', 'detail' => $newest['name'] . $unfinishedNote];
         } elseif ($ageHrs > $threshold) {
-            $probes['Backups'] = ['state' => 'warn', 'label' => 'Stale', 'detail' => sprintf('Last: %d hrs ago (threshold %d) · %d total', $ageHrs, $threshold, count($snapshots))];
+            $probes['Backups'] = ['state' => 'warn', 'label' => 'Stale', 'detail' => sprintf('Last: %d hrs ago (threshold %d) · %d finished', $ageHrs, $threshold, $finished) . $unfinishedNote . $unlistedNote];
+        } elseif ($unfinished > 0) {
+            $probes['Backups'] = ['state' => 'warn', 'label' => 'Fresh, but a snapshot failed', 'detail' => sprintf('Last: %d hrs ago · %d finished', $ageHrs, $finished) . $unfinishedNote . $unlistedNote];
+        } elseif ($unlistedNote !== '') {
+            $probes['Backups'] = ['state' => 'warn', 'label' => 'Fresh, but cannot be put back whole', 'detail' => sprintf('Last: %d hrs ago · %d finished', $ageHrs, $finished) . $unlistedNote];
         } else {
-            $probes['Backups'] = ['state' => 'ok', 'label' => 'Fresh', 'detail' => sprintf('Last: %d hrs ago · %d total', $ageHrs, count($snapshots))];
+            $probes['Backups'] = ['state' => 'ok', 'label' => 'Fresh', 'detail' => sprintf('Last: %d hrs ago · %d finished', $ageHrs, $finished)];
         }
     }
 

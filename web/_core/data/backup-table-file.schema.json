@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "backup-table-file.schema.json",
+  "title": "One table's file in a database snapshot (form 2): what each LINE of it holds",
+  "description": "A snapshot keeps each table in its own file, tblName.jsonl. The file is not one JSON document. Each LINE is a small JSON value of its own: a first line describing the table, then one line per row, then a last line. That is what lets the portal write and read a table a row at a time, so the memory it needs does not grow with the table. This schema describes one line; the three kinds are under $defs. Written and read by Portal\\Core\\DbBackup (web/_core/DbBackup.php).",
+  "$comment": "FOR MAINTAINERS. JSON has no comments, so every explanation lives here. tools/audit-checks/check_backup_column_types.py applies these by POSITION, which is stricter than the oneOf below: the first line must fit firstLine, the last must fit lastLine, and every line between must fit row. It also checks what a schema cannot say: that each row has exactly as many values as the first line has columns, that the last line's count is the number of rows, and that the file's checksum is the one in the manifest. Lines end with a single line-feed character; a line-feed inside a value is written as \\n by JSON, so a value can never break a line. The file ending is .jsonl and not .json on purpose: a release older than this form looks for tblName.json, does not find it, and refuses before touching anything.",
+  "oneOf": [
+    { "$ref": "#/$defs/firstLine" },
+    { "$ref": "#/$defs/row" },
+    { "$ref": "#/$defs/lastLine" }
+  ],
+  "$defs": {
+    "firstLine": {
+      "description": "The first line of the file: which table this is, and how to read every row after it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "table", "columns", "base64"],
+      "properties": {
+        "format": {
+          "description": "The form this file is in. 2, the same number as in the manifest.",
+          "type": "integer",
+          "const": 2
+        },
+        "table": {
+          "description": "The table's name. It must be the name the file itself carries, so a file copied over another table's file is refused.",
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "columns": {
+          "description": "The column names, in the order the values appear in every row line.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" }
+        },
+        "base64": {
+          "description": "The columns whose values are raw bytes, not text (BINARY, BLOB and similar). JSON can only hold text, so each value in these columns is written as base64, a way of writing any bytes using only letters, digits, +, / and =, and is turned back into bytes on restore. An empty list when the table has no such column.",
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" }
+        }
+      }
+    },
+    "row": {
+      "description": "One row of the table: its values, in the order of the first line's columns.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/cell" }
+    },
+    "cell": {
+      "description": "One value. null when the database holds no value. Otherwise text, exactly as the database hands the value over (numbers, dates and times included, so nothing is rounded on the way), or base64 text when the column is listed under base64 in the first line. The third shape, an object holding b64, is a safety net: one value of a TEXT column that turned out not to be valid text is carried as bytes for that value alone, so the content of one value can never make a whole snapshot fail.",
+      "type": ["string", "null", "object"],
+      "if": { "type": "object" },
+      "then": {
+        "additionalProperties": false,
+        "required": ["b64"],
+        "properties": {
+          "b64": {
+            "description": "The value's bytes, written as base64.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+          }
+        }
+      }
+    },
+    "lastLine": {
+      "description": "The last line of the file. Without it there is no telling a whole file from one cut short by a failed copy, because every line that did arrive would be a perfectly good row. A file whose last line is missing, or does not match, is refused.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["end", "rows"],
+      "properties": {
+        "end": {
+          "description": "Always true. It is what marks this line as the last one and not a row.",
+          "type": "boolean",
+          "const": true
+        },
+        "rows": {
+          "description": "How many row lines came before this one.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
