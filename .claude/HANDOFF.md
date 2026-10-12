@@ -125,6 +125,7 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 | E | older databases (#553, #555, #554) — the narrow check found three MEDIUM (with the events table missing the install script emptied every session's pointer, silently; the test passed when the install script's own guard was broken; the data check passed an UPDATE that also soft-deleted sessions). SECOND fix round running: one more commit after `917382c`. **No further check: commit on its proofs**, after reading the install script's block myself. Release only together with G | its own checkout `.claude-work/worktrees/e` | `rollout-E--check2.md`, `rollout-E--fix2.md` |
 | G | the backup faults (#577, #578, #579 and more) — the narrow check found NOTHING HIGH and no way to lose data on a normally set up server; two medium and six small points. The LAST fix round is running: one more commit after `23b5440`. **No further check: commit on its proofs**, after running both self-tests myself on the merged branch. Use the notes in `rollout-G--fix2-evidence/` (they replace the earlier ones). **Commit E and G together or G first** | its own checkout `.claude-work/worktrees/g` | `rollout-G--check2.md` (the work list), `rollout-G--fix2.md` |
 | M1 | the mail library's core and its own SMTP route (new files only: `web/_core/maillib/`, namespace `MWBM\Mail`, tests and README in `tools/maillib/`); nothing in the portal calls it yet | its own checkout `.claude-work/worktrees/m1`, branch `ro-m1-build` | `rollout-M1--build.md` |
+| K | the portal makes its own database connection strict (owner, 12 October: yes, as a small package of its own). It changes `web/_core/bootstrap.php` and the installer's two connections, adds `tools/db-strict-mode-selftest.php`, and gets ONE check. It must be committed before F1 and F3 take `bootstrap.php`, and before F5 takes the installer | its own checkout `.claude-work/worktrees/k`, branch `ro-k-build` | `rollout-K--build.md` |
 
 B2a and E each make ONE commit on their own branch and do not push. Bring each across with `git cherry-pick <hash>` onto
 `claude/alpha-wip` after its one check, then remove the checkout (`git worktree remove`) and delete its branch. B2b (plan item 10, the
@@ -289,7 +290,7 @@ summary and its section 4.1, "what runs beside what"). The short of it:
   snapshot carries that warning, with a deliberate way on for a global administrator.
 - **The portal never sets the database's strictness itself** (it runs with whatever the host has), which is how a loose host
   can store such a value at all, and how #587 stored an empty status. Whether the portal should make its OWN connection strict
-  is a decision for the owner (asked; recommended yes, as a small package of its own, before F1 takes `bootstrap.php`).
+  was put to the owner, who said YES on 12 October: a small package of its own (K), before F1 takes `bootstrap.php`.
 - Also in the fix round: the server's notes are switched on for the restore's session; a row larger than the server's limit is
   refused in words before it is sent; Inspect refuses a link; an outside table that points at itself is counted; a proof for
   outside tables followed onward. The code will say truthfully which changes of column type a restore cannot see (seven kinds
