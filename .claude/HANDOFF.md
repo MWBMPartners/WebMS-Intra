@@ -8,6 +8,13 @@
 
 ## Read this first — where we are right now
 
+**OWNER, 12 OCTOBER 2026, about 17:45 — do not go over the same ground twice.** The owner was asked about the sign-in lockout rule
+(5 wrong tries, 15 minutes) twice, in two forms, and said so: "we should not be re-going over the same things again. this just
+causes elongated time to work and wasts usage credits/tokens!" From now on: search this file before putting any question, and never
+ask again in another form; a build detail that serves an answer already given is decided here and reported in one line; each package
+gets ONE independent check and at most ONE fix round, committed on the fix builder's proofs; shorter updates. The lockout rule is
+settled: no more than 5 wrong tries in any 15 minutes, as built.
+
 ## OWNER DECISION, 12 OCTOBER 2026, ~06:05 — packages that share no files run SIDE BY SIDE; work autonomously
 
 The owner, on the pace: "Let packages that share no files run side by side. Also run autonomously, but do ask me questions if you
@@ -143,11 +150,11 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 
 | Package | What | Where it works | Report |
 | --- | --- | --- | --- |
-| H1 | expense withdraw (#587) — its ONE check found NOTHING wrong with what the code does (migration, page, every reader, the money figures; both MySQL versions), one test gap (the form-token test could be removed unnoticed) and a few untrue sentences. A small fix round is running in the same checkout: one more commit after `654bf98` on `ro-h1-merged`. **No further check: commit on its proofs.** Bring both commits across as one | `.claude-work/worktrees/h1m` | `rollout-H1--check.md`, `rollout-H1--fix.md` |
+| H1 | expense withdraw (#587) — **DONE, pushed `aa25592`**. One check, one round of fixes, then my own run on the merged branch (MySQL 8.0.36): 37 of 37, 50 of 50 and 278 of 278. Migration 211 is taken. Documents updated in the same commit. Checkouts `h1` and `h1m` can be removed. |
 | H2 | sign-in lockout and "Forgot password" (#580) — BUILT as `2cfacbc` on `ro-h2-build` (ten files; no database change), and its ONE check is running. It changes `web/_apps/cron/_health-probes.php`, and so does K: whichever is brought across second may need the two changes joined by hand | its own checkout `.claude-work/worktrees/h2` | `rollout-H2--build.md`, `rollout-H2--check.md` |
 | M1 | the mail library's core and its own SMTP route (#592) — its ONE check, with the checker's own hostile mail servers, found nothing that lets a password or a message travel unprotected, and four medium and six small faults (a cut-off handshake reported as a certificate fault; the name check left to PHP, which 8.5 does more loosely than 8.4; a proof of the TLS floor that could not fail; three more faults the test let through). A fix round is running: one more commit after `f34d677` on `ro-m1-merged`. **No separate check of the fix: M2's check must attack the certificate classification and the name check again through the portal.** Bring both commits across as one. **Read `rollout-M1--fix-evidence/FOR-LATER-PACKAGES.md` before briefing M2, M3 or M4** | `.claude-work/worktrees/m1m` | `rollout-M1--check.md`, `rollout-M1--fix.md` |
 | F1 + F2 | several organisations in one installation (#502; migration 212) and then the members-only gate (the biggest hole of #511), by ONE builder as TWO commits, with ONE check covering both. It was started from `528eb22`, before H1 and K are committed: it was told to take 212, to leave the connection lines of `bootstrap.php` and all of `DbServer.php` alone, and that `/api/attendance/list` and `/attendance` are named tests for the gate | its own checkout `.claude-work/worktrees/f1`, branch `ro-f1-build` | `rollout-F1--build.md` |
-| K | strict database mode (#593) — BUILT as `258dbc5` on `ro-k-build`; placed cleanly on top of today's branch as `f110f89` on `ro-k-merged` (checkout `.claude-work/worktrees/k2`), and its ONE check is running against THAT. Seven files: `DbServer.php` (the one opener), `bootstrap.php`, the installer, the health page, the admin dashboard, Server Information, and `tools/db-strict-mode-selftest.php`. It REPLACES the connection's mode with one fixed list per product (MySQL 8's default for MySQL; the same without `ONLY_FULL_GROUP_BY` for MariaDB). Bring `f110f89` across, not `258dbc5`. It must be committed before F1 and F3 take `bootstrap.php` and before F5 takes the installer | `.claude-work/worktrees/k2` | `rollout-K--build.md`, `rollout-K--check.md` |
+| K | strict database mode (#593) — its ONE check came back with no serious fault and three medium ones (the test only ran on a server with an empty mode; a MariaDB mistaken for MySQL would break six pages while health stays green; nothing tests what the health page says) plus wording. **ONE fix round is running** in `.claude-work/worktrees/k2`; report `rollout-K--fix.md`. Commit on its proofs: `git cherry-pick --no-commit f110f89 <fix>`, add its `DOC-ENTRIES.md`. No second check. It shares `_health-probes.php` with H2: bring K across first. |
 
 B2a and E each make ONE commit on their own branch and do not push. Bring each across with `git cherry-pick <hash>` onto
 `claude/alpha-wip` after its one check, then remove the checkout (`git worktree remove`) and delete its branch. B2b (plan item 10, the
