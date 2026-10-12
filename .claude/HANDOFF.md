@@ -54,7 +54,7 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 | --- | --- | --- | --- |
 | B2a + B2b | access gaps — fix round DONE and B2b built: commits `9cdf50e` (fixes, 19 files) and `b6c1b67` (B2b, 11 files) on `ro-b2a-build`, after `1953360`. A NARROW check of those two commits is running. Bring all three across together | its own checkout `.claude-work/worktrees/b2a` | `rollout-B2a--fix.md`, `rollout-B2a--check2.md` |
 | E | older databases (#553, #555, #554) — fix round DONE: commit `917382c` on `ro-e-build`, after `28ff8f3` (the install script now carries 210's UPDATE and ALTER; the migration test gained five rules). A NARROW check of that commit is running. **Release only together with G** | its own checkout `.claude-work/worktrees/e` | `rollout-E--fix.md`, `rollout-E--check2.md` |
-| G | the backup faults (#577, #578, #579, the clean-up, the freshness report, a link added after a snapshot, and the "Check this snapshot" button) — BUILT as commit `daeb31e` on `ro-g-build` (21 files, no database change), in its ONE check | its own checkout `.claude-work/worktrees/g` | `rollout-G--build.md`, `rollout-G--check.md` |
+| G | the backup faults (#577, #578, #579 and more) — its one check came back NOT CLEAN with NOTHING HIGH: data came back exactly, a failed or killed restore left the database identical, the rehearsal always undid itself. Five medium, eight small. ONE FIX ROUND is running (a commit after `daeb31e`); then a NARROW check, because this is the data-loss code | its own checkout `.claude-work/worktrees/g` | `rollout-G--check.md` (the work list), `rollout-G--fix.md` |
 | F6 part 1 | the zip package's build script and guards (#499) — fix round DONE: commit `0089a78` on `ro-f6-build`, after `84c6180` (the guard turned round into an allow list of 17 kinds tied to places; the PDF library compared file by file; a committed self-test, 128 checks). A NARROW check of that commit is running. Corrected `package.yml` is in `rollout-F6--fix-evidence/` | its own checkout `.claude-work/worktrees/f6` | `rollout-F6--fix.md`, `rollout-F6--check2.md` |
 | H (plan only) | the two faults the owner added: #587 expense withdraw, #580 sign-in lockout and reset e-mails | reads the MAIN folder and the b2a checkout; changes nothing | `rollout-H--plan.md` |
 
@@ -198,6 +198,19 @@ summary and its section 4.1, "what runs beside what"). The short of it:
   "Invalid or expired form token" and never shows them, so an administrator sees the page come back with nothing said. About six
   lines in `web/_install/upgrade.php`, a file G already changes. The checker is asked for the exact fix and its check.
 - The builder did NOT run the by-hand page checklist (how the changed pages look in a browser). It is owed before the push.
+
+**G's check, 12 October, about 11:35 — what the fix round was told:**
+
+- M1: on a database connection set loosely (some shared hosts), a restore said yes while cutting values short. The restore's own
+  session is to be made strict and put back afterwards. M2/L2: the backup page's Delete followed a link out of the backups folder;
+  one name test for every action, before anything is closed or changed. M3: the upgrade page shows the message it stored (the
+  checker tried the fix). **My call, told to the owner:** the "backup failed" message says what went wrong and what to do; it no
+  longer names the setting that skips the backup. M4: the proposed workflow stayed green when a self-test failed (a pipe hid the
+  exit code). M5: six proofs for six planted faults that passed.
+- Also to be fixed there: a restore that affects rows in tables NOT in the snapshot must say so; a table that is not InnoDB is
+  refused before anything changes; the two Restore buttons leave a portal closed if an administrator had closed it.
+- The corrected `RUNBOOK-CORRECTIONS.md`, `DOC-ENTRIES.md` and workflow pieces will be in `rollout-G--fix-evidence/`; use THOSE,
+  not the builder's.
 
 **Trap, learned the hard way today:** the Agent tool's own "separate checkout" option (`isolation: worktree`) cuts the checkout from
 `main`, which is about 400 commits behind the working branch, and refuses writes to the main folder. A builder started that way found
