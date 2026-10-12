@@ -143,9 +143,10 @@ script loads Babel with no fingerprint) and #576 (small follow-ups).
 
 | Package | What | Where it works | Report |
 | --- | --- | --- | --- |
-| H1 | expense withdraw (#587): migration 211 and `full_schema.sql`, the places that read a claim's status, tests that read the stored status back. ONE check when built | its own checkout `.claude-work/worktrees/h1`, branch `ro-h1-build` | `rollout-H1--build.md` |
+| H1 | expense withdraw (#587) — BUILT as `b45463f` on `ro-h1-build` (ten files; migration 211); placed on today's branch as `654bf98` on `ro-h1-merged` (checkout `.claude-work/worktrees/h1m`), and its ONE check is running against THAT. Bring `654bf98` across | `.claude-work/worktrees/h1m` | `rollout-H1--build.md`, `rollout-H1--check.md` |
 | H2 | sign-in lockout and "Forgot password" (#580): one failure row per wrong password, the block fixed at the fifth, reset with its own limit, new `Mailer::canSend()`. No database change. ONE check when built | its own checkout `.claude-work/worktrees/h2`, branch `ro-h2-build` | `rollout-H2--build.md` |
-| M1 | the mail library's core and its own SMTP route (new files only: `web/_core/maillib/`, namespace `MWBM\Mail`, tests and README in `tools/maillib/`); nothing in the portal calls it yet | its own checkout `.claude-work/worktrees/m1`, branch `ro-m1-build` | `rollout-M1--build.md` |
+| M1 | the mail library's core and its own SMTP route (#592) — BUILT as `ddb2af2` on `ro-m1-build` (32 new files; 64 proofs; nothing in the portal calls it); placed on today's branch as `f34d677` on `ro-m1-merged` (checkout `.claude-work/worktrees/m1m`), and its ONE check is running against THAT. Bring `f34d677` across. Its proposed workflow file is `rollout-M1--build-evidence/workflow-proposal-mail-selftests.yml.txt` | `.claude-work/worktrees/m1m` | `rollout-M1--build.md`, `rollout-M1--check.md` |
+| F1 + F2 | several organisations in one installation (#502; migration 212) and then the members-only gate (the biggest hole of #511), by ONE builder as TWO commits, with ONE check covering both. It was started from `528eb22`, before H1 and K are committed: it was told to take 212, to leave the connection lines of `bootstrap.php` and all of `DbServer.php` alone, and that `/api/attendance/list` and `/attendance` are named tests for the gate | its own checkout `.claude-work/worktrees/f1`, branch `ro-f1-build` | `rollout-F1--build.md` |
 | K | strict database mode (#593) — BUILT as `258dbc5` on `ro-k-build`; placed cleanly on top of today's branch as `f110f89` on `ro-k-merged` (checkout `.claude-work/worktrees/k2`), and its ONE check is running against THAT. Seven files: `DbServer.php` (the one opener), `bootstrap.php`, the installer, the health page, the admin dashboard, Server Information, and `tools/db-strict-mode-selftest.php`. It REPLACES the connection's mode with one fixed list per product (MySQL 8's default for MySQL; the same without `ONLY_FULL_GROUP_BY` for MariaDB). Bring `f110f89` across, not `258dbc5`. It must be committed before F1 and F3 take `bootstrap.php` and before F5 takes the installer | `.claude-work/worktrees/k2` | `rollout-K--build.md`, `rollout-K--check.md` |
 
 B2a and E each make ONE commit on their own branch and do not push. Bring each across with `git cherry-pick <hash>` onto
@@ -316,6 +317,27 @@ summary and its section 4.1, "what runs beside what"). The short of it:
   refused in words before it is sent; Inspect refuses a link; an outside table that points at itself is counted; a proof for
   outside tables followed onward. The code will say truthfully which changes of column type a restore cannot see (seven kinds
   are known); the durable fix, recording each column's type in the manifest, is a later issue.
+
+**From M1's build, 12 October, about 17:00 — things the later mail packages must be told:**
+
+- **The library has two certificate modes, not three**: fully checked, and "this one certificate only" for one send. The
+  owner's third way through ("switch checking off behind a warning") is NOT in the library. **M4 must add it to the library on
+  purpose, with its own proofs**; the plan's M4 lists no library file to change.
+- **A refused SIGN-IN comes back as "refused"**, with `SendResult::isAboutTheMessage()` to tell it from a refused MESSAGE.
+  **M3's queue must never drop mail because the mailbox's sign-in was refused**: it holds the queue and tells the global
+  administrator. Otherwise one wrong password throws away every password reset.
+- One send can take up to about 66 seconds in the worst case, not the plan's 30. All recipients or none. One message to several
+  people shows each the others' addresses (said in the README).
+- **Found, and the owner must be asked (it is a workflow file):** the Psalm job on GitHub analyses NOTHING and still reports
+  success ("Could not find any composer autoloaders"; an empty report is uploaded). A check that cannot fail.
+
+**A habit that worked today, keep it:** when a package's checkout was cut before other packages were committed, make a fresh
+checkout from the working branch, `git cherry-pick` the builder's commit onto it, and have the CHECK run against that. Then the
+check covers the combination, and the commit that is brought across is the one that was checked (K as `f110f89`, H1 as
+`654bf98`, M1 as `f34d677`).
+
+**A trap in this session's own tooling:** a guard refuses any single command that both mentions the default branch's name
+anywhere in its text and sends commits to GitHub. Keep the sending command on its own.
 
 **Trap, learned the hard way today:** the Agent tool's own "separate checkout" option (`isolation: worktree`) cuts the checkout from
 `main`, which is about 400 commits behind the working branch, and refuses writes to the main folder. A builder started that way found
