@@ -102,7 +102,11 @@
  *     is not built.
  *   • Put back, whole, a snapshot holding a value that is NOT ON ITS COLUMN'S
  *     LIST OF CHOICES. Only a database set to accept anything stores such a
- *     value, and a restore refuses it (see pinStrictness()). snapshot() looks
+ *     value, and a restore refuses it (see pinStrictness()). Since 12 October
+ *     2026 the portal's own connection refuses such a value too, so a new one
+ *     can only arrive from before that date, from a server that refuses the
+ *     portal's strict setting (the health page says so), or from something
+ *     written outside the portal (a hosting panel, an import). snapshot() looks
  *     for these and says so at once, in its result and in the manifest, so
  *     that nobody first hears of it on the day the restore is needed; see
  *     unlistedWarning().
@@ -820,9 +824,16 @@ class DbBackup
      * 🔒 Make this connection strict for the length of a restore, returning
      * what its setting (`sql_mode`) was so that it can be put back.
      *
-     * WHY. The portal never sets `sql_mode`, so a restore used to run with the
-     * host's. Some shared hosts run with it empty, and the database then
-     * "helps" by changing any value that does not fit instead of refusing it.
+     * WHY. Until 12 October 2026 the portal ran with the host's `sql_mode`,
+     * and so did a restore. The portal now makes its own connection strict
+     * (Portal\Core\DbServer::connect()), but with a different list from the
+     * one a restore needs: the portal's list refuses the date 0000-00-00, and
+     * a restore must put such a date back. So a restore still sets its own
+     * list for its length and then puts the portal's back.
+     *
+     * What went wrong before a restore had a list of its own: some shared
+     * hosts run with `sql_mode` empty, and the database then "helps" by
+     * changing any value that does not fit instead of refusing it.
      * Putting back the snapshot taken before an upgrade, after a migration had
      * changed a column, said "success" and brought back `a lon` for a
      * 36-letter value, 32767 for 70000, an empty text for "no value", and an
@@ -932,7 +943,8 @@ class DbBackup
      * once and ignore a failure, so a restore could answer "success" and hand
      * back a connection still in the restore's own strictness: everything the
      * page did next (reopen the portal, write the activity log) would then
-     * have run under settings the host never chose. A closed connection
+     * have run under the restore's own settings, which are not the ones the
+     * portal asks for on every other request. A closed connection
      * cannot do that. The caller is told through $sessionNotPutBack, and
      * restoreAll() and restoreTable() say so in their results (see
      * sayIfSessionNotPutBack()).
@@ -1212,7 +1224,12 @@ class DbBackup
      *
      * WHY IT EXISTS. A column with a list of choices (an ENUM) on a database
      * set to accept anything stores a value that is not on the list as an
-     * empty text, without a word. A restore refuses that value (see
+     * empty text, without a word. (Since 12 October 2026 the portal's own
+     * connection refuses such a value, so a new one can only arrive from
+     * before that date, from a server that refuses the portal's strict
+     * setting, which the health page reports, or from something written
+     * outside the portal such as a hosting panel or an import.) A restore
+     * refuses that value (see
      * pinStrictness() for why it must), so ONE such cell makes the whole
      * snapshot impossible to put back, and until October 2026 nobody was told
      * until they pressed Check or needed the restore. The snapshot is still

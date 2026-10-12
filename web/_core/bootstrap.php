@@ -320,17 +320,27 @@ try {
         $dbPort = (int) $creds['db_port'];
     }
 
-    $mysqli = new mysqli(
+    // 🔒 Opened through Portal\Core\DbServer::connect() rather than with
+    //    `new mysqli` here, since 12 October 2026. That one method sets the
+    //    character set (utf8mb4, as this block always did) AND makes the
+    //    connection strict, so the database refuses a value that does not fit
+    //    instead of quietly changing it. The portal used to run as loosely as
+    //    its host allowed; the reasons are beside the STRICT_MODE lists in
+    //    DbServer.php. The installation wizard opens its connections the same
+    //    way, so there is one place to get this right.
+    //
+    //    If the database refuses to be made strict, the portal still starts:
+    //    stopping would lock people out of their own data on every page,
+    //    including the page that explains why. DbServer writes the refusal to
+    //    the error log, and the health page, the admin dashboard and Admin →
+    //    Server Information each read the setting back and say so.
+    $mysqli = \Portal\Core\DbServer::connect(
         $creds['db_host'],
         $creds['db_user'],
         $creds['db_pass'],
         $creds['db_name'],
         $dbPort
     );
-
-    // 🔤 Set charset to utf8mb4 for full Unicode support (including emoji)
-    // See: https://dev.mysql.com/doc/refman/8.0/en/charset-unicode-utf8mb4.html
-    $mysqli->set_charset('utf8mb4');
 
 } catch (\mysqli_sql_exception $e) {
     error_log('❌ DB connection failed: ' . $e->getMessage());

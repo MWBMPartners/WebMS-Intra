@@ -281,6 +281,14 @@ foreach ($sqlFiles as $file) {
 $phpVersion = PHP_VERSION;
 $dbInfo     = \Portal\Core\DbServer::inspect($mysqli);
 $dbVersion  = trim($dbInfo['engine'] . ' ' . $dbInfo['version']);
+
+// 🔒 Is the database connection strict, as the portal asks each time it
+//    connects? (Strict means a value that does not fit its column is refused
+//    with an error, not stored changed.) Read back from the database here
+//    rather than assumed. When it is not what was asked for, the alert below
+//    says so in words: the portal keeps running in that case, so this page is
+//    one of the places that has to make sure somebody notices.
+$dbStrictness = \Portal\Core\DbServer::strictness($mysqli);
 $portalEnv  = PORTAL_ENV ?? 'production';
 
 // 📄 Include shared header template
@@ -322,6 +330,17 @@ if ($isUmbrella === false) {
 }
 $keysLiveNow = ReservedKeys::keysAreAddresses();
 ?>
+<?php if ($dbStrictness['state'] !== 'ok'): ?>
+<!-- 🔒 Shown only when the database connection is not running under the
+     strictness the portal asks for. Red when it is not strict at all (values
+     are being changed quietly); amber when it is strict but not the exact
+     setting, or the database would not say. -->
+<div class="alert alert-<?php echo $dbStrictness['state'] === 'crit' ? 'danger' : 'warning'; ?>" role="alert">
+    <h2 class="h6 alert-heading mb-2"><i class="fa-solid fa-triangle-exclamation me-1"></i> <?php echo htmlspecialchars($dbStrictness['headline'], ENT_QUOTES, 'UTF-8'); ?></h2>
+    <p class="mb-1 small"><?php echo htmlspecialchars($dbStrictness['detail'], ENT_QUOTES, 'UTF-8'); ?></p>
+    <p class="mb-0 small"><a href="<?php echo htmlspecialchars(Router::url('admin/system-info'), ENT_QUOTES, 'UTF-8'); ?>">Admin &rarr; Server Information</a> shows the setting this connection is running under.</p>
+</div>
+<?php endif; ?>
 <?php if ($keyClashes !== []): ?>
 <div class="alert alert-warning" role="alert">
     <h2 class="h6 alert-heading mb-2"><i class="fa-solid fa-triangle-exclamation me-1"></i> An organisation key is reserved</h2>

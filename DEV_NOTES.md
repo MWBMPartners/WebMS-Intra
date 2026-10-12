@@ -3041,7 +3041,10 @@ ignore rules remain the first wall; these guards are the second.
   the connection's `sql_mode` to `DbBackup::RESTORE_SQL_MODE` and switches
   `sql_notes` on, in one statement, for the length of a restore, and
   `putStrictnessBack()` puts both back in the same `finally` as the time
-  zone. Do not add `NO_ZERO_DATE` or `NO_ZERO_IN_DATE` to the mode: a database
+  zone. What it puts back is the portal's own list
+  (`DbServer::STRICT_MODE_MYSQL` or `_MARIADB`), not the host's. The two lists
+  differ on purpose: the portal's has `NO_ZERO_DATE` and `NO_ZERO_IN_DATE`, the
+  restore's must not. Do not add `NO_ZERO_DATE` or `NO_ZERO_IN_DATE` to the mode: a database
   that was ever run loosely holds dates of zero, and they must go back as
   they were. A statement that succeeds with a warning OR a note is treated as
   a failure (`tryStatement()`), because that is how the database reports a
@@ -5171,7 +5174,9 @@ Three things worth keeping, because each is the shape of a fault found here:
 
 - **A column that is a fixed list of choices stores an EMPTY value, and reports
   success, when it is given a choice it does not know and the server is not in
-  strict mode.** A new choice goes on the END of the list (the server stores a
+  strict mode.** The portal now asks every connection for strict mode (#593),
+  so through the portal this is an error; a connection opened any other way
+  still depends on the server. A new choice goes on the END of the list (the server stores a
   choice as its position), in a numbered migration and in `full_schema.sql`,
   and every place that lists the choices has to learn it: for claims that is
   `expenses/api/list.php` and `ReportRegistry.php`.
@@ -6338,6 +6343,23 @@ and none of them said what the number meant. That stopped being a minor
 gap in April 2026, when MySQL 8.0 reached the end of its extended
 support and stopped receiving security fixes. This section is for
 anyone extending `Portal\Core\DbServer` or the Server Information page.
+
+### Database strictness (`sql_mode`), since 12 October 2026 (#593)
+
+- **One place opens every connection:** `Portal\Core\DbServer::connect()`. Do not write `new mysqli` anywhere else under `web/`; the self-test fails if it finds one. A connection opened elsewhere runs as loosely as the host allows and nothing looks wrong.
+- **What it asks for.** The setting is REPLACED, not added to, so every installation runs under the same one:
+  - A server KNOWN to be MySQL (Percona included): `ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION`, which is MySQL 8's own default and what every test here runs under (`DbServer::STRICT_MODE_MYSQL`).
+  - Every other server, MariaDB included: the same without `ONLY_FULL_GROUP_BY` (`DbServer::STRICT_MODE_MARIADB`). With that word on, MariaDB 10.6 and 11.4 refuse `SELECT id, name, COUNT(*) FROM t GROUP BY id`, which MySQL accepts and the portal does in many places.
+  - **"Known to be MySQL" takes two things** (`DbServer::wantedSqlMode()`): the version text does not name MariaDB, AND the server answers a question only MySQL answers (`SELECT @@information_schema_stats_expiry`). Being unsure always gives the shorter list, because the two mistakes are not equally bad: a MySQL without the word is only less fussy about grouping, while a MariaDB given MySQL's list accepts it and then answers "error" on pages that worked. A MariaDB can hide its name (`--version=…`), which is why the name alone is not trusted. That MariaDB leaves the question unanswered rests on MariaDB's documentation; no MariaDB was run to confirm it.
+  - Never add `NO_AUTO_CREATE_USER`: MySQL 8 does not know it, and a server that does not know one word refuses the whole list.
+- **Why not "add strictness to what the host has".** It would keep anything else the host switched on. `ANSI_QUOTES` makes `status = "valid"` mean a column called valid, and the portal writes text in double quotes inside SQL in many places (a safeguarding check, `Auth::isCoordinatorOf()`, among them).
+- **If the full list is refused**, it asks once more without the three names MySQL has said it will retire (`NO_ZERO_IN_DATE`, `NO_ZERO_DATE`, `ERROR_FOR_DIVISION_BY_ZERO`). A server that takes only that shorter list is still strict, but is judged `warn`: an amber alert, an amber health check, and a line in PHP's error log on every request, until the lists in `DbServer.php` are brought into line.
+- **Reading it:** `DbServer::strictness($db)` gives `ok` (exactly as asked), `warn` (strict, but not that exact list, or the database would not say) or `crit` (not strict at all). The health check, the dashboard alert, Server Information and the installer's step 2 all use it. `ok` means the setting read back matches; it does not prove the portal's own request is why (a host that already has the same list looks the same).
+- **Cost:** four short statements at start-up on MySQL (two to learn the product, one to ask the MySQL-only question, one to set the mode); three on MariaDB.
+- **Writing SQL from now on.** A value that does not fit is an ERROR on every installation, not only on the test servers. An empty text sent to a date or number column is refused; send NULL. A zero date (`0000-00-00`) is refused.
+- **A database that was run loosely for years** may hold zero dates. Its rows can still be read, and their other columns changed. Writing a zero date back, copying such rows to another table, and a table change that copies the table row by row are refused (error 1292); a table change done in place still works. Mend with `WHERE column = 0`.
+- **Self-tests that open their own connection** (most of them) do not go through `DbServer::connect()`, so on a loose server they still run loose. `feed-importer` and `my-volunteering` need a server on MySQL's default for that reason.
+- **Running the strict-mode self-test.** It needs a throwaway server started with `--sql-mode=""` and an account that may `SET GLOBAL`. Part R changes the server's own `sql_mode` for about a minute and puts it back; never point it at a server anything else uses. What it cannot show: anything about MariaDB (no automated run uses one), and a web server or browser (the pages are loaded from the command line through the portal's entry page).
 
 ### `Portal\Core\DbServer` — the one place the judgement is made
 

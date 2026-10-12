@@ -204,9 +204,14 @@ What is still true:
    check and the restore refuse before touching anything and name the
    table. *Tested (L01, L02, proof 21).*
 8. **A snapshot holding a value that is not on its column's list of choices
-   cannot be put back whole.** This can only happen on a host that runs its
-   database loosely: there a value that is not on a column's list is stored
-   as an empty text, without a word. A restore refuses that value, because
+   cannot be put back whole.** This can only come from a value saved while
+   the portal's connection was loose: before the portal made its own
+   connection strict (12 October 2026) on a host that runs its database
+   loosely, or since then on a host whose database refuses that setting (the
+   health page shows "Database strictness: NOT strict"), or written from
+   outside the portal. On a loose connection a value that is not on a
+   column's list is stored as an empty text, without a word. A restore
+   refuses that value, because
    the only way to put it back is to let the database change other values
    too. The portal now TELLS you when it takes such a snapshot: "Run
    snapshot now" answers in yellow, the snapshot is marked **Cannot be put

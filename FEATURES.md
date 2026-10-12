@@ -230,6 +230,14 @@ screens and didn't say what it meant.
   ageing-but-working database, since that page is polled by uptime
   monitors and a permanently amber light is one everyone learns to
   ignore.
+- **Database strictness (#593).** Every connection the portal opens asks the
+  database to refuse a value that does not fit, instead of quietly changing
+  it. The health page has a **Database strictness** check (green "Strict",
+  amber "Needs a look", red "NOT strict"); the admin dashboard shows an
+  alert, and Server Information a line, when the connection is not running
+  under the setting the portal asks for. All three show the setting read
+  back from the database. The installation wizard refuses, at step 2, a
+  database it cannot make strict. Not run on MariaDB.
 - **`tools/db-server-selftest.php`** — dependency-free, no database
   needed — checks 15 real version strings (including MariaDB's own
   "5.5.5-" prefix quirk) against the real class.

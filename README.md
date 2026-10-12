@@ -159,6 +159,15 @@ as "tested on MariaDB". To see what it covers, run it:
 php tools/db-server-selftest.php
 ```
 
+The portal also makes its own database connection strict (#593). Its test needs a
+THROWAWAY database server started loose, and changes that server's own `sql_mode`
+for about a minute before putting it back:
+
+```bash
+# docker run --rm ... mysql:8.0.36 --sql-mode=""
+SELFTEST_DB_NAME=selftest_strict SELFTEST_DB_PORT=<port> SELFTEST_DB_PASS=<password> php tools/db-strict-mode-selftest.php
+```
+
 (That command is given instead of a number on purpose. This sentence used to
 say "15 crafted version strings". The count reached 36 within hours, and the
 sentence did not. A number in prose goes stale the moment somebody improves the

@@ -114,6 +114,41 @@ function maintenance_health_probes(\mysqli $db): array
         $probes['Database'] = ['state' => 'crit', 'label' => 'Connection failed', 'detail' => $e->getMessage()];
     }
 
+    // 1b. Database strictness (added 12 October 2026)
+    //    The portal asks the database to REFUSE a value that does not fit its
+    //    column (too long, too large, empty where one is needed, not on the
+    //    column's list of choices) rather than store it changed. It asks every
+    //    time it connects, in Portal\Core\DbServer::connect(). This check reads
+    //    the setting BACK from the database instead of trusting that the request
+    //    worked, so it also catches a server that said yes and did nothing.
+    //
+    //    Unlike an old database version (see 1 above), this one DOES change the
+    //    light, and that is deliberate. A connection that is not strict is
+    //    altering what people save right now, on every page, with no error:
+    //    that is a fault in progress, not a fact that will be equally true
+    //    tomorrow. 'crit' means not strict at all; 'warn' means strict but not
+    //    the exact setting asked for, or that the database would not say.
+    //    strictness() never throws, so no try block is needed here.
+    //
+    //    The detail line shows the setting READ BACK (`mode`), never the one
+    //    asked for (`wanted`): on a refused request those differ, and the one
+    //    asked for would read as if it were in force. An empty `mode` means
+    //    either that the setting is empty or that the database would not say,
+    //    and strictness() does not tell the two apart, so the wording covers
+    //    both. It used to say "(nothing)", which was untrue for the second.
+    $strictness = \Portal\Core\DbServer::strictness($db);
+    $probes['Database strictness'] = [
+        'state'  => $strictness['state'],
+        'label'  => match ($strictness['state']) {
+            'ok'    => 'Strict',
+            'crit'  => 'NOT strict',
+            default => 'Needs a look',
+        },
+        'detail' => $strictness['headline']
+            . ' — running under: ' . ($strictness['mode'] !== '' ? $strictness['mode'] : '(empty, or the database would not say)')
+            . ($strictness['state'] === 'ok' ? '' : ' — see Admin → Server Information'),
+    ];
+
     // 2. Disk — _backups + _uploads
     $diskState = 'ok';
     $diskDetail = '';

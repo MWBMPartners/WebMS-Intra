@@ -532,7 +532,12 @@ and web/_apps/tasks/api/list.php, read via `git show`):
          value (`"x = '" . f($a, 'b') . "'; SELECT ..."`) is missed.
        - it assumes MySQL's default modes: under ANSI_QUOTES a "..." is a
          name, not a value, and under NO_BACKSLASH_ESCAPES a backslash
-         escapes nothing. Nothing in web/_core or web/_install sets sql_mode.
+         escapes nothing. The portal sets sql_mode itself on every connection
+         (Portal\\Core\\DbServer::connect()), to a list that holds neither
+         ANSI_QUOTES nor NO_BACKSLASH_ESCAPES, and it REPLACES the host's
+         setting, so a host that switched either on does not change how
+         these statements are read. (Unless the database refuses the
+         portal's setting; the health page then says "NOT strict".)
        - the short `<?` opening tag is not recognised, so a statement after
          one is taken as text outside PHP and missed; __halt_compiler() is
          not recognised either.
@@ -1584,8 +1589,11 @@ def _read_sql_in_string(
       * `/* ... */` is a comment. `/*! ... */`, which MySQL does run, is
         treated as a comment too.
     It assumes MySQL's default modes. Under ANSI_QUOTES a "..." is a name, not
-    a value, and under NO_BACKSLASH_ESCAPES a backslash escapes nothing; the
-    portal sets neither (nothing in web/_core or web/_install sets sql_mode).
+    a value, and under NO_BACKSLASH_ESCAPES a backslash escapes nothing. The
+    portal sets sql_mode itself on every connection
+    (Portal\\Core\\DbServer::connect()), to a list that holds neither word,
+    and it REPLACES the host's setting, so a host that switched either on
+    does not change how these statements are read.
     """
     if state == "text" and not _SQL_SPECIAL_RE.search(text, start, end):
         _fill(regions, start, end, SQL_TEXT)

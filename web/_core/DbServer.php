@@ -20,6 +20,14 @@
  * version. They still deserve to be TOLD, in words, what they are running and
  * what that means — which is what this class produces.
  *
+ * IT ALSO OPENS EVERY CONNECTION, AND MAKES EACH ONE STRICT (12 October 2026)
+ * --------------------------------------------------------------------------
+ * connect() is the only place in the portal that opens a database connection,
+ * and it asks the database to refuse any value that does not fit its column
+ * instead of quietly changing it. strictness() reads that setting back and
+ * judges it, for the same pages that show the version. The reasons, and what
+ * was tried and rejected, are beside the two STRICT_MODE lists below.
+ *
  * IT ALSO WORKS DURING INSTALLATION
  * ---------------------------------
  * The installation wizard runs before the portal's normal start-up code, so it
@@ -59,7 +67,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/475
  * -----------------------------------------------------------------------------
  */
@@ -154,6 +162,397 @@ final class DbServer
     // 🎯 The release line to recommend moving TO, named in the advice text.
     public const SUPPORTED_MYSQL = '8.4';
     public const SUPPORTED_MARIADB = '11.4';
+
+    // 🔒 HOW STRICT THIS PORTAL MAKES ITS OWN CONNECTION (the `sql_mode` setting).
+    //
+    //    WHY THE PORTAL SETS THIS ITSELF. Until 12 October 2026 it ran with
+    //    whatever the hosting company had chosen. On a loosely set server the
+    //    database "helps" with a value that does not fit by changing it and
+    //    saying nothing: a text is cut short, a number clipped, a value that is
+    //    not on a column's list of choices stored as an empty text. The
+    //    expenses "Withdraw" button stored an EMPTY status that way (#587).
+    //    Every test this project has runs on MySQL 8's default settings, which
+    //    are strict, so nothing here could see it.
+    //
+    //    THE SETTING IS REPLACED, NOT ADDED TO, so every installation runs
+    //    under the same one whatever its host chose. Adding strictness to the
+    //    host's own setting was tried and rejected: it keeps anything else the
+    //    host switched on, and one such switch (ANSI_QUOTES) makes
+    //    `status = "valid"` mean a COLUMN called valid. The portal writes text
+    //    that way in many places, a safeguarding check in the sign-in class
+    //    (Auth::isCoordinatorOf()) among them.
+    //
+    //    A server KNOWN to be MySQL gets exactly MySQL 8's own default, which
+    //    is what every test here runs under. On a MySQL host that already has
+    //    the default, this changes nothing at all. "Known" is decided in
+    //    wantedSqlMode() below, and matters: see there.
+    public const STRICT_MODE_MYSQL = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,'
+                                   . 'ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
+
+    // 🍃 MariaDB gets the same list WITHOUT ONLY_FULL_GROUP_BY, and that word is
+    //    left out on purpose. With it on, MariaDB 10.6 and 11.4 refuse
+    //    `SELECT id, name, COUNT(*) FROM t GROUP BY id` (grouping by a table's
+    //    own key and reading its other columns), which MySQL 8 accepts and
+    //    which the portal does all over. MariaDB has the word off by default,
+    //    so leaving it off keeps what works there today. Values that do not fit
+    //    are refused just the same without it (tried on both).
+    //
+    //    EVERY SERVER THAT IS NOT KNOWN TO BE MYSQL GETS THIS LIST TOO, despite
+    //    the constant's name. It is the list that is safe on both products:
+    //    without the word MySQL only becomes less fussy about grouping, while
+    //    with it a MariaDB answers "error" on pages that worked. See
+    //    wantedSqlMode().
+    //
+    //    One word that must NEVER be added to either list: NO_AUTO_CREATE_USER.
+    //    It is in MariaDB's own default, and MySQL 8 does not know it. A server
+    //    that does not know ONE word refuses the WHOLE list, and the connection
+    //    is left exactly as loose as the host made it.
+    public const STRICT_MODE_MARIADB = 'STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,'
+                                     . 'ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
+
+    // ⏳ MySQL has said these three names will one day be removed and their
+    //    effect made part of strict mode itself. A server that has done that
+    //    would refuse the lists above because of the unknown names, so
+    //    makeStrict() asks a second time without them. See there.
+    private const MODE_NAMES_BEING_RETIRED = ['NO_ZERO_IN_DATE', 'NO_ZERO_DATE', 'ERROR_FOR_DIVISION_BY_ZERO'];
+
+    // 🐬 A question only MySQL answers. This setting belongs to MySQL 8's own
+    //    catalogue of tables (how long it keeps table statistics). MySQL's
+    //    manual lists it from 8.0.3 onward; any account may read it (tried
+    //    with an account that has no rights at all, on 8.0.36 and 8.4.11);
+    //    and MariaDB has no such setting. wantedSqlMode() uses it; see there
+    //    for why.
+    //
+    //    WHAT "MariaDB has no such setting" RESTS ON: MariaDB's own list of
+    //    settings, not a run here. No MariaDB was started when this was
+    //    written (12 October 2026). If a MariaDB ever did answer it, that
+    //    server would be judged as it was before this question existed, by
+    //    its name alone; nothing would get worse.
+    //
+    //    If a future MySQL drops the setting, every MySQL quietly loses
+    //    ONLY_FULL_GROUP_BY. tools/db-strict-mode-selftest.php fails on that
+    //    server then: it writes the list it expects out by hand.
+    private const QUESTION_ONLY_MYSQL_ANSWERS = 'SELECT @@information_schema_stats_expiry';
+
+    /**
+     * 🔌 Open a connection to the database. THE ONLY PLACE THIS PORTAL DOES SO.
+     *
+     * The portal's start-up code and both of the installation wizard's
+     * connections come through here, so all three talk in the same character
+     * set and all three are made strict (see makeStrict() below). A connection
+     * opened anywhere else with `new mysqli` would run as loosely as the host
+     * allows, and nothing would look wrong.
+     * `tools/db-strict-mode-selftest.php` fails if it finds one.
+     *
+     * The arguments are the same as `new mysqli` takes, empty ones included,
+     * so swapping this in changed nothing about how a connection is found.
+     *
+     * WHAT IT DOES NOT DO: stop when the database refuses to be made strict.
+     * It writes that to the error log and hands the connection back, because
+     * the two callers need different answers. Ask strictness() to find out.
+     *
+     * @param string|null $host     The database server's address.
+     * @param string|null $user     The account to sign in with.
+     * @param string|null $password That account's password. Marked sensitive so
+     *                              PHP leaves it out of any error report.
+     * @param string|null $database The database to open, or '' for none yet.
+     * @param int|null    $port     The port the database server listens on.
+     *
+     * @return mysqli An open connection.
+     *
+     * @throws \mysqli_sql_exception When the server cannot be reached or will
+     *                               not let this account in. That relies on
+     *                               mysqli reporting faults as exceptions, which
+     *                               is PHP's default and which both callers ask
+     *                               for by name just before calling.
+     */
+    public static function connect(
+        ?string $host,
+        ?string $user,
+        #[\SensitiveParameter] ?string $password,
+        ?string $database,
+        ?int $port
+    ): mysqli {
+        $db = new mysqli($host, $user, $password, $database, $port);
+
+        // 🔤 utf8mb4 is the character set that holds every character,
+        //    including emoji. See: https://dev.mysql.com/doc/refman/8.0/en/charset-unicode-utf8mb4.html
+        $db->set_charset('utf8mb4');
+
+        self::makeStrict($db);
+
+        return $db;
+    }
+
+    /**
+     * 🔒 Make this connection strict: a value that does not fit is REFUSED
+     *    with an error instead of being stored changed.
+     *
+     * Never throws. It needs no special right: an account with rights on one
+     * database only may do it (tried on MySQL 8.0 and 8.4, MariaDB 10.6 and
+     * 11.4).
+     *
+     * WHEN THE SERVER SAYS NO, it asks once more for the same list without the
+     * three names MySQL is retiring. A server that has retired them takes that
+     * shorter list and still refuses values that do not fit. But it is not
+     * silent about it: strictness() judges that connection 'warn' (strict, not
+     * the exact list), so every administrator sees an amber alert, the health
+     * check is amber, and a line marked CRITICAL is written on every request,
+     * until the lists in this file are brought into line with that server.
+     * Whatever happens, a refusal is written to PHP's error log, on every
+     * request, so it cannot pass unseen.
+     *
+     * WHAT IT CANNOT PROMISE. A "yes" from the server is not checked here,
+     * because that would cost every page another question. strictness() reads
+     * the setting back, and the health page, the admin dashboard and the
+     * Server Information page all call it, so a server that says yes and does
+     * nothing is still found.
+     *
+     * @param mysqli $db An open database connection.
+     *
+     * @return string Empty when the server took the full list; otherwise the
+     *                reason it gave for refusing it.
+     */
+    public static function makeStrict(mysqli $db): string
+    {
+        $wanted  = self::wantedSqlMode($db);
+        $refusal = self::setSqlMode($db, $wanted);
+        if ($refusal === '') {
+            return '';
+        }
+
+        $shorter = implode(',', array_diff(explode(',', $wanted), self::MODE_NAMES_BEING_RETIRED));
+        $second  = self::setSqlMode($db, $shorter);
+
+        error_log(
+            '[WebMS-Intra] CRITICAL: the database would not give this connection the strictness the portal asks for'
+            . ' (sql_mode ' . $wanted . '). It said: ' . str_replace(["\r", "\n"], ' ', $refusal) . '. '
+            . ($second === ''
+                ? 'It did take the same list without the names MySQL is retiring (' . $shorter . ').'
+                : 'It refused the shorter list too, so this connection is only as strict as the hosting company set the server.')
+            . ' Admin → Server Information shows what the connection is running under.'
+        );
+
+        return $refusal;
+    }
+
+    /**
+     * 🩺 How strict is this connection really? Reads the setting back from the
+     *    database and says, in plain English, whether it is the one this
+     *    portal asks for.
+     *
+     * Never throws. Three answers, on the same scale as inspect():
+     *
+     *   'ok'    Exactly what the portal asks for.
+     *   'warn'  Strict, but not that exact list; or the database would not say.
+     *   'crit'  Not strict at all: values that do not fit are being changed
+     *           quietly. The installation wizard stops on this one.
+     *
+     * @param mysqli $db An open database connection.
+     *
+     * @return array{state: string, mode: string, wanted: string, headline: string, detail: string}
+     *         `mode` is what the connection is running under ('' when it is
+     *         empty or could not be read); `wanted` is what the portal asks for.
+     */
+    public static function strictness(mysqli $db): array
+    {
+        $mode = null;
+        try {
+            $rs = $db->query('SELECT @@SESSION.sql_mode AS m');
+            if ($rs !== false) {
+                $row = $rs->fetch_assoc();
+                if (isset($row['m']) === true) {
+                    $mode = (string) $row['m'];
+                }
+                $rs->free();
+            }
+        } catch (Throwable $e) {
+            $mode = null;
+        }
+
+        return self::judgeStrictness($mode, self::wantedSqlMode($db));
+    }
+
+    /**
+     * 🧮 Compare the setting a connection is running under with the one the
+     *    portal asks for. Split out from strictness() so it can be tested
+     *    without a database.
+     *
+     * @param string|null $mode   What the database reported, or null when it
+     *                            would not say.
+     * @param string      $wanted What the portal asks for on this product.
+     *
+     * @return array{state: string, mode: string, wanted: string, headline: string, detail: string}
+     */
+    public static function judgeStrictness(?string $mode, string $wanted): array
+    {
+        $base = ['mode' => (string) $mode, 'wanted' => $wanted];
+
+        if ($mode === null) {
+            return $base + [
+                'state'    => 'warn',
+                'headline' => 'The database would not say how strict this connection is',
+                'detail'   => 'This portal asks the database to refuse any value that does not fit '
+                            . 'its column. It could not read back whether that took effect, so it '
+                            . 'cannot tell you either way. Your hosting provider can tell you what '
+                            . 'the server\'s "sql_mode" is.',
+            ];
+        }
+
+        // 🔀 The database lists the words in its own order, so compare them as
+        //    sets, not as text.
+        $have    = array_values(array_filter(explode(',', $mode), static fn (string $word): bool => $word !== ''));
+        $want    = explode(',', $wanted);
+        $missing = array_values(array_diff($want, $have));
+        $extra   = array_values(array_diff($have, $want));
+
+        if ($missing === [] && $extra === []) {
+            return $base + [
+                'state'    => 'ok',
+                'headline' => 'Strict, exactly as this portal asks',
+                'detail'   => 'A value that does not fit its column (a text that is too long, a '
+                            . 'number that is too large, an empty value where one is needed, or '
+                            . 'one that is not on the column\'s list of choices) is refused with an '
+                            . 'error instead of being changed quietly. This is the setting read '
+                            . 'back from the database just now. The portal asks for it each time '
+                            . 'it connects; if the database ever refuses that request, PHP\'s '
+                            . 'error log on the web server says so.',
+            ];
+        }
+
+        $difference = ($missing !== [] ? ' Missing: ' . implode(', ', $missing) . '.' : '')
+                    . ($extra !== [] ? ' Not asked for: ' . implode(', ', $extra) . '.' : '');
+
+        // 🚦 Either of these two words is what makes a connection strict.
+        if (in_array('STRICT_TRANS_TABLES', $have, true) === true || in_array('STRICT_ALL_TABLES', $have, true) === true) {
+            return $base + [
+                'state'    => 'warn',
+                'headline' => 'Strict, but not the exact setting this portal asks for',
+                'detail'   => 'Values that do not fit are still refused, which is the part that '
+                            . 'protects your data. But this is not the full setting the portal '
+                            . 'asks for, so this installation may behave a little differently from '
+                            . 'the ones this portal is tested on.' . $difference . ' If the '
+                            . 'database refused the full setting, its reason is in PHP\'s error '
+                            . 'log on the web server.',
+            ];
+        }
+
+        return $base + [
+            'state'    => 'crit',
+            'headline' => 'NOT strict: the database changes values that do not fit, and says nothing',
+            'detail'   => 'This portal asks the database to refuse any value that does not fit '
+                        . 'its column, and the database would not do it. Until that is put right, '
+                        . 'a text that is too long is cut short, a number that is too large is '
+                        . 'clipped, and a value that is not on a column\'s list of choices is '
+                        . 'stored as an empty one, all without an error.' . $difference . ' Ask '
+                        . 'your hosting provider to allow "SET SESSION sql_mode", or to set the '
+                        . 'server\'s sql_mode to ' . $wanted . '. If the database refused the '
+                        . 'setting, its reason is in PHP\'s error log on the web server.',
+        ];
+    }
+
+    /**
+     * 📋 The strictness setting the portal asks THIS server for.
+     *
+     * MySQL's own list goes ONLY to a server known to be MySQL, which takes two
+     * things: inspect() (the same answer every page shows) calls it MySQL,
+     * AND it answers a question only MySQL answers. Every other server gets
+     * the list without ONLY_FULL_GROUP_BY: a MariaDB, a product inspect()
+     * cannot name, and one that merely is not CALLED MariaDB.
+     *
+     * WHY BEING UNSURE GOES THAT WAY. The two mistakes are not equally bad.
+     * A MySQL given the shorter list only becomes less fussy about grouping,
+     * and still refuses every value that does not fit. A MariaDB given
+     * MySQL's list ACCEPTS it and then answers "error" on pages that worked
+     * (six of them on an empty MariaDB 10.6, in the check of 12 October
+     * 2026), while strictness() calls the connection exactly right.
+     *
+     * WHAT WAS TRIED AND REJECTED.
+     * - Going by inspect() alone, which is how this was first built. It reads
+     *   two pieces of text, and neither is proof: MariaDB lets its version
+     *   text be replaced (`--version=8.0.36-hosted`), and the other text says
+     *   only "Debian 11" or "Source distribution" on builds that Linux
+     *   distributions make. Such a server was taken for MySQL.
+     * - Asking a question only MARIADB answers, and giving MySQL's list when
+     *   it goes unanswered. That fails the dangerous way: a MariaDB that
+     *   refuses the question (some hosts do not let an account read server
+     *   settings) is taken for MySQL again, and nothing says so.
+     * - Reading the product off the connection's opening greeting, to save
+     *   questions. A go-between placed in front of the database can greet
+     *   with a version of its own.
+     *
+     * WHAT IT COSTS. One more short question on every connection to a server
+     * that inspect() calls MySQL (four statements at start-up, where there
+     * were three). And a real MySQL that will not answer the question runs
+     * without ONLY_FULL_GROUP_BY: strictness() still says 'ok', because that
+     * IS what the portal asks such a server for, and Admin → Server
+     * Information shows the list itself.
+     *
+     * @param mysqli $db An open database connection.
+     *
+     * @return string A comma-separated list of mode names, no spaces.
+     */
+    public static function wantedSqlMode(mysqli $db): string
+    {
+        if (self::inspect($db)['family'] === 'mysql' && self::answersAsOnlyMySqlDoes($db) === true) {
+            return self::STRICT_MODE_MYSQL;
+        }
+
+        return self::STRICT_MODE_MARIADB;
+    }
+
+    /**
+     * 🐬 Does this server answer the question only MySQL answers?
+     *
+     * Never throws. Any refusal, for any reason, counts as "no": that is the
+     * safe answer, as wantedSqlMode() explains.
+     *
+     * @param mysqli $db An open database connection.
+     *
+     * @return bool True only when the server gave an answer.
+     */
+    private static function answersAsOnlyMySqlDoes(mysqli $db): bool
+    {
+        // 🛡️ Works whichever way mysqli is set to report faults: by throwing,
+        //    or by handing back false.
+        try {
+            $rs = $db->query(self::QUESTION_ONLY_MYSQL_ANSWERS);
+            if ($rs === false) {
+                return false;
+            }
+            $row = $rs->fetch_row();
+            $rs->free();
+
+            return is_array($row) === true && $row[0] !== null;
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
+    /**
+     * ✍️ Ask the database for one strictness setting.
+     *
+     * @param mysqli $db   An open database connection.
+     * @param string $mode Only ever one of this class's own lists, never
+     *                     anything a person typed, which is why it is safe to
+     *                     put straight into the statement.
+     *
+     * @return string Empty when the database took it; otherwise its reason.
+     */
+    private static function setSqlMode(mysqli $db, string $mode): string
+    {
+        // 🛡️ Works whichever way mysqli is set to report faults: by throwing,
+        //    or by handing back false.
+        try {
+            if ($db->query("SET SESSION sql_mode = '" . $mode . "'") === false) {
+                return $db->error !== '' ? $db->error : 'the database gave no reason';
+            }
+        } catch (Throwable $e) {
+            return $e->getMessage() !== '' ? $e->getMessage() : 'the database gave no reason';
+        }
+
+        return '';
+    }
 
     /**
      * 🔍 Ask the database what it is.

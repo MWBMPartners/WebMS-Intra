@@ -131,6 +131,13 @@ $connection = [
     'Protocol version'    => (string) ($db->protocol_version ?? ''),
 ];
 
+// 🔒 How strict the connection is. The portal asks the database, each time it
+//    connects, to refuse a value that does not fit its column instead of
+//    storing it changed (Portal\Core\DbServer::connect()). This reads the
+//    setting back from the live connection, like every other fact on this
+//    page, and DbServer judges whether it is the one that was asked for.
+$dbStrictness = DbServer::strictness($db);
+
 // ⏱️ How long the database server has been running. This one is refused more
 //    often than the rest, because it reads a server-wide counter.
 $uptimeText = '';
@@ -276,12 +283,37 @@ $colourFor = static function (string $state): string {
 </div>
 
 <!-- 🔌 Database connection -->
-<div class="card mb-4">
+<div class="card mb-4 border-<?php echo $colourFor((string) $dbStrictness['state']); ?>">
     <div class="card-header">
         <h2 class="h5 mb-0"><i class="fa-solid fa-plug me-2"></i>Database connection</h2>
     </div>
     <div class="card-body">
+        <!-- 🔒 Strictness: what the connection is running under, and whether
+             that is what the portal asked for. The card's border and this badge
+             turn amber or red when it is not. -->
+        <p class="mb-1">
+            <span class="badge bg-<?php echo $colourFor((string) $dbStrictness['state']); ?>">Strictness</span>
+        </p>
+        <p class="fw-semibold mb-1"><?php echo htmlspecialchars((string) $dbStrictness['headline'], ENT_QUOTES, 'UTF-8'); ?></p>
+        <p class="mb-3"><?php echo htmlspecialchars((string) $dbStrictness['detail'], ENT_QUOTES, 'UTF-8'); ?></p>
+
         <div class="portal-data-list">
+            <div class="portal-data-row">
+                <div class="col-12 col-md-4 fw-semibold">Strictness setting (sql_mode)</div>
+                <div class="col-12 col-md-8">
+                    <?php if ((string) $dbStrictness['mode'] === ''): ?>
+                        <span class="text-muted">&mdash; empty, or the database would not say</span>
+                    <?php else: ?>
+                        <code><?php echo htmlspecialchars((string) $dbStrictness['mode'], ENT_QUOTES, 'UTF-8'); ?></code>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <?php if ((string) $dbStrictness['state'] !== 'ok'): ?>
+            <div class="portal-data-row">
+                <div class="col-12 col-md-4 fw-semibold">What this portal asks for</div>
+                <div class="col-12 col-md-8"><code><?php echo htmlspecialchars((string) $dbStrictness['wanted'], ENT_QUOTES, 'UTF-8'); ?></code></div>
+            </div>
+            <?php endif; ?>
             <?php foreach ($connection as $label => $value): ?>
             <div class="portal-data-row">
                 <div class="col-12 col-md-4 fw-semibold"><?php echo htmlspecialchars((string) $label, ENT_QUOTES, 'UTF-8'); ?></div>

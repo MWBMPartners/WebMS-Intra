@@ -44,6 +44,27 @@ define('INSTALL_LOCK_FILE', INSTALL_AUTH_DIR . DIRECTORY_SEPARATOR . '.installed
 // plain `return <string>` and safe to `require` independently.
 define('INSTALL_VERSION', (string) (require INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'version.php'));
 
+// 🔌 What steps 3 and 4 say when installGetDb() hands back no connection.
+//    It used to read "Database connection lost. Please go back to Step 2.",
+//    which was untrue for one of the three reasons installGetDb() gives up:
+//    the database answered, but its connection is not strict. (The other two:
+//    the details step 2 kept are gone, or the server cannot be reached.)
+//    installGetDb() does not say which it was, so this names all three and
+//    says how to find out.
+const INSTALL_NO_CONNECTION_MESSAGE = 'The installer has no database connection it can use. The details may have been '
+    . 'lost, the database may not be reachable, or it may no longer refuse values that do not fit (it is not '
+    . '"strict"). Please enter the database details below again. If something is still wrong, this step will say '
+    . 'what it is and what to do.';
+
+// 🛢️ Portal\Core\DbServer opens BOTH of this wizard's database connections
+//    (step 2's test connection, and installGetDb() further down this
+//    file), and judges the server they reach. It is written to the same
+//    bootstrap-free contract as version.php and brand-defaults.php: it needs
+//    nothing but the connection, so this wizard can load it directly. It used
+//    to be loaded part way through step 2; it moved up here on 12 October 2026
+//    because the connection itself is now opened through it.
+require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'DbServer.php';
+
 // 🏷️ Brand presets (issue #296) — loaded from _core/brand-defaults.php.
 // Same bootstrap-free contract: plain `return <array>` so we can require
 // it without the autoloader. We resolve the active preset from the session
@@ -226,8 +247,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Test connection without database first
             mysqli_report(MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR);
             try {
-                $testConn = new mysqli($dbHost, $dbUser, $dbPass, '', $dbPort);
-                $testConn->set_charset('utf8mb4');
+                // 🔒 Opened through DbServer::connect(), which sets the same
+                //    character set this line always did (utf8mb4) and also
+                //    makes the connection strict. See the note beside the
+                //    require at the top of this file.
+                $testConn = \Portal\Core\DbServer::connect($dbHost, $dbUser, $dbPass, '', $dbPort);
 
                 // 🛢️ Now that we are actually talking to a database server, ask
                 //    it which product and version it is, and whether that is one
@@ -237,13 +261,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 //    at that point nobody has typed any database details in yet.
                 //    Here is the first moment the answer exists.
                 //
-                //    Portal\Core\DbServer is written to the same bootstrap-free
-                //    contract as version.php and brand-defaults.php — it depends
-                //    on nothing but the connection — so this wizard can use it
-                //    directly. See the file header there before adding to it.
-                require_once INSTALL_ROOT
-                    . DIRECTORY_SEPARATOR . '_core'
-                    . DIRECTORY_SEPARATOR . 'DbServer.php';
+                //    See the file header of DbServer.php before adding to it.
                 $dbServer = \Portal\Core\DbServer::inspect($testConn);
                 $_SESSION['install_db_server'] = $dbServer;
 
@@ -268,6 +286,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     //    `mysqli_sql_exception`, so the catch below would miss
                     //    it and the wizard would die with a blank HTTP 500 on
                     //    the very screen meant to explain the problem.
+                }
+
+                // 🔒 Will this database refuse a value that does not fit?
+                //
+                //    The portal asks every connection to be strict, so that a
+                //    text too long for its column, or a value that is not on a
+                //    column's list of choices, is refused with an error
+                //    instead of being stored changed. DbServer::connect()
+                //    above has already asked; this reads the answer back.
+                //
+                //    Only 'crit' stops, which means "not strict at all": the
+                //    database refused, and the host's own setting is loose.
+                //    Stopping here costs nothing, because nothing has been
+                //    built yet, and it is the same rule as the version check
+                //    just above. Carrying on would build a portal that
+                //    quietly alters what people type into it.
+                //
+                //    A 'warn' (strict, but not the exact list asked for) never
+                //    blocks. Once the portal is installed, its health page,
+                //    admin dashboard and Server Information page report it.
+                //
+                //    The version check is asked first on purpose: on a server
+                //    too old to run the portal that is the message to show.
+                if ($error === '') {
+                    $dbStrictness = \Portal\Core\DbServer::strictness($testConn);
+                    if ($dbStrictness['state'] === 'crit') {
+                        $error = $dbStrictness['headline'] . '. ' . $dbStrictness['detail'];
+                        $step  = 2;
+                    }
                 }
 
                 // 🚧 Everything below is skipped once we have an error. Creating
@@ -596,7 +643,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'install_schema') {
         $db = installGetDb();
         if ($db === null) {
-            $error = 'Database connection lost. Please go back to Step 2.';
+            $error = INSTALL_NO_CONNECTION_MESSAGE;
             $step = 2;
         } else {
             // 🪦 Drop-and-rebuild path. If the user explicitly opted for
@@ -857,7 +904,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $db = installGetDb();
             if ($db === null) {
-                $error = 'Database connection lost. Please go back to Step 2.';
+                $error = INSTALL_NO_CONNECTION_MESSAGE;
                 $step = 2;
             } else {
                 // 🛡️ Wrap the whole admin-create flow in try/catch — see
@@ -1160,6 +1207,31 @@ function installElevatedAdminCheck(\mysqli $conn): string
     return '';
 }
 
+/**
+ * 🔌 Open the wizard's working connection, from the details step 2 kept.
+ *
+ * This is the connection that loads the install script and every migration,
+ * creates the first administrator and writes the first settings. It is opened
+ * through Portal\Core\DbServer::connect(), the same way the portal itself
+ * connects, so it uses the same character set and is made strict: a value that
+ * does not fit its column is refused, not stored changed.
+ *
+ * It hands back null, exactly as it does when the server cannot be reached,
+ * if the connection turns out not to be strict at all. Step 2 has already
+ * refused that case and explained it, so this can only happen if the server
+ * changed between two steps. The two steps that build things (3 and 4) answer
+ * null by showing step 2's form again with INSTALL_NO_CONNECTION_MESSAGE. That
+ * message cannot say WHICH reason it was, because null carries no reason; the
+ * full explanation appears once the visitor sends step 2's form again, and
+ * the message tells them so. Step 5 only uses this to record the
+ * version it installed, and leaves that out when there is no connection.
+ *
+ * WHAT IT DOES NOT CATCH: a database that will not SAY how strict the
+ * connection is. That is judged a warning, not a refusal, so the connection
+ * is handed back.
+ *
+ * @return mysqli|null An open connection that is not loose; or null.
+ */
 function installGetDb(): ?mysqli
 {
     $creds = $_SESSION['install_db'] ?? null;
@@ -1169,14 +1241,17 @@ function installGetDb(): ?mysqli
 
     mysqli_report(MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR);
     try {
-        $db = new mysqli(
+        $db = \Portal\Core\DbServer::connect(
             $creds['host'],
             $creds['user'],
             $creds['pass'],
             $creds['name'],
             $creds['port']
         );
-        $db->set_charset('utf8mb4');
+        if (\Portal\Core\DbServer::strictness($db)['state'] === 'crit') {
+            $db->close();
+            return null;
+        }
         return $db;
     } catch (\mysqli_sql_exception) {
         return null;

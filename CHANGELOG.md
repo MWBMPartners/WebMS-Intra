@@ -2,6 +2,17 @@
 
 
 ## [Unreleased] (alpha)
+- fix(core): **the portal now makes its own database connection strict** (#593; found through #587). It used to run with whatever strictness (`sql_mode`) its hosting company had set. On a loosely set server the database quietly changes a value that does not fit: a text is cut short, a number clipped, a value that is not on a column's list of choices stored as an empty one. The expenses "Withdraw" button stored an empty status that way. Every connection the portal opens now asks the database to refuse such a value with an error. That covers the portal itself and both of the installation wizard's connections, which all open through `Portal\Core\DbServer::connect()`, now the only place under `web/` that opens one. The host's own setting is replaced, not added to, so every installation runs under the same one.
+  - The health page has a new check, **Database strictness**; the admin dashboard shows an alert, and Admin → Server Information a line, when the connection is not running under the setting the portal asks for. All three show the setting read back from the database, not the one that was asked for.
+  - If the database refuses to be made strict, the portal keeps running and says so (PHP's error log on every request, the health page, the dashboard, Server Information). The installation wizard stops at step 2 instead, because nothing has been built yet.
+  - New self-test: `tools/db-strict-mode-selftest.php` (128 checks). It needs a throwaway database server started loose (`--sql-mode=""`), and changes that server's own setting for about a minute.
+  - **For anybody upgrading an existing installation:**
+    - From this version the portal makes its own database connection strict. On a host already on MySQL's default nothing changes. On a host that ran loosely, a value that does not fit is now refused with an error where it used to be saved changed.
+    - A database that was run loosely may hold dates of zero. The portal still reads those rows and can change their other columns. Through the portal's connection these are refused: writing a zero date back (for example a form saved unchanged), copying such rows to another table, and a table change that copies the table row by row (error 1292). A table change done in place still works.
+    - To mend zero dates use `WHERE column = 0`. Asking for `'0000-00-00'` by name is itself refused.
+    - After upgrading, open the health page: "Database strictness" should be green. Red means the database refused the setting; the portal then runs as loosely as before and says so on every request in PHP's error log.
+    - MariaDB has only been tried by hand, and not at all since the fix round.
+  - Checked by a fresh Claude agent standing in for Codex; not reviewed by Codex yet.
 - **fix(expenses): withdrawing an expense claim now works (#587).** The Withdraw button set a
   claim's status to "Withdrawn", and the database column did not allow that value. On a database
   server with strict checking (MySQL 8's default) the person saw "Error withdrawing claim". On a

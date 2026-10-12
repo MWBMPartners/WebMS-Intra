@@ -10,7 +10,7 @@
  *
  * Usage:
  *   $c = Container::getInstance();
- *   $c->set('db', fn() => new mysqli(...));
+ *   $c->set('db', fn() => \Portal\Core\DbServer::connect(...));
  *   $db = $c->get('db'); // lazy instantiation, cached
  *
  * @package   Portal\Core
