@@ -74,7 +74,7 @@ Counted from git at commit `84c6180` (12 October 2026): 1,207 files under `web/`
 | `.gif` | 3 | the web folder | The animated brand emblems. |
 | `.icns` | 3 | the web folder | The brand kit's app icons for macOS. |
 | `.html` | 2 | `<web folder>/assets/images/brandkit/` | The brand kit's two demonstration pages. |
-| `.htaccess` | 2 | two files, each by name and checksum | The web server's own rules for a folder: the web folder's, and the installer's. |
+| `.htaccess` | 7 | seven files, each by name and checksum | The web server's own rules for a folder: the web folder's, the installer's, and the one "refuse everything" file that sits in `_apps`, `_core`, `_lang`, `_sql` and `_vendor`. |
 | `.md` | 1 | `<web folder>/assets/images/brandkit/` | The brand kit's read-me. |
 | `.xsd` | 1 | `<web folder>/sitemap.xsd` | The schema that describes the sitemap. |
 | `.zip` | 1 | one file, by name and checksum | `assets/images/brandkit/WebMSChurchMS.zip`, the brand kit as one download. |

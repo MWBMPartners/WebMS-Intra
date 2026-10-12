@@ -7,6 +7,16 @@
  * Single entry point for all live traffic.  Loads bootstrap then hands the
  * request to Core\Router.  Default route keys come from tblRoutes; if URL is
  * empty, Router maps it to "dashboard" (see Router::extractPath).
+ *
+ * The folder this file sits in is the web folder. The repository calls it
+ * public_html; a customer's hosting may call it anything (httpdocs, www,
+ * admin_html), and nothing below depends on the name.
+ *
+ * @package   Portal
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   1.1.0
  * -----------------------------------------------------------------------------
  */
 
@@ -24,6 +34,11 @@ if (is_readable($authCredsPath) === false) {
     http_response_code(500);
     exit('Portal not configured. Please run the installer.');
 }
+
+// 🌐 The web folder is THIS file's own folder, whatever it is called. Set
+//    before start-up, which only falls back to the shipped name when nobody
+//    has said (see the note where bootstrap.php defines PORTAL_WEBROOT).
+define('PORTAL_WEBROOT', __DIR__);
 
 require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
 
@@ -59,8 +74,9 @@ Auth::ensureSession();
 //    addresses on the two allow lists in web/_core/Maintenance.php, pass
 //    through: the sign-in pages, admin/upgrade, admin/maintenance, the
 //    static asset folders and offline, so a global administrator can sign
-//    in and run the upgrade; and the one exact address cron/health, so an
-//    uptime monitor still gets its read-only health report. Those lists
+//    in and run the upgrade; and the two exact addresses cron/health and
+//    health, so an uptime monitor still gets its read-only health report
+//    and an upload can still be checked. Those lists
 //    are the real ones; this summary is only a guide and has gone out of
 //    date before. Narrowed from "any administrator" to "global
 //    administrator only" by an owner decision on 20 September 2026 (#515)
@@ -80,7 +96,7 @@ if (Maintenance::blocks(Router::extractPath()) === true) {
     Maintenance::renderAndExit();
 }
 
-// 🚧 Pre-release channel gate (alpha / beta).
+// 🚧 Pre-release channel gate (alpha / beta / dev).
 // -----------------------------------------------------------------------------
 // WHAT WAS WRONG
 // -----------------------------------------------------------------------------
@@ -112,28 +128,31 @@ if (Maintenance::blocks(Router::extractPath()) === true) {
 // WHEN IT RUNS — decided in ONE place, Gatekeeper::shouldEnforce()
 // -----------------------------------------------------------------------------
 // Only on the 'dev', 'beta' and 'alpha' channels, never on the live one. Those
-// three are named explicitly, in Gatekeeper::VALID_CHANNELS, which enforce()
-// uses too. So a future new value, or an unexpected value from the PORTAL_ENV
-// environment variable, cannot switch the gate on by accident.
-// ('alpha' was missing from the first version, although the in-app help says
-// alpha sites are gated. bootstrap.php only produces 'alpha' from the
-// environment variable, so it is always a deliberate choice.)
+// three are named explicitly, in Channel::PRE_RELEASE, which enforce() uses
+// too. Which channel this installation is comes from Channel::decide()
+// (bootstrap.php), in this order: the PORTAL_ENV setting, the `.channel`
+// file, the web folder's name when it is exactly one of three, and otherwise
+// it is ASSUMED TO BE LIVE.
 //
-// And only when bootstrap.php worked the channel out from something deliberate
-// — PORTAL_ENV_SOURCE is 'environment' or 'folder' — never from its
-// last-resort guess, 'fallback'.
+// AN INSTALLATION THAT SAYS NOTHING IS THEREFORE NOT GATED (owner's final
+// rule, 12 October 2026): nobody is locked out for want of a file. Its source
+// is 'assumed', and shouldEnforce() writes one line to PHP's error log on
+// each request saying so, and what settles it.
 //
-// WHAT WAS WRONG: the first version gated on 'dev' however that had been
-// decided. bootstrap.php settles on 'dev' when it recognises neither an
-// environment variable nor a web folder name, so a LIVE server whose web folder
-// simply has an unexpected name would have asked every ordinary member to sign
-// in as staff. When the gate now declines for that reason it writes one line to
-// PHP's error log, so a genuine pre-release copy left open by it is noticed.
+// WHAT THIS HAS DONE BEFORE: the channel was guessed from the web folder's
+// path, and the gate stood aside whenever that guess failed, which left a
+// pre-release copy with an unexpected folder name open with its errors on
+// screen. Then, for one build that was never released (commit 7b30c99), an
+// installation that said nothing was gated as a 'dev' copy, which refused
+// every member of a live portal the moment the code was uploaded without a
+// new file. The first version of all gated on 'dev' when 'dev' was only the
+// failed guess.
 //
-// The defined() check covers a half-finished deploy, in which this file has
+// The defined() check covers a half-finished upload, in which this file has
 // arrived but an older bootstrap.php that does not set PORTAL_ENV_SOURCE is
-// still in place. The channel is then treated as a guess: the direction that
-// cannot lock members out.
+// still in place. The source is then taken as unknown (an empty word). That
+// does not decide whether the gate runs (the channel alone does); it only
+// means no line is written to the log for the moments the upload takes.
 //
 // -----------------------------------------------------------------------------
 // THE WAY OUT, IF THIS EVER SHUTS THE WRONG PEOPLE OUT
@@ -157,7 +176,7 @@ if (Maintenance::blocks(Router::extractPath()) === true) {
 // notification is genuinely wanted on a pre-release channel, add 'cron' to
 // Gatekeeper::OPEN_PREFIXES (and the individual addresses to OPEN_PATHS)
 // rather than switching the whole gate off.
-$portalChannelSource = defined('PORTAL_ENV_SOURCE') === true ? (string) PORTAL_ENV_SOURCE : 'fallback';
+$portalChannelSource = defined('PORTAL_ENV_SOURCE') === true ? (string) PORTAL_ENV_SOURCE : '';
 if (Gatekeeper::shouldEnforce(PORTAL_ENV, $portalChannelSource) === true) {
     Gatekeeper::enforce(PORTAL_ENV);
 }

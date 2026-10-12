@@ -133,14 +133,18 @@ class Router
 
         // 📂 Build the full path to the target app file. Try PORTAL_APPS
         //    first (where all app controllers live after #159), then fall
-        //    back to public_html/ for the small set of entry-point pages
-        //    that intentionally live in the webroot (Swagger UI, openapi.json,
-        //    Apache ErrorDocument target, PWA offline fallback).
+        //    back to the web folder for the small set of entry-point pages
+        //    that intentionally live there (the manifest, openapi.json,
+        //    robots.txt, the sitemap).
+        //
+        //    The web folder is PORTAL_WEBROOT, which the front controller set
+        //    to its own folder. It used to be spelt 'public_html' here, so on
+        //    hosting that calls the web folder anything else those four
+        //    addresses answered "page not found".
         $relTarget = str_replace('/', DIRECTORY_SEPARATOR, $route['targetFile']);
         $targetFile = PORTAL_APPS . DIRECTORY_SEPARATOR . $relTarget;
         if (is_readable($targetFile) === false) {
-            $fallbackFile = PORTAL_ROOT . DIRECTORY_SEPARATOR . 'public_html'
-                          . DIRECTORY_SEPARATOR . $relTarget;
+            $fallbackFile = PORTAL_WEBROOT . DIRECTORY_SEPARATOR . $relTarget;
             if (is_readable($fallbackFile) === true) {
                 $targetFile = $fallbackFile;
             } else {
@@ -297,12 +301,14 @@ class Router
         }
 
         // 📵 Offline fallback page (served by service worker when no network)
-        //    Lives in public_html/offline/ rather than _apps/ — the service
-        //    worker fetches it via a direct URL, and Apache must be able to
-        //    serve it as a static asset under the webroot.
+        //    Lives in offline/ in the web folder rather than in _apps/ — the
+        //    service worker fetches it via a direct URL, and Apache must be
+        //    able to serve it as a static asset under the webroot.
+        //    PORTAL_WEBROOT, not the name 'public_html': see the note where
+        //    bootstrap.php defines it. Auth::offlinePageAnswered() looks for
+        //    this same file by the same constant, and the two must agree.
         if ($path === 'offline') {
-            require PORTAL_ROOT . DIRECTORY_SEPARATOR . 'public_html'
-                  . DIRECTORY_SEPARATOR . 'offline' . DIRECTORY_SEPARATOR . 'index.php';
+            require PORTAL_WEBROOT . DIRECTORY_SEPARATOR . 'offline' . DIRECTORY_SEPARATOR . 'index.php';
             return true;
         }
 
@@ -663,9 +669,21 @@ class Router
         $overall = $dbStatus === 'ok' ? 'ok' : 'degraded';
         http_response_code($dbStatus === 'ok' ? 200 : 503);
 
+        // 🧭 `channelSource` says HOW the channel in `env` was decided:
+        //    'environment' (the PORTAL_ENV setting), 'file' (the `.channel`
+        //    file), 'folder' (the web folder is named public_html,
+        //    public_html_beta or public_html_dev) or 'assumed' (nothing
+        //    says, so the portal takes itself to be live: see Channel.php).
+        //    It is here so that whoever uploads the code, or a monitor, can
+        //    see at once that an installation's channel was never written
+        //    down, from an address that answers without a sign-in on every
+        //    channel. For an assumed channel it is the ONLY sign visible
+        //    from outside. It gives away no more than `env` beside it
+        //    already does.
         echo json_encode([
             'status'     => $overall,
             'env'        => PORTAL_ENV,
+            'channelSource' => PORTAL_ENV_SOURCE,
             'version'    => App::version(),
             'phpVersion' => PHP_VERSION,
             'siteID'     => Site::id(),

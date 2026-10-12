@@ -823,6 +823,18 @@ another repo, ever**.
   portal-wide administrator flag.
 - Per-site `tblSites.primaryColor` + `tblSites.faviconPath` drive branding.
 
+### 🚦 Release channels and hosting (#499, #500) ✅
+
+- The channel (live, beta, alpha, dev) comes from the `PORTAL_ENV` setting, else a `.channel` file beside `_core`, else
+  one of three known web folder names (`public_html`, `public_html_beta`, `public_html_dev`). An installation that says
+  nothing is treated as live, with errors hidden. The admin dashboard tells an administrator when the channel was not
+  written down.
+- The web folder may have any name.
+- Health check (`/health`): also answers while the portal is closed for an upgrade, and reports how the channel was
+  decided (`channelSource`).
+- API documentation (`/api-docs/`) is reachable (it was a fatal error on every installation); behind the staff gate on a
+  pre-release copy.
+
 ### 🌐 Internationalisation (Phase 8) ✅
 
 - `I18n` framework, translations under `web/_lang/{xx}.php`.

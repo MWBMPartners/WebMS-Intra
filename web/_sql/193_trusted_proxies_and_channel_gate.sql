@@ -114,22 +114,25 @@
 -- The portal ships a class whose only job is to keep strangers out of the
 -- alpha and beta copies, the ones running unfinished work. Nothing had ever
 -- called it, so those pre-release copies were open to anybody who knew the
--- address. It is now called on the dev and beta channels only, never on the
--- live one.
+-- address. It is now called on the beta, alpha and dev channels, never on
+-- the live one.
 --
--- It is also never applied when the portal only GUESSED its channel. The
--- channel comes from the PORTAL_ENV environment variable, or else from the
--- name of the web folder, and when neither is recognised the portal settles on
--- "development". Gating on that guess could ask every ordinary member of a
--- live site whose web folder has an unexpected name to sign in as staff, so
--- the gate declines and writes a line to the PHP error log instead. That is
--- why seeding this ON is safe.
+-- Which channel an installation is comes from the PORTAL_ENV setting, else
+-- a .channel file beside _core, else a web folder named exactly
+-- public_html, public_html_beta or public_html_dev. An installation that
+-- says nothing is treated as the LIVE portal, so it is never gated and no
+-- ordinary member is asked to be staff for want of a file. That is why
+-- seeding this ON is safe. (When this migration was written the channel
+-- was guessed from the web folder's path, and the gate stood aside on a
+-- failed guess.)
 --
 -- The setting exists so there is still a way back if the gate ever shuts out
 -- the wrong people: setting it to false switches the gate off. An
 -- administrator is never shut out by the gate itself, because the sign-in
 -- pages are on its open list and anybody with the Admin or Root Admin flag on
--- their user record passes it.
+-- their user record passes it. (Passing the gate is not the same as being
+-- allowed every page behind it: the database upgrade page is for a Root
+-- Admin only.)
 --
 -- -----------------------------------------------------------------------------
 -- WHAT REPLAY DOES

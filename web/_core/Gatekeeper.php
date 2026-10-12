@@ -4,15 +4,19 @@
  * -----------------------------------------------------------------------------
  * Channel Gatekeeper 🚧
  * -----------------------------------------------------------------------------
- * Restricts access to non-production channels (alpha / beta deploys served from
- * the server's public_html_dev/ or public_html_beta/ directories) based on user
- * roles. By default only Admins (`isAdmin=1`) or Root Admins (`isRootAdmin=1`)
- * are allowed. Additional roles can be configured via tblSettings:
+ * Restricts access to the pre-release channels (alpha, beta and dev copies of
+ * the portal, wherever each is hosted) based on user roles. By default only
+ * Admins (`isAdmin=1`) or Root Admins (`isRootAdmin=1`) are allowed.
+ * Additional roles can be configured via tblSettings:
  *     portal.devAccessRoles     = "Admin,Developer"
  * (comma-separated roleKey values from tblRoles)
  *
- * The primary channel is 'dev'. The legacy 'alpha' and 'beta' channels are
- * retained in VALID_CHANNELS for backwards compatibility.
+ * It stands in front of a pre-release channel however that channel was
+ * stated: by the PORTAL_ENV setting, by the `.channel` file, or by the web
+ * folder's name. It NEVER stands in front of an installation whose channel
+ * nobody stated: that one is assumed to be live (owner's final rule, 12
+ * October 2026). See shouldEnforce(), and _core/Channel.php for how the
+ * channel is decided.
  * -----------------------------------------------------------------------------
  * Usage from the front controller (web/public_html/index.php):
  *     if (Gatekeeper::shouldEnforce(PORTAL_ENV, PORTAL_ENV_SOURCE) === true) {
@@ -21,8 +25,8 @@
  *     \Portal\Core\Router::dispatch($mysqli);
  * shouldEnforce() is the ONE place that decides whether the gate runs at all.
  *
- * The single front controller lives at public_html/index.php in the repo;
- * branch-based deploy maps it to the appropriate server-side directory.
+ * The single front controller is index.php in the web folder, whatever the
+ * hosting calls that folder.
  * -----------------------------------------------------------------------------
  */
 
@@ -35,9 +39,11 @@ use RuntimeException;
 class Gatekeeper
 {
     /**
-     * Channels that can bypass individual route auth (they handle it at the gate).
+     * The channels this gate stands in front of: the pre-release ones. Read
+     * from Channel, which uses the same list to decide where PHP's error text
+     * may be shown, so the two cannot drift apart.
      */
-    private const VALID_CHANNELS = ['alpha', 'beta', 'dev'];
+    private const VALID_CHANNELS = Channel::PRE_RELEASE;
 
     /**
      * Exact addresses that stay reachable without passing through the gate.
@@ -225,33 +231,58 @@ class Gatekeeper
 
     /**
      * Should the gate run on this request at all? The front controller
-     * (web/public_html/index.php) asks this, and calls enforce() only on yes.
+     * (index.php in the web folder) asks this, and calls enforce() only on yes.
      *
-     * All three must be true:
+     * Both must be true:
      *   1. The channel is 'dev', 'beta' or 'alpha' (VALID_CHANNELS). The live
      *      channel is never gated.
-     *   2. The channel was decided deliberately: PORTAL_ENV_SOURCE is
-     *      'environment' (the PORTAL_ENV environment variable) or 'folder' (a
-     *      recognised web folder name) — never 'fallback'.
-     *   3. The portal-wide `portal.gatekeeper.enabled` row is not 'false' (in
+     *   2. The portal-wide `portal.gatekeeper.enabled` row is not 'false' (in
      *      any letter case, ignoring spaces around it).
      *
      * -------------------------------------------------------------------------
-     * WHY A FALLBACK CHANNEL IS NOT GATED
+     * HOW THE CHANNEL WAS DECIDED DOES NOT CHANGE THE ANSWER (owner's final
+     * rule, 12 October 2026)
      * -------------------------------------------------------------------------
-     * bootstrap.php settles on 'dev' when it recognises neither an environment
-     * variable nor a folder name. On a LIVE server whose web folder simply has
-     * an unexpected name, that guess is wrong, and gating on it would ask every
-     * ordinary member of the live site to be staff. A guess is not a good enough
-     * reason to lock people out, so the gate declines — and says so in PHP's
-     * error log, one line per request, so that a genuine pre-release copy left
-     * ungated by this is noticed rather than silent. The cure for that copy is
-     * to set PORTAL_ENV.
+     * A 'beta', 'alpha' or 'dev' channel is gated whether the PORTAL_ENV
+     * setting, the `.channel` file or the web folder's name said so. The
+     * live channel is never gated, whether it was stated or only assumed.
+     * Channel::decide() answers 'prod' when nothing says which channel an
+     * installation is, so such an installation is not gated: nobody is
+     * locked out for want of a file.
      *
-     * What this CANNOT do: tell a live server with an odd folder name from a
-     * pre-release copy with an odd folder name. From here they look identical,
-     * which is exactly why it refuses to guess. Step 2 of the build plan
-     * replaces folder-name guessing with an explicit channel file.
+     * WHAT THIS HAS DONE BEFORE, AND WHY EACH WAS REPLACED
+     *   - Until 12 October 2026 the channel was guessed from the web folder's
+     *     path, a failed guess was 'dev', and the gate stood aside on it.
+     *     Every pre-release copy with an unexpected folder name was open,
+     *     with PHP's errors on screen.
+     *   - The first build of Channel (commit 7b30c99) closed that the other
+     *     way: "not set" was a 'dev' copy and this gate ran on it. Uploading
+     *     that code to a live portal without a new file refused every member
+     *     and everything that arrives without a staff sign-in. The owner
+     *     replaced it the same day.
+     *
+     * WHO GETS THROUGH THE GATE, AND WHO DOES NOT REACH THE UPGRADE PAGE
+     * The sign-in pages are on OPEN_PATHS, and anybody with the Admin or
+     * Root Admin flag passes enforce(). Passing the gate is not the same as
+     * being allowed every page behind it: the database upgrade page
+     * (/admin/upgrade) is for a Root Admin only, and the Admin flag alone
+     * gets 403 there. (An earlier comment here said either flag reached the
+     * upgrade page. It was untrue.)
+     *
+     * The source is taken for one thing only: when it is 'assumed', one line
+     * is written to PHP's error log saying so and saying the cure. It is
+     * written here because this is asked once on every request a person or
+     * a machine makes (by index.php, and by the API documentation page,
+     * which the web server runs by itself), and never by a command-line
+     * tool, which cannot know the web folder's name and would otherwise
+     * write the line on every run.
+     *
+     * What this CANNOT do: gate an installation whose `.channel` file wrongly
+     * says `live`, one whose pre-release channel was never stated (it is
+     * assumed live), or one where the switch below has been set to 'false'.
+     * The switch is a global administrator's own decision about the whole
+     * installation. Whether error text is shown is decided in bootstrap.php,
+     * not here.
      *
      * -------------------------------------------------------------------------
      * WHY ONLY THE PORTAL-WIDE ROW OF THE SWITCH COUNTS
@@ -266,9 +297,9 @@ class Gatekeeper
      * which only a global administrator can change — is read.
      *
      * @param string $channel       PORTAL_ENV.
-     * @param string $channelSource PORTAL_ENV_SOURCE: 'environment', 'folder'
-     *                              or 'fallback'. Anything else is treated as
-     *                              'fallback'.
+     * @param string $channelSource PORTAL_ENV_SOURCE: 'environment', 'file',
+     *                              'folder' or 'assumed'. It never changes
+     *                              the answer; see above.
      *
      * @return bool True when enforce() should run.
      */
@@ -278,12 +309,31 @@ class Gatekeeper
         // WHAT WAS WRONG: the first version named only 'dev' and 'beta', so
         // PORTAL_ENV = 'alpha' was never gated. That broke the promise in the
         // in-app help (web/_apps/help/admin.php), which says alpha sites are
-        // gated and documents portal.alphaAccessRoles for them. bootstrap.php
-        // only ever produces 'alpha' from the PORTAL_ENV environment variable,
-        // so an alpha channel is always a deliberate choice, never a guess.
+        // gated and documents portal.alphaAccessRoles for them.
         // The comparison is exact: 'prod', or any value not on the list, is
-        // never gated.
+        // never gated. Channel::decide() only ever produces 'prod' or a value
+        // on the list, so "not on the list" means the live channel.
         if (in_array($channel, self::VALID_CHANNELS, true) === false) {
+            // 📝 Live only because nothing says otherwise: say so, and say
+            //    the cure, where an administrator will look. One line per
+            //    request, on purpose: a pre-release copy that has lost its
+            //    file is open to the public in this state, and nothing a
+            //    visitor sees says so.
+            //    The file's place is given as "beside the _core folder",
+            //    never as a path, so the line is the same on every host and
+            //    gives nothing away.
+            if ($channelSource === Channel::SOURCE_ASSUMED) {
+                error_log(
+                    '[WebMS-Intra] Nothing says which release channel this installation is, so it is being '
+                    . 'treated as the LIVE portal: errors hidden, staff sign-in gate off. If it is a pre-release '
+                    . 'copy, it is open to the public. To settle it, create a file named ' . Channel::FILE_NAME
+                    . ' beside the _core folder holding one word (live, beta, alpha or dev), or set '
+                    . Channel::VARIABLE . ' to that word. Where several web folders share one _core folder, do '
+                    . 'not create the file: name the folders ' . implode(', ', array_keys(Channel::FOLDER_NAMES))
+                    . ', or give each its own ' . Channel::VARIABLE . '.'
+                );
+            }
+
             return false;
         }
 
@@ -296,16 +346,6 @@ class Gatekeeper
         // That is the side that cannot open a pre-release copy by accident.
         $switch = self::portalWideSetting('portal.gatekeeper.enabled');
         if ($switch !== null && strtolower(trim($switch)) === 'false') {
-            return false;
-        }
-
-        if ($channelSource !== 'environment' && $channelSource !== 'folder') {
-            error_log(
-                '[WebMS-Intra] Pre-release gate NOT applied: channel "' . $channel
-                . '" was only a fallback guess (PORTAL_ENV_SOURCE "' . $channelSource
-                . '"), not set by the PORTAL_ENV environment variable or a recognised '
-                . 'web folder name. If this is a pre-release copy, set PORTAL_ENV.'
-            );
             return false;
         }
 

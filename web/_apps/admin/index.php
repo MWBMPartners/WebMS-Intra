@@ -63,6 +63,7 @@ declare(strict_types=1);
 
 use Portal\Core\AccountGuard;
 use Portal\Core\App;
+use Portal\Core\Channel;
 use Portal\Core\ReservedKeys;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -289,7 +290,17 @@ $dbVersion  = trim($dbInfo['engine'] . ' ' . $dbInfo['version']);
 //    says so in words: the portal keeps running in that case, so this page is
 //    one of the places that has to make sure somebody notices.
 $dbStrictness = \Portal\Core\DbServer::strictness($mysqli);
-$portalEnv  = PORTAL_ENV ?? 'production';
+// 🧭 Which copy of the portal this is, and HOW that was decided
+//    (_core/Channel.php). WHAT WAS WRONG: this read `PORTAL_ENV ??
+//    'production'` and the badge below compared it with 'production'. The
+//    channel is never that word (the live channel is 'prod'), so the live
+//    portal never got its green badge.
+$portalEnv       = App::env();
+$channelSource   = defined('PORTAL_ENV_SOURCE') === true ? (string) PORTAL_ENV_SOURCE : '';
+$channelInWords  = $portalEnv === 'prod' ? 'live' : $portalEnv;
+// The web folder's own name, for the note below. Only its last part: never
+// the path, which would tell a reader how the server is laid out.
+$webFolderName   = basename((string) PORTAL_WEBROOT);
 
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
@@ -330,6 +341,37 @@ if ($isUmbrella === false) {
 }
 $keysLiveNow = ReservedKeys::keysAreAddresses();
 ?>
+<?php
+// 🧭 The channel note. Shown only when nobody WROTE DOWN which copy of the
+// portal this is: it was worked out from the web folder's name, or simply
+// assumed to be live (owner's rule, 12 October 2026: see _core/Channel.php).
+// Amber, not red: the portal is working, and on a real live portal the
+// assumption is right. It is here because the same assumption on a test copy
+// leaves that copy open to the public, and nothing else on screen says so.
+//
+// WHO SEES IT: everybody who can open this page, which refuses anybody who
+// is not an administrator at the top of this file. No narrower than that,
+// because /health already tells any visitor the same one word. It names the
+// web folder but never its path.
+//
+// The last sentence, about a shared _core folder, is load-bearing: where
+// several copies share one, a file would speak for all of them, so "create
+// the file" is the wrong advice there and must not stand alone.
+$showChannelNote = ($channelSource === Channel::SOURCE_ASSUMED || $channelSource === Channel::SOURCE_FOLDER);
+?>
+<?php if ($showChannelNote === true): ?>
+<div class="alert alert-warning" role="alert" id="portal-channel-note" data-channel-source="<?php echo htmlspecialchars($channelSource, ENT_QUOTES, 'UTF-8'); ?>">
+    <?php if ($channelSource === Channel::SOURCE_ASSUMED): ?>
+    <h2 class="h6 alert-heading mb-2"><i class="fa-solid fa-triangle-exclamation me-1"></i> This portal has not been told which copy it is</h2>
+    <p class="mb-1 small">Nothing says whether this is the live portal or a test copy (beta, alpha or dev), so it is being treated as the <strong>live</strong> portal: error details are hidden, and the staff-only sign-in for test copies is off. If this is a test copy, anybody who has its address can reach it.</p>
+    <?php else: ?>
+    <h2 class="h6 alert-heading mb-2"><i class="fa-solid fa-triangle-exclamation me-1"></i> Which copy this is was worked out from the web folder&rsquo;s name</h2>
+    <p class="mb-1 small">This is being treated as the <strong><?php echo htmlspecialchars($channelInWords, ENT_QUOTES, 'UTF-8'); ?></strong> copy because its web folder is named <code><?php echo htmlspecialchars($webFolderName, ENT_QUOTES, 'UTF-8'); ?></code>. That works, but only for as long as the folder keeps that exact name: renamed, or moved to hosting that calls the folder something else, this copy would be treated as the live portal.</p>
+    <?php endif; ?>
+    <p class="mb-1 small">To settle it, ask whoever looks after the hosting to create a plain text file named <code>.channel</code> beside the <code>_core</code> folder, holding one word on its first line: <code>live</code>, <code>beta</code>, <code>alpha</code> or <code>dev</code>. Setting <code>PORTAL_ENV</code> to that word on the server does the same. A word the portal does not know counts as not being there.</p>
+    <p class="mb-0 small"><strong>Where several copies share one <code>_core</code> folder, do not create the file:</strong> it would speak for every copy. Keep the web folders named <code>public_html</code>, <code>public_html_beta</code> and <code>public_html_dev</code>, or give each its own <code>PORTAL_ENV</code>.</p>
+</div>
+<?php endif; ?>
 <?php if ($dbStrictness['state'] !== 'ok'): ?>
 <!-- 🔒 Shown only when the database connection is not running under the
      strictness the portal asks for. Red when it is not strict at all (values
@@ -486,7 +528,7 @@ $keysLiveNow = ReservedKeys::keysAreAddresses();
             <div class="portal-data-row">
                 <div class="col-12 col-md-4 fw-semibold">Environment</div>
                 <div class="col-12 col-md-8">
-                    <span class="badge bg-<?php echo ($portalEnv === 'production') ? 'success' : (($portalEnv === 'dev') ? 'warning' : 'info'); ?>">
+                    <span class="badge bg-<?php echo ($portalEnv === 'prod') ? 'success' : (($portalEnv === 'dev') ? 'warning' : 'info'); ?>">
                         <?php echo htmlspecialchars($portalEnv, ENT_QUOTES, 'UTF-8'); ?>
                     </span>
                 </div>

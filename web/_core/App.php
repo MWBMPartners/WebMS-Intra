@@ -16,7 +16,7 @@
  *   App::user()                   → current authenticated user array or null
  *   App::isDebug()                → true if debug mode active AND user is admin
  *   App::version()                → portal version string (e.g. "0.1.0")
- *   App::env()                    → environment string (dev|beta|prod)
+ *   App::env()                    → release channel (prod|beta|alpha|dev)
  *   App::siteId()                 → active site ID (delegates to Site::id())
  *   App::isAdmin()                → 4-tier admin check (umbrella/site root/site/legacy)
  *   App::isSiteAdmin()            → site-level admin check for current site
@@ -262,8 +262,14 @@ class App
             return false;
         }
 
-        // 🛡️ Unconditionally disabled in production, regardless of role
-        if (defined('PORTAL_ENV') === true && PORTAL_ENV === 'prod') {
+        // 🛡️ Unconditionally disabled in production, regardless of role.
+        //    A MISSING constant counts as production. WHAT WAS WRONG: this
+        //    refused only when the constant existed and said 'prod', so
+        //    code that ran before start-up had decided the channel was
+        //    treated as a pre-release copy. Since 12 October 2026 the portal
+        //    assumes it is live when nothing says otherwise
+        //    (_core/Channel.php), and this leans the same way.
+        if (defined('PORTAL_ENV') === false || PORTAL_ENV === 'prod') {
             return false;
         }
 
@@ -356,16 +362,21 @@ class App
     }
 
     /**
-     * Get the current environment (dev, beta, prod).
+     * Get the release channel: 'prod' (live), 'beta', 'alpha' or 'dev'.
      *
-     * @return string Environment identifier
+     * When start-up has not decided it yet the answer is 'prod'. It used to
+     * be 'dev', which labelled reports sent to the outside error-monitoring
+     * service as coming from a test copy, and leaned the opposite way from
+     * the portal's own last resort (assume live: see _core/Channel.php).
+     *
+     * @return string The channel, as PORTAL_ENV holds it
      */
     public static function env(): string
     {
         if (defined('PORTAL_ENV') === true) {
             return PORTAL_ENV;
         }
-        return 'dev';
+        return 'prod';
     }
 
     /**

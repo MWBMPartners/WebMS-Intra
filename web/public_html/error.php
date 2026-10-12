@@ -46,6 +46,11 @@ if (in_array($code, [403, 404, 500, 503], true) === false) {
 $bootstrap = dirname(__DIR__) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
 $rendered = false;
 
+// 🌐 The web folder is THIS file's own folder, whatever the hosting calls it.
+//    Set before start-up, as index.php does: this file is the other way in,
+//    and start-up alone would fall back to the shipped name 'public_html'.
+define('PORTAL_WEBROOT', __DIR__);
+
 if (is_readable($bootstrap) === true) {
     try {
         require_once $bootstrap;

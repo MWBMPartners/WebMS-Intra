@@ -102,12 +102,15 @@ use Portal\Core\Maintenance;
 // 🙈 NEVER PRINT A PHP WARNING INTO THIS PAGE'S ANSWER, MAINTENANCE OR NOT.
 // -----------------------------------------------------------------------------
 //    What was wrong (found by the third verification, 14 September 2026):
-//    web/_core/bootstrap.php shows PHP errors on screen on every channel except
-//    the live one ('prod'), including a live server whose web folder name the
-//    portal does not recognise. On hosting where output is not held back
-//    (FastCGI with output_buffering=0, which is common), a warning printed
-//    inside the checks went out as the first bytes of the answer. Two things
-//    followed:
+//    web/_core/bootstrap.php showed PHP errors on screen on every channel
+//    except the live one ('prod'), including a live server whose web folder
+//    name the portal did not recognise. (Since 12 October 2026 start-up shows
+//    them only on a pre-release channel that was stated, and an installation
+//    that says nothing is assumed to be live: see _core/Channel.php. This
+//    page's own switch stays, for the reasons below.) On hosting where output
+//    is not held back (FastCGI with output_buffering=0, which is common), a
+//    warning printed inside the checks went out as the first bytes of the
+//    answer. Two things followed:
 //      - PHP has to send the headers before the first byte of the body, so
 //        the status and content type were fixed there and then (200,
 //        text/html). The later header('Content-Type: application/json') then
@@ -130,9 +133,8 @@ use Portal\Core\Maintenance;
 //    was already off, so nothing changes there. On a beta, alpha or dev copy
 //    the one difference when the portal is open is that the warning text no
 //    longer appears at the top of the JSON; it is still on the Errors page.
-//    This is a setting for this page only. It does not change bootstrap's
-//    rule for any other page, which is deliberately left as it is (see the
-//    note there).
+//    This is a setting for this page only. It does not change start-up's
+//    rule for any other page (see the note there).
 //
 //    Tried and rejected:
 //      - Sending the Content-Type header before the checks. The status (200,

@@ -147,8 +147,11 @@ class Auth
      *     close. A scratch test on 15 September 2026 confirmed neither header
      *     is sent once a second callback replaces this one. (None of web/
      *     registered one when this was written.)
-     *   - Responses that never start a session (for example /api-docs/, which
-     *     the web server serves directly) get no marker, so they are not kept.
+     *   - Responses that never start a session (for example a file under
+     *     /assets/, which the web server serves with no PHP at all) get no
+     *     marker, so they are not kept. (The example here used to be
+     *     /api-docs/. That page now loads the portal and starts a session
+     *     like any other public page.)
      *
      * @return void
      */
@@ -472,8 +475,18 @@ class Auth
      */
     private static function offlinePageAnswered(): bool
     {
-        $offlinePage = realpath(dirname(__DIR__) . DIRECTORY_SEPARATOR . 'public_html'
-            . DIRECTORY_SEPARATOR . 'offline' . DIRECTORY_SEPARATOR . 'index.php');
+        // 🌐 The web folder is PORTAL_WEBROOT (set by the front controller to
+        //    its own folder), the same constant Router.php uses to include
+        //    this file. It used to be spelt 'public_html' here: on hosting
+        //    that calls the web folder anything else the file was never
+        //    found, so the offline page lost its exemption (the safe
+        //    direction, but it emptied the offline helper's install list).
+        //    When the constant is missing (this class loaded on its own by a
+        //    tool, without bootstrap.php) the answer is no, the safe direction.
+        if (defined('PORTAL_WEBROOT') === false) {
+            return false;
+        }
+        $offlinePage = realpath(PORTAL_WEBROOT . DIRECTORY_SEPARATOR . 'offline' . DIRECTORY_SEPARATOR . 'index.php');
         return is_string($offlinePage) === true && in_array($offlinePage, get_included_files(), true) === true;
     }
 

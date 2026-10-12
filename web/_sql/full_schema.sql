@@ -9425,12 +9425,14 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- stepping left past trusted machines) or 'cf-connecting-ip' (Cloudflare,
 -- which overwrites it on every request). Anything else behaves as the default.
 --
--- portal.gatekeeper.enabled — whether the dev and beta copies of the portal
--- ask for a staff sign-in before showing anything. Seeded ON. Never applies to
--- the live channel, and never when the channel was only a fallback guess
--- rather than set by the PORTAL_ENV environment variable or a recognised web
--- folder name. The setting is a way back if the gate ever shuts out the wrong
--- people.
+-- portal.gatekeeper.enabled — whether the pre-release copies of the portal
+-- (beta, alpha, dev) ask for a staff sign-in before showing anything. Seeded
+-- ON. It applies whenever the channel is one of those three, however that
+-- was decided: the PORTAL_ENV setting, the .channel file, or a web folder
+-- named public_html_beta or public_html_dev. It never applies to the live
+-- channel, and an installation that says nothing is treated as live. A
+-- missing row counts as ON. The setting is a way back if the gate ever
+-- shuts out the wrong people.
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'portal.trustedProxies',     '',                '',                0),

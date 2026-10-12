@@ -332,6 +332,28 @@ ALLOWED_HTACCESS = {
         "1164cf44c0f2c929155912677502795ea2cf448e8d3d87f0dbb196c780cf502e",
         "switches address rewriting off inside the installer's folder",
     ),
+    # The five "refuse everything" files (roll-out package F3). One file, five
+    # places, so one checksum. They hold no rule that switches anything on.
+    "_apps/.htaccess": (
+        "9e16e2fbc09e5d0c749b7e31aa5ffc783e40c95dc1356c98a16661a9a81e488f",
+        "refuses every request: one comment and 'Require all denied'. The same file in five private folders (read 12 October 2026)",
+    ),
+    "_core/.htaccess": (
+        "9e16e2fbc09e5d0c749b7e31aa5ffc783e40c95dc1356c98a16661a9a81e488f",
+        "refuses every request: one comment and 'Require all denied'. The same file in five private folders (read 12 October 2026)",
+    ),
+    "_lang/.htaccess": (
+        "9e16e2fbc09e5d0c749b7e31aa5ffc783e40c95dc1356c98a16661a9a81e488f",
+        "refuses every request: one comment and 'Require all denied'. The same file in five private folders (read 12 October 2026)",
+    ),
+    "_sql/.htaccess": (
+        "9e16e2fbc09e5d0c749b7e31aa5ffc783e40c95dc1356c98a16661a9a81e488f",
+        "refuses every request: one comment and 'Require all denied'. The same file in five private folders (read 12 October 2026)",
+    ),
+    "_vendor/.htaccess": (
+        "9e16e2fbc09e5d0c749b7e31aa5ffc783e40c95dc1356c98a16661a9a81e488f",
+        "refuses every request: one comment and 'Require all denied'. The same file in five private folders (read 12 October 2026)",
+    ),
 }
 # The second net for every .htaccess EXCEPT the web folder's own: a line that
 # could make the server run a file as a program, or hand out a folder's list

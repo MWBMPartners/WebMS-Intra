@@ -2,6 +2,63 @@
 
 
 ## [Unreleased] (alpha)
+- **Changed — which copy of the portal an installation is, and a web folder of any name (#499, #500)**
+  - **The channel (live, beta, alpha or dev) is decided in one place, in a fixed order.** `Portal\Core\Channel`
+    (`web/_core/Channel.php`) asks, in turn: (1) the `PORTAL_ENV` setting; (2) the first line of a file named
+    `.channel` in the folder that holds `_core` (beside `_core`, outside the web folder); (3) the web folder's own
+    name, only when it is exactly `public_html` (live), `public_html_beta` (beta) or `public_html_dev` (dev);
+    (4) otherwise the portal **assumes it is live**: errors hidden, staff gate off. The words understood are `live`,
+    `beta`, `alpha` and `dev` (`prod` still means live). A word the portal does not know, in the setting or in the
+    file, counts as not being there, and the next step is tried.
+  - **Nobody is locked out for want of a file.** An installation that says nothing carries on as the live portal.
+    What it never does is show anything a pre-release copy would: no PHP error text, no debug mode, no debug panel.
+  - **What was wrong before.** The channel was guessed from the path the web server reported, looking for the
+    folder names anywhere in it, and an unrecognised name meant "dev": PHP errors on screen and no staff gate. A live
+    portal on hosting that calls the web folder `httpdocs` or `www` printed PHP errors to the public.
+  - **The web folder may have any name.** Five places built its path with `public_html` typed in. They now use
+    `PORTAL_WEBROOT`, which `index.php`, `error.php` and the API documentation page set to the real folder. On hosting
+    with another name the manifest, `robots.txt`, the sitemap and the API description answered "page not found", the
+    offline page could not be shown, and no name was reserved against an organisation's key for being a real file or
+    folder there.
+  - **`/health` says how the channel was decided** (`channelSource`: `environment`, `file`, `folder` or `assumed`),
+    and answers while the portal is closed for an upgrade, so an upload can be checked.
+  - **Administrators are told when the channel was not written down.** The admin dashboard shows an amber note when
+    the channel came from the folder's name or was assumed; when it was assumed, PHP's error log also gains one line
+    per request.
+  - **The API documentation page (`/api-docs/`) works.** The web server runs that page by itself, and it never loaded
+    the portal, so it was a fatal error on every installation (and printed its own file path wherever the host shows
+    PHP errors). It now loads the portal, never prints PHP's error text, is behind the staff gate on a pre-release
+    copy and shows the holding page while the portal is closed for an upgrade.
+  - **Five "refuse everything" files** (`.htaccess` in `_apps`, `_core`, `_lang`, `_sql`, `_vendor`). They matter only
+    when a hosting panel is pointed at the wrong folder.
+  - **Three defaults lean to "live"** when the channel has not been decided yet (`App::env()`, `App::isDebug()`,
+    `Debug`), and the admin dashboard's channel badge is green on the live channel (it compared with a word the
+    channel never is).
+  - Self-test: `tools/channel-selftest.php` (220 checks). `tools/db-strict-mode-selftest.php` states its channel.
+    `tools/package/check-package.py` names the five new files in its list of allowed `.htaccess` files.
+- **Upgrading — nothing has to be done; one thing is recommended**
+  - **Nothing is required.** An installation whose web folder is named `public_html`, `public_html_beta` or
+    `public_html_dev` is the same channel as before. Any other installation with no `PORTAL_ENV` setting is treated
+    as the live portal, with errors hidden.
+  - **Recommended: say which copy it is.** In the folder that holds `_core` (NOT the web folder), create a plain text
+    file named `.channel` holding one word on its first line: `live`, `beta`, `alpha` or `dev`. Then open `/health`:
+    it should say `"channelSource":"file"`. The admin dashboard's amber note goes away.
+  - **A PRE-RELEASE COPY IN A FOLDER OF ANOTHER NAME MUST BE GIVEN THE FILE (or the setting).** Without it that copy
+    is assumed to be live: no staff gate, open to anybody who has its address. `/health` says
+    `"channelSource":"assumed"` for such a copy. **Two layouts the last release recognised and this one does not:**
+    a web folder named `alpha_html` or `beta_html` (the last release still knew those older names), and a copy whose
+    web folder has another name but sits somewhere under a folder named `public_html_beta` or `public_html_dev` (the
+    last release looked for the names anywhere in the path). Give either the file BEFORE uploading this version; the
+    old code does not read it, so that is harmless.
+  - **Where several copies share one `_core` folder, do NOT create the file.** It sits beside `_core`, so one file
+    would speak for every copy, and it is asked before the folder's name: `live` in it would open the beta and dev
+    copies to everybody. In that layout keep the web folders named `public_html`, `public_html_beta` and
+    `public_html_dev`, or give each web folder its own `PORTAL_ENV`. (Our own three channels are laid out this way
+    today, as one customer's set-up; the deploy package, F7, separates them.)
+  - The file is one installation's own: it is on the ignore list (`/web/.channel`) and must never be committed.
+    Today's deploy mirrors `web/` with deletion and would remove a hand-made file on each run; that is for the deploy
+    package (F7).
+  - Review: one independent check by a fresh Claude agent standing in for Codex (no way found for a visitor to see error text or to make the portal think it is live; four small faults), then one round that fixed those and built the owner's final rule, with no second check. Run on MySQL 8.0.36 and 8.4.11 and on a real Apache 2.4 with PHP 8.5; not on LiteSpeed, PHP run as CGI, or MariaDB. Not reviewed by Codex yet.
 - **Several organisations on one installation: "sign-in session" mode now works (#502).**
   The organisation was worked out before the session had started, so everybody was in
   organisation 1 on every page and the switcher did nothing. A person with one

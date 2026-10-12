@@ -211,6 +211,36 @@ class Maintenance
         //      up some other way (a trailing slash left on, say) just fails to
         //      match, which keeps the holding page up: the safe way round.
         'cron/health',
+
+        // 💚 THE SHORT HEALTH ANSWER, /health (owner's decision, 13 September
+        //    2026, answer 8; added 12 October 2026).
+        //
+        //    Router::healthCheck() answers it in a few lines of JSON: is the
+        //    database reachable, which version, which release channel and how
+        //    that channel was decided. Whatever uploads new code asks this
+        //    address straight afterwards, and that is exactly the moment the
+        //    portal is closed, because the code is newer than the database.
+        //    Without this entry the answer was the holding page (503), so an
+        //    upload could not be told from a broken one, and nobody could see
+        //    from outside that the channel had never been written down
+        //    (`channelSource` says "assumed" then).
+        //
+        //    It is let through for the same reason cron/health is: it is
+        //    meant only to read. It runs `SELECT 1` and prints values the
+        //    portal already holds. It asks for no token and never has: it
+        //    answers anybody, signed in or not, whenever the portal is open,
+        //    so answering while closed gives away nothing new. If anybody
+        //    ever makes it write something, this entry has to come out again.
+        //
+        //    WHAT THIS DOES NOT COVER: a PHP warning raised while it runs
+        //    would still be written to tblErrors by the portal's own error
+        //    handler, as for every other address on these lists. None is
+        //    known; cron/health guards against that, and this does not.
+        //
+        //    Exact, like the entry above: /healthx and /health/anything do
+        //    not match and get the holding page. The same tidied-up address
+        //    is compared (see WHAT STRING THIS IS COMPARED WITH above).
+        'health',
     ];
 
     /**

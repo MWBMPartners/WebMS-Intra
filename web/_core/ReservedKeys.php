@@ -162,13 +162,20 @@ final class ReservedKeys
 
         // 📁 KIND_WEBROOT — every real file or folder directly inside the web
         //    root, read live with scandir() so a folder dropped there reserves
-        //    its own name the instant it exists. dirname(__DIR__) resolves to
-        //    the web/ folder from _core/ (this file's own directory), the same
-        //    reasoning Auth::offlinePageAnswered() already uses elsewhere in
-        //    this codebase, rather than depending on a PORTAL_* bootstrap
-        //    constant this class does not need for anything else.
-        $webRoot = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'public_html';
-        $entries = @scandir($webRoot);
+        //    its own name the instant it exists.
+        //
+        //    The web folder is PORTAL_WEBROOT, which the front controller set
+        //    to its own folder. WHAT WAS WRONG: the path was built here as
+        //    "the folder above _core, then 'public_html'", to avoid leaning
+        //    on a bootstrap constant. On hosting that calls the web folder
+        //    anything else (httpdocs, www, admin_html) that folder does not
+        //    exist, the scandir() below quietly found nothing, and no name
+        //    was reserved for being a real file or folder there. A key that
+        //    is reserved for that reason alone (the name of a folder somebody
+        //    added to the web folder, say) was then allowed. When the constant
+        //    is missing (this class used without bootstrap.php) nothing is
+        //    read, as for a folder that cannot be listed: see the note below.
+        $entries = defined('PORTAL_WEBROOT') === true ? @scandir(PORTAL_WEBROOT) : false;
         // 📝 A false here (folder missing or unreadable) is NOT an exception —
         //    the route and special sources above still hold, and a server
         //    whose web root cannot be listed has bigger problems than this

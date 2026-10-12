@@ -358,6 +358,16 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     second membership test in a page; `Site::organisationsFor()` is the one list
     of "your organisations". Test: `tools/site-modes-selftest.php`.
 
+    **The release channel is decided in ONE place, `Portal\Core\Channel`**
+    (#499, #500; owner, 12 October 2026): the `PORTAL_ENV` setting, else the
+    `.channel` file beside `_core`, else a web folder named exactly
+    `public_html`, `public_html_beta` or `public_html_dev` (that last one is the
+    `dev` channel), else ASSUMED LIVE with errors hidden. Do not write a second
+    channel check, do not read `DOCUMENT_ROOT`, and do not bring back "fail
+    closed" (it was built first and locked members out). `PORTAL_WEBROOT` is the
+    web folder: never build a path with `public_html` typed in. Test:
+    `tools/channel-selftest.php`.
+
 15. **The ApiRouter trap.** Any address starting `api/` is intercepted
     before the normal routing table is ever consulted, and resolved purely
     by naming convention to `_apps/{appName}/api/{action}.php`. A handler

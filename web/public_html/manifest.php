@@ -49,16 +49,18 @@ $siteColor = Site::branding('color') ?? '#0d6efd';
 //    If the folder is missing on disk, fall back to the existing
 //    /assets/images/* placeholders so PWA install never breaks.
 //
-//    NB: filesystem path resolves under PORTAL_ROOT/public_html/ — the
-//    older code path constructed it under PORTAL_APPS/ which was always
-//    a miss (PORTAL_APPS is _apps/, not public_html/assets/) and the
-//    is_readable branch never fired. Fixed alongside the brands/ →
-//    brandkit/assets/ folder move.
+//    NB: the files are looked for under PORTAL_WEBROOT, the web folder
+//    this file itself lives in (the front controller sets it). Two earlier
+//    versions looked in the wrong place. The first looked under PORTAL_APPS/
+//    (which is _apps/, not the web folder), so it always fell back to the
+//    placeholders. The second looked under PORTAL_ROOT/public_html/, which
+//    is right only on hosting that calls the web folder exactly that; on
+//    any other it fell back to the placeholders too.
 $industry  = (string) (App::settings('portal.industry') ?? '');
 $presets   = (array) (require PORTAL_CORE . DIRECTORY_SEPARATOR . 'brand-defaults.php');
 $preset    = $presets[$industry] ?? $presets[''] ?? [];
 $assetDir  = (string) ($preset['assetFolder'] ?? 'webms-intra');
-$brandRoot = PORTAL_ROOT . DIRECTORY_SEPARATOR . 'public_html'
+$brandRoot = PORTAL_WEBROOT
            . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'images'
            . DIRECTORY_SEPARATOR . 'brandkit' . DIRECTORY_SEPARATOR . 'assets'
            . DIRECTORY_SEPARATOR . $assetDir;

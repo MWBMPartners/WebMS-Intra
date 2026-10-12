@@ -207,6 +207,20 @@ rather than a destination.
 3. Review and run any pending SQL migrations
 4. Verify the portal is working correctly
 
+### Say which copy it is (recommended)
+
+The portal needs to know whether it is the live site or a pre-release copy. It asks, in order: the `PORTAL_ENV`
+setting; a file named `.channel` in the folder that holds `_core` (NOT the web folder); the web folder's own name, if
+it is exactly `public_html` (live), `public_html_beta` (beta) or `public_html_dev` (dev). If none of those says, it
+treats itself as the live site, with errors hidden.
+
+- Create a plain text file named `.channel` beside `_core` holding one word on its first line: `live`, `beta`, `alpha`
+  or `dev`. Then open `/health`: it should say `"channelSource":"file"`.
+- **A pre-release copy in a folder of another name must be given the file (or the setting).** Without it that copy is
+  treated as live and has no staff sign-in gate.
+- **Where several copies share one `_core` folder, do NOT create the file**: one file would speak for every copy. Keep
+  the three folder names, or give each web folder its own `PORTAL_ENV`.
+
 ### Manual Configuration (alternative to wizard)
 
 1. Create `_auth_keys/auth_creds.php` returning: `['db_host'=>..., 'db_user'=>..., 'db_pass'=>..., 'db_name'=>..., 'db_port'=>3306]`

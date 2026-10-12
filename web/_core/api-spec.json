@@ -2001,6 +2001,12 @@
                       "type": "string",
                       "example": "prod"
                     },
+                    "channelSource": {
+                      "type": "string",
+                      "enum": ["environment", "file", "folder", "assumed"],
+                      "description": "How the release channel in `env` was decided: the PORTAL_ENV setting, the .channel file, the web folder's name (public_html, public_html_beta or public_html_dev), or assumed (nothing says, so the portal treats itself as live).",
+                      "example": "file"
+                    },
                     "version": {
                       "type": "string",
                       "example": "1.0.0"

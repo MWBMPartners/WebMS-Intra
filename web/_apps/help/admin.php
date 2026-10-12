@@ -519,6 +519,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <p>The portal supports multiple deployment channels: <strong>production</strong>, <strong>beta</strong>, <strong>alpha</strong>, and <strong>dev</strong>. The Gatekeeper system restricts access to non-production channels.</p>
 
+    <p>Which copy a site is comes from the <code>PORTAL_ENV</code> setting, a <code>.channel</code> file beside the <code>_core</code> folder, or a web folder named <code>public_html</code>, <code>public_html_beta</code> or <code>public_html_dev</code>. A site that says nothing is treated as the live site, so this gate does not apply to it, and the admin dashboard says so.</p>
+
     <h5 class="mt-3 mb-3">How the Gatekeeper works</h5>
 
     <ul class="list-group list-group-flush mb-3">

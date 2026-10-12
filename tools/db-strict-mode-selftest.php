@@ -612,7 +612,14 @@ function sm_child(string $kind, array $env = []): array
         '-d', 'session.save_path=' . $smChild . DIRECTORY_SEPARATOR . 'sessions',
         __FILE__, '--child', $kind, $smWeb,
     ];
-    $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['redirect', 1]], $pipes, null, array_merge(getenv(), $env));
+    // 🧭 The child is told which release channel it is: live. Without that,
+    //    the scratch copy has neither the PORTAL_ENV setting nor a `.channel`
+    //    file, and the child is a command-line program, so the portal cannot
+    //    go by the web folder's name either and would ASSUME it is live
+    //    (web/_core/Channel.php). The answer would be the same; this is set
+    //    so the test says what it runs as instead of leaning on a last
+    //    resort.
+    $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['redirect', 1]], $pipes, null, array_merge(getenv(), ['PORTAL_ENV' => 'prod'], $env));
     if (is_resource($process) === false) {
         return ['found' => null, 'output' => 'the child process could not be started', 'log' => ''];
     }

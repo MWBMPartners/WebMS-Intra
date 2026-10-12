@@ -8,12 +8,13 @@
  * into a multidimensional array, initialises the App registry and Debug timer,
  * registers the PSR-4-lite autoloader, and wires global error/exception handlers.
  *
- * This file is loaded by the single front controller (public_html/index.php),
- * and can also be conditionally loaded by individual app files for
- * standalone/debug use. Branch-based deploy targets the same source dir to
- * different server destinations (alpha → public_html_dev/ on server,
- * beta → public_html_beta/ on server, main → public_html/ on server) — so
- * there's no longer a per-channel front controller in the repo.
+ * This file is loaded by the single front controller (index.php in the web
+ * folder), and can also be conditionally loaded by individual app files for
+ * standalone/debug use. There is one front controller for every release
+ * channel. Which channel an installation is comes from the PORTAL_ENV
+ * setting, else its `.channel` file, else one of three known web folder
+ * names, else it is assumed to be live (see _core/Channel.php). The web
+ * folder may be called anything the hosting calls it.
  *
  * All conditional logic uses full IF notation for human readability, per code
  * style guidelines.
@@ -59,6 +60,36 @@ define('PORTAL_APPS',   PORTAL_ROOT . DIRECTORY_SEPARATOR . '_apps');
 define('PORTAL_VENDOR', PORTAL_ROOT . DIRECTORY_SEPARATOR . '_vendor');
 define('PORTAL_SQL',    PORTAL_ROOT . DIRECTORY_SEPARATOR . '_sql');
 
+// 🌐 PORTAL_WEBROOT — the web folder: the one the web server serves, which
+//    holds index.php, the offline page, the manifest and /assets.
+//
+//    The two front controllers (index.php and error.php) define it as their
+//    OWN folder before loading this file, so it is right whatever the hosting
+//    calls that folder: public_html, httpdocs, www, admin_html.
+//
+//    WHAT WAS WRONG: five places built the path with the name 'public_html'
+//    typed in (Router twice, Auth, ReservedKeys, manifest.php). On hosting
+//    with any other name the manifest, robots.txt, the sitemap and the API
+//    description answered "page not found", the offline page could not be
+//    shown at all, and no name was reserved against an organisation's key
+//    for being a real file or folder in the web folder.
+//
+//    The line below is only for code that loads this file WITHOUT a front
+//    controller: a command-line tool, or a test. It falls back to the name the
+//    product is shipped with. WHAT IT CANNOT DO: know a renamed web folder.
+//    Such a tool must define PORTAL_WEBROOT itself, before loading this file,
+//    if it needs anything from the web folder of a renamed installation.
+//
+//    $portalWebrootStated remembers which of the two happened, BEFORE the
+//    stand-in is defined. The release channel (just below) may be read from
+//    the web folder's name, and the stand-in is not this installation's
+//    folder: a command-line tool on a beta copy would otherwise be told
+//    "public_html, so live".
+$portalWebrootStated = defined('PORTAL_WEBROOT');
+if ($portalWebrootStated === false) {
+    define('PORTAL_WEBROOT', PORTAL_ROOT . DIRECTORY_SEPARATOR . 'public_html');
+}
+
 // 📌 Authoritative portal version — single source of truth shared with the
 // bootstrap-free installer (web/_install/) so they cannot drift apart.
 // See _core/version.php for the release-bump procedure.
@@ -81,79 +112,68 @@ define('PORTAL_PRODUCT_TAGLINE_DEFAULT',   (string) $PORTAL_BRAND_DEFAULTS['tagl
 define('PORTAL_PRODUCT_PUBLISHER_DEFAULT', (string) $PORTAL_BRAND_DEFAULTS['publisher']);
 unset($PORTAL_BRAND_DEFAULTS);
 
-// 🌍 Determine runtime environment flag (dev | beta | prod)
-// Priority: 1) PORTAL_ENV env var  2) directory name detection  3) default 'dev'
-// Primary directories: public_html (prod), public_html_beta (beta), public_html_dev (dev)
-// Legacy alpha_html / beta_html checks kept for backwards compatibility.
-// IMPORTANT: order matters — public_html_dev / public_html_beta must be tested
-// BEFORE public_html, since str_contains() would otherwise match "public_html"
-// inside the beta/dev directory names and misclassify them as prod.
-// See: https://www.php.net/manual/en/function.getenv.php
-$env = getenv('PORTAL_ENV');
-$envSource = 'environment';
-if ($env === false || $env === '') {
-    // 🔍 Auto-detect from the front-controller directory name
-    $docRoot = $_SERVER['DOCUMENT_ROOT'] ?? '';
-    $envSource = 'folder';
-    if (str_contains($docRoot, 'public_html_dev') === true || str_contains($docRoot, 'alpha_html') === true) {
-        $env = 'dev';
-    } elseif (str_contains($docRoot, 'public_html_beta') === true || str_contains($docRoot, 'beta_html') === true) {
-        $env = 'beta';
-    } elseif (str_contains($docRoot, 'public_html') === true) {
-        $env = 'prod';
-    } else {
-        $env = 'dev'; // Default to dev for safety
-        $envSource = 'fallback';
-    }
-}
-define('PORTAL_ENV', $env);
-
-// 🧭 PORTAL_ENV_SOURCE — HOW the channel above was decided, not WHAT it is.
-//    Exactly one of:
-//      'environment'  the PORTAL_ENV environment variable was set;
-//      'folder'       a recognised web folder name was found in DOCUMENT_ROOT;
-//      'fallback'     neither — the 'dev' above is a last-resort guess.
+// 🌍 The release channel: PORTAL_ENV ('prod' | 'beta' | 'alpha' | 'dev') and
+//    PORTAL_ENV_SOURCE (how it was decided: 'environment' | 'file' |
+//    'folder' | 'assumed').
+// -----------------------------------------------------------------------------
+// Decided in ONE place, Portal\Core\Channel (_core/Channel.php), in this
+// order: the PORTAL_ENV setting; else the first line of the `.channel` file
+// beside _core; else the web folder's own name, when it is exactly
+// public_html, public_html_beta or public_html_dev; else the portal ASSUMES
+// IT IS LIVE ('prod', source 'assumed'). Read that file's header for the
+// words understood, for what it cannot do, and for "fail closed", which was
+// built first and replaced by the owner on 12 October 2026.
 //
-//    It exists for the pre-release gate (Gatekeeper::shouldEnforce()). That
-//    gate asks for a staff sign-in on the 'dev', 'beta' and 'alpha' channels
-//    ('alpha' only ever comes from the environment variable). On a LIVE
-//    server whose web folder simply has a name this code does not recognise,
-//    the guess above says 'dev', and gating on that guess would stop every
-//    ordinary member using the live site. So the gate only engages when the
-//    channel came from 'environment' or 'folder', never from 'fallback'.
+// THE FOLDER'S NAME IS GIVEN ONLY WHEN A FRONT CONTROLLER STATED IT (index.php
+// and error.php set PORTAL_WEBROOT to their own folder). Never from
+// DOCUMENT_ROOT: on some hosting a visitor's Host header shapes that value,
+// and the last release searched it for the names anywhere in the path.
+// tools/channel-selftest.php fails if this file reads it again.
 //
-//    ⚠️ DELIBERATELY NOT CHANGED HERE — please do not "tidy" these:
-//    how PORTAL_ENV itself is decided (including falling back to 'dev'), and
-//    the error-display rules just below, which still show PHP errors on
-//    screen whenever PORTAL_ENV is not 'prod' — including after a fallback
-//    guess. Both are known and both are left exactly as they were on purpose:
-//    Step 2 of the build plan (.claude/plans/public-door-3-build-plan.md)
-//    replaces this folder-name guessing with an explicit channel file and
-//    deals with both then. A partial change here would only be contradicted
-//    by that step.
-define('PORTAL_ENV_SOURCE', $envSource);
-unset($envSource);
+// WHAT WAS WRONG, until 12 October 2026: an unrecognised folder name became
+// 'dev' with errors SHOWN and the gate OFF. A live portal on hosting that
+// names the web folder `httpdocs` or `www` printed PHP errors to the public.
+//
+// Channel.php is loaded by name because the class loader is not registered
+// until further down this file.
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'Channel.php';
+$portalChannel = \Portal\Core\Channel::decide(PORTAL_ROOT, $portalWebrootStated === true ? PORTAL_WEBROOT : null);
+unset($portalWebrootStated);
+define('PORTAL_ENV', $portalChannel['channel']);
+define('PORTAL_ENV_SOURCE', $portalChannel['source']);
 
 // 🛡️ PHP error display hardening
 // -----------------------------------------------------------------------------
-// In production we MUST NOT echo PHP errors / warnings into the response —
-// they can leak file paths, query fragments, and credential variable names.
-// Errors are still captured by Logger / tblErrors for admin diagnosis.
+// PHP's own error text can leak file paths, query fragments and the names of
+// credential variables, so it is printed into a page ONLY on a pre-release
+// channel that was stated (the setting, the file or the folder's name says
+// beta, alpha or dev).
 //
-// In dev / beta we surface errors at the top of the page so developers see
-// them during active work. Admin staff on beta are expected to be technical.
+// THAT IS NOT THE SAME AS "ONLY STAFF SEE IT". On a pre-release copy the staff
+// gate leaves the sign-in pages, Help, the offline page and /health open, and
+// a PHP warning raised on one of those IS printed to a visitor who is not
+// signed in. It was so before this rule was written. (This comment used to
+// say the people who reach those pages are staff, behind the gate: untrue.)
+//
+// On the live channel, stated OR assumed, nothing is printed. Errors are
+// still REPORTED either way, so Logger / tblErrors and PHP's own log see
+// them for an administrator to read.
+//
+// WHAT WAS WRONG: this used to print errors whenever PORTAL_ENV was not
+// 'prod', which included the last-resort guess. Channel::decide() now gives
+// the answer, so the rule and the channel cannot disagree.
 //
 // See: https://www.php.net/manual/en/errorfunc.configuration.php
-if (PORTAL_ENV === 'prod') {
+if ($portalChannel['showErrors'] === true) {
+    ini_set('display_errors', '1');
+    error_reporting(E_ALL);
+} else {
     ini_set('display_errors', '0');
     ini_set('display_startup_errors', '0');
     ini_set('html_errors', '0');
-    // Errors are still REPORTED so PHP's logger sees them; just not DISPLAYED.
-    error_reporting(E_ALL);
-} else {
-    ini_set('display_errors', '1');
     error_reporting(E_ALL);
 }
+unset($portalChannel);
 
 // 🕐 Default timezone until settings load (overridden later)
 date_default_timezone_set('UTC');

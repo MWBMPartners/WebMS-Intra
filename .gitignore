@@ -28,6 +28,14 @@ web/_auth_keys/
 .env
 *.key
 
+# The release channel of ONE installation (live, beta, alpha or dev), read by
+# web/_core/Channel.php. Each installation has its own, written by whatever
+# uploads the code or by the installation package, so it is never committed:
+# a committed copy would make every checkout, and every channel deployed from
+# it, claim the same channel. Local work sets the PORTAL_ENV variable instead,
+# or keeps its own copy of this file.
+/web/.channel
+
 # User uploads (server-managed, not committed)
 web/_uploads/
 

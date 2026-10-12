@@ -153,11 +153,17 @@ class Debug
 
     /**
      * Returns true if the active environment is production.
+     *
+     * A MISSING constant counts as production. It used to count as "not
+     * production", which would have offered the debug panel to code running
+     * before start-up had decided the channel. The portal's own last resort
+     * is to assume it is live (_core/Channel.php), and this leans the same
+     * way: when in doubt, no debug output.
      */
     private static function isProd(): bool
     {
         if (defined('PORTAL_ENV') === false) {
-            return false;
+            return true;
         }
         return PORTAL_ENV === 'prod';
     }

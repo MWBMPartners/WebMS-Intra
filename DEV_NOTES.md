@@ -1371,19 +1371,41 @@ This approach is better than `.htaccess` because:
 
 ---
 
-## Environment Detection
+## Release channels (which copy of the portal an installation is)
 
-The portal automatically detects which environment it is running in,
-based on the `PORTAL_ENV` environment variable or the server's document
-root directory name:
+- Order: `PORTAL_ENV`; else the first line of `<folder that holds _core>/.channel`; else the web folder's name when
+  it is exactly `public_html` / `public_html_beta` / `public_html_dev`; else assumed live. Decided in
+  `Portal\Core\Channel::decide()`; start-up (`bootstrap.php`) puts the answer in `PORTAL_ENV` (`prod`, `beta`,
+  `alpha`, `dev`) and how it was decided in `PORTAL_ENV_SOURCE` (`environment`, `file`, `folder`, `assumed`).
+- "Fail closed" (an installation that says nothing is shut to all but staff) was built first, in commit `7b30c99`,
+  and replaced by the owner the same day: it refused every member of a live portal, and every scheduled job and
+  payment notice, the moment the code was uploaded without a new file. Do not bring it back.
+- The folder's name is the last part of `PORTAL_WEBROOT` **as a front controller set it** (`__DIR__`). It is never
+  read from `DOCUMENT_ROOT` (on some hosting a visitor's Host header shapes that), and never from start-up's own
+  stand-in name. The match is on the whole name, exactly as written.
+- A command-line tool that loads `bootstrap.php` with no front controller skips the folder step: with no setting
+  and no file it runs as assumed live, even on a copy that is beta by its folder's name. A tool that needs the
+  folder step defines `PORTAL_WEBROOT` itself before loading start-up.
+- PHP's error text is printed only on a pre-release channel that was stated (setting, file or folder). On such a
+  copy a visitor who is not signed in CAN see a PHP warning on the addresses the staff gate leaves open (sign-in,
+  Help, the offline page). Never on live, stated or assumed.
+- The staff gate runs on beta, alpha and dev however they were decided, and never on live. Passing it needs the
+  Admin or Root Admin flag; the database upgrade page behind it is for a Root Admin only.
+- Only the file's first line is read, and it must end within 256 bytes. A byte-order mark and Windows, Unix or old
+  Mac line ends are tolerated; capital letters and spaces round the word are forgiven; UTF-16 is not read.
+- **Local work:** set `PORTAL_ENV` (for example `PORTAL_ENV=dev php -S …`), or keep your own `web/.channel`
+  (ignored by git). The checkout's web folder is named `public_html`, so without either you run as live.
+- **Self-tests that start the portal** set `PORTAL_ENV=prod` (access-pages, backup-page, erasure-pages, feed-admin,
+  sign-in-limits, site-modes, db-strict-mode); channel-selftest sets each case itself.
+- `/api-docs/` is run by the web server directly (the folder is real), so it loads start-up itself and asks the
+  maintenance and staff gates itself. The `api-docs` row in `tblRoutes` does not reach it on Apache.
 
-| Directory | PORTAL_ENV | Behaviour |
-|-----------|-----------|-----------|
-| `public_html/` | `prod` | Errors hidden, no debug panel |
-| `public_html_dev/` | `dev` | Errors displayed, debug panel available |
+**When something looks wrong**
 
-You can override detection by setting the `PORTAL_ENV` environment variable
-in your shell or hosting panel.
+- **"The admin dashboard says this portal has not been told which copy it is."** Nothing states the channel, so
+  it is treated as live. Create the `.channel` file (see above), unless several copies share one `_core`.
+- **"A test copy is open to everybody."** Open `/health`. `"channelSource":"assumed"` means the copy's folder has
+  another name and it has no file or setting. Give it one.
 
 ### Local Development
 

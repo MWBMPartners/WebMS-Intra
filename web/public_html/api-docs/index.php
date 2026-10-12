@@ -29,15 +29,44 @@
  *
  * WHO CAN SEE THIS PAGE
  * ---------------------
- * Public by default — the description at /openapi.json is public too, and only
- * the endpoints it describes require a login. To put the documentation behind
- * the login wall, set isProtected = 1 on the `api-docs` row in tblRoutes.
+ * Public on the live portal — the description at /openapi.json is public too,
+ * and only the endpoints it describes require a login. On a pre-release copy
+ * (beta, alpha, dev) it is behind the staff sign-in gate like every other
+ * page, and while the portal is closed for an upgrade it shows the holding
+ * page.
+ *
+ * This comment used to say "set isProtected = 1 on the `api-docs` row in
+ * tblRoutes" to put the page behind the login wall. That never worked: this
+ * folder really exists in the web folder, so the web server answers
+ * /api-docs/ with this file directly and the router, which reads tblRoutes,
+ * never sees the request. There is no setting that puts this page behind a
+ * sign-in on the live portal.
+ *
+ * HOW IT STARTS, AND WHAT WAS WRONG (found 12 October 2026)
+ * ---------------------------------------------------------
+ * Because the web server runs this file directly, nothing has loaded the
+ * portal before the first line below. The file used to go straight to
+ * `Asset::swaggerUiLocalOnly()`, a class nothing had loaded, so the page was
+ * a fatal error on every installation: a blank error page, or, wherever the
+ * host's own PHP settings show errors, "Class Portal\Core\Asset not found"
+ * with this file's full path, printed to any visitor. It was the one address
+ * where the release channel had no say over error text.
+ *
+ * It now loads start-up itself when nothing has, the way error.php does, and
+ * then asks the same two gates index.php asks. PHP's own error text is
+ * switched off before start-up and again after it, on every channel:
+ * start-up switches it ON for a pre-release copy, and this page has no
+ * reason to print it.
+ *
+ * WHAT IT CANNOT DO: ask the organisation gate (SiteGate). The page is the
+ * same for every organisation, and SiteGate's own header lists it as one of
+ * the addresses it does not cover.
  *
  * @package   Portal\API
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * -----------------------------------------------------------------------------
  */
 
@@ -45,6 +74,47 @@ declare(strict_types=1);
 
 use Portal\Core\Asset;
 use Portal\Core\Auth;
+use Portal\Core\Gatekeeper;
+use Portal\Core\Maintenance;
+use Portal\Core\Router;
+
+// 🙈 Never print PHP's own error text from this page (see the header).
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+
+// 🚪 TWO WAYS IN. On Apache the web server runs this file directly, with
+//    nothing loaded. Where a server hands every address to index.php instead,
+//    the router finds this file through the `api-docs` row in tblRoutes and
+//    includes it: start-up has run and index.php has already asked the gates.
+//    PORTAL_ROOT is the first thing start-up defines, so it tells the two
+//    apart.
+if (defined('PORTAL_ROOT') === false) {
+    // 🚀 Load the portal. The web folder is the folder ABOVE this one,
+    //    whatever the hosting calls it; said before start-up, as index.php
+    //    and error.php say it. A portal that is not installed yet has
+    //    nothing to describe.
+    $portalStartUp = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
+    $portalCreds   = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . 'auth_creds.php';
+    if (is_readable($portalStartUp) === false || is_readable($portalCreds) === false) {
+        http_response_code(404);
+        exit('Not found.');
+    }
+    define('PORTAL_WEBROOT', dirname(__DIR__));
+    require_once $portalStartUp;
+    // Start-up switches error text ON for a pre-release copy; off again.
+    ini_set('display_errors', '0');
+
+    // 🚧 The same two gates, in the same order, as index.php: closed for an
+    //    upgrade, then the staff gate on a pre-release copy. Without them
+    //    this page would be a way round both.
+    Auth::ensureSession();
+    if (Maintenance::blocks(Router::extractPath()) === true) {
+        Maintenance::renderAndExit();
+    }
+    if (Gatekeeper::shouldEnforce(PORTAL_ENV, PORTAL_ENV_SOURCE) === true) {
+        Gatekeeper::enforce(PORTAL_ENV);
+    }
+}
 
 // 📚 Decide which copies of Swagger UI to load. Local-only mode is opt-in per
 //    site; the default keeps the CDN-first behaviour with the local copies as

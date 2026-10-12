@@ -465,9 +465,16 @@ PHP_ENDINGS=(
     "php|public_html/assets/js/tool.php7.js" "txt|public_html/assets/code.php/app.js"
     "php|public_html/sub/index.php" "php|public_html/assets/index.php"
 )
+# Two of these used to be planted at _core/.htaccess and _apps/.htaccess, as
+# files "nobody named". Since 12 October 2026 the portal ships its own "refuse
+# everything" file at those two places (and in _lang, _sql and _vendor), named
+# in ALLOWED_HTACCESS, so a file planted there is no longer un-named: it is a
+# named file that has CHANGED. The two are now planted one folder further down,
+# where nothing is named, and the one in _lang/ is kept as the proof that a
+# named "refuse everything" file is still held to its checksum.
 HTACCESS_FILES=(
     "htaccess-runs-pictures|public_html/assets/.htaccess" "htaccess-changed|public_html/.htaccess"
-    "htaccess-refuse-all|_core/.htaccess" "htaccess-switches-off|_apps/.htaccess" "htaccess-split-line|_lang/.htaccess"
+    "htaccess-refuse-all|_core/templates/.htaccess" "htaccess-switches-off|_apps/admin/.htaccess" "htaccess-split-line|_lang/.htaccess"
 )
 # "what|path under web/|the reason the allow list must give"
 PICTURES=(
@@ -701,8 +708,9 @@ if wanted T09; then
     why T09 "the allow list" "public_html/assets/.htaccess" "could make the server run a file as a program, or list a folder: 'AddHandler application/x-httpd-php .png .txt .js .svg'"
     why T09 "the allow list" "public_html/assets/.htaccess" "could make the server run a file as a program, or list a folder: 'Options +Indexes'"
     why T09 "the allow list" "public_html/.htaccess" "this is not the copy that was read"
-    why T09 "the allow list" "_core/.htaccess" "add this line to ALLOWED_HTACCESS: \"_core/.htaccess\": (\"$("$REAL_SHASUM" -a 256 "$C/htaccess-refuse-all" | cut -d' ' -f1)\", \"<why it ships>\"),"
-    why T09 "the allow list" "_apps/.htaccess" "a file of web-server rules that ALLOWED_HTACCESS does not name"
+    why T09 "the allow list" "_core/templates/.htaccess" "add this line to ALLOWED_HTACCESS: \"_core/templates/.htaccess\": (\"$("$REAL_SHASUM" -a 256 "$C/htaccess-refuse-all" | cut -d' ' -f1)\", \"<why it ships>\"),"
+    why T09 "the allow list" "_apps/admin/.htaccess" "a file of web-server rules that ALLOWED_HTACCESS does not name"
+    why T09 "the allow list" "_lang/.htaccess" "this is not the copy that was read"
     check "T09 … a line that only switches things OFF is not called dangerous" has_not T09 "'Options -Indexes -ExecCGI'"
     why T09 "the allow list" "_lang/.htaccess" "could make the server run a file as a program, or list a folder: 'AddHandler application/x-httpd-php .txt'"
     check "T09 … and the run reached its end" has T09 "the run reached its end."
