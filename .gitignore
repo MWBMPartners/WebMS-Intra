@@ -38,8 +38,14 @@ web/_backups/
 # dompdf etc. go in web/_libraries/ on the server
 web/_libraries/
 
-# Local asset fallbacks (downloaded from CDNs, placed locally for fallback)
+# Local asset fallbacks (downloaded from CDNs, placed locally for fallback).
+# tools/download-cdn-fallbacks.sh fetches every one of these, and the
+# installation package carries them (#499). The right-to-left stylesheet was
+# missing from this list until 12 October 2026: Asset.php has always named it
+# as a fallback, so a developer who ran the fetch script would otherwise have
+# had it offered for commit.
 web/public_html/assets/css/bootstrap.min.css
+web/public_html/assets/css/bootstrap.rtl.min.css
 web/public_html/assets/js/bootstrap.bundle.min.js
 web/public_html/assets/css/fontawesome-all.min.css
 web/public_html/assets/webfonts/
@@ -53,3 +59,7 @@ error_log
 
 # PHP
 *.php.bak
+
+# Python leaves these behind when a script under tools/ is compiled or
+# imported (for example `python3 -m py_compile tools/package/check-package.py`).
+__pycache__/

@@ -2905,6 +2905,39 @@ Use the workflow_dispatch **dry-run** input on `deploy.yml` to preview what
 a deploy would change (and crucially, what it would delete) before pushing.
 See issue #107 for the full rationale and mitigation list.
 
+## The installation package (#499)
+
+How to build and check one, and the table of file kinds a package may hold, are
+in `tools/package/README.md`. Four things will stop a pull request with no
+other warning once the tree check runs on pull requests:
+
+1. **A new kind of file under `web/`, a PHP file inside the web folder, or an
+   archive needs a line in `tools/package/check-package.py`** (its allow list).
+   Otherwise `python3 tools/package/check-package.py --tree web` and every
+   build refuse it.
+2. **Adding or changing ANY `.htaccess` under `web/` needs one line in
+   `ALLOWED_HTACCESS` in that file**: the path, the file's SHA-256, and why it
+   ships. The refusal prints the exact line to paste. This includes a change to
+   `web/public_html/.htaccess`.
+3. **A drawing (`.svg`) may not link to anything outside itself**, and a file
+   name's ending must be in small letters.
+4. The staff web folder's name inside the package is one line in
+   `tools/package/build.sh` (`STAFF_WEB_FOLDER`, `admin_html`: owner,
+   12 October 2026).
+
+**The PDF library (dompdf)** is the publisher's release file, pinned by SHA-256
+in `tools/download-dompdf.sh`. It is not uploaded by hand. To upgrade it,
+change the version and the checksum together and write the file list again
+(`bash tools/download-dompdf.sh --write-list`).
+
+**What the guards cannot catch**, said plainly in the checker's own header: a
+secret in a shape nobody has described (a password somebody chose, the database
+login written any way but the installer's, people's details), anything packed
+or encoded, and a bad rule inside the web folder's own `.htaccess`. Git's
+ignore rules remain the first wall; these guards are the second.
+
+---
+
 ## Who may see and do what: the rules added on 12 October 2026 (#534, #548)
 
 - **`Auth::ensureSession()` looks the signed-in account up on every request** (`SELECT isActive FROM

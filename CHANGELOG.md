@@ -2,6 +2,33 @@
 
 
 ## [Unreleased] (alpha)
+- tooling: **scripts that build and guard the installation zip, part 1** (#499,
+  roll-out package F6). `tools/package/build.sh` makes the package from git at
+  one commit, never from a working folder, and `tools/package/check-package.py`
+  checks the folder and then the zip; no zip exists unless both passed. A
+  package may hold ONLY kinds of file that are positively allowed, each in its
+  allowed place (17 kinds across 1,201 files today); anything else fails the
+  build. Inside the web folder no name may carry a PHP ending after any of its
+  dots except the eight named PHP files, and every `.htaccess` is named with a
+  checksum. The secrets search (gitleaks) is made to read every kind of file.
+  The PDF library is compared file by file against a committed list.
+  `tools/package/package-selftest.sh` plants faults in a scratch clone and
+  requires each to be refused for its own reason (226 checks; it needs the
+  internet and takes tens of minutes). **Nothing can be built for release
+  yet**: five lines in packaged files still carry one customer's address
+  (#500), the installation guide is not written, and the code cannot yet run
+  from a web folder with another name. The workflow that would publish a
+  package is proposed text only.
+- fix(tooling): **`tools/download-dompdf.sh` fetched a copy of the PDF library
+  that could not make a PDF.** It downloaded the tag's source archive, which
+  has no loader file (`web/_core/Pdf.php` needs it). It now downloads the
+  publisher's release file, pinned by its SHA-256, and the deploy uses the same
+  script. Its files are no longer installed writable by everybody, and the pin
+  can no longer be replaced from the environment. Whether PDFs worked on any
+  server before this is not known.
+- tooling: new `tools/download-cdn-fallbacks.sh` fetches the local copies of
+  Bootstrap and Font Awesome that pages fall back to when the outside copy
+  cannot be reached. Nothing fetched them before.
 - security(access): **who may see and do what, tightened** (roll-out packages B2a and B2b; #534, #548, #574, part of #511 and #536).
 
   **Security: what somebody can no longer see or do**

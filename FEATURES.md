@@ -1611,3 +1611,5 @@ Audit pass status as of 2026-06-03: **0 missing routes · 0 column mismatches ·
 | `tools/audit-checks/` | Static-analysis scripts (above) |
 | `tools/e2e-migrations/` | docker-compose MySQL 8.0.36 + `run.sh` 3-phase migration smoke test (#248) |
 | `tools/offsite-backup/` | Reference `sync-offsite.sh` + `log-offsite-result.php`. An administrator copies both to the server by hand, into `_backups/`; they are not deployed (#249) |
+| `tools/package/` | Builds and guards the installation zip (#499): `build.sh`, `check-package.py`, a self-test, and the file list of the PDF library. Part 1 only: no package can be built for release until the installation guide, the address settings (#500) and the any-folder-name support land |
+| `tools/deploy/` | `resolve-settings.sh` decides where a deploy puts files and which login it uses, and refuses when unsure (#500). No workflow uses it yet |

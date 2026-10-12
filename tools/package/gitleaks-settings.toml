@@ -1,0 +1,26 @@
+# Settings for gitleaks, the program that searches a package for secrets (#499).
+#
+# Path: tools/package/gitleaks-settings.toml
+# Read by: tools/package/check-package.py (guard G5), on every run.
+#
+# It says one thing: use gitleaks's own built-in rules. It exists so that the
+# settings are NAMED on every run. Left unnamed, gitleaks takes its settings
+# from a GITLEAKS_CONFIG variable on the build machine, or from a file called
+# .gitleaks.toml inside the folder it is reading, and either could quietly
+# switch rules off.
+#
+# WHAT THIS FILE CANNOT DO: make gitleaks read the files it skips by name
+# (.svg, .gif, .woff2 and more). Settings can only ADD to that list, never
+# take from it. check-package.py gets round that by reading every file a
+# second time under a plain name; see guard_secrets there.
+#
+# Do not add an [allowlist] here to quieten a find. A find in a package is
+# either a real secret, which must come out of web/, or a look-alike, which
+# should be reworded so it no longer looks like one.
+#
+# Copyright (c) 2026 MWBM Partners Ltd (t/a MWservices). All rights reserved.
+
+title = "WebMS Intra package check: gitleaks's own rules, nothing added, nothing taken away"
+
+[extend]
+useDefault = true
