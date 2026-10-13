@@ -841,6 +841,23 @@ another repo, ever**.
 - API documentation (`/api-docs/`) is reachable (it was a fatal error on every installation); behind the staff gate on a
   pre-release copy.
 
+### 🔐 Secret settings (#597, #497) ✅
+
+- Settings: secret settings are stored encrypted and never shown; the page
+  says "Set", "Not set" or "Set, but needs entering again", and names every
+  secret in that last state so it can be entered again (#597).
+- Start-up decrypts secret settings for everything that uses them (#497).
+- Upgrade encrypts secrets an older version stored as readable text, and says
+  which, by name (#497).
+- Bot check: when its keys cannot be read, sign-in and password reset go on
+  without it and every other protected form is refused and says so, the
+  visitor form and live chat included; administrators are told on Admin,
+  Captcha, the health page, the Settings page and in the error log (#497).
+- Health page: a "Stored secrets" check, which also names a key file that is
+  missing, empty or short.
+- Error log: a scheduled job's token is cut out of the address recorded with
+  an error, and out of what is sent to the outside error service.
+
 ### 🔗 The portal's own web address (#500) ✅
 
 - **The portal's own web address** (#500) — set at Admin → Settings → Organisation, "Web addresses" (global administrators), or in one press from the Admin dashboard's notice ("Use this address") while it is not set. Used for every link in an e-mail. The dashboard shows a notice while it is not set or not usable, and another when it is not the address the page was reached at. The same card holds the support e-mail address shown on Help → Getting Support.

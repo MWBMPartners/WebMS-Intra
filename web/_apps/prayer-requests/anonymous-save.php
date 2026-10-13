@@ -58,7 +58,7 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 }
 
 // 🤖 Captcha
-if (Captcha::verify($_POST) === false) {
+if (Captcha::verify($_POST, 'prayer-request') === false) {
     Logger::activity('PrayerRequestAnonRejected', 'Captcha failed on anonymous prayer-request save');
     header('Location: /prayer-requests/anonymous?err=' . urlencode('Captcha verification failed. Please try again.'), true, 302);
     exit();

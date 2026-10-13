@@ -31,7 +31,7 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 
 // 🤖 Captcha gate (#348). Skip if no provider configured.
 if (class_exists(Captcha::class) === true && Captcha::isConfigured() === true) {
-    if (Captcha::verify($_POST) === false) {
+    if (Captcha::verify($_POST, 'event-registration') === false) {
         Logger::activity('EventRegistrationCaptchaFailed', 'Slug=' . ($_POST['slug'] ?? ''));
         http_response_code(400); exit('Captcha failed — please go back and try again.');
     }

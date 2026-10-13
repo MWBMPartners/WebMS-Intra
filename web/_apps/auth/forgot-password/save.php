@@ -86,7 +86,7 @@ if (Auth::verifyCsrf($text($_POST['csrf_token'] ?? '')) === false) {
     exit();
 }
 
-if (Captcha::verify($_POST) === false) {
+if (Captcha::verify($_POST, Captcha::FOR_PASSWORD_RESET) === false) {
     Logger::activity('PasswordResetFailed', 'Captcha failed on forgot-password');
     header('Location: /forgot-password', true, 302);
     exit();

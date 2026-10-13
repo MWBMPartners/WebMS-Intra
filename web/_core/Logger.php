@@ -523,7 +523,8 @@ class Logger
                 $headersJson = json_encode(self::requestHeaders());
                 $ip          = self::clientIp();
                 $ua          = $_SERVER['HTTP_USER_AGENT'] ?? '';
-                $url         = $_SERVER['REQUEST_URI'] ?? '';
+                // Without a scheduled job's token: see withoutJobToken().
+                $url         = self::requestAddress();
 
                 // 🌐 $siteId arrives as a parameter. It is deliberately NOT worked out
                 //    here: the whole point of having two public methods in front of
@@ -635,7 +636,7 @@ class Logger
             'code'     => $code,
             'title'    => $title,
             'detail'   => $detail,
-            'url'      => $_SERVER['REQUEST_URI'] ?? '',
+            'url'      => self::requestAddress(), // without a scheduled job's token
         ];
         $plainFallback = sprintf(
             "Severity: %s\nPlatform: %s\nCode: %s\nTitle: %s\n\nDetail:\n%s\n\nURL: %s\n",
@@ -644,7 +645,7 @@ class Logger
             $code,
             $title,
             substr($detail, 0, 2000),
-            $_SERVER['REQUEST_URI'] ?? ''
+            self::requestAddress()
         );
         foreach ($recipients as $to) {
             // 🪞 Use the framework Mailer's templated send if available; else
@@ -740,7 +741,7 @@ class Logger
             'site'     => $siteId,
             'user'     => $userId,
             'address'  => $ip,
-            'url'      => (string) ($_SERVER['REQUEST_URI'] ?? ''),
+            'url'      => self::requestAddress(),
         ];
     }
 
@@ -805,6 +806,90 @@ class Logger
             return 'Error';
         }
         return 'Fatal';
+    }
+
+    /**
+     * The names a scheduled job's address carries its token under: `key`
+     * (most jobs) and `token` (the health check, the backup check and the
+     * retention sweep). Found by searching web/_apps/cron/ for what each job
+     * reads, on 13 October 2026. A job that takes its token under another
+     * name must be added here, or its token is recorded.
+     */
+    private const TOKEN_PARAMETERS = ['key', 'token'];
+
+    /**
+     * ✂️ The address a request asked for, with the VALUE of a scheduled job's
+     * token cut out of it and "[removed]" put in its place. Everything else
+     * in the address is kept. Never throws.
+     *
+     * Use this wherever an address is recorded or sent anywhere: the error
+     * log's row, the fallback line in PHP's own log, the alert e-mail, and
+     * the outside error service (ErrorMonitor).
+     *
+     * WHAT WAS WRONG (#597, 13 October 2026). A scheduled job is called by
+     * the host's scheduler at an address that ends "?key=…" or "?token=…",
+     * and that token is all that protects the job. An error on such a
+     * request was recorded with the WHOLE address. So the token sat in
+     * tblErrors, on Admin, Error log, for every administrator of every
+     * organisation, and in every backup of that table. It went in the alert
+     * e-mail too. And it was sent to the outside error service, which was
+     * harmless only while that service never worked: its own secret was
+     * never decrypted (#497). This release makes it work.
+     *
+     * HOW A PARAMETER IS RECOGNISED: by its NAME as PHP itself will read it:
+     * decoded ("%74oken" is "token"), without a leading space, and without
+     * any "[…]" after it. Capital letters are ignored, although PHP does not
+     * ignore them, because "?KEY=" typed into a scheduler by mistake still
+     * carries the real token.
+     *
+     * WHAT IT COSTS: the value of ANY parameter called "key" or "token" is
+     * cut, on any page, not only a scheduled job's. That is deliberate. A
+     * password-reset link and an invitation carry their secret under
+     * "token" as well, and telling a job's address from another by its path
+     * would be one more list to keep right.
+     *
+     * WHAT IT CANNOT DO:
+     *   - It does not clean rows already stored. An address recorded before
+     *     this change keeps its token until that row is deleted, and so does
+     *     anything already sent to the outside service. If a job's address
+     *     ever appeared in the error log, give that job a new token.
+     *   - It knows only the two names above. A secret under any other name,
+     *     or written into the PATH of an address (a calendar or podcast feed),
+     *     is recorded as before.
+     *   - It does not look inside the text of an error. A message that
+     *     quotes an address is recorded as written.
+     *
+     * @param string $address A path with its query, as $_SERVER['REQUEST_URI'] holds it.
+     */
+    public static function withoutJobToken(string $address): string
+    {
+        $queryStart = strpos($address, '?');
+        if ($queryStart === false) {
+            return $address;
+        }
+        $pairs = explode('&', substr($address, $queryStart + 1));
+        foreach ($pairs as $i => $pair) {
+            $equals = strpos($pair, '=');
+            if ($equals === false || $equals === strlen($pair) - 1) {
+                continue; // no value to cut
+            }
+            $name    = strtolower(ltrim(urldecode(substr($pair, 0, $equals))));
+            $bracket = strpos($name, '[');
+            if ($bracket !== false) {
+                $name = substr($name, 0, $bracket);
+            }
+            if (in_array($name, self::TOKEN_PARAMETERS, true) === true) {
+                $pairs[$i] = substr($pair, 0, $equals + 1) . '[removed]';
+            }
+        }
+
+        return substr($address, 0, $queryStart + 1) . implode('&', $pairs);
+    }
+
+    /** The address THIS request asked for, as it may be recorded: see withoutJobToken(). */
+    private static function requestAddress(): string
+    {
+        return self::withoutJobToken((string) ($_SERVER['REQUEST_URI'] ?? ''));
     }
 
     private static function requestHeaders(): array

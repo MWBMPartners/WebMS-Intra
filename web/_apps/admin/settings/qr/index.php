@@ -41,7 +41,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.1.1
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/275
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/495
  * @link      https://github.com/MWBMPartners/CueRCode
@@ -212,7 +212,15 @@ $settings = App::settings();
 $provider = (string) ($settings['portal']['qr']['provider'] ?? 'local');
 $endpoint = (string) ($settings['portal']['qr']['cuercode']['api_endpoint'] ?? '');
 $apiKey   = (string) ($settings['portal']['qr']['cuercode']['api_key'] ?? '');
-$apiKeyMasked = $apiKey !== '' ? str_repeat('•', max(8, min(strlen($apiKey), 24))) : '';
+// 🔒 Always eight dots. This used to print one dot per character of the key
+//    (between 8 and 24). For a key saved on this page that gave nothing away,
+//    but only because the portal never decrypted a stored secret (#497): the
+//    length counted was the scramble's, always over 24. (A key typed into the
+//    old Settings edit box was stored readable, and its length did show.) Now
+//    that the portal does decrypt, the same line would have told anybody who
+//    can open this page, administrators of one organisation included, how
+//    long the real key is.
+$apiKeyMasked = $apiKey !== '' ? str_repeat('•', 8) : '';
 
 $pageTitle   = 'QR Code Settings';
 $pageSection = 'admin';

@@ -8,9 +8,9 @@
  * provider is configured — you just call:
  *
  *   Captcha::scriptTag()             // <script> tag(s) for the active provider
- *   Captcha::widget()                // widget markup (or invisible hidden input for v3)
- *   Captcha::verify($_POST)          // server-side verification
- *   Captcha::isConfigured()          // true if at least one provider is wired up
+ *   Captcha::widget($form)           // widget markup (or invisible hidden input for v3)
+ *   Captcha::verify($_POST, $form)   // server-side verification; $form says WHICH form (see below)
+ *   Captcha::isConfigured()          // true if a provider is wired up, readable or not
  *   Captcha::activeProvider()        // the provider key currently in effect (or '')
  *
  * Supported providers:
@@ -48,12 +48,55 @@
  * Graceful degradation:
  *   If no provider is configured, scriptTag() / widget() return empty strings
  *   and verify() returns true (no captcha → request proceeds).
+ *
+ * WHEN THE KEYS ARE STORED BUT CANNOT BE READ (#497; the owner's decision of
+ * 13 September 2026)
+ *   The keys are stored encrypted. If the portal's key file is lost or
+ *   replaced, or the database comes from a backup of another installation,
+ *   the stored keys look encrypted and cannot be opened (see
+ *   SecretSettings::cannotBeRead()). What the portal is then handed is a
+ *   scramble: the provider would refuse it, and EVERY protected form would
+ *   fail, sign-in included, so nobody could get in to put it right.
+ *   The owner chose what happens instead:
+ *     - SIGN-IN and PASSWORD RESET are let through WITHOUT the bot check.
+ *       Their own limits on wrong tries still apply (RateLimiter), because
+ *       those are counted by the pages themselves, not here.
+ *     - EVERY OTHER FORM is REFUSED, and says so in plain words: an
+ *       administrator MEANT those forms to be checked, and a check that
+ *       quietly disappears is worse than a form that refuses. WHERE it says
+ *       so depends on the form. Eight draw the bot check's widget, and show
+ *       the notice in its place (widget()). Two have no place for a widget:
+ *       the visitor form (visitors/public-form.php) shows the notice
+ *       instead of its form, and live chat (livechat/api/send.php) answers
+ *       with it, and the chat box shows that answer. Until 13 October 2026
+ *       the visitor form answered only "Verification failed" and the chat
+ *       box only "Send failed.", which blamed the visitor for something the
+ *       visitor could not put right. All ten take their words from
+ *       closedNotice().
+ *     - Administrators are told: Admin, Captcha; the health page and the
+ *       monitor's address; the Settings page; and the error log, which sends
+ *       the alert e-mail where one is set up.
+ *   That is why verify() and widget() are told which form they are for. The
+ *   two constants FOR_SIGN_IN and FOR_PASSWORD_RESET name the two that are
+ *   let through; any other name is a form that is refused.
+ *
+ *   WHICH KEYS COUNT. Only the provider that WOULD be used: the first in the
+ *   priority list with both its keys stored. An unreadable key left behind
+ *   under a provider further down the list changes nothing while the first
+ *   one works. REJECTED: "any of the six keys unreadable". It is what the
+ *   September design wrote, but it would have switched a WORKING bot check
+ *   off on sign-in because of a key nobody was using.
+ *
+ *   WHAT THIS CANNOT DO: notice a key that is readable but WRONG (mistyped,
+ *   or revoked by the provider). The provider then refuses every answer and
+ *   every protected form fails, sign-in included, as it always has. And a
+ *   key stored as readable text is not "unreadable": it is used as it is.
  * -----------------------------------------------------------------------------
  * @package    Portal\Core
  * @author     MWBM Partners Ltd (t/a MWservices)
  * @copyright  2025-present MWBM Partners Ltd (t/a MWservices)
  * @license    All Rights Reserved
- * @version    0.10.0
+ * @version    0.11.0
  * @link       https://github.com/MWBMPartners/WebMS-Intra
  * -----------------------------------------------------------------------------
  */
@@ -89,8 +132,24 @@ class Captcha
     private const HCAPTCHA_VERIFY_URL  = 'https://hcaptcha.com/siteverify';
     private const HCAPTCHA_POST_FIELD  = 'h-captcha-response';
 
+    // 🚪 The two forms that are let through, without the bot check, while
+    //    its keys cannot be read. Every other form is refused then. See
+    //    "WHEN THE KEYS ARE STORED BUT CANNOT BE READ" in the file header.
+    public const FOR_SIGN_IN        = 'sign-in';
+    public const FOR_PASSWORD_RESET = 'password-reset';
+
+    /** The two settings each provider keeps its keys in. */
+    private const KEY_NAMES = [
+        self::PROVIDER_TURNSTILE => ['auth.turnstile.siteKey', 'auth.turnstile.secretKey'],
+        self::PROVIDER_RECAPTCHA => ['auth.recaptcha.siteKey', 'auth.recaptcha.secretKey'],
+        self::PROVIDER_HCAPTCHA  => ['auth.hcaptcha.siteKey', 'auth.hcaptcha.secretKey'],
+    ];
+
     /** @var string|null Cached active provider key for the current request lifecycle */
     private static ?string $cachedActive = null;
+
+    /** @var bool True when the provider that would be used has a key that cannot be read. Set with $cachedActive. */
+    private static bool $cachedBroken = false;
 
     // 🏗️ ===========================================================================
     // Public API
@@ -115,6 +174,15 @@ class Captcha
 
         foreach ($priority as $provider) {
             if (self::isProviderConfigured($provider, $SETTINGS) === true) {
+                // 🚫 The provider that would be used, but one of its keys
+                //    cannot be read: NO provider is in effect, and the class
+                //    remembers why. It does not fall through to the next
+                //    provider: this is the one the administrator put first.
+                if (self::providerUnreadable($provider) === true) {
+                    self::$cachedBroken = true;
+                    self::$cachedActive = '';
+                    return '';
+                }
                 self::$cachedActive = $provider;
                 return $provider;
             }
@@ -122,6 +190,79 @@ class Captcha
 
         self::$cachedActive = '';
         return '';
+    }
+
+    /**
+     * 🚫 Is the bot check set up, but with keys that cannot be read?
+     *
+     * True when the provider that would be used (the first in the priority
+     * list with both keys stored) has a key that looks encrypted and that
+     * this installation's key file does not open. See the file header for
+     * what each form then does.
+     */
+    public static function isBroken(): bool
+    {
+        self::activeProvider();
+
+        return self::$cachedBroken;
+    }
+
+    /**
+     * The names of the stored bot-check keys that cannot be read, whichever
+     * provider they belong to. For the pages that tell an administrator.
+     *
+     * @return list<string>
+     */
+    public static function unreadableKeys(): array
+    {
+        $names = [];
+        foreach (self::KEY_NAMES as $pair) {
+            foreach ($pair as $name) {
+                if (SecretSettings::isUnreadable($name) === true) {
+                    $names[] = $name;
+                }
+            }
+        }
+
+        return $names;
+    }
+
+    /**
+     * 📣 What an administrator must be told while isBroken() is true, in one
+     * plain paragraph; '' otherwise. The same words on every page that says
+     * it, so that they cannot drift apart.
+     */
+    public static function brokenNotice(): string
+    {
+        if (self::isBroken() === false) {
+            return '';
+        }
+
+        return 'The bot check\'s keys are stored but cannot be read. Until that is put right, sign-in and password reset '
+            . 'are running WITHOUT the bot check (their own limits on wrong tries still apply), and every other form the '
+            . 'bot check protects is refused. To put it right: restore the portal\'s key file (enc.key, in the _auth_keys '
+            . 'folder) from your backup, or type the provider\'s two keys in again at Admin, Captcha.';
+    }
+
+    /**
+     * 🚪 What a VISITOR is told by a form that is refused while isBroken()
+     * is true; '' otherwise. Plain text, not HTML: escape it on the way out.
+     *
+     * One sentence for every refused form, so that they cannot drift apart.
+     * It is public, so it says nothing of keys, settings or what went wrong
+     * inside: only that the thing cannot be sent now, and what to do.
+     *
+     * @param string $what How the sentence starts: 'This form' (the default),
+     *                     or 'Your message' for live chat.
+     */
+    public static function closedNotice(string $what = 'This form'): string
+    {
+        if (self::isBroken() === false) {
+            return '';
+        }
+
+        return $what . ' cannot be sent at the moment. The check that keeps automated senders out is not working. '
+            . 'Please try again later, or get in touch another way.';
     }
 
     /**
@@ -169,12 +310,32 @@ class Captcha
      *                                        and refreshes it every ~110s (token
      *                                        TTL is 120s).
      *
+     * WHILE THE KEYS CANNOT BE READ (isBroken()): nothing at all for sign-in
+     * and password reset, which are let through; for every other form that
+     * calls this, a plain notice saying it cannot be sent, where the widget
+     * would be. (A form that never calls this has to show closedNotice()
+     * itself: the visitor form and live chat do.)
+     *
+     * @param string $form Which form this is for: FOR_SIGN_IN, FOR_PASSWORD_RESET,
+     *                     or anything else (the default) for a form that is
+     *                     refused while the keys cannot be read.
+     *
      * @return string HTML, or empty string if no provider is active
      */
-    public static function widget(): string
+    public static function widget(string $form = ''): string
     {
         global $SETTINGS;
         $active = self::activeProvider();
+
+        if (self::$cachedBroken === true) {
+            if ($form === self::FOR_SIGN_IN || $form === self::FOR_PASSWORD_RESET) {
+                return '';
+            }
+            // Public HTML: no setting's name, and nothing about why. The
+            // words are closedNotice()'s, as on the forms with no widget.
+            return '<div class="alert alert-warning" role="alert" data-bot-check="unreadable">'
+                . self::esc(self::closedNotice()) . '</div>';
+        }
 
         if ($active === self::PROVIDER_TURNSTILE) {
             $siteKey = self::setting($SETTINGS, 'auth', 'turnstile', 'siteKey');
@@ -223,14 +384,30 @@ class Captcha
      * Returns true when the active provider's verification succeeded, OR when
      * no provider is configured (graceful skip).
      *
+     * WHILE THE KEYS CANNOT BE READ (isBroken()): true for sign-in and
+     * password reset, WITHOUT any check, and false for every other form. See
+     * the file header. `$form` has no default on purpose: a call that does
+     * not say which form it protects is an error, not a guess.
+     *
+     * WHAT IT DOES NOT DO: count wrong tries. The sign-in and password-reset
+     * pages do that themselves (RateLimiter), before and after calling this,
+     * whether or not there is a bot check.
+     *
      * @param array<string,mixed> $postData The $_POST superglobal (or equivalent)
+     * @param string              $form     Which form is asking: FOR_SIGN_IN,
+     *                                      FOR_PASSWORD_RESET, or a short name
+     *                                      of any other form ('prayer-request').
      *
      * @return bool True if verification succeeded or no captcha is configured
      */
-    public static function verify(array $postData): bool
+    public static function verify(array $postData, string $form): bool
     {
         global $SETTINGS;
         $active = self::activeProvider();
+
+        if (self::$cachedBroken === true) {
+            return $form === self::FOR_SIGN_IN || $form === self::FOR_PASSWORD_RESET;
+        }
 
         if ($active === self::PROVIDER_TURNSTILE) {
             $secret = self::setting($SETTINGS, 'auth', 'turnstile', 'secretKey');
@@ -258,11 +435,17 @@ class Captcha
     /**
      * Check whether any captcha provider has keys configured.
      *
+     * ALSO TRUE WHILE THE KEYS CANNOT BE READ (isBroken()). Something IS
+     * configured. Several pages ask this first and only call verify() or
+     * widget() when the answer is yes; answering "no" there would let their
+     * forms through with no check at all, which is the opposite of what the
+     * owner chose.
+     *
      * @return bool True if at least one provider is fully configured
      */
     public static function isConfigured(): bool
     {
-        return self::activeProvider() !== '';
+        return self::activeProvider() !== '' || self::$cachedBroken === true;
     }
 
     /**
@@ -270,7 +453,10 @@ class Captcha
      * names and current configuration status.  Used by the admin UI to render
      * the drag-and-drop priority list.
      *
-     * @return array<int,array{key:string,label:string,configured:bool}>
+     * `unreadable` is true for a provider with a stored key that cannot be
+     * read; `configured` is false for it, because it is not usable.
+     *
+     * @return array<int,array{key:string,label:string,configured:bool,unreadable:bool}>
      */
     public static function listProviders(): array
     {
@@ -296,10 +482,12 @@ class Captcha
             if (isset($all[$key]) === false) {
                 continue; // unknown key — skip
             }
+            $unreadable = self::providerUnreadable($key);
             $result[] = [
                 'key'        => $key,
                 'label'      => $all[$key],
-                'configured' => self::isProviderConfigured($key, $SETTINGS),
+                'configured' => $unreadable === false && self::isProviderConfigured($key, $SETTINGS) === true,
+                'unreadable' => $unreadable,
             ];
         }
         return $result;
@@ -460,6 +648,21 @@ class Captcha
             return self::DEFAULT_PRIORITY;
         }
         return $clean;
+    }
+
+    /**
+     * Does this provider have a stored key that cannot be read? Asked of
+     * SecretSettings, which wrote the names down as the settings were loaded.
+     */
+    private static function providerUnreadable(string $provider): bool
+    {
+        foreach (self::KEY_NAMES[$provider] ?? [] as $name) {
+            if (SecretSettings::isUnreadable($name) === true) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

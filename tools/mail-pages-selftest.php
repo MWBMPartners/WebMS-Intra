@@ -1325,21 +1325,24 @@ ok(
 $answer = $post($rootJar, ip(1), $fullForm(['fromName' => SENDER_NAME]));
 [$cipher, $secret] = stored('mail.smtp.password');
 ok('typing it in again stores it encrypted again', $answer['status'] === 302 && $secret === 1 && unsealed($cipher, $keyText) === $mailPassword, 'HTTP ' . $answer['status']);
-// What the GENERAL Settings page shows for the row. It is not changed by this
-// package; this holds in place what it can and cannot give away.
+// What the GENERAL Settings page shows for the row. Since roll-out package
+// S597 (#597) that page never shows a secret in any form: it used to offer a
+// global administrator an "eye" with the ENCRYPTED text behind it, and showed
+// dots to everybody else. This holds in place what it can and cannot give away.
 $page    = req($rootJar, 'GET', '/settings', null, ip(1));
 $rowHtml = preg_match('#data-setting-key="mail\.smtp\.password">(.*?)<div class="portal-data-row#s', $page['body'], $m) === 1 ? $m[1] : '';
 ok(
-    'the general Settings page shows that row as a locked secret; to a global administrator it can reveal the ENCRYPTED text, and the password itself is nowhere on the page',
-    $page['status'] === 200 && $rowHtml !== '' && str_contains($rowHtml, 'fa-lock') === true && str_contains($rowHtml, '••••••••') === true
-        && str_contains($rowHtml, htmlspecialchars($cipher, ENT_QUOTES, 'UTF-8')) === true && str_contains($rowHtml, 'data-value=""') === true && passwordIn($page['body'], $mailPassword) === '',
+    'the general Settings page shows that row as a locked secret that is set; to a global administrator too, neither the password nor the encrypted text is anywhere on the page',
+    $page['status'] === 200 && $rowHtml !== '' && str_contains($rowHtml, 'fa-lock') === true && str_contains($rowHtml, '>Set<') === true
+        && str_contains($page['body'], htmlspecialchars($cipher, ENT_QUOTES, 'UTF-8')) === false && str_contains($rowHtml, 'data-value=""') === true && passwordIn($page['body'], $mailPassword) === '',
     'HTTP ' . $page['status'] . '; row ' . ($rowHtml === '' ? 'not found' : 'found') . '; ' . passwordIn($page['body'], $mailPassword)
 );
 $page    = req($orgJar, 'GET', '/settings', null, ip(2));
 $rowHtml = preg_match('#data-setting-key="mail\.smtp\.password">(.*?)<div class="portal-data-row#s', $page['body'], $m) === 1 ? $m[1] : '';
 ok(
-    'to an administrator of one organisation the general Settings page shows only dots for it: neither the password nor the encrypted text',
-    $page['status'] === 200 && $rowHtml !== '' && str_contains($rowHtml, '••••••••') === true && str_contains($rowHtml, htmlspecialchars($cipher, ENT_QUOTES, 'UTF-8')) === false && passwordIn($page['body'], $mailPassword) === '',
+    'to an administrator of one organisation the general Settings page says only that it is not shown: not whether it is set, and neither the password nor the encrypted text',
+    $page['status'] === 200 && $rowHtml !== '' && str_contains($rowHtml, 'Not shown.') === true && str_contains($rowHtml, '>Set<') === false
+        && str_contains($page['body'], htmlspecialchars($cipher, ENT_QUOTES, 'UTF-8')) === false && passwordIn($page['body'], $mailPassword) === '',
     'HTTP ' . $page['status'] . '; row ' . ($rowHtml === '' ? 'not found' : 'found')
 );
 
@@ -1410,9 +1413,9 @@ setting('mail.smtp.password', '', 1);
 $seen = $monitor();
 $page = req($rootJar, 'GET', $emailPage, null, ip(1));
 ok(
-    'no password: not set up; the health monitor sends the administrator to the e-mail page (not to the general Settings page), and the e-mail page says the password is typed there and nowhere else',
+    'no password: not set up; the health monitor sends the administrator to the e-mail page (not to the general Settings page), and the e-mail page says to type the password there, where it can be tested',
     $seen[0] === 'warn' && str_contains($seen[2], "the mailbox's password") === true && str_contains($seen[2], 'Fill these in at Admin → Integrations → Email') === true && str_contains($seen[2], 'Admin → Settings') === false
-        && str_starts_with($notice($page), 'not-ready: This portal cannot send e-mail yet') === true && str_contains($notice($page), 'must be typed there and nowhere else') === true,
+        && str_starts_with($notice($page), 'not-ready: This portal cannot send e-mail yet') === true && str_contains($notice($page), 'password there, where it can be tested') === true,
     json_encode($seen) . ' / ' . $notice($page)
 );
 // A password encrypted with ANOTHER key: what a restored database on a new installation holds.
@@ -1842,13 +1845,13 @@ ok(
 setting('mail.provider', 'smtp');
 q("DELETE FROM tblSettings WHERE siteID = 1 AND settingKey = 'mail.provider'");
 foreach ([
-    'the password in plain text, as the general Settings page would store it' => $mailPassword,
+    'the password in plain text, as the general Settings page stored it before #597 was fixed' => $mailPassword,
     'a correctly ENCRYPTED password whose row has lost its mark'               => $cipher,
 ] as $what => $value) {
     setting('mail.smtp.password', $value, 0);
     $seen = $monitor();
     mailSince('accept');
-    askForLink(ip($what === 'the password in plain text, as the general Settings page would store it' ? 32 : 33), mailOf('member'));
+    askForLink(ip($what === 'the password in plain text, as the general Settings page stored it before #597 was fixed' ? 32 : 33), mailOf('member'));
     $mail = mailSince('accept');
     ok(
         'a password row NOT marked as a secret, holding ' . $what . ': not set up, said as "not saved by the e-mail page", and nothing is sent',
@@ -2047,8 +2050,8 @@ ok(
 $page = req($rootJar, 'GET', '/help/admin', null, ip(1));
 $text = words($page['body']);
 ok(
-    'the administrator\'s guide has a section on the SMTP mailbox: the password is typed only on the e-mail page, the certificate is always checked, and mail is not kept to try again',
-    $page['status'] === 200 && str_contains($page['body'], 'id="smtp-mailbox"') === true && str_contains($text, 'Type it only on that page.') === true
+    'the administrator\'s guide has a section on the SMTP mailbox: the password is typed on the e-mail page, where it can be tested, the certificate is always checked, and mail is not kept to try again',
+    $page['status'] === 200 && str_contains($page['body'], 'id="smtp-mailbox"') === true && str_contains($text, 'Type it on that page, where it can be tested before the portal relies on it.') === true
         && str_contains($text, 'certificate is always checked, and this cannot be switched off') === true && str_contains($text, 'It does not keep mail to try again.') === true,
     'HTTP ' . $page['status']
 );

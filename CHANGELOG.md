@@ -2,6 +2,118 @@
 
 
 ## [Unreleased] (alpha)
+- **Secret settings (#597, #497): what somebody upgrading must know**
+  - **1. What STARTS the moment the new files are uploaded**
+    Not when Upgrade is pressed: as soon as the files are on the server.
+    Until now the portal never decrypted a stored secret. So a feature that an
+    administrator had switched on, and whose secret was saved on the feature's
+    own page, was handed a scramble and silently did nothing. With this version
+    each of those gets its real secret and **starts working by itself**:
+    - **Error reports go to the outside error service** (Sentry or GlitchTip),
+      from the first error onwards. Each report carries the error's text, the
+      address that was asked for, and the number of the person signed in. (A
+      scheduled job's token is cut out of that address.)
+    - **The venue reminders job starts running**, and sends its reminder e-mails.
+    - **Web push notices reach subscribers.**
+    - **Text messages (which cost money), payments, AI, transcription and maps**
+      start working as soon as somebody uses them. Nothing is queued up waiting.
+    **If you switched one of these on and do not want it yet, switch it off
+    BEFORE you upload this version.**
+    Nothing starts for a feature that was never switched on, or whose secret was
+    never saved. Content translation still cannot be reached (#485).
+  - **2. What can STOP**
+    **A scheduled job whose token was regenerated.** The page showed, and the
+    portal accepted, the scrambled form of the token (a long text ending in `=`).
+    The portal now expects the real token. Open that job's page, copy the token it
+    now shows, and put it into the job's address in your hosting panel's
+    scheduler. In practice this is the venue reminders job after "regenerate
+    token" was used, or a token somebody added by hand as a secret.
+  - **3. Back up the key file with the database**
+    **Keep a copy of `_auth_keys/enc.key` with every database backup, from now
+    on.** Every integration's secret depends on it after this version. A database
+    without the key file that goes with it gives back secrets nobody can read, and
+    each one then has to be typed in again; scheduled jobs then also need their
+    new tokens put into their addresses in the hosting panel's scheduler. Before
+    upgrading, check the file is there and is not empty: an empty key file is
+    treated as no key at all, and nothing can be saved until the real one is back.
+  - **4. What Upgrade does to older secrets**
+    **Press Upgrade.** Migration 214 runs, and then the page encrypts, by itself,
+    every secret an older version stored as readable text. It is the same secret
+    afterwards: nothing that uses it changes. Read the "Stored secrets" card: it
+    names what it encrypted, and anything it had to leave (one it cannot read, or
+    could not rewrite). If the key file is missing or empty when Upgrade is
+    pressed, nothing is encrypted and the card says so.
+    Then open Settings as a global administrator. If a yellow notice is there, it
+    names each secret that still needs entering again. If you no longer have a
+    value, make a new one where it came from.
+    **Older backups still hold those secrets as readable text**, and so does the
+    snapshot Upgrade takes of the database before it starts. Keep them as
+    carefully as the key file, or replace the secrets at their providers.
+    **Rows already in the error log are not rewritten.** If a scheduled job's
+    address ever appeared on Admin, Error log, give that job a new token.
+- **Secret settings are stored encrypted, never shown back, and read correctly (#597, #497)**
+  - **Security**
+    - **Secrets saved on the Settings page are now stored encrypted and are never
+      shown back (#597).** Editing a secret (a mail password, a client secret, a
+      scheduled job's token) used to store it as readable text, take away its "this
+      is a secret" mark, and then show it in full to every administrator, including
+      an administrator of only one organisation. Now the page says only "Set" or
+      "Not set". An empty box keeps the stored value; a new value replaces it; a
+      tick removes it. The "eye" button has gone. An administrator of one
+      organisation is not told whether an installation-wide secret is set.
+    - **The portal now reads its encrypted secrets correctly (#497).** It never
+      decrypted them: everything that used a secret saved through its own page
+      was handed a scramble and silently did not work. Mail only worked because
+      of the fault above. See "What STARTS" above.
+    - **Upgrade now encrypts, by itself, every secret an older version stored as
+      readable text (#497).** The Upgrade page says which ones, by name. It never
+      touches a secret that is already encrypted, and leaves alone (and names) any
+      it cannot read or cannot rewrite.
+    - **When the bot check's keys are stored but cannot be read** (the key file
+      was lost or replaced), sign-in and password reset go on WITHOUT the bot
+      check, still with their own limits on wrong tries, and every other form the
+      bot check protects is refused and says so in plain words. Before, every
+      protected form failed, sign-in included, so nobody could get in to put it
+      right. The visitor form and live chat, which have no place for a bot check,
+      say that they cannot be sent at the moment; they used to answer only
+      "Verification failed". Admin, Captcha, the health page and the monitor's
+      address, the Settings page and the error log each tell administrators.
+    - **Admin, Captcha no longer writes a secret key into its page**, and an empty
+      secret-key box keeps the stored key. To stop using a provider, empty both of
+      its boxes. **A key the portal cannot read is never removed by an empty
+      box:** the boxes of such a provider are shown empty, and pressing Save used
+      to empty both keys and switch the bot check off without a word. To stop
+      using such a provider, remove its two keys on the Settings page. Saving a
+      key while the portal's key file is missing or empty is refused with a plain
+      message.
+    - **An empty key file is no longer treated as a key.** It used to count as
+      one that anybody could work out, so Upgrade "encrypted" secrets with it. A
+      key file that is empty, or is not a file, now means "no key": nothing is
+      saved or encrypted until the real file is back. A key file of any other
+      length works exactly as before.
+    - **A scheduled job's token is no longer recorded or sent with an error.** An
+      error on a job's address used to be stored with the whole address, token
+      included; Admin, Error log showed it, the alert e-mail carried it, and the
+      outside error service was sent it. The token's value is now replaced with
+      `[removed]`. Rows already stored are not rewritten.
+    - **The QR settings page no longer shows how long the stored key is.**
+    - **The error log no longer records what a failing function was handed.** It
+      used to keep the first 15 characters of each value, which could be the start
+      of a secret, and Admin, Error log shows that to every administrator.
+    - **The health page has a "Stored secrets" check**: red when a stored secret
+      cannot be read, amber when one is still stored as readable text, and amber
+      when the key file is missing, empty or shorter than the installer writes
+      (a short one still works; it is named so that it is compared with a backup).
+  - **Database**
+    - **Migration 214** puts the "this is a secret" mark back on every secret
+      setting the old Settings page cleared it from (57 names), and takes it off
+      `auth.ms365.tenantOnly`, a yes/no that was marked by mistake. It changes no
+      value and encrypts nothing; the Upgrade page does that, straight after it.
+  - **Checks**
+    - New `tools/settings-secrets-selftest.php` (151 checks, on the real pages)
+      and `tools/audit-checks/check_sensitive_seeds.py` (a seeded secret must be
+      empty). The audit check is not yet run by any workflow.
+  - Review: one independent check by a fresh Claude agent standing in for Codex (Upgrade could not be made to lose a secret or encrypt one twice; no secret on any of 1,472 fetched pages; one medium and three small faults), then one round of fixes with no second check. Run on MySQL 8.0.36 and 8.4.11; not on MariaDB, Apache, or against a real provider. Not reviewed by Codex yet.
 - **Security — after signing in, a "come back to" address could lead to another website (every installation)**
   - `Auth::safeRedirectUrl()` accepted `/<tab>/other.example`. A browser takes tabs and line breaks out of an
     address before reading it, so that is `//other.example`: another site. A link to the sign-in page carrying such

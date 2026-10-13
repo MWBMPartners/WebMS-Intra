@@ -12,7 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /', true, 302); e
 Auth::ensureSession();
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) { http_response_code(400); exit('Bad request'); }
 if (class_exists(Captcha::class) === true && Captcha::isConfigured() === true) {
-    if (Captcha::verify($_POST) === false) { http_response_code(400); exit('Captcha failed.'); }
+    if (Captcha::verify($_POST, 'decision-card') === false) { http_response_code(400); exit('Captcha failed.'); }
 }
 
 $siteId = Site::id();

@@ -14,11 +14,18 @@
  * Access: UMBRELLA administrators only. This reshapes the database for the
  *         whole installation, so a site administrator is not enough.
  *
+ * STORED SECRETS ARE ENCRYPTED HERE TOO (#497; the owner's decision of
+ * 13 September 2026). Straight after the migrations, every secret setting
+ * that is still stored as readable text is encrypted in place, and the page
+ * says what was done, by NAME and never by value. The rules that keep it from
+ * losing a secret are at SecretSettings::repairStoredRows(). It runs on every
+ * press of the button, and a second run changes nothing the first one did.
+ *
  * @package   Portal\Install
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.2.0
+ * @version   1.3.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/84
  * -----------------------------------------------------------------------------
  */
@@ -33,6 +40,7 @@ use Portal\Core\Auth;
 use Portal\Core\FeedAdmin;
 use Portal\Core\Migrator;
 use Portal\Core\Router;
+use Portal\Core\SecretSettings;
 use Portal\Core\Site;
 
 // Require authentication and admin access
@@ -67,6 +75,7 @@ $ranMigrations = false;
 $ranWithoutWayBack = '';
 $unplacedAfterUpgrade = 0; // #533 — only computed for real after a run; see below
 $apiNotice = ['calendars' => 0, 'organisations' => 0]; // #514 part 8 — see below
+$secretRepair = null; // #497 — what the repair of stored secrets did; null until a run
 
 // Handle POST to run migrations
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -223,9 +232,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // 🔐 #497: which settings are readable text because they are not marked
+    //    as secrets at all? Taken BEFORE the migrations, because migration 214
+    //    puts the mark back on the secrets the old Settings page took it
+    //    from, and after that a long token of hex digits cannot be told from
+    //    text encrypted with another key. Fingerprints only. See
+    //    SecretSettings::readableBefore().
+    $readableBefore = SecretSettings::readableBefore($mysqli);
+
     $results = $migrator->runAll($userId);
     $ranMigrations = true;
     $pending = $migrator->pending(); // Refresh pending list
+
+    // 🔐 #497: encrypt, in place, every secret still stored as readable text.
+    //    AFTER the migrations, so that it sees the marks migration 214 has
+    //    just put back; and whether or not every migration succeeded, because
+    //    it only ever touches rows that ARE marked. It never throws and never
+    //    stops for one row (see SecretSettings::repairStoredRows()), so it
+    //    cannot be what leaves the portal closed. What it did is shown below,
+    //    by name, and written to the activity log, by name.
+    $secretRepair = SecretSettings::repairStoredRows($mysqli, $readableBefore);
+    try {
+        \Portal\Core\Logger::activity(
+            'SecretSettingsRepaired',
+            sprintf(
+                'Stored secrets after the upgrade: %d encrypted now (%s); %d already encrypted; %d left as readable text (%s); '
+                . '%d that cannot be read (%s); %d changed while the upgrade ran (%s)%s',
+                count($secretRepair['encrypted']),
+                implode(', ', $secretRepair['encrypted']),
+                $secretRepair['alreadyProtected'],
+                count($secretRepair['leftReadable']),
+                implode(', ', $secretRepair['leftReadable']),
+                count($secretRepair['cannotBeRead']),
+                implode(', ', $secretRepair['cannotBeRead']),
+                count($secretRepair['changedMeanwhile']),
+                implode(', ', $secretRepair['changedMeanwhile']),
+                $secretRepair['keyFileMissing'] === true ? '; the key file is missing, empty or unreadable, so nothing was encrypted' : ''
+            ),
+            $userId
+        );
+    } catch (\Throwable $ignored) {
+        unset($ignored);
+    }
 
     // 🛡️ #533: how many accounts, across the WHOLE installation, still
     //    belong to no organisation after migration 199 has had its chance
@@ -429,6 +477,104 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- 🔐 #497: what the repair of stored secrets did. Names only: a
+                 value must never be printed on this page, in any state. -->
+            <?php if ($ranMigrations === true && is_array($secretRepair) === true): ?>
+                <?php
+                $secretNames = static function (array $names): string {
+                    $out = '';
+                    foreach ($names as $name) {
+                        $out .= '<code class="me-2 text-break">' . htmlspecialchars((string) $name, ENT_QUOTES, 'UTF-8') . '</code>';
+                    }
+                    return $out;
+                };
+                $secretsNeedAction = $secretRepair['couldNotRun'] === true || $secretRepair['keyFileMissing'] === true
+                    || $secretRepair['leftReadable'] !== [] || $secretRepair['cannotBeRead'] !== [] || $secretRepair['changedMeanwhile'] !== [];
+                ?>
+                <div class="card mb-4 <?php echo $secretsNeedAction === true ? 'border-warning' : ''; ?>" id="upgrade-secrets">
+                    <div class="card-header <?php echo $secretsNeedAction === true ? 'bg-warning-subtle' : ''; ?>">
+                        <h2 class="h6 mb-0">Stored secrets</h2>
+                    </div>
+                    <div class="card-body">
+                        <?php if ($secretRepair['couldNotRun'] === true): ?>
+                            <p class="mb-0" data-secrets="could-not-run">
+                                The stored secrets could not be checked, because the settings could not be read. Nothing was
+                                changed. Open Settings: it names any secret that needs entering again.
+                            </p>
+                        <?php else: ?>
+                            <?php if ($secretRepair['keyFileMissing'] === true): ?>
+                                <p class="mb-2" data-secrets="key-file-missing">
+                                    <strong>No secret was encrypted, and nothing was changed, because the portal's key file is missing, is empty or cannot be read</strong>
+                                    (<code>enc.key</code>, in the <code>_auth_keys</code> folder). Put that file back from your backup.
+                                    <?php if ($secretRepair['unchecked'] > 0): ?>
+                                        <?php echo (int) $secretRepair['unchecked']; ?> stored
+                                        secret<?php echo $secretRepair['unchecked'] === 1 ? '' : 's'; ?> could not be checked without it.
+                                    <?php endif; ?>
+                                </p>
+                            <?php endif; ?>
+
+                            <?php if ($secretRepair['encrypted'] !== []): ?>
+                                <p class="mb-1" data-secrets="encrypted">
+                                    <strong><?php echo count($secretRepair['encrypted']); ?>
+                                    secret<?php echo count($secretRepair['encrypted']) === 1 ? ' was' : 's were'; ?> stored as readable text
+                                    and <?php echo count($secretRepair['encrypted']) === 1 ? 'is' : 'are'; ?> now stored encrypted.</strong>
+                                    <?php echo count($secretRepair['encrypted']) === 1 ? 'It is the same secret' : 'They are the same secrets'; ?>:
+                                    nothing that uses <?php echo count($secretRepair['encrypted']) === 1 ? 'it' : 'them'; ?> has changed.
+                                </p>
+                                <p class="mb-3"><?php echo $secretNames($secretRepair['encrypted']); ?></p>
+                            <?php endif; ?>
+
+                            <?php if ($secretRepair['leftReadable'] !== []): ?>
+                                <p class="mb-1" data-secrets="left-readable">
+                                    <strong><?php echo count($secretRepair['leftReadable']); ?>
+                                    secret<?php echo count($secretRepair['leftReadable']) === 1 ? ' is' : 's are'; ?> still stored as readable text.</strong>
+                                    <?php echo $secretRepair['keyFileMissing'] === true
+                                        ? 'With no usable key file, none could be encrypted.'
+                                        : 'The portal could not store the encrypted form, so each was left exactly as it was.'; ?>
+                                    <?php echo count($secretRepair['leftReadable']) === 1 ? 'It still works' : 'They still work'; ?>.
+                                    Enter each one again on the Settings page to store it encrypted.
+                                </p>
+                                <p class="mb-3"><?php echo $secretNames($secretRepair['leftReadable']); ?></p>
+                            <?php endif; ?>
+
+                            <?php if ($secretRepair['cannotBeRead'] !== []): ?>
+                                <p class="mb-1" data-secrets="cannot-be-read">
+                                    <strong><?php echo count($secretRepair['cannotBeRead']); ?>
+                                    secret<?php echo count($secretRepair['cannotBeRead']) === 1 ? ' looks' : 's look'; ?> encrypted, but the
+                                    portal's key file does not open <?php echo count($secretRepair['cannotBeRead']) === 1 ? 'it' : 'them'; ?>.</strong>
+                                    <?php echo count($secretRepair['cannotBeRead']) === 1 ? 'It was' : 'Each was'; ?> left exactly as it was.
+                                    If it was encrypted with a different key file, whatever uses it will not work. Enter each one
+                                    again on the Settings page.
+                                </p>
+                                <p class="mb-3"><?php echo $secretNames($secretRepair['cannotBeRead']); ?></p>
+                            <?php endif; ?>
+
+                            <?php if ($secretRepair['changedMeanwhile'] !== []): ?>
+                                <p class="mb-1" data-secrets="changed-meanwhile">
+                                    <strong><?php echo count($secretRepair['changedMeanwhile']); ?>
+                                    secret<?php echo count($secretRepair['changedMeanwhile']) === 1 ? ' was' : 's were'; ?> changed by somebody
+                                    while the upgrade was running</strong>, and so
+                                    <?php echo count($secretRepair['changedMeanwhile']) === 1 ? 'was' : 'were'; ?> left alone. Open Settings to see
+                                    whether <?php echo count($secretRepair['changedMeanwhile']) === 1 ? 'it needs' : 'they need'; ?> entering again.
+                                </p>
+                                <p class="mb-3"><?php echo $secretNames($secretRepair['changedMeanwhile']); ?></p>
+                            <?php endif; ?>
+
+                            <?php if ($secretRepair['keyFileMissing'] === false): ?>
+                                <p class="mb-0 text-muted small" data-secrets="already">
+                                    <?php echo (int) $secretRepair['alreadyProtected']; ?> stored
+                                    secret<?php echo $secretRepair['alreadyProtected'] === 1 ? ' was' : 's were'; ?> already encrypted
+                                    and <?php echo $secretRepair['alreadyProtected'] === 1 ? 'was' : 'were'; ?> not touched.
+                                    <?php if ($secretsNeedAction === false && $secretRepair['encrypted'] === []): ?>
+                                        Nothing needed doing.
+                                    <?php endif; ?>
+                                </p>
+                            <?php endif; ?>
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php endif; ?>

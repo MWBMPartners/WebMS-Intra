@@ -196,12 +196,14 @@ class Debug
         //    of attempts to switch on debugging in production, a record that is
         //    only worth keeping if it is true.
         $ip = RateLimiter::clientIp();
-        $path = $_SERVER['REQUEST_URI'] ?? '';
+        $path = (string) ($_SERVER['REQUEST_URI'] ?? '');
 
         // 🪵 Use Logger if available; never throw — this is best-effort audit only.
         if (class_exists('\\Portal\\Core\\Logger', false) === true) {
             try {
-                Logger::activity('DebugBlocked', 'Debug mode attempt in prod from ' . $ip . ' at ' . $path);
+                // The address goes into the activity log, so a scheduled
+                // job's token is cut out of it first (Logger::withoutJobToken()).
+                Logger::activity('DebugBlocked', 'Debug mode attempt in prod from ' . $ip . ' at ' . Logger::withoutJobToken($path));
             } catch (\Throwable) {
                 // 🤷 Logging failure must never break the request.
             }

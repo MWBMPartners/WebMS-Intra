@@ -190,7 +190,7 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 
 // 🤖 7. Captcha — same multi-provider helper prayer-requests/visitors use.
 // Gracefully allows through when no provider is configured.
-if (Captcha::verify($_POST) === false) {
+if (Captcha::verify($_POST, 'found-item') === false) {
     Logger::activity('AssetFoundReportRejected', 'Captcha failed on found-save for asset #' . $assetId);
     $bounce('Verification failed — please try again.', 'danger');
 }

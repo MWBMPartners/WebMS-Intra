@@ -28,8 +28,3 @@
 .github/workflows/deploy.yml  40a1f96ef0d1bbcfb514f68c970827d2d8edd1d3d2ee911d9498f6c7ee9158c2  heading example (beta folder); waits for the approved deploy rewrite
 .github/workflows/deploy.yml  ec5b29735d29bbaf436c7b90573f53a74e62fb1ba9226454ce0d6dc8980fc399  heading example (dev folder); waits for the approved deploy rewrite
 .github/workflows/deploy.yml  4eefb1a2e12dc2061c23c121fae9cf3037a57e7ed2d093112a8ea8e44c75030e  the live health check's address; waits for the approved deploy rewrite
-
-# One comment in the portal's start-up file. Another package was changing
-# that file while F4 was built, so the new wording was handed to the
-# coordinator (rollout-F4 DOC-ENTRIES) to put in when that package lands.
-web/_core/bootstrap.php  70408c539ccdbe34d5a17101ccfd4f7ca55bf61f626bbf516da530dcef8abfc3  a comment naming our installation; new wording is with the coordinator

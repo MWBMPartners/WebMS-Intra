@@ -235,11 +235,22 @@ class ErrorMonitor
         return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($b), 4));
     }
 
+    /**
+     * The address this request asked for, as it is SENT TO THE OUTSIDE
+     * service, with a scheduled job's token cut out of it.
+     *
+     * WHAT WAS HERE: the whole address. A scheduled job's address carries
+     * the job's token after the "?", so the first error on such a request
+     * handed that token to another company. Nobody had seen it happen only
+     * because this adapter never worked before #497: its own secret was
+     * never decrypted. Logger::withoutJobToken() says what is cut, what that
+     * costs, and what it cannot do (it cannot take back what was sent).
+     */
     private static function currentUrl(): string
     {
         $scheme = (($_SERVER['HTTPS'] ?? '') !== '' && (string) ($_SERVER['HTTPS'] ?? '') !== 'off') ? 'https' : 'http';
         $host   = (string) ($_SERVER['HTTP_HOST'] ?? 'unknown');
-        $uri    = (string) ($_SERVER['REQUEST_URI'] ?? '/');
+        $uri    = Logger::withoutJobToken((string) ($_SERVER['REQUEST_URI'] ?? '/'));
         return $scheme . '://' . $host . $uri;
     }
 }

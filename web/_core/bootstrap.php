@@ -219,22 +219,64 @@ spl_autoload_register(function (string $class): void {
 
 if (function_exists('encrypt_setting') === false) {
     /**
+     * 🗝️ What is in the key file, or null when there is NO KEY: the file is
+     * missing, cannot be read, is not a file at all (a folder of that name,
+     * say), or is EMPTY.
+     *
+     * WHAT WAS WRONG (found 13 October 2026, by running it): the two
+     * functions below only asked is_readable(), and then used whatever
+     * file_get_contents() gave. An EMPTY file, and a folder of that name
+     * (which PHP reads as nothing), both made a key out of nothing, which
+     * is the same key on every installation in the world. A secret saved
+     * like that looked protected and was not, and turned into a scramble
+     * the moment the real key file was put back.
+     *
+     * WHERE THE LINE IS: only "nothing at all" is refused. The key is the
+     * SHA-256 of the WHOLE file, so a file of any other length, however
+     * short, is a working key that secrets are already stored under, and it
+     * is used exactly as before. Refusing short files was considered and
+     * REJECTED: it would lose every secret on such an installation.
+     *
+     * The same test is in Portal\Core\SecretSettings::keyFileContents().
+     * Change both together; tools/settings-secrets-selftest.php holds them
+     * to the same answer.
+     */
+    function portal_key_file_contents(): ?string
+    {
+        $keyPath = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . 'enc.key';
+        // is_file() first: is_readable() says yes to a folder, and reading one
+        // gives nothing at all plus a PHP notice on every request.
+        if (is_file($keyPath) === false || is_readable($keyPath) === false) {
+            return null;
+        }
+        $contents = file_get_contents($keyPath);
+
+        return ($contents === false || $contents === '') ? null : $contents;
+    }
+
+    /**
      * Encrypt a plaintext setting value for secure database storage.
      *
      * @param string $plain The plaintext value to encrypt
      *
      * @return string Base64-encoded ciphertext (nonce prepended)
+     *
+     * @throws \RuntimeException When there is no key: see portal_key_file_contents().
      */
     function encrypt_setting(string $plain): string
     {
-        $keyPath = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . 'enc.key';
-
-        if (is_readable($keyPath) === false) {
-            throw new \RuntimeException('Encryption key file not found: ' . $keyPath);
+        $keyFile = portal_key_file_contents();
+        if ($keyFile === null) {
+            // Was "Encryption key file not found", which is untrue of a file
+            // that is there and empty.
+            throw new \RuntimeException(
+                'Encryption key file is missing, is empty or cannot be read: '
+                . PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . 'enc.key'
+            );
         }
 
         // 🔑 Derive a 256-bit key from the key file contents
-        $keyHash = hash('sha256', file_get_contents($keyPath));
+        $keyHash = hash('sha256', $keyFile);
         $key     = sodium_hex2bin($keyHash);
 
         // 🎲 Generate a random nonce for this encryption operation
@@ -268,14 +310,14 @@ if (function_exists('encrypt_setting') === false) {
         $nonce  = substr($bin, 0, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
         $cipher = substr($bin, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
 
-        $keyPath = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . 'enc.key';
-
-        if (is_readable($keyPath) === false) {
+        // No key (see portal_key_file_contents()): nothing can be opened.
+        $keyFile = portal_key_file_contents();
+        if ($keyFile === null) {
             return '';
         }
 
         // 🔑 Derive the same key used during encryption
-        $keyHash = hash('sha256', file_get_contents($keyPath));
+        $keyHash = hash('sha256', $keyFile);
         $key     = sodium_hex2bin($keyHash);
 
         // 🔓 Attempt decryption - returns false if tampered or wrong key
@@ -419,6 +461,30 @@ try {
 
 $SETTINGS = [];
 
+// 🤫 From here on this request holds REAL secrets (see the load just below),
+//    so the record PHP keeps of an error must not carry what a function was
+//    called with.
+//
+//    WHY: when something fails, PHP notes each function on the way there
+//    together with the first 15 characters of every argument, unless this
+//    option is on. The portal stores that note (Logger::exception() writes
+//    it to tblErrors, which Admin, Error log shows to every administrator,
+//    and the alert e-mail carries it). So one failure inside any code that
+//    was handed a secret would have written the start of that secret into
+//    the error log. Run on 12 October 2026 with a planted fault: the start
+//    of a client secret, typed while the key file was missing, turned up on
+//    that page, for an administrator of one organisation too.
+//
+//    Most hosts already have it on (PHP's own production settings do). This
+//    makes it so everywhere, for every release channel: a development copy
+//    holds real secrets too. The file and line of each step are still kept.
+//
+//    WHAT IT CANNOT DO: stop code that puts a secret into the TEXT of an
+//    error it raises itself. Nor does it change what else is stored with an
+//    error: the address that was asked for is, and a scheduled job's
+//    address carries that job's token.
+ini_set('zend.exception_ignore_args', '1');
+
 // 🛡️ Wrapped in try/catch because this runs BEFORE the global exception
 //    handler is registered (line ~420). Under PHP 8.1+ strict mysqli mode
 //    any error here — tblSettings missing/corrupt, connection blip, charset
@@ -436,17 +502,55 @@ try {
         $settingsStmt->bind_param('i', $preDetectedSiteID);
         $settingsStmt->execute();
         $result = $settingsStmt->get_result();
+        $secretsReadAsStored = '';
         while ($row = $result->fetch_assoc()) {
             $value = $row['settingValue'];
 
-            // 🔓 Decrypt sensitive settings (API keys, secrets etc)
-            if ($row['isSensitive'] === '1' && $value !== '' && $value !== null) {
-                $value = decrypt_setting($value);
+            // 🔓 A secret (a row whose isSensitive mark is on) is handed to
+            //    the rest of the portal as its REAL value.
+            //
+            //    WHAT WAS HERE, AND WHY IT NEVER RAN (#497):
+            //        if ($row['isSensitive'] === '1' && …) { decrypt_setting($value) }
+            //    This row comes from a prepared statement, which hands the
+            //    mark back as the NUMBER 1. The text '1' never equals it, so
+            //    no secret was ever decrypted and every reader got the
+            //    scramble (run on 12 October 2026, MySQL 8.0.36 and 8.4.11).
+            //
+            //    WHY NOT JUST CORRECT THAT COMPARISON: decrypt_setting()
+            //    throws on a marked row that holds short plain text, and a
+            //    fresh install seeds one (auth.ms365.tenantOnly = 'true').
+            //    This runs before any error handler exists, and the catch
+            //    below only catches database errors, so every page would
+            //    have stopped. SecretSettings::forReader() never throws: a
+            //    marked row this installation's key does not open is used
+            //    exactly as stored, which is what readers are handed today.
+            //    The reasons, and what it cannot do, are at the top of
+            //    web/_core/SecretSettings.php.
+            //
+            //    WHY IT IS WRAPPED ANYWAY: files reach a shared host one at a
+            //    time. If this file arrives before SecretSettings.php, the
+            //    class is not there yet, and without the catch every page
+            //    would stop until it was. With it, that request reads the
+            //    row as stored, as before this change. One try per row, not
+            //    one round the loop: a single try would drop every setting
+            //    after the first row that failed.
+            //
+            //    THE NAME IS PASSED TOO, so that a secret which cannot be read
+            //    at all is remembered by name for step 7c below, for the bot
+            //    check (Captcha.php) and for the health page.
+            try {
+                $value = \Portal\Core\SecretSettings::forReader($row['isSensitive'], $value, (string) $row['settingKey']);
+            } catch (\Throwable $e) {
+                $secretsReadAsStored = $e->getMessage();
             }
 
             assign_setting($SETTINGS, $row['settingKey'], $value);
         }
         $settingsStmt->close();
+        if ($secretsReadAsStored !== '') {
+            // One line for the request, not one per row, and never a value.
+            error_log('[WebMS-Intra] Secret settings were read as stored, not decrypted: ' . $secretsReadAsStored);
+        }
     } else {
         // 🚨 Settings query failed — log error so it's visible in admin error log
         error_log('[WebMS-Intra] CRITICAL: Failed to prepare settings query: ' . $mysqli->error);
@@ -509,7 +613,8 @@ if ($hidePoweredBy === false) {
 // -----------------------------------------------------------------------------
 // Industry-standard defence-in-depth. All headers are unconditional except
 // HSTS (only sent when the request arrived over HTTPS, which is the case on
-// portal.millrdsdacambridge.uk via DreamHost's edge-redirect). Headers are
+// our own installation, where the host redirects http to https at its
+// edge). Headers are
 // sent BEFORE any app handler so they apply to every response including
 // error pages and the maintenance gate.
 //
@@ -616,6 +721,26 @@ if (isset($SETTINGS['site']['timezone']) === true && $SETTINGS['site']['timezone
 // See: core/Site.php
 
 \Portal\Core\Site::init($mysqli, $SETTINGS, $preDetectedSiteID);
+
+// 🚨 ---------------------------------------------------------------------------
+// 7c. Say so if a stored secret cannot be read (#497)
+// -----------------------------------------------------------------------------
+// A secret that looks encrypted and that this installation's key file does
+// not open is handed on exactly as stored (step 6), so nothing stops; but
+// whatever uses it will not work, and nobody would know why. This writes it
+// down, by name: see SecretSettings::reportUnreadable() for where, how often,
+// and why not while the portal is closed for an upgrade.
+//
+// It costs nothing when every secret reads. It sits AFTER App::init and
+// Site::init, because the error log needs both, and BEFORE the handlers
+// below, so that nothing here can be the first thing they catch. It is
+// wrapped as well: reporting a problem must never create one, and the class
+// file may not have arrived yet on a host that receives files one at a time.
+try {
+    \Portal\Core\SecretSettings::reportUnreadable($mysqli);
+} catch (\Throwable $e) {
+    error_log('[WebMS-Intra] Could not report on stored secrets: ' . get_class($e));
+}
 
 // ⏱️ ---------------------------------------------------------------------------
 // 8. Initialise Debug timer

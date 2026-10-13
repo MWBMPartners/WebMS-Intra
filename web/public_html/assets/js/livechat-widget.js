@@ -307,7 +307,22 @@
                 });
                 const j = await r.json().catch(() => null);
                 if (!r.ok) {
-                    setStatus((j && j.error && (j.error.message || j.error)) || 'Send failed.');
+                    // A 503 is the server saying "not now, and not your
+                    // doing" (for one, the check that keeps automated
+                    // senders out is not working), and its `message` is
+                    // written for the viewer to read. So that one is shown.
+                    //
+                    // WHAT WAS HERE read only `j.error`, a field the server
+                    // never sends, so every refusal showed "Send failed."
+                    // and a viewer could not tell "closed for now" from a
+                    // mistake of their own. The other refusals still show
+                    // "Send failed.": their messages are short notes for a
+                    // program, not sentences for a person.
+                    if (r.status === 503 && j && typeof j.message === 'string' && j.message !== '') {
+                        setStatus(j.message);
+                    } else {
+                        setStatus((j && j.error && (j.error.message || j.error)) || 'Send failed.');
+                    }
                 } else {
                     bodyEl.value = '';
                     setStatus(j && j.data && j.data.status === 'pending' ? 'Sent — awaiting moderator.' : 'Sent.');

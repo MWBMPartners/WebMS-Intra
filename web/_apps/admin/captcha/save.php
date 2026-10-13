@@ -27,11 +27,21 @@
  * organisation are for a global administrator only. Anybody else is now
  * refused, is told why on screen, and nothing is saved.
  *
+ * AN EMPTY SECRET-KEY BOX KEEPS THE STORED KEY (#597, 12 October 2026)
+ * -----------------------------------------------------------------------------
+ * The page no longer writes a secret key into its boxes, so an empty box can
+ * no longer mean "wipe it". The rule is beside the write, in the `keys` action.
+ *
+ * A STORED KEY THE PORTAL CANNOT READ IS NEVER REPLACED BY AN EMPTY BOX
+ * (13 October 2026). The page draws both boxes of such a provider empty, so
+ * pressing Save used to empty both keys and switch the bot check off without
+ * a word. The rule, and why, is in the same place.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.11.0
+ * @version   0.13.0
  * -----------------------------------------------------------------------------
  */
 
@@ -42,6 +52,7 @@ use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\SecretSettings;
 
 // 🛡️ Only POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -94,12 +105,25 @@ $action = (string) ($_POST['action'] ?? '');
 /**
  * 🔧 Upsert a global (siteID = NULL) setting key/value.
  *
- * Encrypts the value first if isSensitive is true and the encrypt_setting()
- * helper is available.
+ * A secret (isSensitive true) is encrypted first, through
+ * SecretSettings::seal(). If it cannot be encrypted, NOTHING is written and
+ * false comes back.
+ *
+ * WHAT WAS HERE: `encrypt_setting($value)` called directly, and only "if the
+ * helper is available". That helper throws when the portal's key file is
+ * missing, so saving ended in the portal's error page. That mattered little
+ * until #497: since then this page is where an administrator is sent to type
+ * the keys in again when the stored ones cannot be read, and a missing key
+ * file is one of the ways to get there. And had the helper ever not been
+ * there, the key would have been stored as readable text with the mark on.
  */
 $upsert = static function (mysqli $db, string $key, string $value, bool $isSensitive): bool {
-    if ($isSensitive === true && function_exists('encrypt_setting') === true && $value !== '') {
-        $value = encrypt_setting($value);
+    if ($isSensitive === true && $value !== '') {
+        $sealed = SecretSettings::seal($value);
+        if ($sealed === null) {
+            return false;
+        }
+        $value = $sealed;
     }
     $isSensInt = $isSensitive === true ? 1 : 0;
 
@@ -197,16 +221,95 @@ if ($action === 'keys') {
     $recaptchaV3Thr = (string) $thresholdFloat;
 
     $writes = [
-        ['auth.turnstile.siteKey',         $turnstileSite,   true],
-        ['auth.turnstile.secretKey',       $turnstileSecret, true],
-        ['auth.recaptcha.siteKey',         $recaptchaSite,   true],
-        ['auth.recaptcha.secretKey',       $recaptchaSecret, true],
         ['auth.recaptcha.version',         $recaptchaVer,    false],
         ['auth.recaptcha.v3.action',       $recaptchaV3Act,  false],
         ['auth.recaptcha.v3.threshold',    $recaptchaV3Thr,  false],
-        ['auth.hcaptcha.siteKey',          $hcaptchaSite,    true],
-        ['auth.hcaptcha.secretKey',        $hcaptchaSecret,  true],
     ];
+
+    // 🔑 Each provider's two keys.
+    //
+    //    THE SECRET KEY: an empty box keeps what is stored (#597).
+    //    WHAT WAS HERE: all three were written on every save, with whatever
+    //    the form sent. That was right only while the page filled each box
+    //    with the stored key. The page no longer writes a secret key into its
+    //    boxes (web/_apps/admin/captcha/index.php), so they arrive empty
+    //    unless somebody typed in them, and writing an empty value would wipe
+    //    the key every time a global administrator changed anything else here.
+    //    A provider with no secret key counts as not set up, so the "are you
+    //    a person?" check would have gone off without anybody choosing that.
+    //
+    //    THE RULE, for a provider whose stored keys the portal CAN read:
+    //      - something typed          → it replaces the stored key;
+    //      - empty, site key filled   → the stored key is kept (nothing written);
+    //      - empty, site key empty    → the stored key is removed. This is how
+    //                                   a provider is taken out of use, and the
+    //                                   page says so.
+    //
+    //    🚫 A STORED KEY THE PORTAL CANNOT READ IS NEVER REPLACED BY AN EMPTY
+    //    BOX (13 October 2026). WHAT WAS WRONG, found by running it: the page
+    //    draws BOTH boxes empty for a provider whose keys cannot be read (what
+    //    is stored is a scramble, and showing it would invite somebody to save
+    //    it back). So "both boxes empty" arrived from the form AS DRAWN, the
+    //    rule above read it as "take this provider out of use", and one press
+    //    of Save emptied both keys. The bot check then went off on every
+    //    form, the warnings stopped (nothing was unreadable any more), and
+    //    putting the key file back could no longer bring the keys back: the
+    //    opposite of the owner's decision that public forms are refused in
+    //    that state. So, for a provider with a stored key that cannot be read:
+    //      - both boxes empty         → NEITHER key is written, and the page
+    //                                   says so;
+    //      - a key typed              → it replaces the stored one, as above;
+    //      - site box empty, secret   → the unreadable site key is left as
+    //        typed                      it is. Emptying it would leave a
+    //                                   secret key with no site key, which
+    //                                   counts as "not set up": the same
+    //                                   silent switch-off by another road.
+    //    Such a provider stays "Cannot be read" until BOTH keys have been
+    //    typed again, and the warnings stay with it.
+    //
+    //    WHAT THIS CANNOT DO: take a provider whose keys cannot be read out
+    //    of use from this page. That is done on the Settings page, where each
+    //    key has a "Remove the stored value" tick; the message below says so.
+    //    SecretSettings::isUnreadable() goes by what was loaded at the start
+    //    of THIS request, so two administrators saving at the same moment
+    //    are not told about each other.
+    $leftAlone = [];
+    foreach ([
+        ['Cloudflare Turnstile', 'auth.turnstile.siteKey', $turnstileSite, 'auth.turnstile.secretKey', $turnstileSecret],
+        ['Google reCAPTCHA',     'auth.recaptcha.siteKey', $recaptchaSite, 'auth.recaptcha.secretKey', $recaptchaSecret],
+        ['hCaptcha',             'auth.hcaptcha.siteKey',  $hcaptchaSite,  'auth.hcaptcha.secretKey',  $hcaptchaSecret],
+    ] as [$providerLabel, $siteName, $siteKeyNow, $secretName, $secretTyped]) {
+        $siteUnreadable = SecretSettings::isUnreadable($siteName);
+        if (($siteUnreadable === true || SecretSettings::isUnreadable($secretName) === true) && $siteKeyNow === '' && $secretTyped === '') {
+            $leftAlone[] = $providerLabel . ': nothing was changed, because one of its stored keys cannot be read and both of its boxes were empty.';
+            continue;
+        }
+        if ($siteKeyNow !== '' || $siteUnreadable === false) {
+            $writes[] = [$siteName, $siteKeyNow, true];
+        } else {
+            $leftAlone[] = $providerLabel . ': its stored site key cannot be read and its box was empty, so it was left as it is.';
+        }
+        if ($secretTyped !== '' || $siteKeyNow === '') {
+            $writes[] = [$secretName, $secretTyped, true];
+        }
+    }
+
+    // 🔑 If a key was typed and the portal cannot encrypt, say so plainly and
+    //    write NOTHING, not even the settings that are not secrets: a page
+    //    that saved half of what was sent would have to explain which half.
+    //    seal() answers null when the key file is missing, empty or cannot be read.
+    $keyTyped = false;
+    foreach ($writes as [$key, $value, $sensitive]) {
+        $keyTyped = $keyTyped === true || ($sensitive === true && $value !== '');
+    }
+    if ($keyTyped === true && SecretSettings::seal('can the portal encrypt at all?') === null) {
+        Logger::activity('CaptchaKeysRefused', 'Captcha provider keys were not saved: the portal could not encrypt them');
+        $_SESSION['flash_msg']  = 'Nothing was saved. The keys are secrets, and the portal could not encrypt them: its key file '
+            . '(enc.key, in the _auth_keys folder) is missing, is empty or cannot be read. Put that file back and save again.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: /admin/captcha', true, 302);
+        exit();
+    }
 
     $allOk = true;
     foreach ($writes as [$key, $value, $sensitive]) {
@@ -216,7 +319,17 @@ if ($action === 'keys') {
         }
     }
 
-    if ($allOk === true) {
+    if ($allOk === true && $leftAlone !== []) {
+        // 🚫 Something was deliberately NOT written (see "A STORED KEY THE
+        //    PORTAL CANNOT READ" above). Said in words, as a warning, so that
+        //    "saved" is never read as "the empty boxes were saved too".
+        Logger::activity('CaptchaKeysUpdated', 'Captcha provider keys updated; stored keys that cannot be read were left as they are');
+        $_SESSION['flash_msg']  = 'Saved, except for this. ' . implode(' ', $leftAlone)
+            . ' An empty box never removes a key the portal cannot read. To put it right, type BOTH of that provider\'s keys'
+            . ' in again. To stop using that provider instead, remove its two keys on the Settings page (edit each one and tick'
+            . ' "Remove the stored value").';
+        $_SESSION['flash_type'] = 'warning';
+    } elseif ($allOk === true) {
         Logger::activity('CaptchaKeysUpdated', 'Captcha provider keys updated');
         $_SESSION['flash_msg']  = 'Captcha provider keys saved.';
         $_SESSION['flash_type'] = 'success';

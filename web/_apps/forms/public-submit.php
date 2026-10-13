@@ -125,7 +125,7 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 }
 
 // 🤖 6. Captcha — gracefully passes through when no provider is configured.
-if (Captcha::verify($_POST) === false) {
+if (Captcha::verify($_POST, 'public-form') === false) {
     Logger::activity('FormPublicRejected', 'Captcha failed on public-submit for form #' . $formId);
     $bounce('Verification failed — please try again.');
 }

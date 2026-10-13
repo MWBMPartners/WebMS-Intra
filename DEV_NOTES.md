@@ -5745,6 +5745,70 @@ philosophy, same "no oracle" security reasoning:
 
 ---
 
+## Secret settings (#597, #497)
+
+- **Back up `_auth_keys/enc.key` together with the database, every time.**
+  From this version every integration's secret depends on it.
+- A setting is a secret when `tblSettings.isSensitive` is 1. That mark is the
+  only record of it. Compare it with `SecretSettings::isMarked()`, never with
+  `=== '1'`: a prepared statement returns the number 1.
+- `Portal\Core\SecretSettings` (`web/_core/SecretSettings.php`) is the one
+  place that says what a stored secret means. `forReader()` is what the
+  settings load in `bootstrap.php` hands on; `state()` is what a page may say
+  about a row; `seal()` is what a save stores; `unreadable()` names the ones
+  the portal cannot read; `repairStoredRows()` is what Upgrade runs;
+  `keyFileNote()` is what the health page says about the key file.
+- **`$SETTINGS`, `App::settings()` and `Settings::get()` hold the REAL value of
+  every secret.** Never decrypt a value taken from them: it is already
+  decrypted, and decrypting again gives an empty text or an error.
+- **The key is the SHA-256 of the whole key file, so a file of ANY length is
+  a working key.** Only an empty file, or something that is not a file, is
+  "no key". Never refuse a short key file: every secret on that installation
+  would be lost. The rule is written twice, in `SecretSettings::keyFileContents()`
+  and in `portal_key_file_contents()` in `bootstrap.php` (which the two older
+  helper functions use). Change both together; the self-test holds them to
+  the same answer.
+- **A marked row that does not decrypt is used exactly as stored**, and
+  start-up never stops for one. Text that is not base64 of at least 40 bytes
+  is certainly READABLE TEXT. Text that is, and that the key file does not
+  open, is treated as CANNOT BE READ; a readable secret that happens to be
+  long base64 is counted there too, which loses nothing.
+- **A page must never print a secret**, not in a `value=""`, not in an
+  attribute, not as dots that count its characters. Show "set" or "not set".
+  An empty box must keep the stored value, **and must never remove a value
+  the portal cannot read**: such a box is empty because the page will not
+  show a scramble, not because somebody emptied it.
+- **A save must go through `SecretSettings::seal()`** and refuse when it
+  answers null. Twelve older save pages, the QR page and the venues page
+  still call `encrypt_setting()` directly: with no key they answer with an
+  error page where a plain message belongs.
+- **`Captcha::verify($_POST, $form)` must be told which form is asking.**
+  `Captcha::FOR_SIGN_IN` and `Captcha::FOR_PASSWORD_RESET` are let through
+  without the bot check while its keys cannot be read; any other name is a
+  form that is refused then. `Captcha::widget($form)` takes the same and
+  shows the notice. **A form that draws no widget must show
+  `Captcha::closedNotice()` itself**, as the visitor form and live chat do.
+- **An address that is recorded or sent anywhere goes through
+  `Logger::withoutJobToken()`**, which cuts the value of a `key` or `token`
+  parameter. A scheduled job that takes its token under another name must be
+  added to the list in `Logger.php`.
+- `bootstrap.php` switches on PHP's `zend.exception_ignore_args`, so a stored
+  error trace names each step without what it was handed. It also calls
+  `SecretSettings::reportUnreadable()`: one SHORT line in the web server's log
+  on every request while a secret cannot be read (a count, and where to read
+  more), and at most one Critical row in the error log every six hours (none
+  while the portal is closed for an upgrade).
+- The test is `tools/settings-secrets-selftest.php`. It needs a database named
+  `selftest_…` holding `full_schema.sql`, an account allowed to make a
+  trigger, and three free ports. It was run on MySQL 8.0.36 and 8.4.11;
+  nothing here has been run on MariaDB.
+- `tools/audit-checks/check_sensitive_seeds.py` fails on a setting seeded as a
+  secret with a value, and on a seed that could overwrite a stored secret.
+- What each piece cannot do is written at the top of `SecretSettings.php`,
+  `Captcha.php`, `Logger::withoutJobToken()` and migration 214.
+
+---
+
 ## The portal's own web address (#500)
 
 `Portal\Core\PortalAddress` is the ONE place that decides the address in a link the portal sends out.
@@ -5792,11 +5856,11 @@ the queue (part three) and the certificate choices (part four) are still to come
 ### Wired into the portal (part two, `MailRoutes`)
 
 - **Who calls it.** Only `web/_core/MailRoutes.php` names the library. `Mailer::send()` asks `MailRoutes` when `mail.provider` is `smtp`. No page reads the SMTP settings itself.
-- **Why `MailRoutes` reads the database and not `$SETTINGS`.** (1) The portal's start-up never decrypts a secret setting (#597), so `$SETTINGS` holds the encrypted text. (2) `$SETTINGS` has one organisation's own rows laid over the installation's; a mail server's name must never come from an organisation's row. Every query in `MailRoutes` says `siteID IS NULL`. **The choice of route is read the same way**, through `MailRoutes::chosenRoute()`: do not read `$SETTINGS['mail']['provider']` anywhere.
+- **Why `MailRoutes` reads the database and not `$SETTINGS`.** (1) It was written when the portal's start-up never decrypted a secret setting; since #597 was fixed `$SETTINGS` does hold the real password, but nothing should read it from there. (2) `$SETTINGS` has one organisation's own rows laid over the installation's; a mail server's name must never come from an organisation's row. Every query in `MailRoutes` says `siteID IS NULL`. **The choice of route is read the same way**, through `MailRoutes::chosenRoute()`: do not read `$SETTINGS['mail']['provider']` anywhere.
 - **The password's rules.** `MailRoutes::saveSmtp()` is the place meant to write it (encrypted, marked as a secret), **but it is not the only thing that can**: the general Settings page can change the same row for a global administrator. What is promised is about reading: a stored value is used only when its row is marked as a secret AND it decrypts with the installation's key. Do not loosen either test: an unmarked value is what the Settings page's Edit box leaves behind, in plain text. (A request to the Settings page that asks for the value to be encrypted and marked passes both tests, and that one is used.)
 - **A refused sign-in is remembered for the rest of the request** (`MailRoutes::sendSmtp()`), and only that: a refused recipient or sender says nothing about the next message. Later messages are logged with the reason `sign-in-not-repeated`. The queue's job (M3) has to decide what to do across requests; today each new request signs in once more.
 - **The certificate notice** (`MailRoutes::certificateProblem()`) reads the newest SMTP line of the send log, passing over lines for messages stopped before the mail server was tried (`over-hourly-limit`, `not-set-up`, `message-refused`). A new reason of that kind must be added to that query.
-- **When #597 is fixed** (start-up decrypting secrets), `$SETTINGS['mail']['smtp']['password']` will hold the real password in memory on every request. Anything that prints `$SETTINGS` must be checked in that package.
+- **Since #597 was fixed**, `$SETTINGS['mail']['smtp']['password']` holds the real password in memory on every request. Never print `$SETTINGS`; that package's check fetched 368 addresses four ways each and found no secret on any.
 - **Time limits.** Sends use shorter limits than the library's defaults (27 seconds at most for one message), because every send is still inside a web request. That is per message, not per request: a page that sends to many people in turn can still run past the host's limit (to be cured by the queue, M3).
 - **The hourly limit** counts `tblEmailLog.sentAtUtc`, never `sentAt` (the database server's own clock, which repeats an hour when the clocks go back). It is counted before each send and is not locked, so sends at the same moment can pass it.
 - **Run its test:** `SELFTEST_DB_NAME=selftest_x SELFTEST_DB_PORT=… SELFTEST_DB_PASS=… SELFTEST_WEB_DIR=/a/quiet/folder php tools/mail-pages-selftest.php`. It starts the library's own stand-in mail servers and trusts their made-up authority through PHP's `openssl.cafile` setting, so no file of the portal is changed for the test.

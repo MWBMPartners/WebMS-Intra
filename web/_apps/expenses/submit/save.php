@@ -39,7 +39,7 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     exit();
 }
 
-if (Captcha::verify($_POST) === false) {
+if (Captcha::verify($_POST, 'expense-claim') === false) {
     $_SESSION['flash_msg']  = 'Captcha verification failed. Please try again.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Router::url('expenses/submit'));

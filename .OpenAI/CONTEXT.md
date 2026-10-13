@@ -397,6 +397,17 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     `/live`, the return address of a Microsoft or Google sign-in): an empty list
     alone is not enough.
 
+    **Secret settings (#597, #497).** Secret settings:
+    `Portal\Core\SecretSettings` is the ONE place that decides what a stored
+    secret means. Do not write a second mark comparison or a second decrypt.
+    `$SETTINGS` holds real secrets: never decrypt a value taken from it, and
+    never print one. Test: `tools/settings-secrets-selftest.php`. The key file:
+    any length is a working key; only empty or "not a file" is no key. Never
+    refuse a short one. `Captcha::verify()` takes the form's name as its second
+    argument; there is no default. A form with no widget shows
+    `Captcha::closedNotice()` itself. An address that is recorded or sent goes
+    through `Logger::withoutJobToken()`.
+
 15. **The ApiRouter trap.** Any address starting `api/` is intercepted
     before the normal routing table is ever consulted, and resolved purely
     by naming convention to `_apps/{appName}/api/{action}.php`. A handler

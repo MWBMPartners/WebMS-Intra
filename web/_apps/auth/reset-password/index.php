@@ -196,7 +196,7 @@ $policyItems = $policy['rules'];
                 </ul>
             </div>
 
-            <?php echo Captcha::widget(); ?>
+            <?php echo Captcha::widget(Captcha::FOR_PASSWORD_RESET); ?>
 
             <button type="submit" class="btn btn-success w-100 mb-3">
                 <i class="fa-solid fa-check me-1"></i> Update Password

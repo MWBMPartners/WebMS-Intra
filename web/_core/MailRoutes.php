@@ -34,17 +34,17 @@
  *   used to say "written ONLY by saveSmtp()", which was not true.) What this
  *   class does promise is about READING: a stored value is used only when
  *   its row is marked as a secret AND it decrypts with the installation's
- *   key. Typed into the Settings page's Edit box it is stored in plain text
- *   with the mark removed, and is not used. Saved there by a request that
- *   asks for it to be encrypted and marked, it passes both tests and IS used.
+ *   key. Since #597 was fixed the general Settings page stores it encrypted
+ *   and keeps the mark, so a password typed there passes both tests and IS
+ *   used. (That page used to store it in plain text with the mark removed.)
  * - It is read ONLY by password() below, and leaves this class only inside a
  *   `MWBM\Mail\Secret`, which cannot be printed, dumped or serialised.
  * - A stored password that is NOT marked as a secret, or that cannot be
- *   decrypted, is treated as "no password: enter it again". The general
- *   Settings page stores what is typed into it as plain text and removes the
- *   mark (#597); a password typed there is therefore never used. REJECTED:
- *   accepting an unmarked value as it stands. It would work, and it would
- *   leave the mailbox's password readable on the Settings page.
+ *   decrypted, is treated as "no password: enter it again". Until #597 was
+ *   fixed the general Settings page stored what was typed into it as plain
+ *   text and removed the mark; a password left that way is not used as it
+ *   stands. REJECTED: accepting an unmarked value as it stands. It would
+ *   work, and it would leave the mailbox's password readable in the database.
  * - Nothing here logs it, and no message built here contains it.
  *
  * ONE ROUTE FOR THE WHOLE INSTALLATION, FOR NOW

@@ -1951,8 +1951,13 @@ INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `default
 VALUES ('auth.ms365.tenantID', '', 1, '')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
+-- 🔓 NOT marked as a secret (isSensitive = 0), since migration 214. It is a
+--    yes/no and nothing reads it. It used to be seeded with the mark on while
+--    holding the plain text `true`, which is not something the portal can
+--    decrypt: one mistaken row that would have stopped every page the day the
+--    settings load began decrypting (#497).
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
-VALUES ('auth.ms365.tenantOnly', 'true', 1, 'true')
+VALUES ('auth.ms365.tenantOnly', 'true', 0, 'true')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
@@ -9943,6 +9948,14 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 DELETE FROM `tblSettings` WHERE `settingKey` IN ('email.provider', 'email.from');
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('213_smtp_mail_route.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 214_secret_setting_marks.sql (roll-out package S597, #597 and #497) ──
+-- That migration has nothing to do on a new database. Every secret setting
+-- above is seeded with its mark on, so there is none to put back, and
+-- `auth.ms365.tenantOnly` is seeded above without the mark. (Migration 213
+-- belongs to another package and is recorded by that package.)
+INSERT INTO `tblMigrations` (`filename`) VALUES ('214_secret_setting_marks.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── from 215_portal_address.sql (roll-out package F4, #500) ──────────────────

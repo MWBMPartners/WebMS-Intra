@@ -27,10 +27,41 @@
  * An administrator of one organisation can still open this page and see which
  * providers are set up, which helps when they are trying to understand
  * behaviour they cannot change. They see it read-only: the reason on the page,
- * every field disabled, no Save buttons, no drag-to-reorder, and the SECRET
- * keys left out of the page entirely (a disabled field still carries its value
- * in the page source). The public site keys are still shown, because they are
- * published in every page that shows a captcha anyway.
+ * every field disabled, no Save buttons and no drag-to-reorder. The public
+ * site keys are still shown, because they are published in every page that
+ * shows a captcha anyway.
+ *
+ * A SECRET KEY IS NEVER PUT INTO THIS PAGE, FOR ANYBODY (#597, 12 October 2026)
+ * -----------------------------------------------------------------------------
+ * WHAT WAS HERE: for a global administrator each secret key was written into
+ * its box. For a key saved on this page that was harmless only by accident:
+ * the portal never decrypted a stored secret (#497), so what the box held was
+ * the scramble. (A key typed into the old Settings edit box was stored
+ * readable, and the box held that.) It was also the cause of a second fault:
+ * pressing Save sent the scramble back, and it was encrypted again, one more
+ * layer on every save.
+ * NOW the portal does decrypt, so the box would always have held the REAL key.
+ * The boxes are always empty instead. An empty box keeps the stored key (see
+ * save.php), and the page says "Stored" or "Not set" beside it. This page reads
+ * the three secret keys only to learn whether each is set.
+ *
+ * WHEN A STORED KEY CANNOT BE READ (#497, the owner's decision of 13 September 2026)
+ * -----------------------------------------------------------------------------
+ * A key encrypted with a key file the portal no longer has cannot be opened.
+ * Captcha.php decides what the forms then do (sign-in and password reset go
+ * on without the bot check; every other form is refused). This page says so
+ * in a red notice at the top, in Captcha::brokenNotice()'s own words, marks
+ * the provider "Cannot be read", and shows that provider's boxes empty: what
+ * is stored is a scramble, and showing it would only invite somebody to save
+ * it back.
+ *
+ * SAVING THOSE EMPTY BOXES CHANGES NOTHING (13 October 2026). It used to
+ * empty both stored keys: "both boxes empty" is how a provider is taken out
+ * of use, and here the boxes are empty AS DRAWN. One press of Save switched
+ * the bot check off everywhere and silenced every warning. save.php now
+ * leaves a key it cannot read alone unless a new one is typed, and the
+ * sentences below the notice and above the boxes say so, because "empty both
+ * boxes to stop using a provider" is not true of such a provider.
  *
  * Hiding the controls is a courtesy, not the control. The save handler,
  * web/_apps/admin/captcha/save.php, refuses the change on the server whatever
@@ -40,8 +71,9 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.11.0
+ * @version   0.13.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/495
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/597
  * -----------------------------------------------------------------------------
  */
 
@@ -51,6 +83,8 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\Router;
+use Portal\Core\SecretSettings;
+use Portal\Core\Site;
 
 // 📌 Page metadata
 $pageTitle   = 'Captcha Providers';
@@ -83,17 +117,47 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 $providers       = Captcha::listProviders();   // ordered per priority
 $activeProvider  = Captcha::activeProvider();  // '' if nothing configured
 
-$turnstileSite   = (string) (App::settings('auth.turnstile.siteKey')   ?? '');
-$turnstileSecret = (string) (App::settings('auth.turnstile.secretKey') ?? '');
+// 🔑 The secret keys are read ONLY to learn whether each is set. Their values
+//    are never kept in a variable here, so nothing below can print one. See
+//    "A SECRET KEY IS NEVER PUT INTO THIS PAGE" in the file header.
+$turnstileSite      = (string) (App::settings('auth.turnstile.siteKey')   ?? '');
+$turnstileHasSecret = ((string) (App::settings('auth.turnstile.secretKey') ?? '')) !== '';
 
-$recaptchaSite   = (string) (App::settings('auth.recaptcha.siteKey')   ?? '');
-$recaptchaSecret = (string) (App::settings('auth.recaptcha.secretKey') ?? '');
+$recaptchaSite      = (string) (App::settings('auth.recaptcha.siteKey')   ?? '');
+$recaptchaHasSecret = ((string) (App::settings('auth.recaptcha.secretKey') ?? '')) !== '';
 $recaptchaVer    = (string) (App::settings('auth.recaptcha.version')   ?? 'v2');
 $recaptchaV3Act  = (string) (App::settings('auth.recaptcha.v3.action')    ?? 'submit');
 $recaptchaV3Thr  = (string) (App::settings('auth.recaptcha.v3.threshold') ?? '0.5');
 
-$hcaptchaSite    = (string) (App::settings('auth.hcaptcha.siteKey')   ?? '');
-$hcaptchaSecret  = (string) (App::settings('auth.hcaptcha.secretKey') ?? '');
+$hcaptchaSite       = (string) (App::settings('auth.hcaptcha.siteKey')   ?? '');
+$hcaptchaHasSecret  = ((string) (App::settings('auth.hcaptcha.secretKey') ?? '')) !== '';
+
+// 🚫 Stored keys that cannot be read (see the file header). The words for the
+//    notice come from Captcha, so this page and the health page say the same.
+$botCheckBroken   = Captcha::brokenNotice();          // '' unless the provider in use is affected
+$unreadableKeys   = Captcha::unreadableKeys();        // names, whichever provider
+$cannotRead       = array_column($providers, 'unreadable', 'key');
+// A site key that cannot be read is a scramble: its box is shown empty.
+if (SecretSettings::isUnreadable('auth.turnstile.siteKey') === true) {
+    $turnstileSite = '';
+}
+if (SecretSettings::isUnreadable('auth.recaptcha.siteKey') === true) {
+    $recaptchaSite = '';
+}
+if (SecretSettings::isUnreadable('auth.hcaptcha.siteKey') === true) {
+    $hcaptchaSite = '';
+}
+
+// 💬 What a secret key's EMPTY box says. Already safe to print.
+$secretPlaceholder = static function (bool $stored, bool $unreadable = false) use ($mayChangePortalWideSettings): string {
+    if ($unreadable === true) {
+        return $mayChangePortalWideSettings === true ? 'Stored, but cannot be read. Type it again' : 'Stored, but cannot be read';
+    }
+    if ($stored === false) {
+        return 'Not set';
+    }
+    return $mayChangePortalWideSettings === true ? 'Stored. Leave empty to keep it' : 'Stored';
+};
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
@@ -102,7 +166,10 @@ $csrf = Auth::csrfToken();
 /**
  * 🎨 Render a "Configured / Not configured" badge for the priority list rows.
  */
-$statusBadge = static function (bool $configured): string {
+$statusBadge = static function (bool $configured, bool $unreadable = false): string {
+    if ($unreadable === true) {
+        return '<span class="badge bg-danger"><i class="fa-solid fa-triangle-exclamation me-1"></i>Cannot be read</span>';
+    }
     if ($configured === true) {
         return '<span class="badge bg-success"><i class="fa-solid fa-check me-1"></i>Configured</span>';
     }
@@ -148,6 +215,47 @@ $providerIcon = static function (string $key): string {
     </div>
 <?php endif; ?>
 
+<?php if ($botCheckBroken !== ''): ?>
+    <!-- 🚫 The provider in use has a key that cannot be read. Shown to every
+         administrator who can open this page: it changes what sign-in does. -->
+    <div class="alert alert-danger" role="alert" id="bot-check-unreadable">
+        <p class="mb-2"><i class="fa-solid fa-triangle-exclamation me-2"></i><strong>The bot check is not working.</strong>
+            <?php echo htmlspecialchars($botCheckBroken, ENT_QUOTES, 'UTF-8'); ?></p>
+        <p class="mb-0 small">
+            The keys that cannot be read:
+            <?php foreach ($unreadableKeys as $unreadableKey): ?>
+                <code class="me-2 text-break"><?php echo htmlspecialchars($unreadableKey, ENT_QUOTES, 'UTF-8'); ?></code>
+            <?php endforeach; ?>
+            <?php if ($mayChangePortalWideSettings === false): ?>
+                Only a global administrator can put this right. Please tell one.
+            <?php endif; ?>
+        </p>
+    </div>
+<?php elseif ($unreadableKeys !== []): ?>
+    <!-- A key left under a provider that is NOT the one in use. Nothing is
+         affected by it today; it would be the moment that provider came first. -->
+    <div class="alert alert-warning" role="alert" id="bot-check-leftover">
+        <i class="fa-solid fa-triangle-exclamation me-2"></i>
+        A stored key cannot be read:
+        <?php foreach ($unreadableKeys as $unreadableKey): ?>
+            <code class="me-2 text-break"><?php echo htmlspecialchars($unreadableKey, ENT_QUOTES, 'UTF-8'); ?></code>
+        <?php endforeach; ?>
+        It belongs to a provider that is not the one in use, so nothing is affected today.
+        <?php
+        // WHAT WAS HERE: "…or empty both of its boxes and save." Its boxes
+        // are drawn empty already, and save.php no longer treats that as
+        // "remove" for a key it cannot read (see the file header).
+        if ($mayChangePortalWideSettings === true): ?>
+            Type that provider's two keys in again. Saving its boxes empty changes nothing: to stop using that
+            provider, remove its two keys on the
+            <a href="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>">Settings page</a>
+            (edit each one and tick "Remove the stored value").
+        <?php else: ?>
+            Only a global administrator can put this right.
+        <?php endif; ?>
+    </div>
+<?php endif; ?>
+
 <?php if ($mayChangePortalWideSettings === false): ?>
     <!-- 👀 Read-only notice. Shown instead of letting somebody fill the form in
          and only find out it was refused after they pressed Save. -->
@@ -177,6 +285,8 @@ $providerIcon = static function (string $key): string {
     <?php if ($activeProvider !== ''): ?>
         Current active provider:
         <strong><?php echo htmlspecialchars(ucfirst($activeProvider), ENT_QUOTES, 'UTF-8'); ?></strong>.
+    <?php elseif ($botCheckBroken !== ''): ?>
+        <strong>No provider is working: the keys of the one that would be used cannot be read (see the notice above).</strong>
     <?php else: ?>
         <strong>No provider is currently active.</strong>
     <?php endif; ?>
@@ -209,7 +319,7 @@ $providerIcon = static function (string $key): string {
                                 <span class="badge bg-primary ms-2">Active</span>
                             <?php endif; ?>
                         </div>
-                        <?php echo $statusBadge((bool) $p['configured']); ?>
+                        <?php echo $statusBadge((bool) $p['configured'], (bool) $p['unreadable']); ?>
                     </li>
                 <?php endforeach; ?>
             </ul>
@@ -235,13 +345,34 @@ $providerIcon = static function (string $key): string {
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="action"     value="keys">
 
+    <?php if ($mayChangePortalWideSettings === true): ?>
+        <p class="form-text">
+            <i class="fa-solid fa-lock me-1"></i>
+            A secret key is never shown here. Leave its box empty to keep the stored
+            key, or type a new one to replace it. To stop using a provider, empty
+            both of its boxes and save.
+            <?php
+            // 🚫 The exception, shown only when it applies: see "SAVING THOSE
+            //    EMPTY BOXES CHANGES NOTHING" in the file header. Without it
+            //    the sentence above is untrue of a provider whose boxes are
+            //    empty because its keys cannot be read.
+            if ($unreadableKeys !== []): ?>
+                <strong id="bot-check-empty-boxes">A provider marked "Cannot be read" is different:</strong>
+                both of its boxes are shown empty, and saving them empty changes nothing. Type both of its keys in
+                again; or, to stop using it, remove its two keys on the
+                <a href="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>">Settings page</a>
+                (edit each one and tick "Remove the stored value").
+            <?php endif; ?>
+        </p>
+    <?php endif; ?>
+
     <!-- ☁️ Cloudflare Turnstile -->
     <div class="card shadow-sm mb-3">
         <div class="card-header bg-body-tertiary d-flex align-items-center">
             <h3 class="h6 mb-0 flex-grow-1">
                 <i class="fa-solid fa-shield-halved text-warning me-2"></i>Cloudflare Turnstile
             </h3>
-            <?php echo $statusBadge($turnstileSite !== '' && $turnstileSecret !== ''); ?>
+            <?php echo $statusBadge($turnstileSite !== '' && $turnstileHasSecret === true, ($cannotRead['turnstile'] ?? false) === true); ?>
         </div>
         <div class="card-body">
             <div class="row g-3">
@@ -253,12 +384,11 @@ $providerIcon = static function (string $key): string {
                 </div>
                 <div class="col-md-6">
                     <label for="turnstile_secret" class="form-label">Secret Key</label>
-                    <!-- 🔑 The secret is only written into the page for somebody who
-                         may change it. A disabled field still carries its value in
-                         the page source, so disabling alone would not hide it. -->
+                    <!-- 🔑 Always empty: a secret key is never written into the
+                         page, for anybody (see the file header). -->
                     <input type="password" class="form-control" id="turnstile_secret" name="turnstile_secret"
-                           value="<?php echo htmlspecialchars($mayChangePortalWideSettings === true ? $turnstileSecret : '', ENT_QUOTES, 'UTF-8'); ?>"
-                           autocomplete="off"<?php echo $readOnlyAttr; ?>>
+                           value="" placeholder="<?php echo $secretPlaceholder($turnstileHasSecret, SecretSettings::isUnreadable('auth.turnstile.secretKey')); ?>"
+                           autocomplete="new-password"<?php echo $readOnlyAttr; ?>>
                 </div>
             </div>
             <p class="form-text mb-0">
@@ -276,7 +406,7 @@ $providerIcon = static function (string $key): string {
             <h3 class="h6 mb-0 flex-grow-1">
                 <i class="fa-brands fa-google text-primary me-2"></i>Google reCAPTCHA
             </h3>
-            <?php echo $statusBadge($recaptchaSite !== '' && $recaptchaSecret !== ''); ?>
+            <?php echo $statusBadge($recaptchaSite !== '' && $recaptchaHasSecret === true, ($cannotRead['recaptcha'] ?? false) === true); ?>
         </div>
         <div class="card-body">
             <div class="row g-3">
@@ -289,8 +419,8 @@ $providerIcon = static function (string $key): string {
                 <div class="col-md-6">
                     <label for="recaptcha_secret" class="form-label">Secret Key</label>
                     <input type="password" class="form-control" id="recaptcha_secret" name="recaptcha_secret"
-                           value="<?php echo htmlspecialchars($mayChangePortalWideSettings === true ? $recaptchaSecret : '', ENT_QUOTES, 'UTF-8'); ?>"
-                           autocomplete="off"<?php echo $readOnlyAttr; ?>>
+                           value="" placeholder="<?php echo $secretPlaceholder($recaptchaHasSecret, SecretSettings::isUnreadable('auth.recaptcha.secretKey')); ?>"
+                           autocomplete="new-password"<?php echo $readOnlyAttr; ?>>
                 </div>
                 <div class="col-md-4">
                     <label for="recaptcha_version" class="form-label">Version</label>
@@ -334,7 +464,7 @@ $providerIcon = static function (string $key): string {
             <h3 class="h6 mb-0 flex-grow-1">
                 <i class="fa-solid fa-h me-2"></i>hCaptcha
             </h3>
-            <?php echo $statusBadge($hcaptchaSite !== '' && $hcaptchaSecret !== ''); ?>
+            <?php echo $statusBadge($hcaptchaSite !== '' && $hcaptchaHasSecret === true, ($cannotRead['hcaptcha'] ?? false) === true); ?>
         </div>
         <div class="card-body">
             <div class="row g-3">
@@ -347,8 +477,8 @@ $providerIcon = static function (string $key): string {
                 <div class="col-md-6">
                     <label for="hcaptcha_secret" class="form-label">Secret Key</label>
                     <input type="password" class="form-control" id="hcaptcha_secret" name="hcaptcha_secret"
-                           value="<?php echo htmlspecialchars($mayChangePortalWideSettings === true ? $hcaptchaSecret : '', ENT_QUOTES, 'UTF-8'); ?>"
-                           autocomplete="off"<?php echo $readOnlyAttr; ?>>
+                           value="" placeholder="<?php echo $secretPlaceholder($hcaptchaHasSecret, SecretSettings::isUnreadable('auth.hcaptcha.secretKey')); ?>"
+                           autocomplete="new-password"<?php echo $readOnlyAttr; ?>>
                 </div>
             </div>
             <p class="form-text mb-0">

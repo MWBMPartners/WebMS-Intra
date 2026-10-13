@@ -22,8 +22,11 @@
  *
  * THE MAILBOX'S PASSWORD
  * ----------------------
- * It is typed here and nowhere else, handed to MailRoutes::saveSmtp(), which
- * stores it encrypted, and it is NEVER written back into this page: the box is
+ * It is typed here and handed to MailRoutes::saveSmtp(), which stores it
+ * encrypted. (This used to say "here and nowhere else". Since #597 was fixed
+ * the general Settings page stores a secret encrypted too, so a password typed
+ * there is used as well; only this page can test it.) It is NEVER written
+ * back into this page: the box is
  * always empty, and the page says only whether one is stored. Leaving the box
  * empty keeps the stored one. Do not add `value="…"` to that box.
  *
@@ -385,10 +388,10 @@ $esc = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES,
             <?php endforeach; ?>
         </ul>
         <?php if ($smtpInUse === true): ?>
-            <?php // 📍 The SMTP mailbox is typed on THIS page, and its password nowhere else: see MailRoutes.php. ?>
+            <?php // 📍 The SMTP mailbox is typed on THIS page, where it can be tested. The page used to add that a password typed on the general Settings page is not used; since #597 was fixed it is. See MailRoutes.php. ?>
             <p class="mb-0">
                 Fill these in under &ldquo;SMTP mailbox&rdquo; further down this page<?php echo $isGlobalAdmin === true ? '' : ' (a global administrator has to do this)'; ?>.
-                The mailbox&rsquo;s password must be typed there and nowhere else: one typed on the general Settings page is not used.
+                Type the mailbox&rsquo;s password there, where it can be tested before the portal relies on it.
                 Then use &ldquo;Send test&rdquo;.
             </p>
         <?php else: ?>

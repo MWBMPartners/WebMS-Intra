@@ -8,17 +8,37 @@
  * stored in tblSettings. Settings are grouped by their dot-notation prefix
  * (e.g. site.*, auth.*, expenses.*). Features:
  *   - Grouped accordion display by setting prefix
- *   - Sensitive value masking (root admin can view, all admins can edit)
+ *   - Secrets (rows whose isSensitive mark is on) are NEVER shown: the page
+ *     says whether one is set, and lets it be replaced or removed (#597)
  *   - Add new settings via modal
  *   - Delete settings (root admin only)
  *   - Search/filter settings
  *   - Flash messages for success/error feedback
  *
+ * SECRETS ARE NEVER SHOWN (#597, 12 October 2026)
+ *   WHAT WAS HERE: a global administrator had an "eye" button beside each
+ *   secret, and the stored text was already in the page behind it. That text
+ *   was the scramble for a properly stored secret, and the REAL value for any
+ *   secret the old edit box had stored unprotected.
+ *   NOW a secret's value is not put into the page in any form: not in the
+ *   list, not in the edit box, not in an attribute for a script to read. Every
+ *   value that may appear goes through $shownValue below, which is empty for
+ *   a secret. Please keep it that way: a value printed "only for a global
+ *   administrator" is still in the page source, the browser's cache and any
+ *   screen share.
+ *   WHAT AN ADMINISTRATOR SEES INSTEAD: "Not set", "Set", or "Set, but needs
+ *   entering again" (stored as readable text, or encrypted with a key file
+ *   that has since changed), with a notice at the top naming every setting in
+ *   that last state. The page cannot tell those two causes apart, so the
+ *   notice describes both and says nothing that is true of only one. An
+ *   administrator of ONE organisation is told nothing at all about an
+ *   installation-wide secret, not even whether it is set.
+ *
  * @package   Portal\Settings
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.4.0
+ * @version   0.5.0
  * -----------------------------------------------------------------------------
  */
 
@@ -26,9 +46,11 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Captcha;
 use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\SecretSettings;
 use Portal\Core\Site;
 
 // 📌 Page metadata for the template system
@@ -47,7 +69,8 @@ if (App::isAdmin() === false) {
 //    and converted it to a whole number. That was a stop-gap: App::isRootAdmin()
 //    used to compare with the text '1' while the database hands back the whole
 //    number 1, so it was false for every real global administrator, and nobody
-//    could delete a setting here or see a sensitive setting's stored text.
+//    could delete a setting here. (It also decided who saw a secret's stored
+//    text; nobody does now. See "SECRETS ARE NEVER SHOWN" in the header.)
 //    App.php now accepts both forms (App::flagIsOn()), so the extra check was
 //    removed. Please do not put it back; the full note is beside the same line
 //    in web/_apps/settings/save.php.
@@ -310,8 +333,29 @@ if ($stmt !== false) {
 }
 
 // 📊 Group settings by first segment of dot-notation key
-$groups = [];
+//
+// 🔐 Each row's state is worked out here, once, and a secret's stored text is
+//    dropped from the row at the same moment. Nothing further down this file
+//    can print what it was never given.
+//      secretState    one of SecretSettings' four states
+//      stateHidden    true for an installation-wide secret when the person is
+//                     an administrator of one organisation: they are told
+//                     nothing about it, not even whether it is set
+//      shownValue     the ONLY value the page may print: '' for a secret
+$groups        = [];
+$unprotected   = [];
 foreach ($rows as $row) {
+    $row['secretState'] = SecretSettings::state($row['isSensitive'], $row['settingValue']);
+    $row['isSecret']    = $row['secretState'] !== SecretSettings::STATE_ORDINARY;
+    $row['stateHidden'] = $row['isSecret'] === true && $row['siteID'] === null && $isRoot === false;
+    $row['shownValue']  = $row['isSecret'] === true ? '' : (string) $row['settingValue'];
+    if ($row['isSecret'] === true) {
+        unset($row['settingValue']);
+    }
+    if ($row['secretState'] === SecretSettings::STATE_UNPROTECTED && $row['stateHidden'] === false) {
+        $unprotected[] = (string) $row['settingKey'];
+    }
+
     $parts = explode('.', $row['settingKey'], 2);
     $group = $parts[0] ?? 'other';
     if (isset($groups[$group]) === false) {
@@ -320,6 +364,10 @@ foreach ($rows as $row) {
     $groups[$group][] = $row;
 }
 ksort($groups);
+// The rows as read still hold every secret's stored text. Only the count is
+// needed from here on, so the list itself is dropped.
+$settingsCount = count($rows);
+unset($rows, $row);
 
 // 📋 Flash message
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
@@ -340,7 +388,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-gear me-2"></i>Settings</h1>
     <div class="d-flex gap-2">
-        <span class="badge bg-secondary align-self-center"><?php echo count($rows); ?> settings</span>
+        <span class="badge bg-secondary align-self-center"><?php echo $settingsCount; ?> settings</span>
         <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addModal">
             <i class="fa-solid fa-plus me-1"></i> Add Setting
         </button>
@@ -354,9 +402,60 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endif; ?>
 
+<?php if (count($unprotected) > 0): ?>
+    <!-- ⚠️ Secrets that are stored, but that this installation's key does not
+         open. Names only, never a value. The usual cause is the old edit box
+         on this page (#597), which stored an edited secret as readable text.
+         The other is a key file replaced since the secret was saved. The page
+         cannot tell which, so every sentence here is true of both. -->
+    <div class="alert alert-warning" id="unprotected-secrets">
+        <p class="mb-2">
+            <i class="fa-solid fa-triangle-exclamation me-1"></i>
+            <strong><?php echo count($unprotected); ?> secret
+            <?php echo count($unprotected) === 1 ? 'setting needs' : 'settings need'; ?> entering again.</strong>
+            <?php echo count($unprotected) === 1 ? 'It is' : 'They are'; ?> not encrypted with this
+            installation's key, so <?php echo count($unprotected) === 1 ? 'it is' : 'each is'; ?> used exactly as stored.
+        </p>
+        <p class="mb-2">
+            <?php foreach ($unprotected as $unprotectedKey): ?>
+                <code class="me-2 text-break"><?php echo htmlspecialchars($unprotectedKey, ENT_QUOTES, 'UTF-8'); ?></code>
+            <?php endforeach; ?>
+        </p>
+        <p class="mb-2 small">
+            <strong>The usual cause:</strong> an older version of this page stored a
+            secret as readable text whenever it was edited. Such a value still
+            works, but it is stored unprotected: anybody who can read the database
+            or a backup of it can read it.
+            <strong>The other cause:</strong> the portal's key file has been replaced
+            since the secret was saved. Then what is stored cannot be read, and
+            whatever uses it will not work.
+        </p>
+        <?php
+        // 🤖 If the bot check's own keys are among them AND cannot be read,
+        //    sign-in is running without it (#497, the owner's decision of 13
+        //    September 2026). An administrator has to be told that wherever
+        //    they are likely to look; the words are Captcha's, so every page
+        //    that says it says the same.
+        $botCheckBroken = Captcha::brokenNotice();
+        ?>
+        <?php if ($botCheckBroken !== ''): ?>
+            <p class="mb-2 small" id="settings-bot-check-unreadable">
+                <strong>This affects sign-in.</strong> <?php echo htmlspecialchars($botCheckBroken, ENT_QUOTES, 'UTF-8'); ?>
+            </p>
+        <?php endif; ?>
+        <p class="mb-0 small">
+            <strong>What to do, either way:</strong> find each one below, press its edit
+            button, and enter the value again. It is then stored encrypted. If you
+            no longer have a value, make a new one where it came from (the
+            provider's own website, or a new token for a scheduled job) and enter that.
+        </p>
+    </div>
+<?php endif; ?>
+
 <!-- 🔍 Search filter -->
 <div class="mb-4">
     <input type="text" class="form-control" id="settingsSearch" placeholder="Search settings by key or value..." aria-label="Search settings">
+    <div class="form-text">A secret's value is never on this page, so it cannot be searched for. Search for its name.</div>
 </div>
 
 <!-- ⚠️ No-JS: expand all accordion panels and show search note -->
@@ -393,34 +492,33 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </div>
 
                         <?php foreach ($groupRows as $row): ?>
-                            <?php $isSensitive = $row['isSensitive'] === '1' || (int) $row['isSensitive'] === 1; ?>
+                            <?php $isSensitive = $row['isSecret']; ?>
                             <div class="portal-data-row portal-setting-row"
                                  data-setting-key="<?php echo htmlspecialchars($row['settingKey'], ENT_QUOTES, 'UTF-8'); ?>">
                                 <div class="col-12 col-md-4">
                                     <span class="d-md-none fw-semibold">Key: </span>
                                     <code class="small"><?php echo htmlspecialchars($row['settingKey'], ENT_QUOTES, 'UTF-8'); ?></code>
                                     <?php if ($isSensitive === true): ?>
-                                        <span class="badge bg-warning text-dark ms-1" title="Encrypted in database">
-                                            <i class="fa-solid fa-lock"></i>
+                                        <span class="badge bg-warning text-dark ms-1" title="A secret: never shown on this page">
+                                            <i class="fa-solid fa-lock" aria-hidden="true"></i>
+                                            <span class="visually-hidden">A secret: never shown on this page</span>
                                         </span>
                                     <?php endif; ?>
                                 </div>
                                 <div class="col-12 col-md-4">
                                     <span class="d-md-none fw-semibold">Value: </span>
-                                    <?php if ($isSensitive === true): ?>
-                                        <?php if ($isRoot === true): ?>
-                                            <span class="portal-masked-value" data-revealed="false">
-                                                <span class="masked-text text-muted">••••••••</span>
-                                                <span class="revealed-text d-none"><?php echo htmlspecialchars(str_replace("\n", ' ', $row['settingValue']), ENT_QUOTES, 'UTF-8'); ?></span>
-                                                <button type="button" class="btn btn-sm btn-link portal-reveal-btn p-0 ms-1" title="Toggle visibility">
-                                                    <i class="fa-solid fa-eye"></i>
-                                                </button>
-                                            </span>
-                                        <?php else: ?>
-                                            <span class="text-muted">••••••••</span>
-                                        <?php endif; ?>
+                                    <?php if ($row['stateHidden'] === true): ?>
+                                        <span class="small text-secondary">Not shown. A global administrator looks after this one.</span>
+                                    <?php elseif ($row['secretState'] === SecretSettings::STATE_NOT_SET): ?>
+                                        <span class="badge bg-secondary">Not set</span>
+                                    <?php elseif ($row['secretState'] === SecretSettings::STATE_PROTECTED): ?>
+                                        <span class="badge bg-success">Set</span>
+                                        <span class="small text-secondary">Stored encrypted. Never shown.</span>
+                                    <?php elseif ($row['secretState'] === SecretSettings::STATE_UNPROTECTED): ?>
+                                        <span class="badge bg-warning text-dark">Set, but needs entering again</span>
+                                        <span class="small d-block">Not encrypted with this installation's key, so it is used as stored. See the notice at the top.</span>
                                     <?php else: ?>
-                                        <span class="small"><?php echo htmlspecialchars(str_replace("\n", ' ', $row['settingValue']), ENT_QUOTES, 'UTF-8'); ?></span>
+                                        <span class="small"><?php echo htmlspecialchars(str_replace("\n", ' ', $row['shownValue']), ENT_QUOTES, 'UTF-8'); ?></span>
                                     <?php endif; ?>
                                 </div>
                                 <div class="col-12 col-md-2 small text-secondary">
@@ -452,8 +550,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <button class="btn btn-sm btn-outline-primary me-1" data-bs-toggle="modal" data-bs-target="#editModal"
                                             data-id="<?php echo (int) $row['settingID']; ?>"
                                             data-key="<?php echo htmlspecialchars($row['settingKey'], ENT_QUOTES, 'UTF-8'); ?>"
-                                            data-value="<?php echo $isSensitive === true ? '' : htmlspecialchars($row['settingValue'], ENT_QUOTES, 'UTF-8'); ?>"
-                                            data-sensitive="<?php echo $isSensitive ? '1' : '0'; ?>">
+                                            data-value="<?php echo htmlspecialchars($row['shownValue'], ENT_QUOTES, 'UTF-8'); ?>"
+                                            data-sensitive="<?php echo $isSensitive === true ? '1' : '0'; ?>"
+                                            aria-label="Edit <?php echo htmlspecialchars($row['settingKey'], ENT_QUOTES, 'UTF-8'); ?>">
                                         <i class="fa-solid fa-pen"></i>
                                     </button>
                                     <?php endif; ?>
@@ -498,9 +597,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="mb-3">
                         <label class="form-label">Value</label>
                         <textarea class="form-control" name="settingValue" id="edit-settingValue" rows="4"></textarea>
-                        <div class="form-text portal-sensitive-hint d-none">
-                            <i class="fa-solid fa-lock me-1"></i> This is a sensitive/encrypted setting. Enter the new plaintext value.
+                        <div class="form-text portal-sensitive-only d-none">
+                            <i class="fa-solid fa-lock me-1"></i> This is a secret. It is stored encrypted and is never shown,
+                            so this box starts empty. Type a new value to replace the stored one, or leave the box empty to keep it.
                         </div>
+                    </div>
+                    <!-- 🧹 Only shown for a secret (see the script below). An
+                         ordinary setting is emptied by saving an empty box; for
+                         a secret an empty box means "keep it", so removing one
+                         needs its own tick. -->
+                    <div class="form-check portal-sensitive-only d-none">
+                        <input class="form-check-input" type="checkbox" value="1" name="clearValue" id="edit-clearValue">
+                        <label class="form-check-label" for="edit-clearValue">
+                            Remove the stored value
+                        </label>
+                        <div class="form-text">Whatever uses this setting stops working until a new value is entered. Anything typed above is ignored.</div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -558,12 +669,17 @@ editModal.addEventListener('show.bs.modal', function (event) {
     document.getElementById('edit-settingKey').value   = button.getAttribute('data-key');
     document.getElementById('edit-settingValue').value = button.getAttribute('data-value');
 
-    var sensitiveHint = editModal.querySelector('.portal-sensitive-hint');
-    if (button.getAttribute('data-sensitive') === '1') {
-        sensitiveHint.classList.remove('d-none');
-    } else {
-        sensitiveHint.classList.add('d-none');
-    }
+    // 🔐 The two parts that only apply to a secret: the hint, and the
+    //    "Remove the stored value" tick. The tick is cleared every time the
+    //    box opens, and switched off for an ordinary setting, so that one
+    //    left ticked for the last row can never be sent with this one.
+    var isSecret   = button.getAttribute('data-sensitive') === '1';
+    var clearValue = document.getElementById('edit-clearValue');
+    clearValue.checked  = false;
+    clearValue.disabled = !isSecret;
+    editModal.querySelectorAll('.portal-sensitive-only').forEach(function (part) {
+        part.classList.toggle('d-none', !isSecret);
+    });
 });
 
 // 🔍 Search/filter settings
@@ -597,30 +713,6 @@ searchInput.addEventListener('input', function () {
                     collapse.classList.add('show');
                 }
             }
-        }
-    });
-});
-
-// 👁️ Reveal/hide sensitive values (root admin only)
-document.querySelectorAll('.portal-reveal-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-        var container = this.closest('.portal-masked-value');
-        var masked    = container.querySelector('.masked-text');
-        var revealed  = container.querySelector('.revealed-text');
-        var icon      = this.querySelector('i');
-
-        if (container.getAttribute('data-revealed') === 'false') {
-            masked.classList.add('d-none');
-            revealed.classList.remove('d-none');
-            icon.classList.remove('fa-eye');
-            icon.classList.add('fa-eye-slash');
-            container.setAttribute('data-revealed', 'true');
-        } else {
-            masked.classList.remove('d-none');
-            revealed.classList.add('d-none');
-            icon.classList.remove('fa-eye-slash');
-            icon.classList.add('fa-eye');
-            container.setAttribute('data-revealed', 'false');
         }
     });
 });

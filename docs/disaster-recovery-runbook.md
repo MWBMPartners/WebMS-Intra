@@ -247,6 +247,13 @@ that also holds the tables' structure.
 - The `_uploads/` folder. Nothing in the portal copies it anywhere.
 - The off-site copy described in `docs/offsite-backup-setup.md`.
 
+**Back up `enc.key` together with the database, every time.** From this
+version every integration's secret depends on it. A secret typed on the
+Settings page is stored encrypted with it, and so is any secret an older
+version stored as readable text: Upgrade now encrypts those by itself. A copy
+of the database without the `enc.key` that goes with it gives back secrets
+nobody can read.
+
 A backup you have never put back is a hope, not a backup. Practise section 8
 on a spare copy.
 
@@ -1043,6 +1050,32 @@ into `_backups/`.
 unreadable. Type each integration's secret in again. People who use a
 two-factor code will not be able to sign in; that needs a developer.
 *Not tested.*
+
+**Scheduled jobs need doing twice.** Each job's token is one of those stored
+secrets, and the token is part of the address your host's scheduler calls.
+So for every scheduled job (reminders, the health check, the backup check,
+calendar imports and the rest):
+
+1. Give the job a new token: on the job's own page where it has one,
+   otherwise by entering a new value for its setting on the Settings page.
+2. Put that new token into the job's address in your hosting panel's
+   scheduler (often called "cron jobs"). *Your host.*
+
+Until step 2 is done the scheduler goes on calling the old address, the
+portal refuses it, and the job does not run. The health page names the token
+among the secrets it cannot read, but nothing tells you that the scheduler is
+being turned away: the reminders simply stop. *Refusing the old token with a
+different key file in place, and with none: run by
+`tools/settings-secrets-selftest.php`. The scheduler itself: not tested, it
+is your host's.*
+
+The bot check's keys are among those secrets. Until they are typed in again
+at Admin, Captcha, sign-in and password reset run **without** the bot check
+(their own limits on wrong tries still apply), and every other form it
+protects is refused. Admin, Captcha, the Settings page and the health page
+each say so, and the error log sends the alert e-mail where one is set up.
+*Run by `tools/settings-secrets-selftest.php`, with keys encrypted by a
+different key file.*
 
 **If `offsite.key` is lost**, the off-site copies cannot be opened by anybody,
 ever.

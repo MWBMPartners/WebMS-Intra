@@ -31,7 +31,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/228
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/497
  * -----------------------------------------------------------------------------
@@ -427,6 +427,65 @@ function maintenance_health_probes(\mysqli $db): array
         }
     } catch (\Throwable $e) {
         $probes['Organisation keys'] = ['state' => 'warn', 'label' => 'Query failed', 'detail' => $e->getMessage()];
+    }
+
+    // 10. Stored secrets — can the portal read what it has stored? (#497)
+    //     Secret settings are kept encrypted with the key file in _auth_keys.
+    //     SecretSettings wrote down, as this request's settings were loaded,
+    //     the name of every secret it could not deal with in the ordinary way:
+    //       - CANNOT BE READ: it looks encrypted and the key file does not
+    //         open it. Whatever uses it is handed a scramble and does not
+    //         work. That is an incident, so it is red, and the monitor is
+    //         told. (A readable secret that happens to be long base64 is
+    //         counted here too, though it works: the two cannot be told
+    //         apart. The detail is worded to be true of both, and entering
+    //         the value again ends it either way.) If the bot check's keys are among them the detail says,
+    //         in Captcha::brokenNotice()'s words, that sign-in is running
+    //         without it: an administrator has to be told that somewhere they
+    //         will see it, and this is the page uptime monitors read.
+    //       - STORED AS READABLE TEXT: it works, but anybody who can read the
+    //         database can read it. Amber. Upgrade encrypts these by itself;
+    //         one still here afterwards could not be encrypted then.
+    //     Names only, never a value.
+    //
+    //     THE KEY FILE ITSELF is named too, when SecretSettings::keyFileNote()
+    //     has something to say about it: missing, empty, not a file, not
+    //     readable, or SHORTER than the installer writes. A short file still
+    //     works and nothing is stopped; it is amber so that somebody compares
+    //     it with their backup copy.
+    //
+    //     WHAT THIS CANNOT SEE: a secret belonging to an organisation other
+    //     than the one this request is for. Only the installation's own rows
+    //     and the current organisation's are loaded.
+    try {
+        $unreadable  = \Portal\Core\SecretSettings::unreadable();
+        $unprotected = \Portal\Core\SecretSettings::unprotected();
+        $keyFileNote = \Portal\Core\SecretSettings::keyFileNote();
+        $keyFileNote = $keyFileNote === '' ? '' : ' ' . $keyFileNote;
+        if ($unreadable !== []) {
+            $botCheck = \Portal\Core\Captcha::brokenNotice();
+            $probes['Stored secrets'] = [
+                'state'  => 'crit',
+                'label'  => sprintf('%d cannot be read', count($unreadable)),
+                'detail' => implode(', ', $unreadable) . '. Each looks encrypted, but this installation\'s key file does not open it. '
+                    . 'Whatever uses it is handed that text exactly as stored, which will not work if it was encrypted with another key '
+                    . 'file. Put the original key file (enc.key, in the _auth_keys folder) back, or enter each value again: the Settings '
+                    . 'page names them.' . ($botCheck === '' ? '' : ' ' . $botCheck) . $keyFileNote,
+            ];
+        } elseif ($unprotected !== []) {
+            $probes['Stored secrets'] = [
+                'state'  => 'warn',
+                'label'  => sprintf('%d not encrypted', count($unprotected)),
+                'detail' => implode(', ', $unprotected) . '. Each still works, but is stored as readable text. Upgrading encrypts these '
+                    . 'by itself when it can; otherwise enter each value again on the Settings page.' . $keyFileNote,
+            ];
+        } elseif ($keyFileNote !== '') {
+            $probes['Stored secrets'] = ['state' => 'warn', 'label' => 'Key file needs a look', 'detail' => trim($keyFileNote)];
+        } else {
+            $probes['Stored secrets'] = ['state' => 'ok', 'label' => 'Readable', 'detail' => 'Every stored secret is encrypted and can be read.'];
+        }
+    } catch (\Throwable $e) {
+        $probes['Stored secrets'] = ['state' => 'warn', 'label' => 'Could not be checked', 'detail' => get_class($e)];
     }
 
     // 🚦 Overall

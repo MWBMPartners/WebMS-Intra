@@ -6,6 +6,18 @@
  * Renders WITHOUT login when visitors.public_capture_enabled = '1'.
  * Captcha-gated (reuses existing captcha integration).
  *
+ * WHILE THE BOT CHECK'S KEYS CANNOT BE READ this form is CLOSED (#497; the
+ * owner's decision of 13 September 2026 that public forms are refused then).
+ * The page says so in Captcha::closedNotice()'s words and draws no form.
+ * WHAT WAS HERE until 13 October 2026: the form was drawn as usual, and
+ * sending it answered "Verification failed, please try again", which
+ * blamed the visitor for something no number of tries could put right.
+ *
+ * WHAT THIS PAGE CANNOT DO: show a bot check's challenge. It never has; it
+ * draws no widget. So while a bot check IS working, sending this form is
+ * refused every time ("Verification failed"). That is older than #497 and
+ * is not changed here.
+ *
  * @package   Portal\Visitors
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/258
  */
@@ -32,7 +44,15 @@ if ($enabled === false) {
 $flash = '';
 $flashType = 'info';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+// 🚫 Closed while the bot check's keys cannot be read (see the file header).
+//    Asked before anything is read from the form, so nothing a visitor typed
+//    is looked at or stored. method_exists(), because files reach a shared
+//    host one at a time and this one may arrive before Captcha.php does.
+$closedNotice = method_exists('Portal\\Core\\Captcha', 'closedNotice') === true ? \Portal\Core\Captcha::closedNotice() : '';
+
+if ($closedNotice !== '') {
+    $flash = $closedNotice;
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // 🛡️ CSRF — even for anonymous visitors, we issue a session-scoped
     //    token so the POST proves it came from a form we rendered.
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
@@ -49,7 +69,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (class_exists('Portal\\Core\\Captcha') === true
         && method_exists('Portal\\Core\\Captcha', 'verify') === true
     ) {
-        $captchaOk = \Portal\Core\Captcha::verify($_POST);
+        $captchaOk = \Portal\Core\Captcha::verify($_POST, 'visitor-form');
     }
 
     if ($name === '' || ($email === '' && $phone === '')) {
@@ -115,7 +135,7 @@ button{margin-top:1rem;padding:.625rem 1.25rem;background:var(--primary);color:#
     <?php if ($flash !== ''): ?>
         <div class="flash flash-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($flash, ENT_QUOTES, 'UTF-8'); ?></div>
     <?php endif; ?>
-    <?php if ($flashType !== 'success'): ?>
+    <?php if ($flashType !== 'success' && $closedNotice === ''): ?>
         <form method="post">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8'); ?>">
             <label>Your name</label>

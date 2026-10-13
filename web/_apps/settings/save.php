@@ -9,15 +9,32 @@
  *   - Role check (requires Admin or Root Admin)
  *   - Three extra refusals that only a GLOBAL administrator can pass, and one
  *     that nobody passes (see the note at the top of the save section below)
- *   - Encryption for isSensitive values
+ *   - Secrets (rows whose isSensitive mark is on) are stored encrypted, and
+ *     an edit can never take the mark off (#597; see "SECRETS" below)
  *   - INSERT (new) or UPDATE (existing) row in tblSettings
  *   - Logs activity and redirects back with flash message
+ *
+ * SECRETS (#597, 12 October 2026)
+ *   WHAT WAS WRONG: whether a value was a secret was read from the form
+ *   (`isSensitive` present or not). The edit box never sent that field, so
+ *   editing a secret stored it as PLAIN TEXT and cleared its mark, and the
+ *   Settings page then showed it to every administrator.
+ *   NOW, for an edit, the STORED row decides. A marked row stays marked
+ *   whatever the form says, and:
+ *     - a typed value is encrypted, then stored;
+ *     - an empty box changes nothing (the page never shows a secret, so the
+ *       box always starts empty, and "empty" cannot mean "wipe it");
+ *     - the "Remove the stored value" box, ticked, stores an empty value.
+ *   If the value cannot be encrypted, NOTHING is stored and the person is
+ *   told why. Storing it readable instead is the fault being fixed.
+ *   WHAT THIS CANNOT DO: turn an ordinary setting into a secret, or a secret
+ *   into an ordinary one. That is chosen once, when a setting is added.
  *
  * @package   Portal\Settings
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.4.0
+ * @version   0.5.0
  * -----------------------------------------------------------------------------
  */
 
@@ -28,6 +45,7 @@ use Portal\Core\Auth;
 use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\SecretSettings;
 use Portal\Core\Site;
 
 // 🛡️ Admin access check
@@ -56,7 +74,11 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 $settingId   = (int) ($_POST['settingID'] ?? 0);
 $settingKey  = trim($_POST['settingKey'] ?? '');
 $settingVal  = trim($_POST['settingValue'] ?? '');
+// 🔒 The "this is a secret" tick. It is honoured ONLY when a setting is
+//    ADDED. On an edit the stored row decides; see "SECRETS" in the header.
 $isSensitive = isset($_POST['isSensitive']) === true ? 1 : 0;
+// 🧹 The "Remove the stored value" tick, which the edit box shows for a secret.
+$clearValue  = isset($_POST['clearValue']) === true;
 
 if ($settingKey === '') {
     $_SESSION['flash_msg']  = 'Setting key is required.';
@@ -65,10 +87,17 @@ if ($settingKey === '') {
     exit();
 }
 
-// 🔒 Encrypt sensitive value
-if ($isSensitive === 1 && function_exists('encrypt_setting') === true) {
-    $settingVal = encrypt_setting($settingVal);
-}
+// 🔒 WHAT USED TO BE HERE: the value was encrypted at this point whenever the
+//    form said "secret", before anything was known about the row. For an edit
+//    the form never said so, and for an add an EMPTY value was encrypted too,
+//    which stored 56 characters of scramble for "nothing" and made every "is
+//    it set?" test answer yes. Encrypting now happens in each branch below,
+//    after the refusals, through SecretSettings::seal().
+$refusalCannotEncrypt = static fn (string $key): string =>
+    'Nothing was saved. "' . $key . '" is a secret, and the portal could not '
+    . 'encrypt it: its key file (enc.key, in the _auth_keys folder) is missing, '
+    . 'is empty or cannot be read. Put that file back and try again. Until '
+    . 'then no secret can be saved.';
 
 // -----------------------------------------------------------------------------
 // 💾 Insert or update DB row
@@ -263,7 +292,7 @@ if ($settingId > 0) {
     //    found" and this page cannot be used to discover that it exists.
     $existing = null;
     $lookup = $mysqli->prepare(
-        'SELECT settingKey, siteID FROM tblSettings '
+        'SELECT settingKey, siteID, isSensitive FROM tblSettings '
         . 'WHERE settingID = ? AND (siteID = ? OR siteID IS NULL) LIMIT 1'
     );
     if ($lookup !== false) {
@@ -362,6 +391,48 @@ if ($settingId > 0) {
         exit();
     }
 
+    // 🔐 A secret is stored encrypted, and stays a secret (#597).
+    //    Decided from the mark on the STORED row, never from the form: see
+    //    "SECRETS" in the header. This sits after every refusal above, so a
+    //    person who may not change the row never has a value encrypted for
+    //    them, and is told the real reason.
+    $rowIsSecret  = SecretSettings::isMarked($existing['isSensitive']);
+    $markFlag     = $rowIsSecret === true ? 1 : 0;
+    $valueToStore = $settingVal;
+    $secretChange = '';
+
+    if ($rowIsSecret === true && $clearValue === true) {
+        $valueToStore = '';
+        $secretChange = 'cleared';
+    } elseif ($rowIsSecret === true && $settingVal === '') {
+        // 🤲 Nothing typed and nothing ticked: leave the row exactly as it is.
+        //    The page never shows a secret, so its box always starts empty.
+        //    Treating that as "store an empty value" would wipe a secret every
+        //    time somebody opened the box and pressed Save.
+        $_SESSION['flash_msg']  = 'Nothing was changed. "' . $storedKey . '" is a secret, and '
+            . 'the box was empty, so the stored value was kept. Type a new value to replace '
+            . 'it, or tick "Remove the stored value" to remove it.';
+        $_SESSION['flash_type'] = 'info';
+        header('Location: /settings');
+        exit();
+    } elseif ($rowIsSecret === true) {
+        $sealed = SecretSettings::seal($settingVal);
+        if ($sealed === null) {
+            // The log line names the setting and never the value.
+            Logger::activity(
+                'SettingsUpdateRefused',
+                'Refused: secret setting "' . $storedKey . '" could not be encrypted, so nothing was stored',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = $refusalCannotEncrypt($storedKey);
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: /settings');
+            exit();
+        }
+        $valueToStore = $sealed;
+        $secretChange = 'replaced';
+    }
+
     // ✏️ Update existing.
     // -------------------------------------------------------------------------
     // 🔒 THE RULES ARE WRITTEN INTO THE STATEMENT, NOT ONLY CHECKED ABOVE
@@ -392,12 +463,19 @@ if ($settingId > 0) {
     // Neither half of the siteID condition lets anybody reach another
     // organisation's row, even by guessing or forging its settingID.
     //
+    // THE MARK IS NOT IN THE "SET" LIST ANY MORE (#597). It used to be written
+    // from the form on every save, which is how an edit cleared it. It is in
+    // the WHERE instead: the row must still carry the mark the decision above
+    // was made on. If it changed in the instant between the read and this
+    // write, nothing is written, so a value prepared as plain text can never
+    // land in a row that has just become a secret, nor the other way round.
+    //
     // Then the number of rows actually written is checked. Zero means nothing
     // happened, and the person is told exactly that.
     $globalFlag = $isGlobalAdmin === true ? 1 : 0;
     $stmt = $mysqli->prepare(
-        'UPDATE tblSettings SET settingValue = ?, isSensitive = ?, updatedAt = NOW() '
-        . 'WHERE settingID = ? '
+        'UPDATE tblSettings SET settingValue = ?, updatedAt = NOW() '
+        . 'WHERE settingID = ? AND isSensitive = ? '
         . 'AND (siteID = ? OR (siteID IS NULL AND ? = 1)) '
         . 'AND ' . $nameRuleSql
     );
@@ -407,7 +485,7 @@ if ($settingId > 0) {
         header('Location: /settings');
         exit();
     }
-    $stmt->bind_param('siiiii', $settingVal, $isSensitive, $settingId, $siteId, $globalFlag, $globalFlag);
+    $stmt->bind_param('siiiii', $valueToStore, $settingId, $markFlag, $siteId, $globalFlag, $globalFlag);
     $stmt->execute();
     $rowsWritten = $stmt->affected_rows;
     $stmt->close();
@@ -428,26 +506,31 @@ if ($settingId > 0) {
     //    it only reports "already held that value" for a row the UPDATE was
     //    allowed to write. It only chooses the message. It decides nothing about
     //    who may write what; the UPDATE's own conditions already did that.
+    //    For a secret that was REPLACED this can never say "already held":
+    //    every encryption of the same value comes out different, so zero rows
+    //    there always means cause (b). For one that was CLEARED it can.
     $alreadyHeldValue = false;
     if ($rowsWritten < 1) {
         $recheck = $mysqli->prepare(
-            'SELECT settingValue, isSensitive FROM tblSettings '
-            . 'WHERE settingID = ? '
+            'SELECT settingValue FROM tblSettings '
+            . 'WHERE settingID = ? AND isSensitive = ? '
             . 'AND (siteID = ? OR (siteID IS NULL AND ? = 1)) '
             . 'AND ' . $nameRuleSql . ' LIMIT 1'
         );
         if ($recheck !== false) {
-            $recheck->bind_param('iiii', $settingId, $siteId, $globalFlag, $globalFlag);
+            $recheck->bind_param('iiiii', $settingId, $markFlag, $siteId, $globalFlag, $globalFlag);
             $recheck->execute();
             $current = $recheck->get_result()->fetch_assoc();
             $recheck->close();
             $alreadyHeldValue = is_array($current) === true
-                && (string) $current['settingValue'] === $settingVal
-                && (int) $current['isSensitive'] === $isSensitive;
+                && (string) $current['settingValue'] === $valueToStore;
         }
     }
 
-    if ($rowsWritten < 1 && $alreadyHeldValue === true) {
+    if ($rowsWritten < 1 && $alreadyHeldValue === true && $secretChange === 'cleared') {
+        $_SESSION['flash_msg']  = 'Setting "' . $storedKey . '" had nothing stored, so there was nothing to remove.';
+        $_SESSION['flash_type'] = 'success';
+    } elseif ($rowsWritten < 1 && $alreadyHeldValue === true) {
         $_SESSION['flash_msg']  = 'Setting "' . $storedKey . '" saved. It already held that value, so nothing needed changing.';
         $_SESSION['flash_type'] = 'success';
     } elseif ($rowsWritten < 1) {
@@ -458,6 +541,14 @@ if ($settingId > 0) {
             . '" may have been changed or removed by somebody else a moment ago. '
             . 'Please reload the page and check it.';
         $_SESSION['flash_type'] = 'warning';
+    } elseif ($secretChange === 'cleared') {
+        Logger::activity('SettingsUpdate', 'Removed the stored value of secret setting: ' . $storedKey, $_SESSION['user_id'] ?? null);
+        $_SESSION['flash_msg']  = 'The stored value of "' . $storedKey . '" was removed.';
+        $_SESSION['flash_type'] = 'success';
+    } elseif ($secretChange === 'replaced') {
+        Logger::activity('SettingsUpdate', 'Updated secret setting: ' . $storedKey, $_SESSION['user_id'] ?? null);
+        $_SESSION['flash_msg']  = 'Setting "' . $storedKey . '" updated. It is stored encrypted and will not be shown again.';
+        $_SESSION['flash_type'] = 'success';
     } else {
         Logger::activity('SettingsUpdate', 'Updated setting: ' . $storedKey, $_SESSION['user_id'] ?? null);
         $_SESSION['flash_msg']  = 'Setting "' . $storedKey . '" updated.';
@@ -667,6 +758,25 @@ if ($settingId > 0) {
         exit();
     }
 
+    // 🔐 A new secret is encrypted here, after every refusal above. An empty
+    //    one is stored empty (seal() leaves '' alone), so "not set" stays true.
+    $valueToStore = $settingVal;
+    if ($isSensitive === 1) {
+        $sealed = SecretSettings::seal($settingVal);
+        if ($sealed === null) {
+            Logger::activity(
+                'SettingsInsertRefused',
+                'Refused: secret setting "' . $settingKey . '" could not be encrypted, so nothing was stored',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = $refusalCannotEncrypt($settingKey);
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: /settings');
+            exit();
+        }
+        $valueToStore = $sealed;
+    }
+
     $stmt = $mysqli->prepare(
         'INSERT INTO tblSettings (settingKey, settingValue, isSensitive, siteID, updatedAt) VALUES (?, ?, ?, ?, NOW())'
     );
@@ -676,11 +786,16 @@ if ($settingId > 0) {
         header('Location: /settings');
         exit();
     }
-    $stmt->bind_param('ssii', $settingKey, $settingVal, $isSensitive, $siteId);
+    $stmt->bind_param('ssii', $settingKey, $valueToStore, $isSensitive, $siteId);
     $stmt->execute();
     $stmt->close();
     Logger::activity('SettingsInsert', 'Added setting: ' . $settingKey, $_SESSION['user_id'] ?? null);
-    $_SESSION['flash_msg']  = 'Setting "' . $settingKey . '" added.';
+    $_SESSION['flash_msg'] = 'Setting "' . $settingKey . '" added.';
+    if ($isSensitive === 1 && $settingVal !== '') {
+        $_SESSION['flash_msg'] .= ' It is stored encrypted and will not be shown again.';
+    } elseif ($isSensitive === 1) {
+        $_SESSION['flash_msg'] .= ' It is a secret with no value yet.';
+    }
     $_SESSION['flash_type'] = 'success';
 }
 

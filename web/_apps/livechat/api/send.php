@@ -20,7 +20,12 @@
  *      isn't minting tokens client-side just to bypass the rate limit)
  *   4. First-message captcha: Captcha::verify on the FIRST send from a given
  *      sessionToken only; skipped on subsequent sends (Turnstile / reCAPTCHA /
- *      hCaptcha tokens are single-use)
+ *      hCaptcha tokens are single-use). While the bot check's keys are
+ *      stored but cannot be read (#497), a first message is refused with a
+ *      503 and Captcha::closedNotice()'s plain words, which the chat box
+ *      shows. It used to answer "Captcha verification failed", which the
+ *      chat box showed as "Send failed." A viewer who had already sent a
+ *      message before the keys stopped reading is not asked again, as before.
  *   5. Sliding-window rate limit (per sessionToken AND per IP) — fail-closed
  *   6. Profanity stub auto-flags (does not reject)
  *   7. chat.autoApprove setting decides initial status (pending vs approved)
@@ -122,8 +127,19 @@ $stmt->close();
 if ($hasPriorMsg === false
     && class_exists(Captcha::class) === true
     && Captcha::isConfigured() === true
-    && Captcha::verify($payload) === false
+    && Captcha::verify($payload, 'live-chat') === false
 ) {
+    // 🚫 Refused because the bot check's keys cannot be read, not because
+    //    of anything the viewer did: say so, in words written for a viewer
+    //    (see point 4 in the file header). 503, "try again later", is what
+    //    the chat box script shows the words of. Not written to the
+    //    activity log: it is not a failed check, it would be one row per
+    //    message, and administrators are told elsewhere (the header of
+    //    web/_core/Captcha.php lists where).
+    $closedNotice = Captcha::closedNotice('Your message');
+    if ($closedNotice !== '') {
+        ApiResponse::error($closedNotice, 503);
+    }
     Logger::activity('LiveChatCaptchaFailed', 'session=' . substr($sessionToken, 0, 8));
     ApiResponse::error('Captcha verification failed', 400);
 }

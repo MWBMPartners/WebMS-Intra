@@ -44,7 +44,7 @@ if ($project === null || (string) $project['status'] !== 'active') {
 $donorId = Auth::check() === true ? (int) ($_SESSION['user_id'] ?? 0) : null;
 
 // Anonymous submissions must clear captcha.
-if ($donorId === null && Captcha::verify($_POST) === false) {
+if ($donorId === null && Captcha::verify($_POST, 'pledge') === false) {
     $_SESSION['flash_msg']  = 'Captcha failed — please try again.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: /projects/view?slug=' . urlencode($slug));

@@ -64,7 +64,7 @@ if ($isLoggedIn === false && $allowAnon === false) {
 $captchaUsable = class_exists(Captcha::class) === true && Captcha::isConfigured() === true;
 
 if ($isLoggedIn === false && $requireCap === true && $captchaUsable === true) {
-    if (Captcha::verify($_POST) === false) {
+    if (Captcha::verify($_POST, 'event-submission') === false) {
         Logger::activity('EventSubmitRejected', 'Failed captcha on /calendar/submit-save');
         header('Location: /calendar/submit?err=captcha', true, 302);
         exit();

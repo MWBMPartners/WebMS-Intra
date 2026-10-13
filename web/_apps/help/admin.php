@@ -143,10 +143,41 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
 
+    <?php
+    // 🔐 Added 12 October 2026 (#597). Until then this page said only that
+    //    sensitive values were "masked". A global administrator could in fact
+    //    reveal them, and editing one stored it unprotected. The Settings page
+    //    now never shows a secret, and an empty box no longer means "wipe it",
+    //    so the three things an administrator can do are spelt out here.
+    ?>
+    <h5 class="mt-4 mb-3">Secret settings</h5>
+
+    <p>
+        A setting with a padlock beside its name is a <strong>secret</strong>, such as a password or a key from another service.
+        It is stored encrypted and is <strong>never shown</strong> on the Settings page, to anybody. The page says only whether it is set.
+    </p>
+    <ul>
+        <li><strong>To replace one</strong>, press its edit button and type the new value. The box always starts empty.</li>
+        <li><strong>To keep it</strong>, leave the box empty. Nothing is changed.</li>
+        <li><strong>To remove it</strong>, tick <strong>"Remove the stored value"</strong>. Whatever uses it stops working until a new value is entered.</li>
+        <li>
+            <strong>"Set, but needs entering again"</strong> means the value is not encrypted with this installation's key, so the portal
+            uses it exactly as it is stored. Usually an older version of the Settings page stored it as readable text when it was edited:
+            it still works, but it is unprotected. Less often the portal's key file has been replaced since it was saved, and whatever
+            uses it will not work. Either way, enter the value again. If you no longer have it, make a new one where it came from (the
+            other service's own website, or a new token for a scheduled job) and enter that. Upgrading the portal encrypts readable
+            values by itself where it can, and its page says which.
+        </li>
+    </ul>
+    <p>
+        A secret that applies to the whole installation can only be changed by a global administrator. An administrator of one
+        organisation is not told whether it is set.
+    </p>
+
     <div class="alert alert-warning d-flex gap-2" role="alert">
         <i class="fa-solid fa-triangle-exclamation mt-1"></i>
         <div>
-            <strong>Caution:</strong> Changing settings can affect the behaviour of the entire portal. Sensitive values (marked with <code>isSensitive</code>) are masked in the settings list for security. Only Root Admins should modify authentication and OAuth settings.
+            <strong>Caution:</strong> Changing settings can affect the behaviour of the entire portal. Only Root Admins should modify authentication and OAuth settings.
         </div>
     </div>
 
@@ -259,6 +290,46 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         Drag the providers in the priority list to set the fallback order. The active provider is the
         <strong>first one in the list that has both site and secret keys configured</strong>. If nothing is
         configured, the captcha is silently skipped (forms still submit; no challenge shown).
+    </p>
+
+    <?php
+    // 🚫 Added 13 October 2026 (#497, the owner's decision of 13 September
+    //    2026). What it says the forms do, where the portal says so, and
+    //    that typing the keys in again puts it right, are each run by
+    //    tools/settings-secrets-selftest.php, part J. If Captcha.php changes
+    //    what the forms do, change this with it.
+    //    Corrected the same day: it said every other form "says so where
+    //    the challenge would be", which was untrue of the visitor form and
+    //    live chat. They have no challenge, and answered "Verification
+    //    failed". Both now say why, and the sentence says where.
+    ?>
+    <h5 class="mt-3 mb-2">If the stored keys cannot be read</h5>
+    <p>
+        The keys are stored encrypted with the portal's key file (<code>enc.key</code>). If that file is lost or replaced, the keys
+        of the provider in use can no longer be read. Until that is put right:
+    </p>
+    <ul>
+        <li><strong>Sign-in and password reset go on without the bot check.</strong> Their own limits on wrong tries still apply.</li>
+        <li>
+            <strong>Every other form the bot check protects is refused</strong>, and says so in plain words: where its challenge
+            would be, or, on the two forms that have no challenge (the visitor form and live chat), in place of the form and in
+            the chat box. A visitor is told that it cannot be sent at the moment and to try again later or get in touch another
+            way; nothing is said about keys.
+        </li>
+        <li>
+            The portal tells you on <a href="/admin/captcha">/admin/captcha</a>, on the health page, on the Settings page and in the
+            error log (which sends the alert e-mail, where one is set up).
+        </li>
+    </ul>
+    <p>
+        To put it right, restore the key file from your backup, or type the provider's two keys in again at
+        <a href="/admin/captcha">/admin/captcha</a>. A key left under a provider that is not the one in use affects nothing.
+    </p>
+    <p>
+        <strong>Saving that page with the boxes empty changes nothing.</strong> The boxes of a provider whose keys cannot be read
+        are shown empty, and an empty box never removes a key the portal cannot read, so the bot check cannot be switched off
+        by pressing Save. To stop using such a provider, remove its two keys on the Settings page instead (edit each one and
+        tick "Remove the stored value").
     </p>
 
     <h5 class="mt-3 mb-2">reCAPTCHA v3 specifics</h5>
@@ -769,7 +840,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <ul class="mb-3">
         <li>It is stored encrypted, and it is never shown again, on that page or anywhere else. The page says only whether one is stored.</li>
         <li>Leave the password box empty when you save to keep the one that is stored.</li>
-        <li><strong>Type it only on that page.</strong> A password typed into the general Settings page is not used, and the e-mail page will ask for it again.</li>
+        <li><strong>Type it on that page</strong>, where it can be tested before the portal relies on it.</li>
         <li>Use a long password that is not an ordinary word.</li>
     </ul>
 

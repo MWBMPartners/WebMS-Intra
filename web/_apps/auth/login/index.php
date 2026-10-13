@@ -90,7 +90,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // 🤖 Captcha check (if configured)
     if ($errorMsg === '') {
-        if (Captcha::verify($_POST) === false) {
+        if (Captcha::verify($_POST, Captcha::FOR_SIGN_IN) === false) {
             $errorMsg = t('auth.captcha_failed');
         }
     }
@@ -282,7 +282,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <a href="/forgot-password" class="small text-decoration-none"><?php echo htmlspecialchars(t('auth.forgot_password'), ENT_QUOTES, 'UTF-8'); ?></a>
         </div>
 
-        <?php echo Captcha::widget(); ?>
+        <?php echo Captcha::widget(Captcha::FOR_SIGN_IN); ?>
 
         <button type="submit" class="btn btn-success w-100">
             <i class="fa-solid fa-right-to-bracket me-1" aria-hidden="true"></i> <?php echo htmlspecialchars(t('auth.sign_in'), ENT_QUOTES, 'UTF-8'); ?>

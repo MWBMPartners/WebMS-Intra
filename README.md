@@ -214,6 +214,13 @@ rather than a destination.
   request named, which matters on hosting where the portal answers for any name.
 - **Type your support e-mail address again** at Admin → Settings → Organisation, "Web addresses". The one that used to
   be built in is blanked by the upgrade.
+- **Before uploading, switch off anything you do not want to start.** Features that were switched on, with a secret
+  saved on their own page, never worked until now and start as soon as the new files are on the server: error reports
+  to an outside error service, the venue reminders job, web push; and text messages, payments, AI, transcription and
+  maps when somebody uses them.
+- **Keep a copy of `_auth_keys/enc.key` with every database backup.** From this version every stored secret depends on
+  it. Then press Upgrade: it encrypts secrets an older version stored as readable text and names what it did.
+- **A scheduled job whose token was regenerated may stop.** Copy the token its page now shows into the scheduler.
 - The full list, including what is not sent when the portal has no usable address, is in `CHANGELOG.md`.
 
 ### Say which copy it is (recommended)
