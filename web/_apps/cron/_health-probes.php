@@ -292,6 +292,34 @@ function maintenance_health_probes(\mysqli $db): array
         $probes['Email'] = ['state' => 'warn', 'label' => 'Check failed', 'detail' => $e->getMessage()];
     }
 
+    // 4c. Mail queue — is mail that could not be sent at once going? (#592, part 3)
+    //     A line of its own, not folded into "Email" above: that line says
+    //     whether the SETTINGS are filled in, this one says what is happening
+    //     to mail. Critical when no mail is going at all (the mail server's
+    //     certificate failed its check, or it refused the mailbox's sign-in);
+    //     a warning when the scheduled job has not run lately, or a setting
+    //     is being passed over. MailQueue::health() writes the words, which
+    //     hold numbers and the mail route's own facts and never an address,
+    //     a subject or any part of a message: this line is also in the
+    //     report an outside monitor reads. The one moment it shows is in
+    //     this organisation's time zone, with the zone's short name.
+    //     Not shown while no mail route is set up AND nothing is waiting:
+    //     "Email" above already says that nothing can be sent, and a line
+    //     about a job nobody needs yet would be a warning to ignore.
+    try {
+        $mailQueue = \Portal\Core\MailQueue::health(
+            $db,
+            (string) (\Portal\Core\Site::current()['timezone'] ?? 'UTC'),
+            ($probes['Email']['state'] ?? '') === 'ok'
+        );
+        if ($mailQueue !== null) {
+            $probes['Mail queue'] = $mailQueue;
+        }
+    } catch (\Throwable $e) {
+        $probes['Mail queue'] = ['state' => 'warn', 'label' => 'Check failed', 'detail' => 'The mail queue could not be looked at. The reason is in the server\'s error log.'];
+        error_log('Health: the mail queue check failed: ' . get_class($e) . ': ' . mb_substr($e->getMessage(), 0, 300));
+    }
+
     // 5. Sessions — PHP native sessions, count files in the configured save_path
     $sessSavePath = (string) (session_save_path() ?: sys_get_temp_dir());
     $sessCount = 0;

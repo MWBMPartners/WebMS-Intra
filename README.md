@@ -221,6 +221,11 @@ rather than a destination.
 - **Keep a copy of `_auth_keys/enc.key` with every database backup.** From this version every stored secret depends on
   it. Then press Upgrade: it encrypts secrets an older version stored as readable text and names what it did.
 - **A scheduled job whose token was regenerated may stop.** Copy the token its page now shows into the scheduler.
+- **Add one scheduled job for waiting mail**, every five minutes, in your hosting panel's scheduler (the address is an
+  example: use your portal's own, and the maintenance token from Admin → Settings):
+  `*/5 * * * * curl -fsS -H "Authorization: Bearer YOUR_TOKEN" "https://YOUR-PORTAL/cron/mail-queue" > /dev/null`.
+  Until it runs, mail goes as it did before, a password reset included, but anything that could not be sent at once
+  waits, and the health page shows that in red. After a backup is restored, waiting mail is held.
 - The full list, including what is not sent when the portal has no usable address, is in `CHANGELOG.md`.
 
 ### Say which copy it is (recommended)

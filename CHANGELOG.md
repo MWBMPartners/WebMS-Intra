@@ -2,6 +2,106 @@
 
 
 ## [Unreleased] (alpha)
+- **The mail queue (#592, part 3): what an administrator must do after upgrading**
+  **Add one scheduled job. It is the only thing that sends mail that is waiting.**
+  1. Run the database upgrade (Admin, Upgrade). It adds migration 216.
+  2. Make sure a maintenance token is set: Admin, Settings, `maintenance.cronToken`. It is the token the other scheduled jobs already use; an empty one refuses every job.
+  3. In the hosting company's scheduler (a hosting panel's "scheduled tasks" or "cron jobs" page), add this job, every five minutes. The address is an example: use your portal's own.
+     ```
+     */5 * * * * curl -fsS -H "Authorization: Bearer YOUR_TOKEN" "https://YOUR-PORTAL/cron/mail-queue" > /dev/null
+     ```
+     If the scheduler can only fetch an address, or the web server does not pass that header to PHP (the answer is then `{"status":"forbidden"}`), use:
+     ```
+     https://YOUR-PORTAL/cron/mail-queue?token=YOUR_TOKEN
+     ```
+     The header form keeps the token out of the web server's access log. Either way the portal keeps it out of its own error and activity records. The same line is in the portal's help: Help, Admin Guide, "The mail queue: mail that cannot go at once".
+  **Until the job is added, mail still goes as it did before the queue existed, a password reset included.**
+  - The portal counts the job as running when it has run in the last 15 minutes. While it has not:
+    - every e-mail is sent inside the request that asks for it, as before. That includes a password-reset e-mail on **every** kind of web server: Apache's own PHP module, FastCGI (mod_fcgid), CGI, PHP-FPM and LiteSpeed;
+    - a page that sends to many people does not stop at 25 messages (it still stops after 20 seconds, so that the host cannot end the request half-way);
+    - after a mail server has refused the mailbox's sign-in, ONE page that sends mail once the wait is over tries the mail server again (pages that send at the same moment do not each try: one of them claims the try).
+  - **Anything that could not be sent at once waits, and nothing sends it until the job runs.** That is: mail met by a mail server that was down or said "later", mail over the hourly limit, and what did not fit in a request's 20 seconds. The page that sent it says so in words.
+  - **The health page shows it in red.** The "Mail queue" line (Admin, Maintenance, Health, and the monitor's `/cron/health`) is **critical** when messages are waiting and the job is not running: it says how many, that the job has never run (or when it last did), and where the line for the scheduler is. With nothing waiting and no job it is a warning that says the same.
+  - A message waits at most 48 hours. Past that it is marked as failed and kept 7 days.
+  - A mail server whose certificate fails its check still **holds** all mail, job or no job. The health page says so, in red.
+  - The one difference from before the queue on a web server that cannot answer before a script ends (Apache's own PHP module, FastCGI, CGI): **once the job is running**, a password-reset e-mail is no longer sent inside the request; it goes at the job's next run, up to five minutes later. Until the job is running it is sent in the request, so the answer takes a little longer for an address that has an account. That small difference was accepted so that the e-mail arrives.
+  - On a pre-release copy (beta, alpha, dev) this one job gets past the staff sign-in gate, because it checks its own token. The other scheduled jobs are still behind that gate there, as before.
+  **After a backup is restored, waiting mail is held.**
+  A message that was waiting when the backup was taken may have been sent since, and the restored database cannot say. So a restore holds every such message (the health page counts held mail), and none is sent by itself. A held message is kept 7 days and then marked as failed. A page on which one can be released by hand is the next package. A rehearsal ("check only") changes nothing and says how many would be held.
+  **What changes without anybody doing anything**
+  - A page that sends to many people (an event broadcast, a newsletter, giving statements) sends the first 25, or as many as go in 20 seconds, and queues the rest. Before, it sent them all in one request, or was cut off part way. (While no job is running, only the 20 seconds apply.)
+  - `Mailer::send()` answers `true` for a message that was sent **or kept**. A caller that records or shows the result asks `Mailer::lastOutcome()` or `Mailer::lastIsWaiting()`. The broadcast page, the newsletter page, the giving statements pages, the invitation page, the two "send a test" pages and the reminder jobs now say "waiting" for mail that is waiting; a newsletter copy and a giving statement are marked as delivered or e-mailed only when they have gone.
+  - An hourly limit that is set no longer drops mail: mail over it waits. The last tenth of the limit (at least 5 where the limit is 10 or more, and never more than half) is kept for urgent mail, so ordinary mail has less room than the number typed: with a limit of 100, 90. One message addressed to more people than that room allows in a whole hour is refused at once.
+  - A mail server that refuses the mailbox's sign-in makes mail **wait**; the portal signs in again only after 15 minutes, 1 hour, 3 hours, then every 6.
+  - A reminder or an invitation that would be useless or misleading late is never sent late (see the CHANGELOG lines).
+  - Review of the mail queue: one independent check by a fresh Claude agent standing in for Codex found the queue itself sound (nothing delivered twice by 9 workers on 400 messages or by killed runs; nothing lost without a record) and one high, six medium and five small faults around it. One round fixed those; because of the high fault a second, narrow check then read that round only and found one medium and four small faults, which a last round fixed. That last round was not independently checked. Run on MySQL 8.0.36 and 8.4.11; not against a real mail server, scheduler or Apache. Not reviewed by Codex yet.
+- **Added — a mail queue: a message that cannot be sent at once is kept and tried again (#592, part 3 of 6)**
+  - **What was wrong.** A message the portal could not send at that moment was gone: the mail server down, its
+    certificate failing the check, the hourly limit reached. Only a line in the send log said so. And a page that
+    sent to many people one after another kept going until the web server ended it: a broadcast to five people
+    through a slow mail server was cut off with three sent, two logged and nothing recorded, and pressing Send
+    again sent to all five once more.
+  - **What happens now.** `Mailer::send()` sends a message at once when it can, and such a message is never
+    stored. One that cannot go is kept in `tblMailQueue` and a scheduled job (`/cron/mail-queue`) sends it. It is
+    tried again after 5 and 15 minutes, then 1, 3, 6 and 12 hours (urgent mail: 1, 5, 15 and 30 minutes), then
+    marked as failed and kept 7 days. Nothing older than 48 hours is ever sent, and nothing is sent at or after
+    its use-by moment.
+  - **Until the job is added, the portal does as it did before.** One question, asked in one place
+    (`MailQueue::jobIsRunning()`): has the real job run in the last 15 minutes? Only the job's own page records
+    that it ran. While the answer is no, a password reset is sent in the request whatever the web server, a
+    request does not stop at 25 messages, and a page tries the mail server again once the wait after a refused
+    sign-in is over. What still cannot go waits, the page that sent it says so, and the health page's "Mail
+    queue" line is critical and says where the line for the scheduler is.
+  - **Never twice.** A run of the job takes rows with one statement and a random mark, and only one run works at
+    a time. A run that dies leaves its rows marked; ten minutes later a message it had not started on goes back
+    to the queue, and one it was handing over is HELD for a person, because nobody can tell whether the mail
+    server took it. **Restoring a backup holds every message that was waiting in it**, for the same reason.
+  - **Never late.** A message carries a use-by moment where a late one would be useless or misleading: a
+    password reset and a portal invitation (when the link stops working), an event reminder and an event
+    invitation (when the event starts; the "tomorrow" reminder at the start of the event's day), a rota reminder
+    (the end of its last duty's day), the daily milestones message (the end of its day) and the e-mail that
+    confirms an erasure request (23 hours). An event's moment is worked out in the time zone typed on the event's
+    own form (`tblEvents.timezone`), and in the organisation's zone when that is not a zone PHP knows. A new
+    request for a reset link removes that person's older waiting reset e-mails, whose links no longer work.
+  - **What is wrong with the mail route is remembered.** A certificate that fails the check holds every message
+    without the mail server being contacted, and each run of the job tries it once; held mail goes by itself when
+    it passes. A refused sign-in makes mail wait, and it is tried again only after 15 minutes, 1 hour, 3 hours,
+    then every 6: offering a refused password for every message is what gets a mailbox locked. Whoever tries
+    must first claim the try, with one statement only one request can win, so pages sending at the same moment
+    make one sign-in between them.
+  - **Mailings.** A request sends at most 25 messages, or for 20 seconds, and the rest is queued. An event
+    broadcast is recorded and all its messages are kept together or not at all, and a second press of Send within
+    ten minutes sends nothing. The broadcast page shows what the send handler reports (it never did).
+  - **"Sent" means sent.** `Mailer::send()` answers true for a message that was only kept, so every page and
+    record that says what became of a message now asks. A newsletter copy or a giving statement that is waiting
+    says "waiting", and is marked as delivered or e-mailed when it goes, or as failed when it never will.
+  - **The hourly limit no longer drops mail.** Mail over it waits. The last tenth of the limit is kept for urgent
+    mail. A message for more people than a whole hour allows is refused at once, in words that name the limit.
+  - **Four numbers can be set**, for the installation by a global administrator and for one organisation by its
+    own administrator, in Settings: `mail.queue.retryHours` (24), `mail.queue.maxAgeHours` (48),
+    `mail.queue.keepFailedDays` (7), `mail.queue.holdDays` (7). Settings refuses a value outside the range and
+    says what the installation's value is; clearing an organisation's own value removes it.
+  - **Personal data.** A waiting message's body is stored encrypted with the installation's key. The queue, its
+    files and the send log are in the written list of personal data; erasing a person deletes mail waiting for
+    them alone (telling the record it came from, such as a giving statement, that it did not go), takes their
+    address off mail that is also for others, empties the reason text of every send-log line to them and of the
+    mail error lines that name their address by itself, and waits for a run of the job to end first. If that run
+    is still working after 20 seconds the person is taken out of the queue all the same and the erasure is
+    counted as not finished: running it again finishes it. "A copy of my data" lists what waits and what was sent
+    to them. The job prints numbers only.
+  - **Database: migration 216.** Three tables (`tblMailQueue`, `tblMailQueueFiles`, `tblMailRouteState`), six
+    settings, the job's address, three more choices at the end of `tblEmailLog.status` (queued, held, expired) and
+    `tblEventBroadcasts.sentAtUtc`.
+  - **To do after upgrading: add the scheduled job.** See DEV_NOTES, "The mail queue". On a pre-release copy
+    this one job gets past the staff sign-in gate; the other scheduled jobs do not.
+  - **Also corrected.** The notification preferences page said non-urgent e-mail is held during Sabbath quiet
+    hours. No e-mail is; the sentence now says what quiet hours do stop (a text message that is not urgent).
+  - **Not done here.** The page that lists the queue, releases a held message, "accept only this certificate" and
+    switching the check off are the next package (M4). Microsoft 365 and Google keep answering only yes or no, so
+    a message one of them turns down in a request is still not kept.
+  - **Tests.** `tools/mail-queue-selftest.php` (154 checks). An independent check and then a second, narrow
+    one were made by fresh agents standing in for Codex, and their findings were fixed. The fixes after the
+    second check were not independently checked. Codex has not reviewed this.
 - **Secret settings (#597, #497): what somebody upgrading must know**
   - **1. What STARTS the moment the new files are uploaded**
     Not when Upgrade is pressed: as soon as the files are on the server.

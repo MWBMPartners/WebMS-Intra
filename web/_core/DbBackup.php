@@ -2894,6 +2894,14 @@ class DbBackup
                 $warnings[] = $sentence;
             }
 
+            // ✉️ Waiting mail that came back with the snapshot is HELD (see
+            //    holdRestoredMail()). Done here, inside the transaction, so
+            //    a rehearsal undoes it below with everything else.
+            $heldMail = $this->holdRestoredMail($order, $dryRun);
+            if ($heldMail !== '') {
+                $warnings[] = $heldMail;
+            }
+
             if ($dryRun === true) {
                 // 🎭 THE REHEARSAL ENDS HERE, BY UNDOING EVERYTHING. A rehearsal
                 //    that failed to undo would be a restore nobody asked for,
@@ -3007,6 +3015,67 @@ class DbBackup
             unset($ignored);
         }
         return false;
+    }
+
+    /**
+     * ✉️ At the end of a restore: HOLD the mail that came back waiting.
+     *
+     * WHY. A message that was waiting when the snapshot was taken is in the
+     * snapshot. If it went afterwards, putting the snapshot back brings its
+     * row back, and the mail job would send it a second time: three waiting
+     * messages came out as six copies when this was run. Nobody can tell
+     * from the restored rows which of them went. So every one that could go
+     * by itself is held for a person, with that reason on it, and none is
+     * sent by itself. MailQueue::holdRestored() holds the statement, with
+     * every other statement that moves a queue row.
+     *
+     * Called INSIDE the restore's transaction, after the tables are back:
+     * a rehearsal ("check only") undoes it with everything else and changes
+     * nothing, and a restore that is stopped leaves nothing held. Only when
+     * the mail queue's table was among the tables just put back: a snapshot
+     * from before the queue existed brings no waiting mail, and what is
+     * waiting NOW was not touched by the restore. If the statement fails it
+     * THROWS, and the restore is stopped and undone: a restore that left
+     * mail able to go twice would be worse than no restore.
+     *
+     * A restore of ONE table calls this too, and there it can do nothing
+     * today: putting the queue's table back by itself is refused before it
+     * starts, because the table of attached files points at it (see the
+     * note at that call in restoreTableWork()).
+     *
+     * WHAT THIS CANNOT DO: say which of the held messages really went, or
+     * release them. A held message is failed after the holding period;
+     * releasing one by hand is the mail queue's own page.
+     *
+     * @param list<string> $restored The tables just put back.
+     * @param bool         $dryRun   True in a rehearsal: only the wording changes.
+     *
+     * @return string A sentence for the person when any message was held; '' otherwise.
+     */
+    private function holdRestoredMail(array $restored, bool $dryRun): string
+    {
+        if (in_array('tblMailQueue', $restored, true) === false) {
+            return '';
+        }
+        // This class is also loaded BY ITSELF, with nothing that finds other
+        // classes for it (tools/backup-restore-selftest.php does, and so may
+        // a script that restores outside the portal). class_exists() asks
+        // the portal's own loader first; only when there is none is the
+        // file beside this one read. holdRestored() needs nothing but the
+        // connection it is given. (Found by that self-test: without this, a
+        // restore run that way was stopped with "class not found".)
+        if (class_exists(MailQueue::class) === false) {
+            require_once __DIR__ . DIRECTORY_SEPARATOR . 'MailQueue.php';
+        }
+        $held = MailQueue::holdRestored($this->db);
+        if ($held < 1) {
+            return '';
+        }
+
+        return $held . ' message' . ($held === 1 ? '' : 's') . ' that ' . ($held === 1 ? 'was' : 'were') . ' waiting in the mail queue when this snapshot was taken '
+            . ($dryRun === true ? 'would be' : ($held === 1 ? 'has been' : 'have been')) . ' HELD, and will not be sent by '
+            . ($held === 1 ? 'itself' : 'themselves') . ': the portal cannot tell whether ' . ($held === 1 ? 'it has' : 'they have')
+            . ' been sent since, and sending again could mean a second copy. The health page counts held mail.';
     }
 
     /**
@@ -3278,6 +3347,19 @@ class DbBackup
             $notCounted = null;   // null = a single-table restore: never empty a pointer
             $this->fillPointers($dir, $table, $format, $tableFacts, array_values(array_intersect($pointers, $columns)), $key, $links[$table] ?? [], $notCounted);
 
+            // ✉️ A SAFEGUARD THAT CANNOT RUN TODAY, kept on purpose. A restore
+            //    of the mail queue's table by itself never gets this far: it
+            //    is refused near the top of this method, because another
+            //    table (the queue's attached files) points at it, and for
+            //    every other table this call does nothing. (An earlier note
+            //    said only "the same as a whole restore", as if it did
+            //    something.) It is left in because the refusal up there
+            //    knows nothing about mail: if that rule is ever relaxed,
+            //    this is what stops mail that came back waiting from being
+            //    sent a second time. No test can reach it while the refusal
+            //    stands.
+            $heldMail = $this->holdRestoredMail([$table], false);
+
             $atCommit = true;
             if ($this->db->commit() === false) {
                 throw new RuntimeException('The database would not make the restore permanent.');
@@ -3291,6 +3373,10 @@ class DbBackup
                     . 'the same. This is expected when restoring a snapshot taken '
                     . 'before that rule was introduced — the duplicates were never '
                     . 'meant to be there. Everything else was restored.';
+            }
+            if ($heldMail !== '') {
+                // In `notice`, which the page already shows: no new key for a page to forget.
+                $result['notice'] = trim(($result['notice'] ?? '') . ' ' . $heldMail);
             }
 
             return $result;

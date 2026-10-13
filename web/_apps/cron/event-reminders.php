@@ -38,6 +38,25 @@
  * portal's own events only (imported events have no coordinators). The
  * output line stays counts only.
  *
+ * WHICH TIME ZONE AN EVENT'S START IS IN (#592). An event's start is a time
+ * on a clock, and the clock's zone is `tblEvents.timezone`: the column the
+ * event form writes, and the one the event page, the calendar feed and the
+ * export read. The use-by moment of every reminder here is worked out in it
+ * (MailQueue::useBy()), and in the ORGANISATION's own zone (`tblSites.
+ * timezone`) when the event's is not one PHP knows: the form's zone box is
+ * free text, so it can be mistyped, and a reminder must not be lost for that.
+ * WHAT WAS WRONG: this read `tblEvents.eventTimezone`, which only the feed
+ * importer writes. For every event made in the portal that column holds its
+ * default, "Europe/London", so the use-by moment of an event in any other
+ * zone was hours out: a reminder for an event an hour away in a zone west of
+ * London was thrown away at once, and one for an event east of it could
+ * still go after the event had started.
+ * WHAT THIS DOES NOT PUT RIGHT: WHEN a reminder is made. The three queries
+ * below still compare the event's clock time with the DATABASE SERVER's own
+ * clock (NOW()), as they always have, so a reminder for an event in another
+ * zone than the server's is made at the wrong moment. That is older than
+ * the mail queue and is not changed here.
+ *
  * @link https://github.com/MWBMPartners/webMS-Intra/issues/329
  * @link https://github.com/MWBMPartners/webMS-Intra/issues/322
  * -----------------------------------------------------------------------------
@@ -48,6 +67,7 @@ declare(strict_types=1);
 use Portal\Core\EventVisibility;
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
+use Portal\Core\MailQueue;
 use Portal\Core\Settings;
 use Portal\Core\WebPush;
 
@@ -95,10 +115,15 @@ $stats = ['24h' => 0, '1h' => 0, 'day' => 0];
  * @param string               $subject     The subject (title and time only).
  * @param string               $bodyFull    The body with the location.
  * @param string               $bodyLimited The body without it.
+ * @param string               $useBy       The moment, in UTC, at or after
+ *                                          which the reminder must not be
+ *                                          sent (MailQueue::useBy()).
  *
- * @return int How many emails went out.
+ * @return int How many emails a mail service ACCEPTED in this run. One that
+ *             was only kept in the mail queue is not counted here: the job
+ *             reports those as "waiting" at the end.
  */
-function sendReminderBatch(\mysqli $db, array $event, string $type, string $subject, string $bodyFull, string $bodyLimited): int
+function sendReminderBatch(\mysqli $db, array $event, string $type, string $subject, string $bodyFull, string $bodyLimited, string $useBy): int
 {
     $eventId    = (int) $event['eventID'];
     $today      = date('Y-m-d');
@@ -132,11 +157,19 @@ function sendReminderBatch(\mysqli $db, array $event, string $type, string $subj
     }
     $stmt->close();
 
+    // ⏳ A REMINDER HAS A USE-BY MOMENT (#592). A reminder the portal could
+    //    not send at once is kept and tried again, and without a use-by
+    //    moment a "Starting soon" reminder kept while the mail server was
+    //    down was delivered three hours after its event had ended. With one,
+    //    it is never sent at or after that moment.
+    //    And "true" from send() is sent OR kept: only one a mail service
+    //    took is counted as sent.
     $sent = 0;
     foreach ($recipients as $email => $full) {
         $email = (string) $email;
         if (filter_var($email, FILTER_VALIDATE_EMAIL) !== false) {
-            if (Mailer::send($email, $subject, $full === true ? $bodyFull : $bodyLimited) === true) { $sent++; }
+            if (Mailer::send($email, $subject, $full === true ? $bodyFull : $bodyLimited, [], ['expiresAt' => $useBy]) === true
+                && Mailer::lastOutcome() === Mailer::OUTCOME_SENT) { $sent++; }
         }
     }
 
@@ -209,7 +242,7 @@ function eventRsvpUserIds(\mysqli $db, int $eventId): array
 // tools/audit-checks/check_event_visibility.py, since the real call sits
 // further up this file than the check's own search window reaches.
 $stmt = $mysqli->prepare(
-    'SELECT e.eventID, e.eventName, e.eventSlug, e.startDateTime, e.locationName, e.externalFeedID FROM tblEvents e '
+    'SELECT e.eventID, e.eventName, e.eventSlug, e.startDateTime, e.timezone, s.timezone AS siteTimezone, e.locationName, e.externalFeedID FROM tblEvents e JOIN tblSites s ON s.siteID = e.siteID '
     . 'WHERE e.isDeleted = 0 AND e.status = "published" '
     . '  AND e.startDateTime BETWEEN DATE_ADD(NOW(), INTERVAL 23 HOUR) + INTERVAL 45 MINUTE '
     . '                          AND DATE_ADD(NOW(), INTERVAL 24 HOUR) + INTERVAL 15 MINUTE '
@@ -225,7 +258,13 @@ while ($e = $result->fetch_assoc()) {
     $head  = '<p>This is a reminder that <strong>' . htmlspecialchars((string) $e['eventName'], ENT_QUOTES, 'UTF-8') . '</strong> is tomorrow.</p>'
            . '<p><strong>When:</strong> ' . htmlspecialchars($when, ENT_QUOTES, 'UTF-8') . '</p>';
     $tail  = '<p>See you there!</p>';
-    $stats['24h'] += sendReminderBatch($mysqli, $e, '24h', $subject, $head . $where . $tail, $head . $tail);
+    // Use-by: the START OF THE EVENT'S OWN DAY, on the event's own clock.
+    // This reminder says "is tomorrow"; from midnight that is untrue, and a
+    // person who believed it would come a day late. (Who gets it is still
+    // decided per recipient by EventVisibility::whereForColumn(), inside
+    // sendReminderBatch(): see the note above this loop's query.)
+    $useBy = MailQueue::useBy(substr((string) $e['startDateTime'], 0, 10), (string) $e['timezone'], (string) $e['siteTimezone']);
+    $stats['24h'] += sendReminderBatch($mysqli, $e, '24h', $subject, $head . $where . $tail, $head . $tail, $useBy);
 }
 $stmt->close();
 
@@ -237,7 +276,7 @@ $stmt->close();
 // inside sendReminderBatch() — see that query's own comment for the full
 // explanation of why the rule cannot apply to this outer query.
 $stmt = $mysqli->prepare(
-    'SELECT e.eventID, e.siteID, e.eventName, e.eventSlug, e.startDateTime, e.locationName, e.externalFeedID FROM tblEvents e '
+    'SELECT e.eventID, e.siteID, e.eventName, e.eventSlug, e.startDateTime, e.timezone, s.timezone AS siteTimezone, e.locationName, e.externalFeedID FROM tblEvents e JOIN tblSites s ON s.siteID = e.siteID '
     . 'WHERE e.isDeleted = 0 AND e.status = "published" '
     . '  AND e.startDateTime BETWEEN DATE_ADD(NOW(), INTERVAL 45 MINUTE) '
     . '                          AND DATE_ADD(NOW(), INTERVAL 75 MINUTE) '
@@ -253,7 +292,9 @@ while ($e = $result->fetch_assoc()) {
     $head  = '<p><strong>' . htmlspecialchars((string) $e['eventName'], ENT_QUOTES, 'UTF-8') . '</strong> starts at ' . htmlspecialchars($when, ENT_QUOTES, 'UTF-8') . '.</p>';
     $where = empty($e['locationName']) === false ? '<p><strong>Where:</strong> ' . htmlspecialchars((string) $e['locationName'], ENT_QUOTES, 'UTF-8') . '</p>' : '';
     $tail  = '<p>See you in about an hour!</p>';
-    $stats['1h'] += sendReminderBatch($mysqli, $e, '1h', $subject, $head . $where . $tail, $head . $tail);
+    // Use-by: the moment the event STARTS, on the event's own clock.
+    $useBy = MailQueue::useBy((string) $e['startDateTime'], (string) $e['timezone'], (string) $e['siteTimezone']);
+    $stats['1h'] += sendReminderBatch($mysqli, $e, '1h', $subject, $head . $where . $tail, $head . $tail, $useBy);
 
     // 🔔 Web Push companion (#322) — same RSVP'd users, riding the SAME
     // '1h' single-shot claim the email batch above just made. Never blocks
@@ -300,7 +341,7 @@ if ($hour >= 6 && $hour <= 8) {
     // organisation (`u.isAdmin = 1`) — a separate, older fault to be reported
     // under #514 part P11, which must not also start carrying imported events.
     $stmt = $mysqli->prepare(
-        'SELECT e.eventID, e.eventName, e.startDateTime FROM tblEvents e '
+        'SELECT e.eventID, e.eventName, e.startDateTime, e.timezone, s.timezone AS siteTimezone FROM tblEvents e JOIN tblSites s ON s.siteID = e.siteID '
         . 'WHERE e.isDeleted = 0 AND e.externalFeedID IS NULL AND e.status = "published" '
         . '  AND DATE(e.startDateTime) = CURDATE() '
         . '  AND NOT EXISTS (SELECT 1 FROM tblEventReminderLog l WHERE l.eventID = e.eventID AND l.reminderType = "day")'
@@ -339,10 +380,15 @@ if ($hour >= 6 && $hour <= 8) {
                . '<p><strong>Confirmed RSVPs:</strong> ' . $rc . '</p>'
                . '<p>Have a great event!</p>';
 
-        $sent = 0;
+        // Use-by: the moment the event STARTS ("is today at …" is no use to
+        // a coordinator after that). Counted as sent only when a mail
+        // service took it: see sendReminderBatch().
+        $useBy = MailQueue::useBy((string) $e['startDateTime'], (string) $e['timezone'], (string) $e['siteTimezone']);
+        $sent  = 0;
         foreach ($recipients as $email) {
             if (filter_var($email, FILTER_VALIDATE_EMAIL) !== false) {
-                if (Mailer::send($email, $subject, $body) === true) { $sent++; }
+                if (Mailer::send($email, $subject, $body, [], ['expiresAt' => $useBy]) === true
+                    && Mailer::lastOutcome() === Mailer::OUTCOME_SENT) { $sent++; }
             }
         }
         $stm = $mysqli->prepare('INSERT INTO tblEventReminderLog (eventID, reminderType, recipientCount) VALUES (?, "day", ?) ON DUPLICATE KEY UPDATE recipientCount = VALUES(recipientCount), sentAt = NOW()');
@@ -354,4 +400,6 @@ if ($hour >= 6 && $hour <= 8) {
     $stmt->close();
 }
 
-echo 'OK ' . json_encode($stats);
+// ⏳ Reminders that were only KEPT in the mail queue in this run, said apart
+//    from the ones that went: they used to be counted as sent.
+echo 'OK ' . json_encode($stats + ['waiting' => Mailer::keptThisRequest()]);

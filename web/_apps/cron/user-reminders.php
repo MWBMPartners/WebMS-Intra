@@ -97,6 +97,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
+use Portal\Core\MailQueue;
 use Portal\Core\PortalAddress;
 use Portal\Core\Settings;
 use Portal\Core\Site;
@@ -357,7 +358,11 @@ foreach ($siteIds as $siteId) {
                 if (filter_var($email, FILTER_VALIDATE_EMAIL) !== false
                     && notifyPrefAllows($t['notifyPrefs'] !== null ? (string) $t['notifyPrefs'] : null, 'taskReminders') === true
                 ) {
-                    if (Mailer::send($email, $subject, $body) === true) {
+                    // "true" is sent OR kept in the mail queue (#592): only
+                    // one a mail service took is counted as sent. No use-by
+                    // moment: a task reminder is still true, and still
+                    // wanted, however late it arrives.
+                    if (Mailer::send($email, $subject, $body) === true && Mailer::lastOutcome() === Mailer::OUTCOME_SENT) {
                         $mailed = 1;
                     }
                 }
@@ -453,7 +458,18 @@ foreach ($siteIds as $siteId) {
                 if (filter_var($group['email'], FILTER_VALIDATE_EMAIL) !== false
                     && notifyPrefAllows($group['notifyPrefs'], 'rotaReminders') === true
                 ) {
-                    if (Mailer::send($group['email'], $subject, $body) === true) {
+                    // ⏳ Use-by (#592): the END OF THE DAY of the LAST duty
+                    //    listed, in this organisation's own time zone. After
+                    //    that every duty in the message is over and it is no
+                    //    use to anybody. (Not the first duty's day: a
+                    //    reminder that arrives after the first is still the
+                    //    only one the person gets for the rest.)
+                    $lastDuty = (string) max(array_column($group['slots'], 'slotDate'));
+                    $useBy    = MailQueue::useBy(
+                        date('Y-m-d', (int) strtotime($lastDuty . ' +1 day')),
+                        (string) (Site::current()['timezone'] ?? date_default_timezone_get())
+                    );
+                    if (Mailer::send($group['email'], $subject, $body, [], ['expiresAt' => $useBy]) === true && Mailer::lastOutcome() === Mailer::OUTCOME_SENT) {
                         $mailed = 1;
                     }
                 }
@@ -542,10 +558,15 @@ foreach ($siteIds as $siteId) {
                           . PortalAddress::linkHtml('milestones', 'View Milestones', $siteId);
 
                     $recipients = resolveMilestoneDigestRecipients($db, $siteId, $recipientsCsv);
-                    $sent = 0;
+                    // ⏳ Use-by (#592): the end of the day this digest calls
+                    //    "today", on the same clock that chose that day
+                    //    ($today above is PHP's). "Today's milestones"
+                    //    delivered tomorrow would be wrong.
+                    $useBy = MailQueue::useBy(date('Y-m-d', (int) strtotime($today . ' +1 day')), date_default_timezone_get());
+                    $sent  = 0;
                     foreach (array_unique($recipients) as $email) {
                         if (filter_var($email, FILTER_VALIDATE_EMAIL) !== false) {
-                            if (Mailer::send($email, $subject, $body) === true) {
+                            if (Mailer::send($email, $subject, $body, [], ['expiresAt' => $useBy]) === true && Mailer::lastOutcome() === Mailer::OUTCOME_SENT) {
                                 $sent++;
                             }
                         }
@@ -595,3 +616,5 @@ foreach ($grandTotals as $family => $t) {
         $t['skipped']
     );
 }
+// ⏳ Reminders only KEPT in the mail queue in this run (#592): not sent yet.
+echo "waiting-in-mail-queue=" . Mailer::keptThisRequest() . "\n";

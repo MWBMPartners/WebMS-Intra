@@ -310,6 +310,17 @@ return [
                     . ' Entries for announcements are not about a person and are kept.',
         'columns'  => ['tableName', 'rowID'],
     ],
+    'tblEmailLog' => [
+        'decision' => 'unlink',
+        // #592, 13 October 2026. The send log has always been dealt with on
+        // an erasure, by a step of its own (GdprEraser::eraseEmailLogRecipients()),
+        // and had no entry here. So this list did not know the table held
+        // anybody's address, and the check that guards this list could not
+        // see it either (the column is a list of addresses, `toRecipients`,
+        // a name that check did not know). Both are put right together.
+        'reason'   => 'The record that a message was sent, or tried. The person\'s address is taken out of its list of recipients; the row itself (which route, what became of it, the subject, when) is the organisation\'s own record and is kept',
+        'columns'  => ['toRecipients'],
+    ],
     'tblErasureRequest' => [
         'decision' => 'unlink',
         // 🛑 #510, 11 October 2026. This said 'erase', and that one word broke
@@ -532,6 +543,23 @@ return [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['userID'],
+    ],
+    'tblMailQueue' => [
+        'decision' => 'erase',
+        // #592. No account number ties a waiting message to a person: they
+        // are in it as an e-mail address, in a list. So it is erased by a
+        // step of its own (GdprEraser::eraseMailQueueMessages()), which
+        // finds the person by address.
+        'reason'   => 'Mail waiting to be sent. A message for this person alone is deleted, with its attached files; in a message that is also for other people their address is taken off the list, so it is not sent to them',
+        // `origin` is here because, for a password reset, it holds the
+        // person's account number ('reset:5'). Such a message is for that
+        // person alone, so the step deletes the whole row.
+        'columns'  => ['toRecipients', 'subject', 'bodyHtml', 'bodyText', 'lastError', 'origin'],
+    ],
+    'tblMailQueueFiles' => [
+        'decision' => 'erase',
+        'reason'   => 'Files attached to mail waiting to be sent (a giving statement, for one). Deleted with the waiting message they belong to, by the same step; the stored copy on disk goes too',
+        'columns'  => ['storedName', 'realName'],
     ],
     'tblNewsletterRecipient' => [
         'decision' => 'erase',
@@ -1425,8 +1453,19 @@ return [
     // NOT PERSONAL - it only looks that way
     // =========================================================================
     // About a place or a thing, not a person. Left alone.
-    // 3 tables.
+    // 4 tables.
 
+    'tblMailRouteState' => [
+        'decision' => 'not-personal',
+        // #592. One row for the installation's mail route: what is wrong
+        // with it (a certificate that failed its check, a sign-in the mail
+        // server refused) and when the mail job last ran. The certificate's
+        // names are a mail SERVER's. The mail server's own words about a
+        // refused sign-in can name the organisation's mailbox, which is a
+        // setting and not a person's record.
+        'reason'   => 'About a mail server and the portal\'s own scheduled job, not about a person',
+        'columns'  => [],
+    ],
     'tblAssetLocations' => [
         'decision' => 'not-personal',
         'reason'   => 'Where a piece of equipment is kept. About a place, not a'

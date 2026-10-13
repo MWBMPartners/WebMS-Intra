@@ -54,24 +54,45 @@
  * organisation can be added later without changing its callers; today it
  * ignores the number.
  *
+ * WHAT IS WRONG WITH THE ROUTE, KEPT FROM ONE REQUEST TO THE NEXT (package M3)
+ * -------------------------------------------------------------------------
+ * Two faults are about the ROUTE and not about any one message, so they are
+ * put on record (one row of tblMailRouteState) and every later send, in any
+ * request or run of the mail job, reads that record first:
+ * - THE CERTIFICATE FAILED ITS CHECK. Nothing is sent. Every message is HELD
+ *   in the mail queue without a connection being made, and each run of the
+ *   job makes exactly one checked connection to see whether it now passes.
+ * - THE MAIL SERVER REFUSED THE SIGN-IN. Nothing is sent. Messages WAIT in
+ *   the queue, and the job signs in again only after a wait that grows (15
+ *   minutes, 1 hour, 3 hours, then every 6), because offering a refused
+ *   password again and again is what gets a mailbox locked.
+ * Either record goes when a message is accepted, when a connection gets past
+ * the step that failed, or when the mail settings are changed (the record
+ * carries a fingerprint of them, so a new password is tried at once).
+ * "Send test" always tries, whatever is on record: it is how an
+ * administrator finds out.
+ *
  * WHAT THIS CANNOT DO
  * -------------------
- * - There is no queue. A message that cannot be sent now is not kept and not
- *   tried again: the caller is told "not sent" and the attempt is logged.
  * - The mail server's certificate is always checked and there is no way to
- *   switch that off. A certificate that fails stops every message until the
- *   mail server's certificate is put right.
+ *   switch that off. A certificate that fails holds every message until the
+ *   mail server's certificate is put right. (`mail.smtp.certCheck` is seeded
+ *   for the page package M4 adds; NOTHING HERE READS IT.)
  * - canSend's facts are settings only. They cannot show that the mail server
  *   will accept the mailbox's password: only "Send test" shows that.
  * - The hourly limit is counted from this portal's own log. It knows nothing
- *   of mail the same mailbox sends from anywhere else, and two requests
- *   arriving at the same moment can both be let through at the limit's edge.
+ *   of mail the same mailbox sends from anywhere else. The mail job runs one
+ *   at a time, so what IT sends is counted exactly; two ordinary requests
+ *   arriving at the same moment can still both be let through at the limit's
+ *   edge. See roomLeft().
+ * - The record of a fault is as old as the last attempt. A certificate put
+ *   right since still shows until the job's next run, or a Send test.
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/592
  * -----------------------------------------------------------------------------
  */
@@ -121,6 +142,36 @@ final class MailRoutes
     /** @var string The send log's word for "not tried: the mail server refused the sign-in earlier in this request". See sendSmtp(). */
     public const SIGN_IN_NOT_REPEATED = 'sign-in-not-repeated';
 
+    // 🧭 What should become of a message after an attempt (`next` in what
+    //    sendSmtp() returns). Mailer and the mail queue act on this word and
+    //    on nothing else, so the rules below are written once: see whatNext().
+    public const NEXT_SENT             = 'sent';             // a mail server accepted it
+    public const NEXT_LATER            = 'later';            // keep it and try again
+    public const NEXT_REFUSED          = 'refused';          // about THIS message: never tried again
+    public const NEXT_HOLD_CERTIFICATE = 'hold-certificate'; // the certificate failed: held, with every other message
+    public const NEXT_HOLD_UNKNOWN     = 'hold-unknown';     // handed over whole and no answer: held for a person
+    public const NEXT_SIGN_IN          = 'sign-in';          // the sign-in was refused: it waits, uncounted
+    public const NEXT_NOT_SET_UP       = 'not-set-up';       // a setting is missing: nothing was tried
+
+    /** @var string The one row of tblMailRouteState there is today: the route every organisation shares. A route for one organisation, later, gets a row of its own. */
+    public const ROUTE_KEY = 'installation';
+
+    // What can be on record as wrong with the route (tblMailRouteState.problem).
+    public const PROBLEM_CERTIFICATE = 'certificate';
+    public const PROBLEM_SIGN_IN     = 'sign-in-refused';
+
+    /**
+     * @var list<int> After a refused sign-in, how long the job waits before
+     *      it signs in again, in seconds: 15 minutes, 1 hour, 3 hours, then 6
+     *      hours each time. Long, on purpose: a mailbox is locked by its
+     *      provider for repeated wrong passwords, and a person has to act
+     *      before another try can do any good.
+     */
+    private const SIGN_IN_WAITS = [900, 3600, 10800, 21600];
+
+    /** @var int How many failures in a row to switch encryption on before the health page says so. */
+    public const ENCRYPTION_FAILURES_WORTH_SAYING = 5;
+
     /**
      * ⏱️ How long each step of a send may take, in seconds.
      *
@@ -130,8 +181,12 @@ final class MailRoutes
      * seconds. With these numbers the longest a send can take is 15 seconds up
      * to handing the message over, plus 12 for the server's verdict: 27.
      *
-     * The cost: a mail server slower than this is given up on sooner. When the
-     * queue arrives (package M3) its job can use the library's defaults.
+     * The cost: a mail server slower than this is given up on sooner. The
+     * mail queue's job (package M3) uses these numbers too, and not the
+     * library's longer defaults: on shared hosting the job is itself a web
+     * request, started by the hosting company's scheduler, and is ended by the
+     * same limits. A message a slow server would not take in time is tried
+     * again at the job's next wait.
      */
     private const SECONDS = ['connect' => 5.0, 'handshake' => 5.0, 'reply' => 6.0, 'write' => 6.0, 'verdict' => 12.0, 'message' => 15.0];
 
@@ -149,6 +204,9 @@ final class MailRoutes
 
     /** @var bool True once the mail server has refused the mailbox's user name and password in this request. See sendSmtp(). */
     private static bool $signInRefused = false;
+
+    /** @var array{problem: string, words: string, since: string, seenAt: string, tryNow: bool}|null What standingProblem() found, kept for the rest of the request. */
+    private static ?array $standing = null;
 
     // =========================================================================
     // 📖 Reading
@@ -524,6 +582,9 @@ final class MailRoutes
         // A save may have just stored a new password, so the one the mail
         // server refused is no longer the one that would be offered.
         self::$signInRefused = false;
+        // And what is on record about the route is read again: a save
+        // changes the fingerprint the record is compared with.
+        self::$standing = null;
     }
 
     // =========================================================================
@@ -597,12 +658,65 @@ final class MailRoutes
     }
 
     /**
+     * 🧯 How much of the hourly limit is kept back for URGENT mail.
+     *
+     * A tenth of the limit, and never fewer than 5, so that a mailing which
+     * fills the hour cannot keep somebody's password-reset link waiting. But
+     * never more than half the limit: with a small limit (3 an hour, say)
+     * "at least 5" would otherwise leave ordinary mail no room at all, ever.
+     */
+    public static function reserve(int $limit): int
+    {
+        return min(max(5, intdiv($limit + 9, 10)), intdiv($limit, 2));
+    }
+
+    /**
+     * 🧮 How many more recipients may be sent to within the hour: null when
+     * the portal applies no limit of its own, otherwise a number (0 or less
+     * means none).
+     *
+     * Ordinary and bulk mail may use the limit less the reserve; urgent mail
+     * may use all of it.
+     *
+     * HOW EXACT THIS IS. The mail queue's job runs one at a time and asks
+     * here before each message, so the job never passes the limit by itself.
+     * A message sent inside an ordinary request asks here too, but two such
+     * requests arriving at the same moment both see the same room and can
+     * both use it: the limit can then be passed by as many messages as there
+     * are requests at that instant. Closing that would mean a lock around
+     * every send in every request, which would make one slow mail server
+     * hold up every page that sends.
+     *
+     * @param mysqli $db     The connection to count on (see recipientsInTheLastHour()).
+     * @param bool   $urgent True for urgent mail.
+     *
+     * @throws \Throwable When the count cannot be made. The caller must then
+     *                    send nothing: see overLimit().
+     */
+    public static function roomLeft(mysqli $db, bool $urgent): ?int
+    {
+        $limit = self::limit();
+        if ($limit === null) {
+            return null;
+        }
+        if ($limit === false) {
+            return 0; // not a number: Mailer::sendingRoute() already says "not set up"
+        }
+
+        return $limit - ($urgent === true ? 0 : self::reserve($limit)) - self::recipientsInTheLastHour($db);
+    }
+
+    /**
      * 🚦 Would sending to this many more recipients pass the hourly limit?
+     *
+     * @param bool $urgent True for urgent mail, which may use the part of the
+     *                     limit kept back from everything else.
      *
      * @return string '' when the message may go; otherwise the reason, in
      *                plain words, for the send log and for the administrator.
+     *                Mailer keeps such a message in the queue when it can.
      */
-    public static function overLimit(int $recipients): string
+    public static function overLimit(int $recipients, bool $urgent = false): string
     {
         $limit = self::limit();
         if ($limit === null) {
@@ -614,7 +728,7 @@ final class MailRoutes
             return 'Not sent: the hourly limit stored is not a number, so the portal cannot tell whether this message is within it.';
         }
         try {
-            $already = self::recipientsInTheLastHour(App::db());
+            $room = self::roomLeft(App::db(), $urgent);
         } catch (\Throwable $e) {
             // The count could not be made (the log table is missing its new
             // columns, or the database is in trouble). Sending anyway would
@@ -623,11 +737,44 @@ final class MailRoutes
 
             return 'Not sent: the portal could not count how much mail went in the last hour, so it cannot tell whether this message is within the limit of ' . $limit . ' recipients an hour.';
         }
-        if ($already + $recipients > $limit) {
-            return 'Not sent: the limit is ' . $limit . ' recipients an hour, ' . $already . ' were sent to in the last hour, and this message is for ' . $recipients . '.';
+        if ($room !== null && $recipients > $room) {
+            $reserve = $urgent === true ? 0 : self::reserve($limit);
+            $already = $limit - $reserve - $room;
+
+            return 'Not sent now: the limit is ' . $limit . ' recipients an hour, ' . $already . ' were sent to in the last hour, and this message is for ' . $recipients . '.'
+                . ($reserve > 0 ? ' (The last ' . $reserve . ' of the ' . $limit . ' are kept for urgent mail, such as password resets.)' : '');
         }
 
         return '';
+    }
+
+    /**
+     * 🚫 Is this message for more recipients than the hourly limit allows in
+     * a WHOLE hour, so that it could never go however long it waited?
+     *
+     * Ordinary and bulk mail may use the limit less the part kept for urgent
+     * mail; urgent mail may use all of it. A message for more than that has
+     * no hour it fits in. It used to be kept "until the hour has room".
+     *
+     * @return string '' when it fits, or when the portal applies no limit of
+     *                its own (or the stored limit is not a number: that is
+     *                limitProblem()'s to report). Otherwise the reason, in
+     *                plain words that name the limit. It holds no address.
+     */
+    public static function neverFits(int $recipients, bool $urgent): string
+    {
+        $limit = self::limit();
+        if ($limit === null || $limit === false) {
+            return '';
+        }
+        $reserve = $urgent === true ? 0 : self::reserve($limit);
+        if ($recipients <= $limit - $reserve) {
+            return '';
+        }
+
+        return 'Not sent, and not kept to try again: this message is for ' . $recipients . ' recipients, and the limit is ' . $limit . ' recipients an hour'
+            . ($reserve > 0 ? ' (of which the last ' . $reserve . ' are kept for urgent mail, such as password resets)' : '')
+            . ', so there is no hour in which it could go. Send it to fewer people at a time, or raise the limit at Admin, Integrations, Email.';
     }
 
     // =========================================================================
@@ -652,10 +799,26 @@ final class MailRoutes
      *
      * @param list<string> $to    The recipients' addresses.
      * @param list<string> $files Paths of files to attach.
+     * @param array{messageId?: string, date?: int, repeatSafe?: bool} $again
+     *        For the mail queue. `messageId` and `date` (seconds since 1970,
+     *        UTC) are the ones the message was first tried with, so that every
+     *        attempt is the SAME message to a mail system that has seen it
+     *        before. `repeatSafe` true means a second copy does no harm.
      *
      * @return array{sent: bool, outcome: string, reason: string, code: int|null, words: string, from: string,
-     *               attachments: int, steps: list<string>, certificate: bool}
-     *         outcome:     one of Mailer's OUTCOME_ values.
+     *               attachments: int, steps: list<string>, certificate: bool, next: string, stage: string,
+     *               messageId: string, routeFault: bool}
+     *         next:        what should become of the message: one of the NEXT_
+     *                      values. See whatNext().
+     *         stage:       the step the attempt stopped at, in the mail
+     *                      library's word.
+     *         messageId:   the message's identifier, to keep for a later
+     *                      attempt. '' when no message was made.
+     *         routeFault:  true when what went wrong would go wrong for every
+     *                      message alike (the server, the encryption, the
+     *                      sign-in, the sender). The job then stops its run.
+     *         outcome:     one of Mailer's OUTCOME_ values, as "Send test"
+     *                      shows it: sent, refused, not-set-up or not-sent.
      *         reason:      a short word for the send log ('not-set-up',
      *                      'message-refused', 'sign-in-not-repeated', or the
      *                      library's own reason, such as 'certificate' or
@@ -669,12 +832,13 @@ final class MailRoutes
      *                      test" only: it holds e-mail addresses too.
      *         certificate: true when the server's certificate is what failed.
      */
-    public static function sendSmtp(array $to, string $subject, string $text, string $html, array $files = []): array
+    public static function sendSmtp(array $to, string $subject, string $text, string $html, array $files = [], array $again = []): array
     {
         $route  = self::open();
         $answer = [
             'sent' => false, 'outcome' => Mailer::OUTCOME_NOT_SET_UP, 'reason' => self::NOT_SET_UP, 'code' => null, 'words' => '',
             'from' => $route['from'], 'attachments' => 0, 'steps' => [], 'certificate' => false,
+            'next' => self::NEXT_NOT_SET_UP, 'stage' => SendResult::STAGE_CONFIG, 'messageId' => '', 'routeFault' => true,
         ];
         $client = $route['client'];
         if ($client === null) {
@@ -693,7 +857,9 @@ final class MailRoutes
                 $attachments[] = Message::fileAttachment((string) $path);
             }
             $message = new Message(
-                (new SystemClock())->now(),
+                // A message from the queue keeps the moment it was written;
+                // a new one is dated now.
+                (int) ($again['date'] ?? 0) > 0 ? (int) $again['date'] : (new SystemClock())->now(),
                 $route['from'],
                 $route['fromName'],
                 array_values($to),
@@ -705,16 +871,22 @@ final class MailRoutes
                 $html,
                 $route['replyTo'],
                 $attachments,
+                // The identifier it was first tried under, or '' for a new one.
+                (string) ($again['messageId'] ?? ''),
             );
             $message->size();
         } catch (MessageRefused $refusal) {
-            $answer['outcome'] = Mailer::OUTCOME_REFUSED;
-            $answer['reason']  = self::MESSAGE_REFUSED;
-            $answer['words']   = 'Not sent: the message could not be made into an e-mail. ' . $refusal->getMessage();
+            $answer['outcome']    = Mailer::OUTCOME_REFUSED;
+            $answer['reason']     = self::MESSAGE_REFUSED;
+            $answer['next']       = self::NEXT_REFUSED;
+            $answer['stage']      = SendResult::STAGE_MESSAGE;
+            $answer['routeFault'] = false;
+            $answer['words']      = 'Not sent: the message could not be made into an e-mail. ' . $refusal->getMessage();
 
             return $answer;
         }
         $answer['attachments'] = $message->attachmentCount();
+        $answer['messageId']   = $message->messageId();
 
         // 🔐 A sign-in the mail server has already refused in this request is
         //    NOT offered again. This used to sign in afresh for every message:
@@ -725,12 +897,16 @@ final class MailRoutes
         //    Each later message is answered here, without contacting the mail
         //    server, and its line in the send log says why.
         //
-        //    WHAT THIS CANNOT DO: remember anything from one request to the
-        //    next. Every new request, and every run of a scheduled job, still
-        //    signs in once and is refused once.
+        //    FROM ONE REQUEST TO THE NEXT the refusal is on record in the
+        //    database (see noteResult() and standingProblem()): Mailer keeps
+        //    a message in the queue without coming here at all, and the mail
+        //    job signs in again only after a wait. This flag is what covers
+        //    the rest of the request in which the refusal was first met.
         if (self::$signInRefused === true) {
             $answer['outcome'] = Mailer::OUTCOME_REFUSED;
             $answer['reason']  = self::SIGN_IN_NOT_REPEATED;
+            $answer['next']    = self::NEXT_SIGN_IN;
+            $answer['stage']   = SendResult::STAGE_AUTH;
             $answer['words']   = 'Not sent, and the mail server was not contacted. It refused the mailbox\'s user name and password for an '
                 . 'earlier message sent in the same run, and offering a refused password again and again can get a mailbox locked. '
                 . 'Check both, and type the password in again at Admin, Integrations, Email.';
@@ -749,10 +925,18 @@ final class MailRoutes
             self::$signInRefused = true;
         }
 
+        // 📒 What this attempt showed about the ROUTE goes on record, for
+        //    every later request and run: see noteResult().
+        self::noteResult($result);
+
         $answer['steps']       = $result->transcript;
         $answer['code']        = $result->code > 0 ? $result->code : null;
         $answer['reason']      = $result->reason;
         $answer['certificate'] = $result->reason === SendResult::REASON_CERTIFICATE;
+        $answer['stage']       = $result->stage;
+        $answer['next']        = self::whatNext($result, ($again['repeatSafe'] ?? false) === true);
+        $answer['routeFault']  = $result->accepted() === false
+            && ($result->isAboutTheMessage() === false || $result->stage === SendResult::STAGE_SENDER);
         if ($result->accepted() === true) {
             $answer['sent']    = true;
             $answer['outcome'] = Mailer::OUTCOME_SENT;
@@ -760,14 +944,100 @@ final class MailRoutes
 
             return $answer;
         }
-        // 🚫 Not accepted. With no queue yet, "try later" and "needs a
-        //    person" both come to the same thing for the caller: it did not
-        //    go and is not kept. Only a refusal that the same attempt would
-        //    meet again is told apart, as 'refused'.
+        // 🚫 Not accepted. `outcome` is the word "Send test" shows, as it
+        //    always was: 'refused' for a "no" that the same attempt would
+        //    meet again, 'not-sent' for everything else. What Mailer and the
+        //    mail queue DO about it is in `next`.
         $answer['outcome'] = $result->outcome === SendResult::REFUSED ? Mailer::OUTCOME_REFUSED : Mailer::OUTCOME_NOT_SENT;
         $answer['words']   = self::inWords($result);
 
         return $answer;
+    }
+
+    /**
+     * 🧭 What should become of a message after this attempt. THE ONE PLACE
+     * the mail library's four outcomes are turned into what the portal does.
+     *
+     *   accepted                          -> sent.
+     *   the certificate failed its check  -> held, with every other message,
+     *                                        until it passes.
+     *   handed over whole, and no answer  -> NOBODY CAN TELL whether it went.
+     *                                        Held for a person; tried again
+     *                                        only when a second copy does no
+     *                                        harm.
+     *   "try later"                       -> kept and tried again.
+     *   refused at the SIGN-IN            -> about the mailbox, not the
+     *                                        message: it waits.
+     *   refused BEFORE the message itself -> kept and tried again. A "no"
+     *     (the greeting, the encryption,     that arrives before encryption
+     *     the sender)                        is on can be forged by somebody
+     *                                        on the network path, and a "no"
+     *                                        to the sender is very often
+     *                                        about the mailbox (a daily
+     *                                        limit, "may not send as"). Mail
+     *                                        is never thrown away on those.
+     *   refused for a recipient, or for   -> refused: about THIS message. It
+     *     the message's content or size      is never tried again.
+     *
+     * REJECTED: treating every reply beginning with 5 as final. A mailbox
+     * that had reached its provider's daily limit would then have thrown
+     * away every message given to it that day.
+     */
+    private static function whatNext(SendResult $result, bool $repeatSafe): string
+    {
+        if ($result->accepted() === true) {
+            return self::NEXT_SENT;
+        }
+        if ($result->outcome === SendResult::NEEDS_PERSON) {
+            if ($result->reason === SendResult::REASON_CERTIFICATE) {
+                return self::NEXT_HOLD_CERTIFICATE;
+            }
+
+            return $repeatSafe === true ? self::NEXT_LATER : self::NEXT_HOLD_UNKNOWN;
+        }
+        if ($result->outcome !== SendResult::REFUSED) {
+            return self::NEXT_LATER;
+        }
+        if ($result->stage === SendResult::STAGE_AUTH) {
+            return self::NEXT_SIGN_IN;
+        }
+
+        return ($result->isAboutTheMessage() === false || $result->stage === SendResult::STAGE_SENDER) ? self::NEXT_LATER : self::NEXT_REFUSED;
+    }
+
+    /**
+     * 🆔 A new identifier for a message that is being kept in the mail queue,
+     * in the form the mail library makes for itself: a random part, then the
+     * domain of the "from" address.
+     *
+     * Made WHEN THE MESSAGE IS KEPT, and not at its first attempt, so that
+     * every attempt there ever is carries the same one. (It was first stored
+     * after the first attempt. A run that died just after the mail server
+     * took the message had then not stored it, and a second copy, where one
+     * is allowed, would have gone out under a different identifier, which is
+     * the one case the identifier is kept for.)
+     *
+     * '' when there is no usable "from" address: the route is then not set
+     * up, and the mail library makes one at the first attempt.
+     */
+    public static function newMessageId(): string
+    {
+        $domain = (string) substr((string) strrchr(self::value('mail.defaultFromAddress'), '@'), 1);
+        if (preg_match('/\A[A-Za-z0-9.-]{1,253}\z/', $domain) !== 1) {
+            return '';
+        }
+
+        return '<' . bin2hex(random_bytes(16)) . '@' . $domain . '>';
+    }
+
+    /**
+     * The words for the step an attempt stopped at, to finish the sentence
+     * "It stopped while …". For the health page, which shows no reply of the
+     * mail server's (a reply can name an e-mail address).
+     */
+    public static function stoppedWhile(string $stage): string
+    {
+        return self::STOPPED_WHILE[$stage] ?? 'at a step the portal has no name for';
     }
 
     /**
@@ -797,68 +1067,384 @@ final class MailRoutes
             // The server gave no reply to quote: the words are the library's own, and already plain.
             return 'Not sent. ' . $while . ' ' . $result->serverWords;
         }
+        // "Later" is asked FIRST. It used to be asked last, so a mail server
+        // that said "try again later" while naming the sender or a recipient
+        // (a busy mailbox, greylisting) was reported as having REFUSED the
+        // "from" address or a recipient's address, which it had not.
         $lead = 'The mail server refused the message.';
-        if ($result->stage === SendResult::STAGE_AUTH) {
+        if ($result->outcome === SendResult::TRY_LATER) {
+            $lead = 'The mail server asked for the message to be sent again later.';
+        } elseif ($result->stage === SendResult::STAGE_AUTH) {
             $lead = 'The mail server refused the user name and password. Check both, and type the password in again.';
         } elseif ($result->stage === SendResult::STAGE_SENDER) {
             $lead = 'The mail server refused the "from" address. The mailbox may not be allowed to send as that address.';
         } elseif ($result->stage === SendResult::STAGE_RECIPIENT) {
             $lead = "The mail server refused a recipient's address.";
-        } elseif ($result->outcome === SendResult::TRY_LATER) {
-            $lead = 'The mail server asked for the message to be sent again later.';
         }
 
         return 'Not sent. ' . $lead . ' ' . $while . ' The mail server said: ' . $result->code . ' ' . $result->serverWords;
     }
 
+    // =========================================================================
+    // 📒 What is on record about the route (tblMailRouteState)
+    // =========================================================================
+
     /**
-     * 🪪 The certificate problem on record, if the last attempt through SMTP
-     * failed on the mail server's certificate.
-     *
-     * Read from the send log: the newest SMTP row for a message that got as
-     * far as the mail server being tried. One good send after the failure
-     * clears it, because the newest such row is then that send. So does a
-     * later attempt that fails for another reason (the server cannot be
-     * reached, or refuses the sign-in): the certificate is then no longer
-     * what the last attempt found.
-     *
-     * A row for a message that was stopped BEFORE the mail server was tried
-     * (the hourly limit, a missing setting, a message that could not be made
-     * into an e-mail) is passed over. It used to count as "the newest row",
-     * so the notice went after any of those, with the certificate still
-     * failing and the page saying it stays until a message is accepted.
-     *
-     * WHAT IT CANNOT DO: it knows only what was true at the last attempt. A
-     * certificate put right since still shows here until something is sent;
-     * "Send test" is the way to find out. And a notice that has gone after a
-     * different failure does not show that the certificate now passes.
-     *
-     * @return array{words: string, at: string}|null `at` is a moment in UTC,
-     *         'Y-m-d H:i:s', or '' when the row has none.
+     * A fingerprint of the settings a fault was met with: which route is
+     * chosen, the mail server, the port, the encryption, the user name and
+     * the stored (encrypted) password. When any of them changes, a fault on
+     * record is no longer assumed, so a corrected password is tried at once.
+     * The password's stored form changes on every save, even when the same
+     * password is typed again, which is what an administrator saving it
+     * again would expect.
      */
-    public static function certificateProblem(mysqli $db): ?array
+    public static function settingsMark(): string
     {
-        // `errorCode` is never NULL in this table (it defaults to ''), so
-        // NOT IN cannot quietly drop a row the way it would for a NULL.
+        $parts = [];
+        foreach (['mail.provider', 'mail.smtp.host', 'mail.smtp.port', 'mail.smtp.security', 'mail.smtp.username', 'mail.smtp.password'] as $key) {
+            $parts[] = self::rows()[$key]['value'] ?? '';
+        }
+
+        return hash('sha256', implode("\n", $parts));
+    }
+
+    /**
+     * The route's row as stored, or a row of empty values when there is none
+     * yet. `tryDue` is 1 when a wait after a refused sign-in is over, worked
+     * out on the database's own UTC clock.
+     *
+     * @return array<string, mixed>
+     *
+     * @throws \Throwable When the table cannot be read (the database has not
+     *                    been upgraded to hold it).
+     */
+    public static function state(mysqli $db): array
+    {
+        $key  = self::ROUTE_KEY;
         $stmt = $db->prepare(
-            'SELECT status, errorCode, errorDetail, sentAtUtc FROM tblEmailLog WHERE provider = ? AND errorCode NOT IN (?, ?, ?) '
-            . 'ORDER BY emailLogID DESC LIMIT 1'
+            'SELECT problem, problemWords, problemSince, problemSeenAt, settingsMark, tries, nextTryAt, certReasons, certNames, certSubject, certIssuer, '
+            . 'certValidFrom, certValidTo, certSha256, encryptionFailures, jobLastRanAt, (nextTryAt IS NULL OR nextTryAt <= UTC_TIMESTAMP()) AS tryDue '
+            . 'FROM tblMailRouteState WHERE routeKey = ?'
         );
-        // The three reasons a message is stopped before the mail server is
-        // tried. (Variables, because bind_param() takes them by reference.)
-        $provider       = self::SMTP;
-        $overLimit      = self::OVER_LIMIT;
-        $notSetUp       = self::NOT_SET_UP;
-        $messageRefused = self::MESSAGE_REFUSED;
-        $stmt->bind_param('ssss', $provider, $overLimit, $notSetUp, $messageRefused);
+        $stmt->bind_param('s', $key);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();
-        if (is_array($row) === false || (string) $row['status'] !== 'failed' || (string) $row['errorCode'] !== SendResult::REASON_CERTIFICATE) {
-            return null;
-        }
 
-        return ['words' => (string) $row['errorDetail'], 'at' => (string) ($row['sentAtUtc'] ?? '')];
+        return $row ?? [
+            'problem' => '', 'problemWords' => '', 'problemSince' => null, 'problemSeenAt' => null, 'settingsMark' => '', 'tries' => 0,
+            'nextTryAt' => null, 'certReasons' => '', 'certNames' => '', 'certSubject' => '', 'certIssuer' => '', 'certValidFrom' => null,
+            'certValidTo' => null, 'certSha256' => '', 'encryptionFailures' => 0, 'jobLastRanAt' => null, 'tryDue' => 1,
+        ];
+    }
+
+    /**
+     * 🚧 The fault on record for the route, if there is one that still
+     * stands. Mailer asks before every send, and the mail job before every
+     * run. Read once a request.
+     *
+     * A fault recorded under OTHER settings no longer stands: it is cleared
+     * here, and mail held for a certificate is released, so that changing
+     * the mail server or typing the password again starts mail off again
+     * without anybody having to press anything else.
+     *
+     * Never throws. If the record cannot be read, the answer is "nothing on
+     * record": a send is then tried in the ordinary way.
+     *
+     * @return array{problem: string, words: string, since: string, seenAt: string, tryNow: bool}
+     *         problem: '' or one of the PROBLEM_ values.
+     *         since, seenAt: moments in UTC, 'Y-m-d H:i:s'.
+     *         tryNow:  for a refused sign-in, true once the wait before the
+     *                  next try is over.
+     */
+    public static function standingProblem(mysqli $db): array
+    {
+        if (self::$standing !== null) {
+            return self::$standing;
+        }
+        $none = ['problem' => '', 'words' => '', 'since' => '', 'seenAt' => '', 'tryNow' => true];
+        try {
+            $state = self::state($db);
+            if ((string) $state['problem'] === '') {
+                return self::$standing = $none;
+            }
+            if (hash_equals((string) $state['settingsMark'], self::settingsMark()) === false) {
+                self::clearProblem($db, (string) $state['problem']);
+
+                return self::$standing = $none;
+            }
+
+            return self::$standing = [
+                'problem' => (string) $state['problem'],
+                'words'   => (string) $state['problemWords'],
+                'since'   => (string) ($state['problemSince'] ?? ''),
+                'seenAt'  => (string) ($state['problemSeenAt'] ?? ''),
+                'tryNow'  => (int) $state['tryDue'] === 1,
+            ];
+        } catch (\Throwable $e) {
+            return $none; // not kept: the next call asks again
+        }
+    }
+
+    /**
+     * @var int How long one request's claim on "the next try after a refused
+     *      sign-in" lasts, in seconds: see claimSignInTry(). Two minutes: a
+     *      single send is given up on after about 50 seconds, and the job
+     *      comes round every five minutes.
+     */
+    private const SIGN_IN_TRY_CLAIM_SECONDS = 120;
+
+    /**
+     * 🔐 CLAIM THE ONE TRY that is due after a refused sign-in. True for the
+     * ONE request that may now sign in again; false for every other.
+     *
+     * WHY. Once the wait after a refused sign-in is over, whoever sends next
+     * tries the mail server again. "Whoever" was not one: twelve pages that
+     * sent at the same moment each saw "the wait is over" and each signed in,
+     * twelve refused sign-ins in a second, which is exactly what gets a
+     * mailbox locked by its provider.
+     *
+     * HOW. ONE statement moves "not before" on by two minutes, and only
+     * where it is not already in the future. The database gives that change
+     * to one statement only: the request whose statement changed the row has
+     * the try, and the rest find the moment already moved and do not contact
+     * the mail server. REJECTED: reading "is the wait over?" and then
+     * writing. Two requests both read "yes" before either has written.
+     *
+     * What the try then shows replaces the two minutes: refused again, the
+     * next wait (noteResult()); signed in, the record is cleared. If the try
+     * never reaches the sign-in (the server cannot be reached), the two
+     * minutes stand, and the next request after them may try.
+     *
+     * Never throws. If the claim cannot be made (the record cannot be
+     * written), the answer is false: nobody signs in, and mail waits.
+     */
+    public static function claimSignInTry(mysqli $db): bool
+    {
+        try {
+            $key     = self::ROUTE_KEY;
+            $problem = self::PROBLEM_SIGN_IN;
+            $hold    = self::SIGN_IN_TRY_CLAIM_SECONDS;
+            $stmt    = $db->prepare(
+                'UPDATE tblMailRouteState SET nextTryAt = UTC_TIMESTAMP() + INTERVAL ? SECOND '
+                . 'WHERE routeKey = ? AND problem = ? AND (nextTryAt IS NULL OR nextTryAt <= UTC_TIMESTAMP())'
+            );
+            $stmt->bind_param('iss', $hold, $key, $problem);
+            $stmt->execute();
+            $won = $stmt->affected_rows === 1;
+            $stmt->close();
+            // What this request read about the route is now out of date.
+            self::$standing = null;
+
+            return $won;
+        } catch (\Throwable $e) {
+            error_log('MailRoutes: the try after a refused sign-in could not be claimed: ' . $e->getMessage());
+
+            return false;
+        }
+    }
+
+    /**
+     * Take the fault off the record. When it was the certificate, the mail
+     * held for it goes back into the queue, due at once.
+     */
+    private static function clearProblem(mysqli $db, string $was): void
+    {
+        $key  = self::ROUTE_KEY;
+        $stmt = $db->prepare(
+            "UPDATE tblMailRouteState SET problem = '', problemWords = '', problemSince = NULL, problemSeenAt = NULL, settingsMark = '', tries = 0, nextTryAt = NULL, "
+            . "certReasons = '', certNames = '', certSubject = '', certIssuer = '', certValidFrom = NULL, certValidTo = NULL, certSha256 = '' WHERE routeKey = ?"
+        );
+        $stmt->bind_param('s', $key);
+        $stmt->execute();
+        $stmt->close();
+        self::$standing = null;
+        if ($was === self::PROBLEM_CERTIFICATE) {
+            MailQueue::releaseHeldForCertificate($db);
+        }
+    }
+
+    /**
+     * 📒 Put on record what one attempt showed about the ROUTE. Called for
+     * every attempt through SMTP: a real send, the mail job, and "Send test".
+     *
+     *   The certificate failed its check   -> on record, with its facts for
+     *                                         the page package M4 adds; every
+     *                                         queued message is held.
+     *   The sign-in was refused            -> on record, and the wait before
+     *                                         the next try grows.
+     *   The attempt got PAST a step that
+     *   is on record as failing            -> that record is cleared: a
+     *                                         connection that reached the
+     *                                         sign-in had a certificate that
+     *                                         passed, and one that reached
+     *                                         the message had signed in.
+     *   Encryption could not be switched
+     *   on, and the certificate was not
+     *   blamed                             -> counted. Somebody on the
+     *                                         network path can cause this at
+     *                                         will, and a future PHP may word
+     *                                         a refused certificate in a way
+     *                                         the mail library does not know,
+     *                                         so a run of them is reported on
+     *                                         the health page without holding
+     *                                         mail as a certificate fault does.
+     *
+     * A write is made only when something changes, so an ordinary accepted
+     * message costs one small read and no write.
+     *
+     * Never throws: a record that cannot be kept must not stop mail. What it
+     * could not write goes to the server's error log.
+     */
+    private static function noteResult(SendResult $result): void
+    {
+        try {
+            $db    = App::db();
+            $state = self::state($db);
+            $key   = self::ROUTE_KEY;
+            $mark  = self::settingsMark();
+            $was   = (string) $state['problem'];
+            $words = mb_substr($result->serverWords, 0, 1000);
+
+            // 🪪 The certificate failed.
+            if ($result->reason === SendResult::REASON_CERTIFICATE) {
+                $facts  = $result->certificate;
+                $utc    = static fn (int $moment): ?string => $moment > 0 ? gmdate('Y-m-d H:i:s', $moment) : null;
+                $values = [
+                    mb_substr(implode(',', $facts === null ? [] : $facts->reasons), 0, 255),
+                    mb_substr(implode(',', $facts === null ? [] : $facts->names), 0, 1000),
+                    mb_substr($facts === null ? '' : $facts->subject, 0, 300),
+                    mb_substr($facts === null ? '' : $facts->issuer, 0, 300),
+                    $facts === null ? null : $utc($facts->validFrom),
+                    $facts === null ? null : $utc($facts->validTo),
+                    $facts === null ? '' : strtolower($facts->sha256),
+                ];
+                $problem = self::PROBLEM_CERTIFICATE;
+                $stmt    = $db->prepare(
+                    'INSERT INTO tblMailRouteState (routeKey, problem, problemWords, problemSince, problemSeenAt, settingsMark, certReasons, certNames, certSubject, certIssuer, '
+                    . 'certValidFrom, certValidTo, certSha256) VALUES (?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?, ?, ?, ?, ?, ?, ?, ?) '
+                    . 'ON DUPLICATE KEY UPDATE problemSince = IF(problem = VALUES(problem), problemSince, VALUES(problemSince)), problem = VALUES(problem), '
+                    . 'problemWords = VALUES(problemWords), problemSeenAt = VALUES(problemSeenAt), settingsMark = VALUES(settingsMark), tries = 0, nextTryAt = NULL, '
+                    . 'certReasons = VALUES(certReasons), certNames = VALUES(certNames), certSubject = VALUES(certSubject), certIssuer = VALUES(certIssuer), '
+                    . 'certValidFrom = VALUES(certValidFrom), certValidTo = VALUES(certValidTo), certSha256 = VALUES(certSha256)'
+                );
+                $stmt->bind_param('sssssssssss', $key, $problem, $words, $mark, ...$values);
+                $stmt->execute();
+                $stmt->close();
+                self::$standing = null;
+                // Everything still queued would meet the same refusal.
+                MailQueue::holdAllForCertificate($db, $words);
+
+                return;
+            }
+
+            // 🔐 The sign-in was refused. (A connection that got this far had
+            //    a certificate that passed, so a certificate record goes.)
+            if ($result->outcome === SendResult::REFUSED && $result->stage === SendResult::STAGE_AUTH) {
+                if ($was === self::PROBLEM_CERTIFICATE) {
+                    self::clearProblem($db, $was);
+                    $state = self::state($db);
+                }
+                $tries   = (string) $state['problem'] === self::PROBLEM_SIGN_IN ? (int) $state['tries'] + 1 : 1;
+                $wait    = self::SIGN_IN_WAITS[min($tries, count(self::SIGN_IN_WAITS)) - 1];
+                $problem = self::PROBLEM_SIGN_IN;
+                $said    = mb_substr('The mail server said: ' . ($result->code > 0 ? $result->code . ' ' : '') . $result->serverWords, 0, 1000);
+                $stmt    = $db->prepare(
+                    'INSERT INTO tblMailRouteState (routeKey, problem, problemWords, problemSince, problemSeenAt, settingsMark, tries, nextTryAt) '
+                    . 'VALUES (?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?, ?, UTC_TIMESTAMP() + INTERVAL ? SECOND) '
+                    . 'ON DUPLICATE KEY UPDATE problemSince = IF(problem = VALUES(problem), problemSince, VALUES(problemSince)), problem = VALUES(problem), '
+                    . 'problemWords = VALUES(problemWords), problemSeenAt = VALUES(problemSeenAt), settingsMark = VALUES(settingsMark), tries = VALUES(tries), '
+                    . 'nextTryAt = VALUES(nextTryAt), encryptionFailures = 0'
+                );
+                $stmt->bind_param('ssssii', $key, $problem, $said, $mark, $tries, $wait);
+                $stmt->execute();
+                $stmt->close();
+                self::$standing = null;
+
+                return;
+            }
+
+            // 🔒 Encryption could not be switched on, and it was not the certificate.
+            if ($result->reason === SendResult::REASON_ENCRYPTION_FAILED) {
+                $stmt = $db->prepare(
+                    'INSERT INTO tblMailRouteState (routeKey, encryptionFailures) VALUES (?, 1) '
+                    . 'ON DUPLICATE KEY UPDATE encryptionFailures = LEAST(encryptionFailures + 1, 60000)'
+                );
+                $stmt->bind_param('s', $key);
+                $stmt->execute();
+                $stmt->close();
+
+                return;
+            }
+
+            // ✅ How far did this attempt get? Past the sign-in, both records
+            //    are disproved; at the sign-in or past the encryption, the
+            //    certificate's is. An attempt that never reached the
+            //    encryption (the server could not be reached) shows nothing.
+            $pastSignIn = $result->accepted() === true
+                || in_array($result->stage, [SendResult::STAGE_RESET, SendResult::STAGE_SENDER, SendResult::STAGE_RECIPIENT, SendResult::STAGE_DATA, SendResult::STAGE_BODY], true) === true;
+            $pastEncryption = $pastSignIn === true || $result->stage === SendResult::STAGE_AUTH;
+            if ($pastEncryption === false) {
+                return;
+            }
+            if (($was === self::PROBLEM_CERTIFICATE) || ($was === self::PROBLEM_SIGN_IN && $pastSignIn === true)) {
+                self::clearProblem($db, $was);
+            }
+            if ((int) $state['encryptionFailures'] > 0) {
+                $stmt = $db->prepare('UPDATE tblMailRouteState SET encryptionFailures = 0 WHERE routeKey = ?');
+                $stmt->bind_param('s', $key);
+                $stmt->execute();
+                $stmt->close();
+            }
+        } catch (\Throwable $e) {
+            error_log('MailRoutes: what the attempt showed about the mail route could not be recorded: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 🕰️ Record that the mail queue's SCHEDULED JOB has just run (a moment in
+     * UTC, from the database's clock).
+     *
+     * ONLY the job's own page calls this (`_apps/cron/mail-queue.php`), once
+     * the scheduler's token has been accepted. MailQueue::run() used to call
+     * it, and an event broadcast makes a run of its own: after one broadcast
+     * the health page read "the job last ran at …" on an installation that
+     * had no job. What the moment is used for: MailQueue::jobIsRunning().
+     */
+    public static function jobRan(mysqli $db): void
+    {
+        $key  = self::ROUTE_KEY;
+        $stmt = $db->prepare('INSERT INTO tblMailRouteState (routeKey, jobLastRanAt) VALUES (?, UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE jobLastRanAt = UTC_TIMESTAMP()');
+        $stmt->bind_param('s', $key);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    /**
+     * 🪪 The certificate problem on record, for the e-mail page's notice.
+     *
+     * UNTIL PACKAGE M3 this was read from the send log: the newest SMTP row
+     * that got as far as the mail server. With a queue that no longer works:
+     * while a certificate fault stands, new messages are held WITHOUT the
+     * mail server being tried, so the newest row is no longer an attempt.
+     * It is now the record itself (see noteResult()). The notice stays until
+     * a connection passes the check, or the mail settings change. A message
+     * stopped before the mail server is tried (the hourly limit, a missing
+     * setting) does not touch it.
+     *
+     * WHAT IT CANNOT DO: it knows only what was true at the last attempt. A
+     * certificate put right since still shows here until the mail job's next
+     * run, or a Send test.
+     *
+     * @return array{words: string, at: string}|null `at` is the moment it was
+     *         last seen, in UTC, 'Y-m-d H:i:s'. Null when nothing is on
+     *         record, or the record cannot be read.
+     */
+    public static function certificateProblem(mysqli $db): ?array
+    {
+        $problem = self::standingProblem($db);
+
+        return $problem['problem'] === self::PROBLEM_CERTIFICATE ? ['words' => $problem['words'], 'at' => $problem['seenAt']] : null;
     }
 
     // =========================================================================

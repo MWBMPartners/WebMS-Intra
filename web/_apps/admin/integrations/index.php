@@ -1068,6 +1068,19 @@ function sendTestEmail(string $recipient): array
         $detail = trim('Exception: ' . $exceptionMsg . ($detail !== '' ? ' | ' . $detail : ''));
     }
 
+    // ⏳ THE MAIL QUEUE (#592). send() also answers true for a message it has
+    //    only KEPT to send later (the hourly limit has no room, or a fault
+    //    with the mail route is on record). That is not a test that passed,
+    //    and this used to report it as "Email sent".
+    if ($ok === true && \Portal\Core\Mailer::lastIsWaiting() === true) {
+        Logger::activity('IntegrationTest', 'Test email was not sent: it is waiting in the mail queue, for ' . $recipient);
+        return [
+            'success' => false,
+            'message' => 'The test e-mail was NOT sent: the portal kept it in the mail queue to send later. The detail below says why, and the health page says whether waiting mail is being sent.',
+            'details' => $detail,
+        ];
+    }
+
     if ($ok === true) {
         Logger::activity('IntegrationTest', 'Test email sent successfully to ' . $recipient);
         return [

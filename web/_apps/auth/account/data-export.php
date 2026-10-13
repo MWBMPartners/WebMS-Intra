@@ -49,6 +49,14 @@
  *                          administrator to place — #517)
  *   tblExternalAudienceMembers (outside calendars whose "who may see these
  *                          events" list names you — #514)
+ *   tblMailQueue, tblMailQueueFiles (e-mail waiting to be sent to your
+ *                          address: its subject, when it was written, what
+ *                          state it is in and the names of any attached
+ *                          files. NOT its text: that is stored encrypted and
+ *                          may be for other people too — #592)
+ *   tblEmailLog           (the portal's record of e-mail sent, or tried, to
+ *                          your address: the subject, when, and what became
+ *                          of it — #592)
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -64,6 +72,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\MailQueue;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -360,6 +369,104 @@ $payload = [
                 }
                 throw $problem;
             }
+        })(),
+        // ✉️ E-mail WAITING to be sent to this person's address (#592): the
+        // mail queue (tblMailQueue) and the files attached to that mail
+        // (tblMailQueueFiles). Handed over: the subject, when the message
+        // was written (a moment in UTC), what state it is in, and the names
+        // of any attached files. NOT handed over: the text of the message,
+        // which is stored encrypted and may be for other people too, and
+        // the list of recipients, which can name other people.
+        //
+        // A person is in these tables only as an e-mail ADDRESS in a list
+        // separated by commas, so they are found by address. The LIKE is
+        // only a first filter; MailQueue::listHasAddress() then decides, and
+        // counts an entry only when it IS the address (a longer address
+        // that merely contains it is somebody else's). The matching erasure
+        // step is GdprEraser::eraseMailQueueMessages().
+        //
+        // Error 1146 means the tables do not exist, because the database
+        // has not been upgraded to include them (migration 216). Then
+        // nothing is waiting, so the answer is an empty list.
+        'mailWaitingToBeSent' => (static function () use ($mysqli, $user): array {
+            $address = trim((string) ($user['emailAddress'] ?? ''));
+            if ($address === '') {
+                return [];
+            }
+            try {
+                $like = '%' . addcslashes($address, '\\%_') . '%';
+                $stmt = $mysqli->prepare(
+                    'SELECT q.queueID, q.subject, q.createdAt, q.status, q.toRecipients, f.realName '
+                    . 'FROM tblMailQueue AS q LEFT JOIN tblMailQueueFiles AS f ON f.queueID = q.queueID '
+                    . 'WHERE q.toRecipients LIKE ? ORDER BY q.queueID, f.queueFileID'
+                );
+                $stmt->bind_param('s', $like);
+                $stmt->execute();
+                $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                $stmt->close();
+            } catch (\mysqli_sql_exception $problem) {
+                if ($problem->getCode() === 1146) {
+                    return [];
+                }
+                throw $problem;
+            }
+            $waiting = [];
+            foreach ($rows as $row) {
+                if (MailQueue::listHasAddress((string) $row['toRecipients'], $address) === false) {
+                    continue;
+                }
+                $id = (int) $row['queueID'];
+                $waiting[$id] ??= [
+                    'subject' => (string) $row['subject'], 'writtenAtUtc' => (string) $row['createdAt'],
+                    'state' => (string) $row['status'], 'attachedFiles' => [],
+                ];
+                if ($row['realName'] !== null) {
+                    $waiting[$id]['attachedFiles'][] = (string) $row['realName'];
+                }
+            }
+
+            return array_values($waiting);
+        })(),
+        // 📧 The portal's record of e-mail sent, or tried, to this person's
+        // address (tblEmailLog, #592): the subject, when, which mail route,
+        // and what became of it. Found by address in the same way, and for
+        // the same reason. The list of recipients is NOT handed over: it can
+        // name other people. `recordedAtUtc` is empty for a row from before
+        // migration 213, which has only the database server's own time. The
+        // newest 2,000 lines that match the first filter are looked at. The
+        // matching erasure step is GdprEraser::eraseEmailLogRecipients().
+        'emailSendLog' => (static function () use ($mysqli, $user): array {
+            $address = trim((string) ($user['emailAddress'] ?? ''));
+            if ($address === '') {
+                return [];
+            }
+            $like = '%' . addcslashes($address, '\\%_') . '%';
+            try {
+                $stmt = $mysqli->prepare(
+                    'SELECT subject, provider, status, sentAtUtc, sentAt, toRecipients FROM tblEmailLog WHERE toRecipients LIKE ? ORDER BY emailLogID DESC LIMIT 2000'
+                );
+                $stmt->bind_param('s', $like);
+                $stmt->execute();
+                $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                $stmt->close();
+            } catch (\mysqli_sql_exception $problem) {
+                // 1054: the two columns of migration 213 are not there yet.
+                if ($problem->getCode() === 1054 || $problem->getCode() === 1146) {
+                    return [];
+                }
+                throw $problem;
+            }
+            $lines = [];
+            foreach ($rows as $row) {
+                if (MailQueue::listHasAddress((string) $row['toRecipients'], $address) === true) {
+                    $lines[] = [
+                        'subject' => (string) $row['subject'], 'route' => (string) $row['provider'], 'whatBecameOfIt' => (string) $row['status'],
+                        'recordedAtUtc' => $row['sentAtUtc'], 'recordedAtServerTime' => (string) $row['sentAt'],
+                    ];
+                }
+            }
+
+            return $lines;
         })(),
         // 🙏 Salvation decision cards (tblSalvationCards) are DELIBERATELY
         // NOT exported here: the public decision-card form has no userID

@@ -11,10 +11,36 @@
  * THE SMTP ROUTE (#592, 12 October 2026) goes through the portal's own mail
  * library (`_core/maillib/`). Everything about it that touches the settings
  * or the mailbox's password is in MailRoutes.php; this class only asks it.
- * WHAT THAT ROUTE DOES NOT HAVE YET: a queue. A message that cannot be sent
- * now (the server is down, its certificate fails the check, the hourly limit
- * is reached) is NOT kept and NOT tried again. send() answers false and the
- * attempt is in the send log with its reason.
+ *
+ * THE QUEUE (#592, part 3). send() sends a message NOW when it can, and such
+ * a message is never stored. A message that cannot go now is KEPT in the
+ * mail queue (MailQueue.php) and send() answers TRUE: the mail server said
+ * "later" or could not be reached, the hourly limit has no room, the request
+ * has used its own budget (25 messages or 20 seconds), a fault with the
+ * route is on record, or the caller asked for it to wait. The scheduled job
+ * (`_apps/cron/mail-queue.php`) sends it. send() answers FALSE only when the
+ * message was neither sent nor kept: the route is not set up, the mail
+ * server refused THIS message, it is for more recipients than the hourly
+ * limit allows in a whole hour, or the queue could not take it.
+ * lastOutcome() tells the cases apart. What decides each case is in send()
+ * and in MailRoutes::whatNext().
+ *
+ * "TRUE" IS NOT "SENT". A caller that RECORDS or SHOWS what became of a
+ * message asks lastOutcome() (or lastIsWaiting()) and says "waiting" for a
+ * message that was only kept. Several pages and records said "sent",
+ * "delivered" and "e-mailed" for mail that was waiting, and nothing
+ * corrected them when it later failed.
+ *
+ * WHILE THE SCHEDULED JOB IS NOT RUNNING (MailQueue::jobIsRunning() answers
+ * no) nothing works through what is kept, so send() keeps as little as it
+ * can: see requestMessages() and the refused sign-in in send().
+ *
+ * WHAT THE MICROSOFT 365 AND GOOGLE ROUTES DO WITH THE QUEUE: a message over
+ * the hourly limit or the request's budget, or one asked to wait, is kept
+ * and sent by the job through that route. A message one of those services
+ * turns down in the request is NOT kept, as before: those routes answer only
+ * yes or no, so "later" cannot be told from "never". They move onto the mail
+ * library in a later package.
  *
  * The MS365 backend uses application-level OAuth2 (client credentials) and
  * Microsoft Graph. By default it sends as `mail.defaultFromAddress`
@@ -52,7 +78,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/234
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/592
  * -----------------------------------------------------------------------------
@@ -91,12 +117,52 @@ class Mailer
 
     // What became of the last message given to send(): see lastOutcome().
     public const OUTCOME_SENT       = 'sent';
+    public const OUTCOME_QUEUED     = 'queued';
+    public const OUTCOME_HELD       = 'held';
     public const OUTCOME_NOT_SET_UP = 'not-set-up';
     public const OUTCOME_REFUSED    = 'refused';
     public const OUTCOME_NOT_SENT   = 'not-sent';
 
     /** @var string One of the OUTCOME_ values above. */
     private static string $lastOutcome = self::OUTCOME_NOT_SENT;
+
+    /** @var int The number of the mail queue row the last message was kept in; 0 when it was not kept. */
+    private static int $lastQueueId = 0;
+
+    /** @var string Why the last message could not be kept, when the fault was the message's own; '' otherwise. See keep(). */
+    private static string $keepRefusal = '';
+
+    /**
+     * ⏱️ One request's own budget for sending: this many messages, or this
+     * many seconds counted from its first, whichever comes first. Every
+     * message after that is kept for the job. (The count applies only while
+     * the scheduled job is running: see requestMessages(). The seconds
+     * always apply.)
+     *
+     * WHY. A page that sends to many people one after another (a broadcast,
+     * a reminder run) used to keep going until the web server ended it: on a
+     * slow mail server a broadcast to five people was cut off at 30 seconds
+     * with three sent, two logged and nothing recorded (#592).
+     *
+     * WHAT IT CANNOT DO: end a send that has already started. A message
+     * begun just inside the 20 seconds can itself take up to 27 more. A page
+     * that must lose nothing even then keeps EVERY message first and lets
+     * the queue send them (`sendNow` false), as the event broadcast does.
+     */
+    public const REQUEST_MESSAGES = 25;
+    public const REQUEST_SECONDS  = 20.0;
+
+    /** @var int How many messages this request has given to send(). The fourth and later are bulk unless their caller says otherwise. */
+    private static int $givenThisRequest = 0;
+
+    /** @var int How many messages this request has tried to send now. */
+    private static int $triedThisRequest = 0;
+
+    /** @var int How many messages this request has KEPT in the mail queue: see keptThisRequest(). */
+    private static int $keptThisRequest = 0;
+
+    /** @var int|null When this request first tried to send, on PHP's steady clock (nanoseconds); null before that. */
+    private static ?int $firstTriedAt = null;
 
     /**
      * 🧭 Which route send() will use: ROUTE_GOOGLE, ROUTE_SMTP or ROUTE_MS365.
@@ -263,16 +329,24 @@ class Mailer
      * @param string       $subj    Email subject line
      * @param string       $body    Body — auto-detected as HTML if it contains `<` tags
      * @param array        $files   File paths to attach
-     * @param array        $options For the queue that package M3 adds:
-     *                              `priority` ('urgent', 'normal' or 'bulk'),
-     *                              `expiresAt` (a moment in UTC after which
-     *                              sending is pointless) and `repeatSafe` (a
-     *                              second copy does no harm). NOTHING READS IT
-     *                              YET: with no queue, every message is tried
-     *                              once, now, whatever is passed. It is here so
-     *                              that callers can already say what they mean.
+     * @param array        $options What the caller knows about the message
+     *                              (every part is optional):
+     *                              `priority`   'urgent', 'normal' or 'bulk'.
+     *                                           Left out, the first three
+     *                                           messages of a request are
+     *                                           normal and the rest bulk.
+     *                              `expiresAt`  a moment in UTC, 'Y-m-d H:i:s',
+     *                                           at or after which the message
+     *                                           must never be sent.
+     *                              `repeatSafe` true when a second copy does
+     *                                           no harm (a reset link, an
+     *                                           alert).
+     *                              `sendNow`    false: do not try in this
+     *                                           request; keep it for the job.
      *
-     * @return bool True if sent successfully. lastOutcome() says more.
+     * @return bool True when the message was SENT, or KEPT to be sent
+     *              (queued, or held). False when it was neither. lastOutcome()
+     *              says which.
      */
     public static function send(string|array $to, string $subj, string $body, array $files = [], array $options = []): bool
     {
@@ -301,29 +375,141 @@ class Mailer
         // 🧾 What lastOutcome() says if nothing below changes it. A route
         //    that is not set up may still throw further down, as the Microsoft
         //    365 route always has; the caller who catches that can still ask.
-        $route             = self::route();
-        self::$lastOutcome = self::canSend() === true ? self::OUTCOME_NOT_SENT : self::OUTCOME_NOT_SET_UP;
+        $route              = self::route();
+        $setUp              = self::canSend();
+        self::$lastOutcome  = $setUp === true ? self::OUTCOME_NOT_SENT : self::OUTCOME_NOT_SET_UP;
+        self::$lastQueueId  = 0;
+        $wanted             = MailQueue::wanted($options, ++self::$givenThisRequest);
+        $urgent             = $wanted['priority'] <= MailQueue::URGENT;
+        // Everything the queue needs to keep this message, should it come to that.
+        $message = [
+            'siteId' => Site::id() > 0 ? Site::id() : null, 'priority' => $wanted['priority'], 'to' => array_map('strval', array_values($recipients)),
+            'subject' => $subj, 'html' => $htmlBody, 'text' => $plainBody, 'files' => $files,
+            'expiresAt' => $wanted['expiresAt'], 'repeatSafe' => $wanted['repeatSafe'], 'canBeKept' => $wanted['canBeKept'], 'origin' => $wanted['origin'],
+        ];
 
-        // ⏳ The hourly limit, for every route (#592). Empty, which is how it
-        //    is seeded, means the portal applies none, and then this changes
-        //    nothing. Over it, the message is NOT sent and NOT kept: there is
-        //    no queue yet. The send log says so, with the numbers.
-        $over = MailRoutes::overLimit(count($recipients));
-        if ($over !== '') {
-            self::logSend($route, '', implode(', ', $recipients), $subj, 0, 'failed', null, MailRoutes::OVER_LIMIT, $over);
+        if ($setUp === true) {
+            // 🚫 FOR MORE PEOPLE THAN A WHOLE HOUR ALLOWS: refused at once.
+            //    It used to be kept "until the hour has room", which it never
+            //    could have: it sat for two days and was then failed as "too
+            //    old", and its sender had been answered "true". Asked before
+            //    anything else, so that it is never kept by any road below.
+            $never = MailRoutes::neverFits(count($recipients), $urgent);
+            if ($never !== '') {
+                self::$lastOutcome = self::OUTCOME_REFUSED;
+                self::logSend($route, '', implode(', ', $recipients), $subj, 0, 'failed', null, MailRoutes::OVER_LIMIT, $never);
 
-            return false;
+                return false;
+            }
+
+            // 🚧 REASONS NOT TO TRY NOW, in the order they are asked. Each
+            //    keeps the message in the queue and answers true. `mayTry`
+            //    says what happens when the queue cannot take it: a message
+            //    that was only being kept for convenience is tried now after
+            //    all; one that MUST not go now is not sent, and says so.
+            $why = null;
+            if ($wanted['sendNow'] === false) {
+                $why = ['status' => 'queued', 'code' => 'asked-to-wait', 'mayTry' => true,
+                    'words' => 'Kept for the mail job to send: the page that wrote it asked for it not to be sent inside the request.'];
+            } elseif ($route === self::ROUTE_SMTP) {
+                // A fault with the route that is already on record: the mail
+                // server is NOT contacted. See MailRoutes, "what is wrong
+                // with the route".
+                $standing = MailRoutes::standingProblem(App::db());
+                if ($standing['problem'] === MailRoutes::PROBLEM_CERTIFICATE) {
+                    $why = ['status' => 'held', 'holdReason' => MailQueue::HELD_CERTIFICATE, 'code' => 'certificate', 'mayTry' => false, 'stage' => 'TLS',
+                        'words' => 'Held, and the mail server was not contacted: its certificate failed the check. ' . $standing['words']];
+                } elseif ($standing['problem'] === MailRoutes::PROBLEM_SIGN_IN
+                    && ($standing['tryNow'] === false || MailQueue::jobIsRunning(App::db()) === true
+                        || MailRoutes::claimSignInTry(App::db()) === false)) {
+                    // 🔐 A refused sign-in is tried again only after a wait,
+                    //    and it is the JOB that tries. But with no job
+                    //    running, nothing ever tried again: one refused
+                    //    sign-in stopped all mail from every page for good.
+                    //    So once the wait is over and no job is running, ONE
+                    //    request is not kept here: it goes on below and is
+                    //    tried now. ONE, because the request must first
+                    //    CLAIM that try (MailRoutes::claimSignInTry(), one
+                    //    statement that only one request can win). Without
+                    //    the claim, twelve pages sending at the same moment
+                    //    each signed in, which is what gets a mailbox
+                    //    locked; an earlier note here said a refused
+                    //    password was "not offered again and again", and for
+                    //    that case it was untrue. If the mail server refuses
+                    //    again the wait grows, exactly as it does for the
+                    //    job (MailRoutes::noteResult()).
+                    //    The three tests are asked in that order on purpose:
+                    //    the claim CHANGES the record, so it is made only
+                    //    when this request would otherwise try.
+                    $why = ['status' => 'queued', 'code' => MailRoutes::SIGN_IN_NOT_REPEATED, 'mayTry' => false, 'stage' => 'AUTH',
+                        'words' => 'Waiting, and the mail server was not contacted: it has refused the mailbox\'s user name and password, and offering a refused '
+                            . 'password again and again can get a mailbox locked. Check both, and type the password in again at Admin, Integrations, Email.'];
+                }
+            }
+            if ($why === null && (self::$triedThisRequest >= self::requestMessages()
+                || (self::$firstTriedAt !== null && (hrtime(true) - self::$firstTriedAt) / 1e9 >= self::REQUEST_SECONDS))) {
+                $why = ['status' => 'queued', 'code' => 'request-budget', 'mayTry' => true,
+                    'words' => MailQueue::jobIsRunning(App::db()) === true
+                        ? 'Kept for the mail job to send: this request had already sent for ' . self::REQUEST_MESSAGES . ' messages or ' . (int) self::REQUEST_SECONDS . ' seconds.'
+                        : 'Kept: this request had already been sending for ' . (int) self::REQUEST_SECONDS . ' seconds. It will NOT go until the mail queue\'s scheduled job is running, which it is not.'];
+            }
+            if ($why === null) {
+                // ⏳ The hourly limit, for every route (#592). Empty, which
+                //    is how it is seeded, means the portal applies none.
+                $over = MailRoutes::overLimit(count($recipients), $urgent);
+                if ($over !== '') {
+                    $why = ['status' => 'queued', 'code' => MailRoutes::OVER_LIMIT, 'mayTry' => false,
+                        'words' => 'Waiting in the mail queue until the hour has room. ' . $over];
+                }
+            }
+            if ($why !== null) {
+                if (self::keep($route, $message, $why) === true) {
+                    return true;
+                }
+                if ($why['mayTry'] === false) {
+                    // Not sent, and not kept. When the fault is the message's
+                    // own (a file that cannot be attached) the log says that,
+                    // and not the reason it was not tried.
+                    $refused = self::$lastOutcome === self::OUTCOME_REFUSED;
+                    self::logSend(
+                        $route, '', implode(', ', $recipients), $subj, 0, 'failed', null,
+                        $refused === true ? 'message-refused' : $why['code'],
+                        $refused === true ? self::$keepRefusal : self::notKept($why['words'])
+                    );
+
+                    return false;
+                }
+                // Not kept, and allowed to go now: carry on and try it.
+            }
+        } else {
+            // 🚫 Not set up: nothing is kept, because nobody can say when,
+            //    or through what, it could ever go. One case still has to be
+            //    stopped here: an hourly limit that is stored and is not a
+            //    number makes the route "not set up" although it could send,
+            //    and sending would make the limit a promise quietly not kept.
+            $over = MailRoutes::overLimit(count($recipients), $urgent);
+            if ($over !== '') {
+                self::logSend($route, '', implode(', ', $recipients), $subj, 0, 'failed', null, MailRoutes::OVER_LIMIT, $over);
+
+                return false;
+            }
         }
 
-        // 🔀 Dispatch to the configured provider. route() is the one place
-        //    that reads the choice, so that sendingRoute() and canSend()
-        //    above can never describe a different route from the one used here.
+        // 🔀 Try it now. route() is the one place that reads the choice, so
+        //    that sendingRoute() and canSend() above can never describe a
+        //    different route from the one used here.
+        if ($setUp === true) {
+            self::$triedThisRequest++;
+            self::$firstTriedAt ??= hrtime(true);
+        }
         if ($route === self::ROUTE_SMTP) {
             // 🚫 This route never throws. With nothing filled in it answers
             //    false and logs "not set up". (The Microsoft 365 route throws
             //    there, which ends a page that sends without a try/catch, such
             //    as an event broadcast, in an error.)
-            return self::sendViaSmtp($recipients, $subj, $htmlBody, $plainBody, $files)['sent'];
+            $answer = MailRoutes::sendSmtp($message['to'], $subj, $plainBody, $htmlBody, $files, ['repeatSafe' => $wanted['repeatSafe']]);
+
+            return self::afterSmtp($answer, $message);
         }
 
         $sent = $route === self::ROUTE_GOOGLE
@@ -336,24 +522,152 @@ class Mailer
     }
 
     /**
+     * 🗂️ What to do with a message after one try through SMTP in a request:
+     * record it, and keep it in the queue when it should be tried again or
+     * looked at by a person.
+     *
+     * @param array<string, mixed> $answer  What MailRoutes::sendSmtp() returned.
+     * @param array<string, mixed> $message What send() built for the queue.
+     *
+     * @return bool What send() answers.
+     */
+    private static function afterSmtp(array $answer, array $message): bool
+    {
+        $to   = $message['to'];
+        $next = (string) $answer['next'];
+
+        if ($next === MailRoutes::NEXT_SENT) {
+            self::$lastOutcome = self::OUTCOME_SENT;
+            self::logSmtp($answer, $to, $message['subject'], 'sent');
+
+            return true;
+        }
+        if ($next === MailRoutes::NEXT_NOT_SET_UP || $next === MailRoutes::NEXT_REFUSED) {
+            // Nothing to keep: a setting is missing, or the mail server said
+            // no to THIS message and would say it again.
+            self::$lastOutcome = $next === MailRoutes::NEXT_REFUSED ? self::OUTCOME_REFUSED : self::OUTCOME_NOT_SET_UP;
+            self::logSmtp($answer, $to, $message['subject'], 'failed');
+
+            return false;
+        }
+
+        // Kept. As what, and with what first wait, depends on what happened.
+        $why = ['code' => (string) $answer['reason'], 'words' => (string) $answer['words'], 'stage' => (string) $answer['stage'], 'messageId' => (string) $answer['messageId'], 'logged' => true];
+        if ($next === MailRoutes::NEXT_HOLD_CERTIFICATE) {
+            $why += ['status' => 'held', 'holdReason' => MailQueue::HELD_CERTIFICATE];
+        } elseif ($next === MailRoutes::NEXT_HOLD_UNKNOWN) {
+            // Counted as an attempt: the whole message was handed over.
+            $why += ['status' => 'held', 'holdReason' => MailQueue::HELD_UNKNOWN, 'attempts' => 1];
+        } elseif ($next === MailRoutes::NEXT_SIGN_IN) {
+            $why += ['status' => 'queued']; // about the mailbox: not counted against the message
+        } else {
+            $why += ['status' => 'queued', 'attempts' => 1, 'waitSeconds' => MailQueue::waitAfter(1, (int) $message['priority']) ?? 0];
+        }
+        $kept = self::keep(self::ROUTE_SMTP, $message, $why);
+        // The attempt is in the send log either way, as what the message now
+        // is: 'queued' or 'held' when it was kept, 'failed' when it was not.
+        if ($kept === false) {
+            $answer['words'] = self::notKept((string) $answer['words']);
+        }
+        self::logSmtp($answer, $to, $message['subject'], $kept === true ? $why['status'] : 'failed');
+
+        return $kept;
+    }
+
+    /**
+     * 📥 Keep one message in the mail queue, and say so in the send log.
+     *
+     * @param array<string, mixed> $message What send() built.
+     * @param array<string, mixed> $why     `status` ('queued' or 'held'), `code` and
+     *        `words` for the send log, and optionally `holdReason`, `stage`,
+     *        `messageId`, `attempts`, `waitSeconds`. `logged` true means the
+     *        caller writes the send-log line itself.
+     *
+     * @return bool False when it could not be kept. lastOutcome() is then
+     *              'refused' when the message itself is at fault (a file it
+     *              should carry cannot be attached), and otherwise
+     *              'not-sent', with the reason in the server's error log
+     *              (never the message, its subject or an address).
+     */
+    private static function keep(string $route, array $message, array $why): bool
+    {
+        if ($message['canBeKept'] === false) {
+            error_log('Mailer: a message was not kept in the mail queue because the use-by moment its caller gave could not be read.');
+            self::$lastOutcome = self::OUTCOME_NOT_SENT;
+
+            return false;
+        }
+        self::$keepRefusal = '';
+        try {
+            self::$lastQueueId = MailQueue::add(App::db(), $message + [
+                'status' => $why['status'], 'holdReason' => $why['holdReason'] ?? '', 'lastStage' => $why['stage'] ?? '', 'lastError' => $why['words'],
+                'messageId' => $why['messageId'] ?? '', 'attempts' => $why['attempts'] ?? 0, 'waitSeconds' => $why['waitSeconds'] ?? 0,
+            ]);
+        } catch (\UnexpectedValueException $e) {
+            // The MESSAGE is at fault: a file it should carry is missing,
+            // empty or too big. Keeping it could never work. The text is
+            // MailQueue's own and names no file and no address.
+            self::$keepRefusal = 'Not sent, and not kept: ' . $e->getMessage() . '.';
+            self::$lastOutcome = self::OUTCOME_REFUSED;
+
+            return false;
+        } catch (\Throwable $e) {
+            // Most often: the files have been updated and the database
+            // upgrade has not been run, so the queue's tables are not there.
+            error_log('Mailer: a message could not be kept in the mail queue: ' . $e->getMessage());
+            self::$lastOutcome = self::OUTCOME_NOT_SENT;
+
+            return false;
+        }
+        self::$lastOutcome = $why['status'] === 'held' ? self::OUTCOME_HELD : self::OUTCOME_QUEUED;
+        self::$keptThisRequest++;
+        if (($why['logged'] ?? false) === false) {
+            self::logSend($route, '', implode(', ', $message['to']), $message['subject'], count($message['files']), $why['status'], null, $why['code'], $why['words']);
+        }
+
+        return true;
+    }
+
+    /** What the send log says of a message that should have been kept and could not be. */
+    private static function notKept(string $words): string
+    {
+        return $words . ' It could NOT be kept to try again: the mail queue did not take it (see the server\'s error log; the database upgrade may not have been run).';
+    }
+
+    /**
+     * 🔢 The mail queue row the last message given to send() was kept in, or
+     * 0 when it was sent, or not kept. For a page that queues a mailing and
+     * then wants to say how much of it has gone.
+     */
+    public static function lastQueueId(): int
+    {
+        return self::$lastQueueId;
+    }
+
+    /**
      * 🧾 What became of the last message given to send(), for a page that
      * wants to say more than yes or no.
      *
      *   'sent'        a mail service accepted it. Not the same as delivered.
+     *   'queued'      it is KEPT and will be tried (again) by the mail job:
+     *                 the mail server could not be reached or said "later",
+     *                 the hourly limit or the request's own budget was
+     *                 reached, the mail server has refused the mailbox's
+     *                 sign-in, or the caller asked for it to wait.
+     *   'held'        it is KEPT and waits for a person, or for the mail
+     *                 server's certificate to be put right: the certificate
+     *                 failed its check, or the whole message was handed over
+     *                 and no answer came, so nobody can tell whether it went.
      *   'not-set-up'  the chosen route is missing something; nothing was tried.
      *   'refused'     SMTP only: the mail server, or the mail library, said no
-     *                 in a way that trying again would not change (this
-     *                 address, this sender, this message, the sign-in).
-     *   'not-sent'    it did not go, for any other reason: the service could
-     *                 not be reached, its certificate failed the check, the
-     *                 hourly limit was reached, or Microsoft 365 or Google
-     *                 said no.
+     *                 to THIS message in a way that trying again would not
+     *                 change (a recipient's address, its content, its size).
+     *                 It is not kept.
+     *   'not-sent'    it did not go and is NOT kept: Microsoft 365 or Google
+     *                 said no, or the message should have been kept and the
+     *                 mail queue could not take it.
      *
-     * WHAT IT CANNOT SAY YET. The plan for this work names two more answers,
-     * 'queued' and 'held', for a message that is being kept to try again or
-     * kept for a person to look at. Neither is returned, because nothing is
-     * kept: there is no queue until package M3. 'not-sent' is the true word
-     * for both until then.
+     * send() answers true for the first three and false for the rest.
      *
      * It describes the LAST call in this request only.
      */
@@ -363,38 +677,204 @@ class Mailer
     }
 
     /**
-     * 📮 Send through the SMTP route, and record the attempt.
+     * ⏳ Was the last message given to send() only KEPT (queued, or held),
+     * and not sent? lastOutcome() in one word, for a caller that counts or
+     * records: send() answers true for a kept message, and "true" must not
+     * be written down as "sent".
+     */
+    public static function lastIsWaiting(): bool
+    {
+        return self::$lastOutcome === self::OUTCOME_QUEUED || self::$lastOutcome === self::OUTCOME_HELD;
+    }
+
+    /**
+     * 🔢 How many messages this request has kept in the mail queue so far.
+     * For a job that sends many (the reminder jobs) and reports its numbers
+     * at the end: "sent 3" beside "waiting 2", not "sent 5".
+     */
+    public static function keptThisRequest(): int
+    {
+        return self::$keptThisRequest;
+    }
+
+    /**
+     * 🔢 How many messages one request may try to send before the rest are
+     * kept: REQUEST_MESSAGES while the scheduled job is running, and no
+     * limit of this kind while it is not.
      *
-     * MailRoutes does the sending and never throws; this adds what Mailer
-     * does for every route, the send log, and a line in the error log for a
-     * real failure. "Not set up" gets no error-log line: it is a state, the
-     * health page reports it, and a broadcast to 200 people would otherwise
-     * write 200 of them.
+     * WHY. The 25 exists so that a mailing does not hold a request for
+     * long: the job sends the rest. With no job running, "the rest" was
+     * never sent at all: a broadcast to 60 reached 25 people and the other
+     * 35 waited for ever. The time budget (REQUEST_SECONDS) stays either
+     * way, because that is what stops the host ending the request half-way;
+     * what does not fit in it is kept, and its line in the send log says
+     * that it will not go until the job is running (the event broadcast
+     * page says so on screen too).
+     */
+    public static function requestMessages(): int
+    {
+        return MailQueue::jobIsRunning(App::db()) === true ? self::REQUEST_MESSAGES : PHP_INT_MAX;
+    }
+
+    /**
+     * 📮 Send through the SMTP route NOW and record the attempt as 'sent' or
+     * 'failed'. Nothing is kept. Used by "Send test" only: send() goes
+     * through afterSmtp(), which can keep a message.
      *
      * @param list<string> $to
      * @param list<string> $files
      *
-     * @return array{sent: bool, outcome: string, reason: string, code: int|null, words: string, from: string,
-     *               attachments: int, steps: list<string>, certificate: bool} See MailRoutes::sendSmtp().
+     * @return array<string, mixed> See MailRoutes::sendSmtp().
      */
     private static function sendViaSmtp(array $to, string $subj, string $html, string $plain, array $files): array
     {
         $answer            = MailRoutes::sendSmtp($to, $subj, $plain, $html, $files);
         self::$lastOutcome = $answer['outcome'];
+        self::logSmtp($answer, $to, $subj, $answer['sent'] === true ? 'sent' : 'failed');
 
-        if ($answer['sent'] === true) {
-            self::logSend(self::ROUTE_SMTP, $answer['from'], implode(', ', $to), $subj, $answer['attachments'], 'sent', $answer['code'], '', '');
+        return $answer;
+    }
 
-            return $answer;
+    /**
+     * 📝 One attempt through SMTP, in the send log, as what the message now
+     * is ('sent', 'queued', 'held' or 'failed'), with a line on the Errors
+     * page when an administrator should see it.
+     *
+     * MailRoutes does the sending and never throws; this adds what Mailer
+     * does for every route. "Not set up" gets no line on the Errors page: it
+     * is a state, the health page reports it, and a broadcast to 200 people
+     * would otherwise write 200 of them.
+     *
+     * `words` never holds the mailbox's password: the mail library takes it
+     * out of everything it returns, and MailRoutes adds none.
+     *
+     * @param array<string, mixed> $answer   What MailRoutes::sendSmtp() returned.
+     * @param list<string>         $to
+     * @param bool                 $errorRow False to leave the Errors page
+     *        alone: the mail job passes it for a message that is simply
+     *        waiting for its next try, or a mail server that is down would
+     *        fill that page with one line for every run.
+     * @param int|false|null       $siteId   The organisation the message is
+     *        for, when that is not this request's (the mail job). False: use
+     *        this request's.
+     */
+    private static function logSmtp(array $answer, array $to, string $subj, string $status, bool $errorRow = true, int|false|null $siteId = false): void
+    {
+        $sent = $status === 'sent';
+        self::logSend(
+            self::ROUTE_SMTP, (string) $answer['from'], implode(', ', $to), $subj, (int) $answer['attachments'], $status, $answer['code'],
+            $sent === true ? '' : (string) $answer['reason'], $sent === true ? '' : (string) $answer['words'], $siteId
+        );
+        if ($sent === false && $errorRow === true && $answer['next'] !== MailRoutes::NEXT_NOT_SET_UP) {
+            // These words can name a recipient's address (a mail server's
+            // refusal quotes it). An erasure empties such lines by the name
+            // 'SMTP' given here: GdprEraser::MAIL_ERROR_PLATFORMS. If this
+            // name changes, or a new route writes its own, change that list.
+            Logger::errorPlatform('SMTP', 'Error', (string) $answer['reason'], 'Mail send fail', (string) $answer['words']);
         }
-        // `words` never holds the mailbox's password: the mail library takes
-        // it out of everything it returns, and MailRoutes adds none.
-        self::logSend(self::ROUTE_SMTP, $answer['from'], implode(', ', $to), $subj, $answer['attachments'], 'failed', $answer['code'], $answer['reason'], $answer['words']);
-        if ($answer['outcome'] !== self::OUTCOME_NOT_SET_UP) {
-            Logger::errorPlatform('SMTP', 'Error', $answer['reason'], 'Mail send fail', $answer['words']);
+    }
+
+    // =========================================================================
+    // 📬 For the mail queue (MailQueue.php). Not for pages.
+    // =========================================================================
+
+    /**
+     * Hand ONE message from the queue to the chosen mail route, now. No
+     * limit and no budget is applied here: the queue has already asked.
+     * Nothing is written to the send log here either: the queue decides what
+     * becomes of the row first, and then calls logQueueAttempt().
+     *
+     * NEVER NEEDS THE REQUEST'S ADDRESS. The message was written, link and
+     * all, when it was queued; the job that calls this has no visitor.
+     *
+     * @param array<string, mixed> $row   The queue row (see MailQueue::claim()).
+     * @param list<string>         $files Paths of the stored copies to attach.
+     *
+     * @return array<string, mixed> As MailRoutes::sendSmtp() returns. For the
+     *         Microsoft 365 and Google routes, which answer only yes or no,
+     *         `next` is 'sent' or 'later', and those routes write their own
+     *         line in the send log.
+     */
+    public static function deliverQueued(array $row, string $html, string $text, array $files): array
+    {
+        $to     = array_values(array_filter(array_map('trim', explode(',', (string) $row['toRecipients'])), static fn (string $a): bool => $a !== ''));
+        $route  = self::route();
+        $answer = [
+            'sent' => false, 'outcome' => self::OUTCOME_NOT_SENT, 'reason' => 'provider-said-no', 'code' => null, 'words' => '', 'from' => '',
+            'attachments' => count($files), 'steps' => [], 'certificate' => false, 'next' => MailRoutes::NEXT_LATER, 'stage' => '',
+            'messageId' => (string) $row['messageID'], 'routeFault' => false, 'ownLog' => true,
+        ];
+        if ($to === []) {
+            // Everybody it was for has been taken off it (an erasure).
+            return ['next' => MailRoutes::NEXT_REFUSED, 'reason' => 'nobody-to-send-to', 'words' => 'Not sent: nobody is left for it to go to.', 'ownLog' => false] + $answer;
+        }
+        if ($route === self::ROUTE_SMTP) {
+            return MailRoutes::sendSmtp($to, (string) $row['subject'], $text, $html, $files, [
+                'messageId' => (string) $row['messageID'], 'date' => (int) $row['createdEpoch'], 'repeatSafe' => (int) $row['repeatSafe'] === 1,
+            ]) + ['ownLog' => false];
+        }
+        try {
+            $sent = $route === self::ROUTE_GOOGLE
+                ? MailerGoogle::send($to, (string) $row['subject'], $html, $files)
+                : self::sendViaGraph($to, (string) $row['subject'], $html, $files);
+        } catch (\Throwable $e) {
+            // These routes throw when a setting is missing. The exception's
+            // text names the setting, never the message.
+            $sent                 = false;
+            $answer['ownLog']     = false;
+            $answer['routeFault'] = true;
+            $answer['words']      = 'Not sent: ' . self::ROUTES[$route] . ' could not be used. ' . $e->getMessage();
+        }
+        if ($sent === true) {
+            return ['sent' => true, 'outcome' => self::OUTCOME_SENT, 'reason' => '', 'next' => MailRoutes::NEXT_SENT, 'words' => 'The mail service accepted the message.'] + $answer;
+        }
+        if ($answer['words'] === '') {
+            $answer['words'] = 'Not sent: ' . self::ROUTES[$route] . ' did not accept the message. Its own line in the send log says why.';
         }
 
         return $answer;
+    }
+
+    /**
+     * 📝 The send-log line for one attempt the mail job made, written once
+     * the queue has decided what the row now is.
+     *
+     * @param array<string, mixed> $row    The queue row.
+     * @param array<string, mixed> $answer What deliverQueued() returned.
+     * @param string               $status 'sent', 'queued', 'held' or 'failed'.
+     */
+    public static function logQueueAttempt(array $row, array $answer, string $status): void
+    {
+        if (($answer['ownLog'] ?? false) === true) {
+            return; // Microsoft 365 and Google wrote their own line
+        }
+        $to     = array_map('trim', explode(',', (string) $row['toRecipients']));
+        $siteId = $row['siteID'] === null ? null : (int) $row['siteID'];
+        if (self::route() === self::ROUTE_SMTP && isset($answer['from']) === true && $answer['from'] !== '') {
+            self::logSmtp($answer, $to, (string) $row['subject'], $status, $status === 'failed' || $status === 'held', $siteId);
+
+            return;
+        }
+        self::logSend(self::route(), '', (string) $row['toRecipients'], (string) $row['subject'], (int) $row['attachmentCount'], $status, null, (string) $answer['reason'], (string) $answer['words'], $siteId);
+    }
+
+    /**
+     * 📝 The send-log line for something that happened to a waiting message
+     * WITHOUT an attempt: its use-by moment passed, it grew too old, it was
+     * held too long, a run died while handing it over, or it cannot be read.
+     * So that nothing leaves the queue unsent without a line saying why.
+     *
+     * @param array<string, mixed> $row    The queue row (never its body).
+     * @param string               $status 'expired', 'failed' or 'held'.
+     * @param string               $code   A short word for the reason.
+     * @param string               $words  The reason, in plain words.
+     */
+    public static function logQueueEvent(array $row, string $status, string $code, string $words): void
+    {
+        self::logSend(
+            self::route(), '', (string) $row['toRecipients'], (string) $row['subject'], (int) ($row['attachmentCount'] ?? 0), $status, null, $code, $words,
+            $row['siteID'] === null ? null : (int) $row['siteID']
+        );
     }
 
     /**
@@ -410,8 +890,12 @@ class Mailer
      *
      * The caller has checked that the person is a global administrator.
      *
-     * @return array{sent: bool, outcome: string, reason: string, code: int|null, words: string, from: string,
-     *               attachments: int, steps: list<string>, certificate: bool} See MailRoutes::sendSmtp().
+     * It is never kept in the mail queue, and it always contacts the mail
+     * server, whatever fault is on record for the route: it is how an
+     * administrator finds out whether the fault is over. A test that is
+     * accepted clears the record, and mail that was waiting then goes.
+     *
+     * @return array<string, mixed> See MailRoutes::sendSmtp().
      */
     public static function testSmtp(string $to, string $subject, string $text): array
     {
@@ -431,13 +915,15 @@ class Mailer
      *                                        web/_core/templates/email/{name}.html.php
      * @param array<string, mixed> $vars      Template variables
      * @param array                $files     Attachments
+     * @param array                $options   As send()'s fifth argument.
      */
     public static function sendTemplated(
         string|array $to,
         string $subject,
         string $template,
         array $vars = [],
-        array $files = []
+        array $files = [],
+        array $options = []
     ): bool {
         $rendered = self::renderTemplate($template, $vars);
         if ($rendered === null) {
@@ -448,7 +934,7 @@ class Mailer
                 $template
             );
         }
-        return self::send($to, $subject, self::renderBase($rendered), $files);
+        return self::send($to, $subject, self::renderBase($rendered), $files, $options);
     }
 
     /**
@@ -794,6 +1280,17 @@ class Mailer
      * `$httpCode` is whatever number the mail service answered with: an HTTP
      * status from Microsoft 365 or Google, an SMTP reply code from a mail
      * server.
+     *
+     * `$status` is one of the column's five choices. Besides 'sent' and
+     * 'failed' there are, since migration 216, 'queued' (kept, and will be
+     * tried again), 'held' (kept, waiting for a person or for the route to be
+     * put right) and 'expired' (its use-by moment passed). Only 'sent' counts
+     * toward the hourly limit.
+     *
+     * `$forSiteId` is the organisation the message is FOR when that is not
+     * the organisation of this request: the mail queue's job, which has no
+     * organisation of its own, passes the queue row's. Left as false, the
+     * request's organisation is used, as it always was.
      */
     public static function logSend(
         string $provider,
@@ -804,13 +1301,14 @@ class Mailer
         string $status,
         ?int $httpCode,
         string $errorCode,
-        string $errorDetail
+        string $errorDetail,
+        int|false|null $forSiteId = false
     ): void {
         global $SETTINGS;
 
         try {
             $db     = App::db();
-            $siteId = Site::id();
+            $siteId = $forSiteId === false ? Site::id() : $forSiteId;
 
             $subjectTrunc = mb_substr($subject, 0, 500);
             $errorCodeTrunc   = mb_substr($errorCode, 0, 100);

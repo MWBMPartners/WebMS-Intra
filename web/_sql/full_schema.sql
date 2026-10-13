@@ -1515,7 +1515,7 @@ CREATE TABLE IF NOT EXISTS `tblEmailLog` (
     `toRecipients`    TEXT          NOT NULL COMMENT 'Comma-joined recipient address list',
     `subject`         VARCHAR(500)  NOT NULL DEFAULT '' COMMENT 'Truncated subject line',
     `attachmentCount` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Number of files actually attached',
-    `status`          ENUM('sent','failed') NOT NULL,
+    `status`          ENUM('sent','failed','queued','held','expired') NOT NULL COMMENT 'sent: a mail service accepted it. failed: it did not go and is not being tried again. queued: kept, and will be tried again. held: kept, waiting for a person or for the mail route to be put right. expired: its use-by moment passed before it could go',
     `httpCode`        SMALLINT      DEFAULT NULL COMMENT 'The number the mail service answered with, when it gave one: an HTTP status from Microsoft 365 or Google, an SMTP reply code from a mail server',
     `errorCode`       VARCHAR(100)  NOT NULL DEFAULT '' COMMENT 'Provider error code, e.g. Graph ErrorAccessDenied',
     `errorDetail`     VARCHAR(500)  NOT NULL DEFAULT '' COMMENT 'Truncated error message. Never token or secret material',
@@ -6062,6 +6062,7 @@ CREATE TABLE IF NOT EXISTS `tblEventBroadcasts` (
     `body`          MEDIUMTEXT   NOT NULL,
     `recipientCount` INT         NOT NULL DEFAULT 0,
     `sentAt`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `sentAtUtc`     DATETIME     DEFAULT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when the broadcast was recorded, which is BEFORE its first message goes. A second press of Send within ten minutes is recognised by it. Empty for rows from before migration 216. (sentAt beside it is the database server''s own clock, not UTC.)',
     PRIMARY KEY (`broadcastID`),
     KEY `idx_broadcast_event` (`eventID`, `sentAt`),
     CONSTRAINT `fk_broadcast_event` FOREIGN KEY (`eventID`) REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE,
@@ -9979,4 +9980,117 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('215_portal_address.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 216_mail_queue.sql (mail package M3, #592 part 3) ───────────────────
+-- The mail queue: a message that cannot be sent at once is kept here and
+-- tried again by the scheduled job (web/_apps/cron/mail-queue.php). The code
+-- is in web/_core/MailQueue.php.
+--
+-- The three tables below are the migration's own, word for word. Every
+-- DATETIME in them is a MOMENT IN UTC, written with UTC_TIMESTAMP(), and each
+-- column's description says so. The two body columns of tblMailQueue are
+-- stored ENCRYPTED with the installation's key.
+--
+-- The three choices the migration adds to the END of tblEmailLog.status
+-- (queued, held, expired) are written inline in that table above. They are
+-- not repeated here: CREATE TABLE IF NOT EXISTS leaves an existing table as
+-- it is, and when the installer runs this file over a database that already
+-- exists it replays every numbered migration afterwards, 216 included, which
+-- is what adds them there.
+--
+-- The same goes for the migration's one new column on tblEventBroadcasts
+-- (`sentAtUtc`): it is written inline in that table above.
+--
+-- Of the six settings, NOTHING READS the last two yet (mail.smtp.certCheck,
+-- mail.smtp.certCheckOffAt): they are for the page package M4 adds, and the
+-- mail server's certificate is always checked whatever they hold.
+
+CREATE TABLE IF NOT EXISTS `tblMailQueue` (
+    `queueID`        INT           NOT NULL AUTO_INCREMENT COMMENT 'Unique number of the waiting message',
+    `siteID`         INT           DEFAULT NULL COMMENT 'The organisation the message is for; empty when it was written outside any organisation. The four keeping-and-retrying settings are read for this organisation',
+    `priority`       TINYINT UNSIGNED NOT NULL DEFAULT 5 COMMENT '1 urgent, 5 normal, 9 bulk. The lowest number goes first',
+    `status`         ENUM('queued','sending','held','failed','expired') NOT NULL DEFAULT 'queued' COMMENT 'queued: waiting to be tried. sending: a run of the job has taken it. held: waiting for a person, or for a fault with the mail route to be put right. failed: given up on, kept for a while so it can be looked at. expired: its use-by moment passed before it could go. A message that is sent is deleted',
+    `stage`          VARCHAR(20)   NOT NULL DEFAULT '' COMMENT 'While status is sending: claimed, then handing-over from just before the message is given to the mail server. Empty otherwise',
+    `holdReason`     VARCHAR(40)   NOT NULL DEFAULT '' COMMENT 'Why a held message is held, as one word: certificate, interrupted, unknown-if-sent or restored. Empty when it is not held',
+    `lastStage`      VARCHAR(20)   NOT NULL DEFAULT '' COMMENT 'The step the last attempt stopped at, in the mail library''s word (CONNECT, AUTH, BODY and so on)',
+    `lastError`      VARCHAR(500)  NOT NULL DEFAULT '' COMMENT 'What happened at the last attempt, in words. Can hold an e-mail address the mail server named. Never any part of the message body',
+    `attempts`       SMALLINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'How many times the message has been given to a mail route. Counted BEFORE each attempt, so a message that stops the job is still counted',
+    `nextAttemptAt`  DATETIME      NOT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): the message is not tried before this',
+    `expiresAt`      DATETIME      DEFAULT NULL COMMENT 'A MOMENT IN UTC: the message is never sent at or after this. Empty when it has no use-by moment. For a password reset it is the moment the link itself stops working',
+    `createdAt`      DATETIME      NOT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when the message was given to the portal to send. Nothing older than the longest-wait setting is ever sent',
+    `statusAt`       DATETIME      NOT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when the row took its present status. How long a failed or held message is kept is counted from this',
+    `claimedAt`      DATETIME      DEFAULT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when a run of the job took the row. Empty when no run has it',
+    `claimToken`     CHAR(32)      NOT NULL DEFAULT '' COMMENT 'The random mark of the run that has taken the row. Empty when no run has it',
+    `toRecipients`   TEXT          NOT NULL COMMENT 'Comma-joined recipient address list, as tblEmailLog holds it',
+    `recipientCount` SMALLINT UNSIGNED NOT NULL DEFAULT 1 COMMENT 'How many addresses the message is for. The hourly limit counts these',
+    `attachmentCount` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'How many files are attached. A message whose stored files do not come to exactly this number is failed, never sent without one',
+    `subject`        VARCHAR(500)  NOT NULL DEFAULT '' COMMENT 'The subject line. Not encrypted: it is what the send log already keeps',
+    `messageID`      VARCHAR(330)  NOT NULL DEFAULT '' COMMENT 'The message''s own identifier, fixed when the message is kept and the same on every attempt, so that a mail system given a second copy can drop it. Empty only when no from address was set at that moment',
+    `bodyHtml`       MEDIUMTEXT    DEFAULT NULL COMMENT 'The HTML version, ENCRYPTED with the installation''s key. Emptied when the message expires',
+    `bodyText`       MEDIUMTEXT    DEFAULT NULL COMMENT 'The plain-text version, ENCRYPTED with the installation''s key. Emptied when the message expires',
+    `repeatSafe`     TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '1 when a second copy does no harm (a reset link, an alert). Such a message is tried again after an interrupted attempt; any other is held for a person',
+    `origin`         VARCHAR(60)   NOT NULL DEFAULT '' COMMENT 'Which record of the portal is waiting to hear what became of this message, as a kind and a number (newsletter:12, statement:7, reset:5). When the message goes or fails, that record is corrected; a new password reset removes the older waiting ones by it. Empty for most mail. Never an address or a name; for a password reset the number is the account number of the person it is for, and the row is deleted with that person',
+    PRIMARY KEY (`queueID`),
+    KEY `idx_mailqueue_claim` (`status`, `priority`, `createdAt`),
+    KEY `idx_mailqueue_token` (`claimToken`),
+    KEY `idx_mailqueue_site` (`siteID`),
+    CONSTRAINT `fk_mailqueue_site` FOREIGN KEY (`siteID`)
+        REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Mail that could not be sent at once and is waiting (#592). See _core/MailQueue.php.';
+
+CREATE TABLE IF NOT EXISTS `tblMailQueueFiles` (
+    `queueFileID`  INT          NOT NULL AUTO_INCREMENT COMMENT 'Unique number of the attached file',
+    `queueID`      INT          NOT NULL COMMENT 'The waiting message the file belongs to',
+    `storedName`   CHAR(32)     NOT NULL COMMENT 'The random name of the folder under _uploads/mail-queue/ that holds the copy',
+    `realName`     VARCHAR(255) NOT NULL COMMENT 'The file''s own name, which the recipient sees. The copy is stored under this name inside that folder',
+    `contentType`  VARCHAR(120) NOT NULL DEFAULT '' COMMENT 'What kind of file it is, such as application/pdf. Empty when not known',
+    `sizeBytes`    INT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'The size of the copy in bytes. A copy of another size is not sent',
+    PRIMARY KEY (`queueFileID`),
+    UNIQUE KEY `uq_mailqueuefiles_stored` (`storedName`),
+    KEY `idx_mailqueuefiles_queue` (`queueID`),
+    CONSTRAINT `fk_mailqueuefiles_queue` FOREIGN KEY (`queueID`)
+        REFERENCES `tblMailQueue` (`queueID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Files attached to waiting mail (#592). The files are copies under _uploads/mail-queue/.';
+
+CREATE TABLE IF NOT EXISTS `tblMailRouteState` (
+    `routeKey`           VARCHAR(40)   NOT NULL COMMENT 'Which mail route the row is about. Today always installation: the one route every organisation shares',
+    `problem`            VARCHAR(30)   NOT NULL DEFAULT '' COMMENT 'What is wrong with the route, as one word: certificate or sign-in-refused. Empty when nothing is known to be wrong',
+    `problemWords`       VARCHAR(1000) NOT NULL DEFAULT '' COMMENT 'The problem in plain words, for an administrator. Never a password',
+    `problemSince`       DATETIME      DEFAULT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when the problem was first seen',
+    `problemSeenAt`      DATETIME      DEFAULT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when the problem was last seen',
+    `settingsMark`       CHAR(64)      NOT NULL DEFAULT '' COMMENT 'A fingerprint of the mail settings as they were when the problem was recorded. When the settings change, the problem is no longer assumed',
+    `tries`              SMALLINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'How many times in a row the mail server has refused the sign-in. The wait before the next try grows with it',
+    `nextTryAt`          DATETIME      DEFAULT NULL COMMENT 'A MOMENT IN UTC: after a refused sign-in, the job does not sign in again before this',
+    `certReasons`        VARCHAR(255)  NOT NULL DEFAULT '' COMMENT 'Why the certificate failed, as the mail library''s words joined by commas (expired, wrong-name and so on)',
+    `certNames`          VARCHAR(1000) NOT NULL DEFAULT '' COMMENT 'The server names the certificate is for, joined by commas',
+    `certSubject`        VARCHAR(300)  NOT NULL DEFAULT '' COMMENT 'Who the certificate says it belongs to',
+    `certIssuer`         VARCHAR(300)  NOT NULL DEFAULT '' COMMENT 'Who issued the certificate',
+    `certValidFrom`      DATETIME      DEFAULT NULL COMMENT 'A MOMENT IN UTC: the certificate is not valid before this',
+    `certValidTo`        DATETIME      DEFAULT NULL COMMENT 'A MOMENT IN UTC: the certificate is not valid after this',
+    `certSha256`         CHAR(64)      NOT NULL DEFAULT '' COMMENT 'The certificate''s SHA-256 fingerprint, in hexadecimal. Empty when the certificate could not be read',
+    `encryptionFailures` SMALLINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'How many attempts in a row have failed while switching encryption on, without the certificate being blamed',
+    `jobLastRanAt`       DATETIME      DEFAULT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when the hosting company''s scheduler last called the job''s own address (cron/mail-queue) with the right token. Written by that page only: a run of the queue made by any other page does not count. Empty when the scheduler never has',
+    PRIMARY KEY (`routeKey`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='What is known to be wrong with a mail route, and when the mail queue job last ran (#592). See _core/MailRoutes.php.';
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'mail.queue.retryHours',     '24', '24', 0),
+    (NULL, 'mail.queue.maxAgeHours',    '48', '48', 0),
+    (NULL, 'mail.queue.keepFailedDays', '7',  '7',  0),
+    (NULL, 'mail.queue.holdDays',       '7',  '7',  0),
+    (NULL, 'mail.smtp.certCheck',       'on', 'on', 0),
+    (NULL, 'mail.smtp.certCheckOffAt',  '',   '',   0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- The scheduled job's address. Not protected by sign-in: the job checks the
+-- maintenance token itself, like every other scheduled job.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('cron/mail-queue', 'cron/mail-queue.php', 0)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('216_mail_queue.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

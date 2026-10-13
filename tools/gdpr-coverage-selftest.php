@@ -696,7 +696,8 @@ check(
 //     matched against a person (GdprEraser::DEDICATED_STEP_TABLES). The generic
 //     handling skips such a table on purpose, so if the dedicated step were
 //     removed, or never called, nothing would erase it and nothing would say
-//     so. Each one must: be marked "erase" in the written list; have its step
+//     so. Each one must: be marked "erase" or "unlink" in the written list;
+//     have its step
 //     defined in GdprEraser; have that step called from execute() BEFORE the
 //     catalogue is walked (the #498 step finds a person's membership entries
 //     through rows the catalogue deletes); and be handed over by the data
@@ -715,8 +716,16 @@ if ($dedicatedSteps === []) {
     $dedicatedFaults[] = 'GdprEraser::DEDICATED_STEP_TABLES is empty, so this check would prove nothing';
 }
 foreach ($dedicatedSteps as $table => $method) {
-    if ((string) ($catalogue[$table]['decision'] ?? '') !== 'erase') {
-        $dedicatedFaults[] = $table . ' is not marked "erase" in the written list';
+    // "erase" or "unlink". Until mail package M3 (#592) only "erase" was
+    // accepted here, because the one dedicated step there was deleted rows.
+    // The send log's step (tblEmailLog) keeps the row and takes the person's
+    // address out of it, which the written list calls "unlink"; calling it
+    // "erase" to satisfy this line would have made the list say something
+    // untrue. Everything else asked of a dedicated step is unchanged, and a
+    // table marked "retain" or "not-personal" still fails here: a step that
+    // removes something has no business on a table the list says to keep.
+    if (in_array((string) ($catalogue[$table]['decision'] ?? ''), ['erase', 'unlink'], true) === false) {
+        $dedicatedFaults[] = $table . ' is not marked "erase" or "unlink" in the written list';
     }
     if (strpos($eraser, 'private static function ' . $method . '(') === false) {
         $dedicatedFaults[] = 'GdprEraser has no ' . $method . '()';

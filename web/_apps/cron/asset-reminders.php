@@ -122,8 +122,11 @@ $db = App::db();
  *
  * @param string[] $recipients
  *
- * @return int|null Recipients actually mailed, or NULL when this due item
- *         was already handled by an earlier run (nothing sent this call).
+ * @return int|null Recipients a mail service ACCEPTED a reminder for in this
+ *         run, or NULL when this due item was already handled by an earlier
+ *         run (nothing sent this call). A reminder that was only kept in the
+ *         mail queue (#592) is not counted: the job reports those as
+ *         "waiting" at the end. (It used to be counted as sent.)
  */
 function sendAssetReminder(
     \mysqli $db,
@@ -159,7 +162,7 @@ function sendAssetReminder(
     $sent = 0;
     foreach (array_unique($recipients) as $email) {
         if (filter_var($email, FILTER_VALIDATE_EMAIL) !== false) {
-            if (Mailer::send($email, $subject, $bodyHtml) === true) {
+            if (Mailer::send($email, $subject, $bodyHtml) === true && Mailer::lastOutcome() === Mailer::OUTCOME_SENT) {
                 $sent++;
             }
         }
@@ -455,6 +458,8 @@ foreach ($grandTotals as $family => $t) {
         $t['skipped']
     );
 }
+// ⏳ Reminders only KEPT in the mail queue in this run (#592): not sent yet.
+echo "waiting-in-mail-queue=" . Mailer::keptThisRequest() . "\n";
 echo "valuationsWritten=" . $grandValuationsWritten . "\n";
 echo "foundReportsPurged=" . $grandFoundReportsPurged . "\n";
 echo "scanLogPurged=" . $grandScanLogPurged . "\n";

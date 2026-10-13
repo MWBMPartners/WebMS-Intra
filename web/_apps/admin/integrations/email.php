@@ -35,15 +35,20 @@
  * - It cannot show that a message is DELIVERED. "Send test" shows that the
  *   mail service accepted it, which is as far as the portal can see.
  * - The certificate notice shows what the last attempt to reach the mail
- *   server found. It goes when a later attempt ends another way (a message
- *   is accepted, or it fails for a different reason), not when the
- *   certificate is put right. A message stopped before the mail server is
- *   tried (the hourly limit, a missing setting) leaves it showing: see
- *   MailRoutes::certificateProblem(). The notice used to say only "goes when
- *   a message is next accepted", which was not the whole of it.
- * - The hourly limit is not exact: messages sent at the same moment are each
- *   counted before the others are recorded, so together they can pass it.
- *   The form says so.
+ *   server found (the record MailRoutes keeps: see
+ *   MailRoutes::certificateProblem()). Since the mail queue (#592, part 3)
+ *   it goes when the certificate passes the check on a later attempt, or
+ *   when the mail settings are changed; not at the moment the certificate
+ *   is put right. A message stopped before the mail server is tried (the
+ *   hourly limit, a missing setting) leaves it showing. (It used to go
+ *   after any attempt that ended another way, because it was read from the
+ *   newest line of the send log.)
+ * - It does not list the mail queue, send a held message or accept one
+ *   certificate. Those are a later package (M4). "Recent sends" shows a
+ *   waiting or held message as "Not sent", with its reason beside it.
+ * - The hourly limit is not exact for mail sent straight from a page:
+ *   messages sent at the same moment are each counted before the others
+ *   are recorded, so together they can pass it. The form says so.
  * - The Microsoft 365 and Google settings are not typed here; the notice at
  *   the top says where they are.
  *
@@ -188,10 +193,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $routeName = Mailer::sendingRoute()['label'];
             try {
                 $ok        = Mailer::send($to, $subject, $text);
-                $flash     = $ok === true
-                    ? $routeName . ' accepted a test message for ' . $to . '. That is not the same as delivered: check that it arrives.'
-                    : 'The test message was not sent: ' . $routeName . ' did not accept it. The reason is under "Recent sends" below.';
-                $flashType = $ok === true ? 'success' : 'danger';
+                // ⏳ "true" is also the answer for a message that was only
+                //    KEPT in the mail queue (the hourly limit has no room,
+                //    say). The route did not accept that one, and this used
+                //    to say it had.
+                $waiting   = $ok === true && Mailer::lastIsWaiting() === true;
+                if ($waiting === true) {
+                    $flash = 'The test message was NOT sent: the portal kept it in the mail queue to send later. The reason is under "Recent sends" below, '
+                        . 'and the health page says whether waiting mail is being sent.';
+                } else {
+                    $flash = $ok === true
+                        ? $routeName . ' accepted a test message for ' . $to . '. That is not the same as delivered: check that it arrives.'
+                        : 'The test message was not sent: ' . $routeName . ' did not accept it. The reason is under "Recent sends" below.';
+                }
+                $flashType = $waiting === true ? 'warning' : ($ok === true ? 'success' : 'danger');
             } catch (\Throwable $e) {
                 // The Microsoft 365 route says what it lacks by throwing.
                 $flash     = 'The test message was not sent: ' . $e->getMessage() . '. The notice below says what ' . $routeName . ' still needs.';
@@ -423,13 +438,15 @@ $esc = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES,
 <?php endif; ?>
 
 <?php if ($certificateProblem !== null): ?>
-    <!-- 🪪 The last attempt through SMTP failed on the mail server's certificate. Read from the send log. -->
+    <!-- 🪪 The mail server's certificate failed its check, and that is on record for the mail route. -->
     <div class="alert alert-warning" role="alert" data-mail-warning="certificate">
         <h2 class="h5 alert-heading"><i class="fa-solid fa-certificate me-1" aria-hidden="true"></i>The mail server&rsquo;s certificate did not pass the check</h2>
         <p>
             The last time the portal tried to send through the SMTP mailbox<?php echo $certificateProblem['at'] !== '' ? ' (' . $esc($showMoment($certificateProblem['at'])) . ')' : ''; ?>,
-            the mail server&rsquo;s certificate was not accepted, so the message was not sent and was not kept.
+            the mail server&rsquo;s certificate was not accepted, so nothing was sent.
             While the certificate stays as it is, no e-mail goes out, password-reset links included.
+            Mail is not lost: every message is held in the mail queue and goes by itself once the certificate passes the check.
+            A held message is kept for a limited time, and one with a use-by time (a password-reset link, for one) is never sent after it.
         </p>
         <p class="text-break"><strong>What the check found:</strong> <?php echo $esc($certificateProblem['words']); ?></p>
         <p class="mb-0">
@@ -438,8 +455,9 @@ $esc = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES,
             The portal always checks the certificate.
         </p>
         <p class="mb-0 mt-2 small">
-            This notice shows what the last attempt to reach the mail server found. It goes when a later attempt ends another way:
-            a message is accepted, or it fails for a different reason. A message stopped before the mail server is tried
+            This notice shows what the last attempt to reach the mail server found. It goes when the certificate passes the check
+            on a later attempt (the mail queue&rsquo;s job tries once each time it runs, and so does &ldquo;Send test&rdquo;), or when the
+            mail settings below are changed. A message stopped before the mail server is tried
             (by the hourly limit, or by a missing setting) leaves it showing.
         </p>
     </div>
@@ -649,9 +667,11 @@ $esc = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES,
                     <input type="text" inputmode="numeric" name="perHour" id="mail-per-hour" class="form-control" maxlength="7" value="<?php echo $esc($form['perHour']); ?>">
                     <div class="form-text">
                         Leave empty for no limit. Many hosting companies allow only so many an hour. This limit covers every route.
-                        A message that would pass it is not sent and is not kept: it is listed under &ldquo;Recent sends&rdquo; as not sent.
-                        The limit is not exact: messages sent at the same moment can together go a little over it,
-                        so set it a little below what your hosting company allows.
+                        A message that would pass it is not sent at once: it waits in the mail queue and goes when the hour has room
+                        (it is listed under &ldquo;Recent sends&rdquo; as not sent until then). The last tenth of the limit, and at least 5
+                        where the limit is 10 or more, is kept for urgent mail such as password-reset links.
+                        The limit is not exact for mail sent straight from a page: messages sent at the same moment can together
+                        go a little over it, so set it a little below what your hosting company allows.
                     </div>
                 </div>
             </div>

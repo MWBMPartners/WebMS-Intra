@@ -157,6 +157,16 @@ class Newsletter
     public const NOT_SENT_NO_ADDRESS = 'no-address';
 
     /**
+     * ⏳ What a recipient's `errorMsg` holds while their copy is WAITING in
+     * the mail queue (#592): kept, not yet sent. It is in `errorMsg`, the
+     * recipient row's one free-text column, because that also keeps the row
+     * out of the next pass (which takes rows with no `deliveredAt` and no
+     * `errorMsg`), so a waiting copy is never sent a second time.
+     * mailSettled() replaces it when the copy goes or fails.
+     */
+    public const WAITING = 'waiting in the mail queue';
+
+    /**
      * 🔗 Why a newsletter for this organisation cannot be sent right now, or
      * '' when it can (#500).
      *
@@ -183,13 +193,21 @@ class Newsletter
 
     /**
      * Dispatch a newsletter via the configured provider. Returns
-     * ['sent' => N, 'failed' => N, 'notSent' => why]. `notSent` is '' when a
-     * pass was made (even one that found nobody waiting), and one of the
-     * NOT_SENT_* reasons when nothing was tried at all; a caller must tell
-     * the sender that reason and not report it as "sent 0". Caller is
-     * responsible for the status transition (sending → sent) afterwards.
+     * ['sent' => N, 'failed' => N, 'waiting' => N, 'notSent' => why].
+     * `notSent` is '' when a pass was made (even one that found nobody
+     * waiting), and one of the NOT_SENT_* reasons when nothing was tried at
+     * all; a caller must tell the sender that reason and not report it as
+     * "sent 0". Caller is responsible for the status transition (sending →
+     * sent) afterwards.
      *
-     * @return array{sent: int, failed: int, notSent: string}
+     * `sent` counts copies a mail service ACCEPTED in this pass. `waiting`
+     * counts copies that were only KEPT in the mail queue (#592): each is
+     * marked WAITING, not delivered, and mailSettled() marks it delivered
+     * (and counts it) when it goes, or failed when it never will. WHAT WAS
+     * WRONG: a kept copy was marked "delivered" at once and counted as sent,
+     * and nothing corrected that when it later failed.
+     *
+     * @return array{sent: int, failed: int, waiting: int, notSent: string}
      */
     public static function dispatch(int $newsletterId, int $siteId): array
     {
@@ -207,7 +225,7 @@ class Newsletter
             $stmt->close();
         }
         if ($news === null) {
-            return ['sent' => 0, 'failed' => 0, 'notSent' => ''];
+            return ['sent' => 0, 'failed' => 0, 'waiting' => 0, 'notSent' => ''];
         }
         // 🔗 Not sent without the portal's address (#500): see
         //    cannotSendBecause(). Nothing is sent and no recipient is
@@ -217,7 +235,7 @@ class Newsletter
         if ($notSent !== '') {
             Logger::errorPlatform('Newsletter', 'Error', 'NO_PORTAL_ADDRESS', 'A newsletter was not sent, because the portal does not know its own web address, so its unsubscribe link could not be written. Set the address at Admin, Settings, Organisation.', 'newsletter #' . $newsletterId);
 
-            return ['sent' => 0, 'failed' => 0, 'notSent' => $notSent];
+            return ['sent' => 0, 'failed' => 0, 'waiting' => 0, 'notSent' => $notSent];
         }
         $subject = (string) ($news['subject'] ?? '') !== '' ? (string) $news['subject'] : (string) $news['title'];
         $html    = self::renderHtml($newsletterId, $siteId);
@@ -228,7 +246,7 @@ class Newsletter
             . 'LIMIT ?'
         );
         if ($rs === false) {
-            return ['sent' => 0, 'failed' => 0, 'notSent' => ''];
+            return ['sent' => 0, 'failed' => 0, 'waiting' => 0, 'notSent' => ''];
         }
         $rs->bind_param('ii', $newsletterId, $cap);
         $rs->execute();
@@ -241,13 +259,24 @@ class Newsletter
 
         $sent = 0;
         $failed = 0;
+        $waiting = 0;
         foreach ($pending as $p) {
             $rid       = (int) $p['recipientID'];
             $email     = (string) $p['emailAddress'];
             $token     = (string) $p['unsubToken'];
             $body      = self::personalise($html, $newsletterId, $rid, $token, $siteId);
-            $ok = self::providerSend($provider, $email, $subject, $body);
-            if ($ok === true) {
+            $ok = self::providerSend($provider, $email, $subject, $body, $rid);
+            if ($ok === true && Mailer::lastIsWaiting() === true) {
+                // ⏳ Only KEPT: say "waiting", never "delivered". See WAITING.
+                $mark = self::WAITING;
+                $u = $db->prepare('UPDATE tblNewsletterRecipient SET errorMsg = ? WHERE recipientID = ?');
+                if ($u !== false) {
+                    $u->bind_param('si', $mark, $rid);
+                    $u->execute();
+                    $u->close();
+                }
+                $waiting++;
+            } elseif ($ok === true) {
                 $u = $db->prepare('UPDATE tblNewsletterRecipient SET deliveredAt = NOW() WHERE recipientID = ?');
                 if ($u !== false) {
                     $u->bind_param('i', $rid);
@@ -274,7 +303,46 @@ class Newsletter
             $bump->close();
         }
 
-        return ['sent' => $sent, 'failed' => $failed, 'notSent' => ''];
+        return ['sent' => $sent, 'failed' => $failed, 'waiting' => $waiting, 'notSent' => ''];
+    }
+
+    /**
+     * 📣 The mail queue's word on a copy that was WAITING: it went, or it
+     * never will (#592). MailQueue::tellOrigin() calls this; nothing else
+     * should.
+     *
+     * Only a row that still says WAITING is changed, so being told twice, or
+     * about a row somebody has since dealt with by hand, changes nothing.
+     * A copy that went is counted in the newsletter's `sentCount` here,
+     * because the pass that kept it did not count it.
+     *
+     * @param int    $recipientId tblNewsletterRecipient.recipientID.
+     * @param bool   $went        True: a mail service accepted it. False: it failed or expired.
+     * @param string $to          Not used: the row holds its own address.
+     */
+    public static function mailSettled(\mysqli $db, int $recipientId, bool $went, string $to): void
+    {
+        $waiting = self::WAITING;
+        if ($went === false) {
+            $failed = 'send-failed';
+            $stmt   = $db->prepare('UPDATE tblNewsletterRecipient SET errorMsg = ? WHERE recipientID = ? AND deliveredAt IS NULL AND errorMsg = ?');
+            $stmt->bind_param('sis', $failed, $recipientId, $waiting);
+            $stmt->execute();
+            $stmt->close();
+
+            return;
+        }
+        $stmt = $db->prepare('UPDATE tblNewsletterRecipient SET deliveredAt = NOW(), errorMsg = NULL WHERE recipientID = ? AND deliveredAt IS NULL AND errorMsg = ?');
+        $stmt->bind_param('is', $recipientId, $waiting);
+        $stmt->execute();
+        $marked = $stmt->affected_rows === 1;
+        $stmt->close();
+        if ($marked === true) {
+            $bump = $db->prepare('UPDATE tblNewsletter SET sentCount = sentCount + 1 WHERE newsletterID = (SELECT newsletterID FROM tblNewsletterRecipient WHERE recipientID = ?)');
+            $bump->bind_param('i', $recipientId);
+            $bump->execute();
+            $bump->close();
+        }
     }
 
     /**
@@ -285,23 +353,32 @@ class Newsletter
      *
      * @link https://github.com/MWBMPartners/webMailerMatt — pending public API
      */
-    private static function providerSend(string $provider, string $to, string $subject, string $html): bool
+    private static function providerSend(string $provider, string $to, string $subject, string $html, int $recipientId): bool
     {
+        // 📮 A newsletter is BULK mail (#592, part 3): it goes after
+        //    everything else, never uses the part of the hourly limit kept
+        //    back for urgent mail, and once this request has used its own
+        //    budget the rest is kept in the mail queue and sent by the job.
+        //    So `true` here means "sent, or kept to be sent": the caller
+        //    asks Mailer::lastIsWaiting() which. `origin` names the
+        //    recipient's row, so that the queue can tell it what became of
+        //    a kept copy (mailSettled()).
+        $bulk = ['priority' => 'bulk', 'origin' => 'newsletter:' . $recipientId];
         switch ($provider) {
             case 'internal':
-                return Mailer::send($to, $subject, $html);
+                return Mailer::send($to, $subject, $html, [], $bulk);
             case 'mailermatt':
                 // TODO(#269 follow-up): webMailerMatt API adapter — reads
                 // newsletter.mailermatt.apiKey + baseUrl and POSTs a send
                 // request. Repo: https://github.com/MWBMPartners/webMailerMatt
                 // Until that ships, fall back to internal so newsletters
                 // still go out rather than silently failing.
-                return Mailer::send($to, $subject, $html);
+                return Mailer::send($to, $subject, $html, [], $bulk);
             case 'mailchimp':
                 // TODO(#269 follow-up): Mailchimp Transactional adapter.
-                return Mailer::send($to, $subject, $html);
+                return Mailer::send($to, $subject, $html, [], $bulk);
             default:
-                return Mailer::send($to, $subject, $html);
+                return Mailer::send($to, $subject, $html, [], $bulk);
         }
     }
 

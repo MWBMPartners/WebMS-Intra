@@ -19,6 +19,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
+use Portal\Core\MailQueue;
 use Portal\Core\PortalAddress;
 use Portal\Core\Site;
 
@@ -49,7 +50,7 @@ if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
 }
 
 // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
-$stmt = $mysqli->prepare('SELECT eventID, eventName, eventSlug, startDateTime FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL');
+$stmt = $mysqli->prepare('SELECT eventID, eventName, eventSlug, startDateTime, timezone FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL');
 $stmt->bind_param('ii', $eventId, $siteId);
 $stmt->execute();
 $event = $stmt->get_result()->fetch_assoc() ?: null;
@@ -102,21 +103,39 @@ $bodyHtml = '<p>Hi' . ($display !== '' ? ' ' . htmlspecialchars($display, ENT_QU
 // value; this covers a thrown exception the same way, so both failure
 // shapes land on the same ordinary flash message rather than one of them
 // crashing the request.
-$sent = false;
+// ⏳ THE MAIL QUEUE (#592). Mailer::send() answers true for a message it has
+//    only KEPT to send later, and this page used to record that as
+//    "[delivered]" and say "Invite emailed." Now it asks what became of it.
+//    Use-by: the moment the event STARTS, on the event's own clock. An
+//    invitation that arrives after that is no use to anybody.
+//    The clock's zone is `tblEvents.timezone`, the column the event form
+//    writes and the event page shows; when it is not a zone PHP knows (the
+//    form's box is free text) the ORGANISATION's own zone is used, so the
+//    invitation is still kept. WHAT WAS WRONG: this read `eventTimezone`,
+//    which only the feed importer writes, so every event made in the portal
+//    was taken to be on London's clock.
+$sent    = false;
+$waiting = false;
 if ($rsvpUrl !== '' && class_exists(Mailer::class) === true && method_exists(Mailer::class, 'send') === true) {
     try {
-        $sent = (bool) Mailer::send($email, $subject, $bodyHtml);
+        $useBy   = MailQueue::useBy((string) $event['startDateTime'], (string) $event['timezone'], (string) (Site::current()['timezone'] ?? ''));
+        $kept    = (bool) Mailer::send($email, $subject, $bodyHtml, [], ['expiresAt' => $useBy]);
+        $waiting = $kept === true && Mailer::lastIsWaiting() === true;
+        $sent    = $kept === true && $waiting === false;
     } catch (\Throwable $e) {
         $sent = false;
         Logger::errorPlatform('Email', 'Error', 'INVITE_SEND', 'Invitation email could not be sent', $e->getMessage());
     }
 }
 
-Logger::activity('EventInviteSent', 'Event #' . $eventId . ' → ' . $email . ($sent === true ? ' [delivered]' : ($rsvpUrl === '' ? ' [not sent: the portal\'s web address is not known]' : ' [mailer failed]')));
+Logger::activity('EventInviteSent', 'Event #' . $eventId . ' → ' . $email . ($sent === true ? ' [accepted by the mail service]' : ($waiting === true ? ' [waiting in the mail queue]' : ($rsvpUrl === '' ? ' [not sent: the portal\'s web address is not known]' : ' [mailer failed]'))));
 
 if ($rsvpUrl === '') {
     $_SESSION['flash_msg'] = 'The invitation was saved, but no e-mail was sent: the portal does not know its own web address, '
         . 'so the e-mail could not carry a working link. A global administrator can set the address at Admin, Settings, Organisation.';
+} elseif ($waiting === true) {
+    $_SESSION['flash_msg'] = 'The invitation was saved. Its e-mail could not be sent at once and is waiting in the mail queue; '
+        . 'it is not sent once the event has started. To be sure it arrives in time, share the link by hand as well.';
 } else {
     $_SESSION['flash_msg'] = $sent === true ? 'Invite emailed.' : 'Token created, but mailer reported a failure — share the link manually.';
 }

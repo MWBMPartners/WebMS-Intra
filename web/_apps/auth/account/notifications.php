@@ -303,9 +303,20 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
             <i class="fa-solid fa-moon me-1"></i> Sabbath quiet hours
         </div>
         <div class="card-body">
+            <?php
+            // 🗣️ This sentence used to say that non-urgent e-mail is held back
+            //    until quiet hours end. No e-mail is: nothing in the portal
+            //    holds e-mail for quiet hours, and the owner (Salem874)
+            //    decided on 12 October 2026 that the mail queue will not
+            //    either. What quiet hours do stop is a text message that is
+            //    not urgent (Sms::send()), and nothing sends that message
+            //    afterwards. The words below say exactly that.
+            ?>
             <p class="small text-muted">
-                When Sabbath quiet hours are active, non-urgent email notifications
-                from the portal are held back until the window ends.
+                E-mail from the portal is not held back during Sabbath quiet hours:
+                it is sent as usual. Quiet hours apply to text messages. While they
+                are active, a text message that is not urgent is not sent to you, and
+                it is not sent afterwards either.
             </p>
             <div class="form-check">
                 <input class="form-check-input" type="radio" name="sabbathHonour" id="sabInherit" value="inherit" <?php echo $sabbathHonour === 'inherit' ? 'checked' : ''; ?>>

@@ -47,6 +47,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Giving;
 use Portal\Core\Logger;
+use Portal\Core\Mailer;
 use Portal\Core\Settings;
 use Portal\Core\Site;
 use Portal\Core\TimeLimit;
@@ -109,7 +110,7 @@ foreach ($pending as $row) {
     }
 
     if (isset($perSite[$siteId]) === false) {
-        $perSite[$siteId] = ['sent' => 0, 'failed' => 0];
+        $perSite[$siteId] = ['sent' => 0, 'failed' => 0, 'waiting' => 0];
     }
 
     $logRow = [
@@ -122,8 +123,14 @@ foreach ($pending as $row) {
     ];
 
     if (Giving::sendStatementEmail($logRow) === true) {
-        $perSite[$siteId]['sent']++;
-        $totalSent++;
+        // "true" is sent OR kept in the mail queue to be sent (#592). Only
+        // the first is counted as sent; Mailer says which it was.
+        if (Mailer::lastIsWaiting() === true) {
+            $perSite[$siteId]['waiting']++;
+        } else {
+            $perSite[$siteId]['sent']++;
+            $totalSent++;
+        }
     } else {
         $perSite[$siteId]['failed']++;
         $totalFailed++;
@@ -134,6 +141,6 @@ foreach ($pending as $row) {
 
 echo "Giving statements sweep — " . count($pending) . " queued row(s) processed across " . count($perSite) . " site(s)\n";
 foreach ($perSite as $siteId => $t) {
-    echo sprintf("site %d: sent=%d failed=%d\n", $siteId, $t['sent'], $t['failed']);
+    echo sprintf("site %d: sent=%d waiting=%d failed=%d\n", $siteId, $t['sent'], $t['waiting'], $t['failed']);
 }
-echo sprintf("TOTAL: sent=%d failed=%d\n", $totalSent, $totalFailed);
+echo sprintf("TOTAL: sent=%d waiting=%d failed=%d\n", $totalSent, Mailer::keptThisRequest(), $totalFailed);

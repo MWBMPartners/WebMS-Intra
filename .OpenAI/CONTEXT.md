@@ -353,7 +353,19 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     `web/_core/MailRoutes.php`, the ONE place that reads the SMTP settings and
     the installation's choice of route, and decrypts the mailbox's password
     (never read `$SETTINGS['mail']['provider']`). Its page test is `tools/mail-
-    pages-selftest.php`. No queue yet; the certificate is always checked.
+    pages-selftest.php`. Since part three a message that cannot be sent at once is kept in the mail
+    queue (`web/_core/MailQueue.php`, which holds every statement that moves a
+    queue row; test `tools/mail-queue-selftest.php`) and sent by `/cron/mail-
+    queue`; `Mailer::send()` answers true for sent OR kept, so anything that
+    records or shows a result asks `Mailer::lastOutcome()`.
+    `MailQueue::jobIsRunning()` is the ONE place that says whether the scheduled
+    job is running (only the job's own page records that it ran); while it is
+    not, the portal sends as it did before the queue. Every queue moment is UTC
+    from `UTC_TIMESTAMP()`; a time on a clock becomes one through
+    `MailQueue::useBy()`. **An event's time zone is `tblEvents.timezone`, the
+    column the event form writes; never read `tblEvents.eventTimezone` for it**
+    (only the feed importer writes that one). The certificate is always checked;
+    a failure holds mail, and so does restoring a backup.
     Sending a test, from the e-mail page or the Integrations page, is for a
     global administrator only: one mail route serves every organisation.
 

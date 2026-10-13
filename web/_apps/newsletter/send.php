@@ -101,7 +101,20 @@ if ($stmt !== false) {
     $stmt->fetch();
     $stmt->close();
 }
-if ($pending === 0) {
+// ⏳ Copies still WAITING in the mail queue (#592), from this pass or an
+//    earlier one. While there are any, the newsletter is NOT marked as sent:
+//    it has not all gone. Pressing Send again once they have gone marks it.
+$stillWaiting = 0;
+$waitingMark  = Newsletter::WAITING;
+$stmt = $db->prepare('SELECT COUNT(*) FROM tblNewsletterRecipient WHERE newsletterID = ? AND deliveredAt IS NULL AND errorMsg = ?');
+if ($stmt !== false) {
+    $stmt->bind_param('is', $id, $waitingMark);
+    $stmt->execute();
+    $stmt->bind_result($stillWaiting);
+    $stmt->fetch();
+    $stmt->close();
+}
+if ($pending === 0 && $stillWaiting === 0) {
     $u = $db->prepare('UPDATE tblNewsletter SET status = "sent", sentAt = NOW() WHERE newsletterID = ?');
     if ($u !== false) {
         $u->bind_param('i', $id);
@@ -110,11 +123,16 @@ if ($pending === 0) {
     }
 }
 
+// ⏳ "Waiting" is said apart from "sent" (#592): a copy kept in the mail queue
+//    has not gone. It used to be counted as sent and marked as delivered.
 $_SESSION['flash_msg']  = sprintf(
-    'Sent %d, failed %d. %s',
+    'Sent %d, failed %d. %s%s',
     (int) $result['sent'],
     (int) $result['failed'],
-    $pending > 0 ? $pending . ' remaining (rate-limited — re-trigger to continue).' : 'Done.'
+    $stillWaiting > 0
+        ? $stillWaiting . ' waiting in the mail queue: each is marked as delivered only once it has gone (the health page says whether waiting mail is being sent). Press Send again after that to mark the newsletter as sent. '
+        : '',
+    $pending > 0 ? $pending . ' remaining (rate-limited — re-trigger to continue).' : ($stillWaiting > 0 ? '' : 'Done.')
 );
 $_SESSION['flash_type'] = (int) $result['failed'] > 0 ? 'warning' : 'success';
 

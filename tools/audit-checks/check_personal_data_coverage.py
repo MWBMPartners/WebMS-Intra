@@ -137,6 +137,14 @@ PERSONAL_COLUMNS = re.compile(
     # could not see it, because neither name was here (`giverName` is a name
     # typed by hand when the envelope matched no member).
     r"|giverID|giverName"
+    # Added by mail package M3 (13 October 2026, #592): a LIST of e-mail
+    # addresses, separated by commas. It is the only thing that ties a row of
+    # the send log (`tblEmailLog`) or of the mail queue (`tblMailQueue`) to a
+    # person, so without the name here either table's catalogue entry could
+    # be deleted and this check would still pass. (The send log had no entry
+    # at all until then, for exactly that reason.) The mail queue's files
+    # table is caught by `storedName`, further up.
+    r"|toRecipients"
     r")$",
     re.IGNORECASE,
 )

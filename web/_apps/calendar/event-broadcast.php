@@ -83,6 +83,17 @@ $result = $stmt->get_result();
 while ($r = $result->fetch_assoc()) { $jobs[] = $r; }
 $stmt->close();
 
+// 📣 What the send handler has to say (#592, part 3): how many messages have
+//    gone, how many are waiting in the mail queue, or that a second press
+//    was not sent again. The handler has always left this message for the
+//    next page and sent the person back here, and THIS PAGE NEVER SHOWED IT:
+//    it stayed unread until some other page happened to show it. With a mail
+//    queue that matters, because "sent to 25, 275 are waiting" is the only
+//    thing that tells the sender not to press Send again. Shown once.
+$flashMsg  = is_string($_SESSION['flash_msg'] ?? null) === true ? $_SESSION['flash_msg'] : '';
+$flashType = in_array($_SESSION['flash_type'] ?? '', ['success', 'warning', 'danger', 'info'], true) === true ? (string) $_SESSION['flash_type'] : 'info';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+
 $pageTitle = 'Email — ' . (string) $event['eventName'];
 $csrf = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
@@ -91,6 +102,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="container py-3" style="max-width:760px;">
     <h1 class="h4 mb-2"><i class="fa-solid fa-envelopes-bulk me-2 text-primary"></i>Email — <?php echo htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8'); ?></h1>
     <p class="text-muted small">Send a bulk update to a segment of your event's people.</p>
+
+    <?php if ($flashMsg !== ''): ?>
+        <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?>" role="status" data-broadcast-result>
+            <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
+        </div>
+    <?php endif; ?>
 
     <form method="post" action="/calendar/event/broadcast/send">
         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">

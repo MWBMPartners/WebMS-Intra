@@ -98,9 +98,26 @@ class Gatekeeper
      *                     private, so gating it protects nothing and only
      *                     breaks the notice for anybody not signed in.
      *
+     *   cron/mail-queue   The mail queue's scheduled job (#592). A scheduler
+     *                     has no staff sign-in, so the gate sent it to the
+     *                     sign-in page (HTTP 302), CARRYING ITS TOKEN into
+     *                     that address, and queued mail never went on a
+     *                     pre-release copy even with the job added. The page
+     *                     checks its own token in constant time, answers 403
+     *                     without it, and prints numbers only
+     *                     (web/_apps/cron/mail-queue.php), so the gate adds
+     *                     nothing in front of it. ONLY THIS JOB is listed.
+     *                     Every other scheduled job (cron/health,
+     *                     cron/event-reminders, cron/backup-check and the
+     *                     rest) is still behind the gate on a pre-release
+     *                     copy and cannot be run by a scheduler there. That
+     *                     is how they were before this entry, and it was
+     *                     deliberately left alone.
+     *
      * Letting these through gives nothing away. Each one either enforces its
-     * own rules — a wrong code, a wrong passkey, a failed Google sign-in or an
-     * invalid invitation gets nobody anywhere — or holds nothing private.
+     * own rules — a wrong code, a wrong passkey, a failed Google sign-in, an
+     * invalid invitation or a missing job token gets nobody anywhere — or
+     * holds nothing private.
      *
      * WHY THE BARE SITE ADDRESS ("/") IS NOT ON THIS LIST ANY MORE
      * The first version listed '' — what "/" becomes once the slashes are
@@ -131,6 +148,7 @@ class Gatekeeper
         'forgot-password/save',
         'reset-password',
         'reset-password/save',
+        'cron/mail-queue',
     ];
 
     /**

@@ -44,6 +44,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
+use Portal\Core\MailQueue;
 use Portal\Core\Router;
 use Portal\Core\SecretSettings;
 use Portal\Core\Site;
@@ -391,6 +392,48 @@ if ($settingId > 0) {
         exit();
     }
 
+    // ✉️ ONE ORGANISATION'S OWN VALUE FOR ONE OF THE MAIL QUEUE'S FOUR NUMBERS
+    //    (#592): how long mail is tried for, the age past which it is never
+    //    sent, and how long a failed and a held message are kept. The owner
+    //    (Salem874) decided that each can be set for one organisation, by
+    //    that organisation's administrator or a global administrator.
+    //    $ownNumber is null for every other setting, and for the
+    //    INSTALLATION'S row of these four, so nothing else on this page
+    //    changes. It comes after every refusal above, which all still hold.
+    //      - A value must be what the queue will accept when it reads the
+    //        row (MailQueue::ownNumberCheck() applies the queue's own test),
+    //        or nothing is saved, and the person is told the range and what
+    //        the installation's value is.
+    //      - An EMPTY value REMOVES the organisation's own row, so that the
+    //        organisation goes back to the installation's value. That is how
+    //        an organisation's administrator removes it: the Delete button on
+    //        the Settings page is for global administrators only, and stays so.
+    $ownNumber = $isPortalWideRow === true ? null : MailQueue::ownNumberCheck($mysqli, $storedKey, $settingVal);
+    if ($ownNumber !== null && $settingVal === '') {
+        // Only this organisation's own row, named again in the statement.
+        $remove = $mysqli->prepare('DELETE FROM tblSettings WHERE settingID = ? AND siteID = ? AND settingKey = ?');
+        $remove->bind_param('iis', $settingId, $siteId, $storedKey);
+        $remove->execute();
+        $removed = $remove->affected_rows;
+        $remove->close();
+        if ($removed > 0) {
+            Logger::activity('SettingsDelete', 'Removed this organisation\'s own value of: ' . $storedKey, $_SESSION['user_id'] ?? null);
+        }
+        $_SESSION['flash_msg']  = ($removed > 0
+            ? 'This organisation\'s own value of "' . $storedKey . '" was removed. '
+            : 'Nothing was removed: this organisation\'s own value of "' . $storedKey . '" was already gone. ')
+            . $ownNumber['installation'];
+        $_SESSION['flash_type'] = $removed > 0 ? 'success' : 'warning';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+    if ($ownNumber !== null && $ownNumber['ok'] === false) {
+        $_SESSION['flash_msg']  = $ownNumber['words'];
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
     // 🔐 A secret is stored encrypted, and stays a secret (#597).
     //    Decided from the mark on the STORED row, never from the form: see
     //    "SECRETS" in the header. This sits after every refusal above, so a
@@ -554,6 +597,11 @@ if ($settingId > 0) {
         $_SESSION['flash_msg']  = 'Setting "' . $storedKey . '" updated.';
         $_SESSION['flash_type'] = 'success';
     }
+    // ✉️ For one of the mail queue's four numbers: say what the value now
+    //    means and what the installation's is. Only after a save that worked.
+    if ($ownNumber !== null && $_SESSION['flash_type'] === 'success') {
+        $_SESSION['flash_msg'] .= ' ' . $ownNumber['words'];
+    }
 } else {
     // ➕ Insert new.
     //    This branch always writes the row against the CURRENT organisation
@@ -637,6 +685,34 @@ if ($settingId > 0) {
         exit();
     }
 
+    // ✉️ ONE OF THE MAIL QUEUE'S FOUR NUMBERS, ADDED AS THIS ORGANISATION'S
+    //    OWN (#592; see the same heading in the edit branch above).
+    //    WHAT WAS WRONG: the duplicate check just below counts the
+    //    installation's row as "already exists", and the installation has a
+    //    row for each of the four. So nobody, not even a global
+    //    administrator, could give one organisation its own value through
+    //    a page: it could only be put there with SQL.
+    //    For exactly these four names (letter for letter; any other
+    //    spelling is null here and meets the duplicate check as before):
+    //      - the value must be one the queue will accept, or nothing is
+    //        saved;
+    //      - only THIS organisation's own row counts as a duplicate;
+    //      - it is never stored as a secret, whatever the form says: the
+    //        queue reads the number as written, and an encrypted one would
+    //        read as "not a number".
+    //    Every refusal above this line has already been applied.
+    $ownNumber = MailQueue::ownNumberCheck($mysqli, $settingKey, $settingVal);
+    if ($ownNumber !== null && $ownNumber['ok'] === false) {
+        $_SESSION['flash_msg']  = $ownNumber['words'];
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+    if ($ownNumber !== null) {
+        $isSensitive = 0;
+    }
+    $onlyOwnRowClashes = $ownNumber !== null ? 1 : 0;
+
     // 🔑 Refuse a name the database would treat as one that already exists,
     //    for this organisation or portal-wide.
     //
@@ -654,9 +730,11 @@ if ($settingId > 0) {
     //    comes next. The message names the existing row, so the administrator
     //    knows what to edit instead of wondering why "it already exists" when
     //    they can see it does not, letter for letter.
-    $stmt = $mysqli->prepare('SELECT settingKey FROM tblSettings WHERE settingKey = ? AND (siteID = ? OR siteID IS NULL) LIMIT 1');
+    //    (For one of the mail queue's four numbers the installation's row
+    //    is left out of this lookup: see $onlyOwnRowClashes above.)
+    $stmt = $mysqli->prepare('SELECT settingKey FROM tblSettings WHERE settingKey = ? AND (siteID = ? OR (siteID IS NULL AND ? = 0)) LIMIT 1');
     if ($stmt !== false) {
-        $stmt->bind_param('si', $settingKey, $siteId);
+        $stmt->bind_param('sii', $settingKey, $siteId, $onlyOwnRowClashes);
         $stmt->execute();
         $clash = $stmt->get_result()->fetch_assoc();
         $stmt->close();
@@ -790,7 +868,7 @@ if ($settingId > 0) {
     $stmt->execute();
     $stmt->close();
     Logger::activity('SettingsInsert', 'Added setting: ' . $settingKey, $_SESSION['user_id'] ?? null);
-    $_SESSION['flash_msg'] = 'Setting "' . $settingKey . '" added.';
+    $_SESSION['flash_msg'] = 'Setting "' . $settingKey . '" added.' . ($ownNumber !== null ? ' ' . $ownNumber['words'] : '');
     if ($isSensitive === 1 && $settingVal !== '') {
         $_SESSION['flash_msg'] .= ' It is stored encrypted and will not be shown again.';
     } elseif ($isSensitive === 1) {

@@ -984,6 +984,16 @@ class GdprEraser
     public const DEDICATED_STEP_TABLES = [
         // #498: a list entry only means "this person" together with its tableName.
         'tblDemoDataRegister' => 'eraseDemoDataRegisterEntries',
+        // #592: a person is in these three only as an e-mail ADDRESS, in a
+        // list of addresses separated by commas. No account number is there
+        // to match on. The mail queue's two tables are handled by one step
+        // (a waiting message and its attached files go together).
+        'tblMailQueue'        => 'eraseMailQueueMessages',
+        'tblMailQueueFiles'   => 'eraseMailQueueMessages',
+        // #234: the send log. It has always had this step; it had no entry
+        // in the written list, so nothing would have noticed the step being
+        // removed.
+        'tblEmailLog'         => 'eraseEmailLogRecipients',
     ];
 
     /**
@@ -1369,6 +1379,18 @@ class GdprEraser
             // says so are saved together or not at all.
             $outcomes = [];
             $lastBeat = time();
+            // ✉️ #592 — mail still WAITING to be sent to this person, and
+            //    then (#234) their address in the send log. Both find the
+            //    person by the e-mail address read above, not by an account
+            //    number. BEFORE the catalogue: once an erasure has started,
+            //    nothing more should be sent to the person, and the mail
+            //    job may run at any moment.
+            //    (The send-log step used to run after the catalogue. Nothing
+            //    in it depends on the order; it moved up so that every step
+            //    that works by address sits in one place, where
+            //    tools/gdpr-coverage-selftest.php looks for it.)
+            $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseMailQueueMessages($requestId, $erasedEmail));
+            $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseEmailLogRecipients($requestId, $erasedEmail));
             foreach (self::catalogue() as $entry) {
                 $outcomes[] = self::asOneStep(
                     $db,
@@ -1382,8 +1404,6 @@ class GdprEraser
             foreach ($giving as $outcome) {
                 $outcomes[] = $outcome;
             }
-            // 📧 #234 — the address in the email send log.
-            $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseEmailLogRecipients($requestId, $erasedEmail));
             // 🖼️ The person's photo: the image file, and the two columns on
             //    the account that say where it is.
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseProfileImages($requestId, $userId));
@@ -1900,8 +1920,10 @@ class GdprEraser
      * @param bool $alreadyConfirmed See "HOW A REQUEST GETS CONFIRMED".
      *
      * @return array{requestID: int, email: string, mailed: bool, confirmed: bool}
-     *   `email` is the address on the account now. `mailed`: the
-     *   confirmation link was sent to it (always false when `confirmed`).
+     *   `email` is the address on the account now. `mailed`: a mail service
+     *   accepted the confirmation link for it (always false when
+     *   `confirmed`, and false for a message that was only kept in the mail
+     *   queue to be sent later).
      *
      * @throws \RuntimeException When the account cannot be found or the
      *   request cannot be saved. Nothing is then filed.
@@ -1963,7 +1985,24 @@ class GdprEraser
                 . 'Until then your account carries on working as it does now.</p>'
                 . '<p>If you didn\'t make this request you can safely ignore this email.</p>';
             try {
-                $mailed = Mailer::send($email, 'Confirm your data erasure request', $body) === true;
+                // ⏳ THE MAIL QUEUE (#592). Two things changed here.
+                //    Use-by: 23 hours from now, on the database's own UTC
+                //    clock. The link works for "one day" on the database
+                //    server's clock (account/erasure-confirm.php), and on
+                //    the night the clocks go forward that day is 23 hours
+                //    long, so 23 is the longest length that is never past
+                //    the link's own end. A message kept in the queue is
+                //    never sent after that: it would carry a dead link.
+                //    And `mailed` is true only when a mail service TOOK the
+                //    message. Mailer::send() also answers true for one it
+                //    has only kept, and the page then told the person "we
+                //    have sent an email" about a message that was waiting.
+                //    A kept one counts as not mailed: the person is told to
+                //    ask an administrator, which works either way, and the
+                //    e-mail, if it does arrive in time, still works too.
+                $useBy  = (string) ($db->query("SELECT DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 82800 SECOND, '%Y-%m-%d %H:%i:%s') AS useBy")->fetch_assoc()['useBy'] ?? 'not known');
+                $mailed = Mailer::send($email, 'Confirm your data erasure request', $body, [], ['expiresAt' => $useBy]) === true
+                    && Mailer::lastOutcome() === Mailer::OUTCOME_SENT;
             } catch (\Throwable $e) {
                 // The request is saved either way; the caller tells the
                 // person that the email did not go.
@@ -3969,6 +4008,100 @@ class GdprEraser
     }
 
     /**
+     * ✉️ #592 — take the erased person out of the MAIL QUEUE: mail that is
+     *    still waiting to be sent (`tblMailQueue`, `tblMailQueueFiles`).
+     *
+     * A waiting message for that person alone is deleted, with any files
+     * attached to it. In a message that is also for other people, their
+     * address is taken off the list, so it is not sent to them, and the
+     * message's last error is emptied (a mail server's refusal can name an
+     * address). MailQueue::eraseAddress() does the work and holds the rules
+     * for matching an address: an entry counts only when it IS the address,
+     * never when a longer address merely contains it.
+     *
+     * Exactly one audit line, including when there was nothing to do. A
+     * failure is a FAILED step, not a crash. A database that has not been
+     * upgraded to hold the queue (error 1146, "no such table") holds no
+     * waiting mail, and that is said rather than counted as a failure.
+     *
+     * WHEN A RUN OF THE MAIL JOB IS STILL WORKING after the wait (20
+     * seconds). The person's waiting mail is taken out all the same, so no
+     * later run can send it, and the step is counted as FAILED on purpose:
+     * that run may write the address into the send log after the next step
+     * has cleaned it. A failed step leaves the request at "pending review",
+     * and running it again finishes the job (nothing is left in the queue,
+     * and the send log is cleaned once more). WHAT WAS WRONG: the step used
+     * to change nothing in that case, and the next run of the job sent the
+     * erased person their waiting message.
+     * WHAT THE ADMINISTRATOR SEES THEN: the erasure ends with "1 of N steps
+     * failed, so the request was not closed", the request is back in the
+     * list at pending review, and the audit trail's line for tblMailQueue
+     * says why and says to run it again.
+     *
+     * What this cannot do: stop a message that a run of the mail job is
+     * handing to the mail server at this very moment; take the person's
+     * name out of the BODY of a message that is also for other people (the
+     * body is stored encrypted and is not read here); or bring back the
+     * attached files of a deleted message if the audit line cannot then be
+     * written (the row is put back by the step's own undo, and is then
+     * failed for its missing file: it is never sent without it).
+     *
+     * @return string One of the STEP_ constants.
+     */
+    private static function eraseMailQueueMessages(int $requestId, string $email): string
+    {
+        $db = App::db();
+
+        if ($email === '') {
+            self::logAudit($db, $requestId, 'none', 'tblMailQueue', null, 'no email address is known for this person, so the mail queue was not searched');
+
+            return self::STEP_UNCHANGED;
+        }
+        try {
+            $done = MailQueue::eraseAddress($db, $email);
+        } catch (\Throwable $e) {
+            if ($e instanceof \mysqli_sql_exception && (int) $e->getCode() === 1146) {
+                self::logAudit($db, $requestId, 'skip', 'tblMailQueue', null, 'the mail queue is not in this database yet (it has not been upgraded), so no mail is waiting');
+
+                return self::STEP_UNCHANGED;
+            }
+            self::logAudit($db, $requestId, 'failed', 'tblMailQueue', null, mb_substr('the person could not be taken out of the mail queue: ' . $e->getMessage(), 0, 250));
+
+            return self::STEP_FAILED;
+        }
+        if ($done['runWasWorking'] === true) {
+            // Done, but NOT FINISHED: see the note above this method.
+            self::logAudit(
+                $db,
+                $requestId,
+                'failed',
+                'tblMailQueue',
+                $done['deleted'] . ' deleted, ' . $done['changed'] . ' changed',
+                'not finished: a run of the mail job was still working after ' . MailQueue::ERASURE_WAITS_SECONDS . ' seconds. Waiting mail for this person was taken out all the same, '
+                . 'so no later run can send it. A message that run was handing over at that moment could not be stopped, and the run may have written the address into the send log since. '
+                . 'Run this erasure again: it then cleans the send log once more'
+            );
+
+            return self::STEP_FAILED;
+        }
+        if ($done['deleted'] + $done['changed'] > 0) {
+            self::logAudit(
+                $db,
+                $requestId,
+                $done['deleted'] > 0 ? 'delete' : 'anonymise',
+                'tblMailQueue',
+                $done['deleted'] . ' deleted, ' . $done['changed'] . ' changed',
+                'waiting mail for this person alone deleted, with its attached files; their address taken off waiting mail that is also for other people'
+            );
+
+            return self::STEP_CHANGED;
+        }
+        self::logAudit($db, $requestId, 'none', 'tblMailQueue', null, 'no mail is waiting to be sent to this person\'s address');
+
+        return self::STEP_UNCHANGED;
+    }
+
+    /**
      * 📧 #234 — take the erased person's address out of the email send log
      *    (`tblEmailLog.toRecipients`).
      *
@@ -4001,13 +4134,43 @@ class GdprEraser
      * Exactly one audit line, including when there was nothing to do. A
      * failed read or update is a FAILED step, not a crash.
      *
-     * What this cannot do: an entry written as `Name <address>` is not
-     * matched. Mailer writes plain addresses only, so none is expected.
+     * THE REASON TEXT GOES TOO (#592). A mail server's refusal names the
+     * address it refused ("550 no such user <a@b>"), and the portal keeps
+     * those words in two places: the send log's `errorDetail`, and the
+     * Errors page (`tblErrors.errorDetail`, for the lines the mail code
+     * writes: MAIL_ERROR_PLATFORMS). WHAT WAS WRONG: only the recipient
+     * list was changed, so after an erasure the address was still in both,
+     * and the audit line said it had been removed. Now:
+     *   - every send-log row whose recipient list held the address has its
+     *     reason text emptied (the status, the reply number and the short
+     *     reason word are kept);
+     *   - every Errors-page line written by the mail code whose detail
+     *     names the address BY ITSELF has its detail emptied. A line that
+     *     names a LONGER address which merely contains it (joann@… for
+     *     ann@…) is somebody else's and is left alone, as it is in the
+     *     recipient list. (The first version emptied those too, and counted
+     *     them in the audit line as lines "naming the address".)
+     * This step runs AFTER the mail queue's step, which waits for any run
+     * of the mail job to end (MailQueue::eraseAddress()), so a line a run
+     * was writing at that moment is here to be cleaned.
+     *
+     * What this cannot do: an entry of the RECIPIENT LIST written as
+     * `Name <address>` is not matched. Mailer writes plain addresses only,
+     * so none is expected. In an error line, "by itself" is judged on the
+     * characters either side of the address: a letter A to Z, a digit or
+     * one of `. _ % + -` before it, or a letter, a digit, a hyphen or a
+     * further `.name` after it, makes it part of a longer address. A longer
+     * address that differs only by a letter outside A to Z in front (an
+     * accented one) is not told apart, and its line is emptied too. And a
+     * send-log row for a message to SOMEBODY ELSE whose refusal happened
+     * to name this address is not found (its recipient list does not hold
+     * it).
      *
      * @return string One of the STEP_ constants.
      */
     private static function eraseEmailLogRecipients(int $requestId, string $email): string
     {
+        // (The list of names is MAIL_ERROR_PLATFORMS, declared just below this method.)
         $db = App::db();
 
         if ($email === '') {
@@ -4025,8 +4188,9 @@ class GdprEraser
         $wanted      = mb_strtolower($email);
         $replacement = '[erased]';
 
-        $affected = 0;
-        $problem  = null;
+        $affected   = 0;
+        $errorLines = 0;
+        $problem    = null;
         try {
             $read = $db->prepare('SELECT emailLogID, toRecipients FROM tblEmailLog WHERE toRecipients LIKE ?');
             if ($read === false) {
@@ -4054,7 +4218,7 @@ class GdprEraser
                         continue; // a longer address that merely contains it
                     }
                     if ($write === null) {
-                        $write = $db->prepare('UPDATE tblEmailLog SET toRecipients = ? WHERE emailLogID = ?');
+                        $write = $db->prepare("UPDATE tblEmailLog SET toRecipients = ?, errorDetail = '' WHERE emailLogID = ?");
                         if ($write === false) {
                             $problem = (string) $db->error;
                             break;
@@ -4070,6 +4234,34 @@ class GdprEraser
                     $write->close();
                 }
             }
+            // 🧹 The Errors page: lines the mail code wrote that name the
+            //    address BY ITSELF. The LIKE only finds the candidates; the
+            //    test below decides, line by line, as the loop above does for
+            //    the recipient list. REJECTED: one UPDATE with the LIKE. It
+            //    emptied lines about other people whose longer address
+            //    happens to contain this one.
+            if ($problem === null) {
+                $platforms = self::MAIL_ERROR_PLATFORMS;
+                $marks     = implode(',', array_fill(0, count($platforms), '?'));
+                $find      = $db->prepare('SELECT errorID, errorDetail FROM tblErrors WHERE errorPlatform IN (' . $marks . ') AND errorDetail LIKE ?');
+                $find->bind_param(str_repeat('s', count($platforms)) . 's', ...array_merge($platforms, [$like]));
+                $find->execute();
+                $lines = $find->get_result()->fetch_all(MYSQLI_ASSOC);
+                $find->close();
+
+                $alone = '/(?<![A-Za-z0-9._%+\-])' . preg_quote($email, '/') . '(?![A-Za-z0-9\-]|\.[A-Za-z0-9])/i';
+                $clean = $db->prepare("UPDATE tblErrors SET errorDetail = '' WHERE errorID = ?");
+                foreach ($lines as $line) {
+                    if (preg_match($alone, (string) $line['errorDetail']) !== 1) {
+                        continue; // a longer address that merely contains it: somebody else's line
+                    }
+                    $errorId = (int) $line['errorID'];
+                    $clean->bind_param('i', $errorId);
+                    $clean->execute();
+                    $errorLines++;
+                }
+                $clean->close();
+            }
         } catch (\Throwable $e) {
             $problem = $e->getMessage();
         }
@@ -4078,15 +4270,34 @@ class GdprEraser
 
             return self::STEP_FAILED;
         }
-        if ($affected > 0) {
-            self::logAudit($db, $requestId, 'anonymise', 'tblEmailLog', (string) $affected . ' rows', 'recipient address detached from send-log audit trail; provider/status/subject/httpCode retained');
+        if ($affected + $errorLines > 0) {
+            self::logAudit(
+                $db,
+                $requestId,
+                'anonymise',
+                'tblEmailLog',
+                $affected . ' rows, ' . $errorLines . ' error lines',
+                'recipient address taken out of the send log and the reason text of those rows emptied; the detail of mail error lines naming the address emptied; provider/status/subject/httpCode kept'
+            );
 
             return self::STEP_CHANGED;
         }
-        self::logAudit($db, $requestId, 'none', 'tblEmailLog', null, 'the send log holds no message to this person\'s address');
+        self::logAudit($db, $requestId, 'none', 'tblEmailLog', null, 'the send log holds no message to this person\'s address, and no mail error line names it');
 
         return self::STEP_UNCHANGED;
     }
+
+    /**
+     * @var list<string> The names the mail code gives its lines on the Errors
+     *      page (`tblErrors.errorPlatform`) when a message does not go:
+     *      'SMTP' (Mailer::logSmtp()), 'Graph' (Mailer::sendViaGraph()) and
+     *      'Gmail' (MailerGoogle::send()). Such a line can quote a mail
+     *      service's own words, which can name a recipient's address, so
+     *      eraseEmailLogRecipients() looks through exactly these.
+     *      Declared here, not in Mailer, so that this class does not need
+     *      the mail code loaded to carry out an erasure.
+     */
+    private const MAIL_ERROR_PLATFORMS = ['SMTP', 'Graph', 'Gmail'];
 
     /**
      * 🖼️ The person's photo: delete the image file, then empty the two columns

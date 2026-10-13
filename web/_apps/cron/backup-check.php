@@ -103,7 +103,9 @@ if ($state !== 'ok' && count($recipients) > 0) {
                 . ($reviewUrl === '' ? '' : "\nReview: " . $reviewUrl . "\n");
     foreach ($recipients as $to) {
         try {
-            if (Mailer::send($to, $subject, $body) === true) {
+            // "true" is sent OR kept in the mail queue (#592): only one a
+            // mail service took is an alert that was sent.
+            if (Mailer::send($to, $subject, $body) === true && Mailer::lastOutcome() === Mailer::OUTCOME_SENT) {
                 $alertsSent++;
             }
         } catch (\Throwable $e) {
@@ -123,6 +125,7 @@ echo json_encode([
     'snapshot_count'  => count($snapshots),
     'recipients'      => count($recipients),
     'alerts_sent'     => $alertsSent,
+    'alerts_waiting'  => Mailer::keptThisRequest(),
     'checked_at'      => date('c'),
 ]);
 exit();

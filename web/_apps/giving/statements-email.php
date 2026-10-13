@@ -31,6 +31,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Giving;
 use Portal\Core\Logger;
+use Portal\Core\Mailer;
 use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\TimeLimit;
@@ -71,12 +72,17 @@ $db = App::db();
 // -----------------------------------------------------------------------------
 if ($resend === true) {
     $stmt = $db->prepare(
+        // ⏳ NOT a statement whose e-mail is still WAITING in the mail queue
+        //    (#592): its row carries the "e-mailed" stamp, but it has not
+        //    gone, and sending it again here would give the donor two.
         'UPDATE tblGivingStatementLog SET emailedAt = NULL, errorMsg = NULL, queuedAt = NOW() '
-        . 'WHERE siteID = ? AND periodKey = ? AND pdfPath IS NOT NULL AND emailedAt IS NOT NULL'
+        . 'WHERE siteID = ? AND periodKey = ? AND pdfPath IS NOT NULL AND emailedAt IS NOT NULL '
+        . 'AND (errorMsg IS NULL OR errorMsg <> ?)'
     );
     $resentCount = 0;
     if ($stmt !== false) {
-        $stmt->bind_param('is', $siteId, $periodKey);
+        $mailWaiting = Giving::MAIL_WAITING;
+        $stmt->bind_param('iss', $siteId, $periodKey, $mailWaiting);
         $stmt->execute();
         $resentCount = $stmt->affected_rows;
         $stmt->close();
@@ -129,8 +135,9 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
-$sent   = 0;
-$failed = 0;
+$sent    = 0;
+$failed  = 0;
+$waiting = 0; // kept in the mail queue, not sent (#592): never counted as sent
 foreach ($pending as $row) {
     $logRow = [
         'logID'    => (int) $row['logID'],
@@ -141,7 +148,8 @@ foreach ($pending as $row) {
         'toDate'   => (string) $row['toDate'],
     ];
     if (Giving::sendStatementEmail($logRow) === true) {
-        $sent++;
+        // "true" is sent OR kept to be sent: Mailer says which.
+        Mailer::lastIsWaiting() === true ? $waiting++ : $sent++;
     } else {
         $failed++;
     }
@@ -162,11 +170,14 @@ if ($stmt !== false) {
 
 Logger::activity(
     'GivingStatementsEmail',
-    sprintf('Period %s: sent %d, failed %d, %d remaining', $periodKey, $sent, $failed, $remaining),
+    sprintf('Period %s: sent %d, waiting in the mail queue %d, failed %d, %d remaining', $periodKey, $sent, $waiting, $failed, $remaining),
     $userId
 );
 
 $msg = sprintf('Sent %d, failed %d', $sent, $failed);
+if ($waiting > 0) {
+    $msg .= sprintf(', %d waiting in the mail queue (each is marked as emailed only once it has gone)', $waiting);
+}
 $msg .= $remaining > 0
     ? sprintf('. %d remaining — re-run, or configure the giving cron to finish (see DEV_NOTES.md).', $remaining)
     : '. Done.';

@@ -90,7 +90,7 @@ endif;
                     <li><strong>Google</strong> — for an organisation on Google Workspace. It needs a key file put on the server.</li>
                 </ul>
                 <p>Choose the route, and see what it still needs, at <a href="/admin/integrations/email">Admin, Integrations, Email</a>. Then use &ldquo;Send test&rdquo; there to send yourself a message.</p>
-                <p>Two things to know. A message the portal cannot send straight away is <strong>not kept and not tried again</strong>: it is listed on that page as not sent, with the reason. And if you set a limit on how many recipients an hour the portal may send to, mail over the limit is not sent either.</p>
+                <p>Two things to know. A message the portal cannot send straight away is <strong>kept and tried again</strong> for about a day by the mail queue; until it goes it is listed on that page as not sent, with the reason. The mail queue needs its own scheduled job, which you add once: the administrator&rsquo;s guide says how, under the SMTP mailbox. And if you set a limit on how many recipients an hour the portal may send to, mail over the limit waits in the same queue until the hour has room.</p>
                 <p>Also check the three DNS records (SPF, DKIM and DMARC) on the domain you send from. They tell other mail systems that the portal may send as your domain, and without them mail tends to land in junk folders. The same page shows which it found.</p>
             </div>
         </div>

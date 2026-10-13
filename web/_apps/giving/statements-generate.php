@@ -77,11 +77,16 @@ if ($action === 'retry') {
     if ($donorId > 0) {
         $periodKey = Giving::statementPeriodKey($from, $to);
         $db = App::db();
+        // ⏳ Not "waiting in the mail queue" (#592): that is not an error to
+        //    clear, and clearing it would leave the row reading "emailed"
+        //    for an e-mail that has not gone. The page offers no Retry for
+        //    it; this is for a request made by hand.
         $stmt = $db->prepare(
-            'UPDATE tblGivingStatementLog SET errorMsg = NULL WHERE siteID = ? AND donorID = ? AND periodKey = ?'
+            'UPDATE tblGivingStatementLog SET errorMsg = NULL WHERE siteID = ? AND donorID = ? AND periodKey = ? AND errorMsg <> ?'
         );
         if ($stmt !== false) {
-            $stmt->bind_param('iis', $siteId, $donorId, $periodKey);
+            $mailWaiting = Giving::MAIL_WAITING;
+            $stmt->bind_param('iiss', $siteId, $donorId, $periodKey, $mailWaiting);
             $stmt->execute();
             $stmt->close();
         }

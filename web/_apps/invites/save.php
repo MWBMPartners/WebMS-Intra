@@ -130,7 +130,13 @@ foreach (array_unique($emails) as $email) {
                     'inviteUrl'   => PortalAddress::absolute('auth/invite?token=' . $plaintext, $siteId),
                     'expiresAt'   => $days . ' days',
                     'message'     => $message,
-                ]
+                ],
+                [],
+                // ⏳ Use-by (#592): the moment the invitation itself runs
+                //    out, as a moment in UTC. An invitation kept in the mail
+                //    queue and sent after that would carry a dead link.
+                //    ($expiresAt above is the same moment on PHP's own clock.)
+                ['expiresAt' => gmdate('Y-m-d H:i:s', (int) strtotime($expiresAt))]
             );
         } catch (\Throwable $ignored) {
             // Mailer is best-effort here; the invite row exists and the admin

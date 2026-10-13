@@ -30,8 +30,13 @@
  *     request named, made-up or not. Once it is set, the link carries the
  *     set address whatever the request says. See section 6 and
  *     web/_core/PortalAddress.php (#500).
- *   - On a host where the answer cannot be sent early, the time it takes
- *     still gives a known address away.
+ *   - On a host where the answer cannot be sent early, the e-mail is not
+ *     sent inside the request at all: it is kept for the mail queue's job
+ *     (section 6). So on such a host a reset e-mail waits until that job next
+ *     runs, and the wait a stranger can measure no longer includes the mail
+ *     server. What is left is the few database writes a known address
+ *     causes (storing the link and the waiting message), which an unknown
+ *     address does not.
  *   - "Sent" on screen is not proof of delivery. Mailer::canSend() reads
  *     settings; only the provider knows whether a message arrived.
  *   - Activity records written before #580 may still hold a whole link, for
@@ -56,6 +61,7 @@ use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
+use Portal\Core\MailQueue;
 use Portal\Core\PortalAddress;
 use Portal\Core\RateLimiter;
 
@@ -248,6 +254,20 @@ try {
     $invalidateStmt->execute();
     $invalidateStmt->close();
 
+    // 🧹 And take this person's OLDER reset e-mails out of the mail queue, if
+    //    any are still waiting (#592). The statement above has just made
+    //    their links stop working. Three resets asked for while the mail
+    //    server was down used to arrive together, two of them with dead
+    //    links. A failure here (a database not yet upgraded to hold the
+    //    queue) must not stop the new link being made, so it has a catch of
+    //    its own; an older message that stays is still stopped by its own
+    //    use-by moment at the latest.
+    try {
+        MailQueue::removeWaitingFrom($mysqli, 'reset:' . $userId);
+    } catch (\Throwable $ex) {
+        error_log('Forgot password: older waiting reset e-mails could not be looked for: ' . get_class($ex));
+    }
+
     // 🔐 Generate a cryptographically secure plaintext token (64-char hex)
     $plaintextToken = bin2hex(random_bytes(32));
 
@@ -344,18 +364,63 @@ if ($resetLink === '') {
         . '</body></html>';
 
     try {
-        $mailSent = Mailer::send(
+        // ✉️ WHAT THE MAIL QUEUE IS TOLD ABOUT THIS MESSAGE (#592, part 3).
+        //
+        //    urgent     it goes before everything else, and may use the part
+        //               of the hourly limit kept back for mail like this.
+        //    expiresAt  the moment the LINK stops working: the very value
+        //               stored for it in section 5, read back here. A
+        //               message that has waited past it is never sent: a
+        //               dead link is worse than no e-mail. If it cannot be
+        //               read, the text below is not a moment, and the queue
+        //               then refuses to keep the message at all.
+        //    repeatSafe a second copy of the same link does no harm.
+        //    sendNow    FALSE ONLY WHERE THIS PAGE CANNOT ANSWER BEFORE IT
+        //               SENDS (MailQueue::pageCanAnswerFirst() says which
+        //               web servers those are) AND THE SCHEDULED JOB IS
+        //               RUNNING (MailQueue::jobIsRunning()). The message is
+        //               then kept for the job and not sent in this request,
+        //               so how long the answer takes does not depend on a
+        //               mail server; it goes at the job's next run, within
+        //               five minutes.
+        //               WHAT WAS WRONG: the second half was missing. On PHP
+        //               run by Apache (its own module, FastCGI or CGI) with
+        //               no job added yet, which is every such installation
+        //               on the morning after upgrading, NO reset e-mail went
+        //               out at all and nobody was told. With no job running
+        //               the e-mail is sent in the request, as it was before
+        //               there was a queue. THE COST, accepted: on such a
+        //               server, until the job is added, the answer takes a
+        //               little longer for an address that has an account.
+        //    origin     this person's reset: a newer request finds this
+        //               message by it and removes it (section 5).
+        $expiryStmt = $mysqli->prepare('SELECT expiresAt FROM tblPasswordResets WHERE userID = ? AND usedAt IS NULL ORDER BY resetID DESC LIMIT 1');
+        $expiryStmt->bind_param('i', $userId);
+        $expiryStmt->execute();
+        $linkExpiresAt = (string) ($expiryStmt->get_result()->fetch_assoc()['expiresAt'] ?? 'not known');
+        $expiryStmt->close();
+
+        Mailer::send(
             [$user['emailAddress']],
             'Password Reset Request – ' . $siteName,
-            $htmlBody
+            $htmlBody,
+            [],
+            [
+                'priority' => 'urgent', 'expiresAt' => $linkExpiresAt, 'repeatSafe' => true, 'origin' => 'reset:' . $userId,
+                'sendNow'  => MailQueue::pageCanAnswerFirst() === true || MailQueue::jobIsRunning($mysqli) === false,
+            ]
         );
-        // 📝 Only say "sent" when the provider took the message. This used to
-        //    write 'PasswordResetEmailed' whatever send() answered, so the
-        //    record said an e-mail had gone when the provider had refused it.
-        if ($mailSent === true) {
+        // 📝 Say what really became of it. This used to write
+        //    'PasswordResetEmailed' whatever send() answered, so the record
+        //    said an e-mail had gone when the provider had refused it. With
+        //    the mail queue there is a third ending: it is waiting.
+        $became = Mailer::lastOutcome();
+        if ($became === Mailer::OUTCOME_SENT) {
             Logger::activity('PasswordResetEmailed', 'Reset email sent to: ' . $email);
+        } elseif ($became === Mailer::OUTCOME_QUEUED || $became === Mailer::OUTCOME_HELD) {
+            Logger::activity('PasswordResetMailWaiting', 'Reset email is waiting in the mail queue (' . $became . ') for: ' . $email);
         } else {
-            Logger::activity('PasswordResetMailFailed', 'Reset email was refused by the mail provider for: ' . $email);
+            Logger::activity('PasswordResetMailFailed', 'Reset email was not sent and is not waiting (' . $became . ') for: ' . $email);
         }
     } catch (\Throwable $ex) {
         // 📝 Log the error but don't expose it to the user

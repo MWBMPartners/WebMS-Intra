@@ -342,6 +342,10 @@ function removeWorld(): void
 {
     q('DELETE FROM tblPasswordResets WHERE userID BETWEEN 929000 AND 929999');
     q("DELETE FROM tblEmailLog WHERE toRecipients LIKE '%mailpages.selftest.invalid%'");
+    // Since the mail queue (package M3) a message that cannot go is KEPT, and
+    // a fault with the mail route is put on record. Both are this run's.
+    q("DELETE FROM tblMailQueue WHERE toRecipients LIKE '%mailpages.selftest.invalid%'");
+    forgetRouteFaults();
     q("DELETE FROM tblActivityLogs WHERE userID BETWEEN 929000 AND 929999 OR visitorIP LIKE '198.51.100.%' OR userAgent = ?", 's', [AGENT]);
     q("DELETE FROM tblErrors WHERE userID BETWEEN 929000 AND 929999 OR visitorIP LIKE '198.51.100.%'");
     for ($last = 1; $last <= 254; $last++) {
@@ -708,6 +712,19 @@ function useServer(string $scenario): void
     setting('mail.smtp.port', (string) $state['ports'][$scenario]);
 }
 
+/**
+ * Take off the record whatever fault the mail route has on it.
+ *
+ * Since the mail queue (package M3) a refused sign-in or a failed certificate
+ * is remembered from one request to the next, and the portal then does not
+ * contact the mail server at all. A check that is about what ONE request does
+ * with a server it has not met before starts from an empty record.
+ */
+function forgetRouteFaults(): void
+{
+    q('DELETE FROM tblMailRouteState');
+}
+
 /** A port on which nothing is listening. */
 function closedPort(): int
 {
@@ -1056,11 +1073,13 @@ $seeds = [];
 foreach (q("SELECT settingKey, defaultValue, isSensitive FROM tblSettings WHERE siteID IS NULL AND (settingKey LIKE 'mail.smtp.%' OR settingKey = 'mail.limit.perHour') ORDER BY settingKey") as $row) {
     $seeds[(string) $row['settingKey']] = [(string) $row['defaultValue'], (int) $row['isSensitive']];
 }
+// The two `certCheck` rows came with migration 216 (the mail queue). Nothing
+// reads them yet: they are for the page a later package adds.
 $expectedSeeds = [
-    'mail.limit.perHour' => ['', 0], 'mail.smtp.host' => ['', 0], 'mail.smtp.password' => ['', 1],
-    'mail.smtp.port' => ['587', 0], 'mail.smtp.security' => ['starttls', 0], 'mail.smtp.username' => ['', 0],
+    'mail.limit.perHour' => ['', 0], 'mail.smtp.certCheck' => ['on', 0], 'mail.smtp.certCheckOffAt' => ['', 0], 'mail.smtp.host' => ['', 0],
+    'mail.smtp.password' => ['', 1], 'mail.smtp.port' => ['587', 0], 'mail.smtp.security' => ['starttls', 0], 'mail.smtp.username' => ['', 0],
 ];
-ok('the install script seeds the six settings, with port 587 and STARTTLS as defaults, and marks the password\'s row (and only that one) as a secret', $seeds === $expectedSeeds, (string) json_encode($seeds));
+ok('the install script seeds the six settings of the SMTP route and the two of migration 216, with port 587 and STARTTLS as defaults, and marks the password\'s row (and only that one) as a secret', $seeds === $expectedSeeds, (string) json_encode($seeds));
 $dead = (int) one("SELECT COUNT(*) AS n FROM tblSettings WHERE settingKey IN ('email.provider', 'email.from')")['n'];
 ok('the two settings nothing reads (email.provider, email.from) are not there', $dead === 0, $dead . ' row(s) found');
 $columns = [];
@@ -1286,8 +1305,12 @@ ok(
     'HTTP ' . $page['status']
 );
 ok(
-    'the form says, beside the hourly limit, that it is not exact: messages sent at the same moment can together go a little over it',
-    str_contains(words($page['body']), 'The limit is not exact: messages sent at the same moment can together go a little over it') === true,
+    // Reworded with the mail queue (package M3): the queue's own job sends one
+    // at a time and never passes the limit, so the sentence now says which
+    // mail the inexactness is about, and that mail over the limit waits.
+    'the form says, beside the hourly limit, that mail over it waits in the queue, and that the limit is not exact for mail sent straight from a page: messages sent at the same moment can together go a little over it',
+    str_contains(words($page['body']), 'The limit is not exact for mail sent straight from a page: messages sent at the same moment can together go a little over it') === true
+        && str_contains(words($page['body']), 'it waits in the mail queue and goes when the hour has room') === true,
     'the sentence is not on the page'
 );
 $answer = $post($rootJar, ip(1), $fullForm());
@@ -1474,9 +1497,12 @@ head('P2. The person is shown the same thing whatever happens to the e-mail');
 // =============================================================================
 foreach ([
     [21, 'accept', 'nobody-here@mailpages.selftest.invalid', 'an address with no account', 0, ''],
-    [22, 'refuse-signin', mailOf('member'), 'a mail server that refuses the sign-in', 0, 'PasswordResetMailFailed'],
-    [23, 'stall', mailOf('member'), 'a mail server that stops answering', 0, 'PasswordResetMailFailed'],
-    [24, 'cert-expired', mailOf('member'), 'a mail server whose certificate has expired', 0, 'PasswordResetMailFailed'],
+    // Since the mail queue (package M3) none of these three loses the
+    // message: it is kept (queued, or held for the certificate), and the
+    // activity record says it is waiting. The person is still shown the same.
+    [22, 'refuse-signin', mailOf('member'), 'a mail server that refuses the sign-in', 0, 'PasswordResetMailWaiting'],
+    [23, 'stall', mailOf('member'), 'a mail server that stops answering', 0, 'PasswordResetMailWaiting'],
+    [24, 'cert-expired', mailOf('member'), 'a mail server whose certificate has expired', 0, 'PasswordResetMailWaiting'],
 ] as [$last, $scenario, $address, $what, $expectMessages, $record]) {
     useServer($scenario);
     mailSince($scenario);
@@ -1492,8 +1518,8 @@ foreach ([
 }
 $row = one("SELECT status, errorCode, errorDetail FROM tblEmailLog WHERE toRecipients = ? ORDER BY emailLogID DESC LIMIT 1", 's', [mailOf('member')]);
 ok(
-    'the failed certificate is in the send log as failed, with its reason in plain words',
-    $row !== null && $row['status'] === 'failed' && $row['errorCode'] === 'certificate' && str_contains((string) $row['errorDetail'], 'The certificate expired on') === true,
+    'the failed certificate is in the send log as held (not sent, and kept), with its reason in plain words',
+    $row !== null && $row['status'] === 'held' && $row['errorCode'] === 'certificate' && str_contains((string) $row['errorDetail'], 'The certificate expired on') === true,
     (string) json_encode($row)
 );
 
@@ -1675,6 +1701,9 @@ ok(
 // them says anything about the certificate, which is still failing, so none
 // may clear the notice. (Each used to: the notice read the newest line of the
 // send log, whatever it was, while saying it stays until a message is accepted.)
+// Since the mail queue (package M3) the first is no longer stopped by the
+// hourly limit: with a certificate fault on record it is HELD for that
+// fault before the limit is asked, and the mail server is not contacted.
 mailSince('cert-name-rule');
 setting('mail.limit.perHour', '1');
 sendDirect([mailOf('third')], 'P11 stopped by the hourly limit', 'A message.');
@@ -1691,9 +1720,10 @@ $codes  = array_column(q("SELECT errorCode FROM tblEmailLog WHERE subject LIKE '
 $page   = req($rootJar, 'GET', $emailPage, null, ip(1));
 $notice11 = preg_match('#data-mail-warning="certificate">(.*?)</div>#s', $page['body'], $m) === 1 ? words($m[1]) : '';
 ok(
-    'a message stopped by the hourly limit, one stopped by a missing setting and one whose file cannot be attached do NOT clear the notice: the mail server was never tried, its certificate is still failing, and the notice says what does clear it',
-    $codes === ['over-hourly-limit', 'not-set-up', 'message-refused'] && $mail['connections'] === 0 && str_contains($notice11, 'The certificate is for another name (other.test)') === true
-        && str_contains($notice11, 'It goes when a later attempt ends another way') === true && str_contains($notice11, 'leaves it showing') === true,
+    'a message given to send() while the limit is used up (held for the certificate), one stopped by a missing setting and one whose file cannot be attached do NOT clear the notice: the mail server was never tried, its certificate is still failing, and the notice says what does clear it',
+    $codes === ['certificate', 'not-set-up', 'message-refused'] && $mail['connections'] === 0 && str_contains($notice11, 'The certificate is for another name (other.test)') === true
+        && str_contains($notice11, 'It goes when the certificate passes the check') === true && str_contains($notice11, 'leaves it showing') === true
+        && str_contains($notice11, 'every message is held in the mail queue') === true,
     'the three were logged as ' . json_encode($codes) . '; connections ' . $mail['connections'] . '; notice: ' . ($notice11 === '' ? 'NOT on the page' : $notice11)
 );
 useServer('accept');
@@ -1720,9 +1750,14 @@ $errors = (int) one('SELECT COUNT(*) AS n FROM tblErrors')['n'];
 $answer = req($rootJar, 'POST', '/calendar/event/broadcast/send', ['csrf_token' => anyToken($rootJar, ip(1)), 'eventID' => (string) EVENT_ID, 'segment' => 'all-rsvps', 'subject' => 'P12 broadcast', 'body' => 'A broadcast that cannot go.'], ip(1));
 $notSent = (int) one("SELECT COUNT(*) AS n FROM tblEmailLog WHERE subject = 'P12 broadcast' AND status = 'failed' AND errorCode = 'not-set-up'")['n'];
 ok(
-    'an event broadcast to two people, with SMTP not set up, ends normally: sent back to the broadcast page, recorded as sent to 0, two "not set up" lines in the send log and no error raised',
+    // Since the mail queue (package M3) a broadcast is recorded BEFORE it is
+    // sent, and a broadcast of which nothing went and nothing is waiting has
+    // its record taken out again, so that it cannot be taken for a first
+    // press when Send is pressed once e-mail works. (It used to leave a
+    // record saying "sent to 0".)
+    'an event broadcast to two people, with SMTP not set up, ends normally: sent back to the broadcast page, NOT left on record as a broadcast, two "not set up" lines in the send log and no error raised',
     $answer['status'] === 302 && str_contains($answer['location'], '/calendar/event/broadcast?eventID=' . EVENT_ID) === true
-        && (int) (one('SELECT recipientCount FROM tblEventBroadcasts WHERE eventID = ? ORDER BY broadcastID DESC LIMIT 1', 'i', [EVENT_ID])['recipientCount'] ?? -1) === 0
+        && (int) one('SELECT COUNT(*) AS n FROM tblEventBroadcasts WHERE eventID = ?', 'i', [EVENT_ID])['n'] === 0
         && $notSent === 2 && (int) one('SELECT COUNT(*) AS n FROM tblErrors')['n'] === $errors,
     'HTTP ' . $answer['status'] . ' to ' . $answer['location'] . '; "not set up" lines ' . $notSent . '; new error records ' . ((int) one('SELECT COUNT(*) AS n FROM tblErrors')['n'] - $errors)
 );
@@ -1752,21 +1787,34 @@ ok(
 );
 useServer('refuse-signin');
 $ran = sendDirect([mailOf('third')], 'P12 sign-in refused', 'A message the server will not take.');
-ok('a refused sign-in: false, nothing thrown, lastOutcome() "refused"', $ran['sent'] === false && $ran['threw'] === '' && $ran['outcome'] === 'refused', (string) json_encode(array_diff_key($ran, ['output' => 1])));
+// Since the mail queue (package M3): a refused sign-in is about the MAILBOX,
+// not the message, so the message is kept and waits. (It used to be lost:
+// false, "refused".)
+$kept = one("SELECT status, attempts FROM tblMailQueue WHERE subject = 'P12 sign-in refused'");
+ok(
+    'a refused sign-in: the message is KEPT (true), nothing thrown, lastOutcome() "queued", and it waits in the queue with no attempt counted against it',
+    $ran['sent'] === true && $ran['threw'] === '' && $ran['outcome'] === 'queued' && $kept !== null && $kept['status'] === 'queued' && (int) $kept['attempts'] === 0,
+    json_encode(array_diff_key($ran, ['output' => 1])) . ' / ' . json_encode($kept)
+);
 // 🔐 Several messages in ONE request, as a broadcast or a reminder run sends
 //    them. Every one used to sign in again and be refused again: 200 reminders
 //    with an out-of-date password were 200 refused sign-ins in seconds, which
 //    is how a mailbox gets locked.
+//    This check is about ONE request that meets the refusal for the first
+//    time, so the refusal the check above left on record is taken off first.
+//    (With it on record, none of the five would contact the server at all:
+//    tools/mail-queue-selftest.php holds that.)
+forgetRouteFaults();
 mailSince('refuse-signin');
 $ran  = sendDirect([mailOf('third')], 'P12 five in one request, sign-in refused', 'A message the server will not take.', [], [], [[mailOf('fourth')], [mailOf('second')], [mailOf('third')], [mailOf('fourth')]]);
 $mail = mailSince('refuse-signin');
 $rows = q('SELECT errorCode, httpCode, errorDetail FROM tblEmailLog WHERE subject = ? ORDER BY emailLogID', 's', ['P12 five in one request, sign-in refused']);
 ok(
-    'five messages in ONE request to a server that refuses the sign-in: the portal signs in ONCE; the other four are answered "refused" without contacting the server, and each is in the send log as not sent for that reason, in plain words',
-    $ran['threw'] === '' && $ran['each'] === array_fill(0, 5, [false, 'refused']) && $mail['signIns'] === 1 && $mail['connections'] === 1
+    'five messages in ONE request to a server that refuses the sign-in: the portal signs in ONCE; the other four are kept ("queued") without contacting the server, and each is in the send log as waiting for that reason, in plain words',
+    $ran['threw'] === '' && $ran['each'] === array_fill(0, 5, [true, 'queued']) && $mail['signIns'] === 1 && $mail['connections'] === 1
         && array_column($rows, 'errorCode') === ['server-said-no', 'sign-in-not-repeated', 'sign-in-not-repeated', 'sign-in-not-repeated', 'sign-in-not-repeated']
         && (int) ($rows[0]['httpCode'] ?? 0) === 535 && ($rows[4]['httpCode'] ?? null) === null
-        && str_starts_with((string) ($rows[4]['errorDetail'] ?? ''), 'Not sent, and the mail server was not contacted. It refused the mailbox\'s user name and password for an earlier message') === true,
+        && str_starts_with((string) ($rows[4]['errorDetail'] ?? ''), 'Waiting, and the mail server was not contacted: it has refused the mailbox\'s user name and password') === true,
     'each send: ' . json_encode($ran['each']) . '; sign-ins the server saw: ' . $mail['signIns'] . '; connections: ' . $mail['connections'] . '; send log: ' . json_encode(array_column($rows, 'errorCode'))
 );
 // ONLY a refused sign-in is remembered. A refused recipient is about that one
@@ -1783,7 +1831,8 @@ ok(
 );
 useServer('stall');
 $ran = sendDirect([mailOf('third')], 'P12 server stalls', 'A message the server never answers.');
-ok('a server that stops answering: false, nothing thrown, lastOutcome() "not-sent"', $ran['sent'] === false && $ran['threw'] === '' && $ran['outcome'] === 'not-sent', (string) json_encode(array_diff_key($ran, ['output' => 1])));
+// Since the mail queue (package M3) such a message is kept and tried again.
+ok('a server that stops answering: the message is KEPT (true), nothing thrown, lastOutcome() "queued"', $ran['sent'] === true && $ran['threw'] === '' && $ran['outcome'] === 'queued', (string) json_encode(array_diff_key($ran, ['output' => 1])));
 // 📭 The server takes the WHOLE message and then hangs up without saying
 //    whether it accepted it. Nobody can tell whether it went, and that must
 //    never be recorded as "sent": the person would be told a reset link or a
@@ -1794,9 +1843,12 @@ $ran  = sendDirect([mailOf('third')], 'P12 nobody can tell', 'A message the serv
 $mail = mailSince('drop-after');
 $row  = one('SELECT status, errorCode, errorDetail FROM tblEmailLog WHERE subject = ? ORDER BY emailLogID DESC LIMIT 1', 's', ['P12 nobody can tell']);
 ok(
-    'a server that takes the whole message and hangs up without an answer: NOT counted as sent. send() answers false, lastOutcome() says "not-sent", and the send log says failed and that nobody can tell whether it went',
-    $ran['sent'] === false && $ran['threw'] === '' && $ran['outcome'] === 'not-sent' && $mail['connections'] === 1 && $row !== null && $row['status'] === 'failed' && $row['errorCode'] === 'unknown-if-sent'
-        && str_starts_with((string) $row['errorDetail'], 'Nobody can tell whether this message went') === true,
+    // Since the mail queue (package M3) it is HELD for a person: kept, never
+    // called sent, and not sent again by itself.
+    'a server that takes the whole message and hangs up without an answer: NOT counted as sent. lastOutcome() says "held", the send log says held and that nobody can tell whether it went, and it was given to the server once only',
+    $ran['sent'] === true && $ran['threw'] === '' && $ran['outcome'] === 'held' && $mail['connections'] === 1 && $row !== null && $row['status'] === 'held' && $row['errorCode'] === 'unknown-if-sent'
+        && str_starts_with((string) $row['errorDetail'], 'Nobody can tell whether this message went') === true
+        && (one("SELECT status, holdReason FROM tblMailQueue WHERE subject = 'P12 nobody can tell'") ?? []) === ['status' => 'held', 'holdReason' => 'unknown-if-sent'],
     json_encode(array_diff_key($ran, ['output' => 1, 'each' => 1])) . '; connections ' . $mail['connections'] . ' / ' . json_encode($row)
 );
 
@@ -1959,22 +2011,26 @@ $third = askForLink(ip(43), mailOf('third'));
 $mail  = mailSince('accept');
 $row   = one('SELECT provider, status, errorCode, errorDetail, recipientCount FROM tblEmailLog WHERE toRecipients = ? ORDER BY emailLogID DESC LIMIT 1', 's', [mailOf('third')]);
 ok(
-    'with a limit of 2 recipients an hour, the third reset e-mail is NOT sent: the mail server gets two messages, the person is told the same as always, and the send log says it was over the limit, with the numbers',
-    count($mail['messages']) === 2 && shape($third) === shape($baseline) && $row !== null && $row['provider'] === 'smtp' && $row['status'] === 'failed' && $row['errorCode'] === 'over-hourly-limit'
-        && str_contains((string) $row['errorDetail'], 'the limit is 2 recipients an hour, 2 were sent to in the last hour, and this message is for 1') === true && records(ip(43), 'PasswordResetMailFailed') === 1,
+    // Since the mail queue (package M3) it is kept and goes when the hour has room.
+    'with a limit of 2 recipients an hour, the third reset e-mail is NOT sent now: the mail server gets two messages, the person is told the same as always, and the send log says it is waiting because of the limit, with the numbers',
+    count($mail['messages']) === 2 && shape($third) === shape($baseline) && $row !== null && $row['provider'] === 'smtp' && $row['status'] === 'queued' && $row['errorCode'] === 'over-hourly-limit'
+        && str_contains((string) $row['errorDetail'], 'the limit is 2 recipients an hour, 2 were sent to in the last hour, and this message is for 1') === true && records(ip(43), 'PasswordResetMailWaiting') === 1,
     'messages ' . count($mail['messages']) . ' / ' . json_encode($row)
 );
 $page = req($rootJar, 'GET', $emailPage, null, ip(1));
 ok(
-    '"Recent sends" lists it as not sent, with that reason',
-    preg_match('#data-mail-log-status="failed">(.*?)</div>\s*</div>#s', $page['body'], $m) === 1 && str_contains(words($m[1]), 'Not sent') === true && str_contains(words($m[1]), 'the limit is 2 recipients an hour') === true,
+    '"Recent sends" lists it as not sent, with that reason and that it is waiting',
+    preg_match('#data-mail-log-status="queued">(.*?)</div>\s*</div>#s', $page['body'], $m) === 1 && str_contains(words($m[1]), 'Not sent') === true && str_contains(words($m[1]), 'the limit is 2 recipients an hour') === true
+        && str_contains(words($m[1]), 'Waiting in the mail queue') === true,
     isset($m[1]) === true ? words($m[1]) : 'no "not sent" row found'
 );
 mailSince('accept');
 $answer = $sendTest(mailOf('fourth'), ip(1));
 $mail   = mailSince('accept');
 ok('"Send test" is not stopped by the limit (an administrator must be able to find out why mail is not going), and its message is counted', $testShown($answer)['result'] === 'sent' && count($mail['messages']) === 1, (string) json_encode($testShown($answer)));
-setting('mail.limit.perHour', '5');
+// A limit of 10, of which the last 5 are kept for urgent mail (package M3):
+// ordinary mail, which these three messages are, may use 5 an hour.
+setting('mail.limit.perHour', '10');
 mailSince('accept');
 $three = sendDirect([mailOf('third'), mailOf('fourth'), mailOf('second')], 'P10 three when two are left', 'A message for three people.');
 $none  = mailSince('accept');
@@ -1982,10 +2038,10 @@ $two   = sendDirect([mailOf('third'), mailOf('fourth')], 'P10 two when two are l
 $one   = sendDirect([mailOf('second')], 'P10 one when none is left', 'A message for one person.');
 $mail  = mailSince('accept');
 ok(
-    'the limit adds up RECIPIENTS, not messages: with 3 sent to in the hour and a limit of 5, a message for three people is not sent (and none of the three gets it), one for two people is, and then one for one person is not',
-    $three['sent'] === false && $three['threw'] === '' && $three['outcome'] === 'not-sent' && $none['connections'] === 0
-        && $two['sent'] === true && $one['sent'] === false && count($mail['messages']) === 1 && $mail['messages'][0]['to'] === [mailOf('third'), mailOf('fourth')],
-    'for three: ' . json_encode($three['sent']) . ' (connections ' . $none['connections'] . '); for two: ' . json_encode($two['sent']) . '; for one: ' . json_encode($one['sent']) . '; messages ' . count($mail['messages'])
+    'the limit adds up RECIPIENTS, not messages: with 3 sent to in the hour and room for 5 (a limit of 10, half kept for urgent mail), a message for three people is not sent now (none of the three gets it; it waits), one for two people is sent, and then one for one person waits',
+    $three['threw'] === '' && $three['outcome'] === 'queued' && $none['connections'] === 0
+        && $two['outcome'] === 'sent' && $one['outcome'] === 'queued' && count($mail['messages']) === 1 && $mail['messages'][0]['to'] === [mailOf('third'), mailOf('fourth')],
+    'for three: ' . $three['outcome'] . ' (connections ' . $none['connections'] . '); for two: ' . $two['outcome'] . '; for one: ' . $one['outcome'] . '; messages ' . count($mail['messages'])
 );
 // The limit is the portal's, not the SMTP route's. Neither of the other two
 // routes is filled in here, so a message that got past the limit would fail
@@ -2042,17 +2098,18 @@ setting('mail.smtp.password', $cipher, 1);
 $page = req($rootJar, 'GET', '/help/admin-first-steps', null, ip(1));
 $text = words($page['body']);
 ok(
-    'the first-steps help names the three routes, says where SMTP is set up and that mail is not kept to try again, and no longer calls the Microsoft 365 route "implementation pending"',
-    $page['status'] === 200 && str_contains($text, 'An SMTP mailbox') === true && str_contains($text, 'not kept and not tried again') === true && str_contains($text, 'the mail server’s certificate is always checked') === true
+    'the first-steps help names the three routes, says where SMTP is set up and that mail which cannot go at once is kept and tried again, and no longer calls the Microsoft 365 route "implementation pending"',
+    $page['status'] === 200 && str_contains($text, 'An SMTP mailbox') === true && str_contains($text, 'kept and tried again') === true && str_contains($text, 'not kept and not tried again') === false && str_contains($text, 'the mail server’s certificate is always checked') === true
         && str_contains($text, '#234') === false,
     'HTTP ' . $page['status']
 );
 $page = req($rootJar, 'GET', '/help/admin', null, ip(1));
 $text = words($page['body']);
 ok(
-    'the administrator\'s guide has a section on the SMTP mailbox: the password is typed on the e-mail page, where it can be tested, the certificate is always checked, and mail is not kept to try again',
+    'the administrator\'s guide has a section on the SMTP mailbox: the password is typed on the e-mail page, where it can be tested, the certificate is always checked, and mail that cannot go at once is kept and tried again by a job the administrator adds',
     $page['status'] === 200 && str_contains($page['body'], 'id="smtp-mailbox"') === true && str_contains($text, 'Type it on that page, where it can be tested before the portal relies on it.') === true
-        && str_contains($text, 'certificate is always checked, and this cannot be switched off') === true && str_contains($text, 'It does not keep mail to try again.') === true,
+        && str_contains($text, 'certificate is always checked, and this cannot be switched off') === true && str_contains($text, 'Mail that cannot be sent at once is kept and tried again.') === true
+        && str_contains($text, '/cron/mail-queue') === true && str_contains($text, 'It does not keep mail to try again.') === false,
     'HTTP ' . $page['status']
 );
 

@@ -68,10 +68,15 @@ foreach ($rows as $r) {
     if ($r['pdfPath'] !== null) {
         $generatedCount++;
     }
-    if ($r['emailedAt'] !== null) {
+    // ⏳ A statement whose e-mail is WAITING in the mail queue (#592) is
+    //    neither e-mailed nor in error. Its row carries the "e-mailed"
+    //    stamp already (that is what stops a second run sending it again),
+    //    so it has to be left out of both counts by name.
+    $mailWaiting = $r['errorMsg'] === Giving::MAIL_WAITING;
+    if ($r['emailedAt'] !== null && $mailWaiting === false) {
         $emailedCount++;
     }
-    if ($r['errorMsg'] !== null) {
+    if ($r['errorMsg'] !== null && $mailWaiting === false) {
         $erroredCount++;
     }
     if ($r['optedOut'] === true) {
@@ -201,7 +206,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="col-md-2 text-end text-muted">Gift Aid: <?php echo htmlspecialchars(Giving::formatAmount($r['giftAidPence'], $currency), ENT_QUOTES, 'UTF-8'); ?></div>
                     <div class="col-md-2">
                         <?php if ($r['optedOut'] === true): ?><span class="badge bg-secondary">opted out</span><?php endif; ?>
-                        <?php if ($r['errorMsg'] !== null): ?>
+                        <?php if ($r['errorMsg'] === Giving::MAIL_WAITING): ?>
+                            <?php // ⏳ Kept in the mail queue, not sent yet (#592). Shown as its own state: it used to read "emailed". ?>
+                            <span class="badge bg-warning text-dark" title="The e-mail is waiting in the mail queue. It is marked as emailed only once it has gone.">waiting to be emailed</span>
+                        <?php elseif ($r['errorMsg'] !== null): ?>
                             <span class="badge bg-danger" title="<?php echo htmlspecialchars($r['errorMsg'], ENT_QUOTES, 'UTF-8'); ?>">error</span>
                         <?php elseif ($r['emailedAt'] !== null): ?>
                             <span class="badge bg-success">emailed</span>
@@ -218,7 +226,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <i class="fa-solid fa-download"></i> PDF
                             </a>
                         <?php endif; ?>
-                        <?php if ($r['errorMsg'] !== null): ?>
+                        <?php // No Retry for a waiting e-mail: there is nothing to retry, and clearing the mark would hide that it has not gone. ?>
+                        <?php if ($r['errorMsg'] !== null && $r['errorMsg'] !== Giving::MAIL_WAITING): ?>
                             <form method="post" action="/giving/statements-generate" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="action" value="retry">

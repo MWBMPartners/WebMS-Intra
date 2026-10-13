@@ -24,6 +24,16 @@ class Giving
     public const ROLE_KEY = 'treasurer';
 
     /**
+     * ⏳ What a statement row's `errorMsg` holds while its e-mail is WAITING
+     * in the mail queue (#592): kept, not yet sent. The row's `emailedAt`
+     * stays stamped meanwhile, because that stamp is what stops a second
+     * run e-mailing the same statement again; this word is what stops the
+     * pages calling it "emailed". statementMailSettled() replaces it when
+     * the e-mail goes or fails.
+     */
+    public const MAIL_WAITING = 'waiting in the mail queue';
+
+    /**
      * Whether the current user is allowed to see / record all entries
      * (treasurer-or-admin). Members without this can only see their own.
      */
@@ -865,7 +875,18 @@ class Giving
         ];
 
         try {
-            $ok = Mailer::sendTemplated($email, $subject, 'giving-statement', $vars, [$pdfPath]);
+            // 📮 A statement run is BULK mail (#592, part 3): it goes after
+            //    everything else, and once the request has used its own
+            //    budget the rest is kept in the mail queue and sent by the
+            //    job. `true` therefore means "sent, or kept to be sent". The
+            //    queue takes a COPY of the PDF when it keeps the message, so
+            //    the statement still goes if this file has been removed by
+            //    then; a copy that has gone missing fails the message, and
+            //    it is never sent without its statement. It is NOT marked as
+            //    safe to repeat: a second copy of a statement would not do.
+            //    `origin` names this row, so that the queue can tell it what
+            //    became of a kept e-mail (statementMailSettled()).
+            $ok = Mailer::sendTemplated($email, $subject, 'giving-statement', $vars, [$pdfPath], ['priority' => 'bulk', 'origin' => 'statement:' . $logId]);
         } catch (\Throwable $e) {
             Logger::errorPlatform('GivingStatements', 'Error', 'EMAIL_SEND_FAIL', 'Failed to email giving statement', $e->getMessage());
             self::rollbackStatementClaim($logId, 'send-exception');
@@ -874,6 +895,18 @@ class Giving
         if ($ok !== true) {
             self::rollbackStatementClaim($logId, 'send-failed');
             return false;
+        }
+
+        // ⏳ ONLY KEPT, NOT SENT (#592). WHAT WAS WRONG: the row was recorded
+        //    as e-mailed, with the address, the moment the queue took the
+        //    message, and stayed so when the message later failed. Now it
+        //    says "waiting" and names no address; statementMailSettled()
+        //    records it as e-mailed when it has gone, or as failed.
+        //    `emailedAt` is left stamped on purpose: see MAIL_WAITING.
+        if (Mailer::lastIsWaiting() === true) {
+            self::markStatementError($logId, self::MAIL_WAITING);
+
+            return true;
         }
 
         // ✅ emailedAt was already stamped by the SEC-03 claim above —
@@ -888,9 +921,42 @@ class Giving
     }
 
     /**
+     * 📣 The mail queue's word on a statement e-mail that was WAITING: it
+     * went, or it never will (#592). MailQueue::tellOrigin() calls this;
+     * nothing else should.
+     *
+     * Only a row that still says MAIL_WAITING is changed. When the e-mail
+     * went, the row is recorded as e-mailed NOW, to the address it went to.
+     * When it failed, the stamp is taken off and the row says 'send-failed',
+     * exactly as a send that failed at once is recorded
+     * (rollbackStatementClaim()), so a treasurer can retry it.
+     *
+     * @param int    $logId tblGivingStatementLog.logID.
+     * @param bool   $went  True: a mail service accepted it. False: it failed or expired.
+     * @param string $to    The address the message was for, as the queue held it.
+     */
+    public static function statementMailSettled(\mysqli $db, int $logId, bool $went, string $to): void
+    {
+        $waiting = self::MAIL_WAITING;
+        if ($went === true) {
+            $to   = mb_substr(trim($to), 0, 255);
+            $stmt = $db->prepare('UPDATE tblGivingStatementLog SET emailedAt = NOW(), emailedTo = ?, errorMsg = NULL WHERE logID = ? AND errorMsg = ?');
+            $stmt->bind_param('sis', $to, $logId, $waiting);
+        } else {
+            $failed = 'send-failed';
+            $stmt   = $db->prepare('UPDATE tblGivingStatementLog SET emailedAt = NULL, errorMsg = ? WHERE logID = ? AND errorMsg = ?');
+            $stmt->bind_param('sis', $failed, $logId, $waiting);
+        }
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    /**
      * Record a generate/send failure on one log row. Manual-retry-only —
-     * nothing in this file ever clears `errorMsg` automatically; a
+     * nothing in this file ever clears a FAILURE automatically; a
      * treasurer must explicitly retry (see giving/statements-generate.php).
+     * (MAIL_WAITING is written through here too. It is not a failure, and
+     * statementMailSettled() replaces it by itself.)
      */
     private static function markStatementError(int $logId, string $message): void
     {

@@ -443,6 +443,10 @@ $coreDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR 
 require_once $coreDir . 'App.php';
 require_once $coreDir . 'GivingRetention.php';
 require_once $coreDir . 'GdprEraser.php';
+// Since mail package M3 (#592) the erasure takes the person out of the mail
+// queue, through this class. (The portal finds its classes by itself; this
+// test names each one it needs.)
+require_once $coreDir . 'MailQueue.php';
 // GdprEraser::fileRequest() asks PortalAddress for the address in the
 // confirmation e-mail's link (#500). Without this line that call stops with
 // "class not found".
@@ -1564,6 +1568,13 @@ function ge_checkAudit(array $world, array $lines, bool $demoLine, array $failTa
     foreach ($world['givingLines'] as $line) {
         $expected[] = $line;
     }
+    // Mail package M3 (#592): the two steps that find the person by their
+    // e-mail ADDRESS, straight after the giving-records step and before the
+    // first instruction. First the mail queue (the made-up person has no
+    // mail waiting, so it must say that nothing was held), then the send
+    // log, whose line used to come after the giving-statement lines below.
+    $expected[] = ['tblMailQueue', ['none']];
+    $expected[] = ['tblEmailLog', ['anonymise']];
     $rowsFor = [];
     foreach ($world['rows'] as $tracked) {
         if ($tracked['kind'] === 'R1') {
@@ -1607,7 +1618,6 @@ function ge_checkAudit(array $world, array $lines, bool $demoLine, array $failTa
     }
     $expected[] = ['GivingStatementPdfFiles', ['delete']];
     $expected[] = ['tblGivingStatementLog', ['anonymise']];
-    $expected[] = ['tblEmailLog', ['anonymise']];
     $expected[] = ['ProfileImageFiles', ['delete'], '1 file(s)'];
     $expected[] = ['tblErasureRequest', [$lastAction]];
 
@@ -1790,8 +1800,9 @@ if ($resultA instanceof Throwable || is_array($resultA) === false) {
 }
 ge_ok('it reports no failed step, and the number of steps it ran',
     // CHANGED by roll-out package A2b: + 5 became + 6 (the giving-records step).
-    $resultA['failed'] === 0 && $resultA['changed'] === true && $resultA['steps'] === $instructionCount + 6,
-    json_encode($resultA) . ' (expected steps: ' . ($instructionCount + 6) . ')');
+    // CHANGED by mail package M3: + 6 became + 7 (the mail queue's step).
+    $resultA['failed'] === 0 && $resultA['changed'] === true && $resultA['steps'] === $instructionCount + 7,
+    json_encode($resultA) . ' (expected steps: ' . ($instructionCount + 7) . ')');
 
 $reqA = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_A]);
 ge_ok('the request row still exists and is "completed"', $reqA !== null && $reqA['status'] === 'completed', json_encode($reqA));
@@ -1923,8 +1934,9 @@ ge_ok('exactly one line per instruction, each for the right table, with the righ
 // CHANGED by roll-out package A2b: the giving-records step writes one line
 // per organisation that holds giving records of the person's.
 ge_ok('the number of lines is the instructions, the Demo Data step, the giving-records lines (' . $givingCountA
-    . ', one per organisation), the four dedicated lines and the closing line',
-    count($auditA) === $instructionCount + 6 + $givingCountA && $givingCountA >= 3,
+    // CHANGED by mail package M3: four dedicated lines became five (the mail queue's).
+    . ', one per organisation), the five dedicated lines and the closing line',
+    count($auditA) === $instructionCount + 7 + $givingCountA && $givingCountA >= 3,
     count($auditA) . ' lines for ' . $instructionCount . ' instructions and ' . $givingCountA . ' organisations');
 ge_ok('the chain of the audit trail verifies', GdprEraser::verifyAuditChain(REQ_A) === true);
 // CHANGED by roll-out package A2b, in two ways. The giving-records step
@@ -2473,7 +2485,8 @@ ge_trigger('selftest_gdpr_fail_step', "CREATE TRIGGER `selftest_gdpr_fail_step` 
     . "FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'selftest: this update was made to fail'");
 $resultB1 = ge_execute(REQ_B, P_B);
 ge_ok('the run still ends without an exception, and reports exactly one failed step',
-    is_array($resultB1) === true && $resultB1['failed'] === 1 && $resultB1['steps'] === $instructionCount + 6,
+    // CHANGED by mail package M3: + 6 became + 7 (the mail queue's step), here and four lines down.
+    is_array($resultB1) === true && $resultB1['failed'] === 1 && $resultB1['steps'] === $instructionCount + 7,
     $resultB1 instanceof Throwable ? get_class($resultB1) . ': ' . $resultB1->getMessage() : json_encode($resultB1));
 $reqB = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_B]);
 ge_ok('the request is back at "pending review" with its account number, name, address and notes all still on it',
@@ -2486,7 +2499,7 @@ ge_ok('the audit trail has a line for EVERY instruction: one "failed", and nothi
     $auditB1Problems === [], implode('; ', array_slice($auditB1Problems, 0, 8)));
 $summary = $auditB1[count($auditB1) - 1] ?? ['details' => ''];
 ge_ok('its last line says how many steps failed and that the request can be run again',
-    str_contains((string) $summary['details'], '1 of ' . ($instructionCount + 6) . ' steps failed')
+    str_contains((string) $summary['details'], '1 of ' . ($instructionCount + 7) . ' steps failed')
     && str_contains((string) $summary['details'], 'back at pending review'), (string) $summary['details']);
 $rowsB1 = ge_checkRows($worldB, $beforeRowsB, ['tblExternalFeedRuns.triggeredByID']);
 ge_ok('the failed table\'s row is untouched, and every other instruction still did its work',
@@ -2532,12 +2545,13 @@ ge_ok('the second run also wrote one line per instruction, most of them "nothing
     // CHANGED by roll-out package A2b: plus one "already dealt with" line
     // for each organisation that kept something on the first run.
     // (And one line for the counted envelopes, which is why "- 1" below.)
-    count($auditB2) === $instructionCount + 5 + $givingCountB2 && $givingCountB2 >= 3 && $noneLines > 100
+    // CHANGED by mail package M3: + 5 became + 6 (the mail queue's line).
+    count($auditB2) === $instructionCount + 6 + $givingCountB2 && $givingCountB2 >= 3 && $noneLines > 100
     && ($auditB2[count($auditB2) - 1]['action'] ?? '') === 'completed'
     && count(array_filter($auditB2, static fn (array $l): bool => $l['tableName'] === 'GivingRecords'
         && str_contains((string) $l['details'], 'already dealt with by an earlier run')
         && str_contains((string) $l['details'], 'was not overwritten'))) === $givingCountB2 - 1,
-    count($auditB2) . ' lines, expected ' . ($instructionCount + 5 + $givingCountB2));
+    count($auditB2) . ' lines, expected ' . ($instructionCount + 6 + $givingCountB2));
 $lateNow = ge_row($lateLog);
 ge_ok('the second run still found the person\'s address: the message logged between the runs is scrubbed',
     $lateNow !== null && $lateNow['toRecipients'] === '[erased]', json_encode($lateNow));
@@ -2584,9 +2598,14 @@ ge_ok('run again with the audit trail working: completed, and the first step is 
     // (Then the counted-envelopes line, so the first instruction's is the third.)
     && (ge_audit(REQ_PC)[0]['tableName'] ?? '') === 'GivingRecords' && (ge_audit(REQ_PC)[0]['action'] ?? '') === 'none'
     && (ge_audit(REQ_PC)[1]['tableName'] ?? '') === 'CountEnvelopes' && (ge_audit(REQ_PC)[1]['action'] ?? '') === 'none'
-    && (ge_audit(REQ_PC)[2]['tableName'] ?? '') === (string) $first['table']
-    && in_array(ge_audit(REQ_PC)[2]['action'] ?? '', ['anonymise', 'delete'], true),
-    $resultC2 instanceof Throwable ? $resultC2->getMessage() : json_encode([$resultC2, $reqPc2, ge_audit(REQ_PC)[0] ?? null, ge_audit(REQ_PC)[2] ?? null]));
+    // CHANGED by mail package M3: then the two steps that find the person by
+    // their e-mail address (the mail queue, then the send log), so the first
+    // instruction's line is the fifth.
+    && (ge_audit(REQ_PC)[2]['tableName'] ?? '') === 'tblMailQueue' && (ge_audit(REQ_PC)[2]['action'] ?? '') === 'none'
+    && (ge_audit(REQ_PC)[3]['tableName'] ?? '') === 'tblEmailLog'
+    && (ge_audit(REQ_PC)[4]['tableName'] ?? '') === (string) $first['table']
+    && in_array(ge_audit(REQ_PC)[4]['action'] ?? '', ['anonymise', 'delete'], true),
+    $resultC2 instanceof Throwable ? $resultC2->getMessage() : json_encode([$resultC2, $reqPc2, ge_audit(REQ_PC)[0] ?? null, ge_audit(REQ_PC)[4] ?? null]));
 
 // =============================================================================
 ge_section('7b', 'A file that cannot be deleted, and a send log that cannot be updated');
