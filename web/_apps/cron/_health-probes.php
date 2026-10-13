@@ -368,11 +368,19 @@ function maintenance_health_probes(\mysqli $db): array
         }
         $installed = (string) (App::settings()['portal']['installed_version'] ?? '?');
         $code = defined('PORTAL_VERSION') ? PORTAL_VERSION : '?';
-        $drift = $installed !== '?' && $installed !== '' && version_compare($installed, (string) $code, '<');
+        // 💬 Version behind: amber, with what to do. The sentence is
+        //    Maintenance::upgradeNotice(), the same one the Upgrade page
+        //    shows. It matters most when NO database upgrade is waiting: the
+        //    portal is open then, nothing else tells anybody there is a
+        //    button to press, and until it is pressed every request asks the
+        //    database a question (#499). This line used to end "upgrade
+        //    needed" whenever the version was behind, and worked that out
+        //    for itself; Maintenance is the one place that decides it.
+        $notice = \Portal\Core\Maintenance::upgradeNotice();
         $probes['Migrations'] = [
-            'state'  => $drift ? 'warn' : 'ok',
+            'state'  => $notice !== '' ? 'warn' : 'ok',
             'label'  => sprintf('%d applied', $migCount),
-            'detail' => sprintf('DB %s / code %s%s', $installed, $code, $drift ? ' — upgrade needed' : ''),
+            'detail' => sprintf('DB %s / code %s%s', $installed, $code, $notice !== '' ? ' — ' . $notice : ''),
         ];
     } catch (\Throwable $e) {
         $probes['Migrations'] = ['state' => 'warn', 'label' => 'Query failed', 'detail' => $e->getMessage()];

@@ -460,6 +460,31 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     `.channel` file never stops an install. Test: `tools/installer-
     selftest.php`.
 
+    **The installation package and upgrades (#499).**
+    `tools/package/build.sh` makes the package from git, `check-package.py`
+    guards it, and `docs/INSTALL.md` (shipped as `INSTALL.md`) is the
+    customer's guide to installing AND upgrading. **The portal is closed for
+    an upgrade only while a database upgrade is really waiting:** that is
+    decided in ONE place, `Maintenance::isActive()`. **The portal never
+    records the version by itself**: `Maintenance::recordVersion()` is the
+    one statement that records it and only the Upgrade page's button calls
+    it; until then every request asks `Migrator::waiting()` once (about half
+    a millisecond), and with the versions equal nothing is asked. A page
+    that only asks uses `Maintenance::versionIsBehind()` or
+    `upgradeNotice()`. Admin, Migrations runs nothing while the version is
+    behind, and is for a global administrator only. The recorded version is
+    read from the installation's own row only: start-up passes over one
+    organisation's row of that name, and Admin, Settings refuses the setting
+    (`Maintenance::lockedInGeneralEditor()`). When the portal cannot tell,
+    `Migrator::waiting()` gives the cause. **A package carries NO `.channel`
+    file:** the installer's finish writes it from `VERSION.txt`, only when
+    there is none (`installWriteChannelFile()`), so an upgrade can never
+    replace it. Never commit `web/.channel`. The domain guard's names come
+    from `OWN_DOMAINS` in
+    `tools/audit-checks/check_no_hardcoded_domains.py`: that is the ONE
+    list. Tests: `tools/upgrade-pages-selftest.php`,
+    `tools/package/package-selftest.sh`.
+
 15. **The ApiRouter trap.** Any address starting `api/` is intercepted
     before the normal routing table is ever consulted, and resolved purely
     by naming convention to `_apps/{appName}/api/{action}.php`. A handler

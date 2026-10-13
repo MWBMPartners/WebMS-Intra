@@ -23,7 +23,10 @@
  *      files are written again and which are left alone; that a read-only
  *      code file is still removed; and 200 wrong codes sent at the same
  *      moment from several processes, with others reading the file all the
- *      while, counted as exactly 200.
+ *      while, counted as exactly 200. And the installation's own
+ *      `.channel` file: the finish writes it from the word the package
+ *      carries (`VERSION.txt`) ONLY when there is none, case by case, and
+ *      what the pages then say.
  *   A. A stranger at a fresh upload, with no code: every step's address by
  *      GET, and every form by POST with hand-made fields (lists where text
  *      is expected, a real database login, a valid form token and none), is
@@ -52,8 +55,11 @@
  *      holds: one `site.url` row with the address typed, the support
  *      address, `_uploads` and `_backups`, a full key file, a "refuse
  *      everything" file in each private folder, no code file. The last page
- *      says the channel was ASSUMED and what to put in which file. A second
- *      visit is refused.
+ *      says the channel was ASSUMED and what to put in which file, and
+ *      that no `.channel` file was written (these files carry no
+ *      `VERSION.txt`). Before the finish, with a `VERSION.txt` put there for
+ *      one request, the checks say the installer WILL write the word. A
+ *      second visit is refused.
  *   U. The upgrade page of that installation: it does not open for an
  *      administrator of one organisation who is not a global one, and
  *      writes nothing for them; the channel and how it was
@@ -62,8 +68,9 @@
  *      breadcrumb keep an organisation's first part of the address when
  *      that way of telling organisations apart is switched on IN THE
  *      SCRATCH COPY.
- *   L. A second installation WITH a `.channel` file: the pages say the word
- *      and who said it; a session lost after the tables are built, and
+ *   L. A second installation WITH a `.channel` file, and a `VERSION.txt`
+ *      saying the files are a LIVE package: the pages say the file's word
+ *      and who said it, and the finish leaves the file exactly as it was; a session lost after the tables are built, and
  *      again after the administrator is made, just asks for the code again;
  *      a database that also holds another program's tables is refused;
  *      "wipe it and start again" wipes once and only once, removes only
@@ -143,6 +150,10 @@
  * - Session fixing, and a form posted from another website in a real
  *   browser: the token rule is checked, the browser's own cookie rules are
  *   not.
+ * - The last page of an installation whose `.channel` file the finish DID
+ *   write: the function and its sentence are checked (S18, S19), and the
+ *   page was proved by hand from real packages on 13 October 2026, but no
+ *   installation here ends that way.
  * - The staff gate of a test copy beyond one sign-in, several organisations
  *   beyond the upgrade page's four addresses, and MariaDB.
  *
@@ -181,7 +192,7 @@ declare(strict_types=1);
  * number means a block was skipped or ran twice. With a second server named
  * (SELFTEST_DB_PORT_2) one more is made: see `$expectedChecks`.
  */
-const EXPECTED_CHECKS = 130;
+const EXPECTED_CHECKS = 135;
 
 /** The made-up addresses this run types. `.invalid` never reaches anybody. */
 const ADDRESS_TYPED = 'https://portal.installer-selftest.invalid';
@@ -973,6 +984,66 @@ ok('S15 the three private folders together: the one that was missing is made, th
     && installChannelFileIgnored($unitRoot, 'assumed') === true && installChannelFileIgnored($unitRoot, 'folder') === true && installChannelFileIgnored($unitRoot, 'file') === false
     && installChannelFileIgnored($unitRoot, 'environment') === false && installChannelFileIgnored($unitRoot . $sep . '_uploads', 'assumed') === false, json_encode($all));
 
+// The installation's own .channel file, written at the finish from the package's word (VERSION.txt), ONLY when there is none.
+$packageSays = static fn (string $word): string => "Product: A product\nVersion: 1.2.3\nChannel: {$word}\nCommit: 0123abc\nBuilt: 2026-10-13T00:00:00Z\n";
+$channelCases = [
+    // what is there before                      VERSION.txt                          .channel before   state           .channel after
+    'a live package, no file'                => [$packageSays('live'),                 null,             'written',      "live\n"],
+    'a beta package, no file'                => [$packageSays('beta'),                 null,             'written',      "beta\n"],
+    'an alpha package, no file'              => [$packageSays('alpha'),                null,             'written',      "alpha\n"],
+    'Windows line ends'                      => [str_replace("\n", "\r\n", $packageSays('beta')), null,   'written',      "beta\n"],
+    'no VERSION.txt at all'                  => [null,                                 null,             'no-word',      null],
+    'a word the portal does not know'        => [$packageSays('production'),           null,             'no-word',      null],
+    'no Channel line'                        => ["Product: A product\nVersion: 1.2.3\n", null,           'no-word',      null],
+    'two words on the line'                  => [$packageSays('beta live'),            null,             'no-word',      null],
+    'an empty word'                          => [$packageSays(''),                     null,             'no-word',      null],
+    'A LIVE PACKAGE OVER A TEST COPY'        => [$packageSays('live'),                 "beta\n",         'kept',         "beta\n"],
+    'A BETA PACKAGE OVER A LIVE PORTAL'      => [$packageSays('beta'),                 "live\n",         'kept',         "live\n"],
+    'a file with a word nobody knows'        => [$packageSays('live'),                 "production\n",   'kept',         "production\n"],
+    'an empty file'                          => [$packageSays('beta'),                 '',               'kept',         ''],
+];
+$wrongChannel = [];
+$caseNumber   = 0;
+foreach ($channelCases as $what => [$versionText, $before, $wantState, $wantAfter]) {
+    $unitRoot = $child . $sep . 'unit-channel-' . (++$caseNumber);
+    mkdir($unitRoot, 0700);
+    if ($versionText !== null) {
+        file_put_contents($unitRoot . $sep . 'VERSION.txt', $versionText);
+    }
+    if ($before !== null) {
+        file_put_contents($unitRoot . $sep . '.channel', $before);
+    }
+    $did   = installWriteChannelFile($unitRoot);
+    $after = is_file($unitRoot . $sep . '.channel') === true ? (string) file_get_contents($unitRoot . $sep . '.channel') : null;
+    if ($did['state'] !== $wantState || $after !== $wantAfter) {
+        $wrongChannel[] = $what . ': ' . json_encode([$did, $after]);
+    }
+}
+// A folder of that name is "there" too, and a folder that cannot be written to is said to be that.
+$unitRoot = $child . $sep . 'unit-channel-folder';
+mkdir($unitRoot . $sep . '.channel', 0700, true);
+file_put_contents($unitRoot . $sep . 'VERSION.txt', $packageSays('beta'));
+$asFolder = installWriteChannelFile($unitRoot);
+$unitRoot = $child . $sep . 'unit-channel-locked';
+mkdir($unitRoot, 0700);
+file_put_contents($unitRoot . $sep . 'VERSION.txt', $packageSays('beta'));
+chmod($unitRoot, 0500);
+$locked = installWriteChannelFile($unitRoot);
+chmod($unitRoot, 0700);
+ok('S18 the finish writes the installation\'s own .channel from the package\'s word ONLY when there is none: live, beta and alpha are written; a missing, unknown, doubled or empty word writes nothing; and a file that is there is kept to the byte whatever it holds, so a live package cannot turn a test copy live and a beta package cannot turn a live portal into a test copy',
+    $wrongChannel === [] && $asFolder['state'] === 'kept' && is_dir($child . $sep . 'unit-channel-folder' . $sep . '.channel') === true
+    && $locked === ['state' => 'not-written', 'word' => 'beta'] && file_exists($unitRoot . $sep . '.channel') === false,
+    implode(' | ', $wrongChannel) . ' folder: ' . json_encode($asFolder) . ' locked: ' . json_encode($locked));
+$fileWords = array_map(static fn (string $state): string => installChannelFileWords(['state' => $state, 'word' => 'beta']), ['will-write' => 'will-write', 'written' => 'written', 'not-written' => 'not-written', 'no-word' => 'no-word', 'kept' => 'kept']);
+ok('S19 and the pages say what was done, in words: "will write" before the finish, "has just written the word beta … Unpacking a newer package never replaces that file" after it, what to do when it could not be written, that nothing was written when the files do not say, and nothing more for a file that was already there; a live package is called the live portal',
+    str_contains($fileWords['will-write'], 'This package says it is a beta copy (a test copy, not the live portal). When the installation finishes, the installer writes the word beta into the file .channel, beside the _core folder') === true
+    && str_contains($fileWords['will-write'], 'There is nothing for you to create.') === true
+    && $fileWords['written'] === 'The installer has just written the word beta into the file .channel, beside the _core folder, because this package says it is a beta copy (a test copy, not the live portal). Unpacking a newer package never replaces that file.'
+    && str_contains($fileWords['not-written'], 'could not write the word beta') === true && str_contains($fileWords['not-written'], 'Create the file yourself, with the one word beta on its first line.') === true
+    && str_contains($fileWords['no-word'], 'The installer wrote no .channel file') === true && str_contains($fileWords['no-word'], 'VERSION.txt') === true
+    && $fileWords['kept'] === '' && str_contains(installChannelFileWords(['state' => 'written', 'word' => 'live']), 'because this package says it is the live portal.') === true,
+    json_encode($fileWords));
+
 // The code file, made read-only by its owner (the code page suggests it), and then one that cannot be removed at all.
 $unitRoot = $child . $sep . 'unit-code';
 $unitAuth = $unitRoot . $sep . '_auth_keys';
@@ -1341,6 +1412,18 @@ ok('I34 with a .channel file holding a word the portal does not know ("productio
     str_contains($row($unknown, 'channel'), 'Assumed') === true && str_contains($row($unknown, 'channel'), 'This is the live portal. That is ASSUMED: there is a file named .channel beside the _core folder, but it was not used') === true
     && str_contains($row($unknown, 'channel'), 'The words the portal knows are live, alpha, beta and dev.') === true && str_contains($row($unknown, 'channel'), 'open the file .channel') === true
     && str_contains($row($unknown, 'channel'), 'create a plain text file') === false, $row($unknown, 'channel'));
+file_put_contents($rootA . $sep . 'VERSION.txt', "Product: A product\nVersion: 1.2.3\nChannel: beta\nCommit: 0123abc\nBuilt: 2026-10-13T00:00:00Z\n");
+$promised = req($owner, 'GET', '/?step=1');
+file_put_contents($rootA . $sep . '.channel', "alpha\n");
+$ownFile  = req($owner, 'GET', '/?step=1');
+gone($rootA . $sep . '.channel');
+gone($rootA . $sep . 'VERSION.txt');
+ok('I39 with a package\'s VERSION.txt saying beta and no .channel file yet, the row is still ASSUMED (nothing says yet) but no longer tells the reader to create the file: it says the installer will write the word beta when it finishes; nothing is written before the finish; and with a .channel file of the person\'s own there, the row goes by that file and promises nothing',
+    str_contains($row($promised, 'channel'), 'This is the live portal. That is ASSUMED: nothing on this server says which copy this is.') === true
+    && str_contains($row($promised, 'channel'), 'When the installation finishes, the installer writes the word beta into the file .channel, beside the _core folder') === true
+    && str_contains($row($promised, 'channel'), 'create a plain text file') === false
+    && str_contains($row($ownFile, 'channel'), 'This is a alpha copy (a test copy, not the live portal). The file .channel, beside the _core folder, says so.') === true
+    && str_contains($row($ownFile, 'channel'), 'the installer writes') === false, $row($promised, 'channel') . ' || ' . $row($ownFile, 'channel'));
 rename($rootA . $sep . 'httpdocs' . $sep . '.htaccess', $rootA . $sep . 'httpdocs' . $sep . 'htaccess-set-aside');
 $missing = req($owner, 'GET', '/?step=1');
 rename($rootA . $sep . 'httpdocs' . $sep . 'htaccess-set-aside', $rootA . $sep . 'httpdocs' . $sep . '.htaccess');
@@ -1458,6 +1541,9 @@ $doneChannel = preg_match('/<li class="install-check" data-done="channel" data-c
 ok('I21 it says which copy this is and how that was decided: ASSUMED live, because nothing says; and it recommends the file .channel with the exact word to put in it',
     $doneChannel[0] === 'assumed' && str_contains($doneChannel[1], 'This is the live portal. That is ASSUMED: nothing on this server says which copy this is.') === true
     && str_contains($doneChannel[1], 'create a plain text file named .channel in the folder that holds _core (beside _core, not inside it), with one word on its first line. For the live portal that word is: live.') === true, json_encode($doneChannel));
+ok('I40 these files do not say which copy they are (no VERSION.txt), so the finish wrote NO .channel file, and the last page says that it wrote none and why',
+    file_exists($rootA . $sep . '.channel') === false && str_contains($done['body'], 'data-channel-file="no-word"') === true
+    && str_contains($doneChannel[1], 'The installer wrote no .channel file, because these files do not say which copy they are') === true, json_encode($doneChannel));
 ok('I22 it says to back up the key file together with the database, and what is lost without it', str_contains(words($done), 'Back up the key file together with the database.') === true
     && str_contains(words($done), 'A backup of the database is not complete without it') === true && str_contains(words($done), 'enc.key') === true);
 ok('I23 and what to do next, with a button that goes to the portal', str_contains(words($done), 'What to do next:') === true && str_contains($done['body'], '<a href="/" class="btn btn-primary btn-lg">') === true);
@@ -1581,6 +1667,10 @@ ok('U07 at an organisation\'s own address the page opens, and its breadcrumb kee
     && str_contains($page['body'], 'href="/admin"') === false, 'HTTP ' . $page['status'] . ' ' . $page['location']);
 $wrong = req($admin, 'POST', $here, ['csrf_token' => str_repeat('0', 64)]);
 ok('U08 a form with a wrong token is sent back to the organisation\'s own upgrade page', $wrong['status'] === 302 && $wrong['location'] === $here, 'HTTP ' . $wrong['status'] . ' to ' . $wrong['location']);
+// One upgrade waiting (a file that does nothing). Since 13 October 2026 the
+// Upgrade page takes no snapshot when nothing is waiting, so without it the
+// two refusals below would never be reached. Removed again after U10.
+file_put_contents($rootA . $sep . '_sql' . $sep . '997_installer_selftest.sql', "-- Written by tools/installer-selftest.php for one run. Does nothing.\nSELECT 1;\n");
 @chmod($rootA . $sep . '_backups', 0500);
 $failed = req($admin, 'POST', $here, ['csrf_token' => $csrf(req($admin, 'GET', $here))]);
 @chmod($rootA . $sep . '_backups', 0750);
@@ -1597,9 +1687,11 @@ q($databases['a'], 'SET SESSION sql_mode = ?', 's', [$modeWas]);
 $stopped = req($admin, 'POST', $here, ['csrf_token' => $csrf(req($admin, 'GET', $here))]);
 $shown   = req($admin, 'GET', $here);
 q($databases['a'], 'DROP TABLE tblZzInstallerSelftest');
+gone($rootA . $sep . '_sql' . $sep . '997_installer_selftest.sql');
+$upgradesRun = n($databases['a'], "SELECT COUNT(*) AS n FROM tblMigrations WHERE filename = '997_installer_selftest.sql'");
 ok('U10 when the snapshot cannot be put back whole, the refusal goes back to the organisation\'s own upgrade page too', $stopped['status'] === 302 && $stopped['location'] === $here && str_contains($shown['body'], 'The upgrade was NOT started') === true,
     'HTTP ' . $stopped['status'] . ' to ' . $stopped['location']);
-ok('U11 none of the three left the portal closed for an upgrade', setting($databases['a'], 'portal.maintenance.active') === '0', setting($databases['a'], 'portal.maintenance.active'));
+ok('U11 none of the three left the portal closed for an upgrade, and neither refusal ran the waiting upgrade', setting($databases['a'], 'portal.maintenance.active') === '0' && $upgradesRun === 0, setting($databases['a'], 'portal.maintenance.active') . '; upgrades run: ' . $upgradesRun);
 stopServer('main');
 
 // =============================================================================
@@ -1609,6 +1701,9 @@ head('L. A second installation: .channel says beta, the session is lost twice, a
 
 errorLog(); // step over what part U made the portal log on purpose
 file_put_contents($rootB . $sep . '.channel', "beta\n");
+// These files say they are a LIVE package (M1 of 13 October 2026: a live
+// package must not turn a test copy live). The file above must outlast it.
+file_put_contents($rootB . $sep . 'VERSION.txt', "Product: A product\nVersion: 1.2.3\nChannel: live\nCommit: 0123abc\nBuilt: 2026-10-13T00:00:00Z\n");
 startServer('main', $rootB, 'httpdocs');
 $second = jar('second');
 req($second, 'GET', '/');
@@ -1885,6 +1980,9 @@ $doneChannel = preg_match('/<li class="install-check" data-done="channel" data-c
 ok('L15 with the file, the last page says the word and who said it: a beta copy, the file .channel; it does not say assumed and does not ask for a file to be created',
     $doneChannel[0] === 'file' && str_contains($doneChannel[1], 'This is a beta copy (a test copy, not the live portal). The file .channel, beside the _core folder, says so.') === true
     && stripos($doneChannel[1], 'assumed') === false && str_contains($doneChannel[1], 'create a plain text file') === false, json_encode($doneChannel));
+ok('L25 the .channel file that was already there is KEPT to the byte although these files say they are a live package: the finish does not replace it, the finished portal is still a beta copy, and the last page adds no line about writing one',
+    @file_get_contents($rootB . $sep . '.channel') === "beta\n" && str_contains($done['body'], 'data-channel-file=') === false
+    && str_contains($doneChannel[1], 'The installer') === false, json_encode([@file_get_contents($rootB . $sep . '.channel'), $doneChannel]));
 ok('L16 an address the database ALREADY held is kept, not replaced by the one typed, and the last page says which is in use and that the typed one was not',
     setting($databases['b'], 'site.url') === 'https://kept.installer-selftest.invalid' && str_contains(words($done), 'will begin with https://kept.installer-selftest.invalid.') === true
     && str_contains(words($done), 'That is not the address you typed (https://portal-b.installer-selftest.invalid). This database already had an address saved, and it was kept.') === true, setting($databases['b'], 'site.url'));

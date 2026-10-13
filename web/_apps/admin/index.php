@@ -317,6 +317,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <?php
+// ⬆️ "Finish the upgrade" (#499). When new files have been uploaded and NO
+// database upgrade is waiting, the portal stays open, so nothing else on
+// screen says there is a button to press; and until it is pressed every
+// request asks the database whether an upgrade is waiting. The words have
+// ONE home, Maintenance::upgradeNotice(), which the health page and the
+// Upgrade page also use, so the three cannot come to differ. It is empty
+// when the recorded version is not behind, and asks the database nothing
+// then.
+//
+// WHO SEES IT: a global administrator only. The notice says "open the
+// Upgrade page", and that page refuses everybody else, so shown to an
+// administrator of one organisation it would be advice they cannot follow.
+$upgradeNotice = $isUmbrella === true ? \Portal\Core\Maintenance::upgradeNotice() : '';
+?>
+<?php if ($upgradeNotice !== ''): ?>
+<div class="alert alert-warning" role="alert" id="admin-upgrade-notice"><?php echo htmlspecialchars($upgradeNotice, ENT_QUOTES, 'UTF-8'); ?></div>
+<?php endif; ?>
+
+<?php
 // 🔒 #515 — warn staff when an organisation's key is the same as an address
 // the portal itself relies on (Portal\Core\ReservedKeys explains what
 // "reserved" means and why an existing clash is left working rather than
@@ -678,7 +697,13 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
         </div>
     </div>
 
-    <!-- 🔧 Migrations Card -->
+    <?php
+    // 🔧 Migrations card. Shown to a global administrator only (#499): since
+    //    13 October 2026 Admin, Migrations refuses everybody else, and a card
+    //    that leads to a refusal is a dead end. The same goes for the
+    //    "Migrations" button further down and the entry in the menu.
+    ?>
+    <?php if ($isUmbrella === true): ?>
     <div class="col-12 col-sm-6 col-xl-3">
         <div class="card border-warning h-100">
             <div class="card-body">
@@ -700,6 +725,7 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
             </div>
         </div>
     </div>
+    <?php endif; ?>
 </div>
 
 <!-- 🖥️ System Information -->
@@ -794,12 +820,15 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
                     <span class="small">Departments</span>
                 </a>
             </div>
+            <?php // A global administrator only: the page refuses everybody else (#499). ?>
+            <?php if ($isUmbrella === true): ?>
             <div class="col-6 col-md-4 col-lg-2">
                 <a href="/admin/migrations" class="btn btn-outline-warning w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-database fa-lg"></i>
                     <span class="small">Migrations</span>
                 </a>
             </div>
+            <?php endif; ?>
             <div class="col-6 col-md-4 col-lg-2">
                 <a href="/admin/settings" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-gear fa-lg"></i>

@@ -504,6 +504,24 @@ try {
         $result = $settingsStmt->get_result();
         $secretsReadAsStored = '';
         while ($row = $result->fetch_assoc()) {
+            // 🔢 ONE SETTING IS READ FROM THE INSTALLATION'S OWN ROW ONLY: the
+            //    version the database is recorded at (#499). The upgrade gate
+            //    (Maintenance) compares it with the files' version to decide
+            //    whether the portal is closed. A row of the same name saved
+            //    for ONE organisation used to be laid over it like any other
+            //    setting, and one that said a newer version opened the
+            //    portal, for that organisation, with a database upgrade
+            //    waiting (found 13 October 2026). Such a row is passed over
+            //    here, so nothing in the portal ever sees it; the Settings
+            //    page refuses to make one (Maintenance::lockedInGeneralEditor()).
+            //    The name is written out, not asked of that class: this runs
+            //    before anything can be trusted to be loaded, and files reach
+            //    a shared host one at a time. Only rows of ONE organisation
+            //    are tested, so an installation with none pays nothing.
+            if ($row['siteID'] !== null && strcasecmp((string) $row['settingKey'], 'portal.installed_version') === 0) {
+                continue;
+            }
+
             $value = $row['settingValue'];
 
             // 🔓 A secret (a row whose isSensitive mark is on) is handed to

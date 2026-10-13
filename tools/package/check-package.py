@@ -53,6 +53,8 @@ public-door-6-configurable-domains-and-package.md` section 6.6)
        web/_functions/ fails, because the build would leave it out. The one
        file let through there is the folder's own "refuse everything" file,
        and only while it is byte for byte the copy in web/_core/.
+  --   Git holds no channel file (web/.channel), and neither does a package
+       (see G9). One that is committed is refused, whatever it says.
   --   The allow list: every name uses only plain characters and an ending
        in small letters, and every file is of an allowed kind in an allowed
        place. A picture or a font is followed from its first part to its
@@ -73,19 +75,39 @@ public-door-6-configurable-domains-and-package.md` section 6.6)
   G5   gitleaks finds no secret (a separate program; see below). It is run
        twice: on the folder as it is, and on a copy in which every file has a
        plain name and is cut into small pieces, because left to itself it
-       skips some files for their names and some for how they begin.
-  G6   Our own domain appears nowhere.
+       skips some files for their names and some for how they begin. Its
+       "found nothing" counts only if it FOUND a made-up key it was shown
+       first, alone and again among the pieces: a program that merely calls
+       itself gitleaks, or one whose rules did not load, finds neither.
+  G6   Our own domain is nowhere WRITTEN OUT WHOLE: not in any file, in
+       capitals or small letters, and not in a file's name. (Until
+       13 October 2026 this said "not in any byte of any file", which claimed
+       more than it does: see WHAT THIS CANNOT DO.) The names it looks for
+       have ONE home, the OWN_DOMAINS list in
+       tools/audit-checks/check_no_hardcoded_domains.py.
   G7   Every .php file outside _vendor/ passes `php -l`, dompdf's included:
        PHP's exit code must be 0 AND it must say "No syntax errors".
   G8   dompdf is the pinned version, the committed list was made from the
        pinned download, and the files the portal loads are there.
   --   Every fallback copy of an outside library matches its fingerprint.
-  G9   The channel word, the version and the tag all agree.
+  G9   The channel word, the version and the tag all agree, and the package
+       holds NO file called .channel. The word travels as the Channel line of
+       VERSION.txt, and the installer writes the installation's own .channel
+       from it only when there is none. Until 13 October 2026 every package
+       carried the file, so unpacking one over an installation replaced that
+       installation's own word: a test copy given a live package called
+       itself live and lost its staff sign-in gate.
   G10  The guide is there and names the web folder the package really has.
+       No switch lets a package through without it.
+  --   No one file is larger than 16 MB, and all of them together are no
+       larger than 150 MB (a real package is about 29 MB unpacked).
   G11-G13 (zip only) The zip matches its .sha256 file, is not damaged, has no
        unsafe entry names, no link, no entry writable by group or others, and
-       is between 5 MB and 80 MB. Then every guard above runs again on what
-       the zip really holds.
+       is between 5 MB and 80 MB. It carries no comment, and every byte of it
+       belongs to an entry, to the list of entries or to the end record:
+       nothing in front, nothing between, nothing after. What it says it
+       unpacks to is within the two limits above BEFORE anything is unpacked.
+       Then every guard above runs again on what the zip really holds.
 
 NOT BUILT HERE, ON PURPOSE: the earlier design's G14 and REMOVED-FILES.txt
 belong to the two-door layout (#493) and to a later release.
@@ -93,7 +115,7 @@ belong to the two-door layout (#493) and to a later release.
 Usage
   check-package.py <folder or zip> --commit <commit> --channel <live|beta|alpha>
                    [--tag <vX.Y.Z or vX.Y.Z-suffix>] [--repo <repository>]
-                   [--allow-missing-guide] [--allow-no-gitleaks]
+                   [--allow-no-gitleaks]
   check-package.py --tree web [--commit <commit>] [--repo <repository>]
         For the pull-request checks. Reads what git holds under web/ at the
         commit (default HEAD) and applies the same rules about names, kinds,
@@ -103,22 +125,26 @@ Usage
         do not run here. A file git does not track is not seen: the package
         is made from git, so such a file cannot get into it.
 
-THE TWO "ALLOW" SWITCHES, AND WHY THEY CANNOT SHIP QUIETLY
-  --allow-missing-guide  docs/INSTALL.md does not exist yet (it is written by
-        doing a real installation, in part 2 of this work). Skips G10 only.
+THE ONE "ALLOW" SWITCH, AND WHY IT CANNOT SHIP QUIETLY
   --allow-no-gitleaks    gitleaks is not installed on this machine. Skips G5
         only, and only when gitleaks really is absent.
-  Each prints "NOT CHECKED", and the last line then says the package is NOT
-  FIT TO PUBLISH. Both are REFUSED when --tag is given, and only a tagged
-  build is ever published. build.sh puts NOT-FOR-RELEASE in the zip's name for
-  either switch. This checker insists on that name only for a missing guide,
-  because that is the one it can see from the package; it cannot tell from a
-  zip whether gitleaks ran when it was built.
+  It prints "NOT CHECKED", and the last line then says the package is NOT FIT
+  TO PUBLISH. It is REFUSED when --tag is given, and only a tagged build is
+  ever published. build.sh puts NOT-FOR-RELEASE in the zip's name. This
+  checker cannot insist on that name: it cannot tell from a zip whether
+  gitleaks ran when it was built.
+  There used to be a second switch, --allow-missing-guide, from the weeks
+  before docs/INSTALL.md existed. It was removed on 13 October 2026: the guide
+  exists, a package without it is useless to a customer, and a switch that
+  lets one through is a way for that to happen by accident.
 
 Exit: 0 when every guard that ran passed; 1 otherwise, including when this
 script itself stopped early. A real result always ends with a line containing
 "the run reached its end". A crash does not print that line, so anything
 that reads the result must look for it as well as the exit code. build.sh does.
+"Stopped early" includes being ENDED by something it read: until 13 October
+2026 a list of our domains that ended the program when it was read stopped
+the checker after G5 with exit code 0.
 
 WHAT THIS CANNOT DO
   - It cannot tell an altered zip from the original if whoever altered it also
@@ -168,9 +194,27 @@ WHAT THIS CANNOT DO
   - An archive is recognised by how its contents begin (zip, gzip, bzip2, xz,
     7z, rar, tar). A container format this does not know, inside a file of an
     allowed kind, would not be seen as one.
-  - It does not prove the package INSTALLS. That is the install-from-the-zip
-    proof, which needs the installer work (F3, F5) to exist first.
-  - G6 looks only for the names in OWN_DOMAINS below.
+  - It does not prove the package INSTALLS. That was done by hand on
+    13 October 2026, by following docs/INSTALL.md from a built zip on MySQL
+    8.0.36 and 8.4.11 behind PHP's own web server. Nothing here repeats it,
+    and nobody has yet done it on a real hosting panel or under Apache.
+  - G6 looks only for the names on the OWN_DOMAINS list (see G6 above). Some
+    OTHER address built into the code is not found by it.
+  - G6 finds a name only where it is written out whole, letter after letter,
+    in one line. Shown on 13 October 2026 to pass: the name split across two
+    lines, one of its letters written as %xx or as a character reference
+    (&#x6d;), the whole of it in base64, and the name inside the PACKED text
+    of a PNG. (A full stop written as %2E, and the plain text of a PNG, are
+    found: the letters are still in a row.) Nothing here decodes anything.
+  - The made-up key G5 shows gitleaks first proves that the program finds
+    ONE shape, a private key, with these options and these settings. It does
+    not prove any other rule loaded, and a program written to recognise that
+    one key and nothing else would pass it.
+  - The zip's bytes are accounted for by the lengths the zip itself states.
+    Bytes hidden INSIDE an entry's own packed data (after the end of its
+    compressed stream but within its stated length) are not looked for.
+  - A file it reads as a program (the list of our domains) could end this
+    script in a way Python cannot catch (os._exit). That file is our own.
   - It trusts git and the programs it calls (git, php, gitleaks, python).
 
 Copyright (c) 2026 MWBM Partners Ltd (t/a MWservices). All rights reserved.
@@ -223,7 +267,9 @@ REMOVED_FOLDERS = REMOVED_PLACEHOLDER_FOLDERS + REMOVED_EMPTY_FOLDERS
 REMOVED_FILE_NAMES = (".gitkeep",)
 
 CODE_FOLDERS = ("_apps", "_core", "_install", "_lang", "_sql", "_vendor", "_libraries")
-ROOT_FILES = (".channel", "VERSION.txt", "CHANGELOG.md", "INSTALL.md")
+# No ".channel" here: a package must not carry one (see G9 at the top).
+ROOT_FILES = ("VERSION.txt", "CHANGELOG.md", "INSTALL.md")
+CHANNEL_FILE = ".channel"
 DOMPDF_FOLDER = "_libraries/dompdf/"
 DOMPDF_LIST = HERE / "dompdf-files.sha256"
 
@@ -243,21 +289,23 @@ GITLEAKS_PIECE = 8000
 GITLEAKS_STEP = 4000
 GITLEAKS_PAD = 1024
 
-# G6. The first customer's domain is ours to keep out of every package; a
-# customer's own domain is never added here. The name is held in base64, and
-# that is NOT secrecy (the repository is public, and anybody can decode it).
-# It is so that the plain name appears nowhere under tools/: the hand check in
-# .claude/CLAUDE.md (a search of web, .github and tools for that name) and the
-# repository-wide check that package F4 adds would otherwise both report this
-# guard's own pattern for ever, and a check that always reports something
-# gets ignored. Nothing under tools/ is ever in a package (only web/ is).
-# To see the names: check-package.py --print-own-domains.
-# When tools/audit-checks/check_no_hardcoded_domains.py exists (package F4),
-# G6 should call it and this line be deleted, so the names have one home.
-OWN_DOMAINS = tuple(base64.b64decode(name).decode() for name in ("bWlsbHJkc2RhY2FtYnJpZGdl",))
+# G6. The names of our own domains have ONE home: the OWN_DOMAINS list in the
+# repository-wide check, tools/audit-checks/check_no_hardcoded_domains.py.
+# Until 13 October 2026 this file kept a second copy of that list, and two
+# lists that must agree are two lists that will one day disagree. To see the
+# names: python3 tools/audit-checks/check_no_hardcoded_domains.py
+# --print-own-domains.
+OWN_DOMAINS_HOME = HERE.parent / "audit-checks" / "check_no_hardcoded_domains.py"
 
 MIN_ZIP_BYTES = 5 * 1024 * 1024
 MAX_ZIP_BYTES = 80 * 1024 * 1024
+# What a package may UNPACK to. Until 13 October 2026 only the zip itself was
+# measured, and a 150 MB script shipped inside an 11 MB zip: text of one
+# repeated letter packs to almost nothing. On that day a real package was
+# 1,580 files, 29.2 MB in all, its largest file 1.4 MB; the limits leave room
+# to grow and none for that.
+MAX_FILE_BYTES = 16 * 1024 * 1024
+MAX_UNPACKED_BYTES = 150 * 1024 * 1024
 
 # -----------------------------------------------------------------------------
 # THE ALLOW LIST. A package may hold only what is named here.
@@ -668,7 +716,7 @@ class Package:
     def positively_named(self) -> set[str]:
         """Files the kinds rule does not judge, because each is allowed by
         its exact name AND has its exact contents checked by another guard:
-        the package's own four files (G9, G10, G1), the fallback copies
+        the package's own three files (G9, G10, G1), the fallback copies
         (their fingerprints), dompdf's files (the committed list, G1) and
         the two files the build writes into _libraries/ (G1, G8)."""
         return (
@@ -779,6 +827,39 @@ def guard_left_out(pkg: Package, report: Report) -> None:
         f"{len(pkg.left_out)} file(s) in git are left out on purpose (placeholders, the 'refuse everything' file "
         f"of each folder that is left out, and the three folders nothing deploys): {shown}{more}",
     )
+
+
+def guard_no_channel_file_in_git(pkg: Package, report: Report) -> None:
+    """Refuses a commit at which git holds web/.channel.
+
+    That file says which copy of the portal ONE installation is. The
+    repository must never hold one (it is on the ignore list, .gitignore): a
+    committed one would make every checkout, and every channel deployed from
+    it, claim the same channel. In a package it would also replace the word
+    of every installation it is unpacked over (see G9 at the top).
+
+    Until 13 October 2026 nothing refused it. An independent check committed
+    one that said "live", and it passed: the build then wrote a file of the
+    same name and word into every package, so the package matched git byte
+    for byte. The build writes no such file any more, and G9 refuses a
+    package that holds one; this guard stays because it says, at the pull
+    request, exactly what is wrong and what to do.
+
+    WHAT THIS CANNOT DO: it sees only what git holds at the commit. A
+    .channel file in a working folder that git does not track is not seen,
+    and cannot get into a package, which is made from git."""
+    guard = "no channel file in git"
+    if ".channel" in pkg.from_git:
+        report.failed(
+            guard,
+            "web/.channel — git holds a channel file at this commit, and the repository must never hold one. It "
+            "says which copy of the portal ONE installation is (live, beta, alpha or dev), so a committed one "
+            "would make every checkout and every channel deployed from it claim the same channel; each deploy "
+            "writes its own, and the installer writes an installation's. Take it out of git (git rm --cached web/.channel; it is already "
+            "on the ignore list) and use the PORTAL_ENV setting for local work",
+        )
+    else:
+        report.passed(guard, "git holds no web/.channel at this commit")
 
 
 def looks_like_archive(data: bytes) -> bool:
@@ -1239,7 +1320,7 @@ def guard_top_level(pkg: Package, report: Report) -> None:
         "must simply go; otherwise decide whether it ships, and if so add it to CODE_FOLDERS or ROOT_FILES"
         for name in sorted(present - allowed)
     ]
-    # INSTALL.md has its own guard (G10), which knows about the allow switch.
+    # INSTALL.md has its own guard (G10), which says why a package needs it.
     problems += [f"{name} — expected, and missing" for name in sorted(allowed - present - {"INSTALL.md"})]
     if problems:
         report.failed(guard, f"{len(problems)} problem(s) at the top of the package", problems)
@@ -1305,6 +1386,21 @@ def gitleaks_run(source: Path, work: Path) -> tuple[int, list[dict] | None, list
     return done.returncode, finds, tail
 
 
+CANARY_NAME = "made-up-key-shown-first.txt"
+
+
+def canary_text() -> str:
+    """A made-up private key, for G5 to show gitleaks before believing it.
+
+    Put together here, when it is needed, so that this file never holds one
+    written out: a scanner reading the repository would report this very
+    file. The letters come from a fixed checksum, so it is the same made-up
+    key on every run and opens nothing anywhere."""
+    letters = base64.b64encode(hashlib.sha256(b"webms-intra package checker: a made-up key").digest() * 3).decode()
+    dashes = "-" * 5
+    return f"{dashes}BEGIN RSA PRIVATE KEY{dashes}\n{letters[:64]}\n{letters[64:128]}\n{dashes}END RSA PRIVATE KEY{dashes}\n"
+
+
 def guard_secrets(pkg: Package, report: Report, allow_no_gitleaks: bool) -> None:
     guard = "G5 gitleaks"
     if shutil.which("gitleaks") is None:
@@ -1335,6 +1431,27 @@ def guard_secrets(pkg: Package, report: Report, allow_no_gitleaks: bool) -> None
     # begin with blank lines, so neither reason can apply. A find in a piece
     # is turned back into the real file's name and line.
     with tempfile.TemporaryDirectory() as tmp:
+        # FIRST, CAN IT FIND ANYTHING? It is shown one file holding a made-up
+        # private key. A program that reports nothing there has proved nothing
+        # by reporting nothing about the package. WHAT WAS WRONG: any program
+        # called gitleaks was believed. One that only wrote an empty report
+        # passed, and the zip it "searched" then checked as a release (the
+        # check of 13 October 2026). The same would have passed a real
+        # gitleaks whose rules did not load.
+        shown = Path(tmp) / "shown-first"
+        shown.mkdir()
+        (shown / CANARY_NAME).write_text(canary_text(), encoding="utf-8")
+        code, finds, tail = gitleaks_run(shown, Path(tmp) / "shown-first-work")
+        if code != 1 or not finds or any(Path(str(find.get("File", ""))).name != CANARY_NAME for find in finds):
+            report.failed(
+                guard,
+                "the program called gitleaks was shown one file holding a made-up private key and did not report it "
+                f"(exit code {code}, {'no report' if finds is None else str(len(finds)) + ' find(s)'}). A search that cannot "
+                "find that has proved nothing, so its silence about this package is not accepted. Check that it is the "
+                "real gitleaks and that it reads " + GITLEAKS_SETTINGS.name + ". Its last lines: " + " | ".join(tail),
+            )
+            return
+
         code, finds, tail = gitleaks_run(pkg.root, Path(tmp) / "as-it-is")
         runs = [("the folder as it is", code, finds, tail)]
         places = set()
@@ -1354,14 +1471,32 @@ def guard_secrets(pkg: Package, report: Report, allow_no_gitleaks: bool) -> None
                 if start + GITLEAKS_PIECE >= len(data):
                     break
                 start += GITLEAKS_STEP
+        # The made-up key again, as the LAST piece, cut and padded like every
+        # other. This run must report it: that shows the pieces really are
+        # read by this version of gitleaks, which is the whole point of them.
+        canary_piece = len(pieces)
+        (copy / f"{canary_piece:07d}.txt").write_bytes(b"\n" * GITLEAKS_PAD + canary_text().encode())
         code, finds, tail = gitleaks_run(copy, Path(tmp) / "plain-names-work")
-        runs.append((f"every file again under a plain name ({len(pieces)} pieces)", code, finds, tail))
+        canary_seen = False
+        real_finds = None if finds is None else []
         for find in finds or []:
             try:
-                rel, lines_before = pieces[int(Path(find["File"]).stem)]
+                number = int(Path(find["File"]).stem)
+                if number == canary_piece:
+                    canary_seen = True
+                    continue
+                real_finds.append(find)
+                rel, lines_before = pieces[number]
                 places.add(f"{rel}:{lines_before + find['StartLine'] - GITLEAKS_PAD} — {find['RuleID']} (the value is not shown)")
             except (KeyError, ValueError, IndexError, TypeError):
+                real_finds.append(find)
                 places.add(f"a find that could not be traced back to a file: {str(find.get('File'))[:80]}")
+        # With the made-up key found and nothing else, this run's own exit
+        # code is 1; it is judged below as the run would have ended without it.
+        runs.append((
+            f"every file again under a plain name ({len(pieces)} pieces)",
+            0 if code == 1 and canary_seen and not real_finds else code, real_finds, tail,
+        ))
 
     # Each run must have ended with code 0, left a report, and listed nothing.
     # Anything else is a failure: a gitleaks that crashed, was not really
@@ -1376,6 +1511,11 @@ def guard_secrets(pkg: Package, report: Report, allow_no_gitleaks: bool) -> None
             wrong.append(f"{what}: it ended with code 0 but its report lists {len(finds)} find(s), so its exit code cannot be trusted")
         elif code != 0:
             wrong.append(f"{what}: it ended with code {code} (1 means it found something)")
+    if not canary_seen:
+        wrong.append(
+            "every file again under a plain name: the made-up key put among the pieces was NOT reported, so this "
+            "program does not read the pieces and that run has proved nothing"
+        )
     if wrong or places:
         report.failed(
             guard,
@@ -1385,14 +1525,49 @@ def guard_secrets(pkg: Package, report: Report, allow_no_gitleaks: bool) -> None
     else:
         report.passed(
             guard,
-            f"gitleaks found nothing in two runs: the folder as it is, and all {len(pkg.files)} files again under "
-            f"plain names in {len(pieces)} pieces, so that none is skipped for its name or for how it begins",
+            f"gitleaks found the made-up key it was shown, alone and among the pieces, and nothing else in two "
+            f"runs: the folder as it is, and all {len(pkg.files)} files again under plain names in {len(pieces)} "
+            "pieces, so that none is skipped for its name or for how it begins",
         )
 
 
+def own_domains() -> tuple[str, ...]:
+    """The names G6 looks for, read from their one home.
+
+    That file is read as Python and its list taken out of it. It is NOT run as
+    a program and asked to print the names: an emptied or broken file run that
+    way prints nothing and ends with exit code 0, which would read as "no
+    names to look for", and G6 would then pass every package. Here a missing
+    file, or an empty or misshapen list, is an error, and the guard fails.
+    (compile() and exec() rather than an import, so that no __pycache__
+    folder is left in the repository by a build.)"""
+    scope: dict = {"__name__": "own_domains_home", "__file__": str(OWN_DOMAINS_HOME)}
+    try:
+        exec(compile(OWN_DOMAINS_HOME.read_text(encoding="utf-8"), str(OWN_DOMAINS_HOME), "exec"), scope)  # noqa: S102 — our own file, beside this one
+    except SystemExit as stop:
+        # A file that ENDS THE PROGRAM when it is read (sys.exit(0) at its
+        # top) used to end this checker there and then, with exit code 0 and
+        # every later guard not run. It is an error like any other.
+        raise RuntimeError(f"{OWN_DOMAINS_HOME.name} ended the program when it was read (exit code {stop.code})") from None
+    names = scope.get("OWN_DOMAINS")
+    if not isinstance(names, tuple) or len(names) == 0 or any(not isinstance(name, str) or len(name) < 4 for name in names):
+        raise RuntimeError(f"{OWN_DOMAINS_HOME.name} has no usable OWN_DOMAINS list (a tuple of names, each 4 characters or more)")
+    return names
+
+
 def guard_own_domain(pkg: Package, report: Report) -> None:
+    """Why this reads the files itself and does not call that check with
+    `--root <folder>`: run that way it reads TEXT files only. It skips every
+    picture, font, PDF and archive by its ending, and any file with a zero
+    byte in its first 4,096. A package is a public download, so here every
+    byte of every file is read, and every file's name."""
     guard = "G6 our own domain"
-    needles = [name.lower().encode() for name in OWN_DOMAINS]
+    try:
+        names = own_domains()
+    except Exception as error:  # noqa: BLE001 — a guard that could not run is a failure, never a quiet pass
+        report.failed(guard, f"the list of our own domains could not be read, so this guard did not run: {error}")
+        return
+    needles = [name.lower().encode() for name in names]
     hits = []
     for rel, full in sorted(pkg.files.items()):
         if any(needle in rel.lower().encode() for needle in needles):
@@ -1407,7 +1582,7 @@ def guard_own_domain(pkg: Package, report: Report) -> None:
             hits,
         )
     else:
-        report.passed(guard, f"not found in any of {len(pkg.files)} files")
+        report.passed(guard, f"none of the {len(needles)} name(s) on the one list is written out whole in any of {len(pkg.files)} files")
 
 
 def guard_php_lint(pkg: Package, report: Report) -> None:
@@ -1560,11 +1735,15 @@ def guard_labels(pkg: Package, report: Report, channel: str, tag: str | None) ->
     problems: list[str] = []
     version = expected_version(pkg, channel, tag, problems)
 
-    channel_file = pkg.files.get(".channel")
-    if channel_file is None:
-        problems.append(".channel — missing; the portal would not know which channel it is")
-    elif channel_file.read_bytes() != (channel + "\n").encode():
-        problems.append(f".channel holds {channel_file.read_bytes()!r}; it must be exactly {channel!r} and a line end")
+    # A package must NOT carry the file (see G9 at the top). Looked for as a
+    # file and as a folder, at the top, where the portal reads it.
+    if CHANNEL_FILE in pkg.files or CHANNEL_FILE in pkg.folders:
+        problems.append(
+            f"{CHANNEL_FILE} — a package must not carry this file: unpacked over an installation it would REPLACE that "
+            "installation's own word, turning a test copy live or a live portal into a test copy. The word travels "
+            "as the Channel line of VERSION.txt, and the installer writes the file only when there is none. Take the "
+            "line that writes it out of build.sh"
+        )
 
     version_file = pkg.files.get("VERSION.txt")
     if version_file is None:
@@ -1588,36 +1767,66 @@ def guard_labels(pkg: Package, report: Report, channel: str, tag: str | None) ->
         report.passed(guard, f"version {version}, channel {channel}, commit {pkg.commit[:12]}" + (f", tag {tag}" if tag else ", no tag"))
 
 
-def guard_guide(pkg: Package, report: Report, allow_missing_guide: bool) -> bool:
-    """Returns True when the package has no guide (the caller needs to know)."""
+def guard_guide(pkg: Package, report: Report) -> None:
+    """G1 has already held INSTALL.md to docs/INSTALL.md in git, byte for byte.
+    This says whether it is there at all, and whether it is about THIS package."""
     guard = "G10 the installation guide"
     guide = pkg.files.get("INSTALL.md")
     if guide is None:
-        if allow_missing_guide:
-            report.skipped(guard, "INSTALL.md is not in the package, and --allow-missing-guide was given")
-        else:
-            report.failed(
-                guard,
-                "INSTALL.md is not in the package. A customer with only a hosting panel cannot install without "
-                "it. Give --allow-missing-guide only for a build that will not be published",
-            )
-        return True
-    if pkg.web_folder not in guide.read_text(encoding="utf-8", errors="replace"):
+        report.failed(
+            guard,
+            "INSTALL.md is not in the package. A customer with only a hosting panel cannot install without it, "
+            "so no package is made without it: write docs/INSTALL.md at this commit",
+        )
+    elif pkg.web_folder not in guide.read_text(encoding="utf-8", errors="replace"):
         report.failed(guard, f"INSTALL.md never mentions {pkg.web_folder}, the web folder this package really has")
     else:
         report.passed(guard, f"present, and it names the web folder {pkg.web_folder}")
-    return False
 
 
-def check_folder(root: Path, args: argparse.Namespace, repo: Path, report: Report, *, bits_on_disk: bool) -> bool:
-    """Run every guard on a folder. Returns True when it has no guide."""
+def too_large(sizes: dict[str, int]) -> list[str]:
+    """Why these files, by their sizes, are more than a package may unpack
+    to: one line for each file over the limit, one for the total. Used on a
+    folder's real sizes, and on the sizes a zip STATES before it is unpacked."""
+    problems = [
+        f"{name!r} — {size / 1048576:.1f} MB; no one file in a package may be larger than {MAX_FILE_BYTES // 1048576} MB"
+        for name, size in sorted(sizes.items()) if size > MAX_FILE_BYTES
+    ]
+    total = sum(sizes.values())
+    if total > MAX_UNPACKED_BYTES:
+        problems.append(
+            f"all {len(sizes)} files together are {total / 1048576:.1f} MB; a package may unpack to no more than "
+            f"{MAX_UNPACKED_BYTES // 1048576} MB"
+        )
+    return problems
+
+
+def guard_sizes(pkg: Package, report: Report) -> None:
+    guard = "sizes"
+    sizes = {rel: full.stat().st_size for rel, full in pkg.files.items()}
+    problems = too_large(sizes)
+    if problems:
+        report.failed(
+            guard,
+            f"{len(problems)} size(s) are beyond what a package may hold. If a file really has grown that large, raise "
+            "MAX_FILE_BYTES or MAX_UNPACKED_BYTES on purpose, with the reason",
+            problems,
+        )
+    else:
+        report.passed(guard, f"{len(sizes)} files, {sum(sizes.values()) / 1048576:.1f} MB in all, the largest {max(sizes.values(), default=0) / 1048576:.1f} MB")
+
+
+def check_folder(root: Path, args: argparse.Namespace, repo: Path, report: Report, *, bits_on_disk: bool) -> None:
+    """Run every guard on a folder."""
     pkg = Package(root, repo, args.commit)
     guard_listing(pkg, report)
     guard_left_out(pkg, report)
+    guard_no_channel_file_in_git(pkg, report)
     guard_allow_list(pkg, report)
     guard_deny_list(pkg, report)
     guard_contents(pkg, report)
     guard_top_level(pkg, report)
+    guard_sizes(pkg, report)
     if bits_on_disk:
         guard_permission_bits(pkg, report)
     guard_secrets(pkg, report, args.allow_no_gitleaks)
@@ -1626,12 +1835,67 @@ def check_folder(root: Path, args: argparse.Namespace, repo: Path, report: Repor
     guard_dompdf(pkg, report)
     guard_fallbacks(pkg, report)
     guard_labels(pkg, report, args.channel, args.tag)
-    return guard_guide(pkg, report, args.allow_missing_guide)
+    guard_guide(pkg, report)
 
 
 # -----------------------------------------------------------------------------
 # The zip
 # -----------------------------------------------------------------------------
+
+def zip_bytes_unaccounted_for(zip_path: Path, archive: zipfile.ZipFile, size: int) -> list[str]:
+    """Every byte of a package's zip must belong to an entry, to the list of
+    entries, or to the end record. Returns what does not.
+
+    WHAT WAS WRONG: only the entries were looked at. A zip with a made-up key
+    and our own name in its archive comment, or with a megabyte of other
+    bytes in front of its first entry, or 30 KB after its end, passed once
+    its checksum file had been rewritten (the check of 13 October 2026). None
+    of those bytes is a file, so no other guard ever read them.
+
+    Read from the zip's own bytes: the 30-byte header in front of each entry
+    says how long its name and its extra field are; the entry's packed data
+    follows; the next entry must begin exactly there. The list of entries
+    must begin where the last entry ends, and the 22-byte end record must be
+    the last thing in the file. What it cannot see is at the top of this
+    file."""
+    problems: list[str] = []
+    if archive.comment:
+        problems.append(f"it carries a comment of {len(archive.comment)} byte(s); a package's zip carries none, and nothing reads one")
+    spans = []
+    with zip_path.open("rb") as raw:
+        for info in archive.infolist():
+            raw.seek(info.header_offset)
+            head = raw.read(30)
+            if len(head) != 30 or head[:4] != b"PK\x03\x04":
+                problems.append(f"{info.filename!r} — no entry begins where the list of entries says this one does")
+                continue
+            if info.flag_bits & 0x08:
+                # build.sh writes to a file, where zip never needs this form;
+                # with it, an entry's end cannot be worked out from its header.
+                problems.append(f"{info.filename!r} — written with its sizes AFTER its data, which the build's zip never does")
+                continue
+            name_length, extra_length = int.from_bytes(head[26:28], "little"), int.from_bytes(head[28:30], "little")
+            spans.append((info.header_offset, info.header_offset + 30 + name_length + extra_length + info.compress_size, info.filename))
+        raw.seek(max(0, size - 22))
+        end_record = raw.read(22)
+    expected = 0
+    for start, end, name in sorted(spans):
+        if start > expected:
+            problems.append(
+                f"{start - expected} byte(s) that belong to no entry, "
+                + ("in front of the first entry" if expected == 0 else f"in front of {name!r}")
+            )
+        elif start < expected:
+            problems.append(f"{name!r} — begins inside the entry before it")
+        expected = max(expected, end)
+    if expected != archive.start_dir:
+        problems.append(f"{abs(archive.start_dir - expected)} byte(s) between the last entry and the list of entries are not accounted for")
+    if len(end_record) != 22 or end_record[:4] != b"PK\x05\x06" or end_record[20:22] != b"\x00\x00":
+        problems.append("it does not END with its end record: something follows it")
+    elif archive.start_dir + int.from_bytes(end_record[12:16], "little") != size - 22:
+        problems.append("byte(s) between the list of entries and the end record are not accounted for")
+    return problems
+
 
 def zip_is_safe_to_open(zip_path: Path, report: Report) -> bool:
     """G11-G13. Returns False when the zip must not even be unpacked."""
@@ -1680,6 +1944,11 @@ def zip_is_safe_to_open(zip_path: Path, report: Report) -> bool:
                     problems.append(f"{name!r} — {unsafe_bits(stat.S_IMODE(mode))} ({stat.filemode(mode)})")
             if len(names) != len(set(names)):
                 problems.append("the same entry name appears twice")
+            problems += zip_bytes_unaccounted_for(zip_path, archive, size)
+            # What it SAYS it unpacks to, before a byte is unpacked. Reading
+            # an entry stops at the size stated for it, so a zip cannot
+            # unpack to more than this.
+            problems += too_large({info.filename: info.file_size for info in archive.infolist()})
             # Every file is read to its end, which is where its checksum is
             # compared. Python's own testzip() was used before; it lets a
             # broken compressed stream through as a crash instead of a result.
@@ -1699,12 +1968,12 @@ def zip_is_safe_to_open(zip_path: Path, report: Report) -> bool:
     report.passed(
         guard,
         f"{zip_path.name}: {size / 1048576:.1f} MB, matches its .sha256, not damaged, {len(names)} safe entries, "
-        "none a link, none writable by group or others",
+        "none a link, none writable by group or others, no comment, and every byte of it accounted for",
     )
     return True
 
 
-def check_zip_name(zip_path: Path, args: argparse.Namespace, no_guide: bool, report: Report) -> None:
+def check_zip_name(zip_path: Path, args: argparse.Namespace, report: Report) -> None:
     guard = "the zip's file name"
     name = zip_path.name
     problems = []
@@ -1712,9 +1981,6 @@ def check_zip_name(zip_path: Path, args: argparse.Namespace, no_guide: bool, rep
         problems.append(f"it must be called {ZIP_PREFIX}<version>….zip")
     if args.tag is not None and name != f"{ZIP_PREFIX}{args.tag[1:]}.zip":
         problems.append(f"a tagged build is called {ZIP_PREFIX}{args.tag[1:]}.zip")
-    # So that a zip passed from hand to hand still says what it is.
-    if no_guide and "NOT-FOR-RELEASE" not in name:
-        problems.append("it has no installation guide, so its name must contain NOT-FOR-RELEASE")
     if problems:
         report.failed(guard, f"{name} is wrongly named", problems)
     else:
@@ -1780,9 +2046,11 @@ def check_tree(tree: str, commit: str, repo: Path) -> int:
                 [repr(rel) for rel in links],
             )
         guard_left_out(pkg, report)
+        guard_no_channel_file_in_git(pkg, report)
         guard_allow_list(pkg, report)
         guard_deny_list(pkg, report)
         guard_contents(pkg, report)
+        guard_sizes(pkg, report)
     if report.problems > 0:
         print(f"FAIL — {report.problems} guard(s) failed for web/ at {commit}; {END_MARK}.")
         return 1
@@ -1799,16 +2067,13 @@ def main() -> int:
     parser.add_argument("--channel", choices=CHANNEL_WORDS, help="the channel word the package must carry")
     parser.add_argument("--tag", help="the release tag, for a build that will be published")
     parser.add_argument("--repo", default=str(HERE.parent.parent), help="the repository (default: the one this script is in)")
-    parser.add_argument("--allow-missing-guide", action="store_true")
     parser.add_argument("--allow-no-gitleaks", action="store_true")
     parser.add_argument("--tree", help="'web': check what git holds under web/ (with --commit, default HEAD)")
-    parser.add_argument("--print-own-domains", action="store_true", help="print the names G6 looks for, and stop")
     args = parser.parse_args()
+    global STARTED
+    STARTED = True
     repo = Path(args.repo).resolve()
 
-    if args.print_own_domains:
-        print("\n".join(OWN_DOMAINS))
-        return 0
     if args.tree is not None:
         return check_tree(args.tree, args.commit or "HEAD", repo)
     if args.target is None or args.commit is None or args.channel is None:
@@ -1818,10 +2083,10 @@ def main() -> int:
     report = Report()
     print(f"Checking {target}")
 
-    if args.tag is not None and (args.allow_missing_guide or args.allow_no_gitleaks):
+    if args.tag is not None and args.allow_no_gitleaks:
         # Only a tagged build is ever published, so this is the one place the
-        # two switches are shut out for good.
-        report.failed("the allow switches", "a build with --tag may be published, so no --allow-… switch is accepted with it")
+        # switch is shut out for good.
+        report.failed("the allow switch", "a build with --tag may be published, so --allow-no-gitleaks is not accepted with it")
     elif target.is_dir():
         check_folder(target, args, repo, report, bits_on_disk=True)
     elif target.is_file():
@@ -1829,8 +2094,8 @@ def main() -> int:
             with tempfile.TemporaryDirectory() as tmp:
                 with zipfile.ZipFile(target) as archive:
                     archive.extractall(tmp)
-                no_guide = check_folder(Path(tmp), args, repo, report, bits_on_disk=False)
-            check_zip_name(target, args, no_guide, report)
+                check_folder(Path(tmp), args, repo, report, bits_on_disk=False)
+            check_zip_name(target, args, report)
     else:
         report.failed("the package", f"{target} is neither a folder nor a file")
 
@@ -1847,9 +2112,24 @@ def main() -> int:
     return 0
 
 
+# True once the arguments have been read: from then on, nothing but main()
+# returning may end this run with exit code 0.
+STARTED = False
+
 if __name__ == "__main__":
     try:
-        sys.exit(main())
+        result = main()
+    except SystemExit as stop:
+        # Python's reader of arguments ends the run itself (--help with 0, a
+        # wrong option with 2), and that is left alone. ANYTHING ELSE that
+        # ends the run before main() returns has stopped it early. Until
+        # 13 October 2026 such an end kept its own exit code, and that code
+        # could be 0.
+        if not STARTED or stop.code not in (None, 0):
+            raise
+        print("FAIL — the checker was ended before its last line by something it read, and proved nothing")
+        sys.exit(1)
     except Exception as error:  # noqa: BLE001 — any crash must read as a failure, never as silence
         print(f"FAIL — the checker stopped early and proved nothing: {type(error).__name__}: {error}")
         sys.exit(1)
+    sys.exit(result)

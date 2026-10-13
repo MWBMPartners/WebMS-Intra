@@ -214,11 +214,14 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                                 <i class="fa-solid fa-users me-1"></i> <?php echo htmlspecialchars(t('nav.user_management'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
+                        <?php // Migrations is for a global administrator only (#499): the page refuses everybody else, so nobody else is shown the way to it. ?>
+                        <?php if (App::isUmbrellaAdmin() === true): ?>
                         <li>
                             <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/migrations'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-database me-1"></i> <?php echo htmlspecialchars(t('nav.migrations'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
+                        <?php endif; ?>
                         <li>
                             <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-gear me-1"></i> <?php echo htmlspecialchars(t('nav.settings'), ENT_QUOTES, 'UTF-8'); ?>

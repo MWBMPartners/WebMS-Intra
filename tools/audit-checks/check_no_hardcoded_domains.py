@@ -45,8 +45,11 @@ search in `.claude/CLAUDE.md`, would both report this file's own pattern for
 ever, and a check that always reports something gets ignored. For the same
 reason the pending list names a line by its fingerprint (SHA-256), not by its
 text. `--print-own-domains` shows the names.
-(`tools/package/check-package.py` keeps its own copy of the same name, the
-same way, for its guard G6. Giving the two one home is a change to that tool.)
+`tools/package/check-package.py` reads this list for its guard G6 (it kept a
+copy of its own until 13 October 2026), so this is the ONE home of the names.
+It takes `OWN_DOMAINS` out of this file as Python reads it, and fails its
+guard when the list is missing or empty: keep the name `OWN_DOMAINS`, and keep
+it a tuple.
 
 Add a name here only when the domain is OURS. Never add a customer's.
 

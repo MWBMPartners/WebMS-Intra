@@ -2972,6 +2972,65 @@ login written any way but the installer's, people's details), anything packed
 or encoded, and a bad rule inside the web folder's own `.htaccess`. Git's
 ignore rules remain the first wall; these guards are the second.
 
+### Upgrading from a package: when the portal closes, and who records the version
+
+- **When the portal closes for an upgrade is decided in ONE place, `Portal\Core\Maintenance::isActive()`:** the
+  explicit switch, or the recorded version behind the files' AND a numbered file under `_sql` the database has
+  not recorded. The read-only question is `Migrator::waiting()` (never `new Migrator()` on a visitor's request:
+  its constructor creates a missing table). **The portal never records the version by itself.**
+  `Maintenance::recordVersion()` is the ONE statement that records it after installation, and ONLY the Upgrade
+  page's button calls it; never call it on the way through the gate. (For a few hours on 13 October 2026 the
+  gate recorded the version when nothing was waiting. A request that arrived while a newer version was half
+  uploaded then recorded it, and the upgrade file that landed a moment later never closed the portal.) A page
+  that only needs to ASK uses `Maintenance::versionIsBehind()`, `whyUpgradeUnknown()` and `upgradeNotice()`,
+  which change nothing. Test: `tools/upgrade-pages-selftest.php` (needs a database user who may switch the
+  server's statement log on).
+- **Which row holds the recorded version: the installation's own, and no other.** Start-up
+  (`web/_core/bootstrap.php`) passes over a row of `portal.installed_version` that belongs to ONE organisation,
+  so nothing in the portal sees it, at no cost to an ordinary request. Admin, Settings refuses to add, change or
+  delete the setting (`Maintenance::lockedInGeneralEditor()`, asked in three places like
+  `Site::lockedInGeneralEditor()`). It cannot stop somebody changing the row straight in the database. **Found,
+  not changed:** the installer's own reader (`web/_install/db_state.php`) still prefers a row of organisation 1.
+- **When the portal cannot tell, `Migrator::waiting()` says which of four causes it was** (`cause`: `folder`,
+  `folder-empty`, `table-missing`, `table-unreadable`), and the Upgrade page words its advice by that. A button is
+  offered only where pressing it can help: never for an unreadable folder or table. Add a cause there, not a
+  second way of telling.
+- **After `runAll()`, call `Maintenance::forgetVersionState()`** before asking the gate anything again: the
+  answer is kept for the rest of the request, and the one from before the run is no longer true. And end a run
+  with `Maintenance::setActive(false, '')` (or `(true, '')` after a failure): the second argument takes the words
+  "Applying database migrations" away, which `setActive(false)` alone leaves stored.
+- **Admin, Migrations is for a global administrator only** (`App::isUmbrellaAdmin()`), like the Upgrade page.
+- **A form token works once** (`Auth::verifyCsrf()` makes a new one after each good use). A test that sends two
+  forms with one token proves nothing about the second: it is turned away for the token. Fetch one for each, and
+  recognise a refusal by its words (learned in `tools/upgrade-pages-selftest.php`, section M).
+- **What that costs.** While the version is behind and nobody has pressed the button, every request asks the
+  question once: one folder listing and one plain statement, about half a millisecond measured (0.5 to 0.65 ms
+  with 214 upgrade files, the database on the same machine). With the versions equal nothing is asked at all.
+  Keep it that cheap: do not turn the statement into a prepared one (three trips to the database where it is
+  one), and do not ask it from anywhere that runs when the versions are equal.
+- **The words an administrator is shown have one home, `Maintenance::upgradeNotice()`.** The health page's
+  "Migrations" line, the Upgrade page and the Admin dashboard's notice (a global administrator only) use it.
+- **Never write a `.channel` file into a package.** `build.sh` no longer does, and `check-package.py` (G9)
+  refuses a package that holds one. The installer's finish writes it (`installWriteChannelFile()` in
+  `web/_install/install_common.php`) from `VERSION.txt`'s `Channel:` line, only when there is none.
+- **Building needs the whole repository, not only `tools/package/`.** The checker's domain guard (G6) reads its
+  names from `tools/audit-checks/check_no_hardcoded_domains.py`. That is the ONE list: add a domain of ours there
+  and nowhere else. Keep the name `OWN_DOMAINS` and keep it a tuple; the guard fails if it is missing or empty.
+  G6 finds a name only where it is written out whole.
+- **Never commit `web/.channel`.** It is on the ignore list. If one is committed, `check-package.py --tree web`
+  and every package build refuse the commit. Use `PORTAL_ENV` for local work.
+- **`gitleaks`.** A build needs it; `--allow-no-gitleaks` is the one switch, its zip is named NOT-FOR-RELEASE and
+  it is refused with `--tag` (held by self-test cases `B17` to `B19`, which make a path of their own with no
+  `gitleaks` on it). `gitleaks-settings.toml` lets ONE thing through, a find whose secret is exactly
+  `YOUR_TOKEN`; do not add to it, reword the look-alike instead. Proved with gitleaks 8.30.1 (the macOS build).
+  The proposed workflow installs 8.30.1 too, and cannot run until somebody fills in that download's checksum.
+- **An upgrade by unpacking never removes a file.** A file one version had and the next does not stays on the
+  customer's hosting. A list of files to delete on upgrade (`REMOVED-FILES.txt`) is still not built (#606). Until
+  it is, think before removing or renaming anything under `web/public_html/` (a stale file there can still be
+  fetched) or `web/_sql/` (the Upgrade page reads every numbered file it finds).
+- **How the install-from-the-zip proofs were made**, so they can be made again: the scratch scripts are kept in
+  `.claude-work/resume/rollout-F6b--fix-evidence/scripts-i-used/` (not in the repository).
+
 ---
 
 ## Who may see and do what: the rules added on 12 October 2026 (#534, #548)

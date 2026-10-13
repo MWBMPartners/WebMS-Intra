@@ -185,7 +185,7 @@ class Photos
         header('Cache-Control: private, max-age=3600');
         header('X-Content-Type-Options: nosniff');
         self::outputGd($img, $mime);
-        imagedestroy($img);
+        // No imagedestroy(): it has done nothing since PHP 8.0 (the picture is freed with its variable), and PHP 8.5 reports it as deprecated.
         return true;
     }
 

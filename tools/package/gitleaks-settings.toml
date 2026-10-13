@@ -14,13 +14,36 @@
 # take from it. check-package.py gets round that by reading every file a
 # second time under a plain name; see guard_secrets there.
 #
-# Do not add an [allowlist] here to quieten a find. A find in a package is
-# either a real secret, which must come out of web/, or a look-alike, which
+# Do not add to the [allowlist] below to quieten a find. A find in a package
+# is either a real secret, which must come out of web/, or a look-alike, which
 # should be reworded so it no longer looks like one.
+#
+# THE ONE THING THAT IS LET THROUGH, AND WHY. The first time the real gitleaks
+# read a real package (version 8.30.1, on 13 October 2026) it reported two
+# places, both the same line: the scheduled-job command the Help page and the
+# release notes tell an administrator to copy,
+#     curl -fsS -H "Authorization: Bearer YOUR_TOKEN" "https://YOUR-PORTAL/…"
+# (web/_apps/help/admin.php and CHANGELOG.md; the rule is curl-auth-header).
+# The "secret" it found is the placeholder YOUR_TOKEN. That line cannot be
+# reworded: it has to be a command that works once the token is put in. So a
+# find whose secret is EXACTLY that word is let through, and nothing else is:
+# YOUR_TOKEN2, or a real token in the same command, is still reported
+# (case C26 of package-selftest.sh).
+#
+# It is written as [allowlist], the older spelling, which gitleaks 8.30.1
+# reads (proved) and which versions before the newer [[allowlists]] with
+# targetRules read too. PROVED ONLY WITH 8.30.1, on a developer's Mac: any
+# other version may report other lines, or read this file differently. The
+# proposed workflow is to install that same version; its first run on GitHub
+# (the Linux build) is still to come.
 #
 # Copyright (c) 2026 MWBM Partners Ltd (t/a MWservices). All rights reserved.
 
-title = "WebMS Intra package check: gitleaks's own rules, nothing added, nothing taken away"
+title = "WebMS Intra package check: gitleaks's own rules, with one placeholder let through"
 
 [extend]
 useDefault = true
+
+[allowlist]
+description = "The placeholder YOUR_TOKEN in the scheduled-job command an administrator is told to copy. Exactly that word, and nothing else."
+regexes = ['''^YOUR_TOKEN$''']

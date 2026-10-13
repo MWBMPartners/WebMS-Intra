@@ -118,16 +118,31 @@ class Migrator
      */
     public function allFiles(): array
     {
-        // 🔍 Check that the sql/ directory exists and is readable
-        if (is_dir($this->sqlDir) === false || is_readable($this->sqlDir) === false) {
-            return [];
+        // 📂 A folder that cannot be read is an empty list here, as it always
+        //    was; waiting() below is the caller that needs to tell the two apart.
+        return self::numberedFiles($this->sqlDir) ?? [];
+    }
+
+    /**
+     * 📂 The numbered migration files in a folder, sorted, or null when the
+     * folder is missing or cannot be read. The ONE place that says what counts
+     * as a migration file.
+     *
+     * @return array<string>|null
+     */
+    private static function numberedFiles(string $sqlDir): ?array
+    {
+        // 🔍 Asked first, so that an unreadable folder raises no PHP warning:
+        //    the portal records every warning in its error table.
+        if (is_dir($sqlDir) === false || is_readable($sqlDir) === false) {
+            return null;
+        }
+        $handle = opendir($sqlDir);
+        if ($handle === false) {
+            return null;
         }
 
         $files = [];
-        $handle = opendir($this->sqlDir);
-        if ($handle === false) {
-            return [];
-        }
 
         // 📂 Read the numbered migration files from the directory.
         //
@@ -163,6 +178,84 @@ class Migrator
         sort($files, SORT_STRING);
 
         return $files;
+    }
+
+    /**
+     * 🔎 READ ONLY: is a database upgrade waiting? That is, is there a
+     * numbered file under _sql that this database has not recorded?
+     *
+     * Written for the holding page (Maintenance), which asks this on EVERY
+     * request for as long as the recorded version is behind the files', and
+     * so must change nothing and cost little. `new Migrator()` will not do
+     * there: its constructor CREATES the table of applied upgrades when it
+     * is missing, and pending() then reads a missing or unreadable folder as
+     * "nothing waiting".
+     *
+     * WHEN IT CANNOT TELL, IT SAYS SO. `why` holds the reason as a sentence,
+     * and `cause` says which of four things it was, so that a page can say
+     * what actually helps (the advice for a missing folder is no use to
+     * somebody whose table is missing, and it was given to them once):
+     *   'folder'            the _sql folder is missing or cannot be read
+     *   'folder-empty'      it holds no numbered file at all. A complete
+     *                       copy of the portal always holds them, so an
+     *                       empty one is an upload that has not finished
+     *   'table-missing'     the table of applied upgrades is not there
+     *   'table-unreadable'  it is there, and the database would not let it
+     *                       be read (a right taken away, a damaged table)
+     *
+     * WHAT THIS CANNOT DO: it sees only the files that have ARRIVED. While a
+     * newer version is still being uploaded it answers "nothing waiting"
+     * until the new upgrade file lands. That is why its caller records
+     * nothing on the strength of this answer and asks again on the next
+     * request (see the top of Maintenance.php).
+     *
+     * @return array{answered: bool, files: array<string>, why: string, cause: string}
+     *         `cause` is '' when it could tell.
+     */
+    public static function waiting(mysqli $db, string $sqlDir = ''): array
+    {
+        $cannotTell = static fn (string $cause, string $why): array => ['answered' => false, 'files' => [], 'why' => $why, 'cause' => $cause];
+
+        $files = self::numberedFiles($sqlDir !== '' ? rtrim($sqlDir, DIRECTORY_SEPARATOR) : PORTAL_ROOT . DIRECTORY_SEPARATOR . '_sql');
+        if ($files === null) {
+            return $cannotTell('folder', 'the folder that holds the database upgrade files (_sql, beside _core) is missing or cannot be read');
+        }
+        if ($files === []) {
+            return $cannotTell('folder-empty', 'the folder that holds the database upgrade files (_sql, beside _core) holds none, so the upload of the portal\'s files looks unfinished');
+        }
+
+        try {
+            // ⚡ One plain statement, on purpose. It holds no value from
+            //    anybody, so there is nothing to bind, and a prepared
+            //    statement is three trips to the database (prepare, run,
+            //    close) where this is one. That matters here and nowhere
+            //    else in this class: this runs on every request while an
+            //    upgrade is unfinished.
+            $result = $db->query('SELECT `filename` FROM `tblMigrations`');
+            if ($result === false) {
+                throw new RuntimeException($db->error);
+            }
+            $recorded = array_fill_keys(array_column($result->fetch_all(), 0), true);
+            $result->free();
+        } catch (\Throwable $e) {
+            // 1146 is the database's own number for "no such table".
+            if ($e instanceof \mysqli_sql_exception && $e->getCode() === 1146) {
+                return $cannotTell('table-missing', 'the database\'s list of upgrades already applied (the table tblMigrations) is missing');
+            }
+            // The database's own words may name things a visitor should not
+            // see; only a global administrator is shown `why`.
+            return $cannotTell('table-unreadable', 'the database\'s list of upgrades already applied (the table tblMigrations) is there but '
+                . 'could not be read. The database said: ' . rtrim($e->getMessage(), '. '));
+        }
+
+        $waiting = [];
+        foreach ($files as $file) {
+            if (isset($recorded[$file]) === false) {
+                $waiting[] = $file;
+            }
+        }
+
+        return ['answered' => true, 'files' => $waiting, 'why' => '', 'cause' => ''];
     }
 
     /**

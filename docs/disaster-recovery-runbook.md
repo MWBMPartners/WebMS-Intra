@@ -349,7 +349,7 @@ code is newer than the database. Sign in and open `/admin/upgrade`.
 | "Too many failed attempts" at sign-in | Three wrong passwords from one address block that address for 15 minutes. *Tested (17).* Wait, and make sure nobody at that address tries meanwhile: a try while blocked is counted as another wrong one and keeps the block going. *Read from the code; the 15 minutes were not waited out.* |
 | Pages are slow | `/admin/maintenance/health` |
 | Email is not arriving | `/admin/integrations/email`, "Send test" |
-| An upgrade stopped | `/admin/migrations` lists every database change and its error. Then [6.3](#63-after-an-upgrade-that-went-wrong). |
+| An upgrade stopped | `/admin/upgrade` lists the database changes still waiting and those already run, and shows the error beside the one that failed when its button is pressed. (`/admin/migrations` only points there while an upgrade is unfinished.) Then [6.3](#63-after-an-upgrade-that-went-wrong). |
 
 The newest errors, when the pages will not load:
 
@@ -490,8 +490,15 @@ you have just made a full dump
 file is there and not empty. Set it back to `1` straight afterwards.
 *The setting is read from the code (`web/_install/upgrade.php`); upgrading
 with it switched off was not run by anybody working on this package.*
-- **A database change failed part way.** Open `/admin/migrations` and read the
-  error. If you have a developer, send them that error before going back.
+- **A database change failed part way.** The Upgrade page showed the error
+  beside that change when its button was pressed. To see it again, open
+  `/admin/upgrade` and press the button again: it takes a new snapshot and
+  tries only the changes still waiting. (`/admin/migrations` runs nothing
+  while an upgrade is unfinished; it points to the Upgrade page.) If you have
+  a developer, send them that error before going back.
+  *Read from the code (`web/_install/upgrade.php`,
+  `web/_apps/admin/migrations/index.php`), 13 October 2026; a change that
+  really fails was not run.*
 - **To go back**, put back the snapshot the upgrade took
   ([section 8](#8-put-a-snapshot-back)). Know this first: **a restore puts the
   rows back. It never changes a table's shape.** If the upgrade had already

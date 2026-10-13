@@ -685,6 +685,12 @@ PWA offline fallback page.
 Runs by itself the first time the portal's address is opened, when no database login exists yet. It loads none of
 the portal. Made for somebody with only a hosting panel (#499, #500).
 
+- **Installation package (#499):** built by `tools/package/build.sh`, guarded by `tools/package/check-package.py`.
+  Installing and upgrading from the zip with only a hosting panel's file manager is written up in
+  `docs/INSTALL.md` (shipped as `INSTALL.md`) and was proved by doing it on MySQL 8.0.36 and 8.4.11 (13 October
+  2026), not yet on a real hosting panel or under Apache. A package carries no `.channel` file; the installer
+  writes the installation's own. The portal closes for an upgrade only while a database upgrade is waiting. The
+  workflow that would publish a package (`package.yml`) is proposed only and is not in the repository.
 - **Ownership code first.** A code written into `_auth_keys/install-code.php`, which only somebody who can open the
   hosting's files can read. Nothing else is shown or acted on without it. Ten wrong tries write a new code. Asked
   for again at the finish.
@@ -1685,5 +1691,5 @@ Audit pass status as of 2026-06-03: **0 missing routes · 0 column mismatches ·
 | `tools/audit-checks/` | Static-analysis scripts (above) |
 | `tools/e2e-migrations/` | docker-compose MySQL 8.0.36 + `run.sh` 3-phase migration smoke test (#248) |
 | `tools/offsite-backup/` | Reference `sync-offsite.sh` + `log-offsite-result.php`. An administrator copies both to the server by hand, into `_backups/`; they are not deployed (#249) |
-| `tools/package/` | Builds and guards the installation zip (#499): `build.sh`, `check-package.py`, a self-test, and the file list of the PDF library. Part 1 only: no package can be built for release until the installation guide, the address settings (#500) and the any-folder-name support land |
+| `tools/package/` | Builds and guards the installation zip (#499): `build.sh`, `check-package.py`, a self-test, the settings for the search for secrets, and the file list of the PDF library. A package installs and upgrades (proved 13 October 2026, not on a real hosting panel); the workflow that would publish one is proposed only |
 | `tools/deploy/` | `resolve-settings.sh` decides where a deploy puts files and which login it uses, and refuses when unsure (#500). No workflow uses it yet |

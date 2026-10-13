@@ -2,6 +2,87 @@
 
 
 ## [Unreleased] (alpha)
+- **The installation package (#499): a customer can install and upgrade from the zip**
+  - **Upgrading — what changes for somebody who upgrades to this version. Nothing has to be done.**
+    1. **The portal no longer closes for an upgrade unless a database upgrade is really waiting.** It used to
+       show its holding page ("Portal Maintenance") from the moment newer files arrived until the Upgrade page's
+       button was pressed. A newer version that brought NO database upgrade therefore left every member on the
+       holding page for ever, because that button was only drawn when a database upgrade was waiting. Now: with
+       a database upgrade waiting, the holding page is shown as before, until the button on `/admin/upgrade` has
+       been pressed. With none waiting, the portal stays open. **It does not record the new version by itself:
+       an administrator presses "Finish the upgrade" on `/admin/upgrade`.** Until then every request asks the
+       database one small question (is an upgrade waiting?), about half a millisecond each; the health page's
+       "Migrations" line and the Upgrade page say so. If the portal cannot tell (the folder `_sql` or the table
+       of applied upgrades cannot be read) it stays closed, and the Upgrade page says why and what to do about
+       that cause.
+    2. **Admin, Migrations is not a way to upgrade.** While the files are newer than the version the database
+       is recorded at, `/admin/migrations` runs nothing and points to the Upgrade page. It used to run the
+       waiting upgrades with no snapshot first, without the check of stored secrets and without recording the
+       version, which left the portal closed afterwards. **It is now for a global administrator only**, as the
+       Upgrade page is: an administrator of one organisation is refused in words, and the refusal is written to
+       the activity log.
+    3. **The Upgrade page** offers a button, "Finish the upgrade", when the version is behind and nothing is
+       waiting (it takes no snapshot then, because no database upgrade runs; it does still store encrypted any
+       saved secret that was kept as readable text, and names each one); says "The upgrade is finished"
+       when it has recorded the version, with one line in the activity log ("PortalVersionRecorded"); and says
+       why when it cannot tell whether an upgrade is waiting. Its button is the only thing that records the
+       version after installation. When the database's list of applied upgrades is there but cannot be read, the
+       page is drawn (it was "Server Error") and offers no button.
+    4. **A package no longer carries a `.channel` file**, the file that says which copy of the portal an
+       installation is. Unpacking a package used to replace it: a test copy given a live package called itself
+       live and lost its staff sign-in gate, and a live portal given a beta package shut out every member. The
+       installer now writes the file when it finishes, from the word the package carries (the `Channel:` line
+       of `VERSION.txt`), and only when there is none. An installation that already has the file keeps it. One
+       that has none (its copy is told by the web folder's name, or assumed live) is exactly as it was.
+    5. **A version that is still being uploaded is not taken for a finished one.** While some of the new files
+       are in place and others not, the portal records nothing; if the new version brings a database upgrade,
+       the holding page goes up on the first request after that file has arrived. The folders may be uploaded
+       in any order.
+    6. **The recorded version cannot be changed by hand in the portal.** Admin, Settings refuses to add, change
+       or delete the setting `portal.installed_version`, for anybody, and points to the Upgrade page. A row of
+       that name saved for ONE organisation is no longer read at all: it used to beat the installation's own and
+       could open the portal with a database upgrade waiting.
+    7. **A notice on the Admin dashboard** tells a global administrator when the files are newer than the version
+       the database is recorded at, in the same words as the health page and the Upgrade page. The dashboard's
+       "Pending Migrations" card, its "Migrations" button and the menu's "Migrations" entry are shown to a global
+       administrator only, because the page they lead to now refuses everybody else.
+  - **Proved by doing it, twice.** A package was built, unpacked into an empty folder, and installed by following
+    `docs/INSTALL.md`, on MySQL 8.0.36 and on 8.4.11. Then two later packages were unpacked over each: one that
+    differs only in its version number (a stranger and a member get the portal, not the holding page), and one
+    with a database upgrade (the holding page until the Upgrade page's button; the portal afterwards). A beta
+    installation given a live package, and a live one given a beta package, each kept their own word. By
+    checksum, nothing under `_auth_keys`, `_uploads` or `_backups` changed. **Not proved:** a real hosting
+    panel, and Apache (the installs ran behind PHP's own web server).
+  - **The guide (`docs/INSTALL.md`, shipped in every package as `INSTALL.md`)** was corrected from what happened
+    and has an upgrade section, a way back, what to do when the web folder is not called `admin_html`, and what
+    to do on hosting that fixes the main address's folder, allows web folders only inside `public_html`, or
+    will not take an 11 MB upload. It says that unpacking replaces the web folder's `.htaccess`, that the way
+    back must not lose what somebody put inside the web folder, and that a database backup is put back into an
+    EMPTIED database. The installer's seven numbered stages are steps 3 to 10 of the guide; each heading says
+    which.
+  - **The package's guards.** No package without the guide (`--allow-missing-guide` is gone). A committed
+    `web/.channel` is refused, and so is a package that holds the file. One list of our own domains
+    (`OWN_DOMAINS` in `tools/audit-checks/check_no_hardcoded_domains.py`). The search for secrets (`gitleaks`)
+    must first find a made-up key it is shown, so a program that only calls itself `gitleaks` no longer passes.
+    A zip may carry no comment and no byte that is not part of a file, and may unpack to at most 16 MB for one
+    file and 150 MB in all.
+  - **The first run of the real `gitleaks` on a real package (version 8.30.1) reported one line twice, wrongly:**
+    the scheduled-job command in the Help and in these notes, whose "secret" is the placeholder `YOUR_TOKEN`.
+    `tools/package/gitleaks-settings.toml` now lets through a find whose secret is exactly that word. Without
+    that every release build would have stopped.
+  - **Two faults on the first pages a new customer sees.** The dashboard asked for 15 pictures that do not exist
+    (an app's icon is an icon font's name, and was written into a picture's address). And `imagedestroy()`,
+    which PHP 8.5 reports as deprecated, printed a notice in front of a label PDF on a pre-release copy; the
+    five calls are gone (the function has done nothing since PHP 8.0).
+  - **Tests.** New: `tools/upgrade-pages-selftest.php` (when an upgrade closes the portal, on the real pages;
+    95 checks; 24 faults planted one at a time each fail it, and so do four more planted in the dashboard's
+    lines). `tools/site-addresses-selftest.php` has two more checks (103): the menu offers Migrations to a global
+    administrator and to nobody else. More cases in `tools/installer-selftest.php`
+    (the channel file) and `tools/package/package-selftest.sh` (`T14`, `B16` to `B19`, `C16` to `C26`). An
+    independent check was made of the build, and a second, narrow one of the gate; their findings are what the
+    second and fourth commits fix. The fourth commit's fixes were not independently checked, and nor were the
+    lines joined by hand afterwards (the Settings page's two refusals side by side, the dashboard notice, the
+    hidden "Migrations" links); the tests were run again on the joined result. Codex has not reviewed any of it.
 - **Added — the mail queue's page, and three deliberate ways past a failed certificate check (#592, part 4 of 6)**
   - **Added**
     - **The mail queue has a page** (#592, part 4): on Admin, Integrations, Email. It lists what is waiting or held, most urgent first, with the kind of message, who it is for, its subject, when it was kept, why it waits, how many times it was tried and the time after which it is not sent. A held password reset is listed first with how long its link has left. It never shows a message's content. Every moment on the e-mail page is in ONE time zone, named beside it: the organisation's own (set at Admin, Organisations), or the `site.timezone` setting's when the organisation's own was never set. A global administrator sees every organisation's messages and can act; an organisation's administrator sees their own organisation's, with no button.

@@ -178,8 +178,8 @@
 declare(strict_types=1);
 
 /** How many checks each kind of run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_FULL     = 101;
-const EXPECTED_NO_CRAWL = 91;
+const EXPECTED_FULL     = 103;
+const EXPECTED_NO_CRAWL = 93;
 const EXPECTED_ONLY     = 11;
 
 function refuse(string $why): never
@@ -1039,10 +1039,16 @@ if ($only === []) {
     $menuLinks = addressesIn($menu[0] ?? '');
     $verdict   = judge($menuLinks, B);
     ok('F02 every link in the menu keeps the organisation\'s part (' . $verdict['judged'] . ' addresses read)', $verdict['judged'] >= 25 && wrong($verdict) === '', $verdict['judged'] . ' read; ' . wrong($verdict));
-    $expected20 = ['', 'admin', 'admin/errors', 'admin/activity', 'admin/audit', 'admin/users', 'admin/migrations', 'settings', 'admin/apps', 'admin/reports', 'admin/workflows',
+    $expected20 = ['', 'admin', 'admin/errors', 'admin/activity', 'admin/audit', 'admin/users', 'settings', 'admin/apps', 'admin/reports', 'admin/workflows',
         'admin/sms', 'admin/transcription', 'admin/safeguarding/dbs', 'admin/decision-cards', 'account', 'logout'];
     $missing = array_filter($expected20, static fn (string $page): bool => in_array(B . '/' . $page, $menuLinks, true) === false);
     ok('F03 the logo, the dashboard, the administration menu, "My account" and "Sign out" are each there under the organisation\'s part', $missing === [], 'not found: ' . implode(', ', array_map(static fn (string $p): string => B . '/' . $p, $missing)));
+    // Migrations is for a GLOBAL administrator only (#499, 13 October 2026): the page refuses everybody else,
+    // so the menu must not offer it to an administrator of one organisation, which is what 'badmin' is. It was
+    // in F03's list until then. F12b holds the other half: a global administrator IS offered it.
+    ok('F03b an administrator of ONE organisation is not offered Migrations in the menu: the page would refuse them',
+        in_array(B . '/admin/migrations', $menuLinks, true) === false && in_array('/admin/migrations', $menuLinks, true) === false,
+        'the menu holds: ' . implode(', ', array_filter($menuLinks, static fn (string $a): bool => str_contains($a, 'migrations') === true)));
     ok('F04 the menu holds no bare address at all, not even one the check would excuse', array_filter($menuLinks, static fn (string $a): bool => str_starts_with($a, '/') === true && str_starts_with($a, B . '/') === false && str_starts_with($a, '/assets/') === false) === [],
         implode(', ', array_filter($menuLinks, static fn (string $a): bool => str_starts_with($a, '/') === true && str_starts_with($a, B . '/') === false)));
     $verdict = judge(addressesIn(furniture($front['body'])), B);
@@ -1077,6 +1083,9 @@ if ($only === []) {
     // switcher: one link to the front page of each OTHER organisation. Those two are meant to lead away.
     $switcher = ['/' . KEY_A . '/', '/' . (string) (one('SELECT siteKey FROM tblSites WHERE siteID = 1')['siteKey'] ?? '') . '/'];
     $ownLinks = array_values(array_diff($rootLinks, $switcher));
+    ok('F12b a global administrator IS offered Migrations in the menu, under B\'s part',
+        in_array(B . '/admin/migrations', $rootLinks, true) === true,
+        'the menu holds: ' . implode(', ', array_filter($rootLinks, static fn (string $a): bool => str_contains($a, 'migrations') === true)));
     ok('F12 a global administrator\'s menu offers the organisations page under B\'s part; apart from the switcher\'s two links to the other organisations it holds no address without that part',
         $frontRoot['status'] === 200 && in_array(B . '/admin/sites', $rootLinks, true) === true && in_array(B . '/admin/sites', $menuLinks, true) === false
         && count($rootLinks) - count($ownLinks) === 2 && wrong(judge($ownLinks, B)) === '', said($frontRoot) . ' ' . wrong(judge($ownLinks, B)) . ' menu: ' . implode(' ', $rootLinks));

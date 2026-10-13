@@ -76,7 +76,7 @@
  * "Maintenance mode" check reads only the on/off switch
  * (portal.maintenance.active). When the portal has closed ITSELF because the
  * code is newer than the database, that switch can still be off, so the line
- * says "Off" and the "Migrations" line says "upgrade needed" instead.
+ * says "Off" and the "Migrations" line says so instead, with what to do.
  *
  * WHAT IT CANNOT DO
  *   - On a beta or alpha copy it is behind the pre-release gate, like every
@@ -257,8 +257,10 @@ require_once __DIR__ . DIRECTORY_SEPARATOR . '_health-probes.php';
 //      - The empty session file PHP creates for each request is not covered.
 //        That is PHP's own session handling, on disk, not the database.
 //      - Maintenance::isActive() itself runs just before the handler is put in
-//        place, because the handler depends on its answer. It only reads the
-//        settings already loaded into memory.
+//        place, because the handler depends on its answer. It reads the
+//        settings already loaded into memory and, only while the recorded
+//        version is behind the files', asks the database one read-only
+//        question (which upgrade files has it recorded?). It writes nothing.
 $closedForUpgrade = Maintenance::isActive();
 if ($closedForUpgrade === true) {
     // ⚠️ Deliberately never paired with restore_error_handler(): see step 3.

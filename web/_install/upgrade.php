@@ -33,6 +33,33 @@
  *     before the installer wrote those files gets them this way. What that
  *     file can and cannot do is at the top of install_common.php.
  *
+ * A BUTTON IS OFFERED WHEREVER ONE CAN SAFELY DO SOMETHING (#499): "Run N
+ * Pending Migration(s)" when a database upgrade is waiting, and "Finish the
+ * upgrade" when none is but the recorded version is behind the files'. NONE
+ * is offered when this page can list no upgrade and cannot tell whether one
+ * is waiting (the _sql folder or the table of applied upgrades cannot be
+ * read): a button could then only make things worse, and the page says what
+ * to do instead, by cause. Until 13 October 2026 a button was drawn only
+ * when an upgrade was waiting, and it was the only thing that recorded the
+ * version: a newer package with no database upgrade in it left the portal
+ * on the holding page with nothing to press.
+ *
+ * "FINISH THE UPGRADE" TAKES NO SNAPSHOT, AND CAN STILL CHANGE ROWS. No
+ * migration runs, so there is nothing of that kind to undo. But the step
+ * that follows every press encrypts, in place, any stored secret that is
+ * still kept as readable text; the secret is the same afterwards, and the
+ * page names each one. (This comment and the card used to say that nothing
+ * in the database changes. A check on 13 October 2026 watched a row change,
+ * with no snapshot taken.)
+ *
+ * THIS BUTTON IS THE ONLY THING THAT RECORDS THE VERSION after installation.
+ * The portal never records it by itself (it did for a few hours, and that
+ * opened a hole: see the top of Portal\Core\Maintenance, where the holding
+ * page's rule and the one statement that records the version live). With
+ * nothing waiting the portal is open all the same, and until this button is
+ * pressed every request asks the database whether an upgrade is waiting; the
+ * page says so.
+ *
  * EVERY ADDRESS THIS PAGE WRITES is built by Site::url() (#536): its three
  * redirects and its breadcrumb used to be written out as "/admin/upgrade"
  * and "/admin". Where organisations are told apart by the first part of the
@@ -62,6 +89,7 @@ require_once __DIR__ . DIRECTORY_SEPARATOR . 'install_common.php';
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\FeedAdmin;
+use Portal\Core\Maintenance;
 use Portal\Core\Migrator;
 use Portal\Core\Router;
 use Portal\Core\SecretSettings;
@@ -88,8 +116,50 @@ if (App::isUmbrellaAdmin() === false) {
     return;
 }
 
-$migrator = new Migrator($mysqli);
-$pending  = $migrator->pending();
+// 🔢 Is the recorded version behind the files', and could the portal tell
+//    whether a database upgrade is waiting? Asked BEFORE the Migrator is made,
+//    because making it creates the table of applied upgrades when that table
+//    is missing, which is one of the two reasons the portal could not tell.
+$versionBehind = Maintenance::versionIsBehind();
+$whyUnknown    = Maintenance::whyUpgradeUnknown();
+$unknownCause  = Maintenance::upgradeUnknownCause(); // which of four causes: decides the advice
+$versionRecorded = false; // true once this press has recorded the version
+
+// 🛟 THE LIST OF WAITING UPGRADES, WHICH MAY NOT BE READABLE.
+//
+//    WHAT WAS WRONG: these two lines stood outside any try. When the table
+//    of applied upgrades was THERE but could not be read (a column renamed,
+//    the database user's right to read it taken away), the list threw and
+//    this page was "Server Error", HTTP 500. That was the one state in which
+//    the health page sent an administrator here "to be told why, and what
+//    to do" (found by a check on 13 October 2026).
+//
+//    Now the page is drawn, with the reason in the "could not tell" box
+//    further down and NO button: $migrator stays null, nothing is listed,
+//    and a form sent anyway is sent back (see the refusal below).
+$migrator = null;
+$pending  = [];
+try {
+    $migrator = new Migrator($mysqli);
+    $pending  = $migrator->pending();
+} catch (\Throwable $listFailed) {
+    $migrator = null;
+    $pending  = [];
+    if ($whyUnknown === '') {
+        // The gate had no reason to ask (the versions are not behind), so
+        // ask now, for the reason in words and for its cause.
+        $asked        = Migrator::waiting($mysqli);
+        $whyUnknown   = $asked['why'] !== '' ? $asked['why']
+            : 'the database\'s list of upgrades already applied (the table tblMigrations) could not be read. The database said: '
+                . rtrim($listFailed->getMessage(), '. ');
+        $unknownCause = $asked['cause'] !== '' ? $asked['cause'] : 'table-unreadable';
+    }
+    // A table that is missing AND could not be made again gets the advice
+    // for one that cannot be read: there is no button to point to.
+    if ($unknownCause === 'table-missing') {
+        $unknownCause = 'table-unreadable';
+    }
+}
 $results  = [];
 $error    = '';
 $ranMigrations = false;
@@ -125,6 +195,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $userId = (int) ($_SESSION['user_id'] ?? 0);
 
+    // 🚫 The portal could not tell whether a database upgrade is waiting, and
+    //    this page lists none (the _sql folder cannot be read, or is empty).
+    //    Running "nothing" would record the version and open the portal on a
+    //    guess. Nothing is run; the page says why and what to do. No button
+    //    is drawn in this state, so this is for a form sent some other way.
+    //    The same when the list of upgrades could not be read at all.
+    if ($migrator === null || ($pending === [] && $whyUnknown !== '')) {
+        header('Location: ' . Site::url('admin/upgrade'));
+        exit();
+    }
+
     // 🚧 Maintenance gate: lock public access for the duration of the
     //    migration run. Non-admin requests will see the maintenance page;
     //    admins (and the routes on the allow-list) can still reach the
@@ -157,9 +238,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     //    ending the request; if that happens no migration has run, and the
     //    unfinished snapshot folder is listed as unfinished and removed by a
     //    later upgrade once it is a day old.
+    //
+    //    NOT TAKEN WHEN NOTHING IS WAITING (#499): no migration is about to
+    //    run. WHAT THAT LEAVES WITHOUT A SNAPSHOT: the stored-secrets step
+    //    further down still runs, and it rewrites, in place, any secret kept
+    //    as readable text. The secret is the same afterwards; the row is not.
     $backupSetting = (string) (\Portal\Core\App::settings()['portal']['upgrade']['backup']['enabled'] ?? '1');
     $backupResult  = null;
-    if ($backupSetting === '1') {
+    if ($backupSetting === '1' && $pending !== []) {
         \Portal\Core\TimeLimit::atLeast(900);
         $backup = new \Portal\Core\DbBackup($mysqli);
         $backupResult = $backup->snapshot('pre-upgrade-' . PORTAL_VERSION);
@@ -182,7 +268,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     . 'that the portal is allowed to write to it, and that the disk is not full. '
                                     . 'The recovery guide covers the other causes.';
             $_SESSION['flash_type'] = 'danger';
-            \Portal\Core\Maintenance::setActive(false);
+            // '' takes the words "Applying database migrations" away again
+            // with the switch: see where the run ends, further down.
+            \Portal\Core\Maintenance::setActive(false, '');
             header('Location: ' . Site::url('admin/upgrade'));
             exit();
         }
@@ -225,7 +313,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Shown once, like the message: the second button appears
                 // only on the page this refusal leads to.
                 $_SESSION['upgrade_may_go_on'] = true;
-                \Portal\Core\Maintenance::setActive(false);
+                \Portal\Core\Maintenance::setActive(false, '');
                 header('Location: ' . Site::url('admin/upgrade'));
                 exit();
             }
@@ -269,6 +357,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $results = $migrator->runAll($userId);
     $ranMigrations = true;
     $pending = $migrator->pending(); // Refresh pending list
+    // 🧹 What the gate found out at the START of this request ("one database
+    //    upgrade is waiting") is no longer true. Left in place, the card
+    //    below once said that sentence beside "nothing is waiting".
+    Maintenance::forgetVersionState();
 
     // 🔐 #497: encrypt, in place, every secret still stored as readable text.
     //    AFTER the migrations, so that it sees the marks migration 214 has
@@ -348,24 +440,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
     if ($allOk === true) {
-        try {
-            $stmt = $mysqli->prepare(
-                "INSERT INTO `tblSettings` "
-                . "(`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) "
-                . "VALUES (NULL, 'portal.installed_version', ?, '', 0) "
-                . "ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`)"
-            );
-            if ($stmt !== false) {
-                $v = (string) PORTAL_VERSION;
-                $stmt->bind_param('s', $v);
-                $stmt->execute();
-                $stmt->close();
-            }
-        } catch (\mysqli_sql_exception $e) {
-            // Non-fatal — the gate will fire again until this gets fixed.
-        }
-        \Portal\Core\Maintenance::setActive(false);
+        // ✍️ The statement that records the version is Maintenance's own.
+        //    Nothing else calls it. If the database refuses, nothing is
+        //    lost: with nothing waiting the portal is open all the same, and
+        //    this page goes on offering the button.
+        $versionRecorded = Maintenance::recordVersion($userId);
+        // 🧽 The switch off, AND the words taken away. The words "Applying
+        //    database migrations — please wait." were written when this run
+        //    began, and setActive(false) alone left them stored: they were
+        //    shown again the next time the portal closed, for an upgrade
+        //    nobody had started.
+        \Portal\Core\Maintenance::setActive(false, '');
+    } else {
+        // A migration failed: the portal stays closed, as before, but no
+        // longer under words that say something is being applied.
+        \Portal\Core\Maintenance::setActive(true, '');
     }
+
+    // 🔁 What the cards below go by, asked afresh now that the run is over.
+    $versionBehind = Maintenance::versionIsBehind();
+    $whyUnknown    = Maintenance::whyUpgradeUnknown();
+    $unknownCause  = Maintenance::upgradeUnknownCause();
 }
 
 // Get all executed migrations for display.
@@ -504,6 +599,50 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php echo htmlspecialchars(implode('; ', $privateFolders['problems']), ENT_QUOTES, 'UTF-8'); ?>.
                         What to do: in the hosting panel&rsquo;s file manager, check that the folder exists beside <code>_core</code> and that the
                         website may write to it, then open this page again.
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($versionRecorded === true): ?>
+                <!-- ✍️ #499: this press recorded the version, which is what ends an upgrade -->
+                <div class="alert alert-success" id="upgrade-version-recorded">
+                    <strong>The upgrade is finished.</strong> The database is now recorded at version
+                    <?php echo htmlspecialchars(App::version(), ENT_QUOTES, 'UTF-8'); ?>, the same as the portal&rsquo;s files.
+                </div>
+            <?php endif; ?>
+
+            <?php if ($whyUnknown !== ''): ?>
+                <!-- ❓ #499: the portal, or this page, could not tell whether an upgrade is waiting. The advice goes by the cause. -->
+                <div class="alert alert-warning" id="upgrade-cannot-tell" data-cause="<?php echo htmlspecialchars($unknownCause, ENT_QUOTES, 'UTF-8'); ?>">
+                    <?php if ($versionBehind === true): ?>
+                        <strong>The portal is closed to everybody else, because it could not tell whether a database upgrade is waiting.</strong>
+                    <?php else: ?>
+                        <strong>This page could not tell whether a database upgrade is waiting.</strong>
+                    <?php endif; ?>
+                    When this page was opened, <?php echo htmlspecialchars($whyUnknown, ENT_QUOTES, 'UTF-8'); ?>.
+                    <?php if ($versionBehind === true): ?>
+                        The portal&rsquo;s files are newer than the version the database is recorded at, so to be safe it stays closed until it can tell.
+                    <?php endif; ?>
+                    <?php
+                    // 💬 WHAT TO DO, BY CAUSE. There was one piece of advice for
+                    //    every cause, the one for a missing folder: somebody
+                    //    whose TABLE was missing was told to unpack the package
+                    //    again, which changes nothing for them.
+                    ?>
+                    <?php if ($unknownCause === 'table-missing'): ?>
+                        <span id="upgrade-advice">What to do: nothing is wrong with the portal&rsquo;s files. The table was missing from the database, and this
+                        page has just made it again, empty, so every database upgrade now counts as waiting. Press the button below: it takes a
+                        snapshot first and then runs them all again, in order, which each of them is written to allow. If you know the table went
+                        missing because the database was put back from an incomplete backup, put a complete one back instead.</span>
+                    <?php elseif ($unknownCause === 'table-unreadable'): ?>
+                        <span id="upgrade-advice">What to do: nothing is wrong with the portal&rsquo;s files, and no button is offered here, because
+                        none could put this right. In the hosting panel, check that the portal&rsquo;s database user still has full rights to its
+                        database. If it has, the table itself is damaged: put the table <code>tblMigrations</code> back from a backup of the
+                        database. Then open this page again.</span>
+                    <?php else: ?>
+                        <span id="upgrade-advice">What to do: in the hosting panel&rsquo;s file manager, check that the folder <code>_sql</code> is beside
+                        <code>_core</code> and holds the numbered files from the package (unpack the package again if it does not), then open this
+                        page again. No button is offered until then.</span>
                     <?php endif; ?>
                 </div>
             <?php endif; ?>
@@ -743,6 +882,26 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <span class="text-muted small ms-2">Only if you have another backup of the database that you trust.</span>
                             </form>
                         <?php endif; ?>
+                    </div>
+                </div>
+            <?php elseif ($versionBehind === true && $whyUnknown === ''): ?>
+                <?php // ✍️ #499: nothing waiting, but the version is behind. The same form as above; see the top of this file. ?>
+                <div class="card mb-4" id="upgrade-finish">
+                    <div class="card-header">
+                        <h2 class="h6 mb-0">Finish the upgrade</h2>
+                    </div>
+                    <div class="card-body">
+                        <?php // 💬 The sentence has one home, Maintenance::upgradeNotice(); the health page shows the same one. ?>
+                        <p id="upgrade-notice"><?php echo htmlspecialchars(Maintenance::upgradeNotice(false), ENT_QUOTES, 'UTF-8'); ?></p>
+                        <p>
+                            No database upgrade will run, so the button takes no snapshot. It does two things. It stores encrypted
+                            any saved password or key that is still kept as readable text (the secret itself stays the same, and the
+                            page then names each one). And it records the new version, which is what stops the asking.
+                        </p>
+                        <form method="post">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                            <button type="submit" class="btn btn-warning">Finish the upgrade</button>
+                        </form>
                     </div>
                 </div>
             <?php endif; ?>

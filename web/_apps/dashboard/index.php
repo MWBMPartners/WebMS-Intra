@@ -264,7 +264,9 @@ foreach ($SETTINGS as $key => $arr) {
     $apps[] = [
         'key'   => $key,
         'name'  => $arr['displayName'] ?? ($appRegistryEntries[$key]['name'] ?? ucfirst($key)),
-        'icon'  => $arr['displayIcon'] ?? ($appRegistryEntries[$key]['icon'] ?? 'app.svg'),
+        // 🧊 The last fallback is the registry's own ("fa-solid fa-cube"). It
+        //    used to be 'app.svg', a picture that has never existed.
+        'icon'  => $arr['displayIcon'] ?? ($appRegistryEntries[$key]['icon'] ?? 'fa-solid fa-cube'),
         'color' => $arr['brandColor']  ?? ($appRegistryEntries[$key]['color'] ?? '#0d6efd'),
         'url'   => Router::url($appRoute),
     ];
@@ -486,7 +488,47 @@ $firstRunSteps = [
             <a href="<?php echo htmlspecialchars($app['url'], ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
                 <div class="card app-card h-100 shadow-sm" style="border-top:4px solid <?php echo htmlspecialchars($app['color'], ENT_QUOTES, 'UTF-8'); ?>">
                     <div class="card-body text-center">
-                        <img src="/assets/images/<?php echo htmlspecialchars($app['icon'], ENT_QUOTES, 'UTF-8'); ?>" alt="" width="48" class="mb-3">
+                        <?php
+                        // 🖼️ AN APP'S ICON IS AN ICON FONT'S CLASS NAME ("fa-solid fa-receipt"):
+                        //    that is what the registry and every seeded displayIcon setting hold.
+                        //    This line used to write it into <img src="/assets/images/…">, so a
+                        //    browser asked for a picture called "fa-solid fa-receipt" for every
+                        //    card: 15 "not found" answers on each visit to the first page a new
+                        //    customer sees (found 13 October 2026).
+                        //
+                        //    An <img> is drawn only for a REAL picture: a plain file name (no
+                        //    folder in it) that exists under assets/images in the web folder.
+                        //    A name that looks like a picture but is not there gets the generic
+                        //    icon, never a broken picture.
+                        //
+                        //
+                        //    THE PICTURE'S ADDRESS IS WRITTEN BARE, NOT BUILT BY Site::url(),
+                        //    as header.php writes its files' addresses. A real file is answered
+                        //    by the web server itself, and has no organisation's part: where
+                        //    organisations are told apart by the first part of the address,
+                        //    Site::url() would add that part and the picture would be "not
+                        //    found". (For a few hours on 13 October 2026 it was built by
+                        //    Site::url(); no app had a picture for an icon, so nothing broke.)
+                        //
+                        //    NO "address-check: allow" MARKER ON THE LINE, on purpose. The check
+                        //    (tools/audit-checks/check_site_aware_addresses.py) already takes an
+                        //    address under a real folder of the web folder for the web server's
+                        //    own, and calls a marker on such a line an error ("an allow marker
+                        //    on a line where nothing is found"; tried on 13 October 2026).
+                        $iconName      = (string) $app['icon'];
+                        $iconLooksFile = preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*\.(svg|png|gif|webp|jpe?g)$/i', $iconName) === 1;
+                        $iconIsPicture = $iconLooksFile === true && is_file(
+                            PORTAL_WEBROOT . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'images' . DIRECTORY_SEPARATOR . $iconName
+                        ) === true;
+                        $iconAddress   = '/assets/images/' . $iconName;
+                        ?>
+                        <?php if ($iconIsPicture === true): ?>
+                            <img src="<?php echo htmlspecialchars($iconAddress, ENT_QUOTES, 'UTF-8'); ?>" alt="" width="48" class="mb-3">
+                        <?php else: ?>
+                            <div class="mb-3" style="color:<?php echo htmlspecialchars($app['color'], ENT_QUOTES, 'UTF-8'); ?>">
+                                <i class="<?php echo htmlspecialchars($iconLooksFile === true ? 'fa-solid fa-cube' : $iconName, ENT_QUOTES, 'UTF-8'); ?> fa-2x" aria-hidden="true"></i>
+                            </div>
+                        <?php endif; ?>
                         <h5 class="card-title mb-0"><?php echo htmlspecialchars($app['name'], ENT_QUOTES, 'UTF-8'); ?></h5>
                     </div>
                 </div>

@@ -122,7 +122,7 @@ class Qr
         $bgColor = imagecolorallocate($img, $br, $bg2, $bb);
         $fgColor = imagecolorallocate($img, $fr, $fg2, $fb);
         if ($bgColor === false || $fgColor === false) {
-            imagedestroy($img);
+            // No imagedestroy(): it has done nothing since PHP 8.0 (the picture is freed with its variable), and PHP 8.5 reports it as deprecated.
             return '';
         }
         imagefilledrectangle($img, 0, 0, $size, $size + $captionH, $bgColor);
@@ -151,7 +151,7 @@ class Qr
         ob_start();
         imagepng($img);
         $bytes = (string) ob_get_clean();
-        imagedestroy($img);
+        // No imagedestroy(): it has done nothing since PHP 8.0 (the picture is freed with its variable), and PHP 8.5 reports it as deprecated.
         return $bytes;
     }
 

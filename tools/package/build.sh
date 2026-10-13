@@ -16,19 +16,26 @@
 #
 # Usage:
 #   bash tools/package/build.sh <commit> <channel word> <output folder>
-#        [--tag <tag>] [--allow-missing-guide] [--allow-no-gitleaks]
+#        [--tag <tag>] [--allow-no-gitleaks]
 #
 #   <commit>         what to package: a commit, a tag or a branch name
-#   <channel word>   live, beta or alpha; written into the package's .channel
+#   <channel word>   live, beta or alpha; written as the Channel line of the
+#                    package's VERSION.txt (a package carries NO .channel
+#                    file: see step 5)
 #   <output folder>  must not exist yet, or be empty. It receives:
 #                      stage/                       the package, unpacked
 #                      webms-intra-….zip            the package
 #                      webms-intra-….zip.sha256     its checksum
 #   --tag <tag>      for a build that will be published (v1.5.0, v1.5.0-beta.1)
-#   --allow-…        see "THE TWO ALLOW SWITCHES" in check-package.py. Each
-#                    skips ONE guard (the guide; the search for secrets), is
-#                    refused with --tag, and adds NOT-FOR-RELEASE to the
-#                    zip's name.
+#   --allow-no-gitleaks
+#                    for a machine without gitleaks: see "THE ONE ALLOW
+#                    SWITCH" in check-package.py. It skips ONE guard (the
+#                    search for secrets), is refused with --tag, and adds
+#                    NOT-FOR-RELEASE to the zip's name.
+#
+# THE GUIDE MUST BE THERE. A commit without docs/INSTALL.md is not built at
+# all. There used to be a switch for that (--allow-missing-guide), from the
+# weeks before the guide was written; it was removed on 13 October 2026.
 #
 # THE ONE RULE THAT MATTERS MOST: the package is made from GIT, at the commit
 # named, with `git archive`. It is never a copy of the working folder. On
@@ -42,8 +49,8 @@
 # passed and its checksum file is written. (Until 12 October 2026 it was made
 # in the output folder and deleted on failure, and a failure between the two
 # left a zip behind that nobody had checked.) No switch skips the two runs of
-# the checker; the two --allow switches each skip one guard inside it, and a
-# build that used one is never fit to publish.
+# the checker; --allow-no-gitleaks skips one guard inside it, and a build
+# that used it is never fit to publish.
 #
 # A run of the checker counts as passed only when its exit code is 0 AND its
 # last line is a PASS line saying it reached its end. An empty or crashed
@@ -58,10 +65,10 @@
 # its final name, because the zip only gets that name after both checks.
 #
 # WHAT THIS CANNOT DO: it does not publish anything, create a tag, or decide
-# which channel a commit belongs to (the caller says). And until package F3
-# of the roll-out lands, the portal's code only works from a web folder
-# called public_html, so a package built today cannot be installed yet. See
-# README.md beside this script.
+# which channel a commit belongs to (the caller says). It does not install
+# anything either: that a package installs and upgrades was proved by hand,
+# by following docs/INSTALL.md, on 13 October 2026. See README.md beside this
+# script.
 # =============================================================================
 set -euo pipefail
 
@@ -140,12 +147,12 @@ POSITIONAL=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --tag) TAG="${2:?--tag needs a tag name}"; shift 2 ;;
-        --allow-missing-guide | --allow-no-gitleaks) ALLOW+=("$1"); shift ;;
+        --allow-no-gitleaks) ALLOW+=("$1"); shift ;;
         -*) stop "unknown option '$1' (usage is at the top of this script)" ;;
         *) POSITIONAL+=("$1"); shift ;;
     esac
 done
-[[ "${#POSITIONAL[@]}" -eq 3 ]] || stop "usage: build.sh <commit> <channel word> <output folder> [--tag <tag>] [--allow-missing-guide] [--allow-no-gitleaks]"
+[[ "${#POSITIONAL[@]}" -eq 3 ]] || stop "usage: build.sh <commit> <channel word> <output folder> [--tag <tag>] [--allow-no-gitleaks]"
 CHANNEL="${POSITIONAL[1]}"
 OUT="${POSITIONAL[2]}"
 
@@ -161,23 +168,17 @@ esac
 # check-package.py refuses this too. It is repeated here only so the refusal
 # comes before several minutes of downloading, not after.
 if [[ -n "$TAG" && "${#ALLOW[@]}" -gt 0 ]]; then
-    stop "a build with --tag may be published, so no --allow-… switch is accepted with it"
+    stop "a build with --tag may be published, so --allow-no-gitleaks is not accepted with it"
 fi
 
 COMMIT="$(git -C "$REPO_ROOT" rev-parse --verify "${POSITIONAL[0]}^{commit}")" || stop "'${POSITIONAL[0]}' is not a commit in this repository"
 SHORT="$(git -C "$REPO_ROOT" rev-parse --short "$COMMIT")"
 
-# The guide is written by really installing the portal, so it does not exist
-# until that can be done. A package without it is useless to a customer, so
-# its absence stops the build unless the caller says, in so many words, that
-# this build is not for release.
-HAVE_GUIDE=1
+# A package without the guide is useless to a customer who has only a hosting
+# panel, so a commit without it is not built. check-package.py refuses such a
+# package too (G10); this is here so the refusal comes before the downloads.
 if ! git -C "$REPO_ROOT" cat-file -e "$COMMIT:docs/INSTALL.md" 2> /dev/null; then
-    HAVE_GUIDE=0
-    case " ${ALLOW[*]-} " in
-        *" --allow-missing-guide "*) ;;
-        *) stop "docs/INSTALL.md does not exist at $SHORT. A package without the installation guide must not be released. To build one only to prove the build, add --allow-missing-guide" ;;
-    esac
+    stop "docs/INSTALL.md does not exist at $SHORT. A package is never made without the installation guide: a customer with only a hosting panel cannot install without it"
 fi
 
 # This script deletes nothing it did not make, so it will not build into a
@@ -297,9 +298,19 @@ VERSION="$(sed -n "s/^return '\([^']*\)';.*/\1/p" "$STAGE/_core/version.php")"
 PACKAGE_VERSION="$VERSION"
 [[ -n "$TAG" ]] && PACKAGE_VERSION="${TAG#v}"
 
-printf '%s\n' "$CHANNEL" > "$STAGE/.channel"
+# NO .channel FILE IS WRITTEN INTO A PACKAGE. Until 13 October 2026 this step
+# wrote one, so unpacking a newer package over an installation REPLACED that
+# installation's own word with the package's: a test copy given a live package
+# called itself live and lost its staff sign-in gate, and a live portal given a
+# beta package shut out every member. The word now travels only as the Channel
+# line below. The installer's finish reads that line (installPackageChannelWord()
+# in web/_install/install_common.php) and writes the installation's own
+# .channel from it, only when there is none. check-package.py (G9) refuses a
+# package that holds the file.
+#
 # Plain text, five "Key: value" lines. "Which package do you have?" is the
-# first question support asks, and the installer reads the Channel line.
+# first question support asks. (This comment used to say "the installer reads
+# the Channel line" at a time when nothing in a package read this file.)
 {
     echo "Product: $PRODUCT"
     echo "Version: $PACKAGE_VERSION"
@@ -310,11 +321,7 @@ printf '%s\n' "$CHANNEL" > "$STAGE/.channel"
 # From git at the commit, like everything else; the portal's release-notes
 # page reads it.
 git -C "$REPO_ROOT" show "$COMMIT:CHANGELOG.md" > "$STAGE/CHANGELOG.md"
-if [[ "$HAVE_GUIDE" -eq 1 ]]; then
-    git -C "$REPO_ROOT" show "$COMMIT:docs/INSTALL.md" > "$STAGE/INSTALL.md"
-else
-    echo "   NOTE: no installation guide exists at this commit. This package is NOT FOR RELEASE."
-fi
+git -C "$REPO_ROOT" show "$COMMIT:docs/INSTALL.md" > "$STAGE/INSTALL.md"
 
 echo "== 6. Setting the same permission bits whoever builds"
 # What a customer's "extract" gives each file comes from the bits stored in

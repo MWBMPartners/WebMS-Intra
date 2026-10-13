@@ -18,6 +18,9 @@
  *      decided". The decision itself is NOT made here: it is made in one
  *      place, `Portal\Core\Channel`, and this only puts its answer into
  *      sentences.
+ *   3. (The installer only.) Writing the installation's own `.channel` file
+ *      from the word the package carries, and ONLY when there is none. See
+ *      installWriteChannelFile().
  *
  * It lives in its own file so that the two pages cannot drift apart, and it
  * uses nothing but PHP and `Portal\Core\Channel` (for the names it prints),
@@ -299,6 +302,121 @@ function installChannelWords(string $channel, string $source, ?string $webFolder
         'assumed' => true,
         'advice'  => [$fileAdvice, $sharedAdvice],
     ];
+}
+
+/** The package's own description of itself, beside `_core`. Five "Key: value" lines; tools/package/build.sh writes it. */
+const INSTALL_PACKAGE_FILE = 'VERSION.txt';
+
+/**
+ * 📦 The word the package says it is (live, beta or alpha): the `Channel:`
+ * line of VERSION.txt, beside `_core`. '' when there is no such file or
+ * line, or the word is not one the portal knows.
+ *
+ * "Knows" is asked of `Channel` itself, by handing it the word as if it were
+ * the `.channel` file's first line. No second list of words is kept here.
+ *
+ * @param string $root The folder that holds `_core`.
+ */
+function installPackageChannelWord(string $root): string
+{
+    $file = rtrim($root, '/\\') . DIRECTORY_SEPARATOR . INSTALL_PACKAGE_FILE;
+    clearstatcache(true, $file);
+    if (is_file($file) === false || is_readable($file) === false) {
+        return '';
+    }
+    // The file is five short lines; nothing past its start is looked at.
+    $text = (string) file_get_contents($file, false, null, 0, 2000);
+    if (preg_match('/^Channel:[ \t]*(\S+)[ \t]*\r?$/m', $text, $found) !== 1) {
+        return '';
+    }
+
+    return Channel::decideFrom(null, $found[1], null)['source'] === Channel::SOURCE_FILE ? $found[1] : '';
+}
+
+/**
+ * 📝 Give the installation its own `.channel` file, from the package's word,
+ * ONLY WHEN THERE IS NONE. Called once, by the installer's finish.
+ *
+ * WHY THE INSTALLER WRITES IT AND THE PACKAGE DOES NOT CARRY IT (#499,
+ * 13 October 2026). Every package used to hold a `.channel` file, so
+ * unpacking a newer package over an installation REPLACED the installation's
+ * own word with the package's. A test copy given a live package called
+ * itself live and lost its staff sign-in gate; a live portal given a beta
+ * package shut out every member. An upgrade unpacks files and never runs the
+ * installer, so now nothing an upgrade does can touch the file.
+ *
+ * A file that is already there is never replaced, whatever it holds (a word
+ * of somebody's own, a word nobody knows, nothing at all), and neither is a
+ * folder or a link of that name. A package word that is missing or unknown
+ * writes nothing: the portal then assumes it is the live one, and the last
+ * page says so.
+ *
+ * WHAT IT CANNOT DO: settle the channel where the server's PORTAL_ENV setting
+ * is in use (that setting is asked first and wins), or where several copies
+ * share this folder (the file then speaks for all of them).
+ *
+ * @param string $root The folder that holds `_core`.
+ *
+ * @return array{state: string, word: string} `state` is 'kept' (a file was
+ *         there), 'no-word' (the package says nothing usable), 'written', or
+ *         'not-written' (it could not be written). `word` is the package's
+ *         word, '' when it has none.
+ */
+function installWriteChannelFile(string $root): array
+{
+    $file = Channel::filePath($root);
+    clearstatcache(true, $file);
+    if (file_exists($file) === true || is_link($file) === true) {
+        return ['state' => 'kept', 'word' => installPackageChannelWord($root)];
+    }
+    $word = installPackageChannelWord($root);
+    if ($word === '') {
+        return ['state' => 'no-word', 'word' => ''];
+    }
+    // "x": make the file only if no file of that name exists, in one step,
+    // so that a file which appears in the same moment is still not replaced.
+    $handle = @fopen($file, 'x');
+    if ($handle === false) {
+        return ['state' => 'not-written', 'word' => $word];
+    }
+    $written = fwrite($handle, $word . "\n");
+    fclose($handle);
+    clearstatcache(true, $file);
+    if ($written !== strlen($word) + 1) {
+        // Half a word must not be left to decide which copy this is.
+        @unlink($file);
+
+        return ['state' => 'not-written', 'word' => $word];
+    }
+
+    return ['state' => 'written', 'word' => $word];
+}
+
+/**
+ * 💬 What installWriteChannelFile() did, or (state 'will-write') is about to
+ * do, as one or two sentences for the installer's pages. '' for a file that
+ * was already there: the page's own sentence then says the file decided.
+ *
+ * @param array{state: string, word: string} $report
+ */
+function installChannelFileWords(array $report): string
+{
+    $word = $report['word'];
+    $file = 'the file ' . Channel::FILE_NAME . ', beside the _core folder';
+    // "the live portal" or "a beta copy", in the words installChannelWords() uses.
+    $copy = Channel::decideFrom(null, $word, null)['channel'] === 'prod' ? 'the live portal' : 'a ' . $word . ' copy (a test copy, not the live portal)';
+
+    return match ($report['state']) {
+        'will-write'  => 'This package says it is ' . $copy . '. When the installation finishes, the installer writes the word '
+            . $word . ' into ' . $file . ', which settles it. There is nothing for you to create.',
+        'written'     => 'The installer has just written the word ' . $word . ' into ' . $file . ', because this package says it is '
+            . $copy . '. Unpacking a newer package never replaces that file.',
+        'not-written' => 'This package says it is ' . $copy . ', but the installer could not write the word ' . $word . ' into ' . $file
+            . '. Create the file yourself, with the one word ' . $word . ' on its first line.',
+        'no-word'     => 'The installer wrote no ' . Channel::FILE_NAME . ' file, because these files do not say which copy they '
+            . 'are: there is no ' . INSTALL_PACKAGE_FILE . ' beside the _core folder with a Channel line the portal knows.',
+        default       => '',
+    };
 }
 
 /**

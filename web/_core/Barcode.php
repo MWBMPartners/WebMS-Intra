@@ -1073,7 +1073,7 @@ class Barcode
         $white = imagecolorallocate($img, 255, 255, 255);
         $black = imagecolorallocate($img, 0, 0, 0);
         if ($white === false || $black === false) {
-            imagedestroy($img);
+            // No imagedestroy(): it has done nothing since PHP 8.0 (the picture is freed with its variable), and PHP 8.5 reports it as deprecated.
             return '';
         }
         imagefilledrectangle($img, 0, 0, $width, $totalH, $white);
@@ -1101,7 +1101,7 @@ class Barcode
         ob_start();
         imagepng($img);
         $bytesOut = (string) ob_get_clean();
-        imagedestroy($img);
+        // No imagedestroy(): it has done nothing since PHP 8.0 (the picture is freed with its variable), and PHP 8.5 reports it as deprecated.
         return $bytesOut;
     }
 

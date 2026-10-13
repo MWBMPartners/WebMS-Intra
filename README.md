@@ -214,10 +214,15 @@ The step-by-step guide for somebody with only a hosting panel is [docs/INSTALL.m
 
 ### Upgrading
 
-1. Upload the updated `web/` files to the server (FTP sync)
-2. Navigate to Admin > Upgrade (or `/admin/upgrade.php`)
-3. Review and run any pending SQL migrations
-4. Verify the portal is working correctly
+The step-by-step guide is "Upgrading to a newer package" in [docs/INSTALL.md](docs/INSTALL.md). In short:
+
+1. Read the new version's notes in `CHANGELOG.md` and make a backup. Some things have to be done before the new
+   files are uploaded.
+2. Put the new files in place: unpack the new package over the old one, or let your deploy copy them.
+3. Sign in as a global administrator and open `/admin/upgrade`. If the new version brings a database upgrade,
+   everybody else sees a holding page until you press the button there. If it brings none, the portal stays open:
+   press **Finish the upgrade** all the same, so that the new version is recorded.
+4. Check that the portal is working.
 
 ### After upgrading to the next release
 

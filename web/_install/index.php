@@ -561,6 +561,17 @@ $installChannelWords = installChannelWords(
     basename(INSTALL_WEB_FOLDER),
     installChannelFileIgnored(INSTALL_ROOT, $installChannel['source'])
 );
+// 📦 A package carries its word in VERSION.txt, and the finish writes it into
+//    the installation's own `.channel` file when there is none (see
+//    installWriteChannelFile()). Until then the sentence above is true as it
+//    stands (nothing says yet), so only the advice changes: "create the file
+//    yourself" becomes "the installer will".
+$installPackageWord = installPackageChannelWord(INSTALL_ROOT);
+if ($installPackageWord !== '' && file_exists(\Portal\Core\Channel::filePath(INSTALL_ROOT)) === false
+    && $installChannel['source'] !== \Portal\Core\Channel::SOURCE_ENVIRONMENT
+) {
+    $installChannelWords['advice'] = [installChannelFileWords(['state' => 'will-write', 'word' => $installPackageWord])];
+}
 
 // ---------------------------------------------------------------------------
 // Determine current step
@@ -1996,6 +2007,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             //    it) is removed all the same; where the hosting will not let
             //    it go, the last page says what is left and what to do.
             $finishReport['codeRemoved'] = installCodeRemove(INSTALL_AUTH_DIR);
+
+            // 🧭 The installation's own `.channel` file, from the package's
+            //    word, only when there is none. Last, so that a finish which
+            //    stopped earlier has not yet turned a fresh upload into a
+            //    gated test copy. Then the channel is decided again, so that
+            //    the last page says what the finished portal will say.
+            $finishReport['channelFile'] = installWriteChannelFile(INSTALL_ROOT);
+            $installChannel      = \Portal\Core\Channel::decide(INSTALL_ROOT, INSTALL_WEB_FOLDER);
+            $installChannelWords = installChannelWords(
+                $installChannel['channel'],
+                $installChannel['source'],
+                basename(INSTALL_WEB_FOLDER),
+                installChannelFileIgnored(INSTALL_ROOT, $installChannel['source'])
+            );
 
             $finishReport['keyWasThere'] = $keyWasThere;
             $finishReport['folders']     = $folders;
@@ -3915,6 +3940,10 @@ header('X-Robots-Tag: noindex, nofollow');
                 <li class="install-check" data-done="channel" data-channel-source="<?php echo htmlspecialchars((string) $installChannel['source'], ENT_QUOTES, 'UTF-8'); ?>">
                     <strong class="install-check-label">Which copy of the portal this is</strong>
                     <span class="install-check-value">This is <?php echo htmlspecialchars($installChannelWords['copy'] . '. ' . $installChannelWords['how'], ENT_QUOTES, 'UTF-8'); ?></span>
+                    <?php $doneChannelFile = installChannelFileWords(is_array($finishReport['channelFile'] ?? null) === true ? $finishReport['channelFile'] : ['state' => 'kept', 'word' => '']); ?>
+                    <?php if ($doneChannelFile !== ''): ?>
+                        <span class="install-check-fix" data-channel-file="<?php echo htmlspecialchars((string) $finishReport['channelFile']['state'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($doneChannelFile, ENT_QUOTES, 'UTF-8'); ?></span>
+                    <?php endif; ?>
                     <?php foreach ($installChannelWords['advice'] as $advice): ?>
                         <span class="install-check-fix"><?php echo htmlspecialchars((string) $advice, ENT_QUOTES, 'UTF-8'); ?></span>
                     <?php endforeach; ?>

@@ -381,6 +381,23 @@ if ($settingId > 0) {
         exit();
     }
 
+    // 🔒 Nor is the version the database is recorded at changed here (#499),
+    //    by anybody, a global administrator included. The portal decides
+    //    from it whether to close for an upgrade: one number typed too high
+    //    opened it with a database upgrade waiting. The Upgrade page's
+    //    button records it. See Maintenance::lockedInGeneralEditor().
+    if (\Portal\Core\Maintenance::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" records the version the database is at and is written only by the installer and the Upgrade page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\Maintenance::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
     if ($isPortalWideRow === true && $isGlobalAdmin === false) {
         Logger::activity(
             'SettingsUpdateRefused',
@@ -716,6 +733,23 @@ if ($settingId > 0) {
             $_SESSION['user_id'] ?? null
         );
         $_SESSION['flash_msg']  = MailRoutes::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
+    // 🔒 Nor may the recorded version be ADDED here (#499): not as one
+    //    organisation's own row, which start-up does not read and which
+    //    would only mislead whoever found it, and not as the installation's
+    //    row where an older installation has none (the Upgrade page's button
+    //    writes that one). See Maintenance::lockedInGeneralEditor().
+    if (\Portal\Core\Maintenance::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $settingKey . '" records the version the database is at and is written only by the installer and the Upgrade page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\Maintenance::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();

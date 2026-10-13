@@ -67,10 +67,14 @@ use Portal\Core\SiteGate;
 Auth::ensureSession();
 
 // 🚧 Maintenance gate (#220).
-//    If portal.maintenance.active = '1' OR the installed_version is
-//    behind PORTAL_VERSION (indicating new code was deployed but the
-//    DB hasn't been brought up yet), gate non-admin / non-allow-listed
-//    requests to a 503 maintenance page. Global administrators, and the
+//    If portal.maintenance.active = '1', OR the installed_version is
+//    behind PORTAL_VERSION AND a database upgrade is really waiting (new
+//    code was deployed but the DB hasn't been brought up yet), gate
+//    non-admin / non-allow-listed requests to a 503 maintenance page. Newer
+//    code with NO database upgrade waiting does not close the portal, and
+//    the gate records nothing: it asks again on every request until the
+//    Upgrade page's button has recorded the version (#499, 13 October
+//    2026; see the top of Maintenance.php). Global administrators, and the
 //    addresses on the two allow lists in web/_core/Maintenance.php, pass
 //    through: the sign-in pages, admin/upgrade, admin/maintenance, the
 //    static asset folders and offline, so a global administrator can sign

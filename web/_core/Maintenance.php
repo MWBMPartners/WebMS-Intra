@@ -9,17 +9,43 @@
  *
  * Two state inputs combine to decide whether a request is gated:
  *
- *   1. portal.installed_version  (tblSettings, written by installer step 5
- *      and by Migrator::runAll() on success). If LESS than the code version
- *      from _core/version.php → "version drift" → gate on.
+ *   1. portal.installed_version  (tblSettings), the version the DATABASE
+ *      is recorded at. Written by the installer when it finishes, and after
+ *      that only by recordVersion() below, which ONLY the Upgrade page's
+ *      button calls. If it is LESS than the files' version from
+ *      _core/version.php AND a database upgrade is really waiting (a
+ *      numbered file under _sql that the database has not recorded) → gate
+ *      on. The migration runner (Migrator) has never recorded the version,
+ *      though this comment said for a long time that it did.
  *
  *   2. portal.maintenance.active (tblSettings, written by /admin/upgrade
  *      while it's running, and by the installer's drop-and-rebuild path).
  *      If '1' → gate on.
  *
  * Either input alone is sufficient to gate. Both clear automatically when
- * the upgrade completes — version drift resolves when installed_version
- * gets bumped; the explicit flag is cleared by whoever set it.
+ * the upgrade completes — the first when the version is recorded; the
+ * explicit flag is cleared by whoever set it.
+ *
+ * THE RULE USED TO BE "closed whenever the recorded version is behind the
+ * files'". It was replaced on 13 October 2026 (#499): a newer package with
+ * NO database upgrade in it left every member on the holding page for ever,
+ * because nothing recorded the version except a button that was only drawn
+ * when a database upgrade was waiting. The portal is now closed for an
+ * upgrade only while one is actually waiting.
+ *
+ * THE PORTAL NEVER RECORDS THE VERSION BY ITSELF. For a few hours on
+ * 13 October 2026 (commit 81b359b, never released) it did: with the version
+ * behind and nothing waiting, the first request recorded the files' version
+ * and the question was never asked again. That opened a hole the old rule
+ * did not have. A request that arrived while a newer version was HALF
+ * uploaded (the new _core/version.php there, the new file under _sql not
+ * yet) found nothing waiting and recorded the version; when the file landed
+ * a moment later the versions were equal, nothing asked any more, and the
+ * portal stayed open with an upgrade waiting. Now nothing is recorded until
+ * an administrator presses the Upgrade page's button, and until then every
+ * request asks. So in that half-uploaded moment the portal is open and
+ * records nothing, and it closes on the first request after the file lands.
+ * What the asking costs is at versionState().
  *
  * Allow-list (always pass through, even when gated):
  *   • /login, /logout        — a global administrator needs to sign in to fix it
@@ -80,8 +106,8 @@ class Maintenance
         //    everything else.
         //
         //    That mattered more than it sounds, because maintenance mode
-        //    switches itself on whenever the code is newer than the database —
-        //    which is every single upgrade. A signed-out administrator during an
+        //    switches itself on whenever the code is newer than the database
+        //    and a database upgrade is waiting. A signed-out administrator during an
         //    upgrade was shut out completely, and the holding page's own
         //    "sign in" link pointed at the same address that did not exist.
         //
@@ -218,8 +244,11 @@ class Maintenance
         //    Router::healthCheck() answers it in a few lines of JSON: is the
         //    database reachable, which version, which release channel and how
         //    that channel was decided. Whatever uploads new code asks this
-        //    address straight afterwards, and that is exactly the moment the
-        //    portal is closed, because the code is newer than the database.
+        //    address straight afterwards, and when that code brings a
+        //    database upgrade that is exactly the moment the portal is
+        //    closed. (This used to say it is closed whenever the code is
+        //    newer than the database. It is closed only while an upgrade is
+        //    waiting, or while the portal cannot tell.)
         //    Without this entry the answer was the holding page (503), so an
         //    upload could not be told from a broken one, and nobody could see
         //    from outside that the channel had never been written down
@@ -243,9 +272,71 @@ class Maintenance
         'health',
     ];
 
+    /** The setting that holds the version the DATABASE is recorded at. */
+    public const VERSION_SETTING = 'portal.installed_version';
+
+    /** What the general settings editor says when it refuses that setting. */
+    public const LOCKED_MESSAGE = 'That setting records which version the database is at, and the portal decides from it '
+        . 'whether to close for an upgrade. It cannot be added, changed or deleted here. The installer writes it, and '
+        . 'after that only the button on the Upgrade page does: a global administrator opens that page to record a '
+        . 'version. Nothing was changed.';
+
     /**
-     * Is maintenance currently active? Combines version-drift detection
-     * with the explicit `portal.maintenance.active` flag.
+     * 🔒 May the general settings editor (Admin, Settings) touch this
+     * setting? No for the recorded version, for anybody, a global
+     * administrator included, and for a row of ONE organisation as much as
+     * for the installation's own.
+     *
+     * WHY. One typed number there decides whether the portal closes: a
+     * version typed too high opens it with a database upgrade waiting, and
+     * the row deleted makes it an installation that "never recorded a
+     * version", which is never closed for an upgrade at all. An
+     * organisation's own row of that name used to beat the installation's
+     * (start-up no longer reads such a row: see where bootstrap.php loads
+     * the settings). The button on the Upgrade page is the way to record a
+     * version.
+     *
+     * The editor asks this in three places, as it does for the settings
+     * Site::lockedInGeneralEditor() names: changing a row and adding one
+     * (web/_apps/settings/save.php), and deleting one
+     * (web/_apps/settings/index.php).
+     *
+     * WHAT IT CANNOT DO: stop somebody changing the row straight in the
+     * database.
+     *
+     * Names are compared without regard to capitals, as the database does.
+     */
+    public static function lockedInGeneralEditor(string $key): bool
+    {
+        return strcasecmp($key, self::VERSION_SETTING) === 0;
+    }
+
+    /**
+     * What this request found out about the two versions, worked out once
+     * and kept for the rest of the request; null until first asked. See
+     * versionState().
+     *
+     * @var array{behind: bool, answered: bool, waiting: int, why: string, cause: string}|null
+     */
+    private static ?array $versionState = null;
+
+    /**
+     * Is maintenance currently active? True for the explicit
+     * `portal.maintenance.active` flag, and while the files are newer than
+     * the database AND a database upgrade is waiting.
+     *
+     * FILES NEWER, NOTHING WAITING: the portal is NOT closed (owner's rule:
+     * an upgrade must never stop something working for want of a step nobody
+     * can take). NOTHING IS RECORDED HERE: see the top of this file for what
+     * went wrong when it was. The question is asked again on the next
+     * request, and on every one until the Upgrade page's button has recorded
+     * the version.
+     *
+     * FILES NEWER, AND IT CANNOT TELL whether anything is waiting (the table
+     * of applied upgrades or the _sql folder cannot be read): closed, as it
+     * always was. The Upgrade page says why (whyUpgradeUnknown()).
+     *
+     * VERSIONS EQUAL (the ordinary day): nothing is asked at all.
      */
     public static function isActive(): bool
     {
@@ -256,24 +347,206 @@ class Maintenance
             return true;
         }
 
-        // 🔢 Version-drift check. portal.installed_version is what's
-        //    actually in the DB; PORTAL_VERSION is what the code on
-        //    disk thinks. If the code is newer than the DB, an upgrade
-        //    is needed and we shouldn't let users in until it's run.
-        $installed = App::settings()['portal']['installed_version'] ?? '';
-        if (!is_string($installed) || $installed === '') {
-            // 🪞 Legacy install — never recorded a version. Don't gate
-            //    on a missing value; let the user in and let the next
-            //    explicit upgrade record the version.
+        $state = self::versionState();
+        if ($state['behind'] === false) {
             return false;
         }
-        if (defined('PORTAL_VERSION')
-            && version_compare($installed, (string) PORTAL_VERSION, '<')
-        ) {
-            return true;
+
+        // 🚧 Behind: closed while something waits, or while it cannot tell.
+        return $state['answered'] === false || $state['waiting'] > 0;
+    }
+
+    /**
+     * 🔢 Is the recorded version behind the files', and if so is a database
+     * upgrade waiting? The second question (a folder listing and one query,
+     * Migrator::waiting()) is asked ONLY when the versions differ, and once
+     * a request however often this class is asked.
+     *
+     * WHAT IT COSTS, while the version is behind and nobody has pressed the
+     * button: measured on 13 October 2026 with 214 upgrade files, on a busy
+     * development machine with the database on the same machine: about
+     * half a millisecond a request (between 0.5 and 0.65 ms in the middle of
+     * 2,000 tries, over two runs each on MySQL 8.0.36 and 8.4.11; some
+     * 0.16 ms of it is listing the folder and 0.3 to 0.4 ms the one
+     * statement). Small, but it is on EVERY request, which is why
+     * upgradeNotice() tells an administrator to press the button.
+     *
+     * WHICH ROW: the installation's own, never one organisation's. The
+     * settings in memory hold only that one for this name, because start-up
+     * does not read an organisation's row of it (bootstrap.php). Reading it
+     * here with a statement of its own would have cost every ordinary
+     * request one.
+     *
+     * @return array{behind: bool, answered: bool, waiting: int, why: string, cause: string}
+     */
+    private static function versionState(): array
+    {
+        if (self::$versionState !== null) {
+            return self::$versionState;
         }
 
-        return false;
+        // 🪞 A legacy install never recorded a version. Don't gate on a
+        //    missing value; the next press of the Upgrade button records it.
+        //    A recorded version AHEAD of the files' (an older package put
+        //    back over a newer database) is not behind either.
+        $recorded = App::settings()['portal']['installed_version'] ?? '';
+        if (is_string($recorded) === false || $recorded === '' || defined('PORTAL_VERSION') === false
+            || version_compare($recorded, (string) PORTAL_VERSION, '<') === false
+        ) {
+            return self::$versionState = ['behind' => false, 'answered' => true, 'waiting' => 0, 'why' => '', 'cause' => ''];
+        }
+
+        $asked = Migrator::waiting(App::db());
+        return self::$versionState = [
+            'behind' => true, 'answered' => $asked['answered'], 'waiting' => count($asked['files']),
+            'why' => $asked['why'], 'cause' => $asked['cause'],
+        ];
+    }
+
+    /**
+     * 🧹 Forget what this request found out, so that the next question is
+     * asked afresh. For the Upgrade page, straight after it has run the
+     * waiting upgrades: the answer kept from BEFORE the run ("one database
+     * upgrade is waiting") is no longer true after it, and the page once
+     * printed it beside "nothing is waiting".
+     */
+    public static function forgetVersionState(): void
+    {
+        self::$versionState = null;
+    }
+
+    /**
+     * Is the version the database is recorded at behind the files'? False
+     * again as soon as the Upgrade page's button has recorded it on this
+     * request (recordVersion()). For the Upgrade page (which then offers a
+     * button whether or not a database upgrade is waiting, EXCEPT when the
+     * portal cannot tell and no button could safely be offered) and Admin,
+     * Migrations (which then points at the Upgrade page and runs nothing).
+     * Changes nothing.
+     */
+    public static function versionIsBehind(): bool
+    {
+        return self::versionState()['behind'];
+    }
+
+    /**
+     * Why this request could not tell whether a database upgrade is waiting,
+     * in words for a global administrator; '' when it could tell, or never
+     * needed to ask. Changes nothing.
+     */
+    public static function whyUpgradeUnknown(): string
+    {
+        return self::versionState()['answered'] === true ? '' : self::versionState()['why'];
+    }
+
+    /**
+     * Which of the four causes that was, so that a page can say what helps:
+     * one of Migrator::waiting()'s words ('folder', 'folder-empty',
+     * 'table-missing', 'table-unreadable'), or '' when it could tell or
+     * never needed to ask. Changes nothing.
+     */
+    public static function upgradeUnknownCause(): string
+    {
+        return self::versionState()['answered'] === true ? '' : self::versionState()['cause'];
+    }
+
+    /**
+     * 💬 What an administrator needs to be told while the recorded version is
+     * behind the files', in one or two sentences; '' when it is not behind.
+     * ONE home for the words, because they are shown in more than one place
+     * (the health page's "Migrations" line, the Upgrade page) and must not
+     * come to differ. Changes nothing.
+     *
+     * With nothing waiting the portal is not closed, so nothing else tells
+     * anybody that there is a button to press; and until it is pressed every
+     * request asks the database a question (see versionState()).
+     *
+     * @param bool $sayWhere False on the Upgrade page itself, which does not
+     *                       need telling to open the Upgrade page.
+     */
+    public static function upgradeNotice(bool $sayWhere = true): string
+    {
+        $state = self::versionState();
+        if ($state['behind'] === false) {
+            return '';
+        }
+        $recorded = (string) (App::settings()['portal']['installed_version'] ?? '');
+        $start    = 'The portal\'s files are version ' . (string) PORTAL_VERSION . ', newer than the version the database is recorded at ('
+            . $recorded . '). ';
+        $page     = 'the Upgrade page (' . Site::url('admin/upgrade') . ')';
+
+        if ($state['answered'] === false) {
+            return $start . 'The portal could not tell whether a database upgrade is waiting, so it is closed to everybody except a '
+                . 'global administrator.' . ($sayWhere === true ? ' Open ' . $page . ': it says why, and what to do.' : '');
+        }
+        if ($state['waiting'] > 0) {
+            return $start . ($state['waiting'] === 1 ? 'One database upgrade is' : $state['waiting'] . ' database upgrades are')
+                . ' waiting, so the portal is closed to everybody except a global administrator.'
+                . ($sayWhere === true ? ' Open ' . $page . ' and press its button.' : '');
+        }
+
+        // "does not close the portal", not "the portal is open": its own
+        // maintenance switch may be on for another reason.
+        return $start . 'No database upgrade is waiting, so this does not close the portal. But the new version is not recorded '
+            . 'yet, and until it is, every request asks the database whether an upgrade is waiting.'
+            . ($sayWhere === true ? ' Open ' . $page . ' and press "Finish the upgrade".' : '');
+    }
+
+    /**
+     * ✍️ Record the files' version as the version the database is at. The
+     * ONE statement that does so after installation.
+     *
+     * ONLY THE UPGRADE PAGE'S BUTTON CALLS THIS. It must never be called on
+     * the way through the gate: see "THE PORTAL NEVER RECORDS THE VERSION BY
+     * ITSELF" at the top of this file. tools/upgrade-pages-selftest.php fails
+     * if a visitor's request records anything.
+     *
+     * SAFE WHEN PRESSED TWICE AT ONCE: the database changes the row for the
+     * first and reports "nothing changed" to the second, so the line in the
+     * activity log is written once, by the press that changed it.
+     *
+     * It does not check that nothing is waiting: its caller has run what was.
+     *
+     * @param int $byUserId The administrator who pressed the button.
+     *
+     * @return bool True when the version is recorded now, by this call or
+     *              already; false when the database refused.
+     */
+    public static function recordVersion(int $byUserId): bool
+    {
+        if (defined('PORTAL_VERSION') === false) {
+            return false;
+        }
+        $version = (string) PORTAL_VERSION;
+        try {
+            $stmt = App::db()->prepare(
+                "INSERT INTO `tblSettings` "
+                . "(`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) "
+                . "VALUES (NULL, 'portal.installed_version', ?, '', 0) "
+                . "ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`)"
+            );
+            $stmt->bind_param('s', $version);
+            $stmt->execute();
+            // 1 = a new row, 2 = the row was changed, 0 = it already said so.
+            $changed = $stmt->affected_rows > 0;
+            $stmt->close();
+        } catch (\Throwable $e) {
+            // Not recorded. With nothing waiting the portal is open all the
+            // same, and goes on asking until the button is pressed again.
+            return false;
+        }
+
+        self::$versionState = ['behind' => false, 'answered' => true, 'waiting' => 0, 'why' => '', 'cause' => ''];
+        if ($changed === true) {
+            // Logger::activity() never throws; a line that cannot be written
+            // goes to PHP's own error log instead.
+            Logger::activity(
+                'PortalVersionRecorded',
+                'The database is now recorded at version ' . $version . ', by the Upgrade page.',
+                $byUserId
+            );
+        }
+        return true;
     }
 
     /**
@@ -356,11 +629,14 @@ class Maintenance
      * blocked for everybody, administrators included, whatever
      * `currentUserCanBypass()` says.
      *
-     * Order matters for cost, not just correctness: `isActive()` only
-     * reads settings already in memory; `currentUserCanBypass()` may query
-     * the account (App::isUmbrellaAdmin() → App::user()), so it is asked
-     * LAST, once every cheaper answer has already failed to settle the
-     * question.
+     * Order matters for cost, not just correctness: `isActive()` reads
+     * settings already in memory and, ONLY while the recorded version is
+     * behind the files', asks the database one question a request
+     * (versionState()); `currentUserCanBypass()` may query the account
+     * (App::isUmbrellaAdmin() → App::user()), so it is asked LAST, once
+     * every cheaper answer has already failed to settle the question.
+     * (This used to say that isActive() "only reads settings already in
+     * memory", which stopped being true when the gate began to ask.)
      *
      * @param string $routeKey The address the visitor asked for — pass
      *                         Router::extractPath(), matching isAllowed().

@@ -24,9 +24,10 @@
 # rule out once, in a copy (--tools), to see this fail.
 #
 # STILL WITHOUT A CASE OF THEIR OWN (see README.md): the top-level names (G3),
-# dompdf's version marker, the labels (G9), the guide guard inside the checker
-# (G10), the zip's size, checksum file and entry names, and the fallback
-# copies' fingerprints. A fault in one of those would not be noticed here.
+# dompdf's version marker, the version and tag labels (G9; its "no .channel
+# file" rule HAS one, C16), the zip's smallest and largest size as a file, its
+# checksum file and entry names, and the fallback copies' fingerprints. A
+# fault in one of those would not be noticed here.
 #
 # Usage:
 #   bash tools/package/package-selftest.sh [--cache <folder>] [--logs <folder>]
@@ -41,7 +42,11 @@
 #                     a case that was NOT ok is printed)
 #   --only "<ids>"    run only these cases, or groups by their first letter:
 #                     T (git's list), B (whole builds), C (the checker on one
-#                     planted fault), D (the dompdf fetch script)
+#                     planted fault), D (the dompdf fetch script). The three
+#                     gaps closed on 13 October 2026 are "T13 B01 B15 C13 C14
+#                     C15" (and B14, the domain guard's older case). The cases
+#                     added after that day's check are "T14 B16 B17 B18 B19
+#                     C16 C17 C18 C19 C20 C21 C22 C23 C24 C25 C26".
 #   --tools <folder>  test the scripts in another tools/ folder instead of the
 #                     one this script is in (used to show that a fault planted
 #                     in a COPY of the scripts makes these cases fail)
@@ -59,6 +64,9 @@
 # gitleaks is used when it is installed. When it is NOT, a stand-in takes its
 # place so the other guards can still be tested, and the run says so loudly:
 # such a run proves nothing about what the real gitleaks finds.
+# THE CASES THAT NEED "NO gitleaks ON THIS MACHINE" (B17 to B19) do not rely
+# on the machine: they are run with a path of their own, made here, on which
+# no program of that name can be found (see NO_GITLEAKS_PATH).
 #
 # IT TAKES a while: some twenty whole builds, each of which reads every PHP
 # file twice and searches every file for secrets four times. The last line
@@ -220,18 +228,26 @@ EOF
 GITLEAKS_IS_REAL=1
 if ! command -v gitleaks > /dev/null; then
     GITLEAKS_IS_REAL=0
-    # Finds ONE shape, the one this self-test plants (handed over in
-    # SELFTEST_KNOWN_SHAPE), and reports its file and line. It SKIPS files the
-    # way the real gitleaks 8.21.2 does, by name and by how they begin, so
-    # that the cases about "every file is read" fail here too if the
-    # checker's second run is taken away. It is not the real thing: it proves
-    # the checker's own handling, never what the real gitleaks recognises.
+    # Finds TWO shapes and reports each one's file and line: the one this
+    # self-test plants (handed over in SELFTEST_KNOWN_SHAPE), and a private
+    # key written out whole, which is the made-up key the checker shows any
+    # gitleaks first (a stand-in that could not find it would be refused, as
+    # a fake must be: case C25). It SKIPS files the way the real gitleaks
+    # 8.21.2 does, by name and by how they begin, so that the cases about
+    # "every file is read" fail here too if the checker's second run is taken
+    # away. It is not the real thing: it proves the checker's own handling,
+    # never what the real gitleaks recognises.
     cat > "$SCRATCH/bin/gitleaks" << 'EOF'
 #!/usr/bin/env python3
 import json, os, re, sys
 args = sys.argv[1:]
 source, report = args[args.index("--source") + 1], args[args.index("--report-path") + 1]
 shape = os.environ["SELFTEST_KNOWN_SHAPE"].encode()
+# A key written out WHOLE: its first line, then nothing but the letters a key
+# is made of, then its last line. (The first draft looked for the first line
+# and any 64 characters before the next "KEY-----", and reported a comment in
+# web/_core/WebPush.php that only quotes a key's first line.)
+whole_key = re.compile(rb"-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY-----\s+[A-Za-z0-9+/=\s]{64,}?-----END[ A-Z0-9_-]{0,100}PRIVATE KEY-----")
 skipped_name = re.compile(r"(?i)\.(bmp|gif|jpe?g|svg|tiff?)$|\.(eot|[ot]tf|woff2?)$|(doc|zip|pdf|bin|exe)$|(^|/)node_modules/")
 skipped_start = (b"wOF2", b"PK\x03\x04", b"MZ", b"\x1f\x8b", b"%PDF")
 finds = []
@@ -245,10 +261,42 @@ for folder, _folders, names in os.walk(source):
             {"File": full, "StartLine": number, "RuleID": "stand-in-rule"}
             for number, line in enumerate(data.split(b"\n"), start=1) if shape in line
         ]
+        finds += [
+            {"File": full, "StartLine": data.count(b"\n", 0, found.start()) + 1, "RuleID": "stand-in-private-key"}
+            for found in whole_key.finditer(data)
+        ]
 json.dump(finds, open(report, "w"))
 sys.exit(1 if finds else 0)
 EOF
 fi
+# Two programs that only CALL themselves gitleaks (case C25). Kept out of the
+# ordinary path; each case puts one in front.
+#   finds-nothing: writes an empty report and ends with code 0, whatever it
+#       is shown. The check of 13 October 2026 got a release name out of one.
+#   blind-to-pieces: reports the made-up key when it is shown alone, and
+#       nothing when the same key is one of the numbered pieces. (It looks
+#       only at the files at the top of the folder it is given, which is
+#       enough for both.)
+mkdir -p "$SCRATCH/bin-finds-nothing" "$SCRATCH/bin-blind-to-pieces" || exit 1
+cat > "$SCRATCH/bin-finds-nothing/gitleaks" << 'EOF'
+#!/usr/bin/env python3
+import sys
+open(sys.argv[sys.argv.index("--report-path") + 1], "w").write("[]")
+EOF
+cat > "$SCRATCH/bin-blind-to-pieces/gitleaks" << 'EOF'
+#!/usr/bin/env python3
+import json, os, sys
+source, report = sys.argv[sys.argv.index("--source") + 1], sys.argv[sys.argv.index("--report-path") + 1]
+finds = [
+    {"File": os.path.join(source, name), "StartLine": 1, "RuleID": "fake-rule"}
+    for name in sorted(os.listdir(source))
+    if os.path.isfile(os.path.join(source, name)) and not name[:7].isdigit() and b"PRIVATE KEY-----" in open(os.path.join(source, name), "rb").read()
+]
+json.dump(finds, open(report, "w"))
+sys.exit(1 if finds else 0)
+EOF
+chmod +x "$SCRATCH/bin-finds-nothing/gitleaks" "$SCRATCH/bin-blind-to-pieces/gitleaks"
+
 # php with its exit code lost on the way (a wrapper that pipes its output).
 # Kept out of the ordinary path: only case C10 puts it in front.
 mkdir -p "$SCRATCH/bin-lost-code" || exit 1
@@ -259,6 +307,31 @@ EOF
 chmod +x "$SCRATCH/bin-lost-code/php"
 chmod +x "$SCRATCH"/bin/*
 export PATH="$SCRATCH/bin:$PATH"
+
+# NO_GITLEAKS_PATH: the path above with gitleaks made unfindable, for the
+# cases about a machine that does not have it (B17 to B19). Every folder on
+# the path that holds a program of that name (the real one, or this run's
+# stand-in) is replaced by a new folder of links to everything ELSE in it.
+# WHAT WAS WRONG: nothing tested those rules at all, and a test that simply
+# trusted "this machine has no gitleaks" would have started passing for the
+# wrong reason the day somebody installed it.
+NO_GITLEAKS_PATH=""
+SHADOWS=0
+while IFS= read -r -d ':' FOLDER; do
+    [[ -n "$FOLDER" ]] || continue
+    if [[ -e "$FOLDER/gitleaks" ]]; then
+        SHADOWS=$((SHADOWS + 1))
+        mkdir -p "$SCRATCH/no-gitleaks/$SHADOWS" || exit 1
+        for ENTRY in "$FOLDER"/*; do
+            [[ "$(basename "$ENTRY")" == "gitleaks" ]] || ln -s "$ENTRY" "$SCRATCH/no-gitleaks/$SHADOWS/" || exit 1
+        done
+        FOLDER="$SCRATCH/no-gitleaks/$SHADOWS"
+    fi
+    NO_GITLEAKS_PATH="${NO_GITLEAKS_PATH:+$NO_GITLEAKS_PATH:}$FOLDER"
+done <<< "$PATH:"
+if PATH="$NO_GITLEAKS_PATH" command -v gitleaks > /dev/null; then
+    echo "ERROR: could not make a path without gitleaks, so the cases that need one cannot run" >&2; exit 1
+fi
 
 # -----------------------------------------------------------------------------
 # The scratch repository and its scratch commits
@@ -277,11 +350,17 @@ make_repo() {
     mkdir -p "$SCRATCH/$1/tools/package" || return 1
     cp "$TOOLS_FROM/package/build.sh" "$TOOLS_FROM/package/check-package.py" "$TOOLS_FROM/package/dompdf-files.sha256" "$TOOLS_FROM/package/gitleaks-settings.toml" "$SCRATCH/$1/tools/package/" || return 1
     cp "$TOOLS_FROM/download-dompdf.sh" "$TOOLS_FROM/download-cdn-fallbacks.sh" "$SCRATCH/$1/tools/" || return 1
+    # The checker's domain guard (G6) reads its names from this file and from
+    # nowhere else, so a scratch repository without it could not be checked.
+    mkdir -p "$SCRATCH/$1/tools/audit-checks" || return 1
+    cp "$TOOLS_FROM/audit-checks/check_no_hardcoded_domains.py" "$SCRATCH/$1/tools/audit-checks/" || return 1
 }
 make_repo repo "$REPO_ROOT" || { echo "ERROR: could not make the scratch repository" >&2; exit 1; }
 R="$SCRATCH/repo"
 BUILD="$R/tools/package/build.sh"
 CHECKER="$R/tools/package/check-package.py"
+# The ONE home of the names of our own domains (see G6 in check-package.py).
+OWN_LIST="$R/tools/audit-checks/check_no_hardcoded_domains.py"
 WEB_FOLDER="$(sed -n 's/^STAFF_WEB_FOLDER="\([A-Za-z0-9_]*\)"$/\1/p' "$BUILD")"
 VERSION="$(git -C "$R" show "$BASE_COMMIT:web/_core/version.php" | sed -n "s/^return '\([^']*\)';.*/\1/p")"
 
@@ -309,11 +388,17 @@ printf '<?php\nthis is not php (\n' > "$C/broken-php"
 # Files of web-server rules.
 printf 'Options +Indexes\nAddHandler application/x-httpd-php .png .txt .js .svg\n' > "$C/htaccess-runs-pictures"
 printf 'Require all denied\n' > "$C/htaccess-refuse-all"
+# A channel file, as somebody might commit one by mistake. It says "live", the
+# very word a live build writes, which is how one got past every guard before.
+printf 'live\n' > "$C/channel-live"
 printf 'Options -Indexes -ExecCGI\nRequire all denied\n' > "$C/htaccess-switches-off"
 # One rule split over two lines with a backslash, as the server would join it.
 printf 'Add\\\nHandler application/x-httpd-php .txt\n' > "$C/htaccess-split-line"
 (cd "$C" && "$REAL_ZIP" -q zip.zip txt && gzip -c txt > gz)
 mv "$C/zip.zip" "$C/zip"
+# A PHP file of 17 MB that is nothing but one comment: an allowed kind, in an
+# allowed place, and it packs to a few thousand bytes inside a zip.
+{ printf '<?php\n// '; head -c 17000000 /dev/zero | tr '\0' 'a'; printf '\n'; } > "$C/big"
 
 # new_commit <parent> <name> [<path under web/> <content name>]…  → prints the commit
 new_commit() {
@@ -389,9 +474,10 @@ PYEOF
 }
 make_pictures || { echo "ERROR: could not make the planted pictures, fonts and drawings" >&2; exit 1; }
 
-# PASSABLE: the base commit made buildable. Two things may stand in the way
-# today, and each is handled only while it is true: lines that carry a domain
-# of ours (package F4 removes them), and no installation guide (part 2).
+# PASSABLE: the base commit made buildable. Two things can stand in the way of
+# an OLDER base (--base), and each is handled only while it is true: lines
+# that carry a domain of ours (removed on 12 October 2026), and no
+# installation guide (written on 13 October 2026).
 DOMAIN_FILES=""
 EXTRA=()
 while IFS= read -r NAME; do
@@ -403,7 +489,7 @@ while IFS= read -r NAME; do
         git -C "$R" show "$BASE_COMMIT:$FILE" | python3 -c 'import re, sys; sys.stdout.buffer.write(re.sub(sys.argv[1].encode(), b"a-church", sys.stdin.buffer.read(), flags=re.I))' "$NAME" > "$C/fixed.$(echo "$FILE" | tr '/' '_')"
         EXTRA+=("$FILE" "$C/fixed.$(echo "$FILE" | tr '/' '_')")
     done < <(git -C "$R" grep -l -i -I -F "$NAME" "$BASE_COMMIT" -- web/ | sed "s/^$BASE_COMMIT://")
-done < <(python3 "$CHECKER" --print-own-domains)
+done < <(python3 "$OWN_LIST" --print-own-domains)
 HAD_GUIDE=1
 if ! git -C "$R" cat-file -e "$BASE_COMMIT:docs/INSTALL.md" 2> /dev/null; then
     HAD_GUIDE=0
@@ -559,11 +645,20 @@ PLANT_FINE="$(new_commit "$PASSABLE" new-and-fine "${PLANT[@]}")" || { echo "ERR
 # does not depend on the base still carrying such lines (package F4 removes
 # them). The name is asked of the checker at run time and written in mixed
 # capitals; it is never written out in this script.
-OWN_DOMAIN="$(python3 "$CHECKER" --print-own-domains | head -n 1)"
+OWN_DOMAIN="$(python3 "$OWN_LIST" --print-own-domains | head -n 1)"
+[[ -n "$OWN_DOMAIN" ]] || { echo "ERROR: $OWN_LIST printed no name, so the domain guard cannot be tested" >&2; exit 1; }
 # shellcheck disable=SC2016  # the single quotes are deliberate: $address is PHP's, not bash's
 printf '<?php\n// planted by the package self-test\n$address = "https://portal.%s.uk/";\n' "$(printf '%s' "$OWN_DOMAIN" | tr '[:lower:]' '[:upper:]')" > "$C/domain"
 PLANT_DOMAIN="$(new_commit "$PASSABLE" own-domain web/_core/PlantedAddress.php "$C/domain")" || exit 1
 LOST_FILE="$(new_commit "$PASSABLE" lost-file web/_includes/helper.php "$C/php")" || exit 1
+# A channel file committed at web/.channel, where the ignore list says none may be.
+CHANNEL_IN_GIT="$(new_commit "$PASSABLE" channel-in-git web/.channel "$C/channel-live")" || exit 1
+BIG_FILE="$(new_commit "$PASSABLE" big-file web/_core/PlantedBig.php "$C/big")" || exit 1
+# The passable commit with its installation guide taken away.
+export GIT_INDEX_FILE="$SCRATCH/index.no-guide"
+git -C "$R" read-tree "$PASSABLE" && git -C "$R" update-index --force-remove docs/INSTALL.md || exit 1
+NO_GUIDE="$(git -C "$R" -c user.name=selftest -c user.email=selftest@invalid commit-tree "$(git -C "$R" write-tree)" -p "$PASSABLE" -m "self-test: no guide (never kept)")" || exit 1
+unset GIT_INDEX_FILE
 # The ONE file a left-out folder may hold is its own "refuse everything" file,
 # byte for byte the copy in _core/ (roll-out package F5). Two that are not
 # that: the folder's own rules file with other wording, and the right wording
@@ -755,6 +850,24 @@ if wanted T12; then
     check "T12 … and the run reached its end" has T12 "may be packaged; the run reached its end."
 fi
 
+if wanted T13; then
+    tree T13 "$CHANNEL_IN_GIT"
+    check "T13 a channel file committed at web/.channel: refused" rc_is T13 1
+    check "T13 … and it says which file, and that the repository must never hold one" has T13 "web/.channel — git holds a channel file at this commit, and the repository must never hold one"
+    # Until 13 October 2026 that guard was ALONE in refusing it, because the
+    # build wrote a file of the same name and word. No package may hold one
+    # now, so the allow list refuses it as well, and says so.
+    check "T13 … and the allow list refuses it too, as a file no package may hold" test -n "$(guard_lines T13 "the allow list" | grep -F "'.channel'")"
+    check "T13 … and the run reached its end" has T13 "the run reached its end."
+fi
+if wanted T14; then
+    tree T14 "$BIG_FILE"
+    check "T14 a 17 MB file of an allowed kind in an allowed place: refused" rc_is T14 1
+    check "T14 … by the sizes guard, which names it and the limit" test -n "$(guard_lines T14 "sizes" | grep -F "'_core/PlantedBig.php' — 16.2 MB; no one file in a package may be larger than 16 MB")"
+    check "T14 … and by that guard ALONE" has T14 "FAIL — 1 guard(s) failed"
+    check "T14 … and the run reached its end" has T14 "the run reached its end."
+fi
+
 # -----------------------------------------------------------------------------
 # B. Whole builds
 # -----------------------------------------------------------------------------
@@ -776,14 +889,21 @@ sys.exit(1 if bad else 0)
 PYEOF
 }
 
-if wanted B01 && [[ "$HAD_GUIDE" -eq 0 ]]; then
-    build B01 "$BASE_COMMIT"
-    check "B01 the base commit, no guide, no switch: refused" rc_is B01 1
+if wanted B01; then
+    build B01 "$NO_GUIDE"
+    check "B01 a commit with no installation guide: refused" rc_is B01 1
     check "B01 … and it says why" has B01 "docs/INSTALL.md does not exist"
     check "B01 … and nothing was made" no_zip B01
+    # The switch that used to let such a build through is gone. It must be
+    # refused as a word the build does not know, not quietly accepted.
+    build B01b "$NO_GUIDE" --allow-missing-guide
+    check "B01 the old switch --allow-missing-guide: refused" rc_is B01b 1
+    check "B01 … as an option the build does not know" has B01b "unknown option '--allow-missing-guide'"
+    check "B01 … and nothing was made" no_zip B01b
 fi
-if wanted B02 && [[ -n "$DOMAIN_FILES" ]]; then
-    build B02 "$BASE_COMMIT" --allow-missing-guide
+# Only for an older base (--base) that still carries such lines AND has a guide.
+if wanted B02 && [[ -n "$DOMAIN_FILES" && "$HAD_GUIDE" -eq 1 ]]; then
+    build B02 "$BASE_COMMIT"
     check "B02 the base commit carries a domain of ours: refused" rc_is B02 1
     check "B02 … by the domain guard" has B02 "FAIL — G6 our own domain"
     check "B02 … and by that guard ALONE (every other guard passes on the real files)" has B02 "FAIL — 1 guard(s) failed"
@@ -801,6 +921,48 @@ if wanted B03 || wanted C; then
     check "B03 … a real page called phpinfo.php, outside the web folder, still ships" bash -c "unzip -Z1 '$PASS_ZIP' | grep -qx '_apps/admin/system-info/phpinfo.php'"
     check "B03 … no entry in the zip is writable by group or others" zip_bits "$PASS_ZIP"
     check "B03 … and none in the folder" test -z "$(find "$PASS_BUILT/stage" -perm -020 -print -o -perm -002 -print | head -n 1)"
+    check "B03 … the secrets search found the made-up key it was shown, alone and among the pieces, both times" test "$(grep -c '^PASS — G5 gitleaks: gitleaks found the made-up key it was shown, alone and among the pieces, and nothing else' "$LOGS/B03.log")" -eq 2
+fi
+if wanted B16; then
+    # A package carries NO .channel file (M1 of 13 October 2026): unpacked
+    # over an installation it would replace that installation's own word.
+    need_pass_build
+    check "B16 the package folder holds no file called .channel" test ! -e "$PASS_BUILT/stage/.channel"
+    check "B16 … and neither does the zip" bash -c "! unzip -Z1 '$PASS_ZIP' | grep -qx '.channel'"
+    check "B16 … the word travels as the Channel line of VERSION.txt" grep -qx 'Channel: live' "$PASS_BUILT/stage/VERSION.txt"
+    check "B16 … and the installer that reads that line is in the package" grep -q "function installPackageChannelWord" "$PASS_BUILT/stage/_install/install_common.php"
+fi
+if wanted B17; then
+    # THE SWITCH, on a path with no gitleaks. The zip must say what it is in
+    # its NAME, and the build must say so in its LAST LINE.
+    PATH="$NO_GITLEAKS_PATH" build B17 "$PASSABLE" --allow-no-gitleaks
+    check "B17 a build with --allow-no-gitleaks, on a path with no gitleaks: builds" rc_is B17 0
+    check "B17 … its zip is named NOT-FOR-RELEASE, and no zip of any other name was made" test "$(find "$SCRATCH/out/B17" -maxdepth 1 -name 'webms-intra-*.zip' -print | sed 's#.*/##')" = "webms-intra-$VERSION-live-$(git -C "$R" rev-parse --short "$PASSABLE")-NOT-FOR-RELEASE.zip"
+    check "B17 … its LAST line says it is not fit to publish, why, and names that zip" bash -c "tail -n 1 '$LOGS/B17.log' | grep -qE '^BUILD COMPLETE, BUT NOT FIT TO PUBLISH \(built with --allow-no-gitleaks\) — reached the end: webms-intra-.*-NOT-FOR-RELEASE\.zip\$'"
+    check "B17 … the checker said the search was NOT CHECKED, both times" test "$(grep -c '^NOT CHECKED — G5 gitleaks' "$LOGS/B17.log")" -eq 2
+    check "B17 … and never said that every guard passed" has_not B17 "PASS — every guard passed"
+fi
+if wanted B18; then
+    PATH="$NO_GITLEAKS_PATH" build B18 "$PASSABLE"
+    check "B18 the same build WITHOUT the switch, on a path with no gitleaks: refused" rc_is B18 1
+    check "B18 … because the search for secrets did not run" has B18 "FAIL — G5 gitleaks: gitleaks is not installed, so the search for secrets did not run"
+    check "B18 … and no zip was made" no_zip B18
+fi
+if wanted B19; then
+    # A tagged build is the only kind that is published, so the switch is
+    # refused with a tag: by the build, and by the checker on its own.
+    PATH="$NO_GITLEAKS_PATH" build B19 "$PASSABLE" --tag "v$VERSION" --allow-no-gitleaks
+    check "B19 the switch together with --tag: the build refuses" rc_is B19 1
+    check "B19 … itself, saying why" has B19 "ERROR: a build with --tag may be published, so --allow-no-gitleaks is not accepted with it"
+    # The checker would refuse it too, minutes later. This is the build's own
+    # refusal only if it came before the first step.
+    check "B19 … before its first step, so before anything was fetched or made" has_not B19 "== 1. Taking web/"
+    check "B19 … and nothing was made" no_zip B19
+    need_pass_build
+    PATH="$NO_GITLEAKS_PATH" run B19b python3 "$CHECKER" "$PASS_BUILT/stage" --commit "$PASSABLE" --channel live --tag "v$VERSION" --allow-no-gitleaks
+    check "B19 the checker on its own, given both: refuses" rc_is B19b 1
+    check "B19 … for its own reason" has B19b "FAIL — the allow switch: a build with --tag may be published, so --allow-no-gitleaks is not accepted with it"
+    check "B19 … having run no other guard" test "$(grep -c '^PASS' "$LOGS/B19b.log")" -eq 0
 fi
 if wanted B04; then
     (umask 0002; build B04 "$PASSABLE")
@@ -911,6 +1073,15 @@ if wanted B14; then
     check "B14 … and by that guard ALONE" has B14 "FAIL — 1 guard(s) failed"
     check "B14 … and the name itself is not in this script" test "$(grep -c -i -F "$OWN_DOMAIN" "${BASH_SOURCE[0]}")" -eq 0
     check "B14 … and no zip was made" no_zip B14
+fi
+if wanted B15; then
+    build B15 "$CHANNEL_IN_GIT"
+    check "B15 a build from a commit that holds web/.channel: refused" rc_is B15 1
+    check "B15 … by the guard that is there for it" has B15 "FAIL — no channel file in git"
+    # The build no longer writes a file of that name, so the committed one is
+    # also in the package, where the labels guard refuses it.
+    check "B15 … and by the labels guard, because a package must not carry the file" has B15 "  • .channel — a package must not carry this file"
+    check "B15 … and no zip was made" no_zip B15
 fi
 
 # -----------------------------------------------------------------------------
@@ -1031,6 +1202,175 @@ if wanted C12; then
     done
     check "C12 … and the value it found is not printed" has_not C12 "$KNOWN_SHAPE"
     check "C12 … and the run reached its end" has C12 "the run reached its end."
+fi
+if wanted C13; then
+    need_pass_build; fresh C13; rm -f "$CASE/INSTALL.md"
+    folder_case C13 "a package with no installation guide" "FAIL — G10 the installation guide: INSTALL.md is not in the package"
+    # The checker's own copy of the old switch is gone too: Python's reader of
+    # arguments ends with code 2 for a word it does not know, and prints no
+    # PASS line.
+    run C13b python3 "$CHECKER" "$CASE" "${CHECK_ARGS[@]}" --allow-missing-guide
+    check "C13 the old switch --allow-missing-guide, given to the checker: not accepted" rc_is C13b 2
+    check "C13 … and nothing that reads as a pass was printed" has_not C13b "PASS"
+    fresh C13c; printf '# Installing\n\nPoint your address at the web folder.\n' > "$CASE/INSTALL.md"
+    folder_case C13c "a guide that never names the web folder this package has" "FAIL — G10 the installation guide: INSTALL.md never mentions $WEB_FOLDER"
+fi
+if wanted C14; then
+    # THE ONE LIST. In a COPY of the scripts, one more name is put on the list
+    # in tools/audit-checks/check_no_hardcoded_domains.py and nothing else is
+    # changed. The name is the passable commit's own number, which a package
+    # holds in exactly one place: line 4 of VERSION.txt. The copy's checker
+    # must then refuse the very folder the real checker passed (B03), for that
+    # line and nothing else. That can only happen if G6 takes its names from
+    # that file.
+    need_pass_build; fresh C14
+    make_repo repo-own-list && python3 - "$SCRATCH/repo-own-list/tools/audit-checks/check_no_hardcoded_domains.py" "$PASSABLE" << 'PYEOF'
+import base64, re, sys
+path, name = sys.argv[1:3]
+text = open(path, encoding="utf-8").read()
+changed, count = re.subn(r"(OWN_DOMAINS = tuple\([^\n]* for name in \()", lambda found: found.group(1) + '"' + base64.b64encode(name.encode()).decode() + '", ', text)
+if count != 1:
+    sys.exit("could not find the OWN_DOMAINS line to add a name to")
+open(path, "w", encoding="utf-8").write(changed)
+PYEOF
+    run C14 python3 "$SCRATCH/repo-own-list/tools/package/check-package.py" "$CASE" "${CHECK_ARGS[@]}"
+    check "C14 a name added to the ONE list of our domains, in a copy: the package the real checker passed is refused" rc_is C14 1
+    check "C14 … by the domain guard, for the one line that holds the name" test "$(guard_lines C14 "G6")" = "  • VERSION.txt:4"
+    check "C14 … and by that guard ALONE" has C14 "FAIL — 1 guard(s) failed"
+    check "C14 … and the run reached its end" has C14 "the run reached its end."
+fi
+if wanted C15; then
+    # A guard that cannot read its list must FAIL. Left to pass, a lost or
+    # emptied list would let every domain through without a word.
+    need_pass_build; fresh C15
+    make_repo repo-no-list && rm -f "$SCRATCH/repo-no-list/tools/audit-checks/check_no_hardcoded_domains.py"
+    run C15 python3 "$SCRATCH/repo-no-list/tools/package/check-package.py" "$CASE" "${CHECK_ARGS[@]}"
+    check "C15 the one list of our domains is missing: refused, not passed" rc_is C15 1
+    check "C15 … for its own reason" has C15 "FAIL — G6 our own domain: the list of our own domains could not be read, so this guard did not run"
+    check "C15 … and the run reached its end" has C15 "the run reached its end."
+    make_repo repo-empty-list && : > "$SCRATCH/repo-empty-list/tools/audit-checks/check_no_hardcoded_domains.py"
+    run C15b python3 "$SCRATCH/repo-empty-list/tools/package/check-package.py" "$CASE" "${CHECK_ARGS[@]}"
+    check "C15 the one list is an EMPTY file: refused, not passed" rc_is C15b 1
+    check "C15 … for its own reason" has C15b "has no usable OWN_DOMAINS list"
+fi
+
+if wanted C16; then
+    need_pass_build; fresh C16; printf 'live\n' > "$CASE/.channel"
+    folder_case C16 "a package folder that holds a .channel file, as every build wrote one before" "  • .channel — a package must not carry this file: unpacked over an installation it would REPLACE that installation's own word"
+    check "C16 … by the labels guard" has C16 "FAIL — G9 channel, version and tag"
+fi
+# rewrite_zip <case> <python that changes `data`, the bytes of the zip>: a
+# passing zip, changed, with its checksum file written again to match.
+rewrite_zip() {
+    fresh "$1"; zipped "$1"
+    python3 - "$ZIPPED" "$2" << 'PYEOF' || return 1
+import sys, zipfile
+path = sys.argv[1]
+start_dir = zipfile.ZipFile(path).start_dir
+data = bytearray(open(path, "rb").read())
+exec(sys.argv[2])
+open(path, "wb").write(data)
+PYEOF
+    (cd "$(dirname "$ZIPPED")" && "$REAL_SHASUM" -a 256 "$(basename "$ZIPPED")" > "$(basename "$ZIPPED").sha256")
+}
+if wanted C17; then
+    need_pass_build
+    # A comment: 40 bytes after the end record, and their count written into it.
+    rewrite_zip C17 'data[-2:] = (40).to_bytes(2, "little"); data += b"a note nobody reads, 40 bytes long......"'
+    check "C17 (the zip with a comment still opens and lists its files)" bash -c "unzip -Z1 '$ZIPPED' | grep -q full_schema.sql"
+    zip_case C17 "a zip that carries a comment, its checksum file rewritten" "it carries a comment of 40 byte(s)"
+    check "C17 … and it was not unpacked" has C17 "it was NOT unpacked"
+fi
+if wanted C18; then
+    need_pass_build
+    rewrite_zip C18 'data[0:0] = b"x" * 1000'
+    check "C18 (the zip with bytes in front still opens and lists its files)" bash -c "unzip -Z1 '$ZIPPED' 2> /dev/null | grep -q full_schema.sql"
+    zip_case C18 "a zip with 1,000 bytes in front of its first entry, its checksum file rewritten" "1000 byte(s) that belong to no entry, in front of the first entry"
+fi
+if wanted C19; then
+    need_pass_build
+    rewrite_zip C19 'data += b"y" * 30000'
+    check "C19 (the zip with bytes after its end still opens and lists its files)" bash -c "unzip -Z1 '$ZIPPED' 2> /dev/null | grep -q full_schema.sql"
+    zip_case C19 "a zip with 30,000 bytes after its end record, its checksum file rewritten" "it does not END with its end record: something follows it"
+fi
+if wanted C20; then
+    need_pass_build
+    # 500 bytes between the last entry and the list of entries, with the end
+    # record's note of where that list begins put right, so the zip is whole.
+    rewrite_zip C20 'data[start_dir:start_dir] = b"z" * 500; data[-6:-2] = (start_dir + 500).to_bytes(4, "little")'
+    check "C20 (the zip with bytes hidden in its middle still opens and lists its files)" bash -c "unzip -Z1 '$ZIPPED' 2> /dev/null | grep -q full_schema.sql"
+    zip_case C20 "a zip with 500 bytes hidden between its last entry and its list of entries" "500 byte(s) between the last entry and the list of entries are not accounted for"
+fi
+if wanted C21; then
+    need_pass_build; fresh C21; cp "$C/big" "$CASE/_core/PlantedBig.php"; chmod 644 "$CASE/_core/PlantedBig.php"
+    folder_case C21 "a package folder holding a 17 MB file" "'_core/PlantedBig.php' — 16.2 MB; no one file in a package may be larger than 16 MB"
+    check "C21 … by the sizes guard" has C21 "FAIL — sizes"
+fi
+if wanted C22; then
+    need_pass_build; fresh C22; cp "$C/big" "$CASE/_core/PlantedBig.php"; chmod 644 "$CASE/_core/PlantedBig.php"; zipped C22
+    check "C22 (the 17 MB file adds less than 100,000 bytes to the zip)" test "$(( $(wc -c < "$ZIPPED") - $(wc -c < "$PASS_ZIP") ))" -lt 100000
+    zip_case C22 "a zip that would unpack a 17 MB file" "'_core/PlantedBig.php' — 16.2 MB; no one file in a package may be larger than 16 MB"
+    check "C22 … refused from what the zip SAYS, before anything was unpacked" has C22 "it was NOT unpacked"
+fi
+if wanted C23; then
+    need_pass_build; fresh C23
+    # Ten files of 15 MB each: every one within the limit for a file, and
+    # together more than a package may unpack to.
+    for NUMBER in 0 1 2 3 4 5 6 7 8 9; do { printf '<?php\n// '; head -c 15000000 /dev/zero | tr '\0' 'a'; printf '\n'; } > "$CASE/_core/PlantedLarge$NUMBER.php"; chmod 644 "$CASE/_core/PlantedLarge$NUMBER.php"; done
+    zipped C23
+    zip_case C23 "a zip of files each within the limit that together unpack to more than 150 MB" "a package may unpack to no more than 150 MB"
+    check "C23 … with no single file named as too large" has_not C23 "no one file in a package may be larger"
+    check "C23 … refused before anything was unpacked" has C23 "it was NOT unpacked"
+fi
+if wanted C24; then
+    # The one list of our domains ENDS THE PROGRAM when it is read. The
+    # checker used to stop there with exit code 0 and no last line.
+    need_pass_build; fresh C24
+    # The two lines go at the END of the file: its first statement has to stay
+    # first (Python refuses the file otherwise, which is a different failure).
+    make_repo repo-list-exits && printf '\nimport sys\nsys.exit(0)\n' >> "$SCRATCH/repo-list-exits/tools/audit-checks/check_no_hardcoded_domains.py"
+    run C24 python3 "$SCRATCH/repo-list-exits/tools/package/check-package.py" "$CASE" "${CHECK_ARGS[@]}"
+    check "C24 a list of our domains that ends the program when it is read: refused, not exit code 0" rc_is C24 1
+    check "C24 … for its own reason" has C24 "FAIL — G6 our own domain: the list of our own domains could not be read, so this guard did not run: check_no_hardcoded_domains.py ended the program when it was read (exit code 0)"
+    check "C24 … the guards after it still ran" has C24 "G10 the installation guide"
+    check "C24 … and the run reached its end" has C24 "the run reached its end."
+fi
+if wanted C25; then
+    # A program that only CALLS itself gitleaks. Its "found nothing" used to
+    # be believed.
+    need_pass_build; fresh C25
+    PATH="$SCRATCH/bin-finds-nothing:$PATH" run C25 python3 "$CHECKER" "$CASE" "${CHECK_ARGS[@]}"
+    check "C25 a gitleaks that finds nothing whatever it is shown: refused" rc_is C25 1
+    check "C25 … because it did not report the made-up key it was shown first" has C25 "FAIL — G5 gitleaks: the program called gitleaks was shown one file holding a made-up private key and did not report it (exit code 0, 0 find(s))"
+    check "C25 … and by that guard ALONE" has C25 "FAIL — 1 guard(s) failed"
+    check "C25 … and the run reached its end" has C25 "the run reached its end."
+    PATH="$SCRATCH/bin-blind-to-pieces:$PATH" run C25b python3 "$CHECKER" "$CASE" "${CHECK_ARGS[@]}"
+    check "C25 a gitleaks that finds the made-up key alone but does not read the pieces: refused" rc_is C25b 1
+    check "C25 … because the key put among the pieces was not reported" has C25b "the made-up key put among the pieces was NOT reported"
+    check "C25 … and for that alone: the program did not crash, and no other guard failed" bash -c "grep -qF 'FAIL — 1 guard(s) failed' '$LOGS/C25b.log' && ! grep -qF 'left no report' '$LOGS/C25b.log'"
+    check "C25 … and the made-up key itself is never printed" has_not C25b "PRIVATE KEY-----"
+fi
+if wanted C26; then
+    # THE ONE THING gitleaks-settings.toml LETS THROUGH is the placeholder
+    # YOUR_TOKEN in a command an administrator copies. Anything else in the
+    # same command must still be found: a longer word, and a made-up token
+    # (put together here from pieces, so that this script holds none).
+    # This is about what the REAL gitleaks does with that file, so it cannot
+    # be run with the stand-in.
+    if [[ "$GITLEAKS_IS_REAL" -eq 1 ]]; then
+        need_pass_build; fresh C26
+        MADE_UP_TOKEN="$(printf '%s%s%s' "q8Zr4TnW" "2pLs9XvB" "7mKd5HcJ")"
+        printf '<?php\n// curl -H "Authorization: Bearer %s" "https://portal.example.org/cron/x"\n// curl -H "Authorization: Bearer YOUR_TOKEN2" "https://portal.example.org/cron/x"\n// curl -H "Authorization: Bearer YOUR_TOKEN" "https://portal.example.org/cron/x"\n' "$MADE_UP_TOKEN" > "$CASE/_core/PlantedCommand.php"
+        chmod 644 "$CASE/_core/PlantedCommand.php"
+        run C26 python3 "$CHECKER" "$CASE" "${CHECK_ARGS[@]}"
+        check "C26 a made-up token, and a longer word, in the command whose placeholder is let through: refused" rc_is C26 1
+        check "C26 … the secrets search names the made-up token's line" test -n "$(guard_lines C26 "G5" | grep -F "_core/PlantedCommand.php:2 — curl-auth-header")"
+        check "C26 … and the longer word's line" test -n "$(guard_lines C26 "G5" | grep -F "_core/PlantedCommand.php:3 — curl-auth-header")"
+        check "C26 … and NOT the line that holds exactly the placeholder" test -z "$(guard_lines C26 "G5" | grep -F "_core/PlantedCommand.php:4")"
+        check "C26 … and the made-up token is not printed" has_not C26 "$MADE_UP_TOKEN"
+    else
+        echo "NOT RUN C26: it needs the real gitleaks (the placeholder that gitleaks-settings.toml lets through)" | tee -a "$RESULTS"
+    fi
 fi
 
 # -----------------------------------------------------------------------------

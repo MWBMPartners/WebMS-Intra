@@ -8,6 +8,23 @@
  * from sql/, shows which have been applied, and allows running pending ones.
  * Uses the Migrator class for execution.
  *
+ * NOT A ROAD FOR AN UPGRADE (#499). When the portal's files are newer than
+ * the version the database is recorded at, this page runs nothing and points
+ * at the Upgrade page instead. Until 13 October 2026 it ran the waiting
+ * migrations like any others: with no snapshot first, without the check of
+ * stored secrets, and without recording the version, so the portal stayed on
+ * its holding page afterwards with nothing left to press.
+ *
+ * WHAT THAT CANNOT DO: it goes by the version number. A migration that
+ * arrives WITHOUT a new version number can still be run here, as before,
+ * with no snapshot first and without the check of stored secrets.
+ *
+ * FOR A GLOBAL ADMINISTRATOR ONLY, as the Upgrade page is. Until 13 October
+ * 2026 any administrator got in, an administrator of ONE organisation too:
+ * with the versions equal and an upgrade file waiting, one of them ran it
+ * for the whole installation (a check did exactly that). Anybody else is
+ * now refused in words, and the refusal is written to the activity log.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
@@ -21,17 +38,66 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Maintenance;
 use Portal\Core\Migrator;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 📌 Page metadata
 $pageTitle   = 'Database Migrations';
 $pageSection = 'admin';
 $breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Migrations' => ''];
 
-// 🛡️ Admin access check
-if (App::isAdmin() === false) {
-    Router::renderError(403);
+// 🛡️ A GLOBAL administrator only: see the top of this file. This page
+//    reshapes the database for the WHOLE installation, so an administrator
+//    of one organisation has no business here, any more than on the Upgrade
+//    page (App::isAdmin() let them in). Refused in words, before anything is
+//    read or run, and written down.
+if (App::isUmbrellaAdmin() === false) {
+    Logger::activity(
+        'MigrationsRefused',
+        'Refused: Admin, Migrations is for a global administrator only',
+        isset($_SESSION['user_id']) === true ? (int) $_SESSION['user_id'] : null
+    );
+    http_response_code(403);
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
+    ?>
+    <h1 class="mb-4"><i class="fa-solid fa-database me-2"></i>Database Migrations</h1>
+    <div class="alert alert-danger" id="migrations-global-only">
+        <p class="mb-0">
+            <strong>This page is for a global administrator only.</strong>
+            It runs database upgrades for the whole installation, every organisation on it included, so an administrator
+            of one organisation cannot open it. Nothing was run. If the portal needs upgrading, ask a global administrator.
+        </p>
+    </div>
+    <?php
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
+    return;
+}
+
+// 🧭 An upgrade is waiting to be finished: point at the Upgrade page and stop,
+//    before anything on this page can run. A form sent here gets the same
+//    answer. A signpost and not a redirect, so that the reason is read
+//    before the next page is opened.
+if (Maintenance::versionIsBehind() === true) {
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
+    ?>
+    <h1 class="mb-4"><i class="fa-solid fa-database me-2"></i>Database Migrations</h1>
+    <div class="alert alert-warning" id="migrations-use-upgrade">
+        <p><strong>Nothing can be run here just now: the portal is part way through an upgrade.</strong></p>
+        <p>
+            Its files are newer than the version the database is recorded at. Finish the upgrade on the Upgrade page.
+            When a database upgrade is waiting, that page takes a snapshot of the database first, so there is a way
+            back, and then runs it. Then, waiting or not, it stores encrypted any saved secret still kept as readable
+            text and records the new version, which is what ends the upgrade. This page does none of those except run
+            the upgrades.
+        </p>
+        <p class="mb-0">
+            <a class="btn btn-warning" href="<?php echo htmlspecialchars(Site::url('admin/upgrade'), ENT_QUOTES, 'UTF-8'); ?>">Open the Upgrade page</a>
+        </p>
+    </div>
+    <?php
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     return;
 }
 
