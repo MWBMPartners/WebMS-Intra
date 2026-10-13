@@ -15,7 +15,7 @@
  * @author     MWBM Partners Ltd (t/a MWservices)
  * @copyright  2025-2026 MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version    0.3.1
+ * @version    0.3.3
  * -----------------------------------------------------------------------------
  */
 
@@ -135,6 +135,26 @@ if ($totpStmt !== false) {
     $totpEnabled = ($totpRow !== null && (int) ($totpRow['totpEnabled'] ?? 0) === 1);
 }
 
+// 🔑 How many backup codes this person has left (#613). A backup code signs
+//    them in once if they lose their phone. Only the NUMBER can be shown: the
+//    database holds a one-way fingerprint of each code, so the codes
+//    themselves cannot be read back by anybody, this page included.
+//    The number says how many are stored, not that the person has them
+//    written down. Before #613 the set-up page made eight and never showed
+//    them, so somebody who switched this on earlier is told "8" for codes
+//    they have never seen. That is why the wording below tells them to make
+//    a new set if they did not save theirs.
+$totpCodesLeft = 0;
+if ($totpEnabled === true) {
+    $codesStmt = $mysqli->prepare('SELECT COUNT(*) AS codesLeft FROM tblTotpBackupCodes WHERE userID = ? AND isUsed = 0');
+    if ($codesStmt !== false) {
+        $codesStmt->bind_param('i', $userId);
+        $codesStmt->execute();
+        $totpCodesLeft = (int) ($codesStmt->get_result()->fetch_assoc()['codesLeft'] ?? 0);
+        $codesStmt->close();
+    }
+}
+
 // 📋 Check if local account exists
 $hasLocalAccount = false;
 $laCheck = $mysqli->prepare('SELECT 1 FROM tblLocalAccounts WHERE userID = ? LIMIT 1');
@@ -198,6 +218,12 @@ if (isset($_GET['wa_registered']) === true && $_GET['wa_registered'] === '1') {
 if (isset($_GET['totp_disabled']) === true && $_GET['totp_disabled'] === '1') {
     $successMsg = 'Two-factor authentication has been disabled.';
 }
+// The set-up page sends a person here when it is already on (#613). It used
+// to leave its message in the session, which this page never reads, so the
+// message came up later on some unrelated page instead.
+if (isset($_GET['totp_on']) === true && $_GET['totp_on'] === '1' && $totpEnabled === true) {
+    $successMsg = 'Two-factor authentication is on for your account. If you did not save your backup codes, you can make a new set below.';
+}
 if (isset($_GET['error']) === true) {
     $errorMap = [
         'csrf'         => 'Invalid session token. Please try again.',
@@ -214,6 +240,23 @@ if (isset($_GET['error']) === true) {
         'wa_delete'    => 'Unable to remove that passkey.',
         'wa_csrf'      => 'Invalid session token. Please try again.',
         'totp_nopw'    => 'Your account has no password set, so 2FA cannot be disabled this way. Contact an administrator.',
+        // "Make new backup codes" (#613); auth/2fa/setup.php sends each of these.
+        'totp_code'    => 'That code is not right, so no new backup codes were made. Enter the 6-digit code your authenticator app shows now.',
+        'totp_wait'    => 'Too many wrong codes. Please wait up to 15 minutes, then try again.',
+        'totp_off'     => 'Two-factor authentication is not on for your account, so there are no backup codes to make.',
+        // "Your old codes still work" is said only to somebody who has some.
+        // It used to be said to everybody, and a person with none (anybody who
+        // has used them all, and everybody after an upgrade that removes the
+        // codes nobody was shown) was told something untrue.
+        'totp_codes_failed' => ($totpCodesLeft > 0)
+            ? 'New backup codes could not be made. Nothing was changed, and your old codes still work. Please try again.'
+            : 'New backup codes could not be made. Nothing was changed. Please try again.',
+        // The form was not this page's own, or had been sent already. The usual
+        // cause is a second press of the button: the first press made a set and
+        // used up the form, and the browser shows the second answer, so the
+        // person holds codes they never saw. They are told what to do. (The
+        // script under the form stops the second press where scripts run.)
+        'totp_form'    => 'That form had already been sent, or had expired. If you were making new backup codes and did not see them, make a set again: enter the code your authenticator app shows now and press the button once.',
     ];
     $errorCode = $_GET['error'];
     $errorMsg  = $errorMap[$errorCode] ?? 'An error occurred.';
@@ -380,6 +423,116 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <span class="badge bg-success"><i class="fa-solid fa-circle-check me-1"></i>Enabled</span>
                         <span class="text-muted small ms-2">Your account requires a code from your authenticator app at sign-in.</span>
                     </p>
+
+                    <?php
+                    // 🔑 Backup codes (#613). The form posts to the set-up page
+                    //    (auth/2fa/setup.php), which makes the codes and shows them
+                    //    once, in its own answer. It asks for a code from the
+                    //    authenticator app and not the password, as "Disable" below
+                    //    does, because an account that signs in through Microsoft or
+                    //    Google has no password here and needs backup codes as well.
+                    ?>
+                    <!-- 🔑 Backup codes -->
+                    <h6>Backup codes</h6>
+                    <p class="small text-muted mb-2">
+                        A backup code signs you in once if you lose your phone.
+                        <?php if ($totpCodesLeft > 0): ?>
+                            <strong>You have <?php echo (int) $totpCodesLeft; ?> unused backup <?php echo $totpCodesLeft === 1 ? 'code' : 'codes'; ?>.</strong>
+                        <?php else: ?>
+                            <strong>You have no unused backup codes, so a lost phone would lock you out. Make a set now.</strong>
+                        <?php endif; ?>
+                        Codes are shown only once, when they are made. If you did not save yours, make a new set: the old ones then stop working.
+                    </p>
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('auth/2fa/setup'), ENT_QUOTES, 'UTF-8'); ?>" class="mb-3"
+                          id="totpNewCodesForm"
+                          data-confirm="Make a new set of backup codes? Any backup codes you already have will stop working.">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="action" value="new_backup_codes">
+                        <div class="mb-3">
+                            <label for="totp_new_codes_code" class="form-label">Enter the 6-digit code from your authenticator app</label>
+                            <input type="text" class="form-control" id="totp_new_codes_code" name="code"
+                                   maxlength="6" pattern="[0-9]{6}" inputmode="numeric" autocomplete="one-time-code" required>
+                        </div>
+                        <button type="submit" class="btn btn-outline-primary w-100">
+                            <i class="fa-solid fa-key me-1" aria-hidden="true"></i> Make New Backup Codes
+                        </button>
+                    </form>
+                    <?php
+                    // 🖱️ The form above is sent ONCE (#613, found by the independent check).
+                    //
+                    //    Pressed twice, it was sent twice. The first sending made a new
+                    //    set and used up the form's token; the second was refused; and the
+                    //    browser shows the answer to the LAST thing it sent. So the old
+                    //    codes were gone, the new ones had never been on screen, and the
+                    //    person read "Invalid session token".
+                    //
+                    //    Two ways the form is really sent, and both are watched:
+                    //    - by the browser itself (the confirm box did not load, or the
+                    //      person presses the button again after saying OK): that raises
+                    //      a "submit" event. The confirm box (portal-confirm.js) stops
+                    //      the FIRST such event to ask its question, so the event is
+                    //      looked at again once every listener has run, to see whether
+                    //      it was stopped;
+                    //    - by the confirm box after OK: it marks the form
+                    //      (data-confirm-accepted) and calls form.submit(), which raises
+                    //      no event at all. The mark is the signal.
+                    //
+                    //    The nonce is not decoration. The page's own rules (the
+                    //    Content-Security-Policy header in templates/header.php) refuse
+                    //    a script written into the page without it.
+                    //
+                    //    WHAT IT CANNOT DO: anything where scripts are switched off, or
+                    //    for two windows open on this page. The person then lands back
+                    //    here with the "totp_form" message above, which says what to do.
+                    //    NOT RUN IN A BROWSER: read, and its grammar checked with Node.
+                    ?>
+                    <script nonce="<?php echo htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
+                    (function () {
+                        'use strict';
+                        var form = document.getElementById('totpNewCodesForm');
+                        if (form === null) {
+                            return;
+                        }
+                        var button = form.querySelector('button[type="submit"]');
+                        var sent = false;
+                        function markSent() {
+                            sent = true;
+                            if (button !== null) {
+                                button.disabled = true;
+                            }
+                        }
+                        form.addEventListener('submit', function (event) {
+                            if (sent === true) {
+                                event.preventDefault();
+                                return;
+                            }
+                            window.setTimeout(function () {
+                                if (event.defaultPrevented === false) {
+                                    markSent();
+                                }
+                            }, 0);
+                        });
+                        if (typeof MutationObserver === 'function') {
+                            new MutationObserver(function () {
+                                if (form.getAttribute('data-confirm-accepted') === '1') {
+                                    markSent();
+                                }
+                            }).observe(form, { attributes: true, attributeFilter: ['data-confirm-accepted'] });
+                        }
+                        // A page brought back by the browser's "Back" button keeps what
+                        // this script did. The form there is a new chance, not a sent one.
+                        window.addEventListener('pageshow', function (event) {
+                            if (event.persisted === true) {
+                                sent = false;
+                                if (button !== null) {
+                                    button.disabled = false;
+                                }
+                            }
+                        });
+                    })();
+                    </script>
+
+                    <hr>
 
                     <!-- 🔓 Disable — requires password re-confirmation (#B5b) -->
                     <form method="post" action="<?php echo htmlspecialchars(Site::url('auth/2fa/disable'), ENT_QUOTES, 'UTF-8'); ?>"

@@ -356,7 +356,7 @@ has another name" below before you unpack: there is one more thing to do.
    your own computer and open that file with any text editor, such as Notepad. It is long, and the newest changes
    are at the top. Look for the entries whose headings mention **upgrading**. Some things have to be done
    **before** the new files are uploaded, and those entries are where they are written. For a portal installed
-   before October 2026, read these four entries in full. Each is given here by words from its heading, so that
+   before October 2026, read these five entries in full. Each is given here by words from its heading, so that
    the text editor's "Find" takes you to it:
    - **what somebody upgrading must know** (about secret settings). Its part 1, "What STARTS the moment the new
      files are uploaded", lists what begins working by itself (text messages, which cost money, among them) and
@@ -368,6 +368,8 @@ has another name" below before you unpack: there is one more thing to do.
    - **what an administrator must do after upgrading** (about the mail queue). One scheduled job has to be added
      in the hosting panel, and the entry gives the line to add.
    - **Upgrading — nothing has to be done** (about the installer and the private folders).
+   - **What an administrator must tell people after upgrading** (about backup codes for two-factor
+     authentication). Everybody who switched it on before has no backup codes and must make a set.
 
    After the upgrade the same notes are in the portal itself, at Admin, Release Notes.
 2. **Back up the database and the `_auth_keys` folder, together.** The database: your hosting panel has a backup

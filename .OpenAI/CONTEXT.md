@@ -453,6 +453,15 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     `Captcha::closedNotice()` itself. An address that is recorded or sent goes
     through `Logger::withoutJobToken()`.
 
+    **Two-factor authentication (#613).** `auth/2fa/setup.php` is the ONE place
+    backup codes are made, and it shows them only in the answer to the request
+    that made them: never put a code, or the authenticator key, readable in
+    `$_SESSION`. A code is single-use by `… AND isUsed = 0` plus "one row
+    changed" in `auth/2fa/verify.php`, and is looked for among the person's own
+    codes only. The old set is removed row by row after locking the person's own
+    account row, never by `DELETE … WHERE userID = ?` (two people at once
+    deadlock). Test: `tools/two-step-selftest.php`, alone on its server.
+
     **Time zones (#604).** `Site::timezone()` is the ONE place that answers
     an organisation's zone, and `Site::isZoneName()` the one test of what a
     zone name is. Do not read `tblSites.timezone` anywhere else, and do not

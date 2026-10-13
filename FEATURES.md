@@ -269,6 +269,7 @@ Local + SSO + multi-factor sign-in.
 | Reset password (token verified, single-use) | ✅ |
 | Account page (profile, change password, linked accounts, WebAuthn keys, unlink) | ✅ |
 | 2FA TOTP setup / verify / disable | ✅ |
+| 2FA backup codes: shown once at set-up; "Make New Backup Codes" on Account (#613) | ✅ |
 | **Password policy** — min 12 chars (configurable), independent complexity flags, max length, **client-side strength meter** | ✅ (#132) |
 | Sign-in limit — 5 failed tries from one address, or 10 for one account (by user name or e-mail address), in 15 minutes; the screen says how long is left; a completed password reset frees the account's name | ✅ (#52, #580) |
 

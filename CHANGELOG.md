@@ -2,6 +2,50 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — backup codes for two-factor authentication are shown, and can be made again (#613)**
+  - **What an administrator must tell people after upgrading**
+    1. **Everybody who switched two-factor authentication on before this version has no backup codes.** The set-up
+       page made eight and never showed them, so a lost phone locked that person out until an administrator
+       stepped in. Ask each of them to open **Account**, find "Two-Factor Authentication", type the 6-digit code
+       from their authenticator app under "Backup codes" and press **Make New Backup Codes** once. The page then
+       shows eight codes, once. They should write them down or print them and keep them apart from the phone.
+    2. **The codes nobody was shown are removed by the upgrade.** They had also been written into the activity log
+       in readable text, so they could not be left working. That removal is part of the activity-log change
+       (#622), in this same release. After it, the Account page tells each of those people "You have no unused
+       backup codes, so a lost phone would lock you out. Make a set now."
+    3. **Anybody who had the set-up page open while doing something else in the portal** may have had the key of
+       their authenticator written into the activity log as well. Making new codes does not change that key.
+       Those people should switch two-factor authentication off and set it up again. How an administrator finds
+       out who they are is in the entry about the activity log (#622).
+    4. **A backup code works once, and only for the account it was made for.** It is typed in the "Backup code"
+       box on the page that asks for the 6-digit code. Small letters are accepted. Using one is written to the
+       activity log as "2FA verification successful (backup code)".
+    5. **Making a new set needs a code from the authenticator app**, not the password, so it also works for an
+       account that signs in through Microsoft or Google. Five wrong codes stop the form for up to 15 minutes;
+       that does not stop the person signing in.
+    6. **The codes are shown only in the answer to the request that made them.** They are never kept in a session
+       or in a log, and the portal stores only a one-way fingerprint of each, so nobody can show them a second
+       time. If a person closes the page too soon, or the page never arrives, they make a new set.
+    7. **If somebody presses the button twice.** The button switches itself off when the form is sent. Where
+       scripts do not run, a second press can still leave a person with new codes they never saw; the Account
+       page then says so ("That form had already been sent, or had expired…") and tells them to make a set
+       again, pressing once.
+    8. **Many people can do this at the same moment**, for example on the day everybody is asked to.
+    9. No database change in this part. Nothing has to be run after upgrading.
+  - Switching on and storing the codes now happen together or not at all. Before, if the codes could not be stored,
+    two-factor authentication was left on with no codes.
+  - One backup code could sign in more than one browser when they sent it at the same moment. The database now hands
+    the code to one of them.
+  - The key for the authenticator app is kept encrypted in the session while the set-up page is open. Before,
+    anything else the person did meanwhile wrote the key into the activity log in readable text.
+  - The page that asks for the code loads its styles the way the sign-in page does. It named three files itself:
+    the icons' file never exists under that name, and the two Bootstrap files exist only in an installation made
+    from a package.
+  - The set-up page now draws its own messages ("That code is not right"). They used to stay in the session and
+    appear later on some other page.
+  - New test: `tools/two-step-selftest.php` (84 checks, MySQL 8.0.36 and 8.4.11). It runs the real pages.
+  - Not proved: a real authenticator app, a real browser (that the button's script runs), an account with no
+    password, MariaDB.
 - **Fixed — buttons and links that reached nothing, and the "We're live" push that now really goes (#612)**
   - **What an administrator should know after upgrading**
     - Nothing to do. No database change, no new setting, no new address.

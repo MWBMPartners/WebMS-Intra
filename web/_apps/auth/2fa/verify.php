@@ -1,5 +1,5 @@
 <?php
-// Path: public_html/auth/2fa/verify.php
+// Path: web/_apps/auth/2fa/verify.php
 /**
  * -----------------------------------------------------------------------------
  * Auth — TOTP 2FA Verification (Post-Login Challenge)
@@ -7,17 +7,30 @@
  * Shown after successful password/OAuth login when 2FA is enabled.
  * User must enter TOTP code or backup code to complete authentication.
  *
+ * CHANGED FOR #613 (13 October 2026)
+ * - A backup code works ONCE, and that is now enforced by the database, not
+ *   assumed (see "Mark it used" below).
+ * - A backup code typed in small letters is accepted. The codes are shown in
+ *   capitals, and a phone's keyboard types small letters.
+ * - The page loads its styles the way the sign-in page does. It used to
+ *   name three files itself. The icons' file never exists under the name it
+ *   used, so the icons never showed. The two Bootstrap files are added only
+ *   when an installation package is built (tools/package/build.sh), so a
+ *   portal put on its server any other way drew this page with no styling.
+ *
  * @package   Portal\Auth
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.9.1
+ * @version   0.10.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/92
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/613
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
+use Portal\Core\Asset;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\RateLimiter;
@@ -86,8 +99,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     }
 
-    $code     = trim($_POST['code'] ?? '');
+    // A list sent where text is expected (code[]=…) used to stop the page
+    // with an error: trim() refuses a list. It is read as "no code" now.
+    $code      = (is_string($_POST['code'] ?? null) === true) ? trim($_POST['code']) : '';
     $useBackup = isset($_POST['use_backup']) === true;
+
+    // 🔡 Backup codes are made and shown in capitals (eight of 0-9 and A-F),
+    //    and their fingerprints are of the capitals. A phone's keyboard types
+    //    small letters, so "3fa9c2b1" used to be refused as a wrong code and
+    //    counted against the limit. Text of exactly that shape is read in
+    //    capitals. Anything else is left as typed.
+    if ($useBackup === true && preg_match('/^[0-9A-Fa-f]{8}$/', $code) === 1) {
+        $code = strtoupper($code);
+    }
 
     if ($code === '') {
         $_SESSION['flash_msg']  = 'Please enter a code.';
@@ -132,16 +156,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $bcResult = $bcStmt->get_result();
             while ($bcRow = $bcResult->fetch_assoc()) {
                 if (password_verify($code, $bcRow['codeHash']) === true) {
-                    // 📋 Mark code as used
+                    // 📋 Mark it used, and let the person in ONLY if this
+                    //    request is the one that marked it (#613).
+                    //
+                    //    This used to mark the row and then say "verified"
+                    //    whatever had happened. Two requests carrying the
+                    //    same code at the same moment both read the row as
+                    //    unused, and both were let in: one code, two
+                    //    sign-ins. "AND isUsed = 0" makes the database hand
+                    //    the code to one of them; the other changes no row
+                    //    and is refused like any wrong code.
+                    $codeId   = (int) $bcRow['codeID'];
                     $markStmt = $mysqli->prepare(
-                        'UPDATE tblTotpBackupCodes SET isUsed = 1, usedAt = NOW() WHERE codeID = ?'
+                        'UPDATE tblTotpBackupCodes SET isUsed = 1, usedAt = NOW() WHERE codeID = ? AND isUsed = 0'
                     );
                     if ($markStmt !== false) {
-                        $markStmt->bind_param('i', $bcRow['codeID']);
+                        $markStmt->bind_param('i', $codeId);
                         $markStmt->execute();
+                        $verified = ($markStmt->affected_rows === 1);
                         $markStmt->close();
                     }
-                    $verified = true;
                     break;
                 }
             }
@@ -201,8 +235,11 @@ $pageTitle = 'Two-Factor Verification';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?php echo htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8'); ?></title>
-    <link rel="stylesheet" href="/assets/css/bootstrap.min.css">
-    <link rel="stylesheet" href="/assets/css/fontawesome/all.min.css">
+
+    <!-- 🎨 Stylesheets (CDN with local fallback), as on the sign-in page -->
+    <?php echo Asset::bootstrapCss(\Portal\Core\I18n::isRtl()); ?>
+    <?php echo Asset::fontAwesomeCss(); ?>
+    <?php echo Asset::portalCss(); ?>
 
     <!-- 🌙 Prevent FOUC: apply saved theme before first paint -->
     <script>
@@ -218,7 +255,12 @@ $pageTitle = 'Two-Factor Verification';
     })();
     </script>
 </head>
-<body class="bg-light">
+<?php
+// "bg-body-tertiary" is the same pale grey as the "bg-light" that was here.
+// Unlike it, it turns dark with the dark theme, so the page is not pale behind
+// a dark card. (Read from Bootstrap's own rules; not looked at in a browser.)
+?>
+<body class="bg-body-tertiary">
 <div class="container">
     <div class="row justify-content-center mt-5">
         <div class="col-12 col-md-5">
@@ -286,6 +328,7 @@ $pageTitle = 'Two-Factor Verification';
         </div>
     </div>
 </div>
-<script src="/assets/js/bootstrap.bundle.min.js"></script>
+<!-- 📦 JavaScript (CDN with local fallback); it closes the message box above -->
+<?php echo Asset::bootstrapJs(); ?>
 </body>
 </html>

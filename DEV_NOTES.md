@@ -6030,6 +6030,43 @@ either folder still stops the build (`package-selftest.sh` cases T04b and B08b).
 
 ---
 
+## Two-factor authentication: backup codes (#613)
+
+- `web/_apps/auth/2fa/setup.php` is the ONE place backup codes are made (`twoStepReplaceBackupCodes()`), for
+  switching on and for "Make New Backup Codes" (the Account page's form posts there with `action=new_backup_codes`;
+  there is no separate address, so no row in `tblRoutes`).
+- **The codes are drawn in the answer to the request that made them and nowhere else.** Never put them, or the key
+  for the authenticator app, in `$_SESSION` in readable form. The key waits in the session encrypted
+  (`Auth::encrypt()`), under `totp_setup_secret`. The name `totp_backup_codes` is no longer written; the set-up page
+  removes it from any session that still has it.
+- **How the old set is removed, and why.** Inside the transaction: lock the person's own `tblUsers` row
+  (`… FOR UPDATE`), read their old code rows with a plain `SELECT`, delete each by its own `codeID`. **Never
+  `DELETE FROM tblTotpBackupCodes WHERE userID = ?` there:** when the person has no rows, that statement holds the
+  empty stretch of the index, a second person doing the same holds it too, and the database stops one of them (a
+  deadlock). Catching the deadlock and trying again does not work (the other request is still working out its
+  fingerprints). The caller must not read anything inside its transaction before calling the function: the plain
+  read sees the database as it was at the transaction's first plain read. Checks D5b, D5c and D5d hold all three.
+- A backup code is single-use because `verify.php` marks it with `UPDATE … WHERE codeID = ? AND isUsed = 0` and
+  lets the person in only when that changed one row. Do not go back to "mark it, then say yes". It is looked for
+  among the person's OWN codes only (`WHERE userID = ?`): check C13.
+- Storage is unchanged: `tblTotpBackupCodes.codeHash` is a bcrypt fingerprint (`password_hash`), one row per code.
+- Activity types added: `TotpBackupCodesMade`, `TotpBackupCodesFailed`. `TotpVerified` and `TotpVerifyFailed` are
+  unchanged (the sign-in report in `admin/reports/data.php` reads them by name).
+- Limits: the code page keeps its own (5 per account and address in 15 minutes, 15 per account in 30). "Make New
+  Backup Codes" has a separate one, `totp_newcodes:<account>`, 5 in 15 minutes.
+- **A script written into a page needs the page's nonce** (a one-time mark the page's header gives the browser).
+  The Account form's "send once" script carries `nonce="<?php echo … App::cspNonce() … ?>"`. The header's rules
+  (`templates/header.php`) name a nonce, and a browser that knows nonces then refuses any script written into the
+  page without one. Many older pages still write a script with no nonce; that is tracked as its own issue.
+- Still open, each on the issue: the picture (QR code) on the set-up page (#623); an authenticator code can be
+  used again inside its window; one person in two windows at the same moment is shown two sets and only the later
+  one is stored.
+- Test: `php tools/two-step-selftest.php` (see its header for what it cannot prove: a real authenticator app, how
+  the pages look, that a script runs, an account with no password, MariaDB). It must run alone on its database
+  server.
+
+---
+
 ## Sign-in limits and password reset (#580)
 
 - **`Mailer::canSend()` is the one place that answers "can the portal send e-mail?"** `Mailer::sendingRoute()` beside it gives the route's name and what is still missing. A page must never test a provider's settings itself. A new mail route is added in `Mailer::route()` and `Mailer::sendingRoute()` and nowhere else. "Yes" is not proof of delivery.
