@@ -136,7 +136,9 @@ if (App::isRootAdmin() === false) {
     http_response_code(403);
     $pageTitle   = 'Backup Management';
     $pageSection = 'admin';
-    $breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => Site::url('admin/maintenance'), 'Backups' => ''];
+    // 'Maintenance' has no page of its own, so it is shown without a link (#612). It used to link to
+    // 'admin/maintenance', which is not an address anyone answers.
+    $breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => '', 'Backups' => ''];
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
     ?>
     <h1 class="mb-3"><i class="fa-solid fa-database me-2"></i>Backup Management</h1>
@@ -551,7 +553,9 @@ if (DbBackup::isSnapshotName($inspect) === true) {
 
 $pageTitle   = 'Backup Management';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => Site::url('admin/maintenance'), 'Backups' => ''];
+// 'Maintenance' has no page of its own, so it is shown without a link (#612). It used to link to
+// 'admin/maintenance', which is not an address anyone answers.
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => '', 'Backups' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -563,7 +567,7 @@ $csrf = Auth::csrfToken();
     </div>
     <div>
         <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/backup-check'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm me-1">Freshness check</a>
-        <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Maintenance</a>
+        <a href="<?php echo htmlspecialchars(Site::url('admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Admin</a>
     </div>
 </div>
 

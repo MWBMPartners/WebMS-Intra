@@ -5828,6 +5828,55 @@ philosophy, same "no oracle" security reasoning:
 
 ---
 
+## Addresses that reach nothing, and the "We're live" push (#612)
+
+- Run the check with `python3 tools/audit-checks/check_registered_addresses.py`. It reads `web/_sql/full_schema.sql`
+  as SQL (comments removed, every row of every `INSERT INTO tblRoutes` and every `api.*.enabled` row of
+  `INSERT INTO tblSettings` read value by value, later `DELETE`s applied). On 13 October 2026 it found the same 599
+  addresses and the same 61 api switches as a MySQL 8.0.36 database built from that script
+  (`--list-registered` and `--list-switches` print them for comparison).
+- It cannot see a key built from a variable (`Site::url('expenses/view/' . $id)`), nor judge whether a registered
+  address is the right one, nor whether the app that owns an `api/` folder is switched on, nor a switch seeded
+  `false`. It prints how many calls it skipped.
+- The router answers some addresses without the address table (`login/google`, `logout`, `a/<token>`, `f/<token>`
+  and others). They are listed, each with its reason, in `ROUTER_EXACT` and `ROUTER_PATTERNS` in the check. If
+  `Router::handleSpecialRoutes()` gains one, add it there.
+- `KNOWN_UNREGISTERED` in the check is EMPTY. A line there would be an address found to reach nothing and not yet
+  fixed; it only shrinks, and a line that no longer matches fails the check.
+- The moderation handler (`web/_apps/livechat/api/moderate.php`) uses up the form token as soon as it has checked it
+  (`Auth::verifyCsrf()` rotates it) whatever the answer, and does not send the new one back. A page that posts to it
+  must fetch a fresh token before the next press. `admin/live/chat.php` does that by reloading after every answer.
+  Two moderation tabs open at once still share one token: the second tab's first press says "CSRF check failed" and
+  then reloads.
+- Live chat is off in a new installation (`chat.enabled` is `false`); the page answers "App disabled" until a global
+  administrator switches it on. `tools/live-chat-moderation-selftest.php` switches it on for its run, switches several
+  organisations on (told apart by sign-in session) for part G, and puts both back.
+- Run the test: `SELFTEST_DB_NAME=selftest_x SELFTEST_DB_PORT=... SELFTEST_DB_PASS=... SELFTEST_WEB_PORT=9750
+  SELFTEST_WEB_DIR=/a/quiet/folder php tools/live-chat-moderation-selftest.php`. The database must hold
+  `full_schema.sql`. Part E needs Node.js; without it the part says SKIPPED and the last line says the script was not
+  run.
+- The "We're live" handler (`web/_apps/admin/livestream/index.php`, action `notify_live`) calls `WebPush::sendToChannel()`
+  directly, so there is no place to hand it a stand-in sender. `tools/go-live-button-selftest.php` instead gives every
+  device an `http://...selftest.invalid` address, which `WebPush::send()` refuses before any network call, recording
+  outcome -1 on the device's row: a row with `failCount` one higher and `lastHttpStatus = -1` is a device that WAS
+  addressed. To read WHAT was said, one line is put at the top of `send()` in the test's SCRATCH COPY of the sender (never
+  the repository's file): it writes the device, the words, the keep-time, urgency and collapse key to a file, and pauses
+  when `GLB_SLOW_MS` is set (only for the server with eight workers, so that overlapping presses overlap). It opens no
+  connection. Web Push is made to look configured with made-up text (the private key's row is marked "not secret" for the
+  run) and everything is put back. It would also catch a real answer (any other status) as a failure.
+- The limit on "We're live" presses is taken in `web/_apps/admin/livestream/index.php` inside a short transaction that first
+  locks the organisation's own `tblSites` row (`SELECT … FOR UPDATE`, the way `Events` and the calendar importer take a
+  turn), then asks `RateLimiter::tooMany()` and records the hit with `RateLimiter::recordHit()`, and only then sends.
+  The sender's query (`WebPush::sendToChannel()`) leaves out a device whose account is switched off
+  (`tblUsers.isActive = 0`) or whose membership of that organisation is switched off (`tblUserSites.isActive = 0`); a
+  device with no account, or whose account has no membership row at all, is unchanged.
+- `web/_apps/auth/account/save.php` (the Account page's "Notification Preferences" card) now reads the stored choices and
+  changes only its own three keys (`emailDigest`, `expenseUpdates`, `eventReminders`).
+- `web/_core/templates/header.php` draws the trail of links: only the last entry is `aria-current="page"`; an earlier
+  entry with no address is `<li class="breadcrumb-item">` with plain words (it used to be `active` and current too).
+
+---
+
 ## The installer (#499, #500)
 
 `web/_install/index.php` runs with none of the portal loaded. It is reached only through the web folder's

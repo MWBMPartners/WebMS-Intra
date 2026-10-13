@@ -49,11 +49,37 @@ $action = $_POST['action'] ?? 'update_profile';
 
 if ($action === 'update_notifications') {
     $userId = (int) $_SESSION['user_id'];
-    $prefs = json_encode([
-        'emailDigest'    => isset($_POST['emailDigest']) === true,
-        'expenseUpdates' => isset($_POST['expenseUpdates']) === true,
-        'eventReminders' => isset($_POST['eventReminders']) === true,
-    ], JSON_THROW_ON_ERROR);
+
+    // ⚠️ WHAT WAS WRONG HERE (#612): this card has three switches, and the code used to store
+    // ONLY those three, replacing everything else the person had stored. The other choices
+    // live on Account, Notifications ("We're live now", "Service reminders", the approvals
+    // push and every other e-mail choice), and a choice that is missing counts as ON
+    // (WebPush::notifyPrefAllows()). So a member who had switched "We're live now" off, and
+    // then pressed Save on this card without touching it, was switched back ON, and was
+    // sent the next "we are live" push. Now the stored choices are read first and ONLY this
+    // card's three keys are changed. WHAT THIS CANNOT DO: it cannot tell what a missing key
+    // meant; it leaves every other key exactly as it found it (including unknown ones).
+    $stored = [];
+    $readStmt = $mysqli->prepare('SELECT notifyPrefs FROM tblUsers WHERE userID = ? LIMIT 1');
+    if ($readStmt === false) {
+        // Unable to read what is stored: write nothing rather than overwrite it with a guess.
+        $_SESSION['flash_msg']  = 'Your notification preferences could not be saved. Please try again.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('account'), true, 302);
+        exit();
+    }
+    $readStmt->bind_param('i', $userId);
+    $readStmt->execute();
+    $readRow = $readStmt->get_result()->fetch_assoc();
+    $readStmt->close();
+    $decodedPrefs = ($readRow !== null && $readRow['notifyPrefs'] !== null) ? json_decode((string) $readRow['notifyPrefs'], true) : null;
+    if (is_array($decodedPrefs) === true) {
+        $stored = $decodedPrefs;
+    }
+    $stored['emailDigest']    = isset($_POST['emailDigest']) === true;
+    $stored['expenseUpdates'] = isset($_POST['expenseUpdates']) === true;
+    $stored['eventReminders'] = isset($_POST['eventReminders']) === true;
+    $prefs = json_encode($stored, JSON_THROW_ON_ERROR);
 
     $npStmt = $mysqli->prepare('UPDATE tblUsers SET notifyPrefs = ? WHERE userID = ?');
     if ($npStmt !== false) {

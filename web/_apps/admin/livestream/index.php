@@ -30,11 +30,37 @@ if (App::isAdmin() === false) {
 $db     = App::db();
 $siteId = Site::id();
 
+// 🔁 Where the person came from, if it was the Host Console's page for an event; '' otherwise. The ONE place
+// that decides it, used by the "form token already used" page and by the redirect after a press, so the two
+// cannot disagree. The pattern is exactly what the redirect always used: the organisation's part of the address
+// (Site::url) then the page, `?id=` and digits, anchored at both ends. It is an allow-list, so it can never be
+// an open redirect: anything that is not that one page comes back as ''.
+$cameFrom = static function (): string {
+    $returnTo = (string) ($_POST['returnTo'] ?? '');
+    if ($returnTo !== '' && preg_match('#^' . preg_quote(Site::url('admin/host-console/event'), '#') . '\?id=\d+$#', $returnTo) === 1) {
+        return $returnTo;
+    }
+    return '';
+};
+
 // 📝 POST handling — single endpoint, action-dispatched.
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+        // ⚠️ WHAT WAS WRONG HERE (#612): this answered a bare "Bad request" and nothing else. A double-click
+        // on "Send We're live" sends the form twice with the same form token; the first press uses the token
+        // up, the second is refused HERE, and the administrator was left on that bare page with no sign that
+        // the first press had worked. The status is still 400 and nothing is changed or sent (this is the
+        // form-token check and it is not loosened); only the words and a way back are new. The buttons now
+        // also switch themselves off when pressed (see the script at the bottom), so a double-click should
+        // no longer reach this. WHAT THIS CANNOT DO: tell the person whether the first press worked.
         http_response_code(400);
-        exit('Bad request');
+        $backTo = $cameFrom();
+        $backTo = $backTo !== '' ? trim($backTo) : Site::url('admin/livestream/channels');
+        echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>This page was out of date</title></head><body>'
+            . '<p>This page was out of date, so nothing was changed. If you pressed a button twice, only the first press counted.</p>'
+            . '<p><a href="' . htmlspecialchars($backTo, ENT_QUOTES, 'UTF-8') . '">Go back and look at the result</a></p>'
+            . '</body></html>';
+        exit();
     }
     $action = (string) ($_POST['action'] ?? '');
 
@@ -135,47 +161,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (WebPush::isConfigured() === false) {
             $_SESSION['flash_msg']  = 'Web Push is not configured yet — set it up at /admin/integrations/push first.';
             $_SESSION['flash_type'] = 'danger';
-        } elseif (RateLimiter::tooMany('pushgolive:' . $siteId, 3, 900) === true) {
-            $_SESSION['flash_msg']  = 'Too many "we\'re live" pushes sent recently for this site — try again shortly.';
-            $_SESSION['flash_type'] = 'warning';
         } else {
             $liveNow = Livestream::currentlyLive($siteId);
             if ($liveNow === null) {
                 $_SESSION['flash_msg']  = 'No channel is currently scheduled live — nothing to notify.';
                 $_SESSION['flash_type'] = 'warning';
             } else {
-                $eventId  = (int) ($_POST['eventID'] ?? 0);
-                $liveUrl  = $eventId > 0 ? Site::url('live') . '?eventID=' . $eventId : Site::url('live');
-                $ttl      = (int) (App::settings('push.ttl.golive') ?? '900');
-                $siteName = (string) (App::settings('site.name') ?? 'Portal');
-                $stats = WebPush::sendToChannel(
-                    $siteId,
-                    'livestream',
-                    [
-                        'title' => $siteName . ' is live now',
-                        'body'  => (string) $liveNow['name'],
-                        'url'   => $liveUrl,
-                        'tag'   => 'golive',
-                    ],
-                    $ttl,
-                    'high',
-                    'golive' . $siteId,
-                    'pushLivestream'
-                );
-                RateLimiter::recordHit('pushgolive:' . $siteId, 900);
-                $_SESSION['flash_msg']  = 'Push sent — ' . $stats['sent'] . ' delivered, ' . $stats['failed'] . ' failed, ' . $stats['pruned'] . ' pruned.';
-                $_SESSION['flash_type'] = $stats['sent'] > 0 ? 'success' : 'warning';
+                // 🚦 THE LIMIT: three presses in fifteen minutes for this organisation. ⚠️ WHAT WAS WRONG HERE
+                // (#612): the limit was CHECKED before the push was sent and COUNTED after it, so several
+                // administrators pressing at the same moment all passed the check and all sent (six presses at
+                // once sent six pushes, with the limit at three). Now the press is counted FIRST, before
+                // anything is sent, and the checking and counting happen together while holding this
+                // organisation's own row (SELECT … FOR UPDATE inside a short transaction, the way Events and
+                // the calendar importer take a turn): the second press waits for the first to finish counting
+                // and then sees it. A press that is refused here sends nothing. A press that is counted and
+                // then fails to send still stays counted, which is the careful way round.
+                $turn = 0;   // 1 = this press may send, 0 = over the limit, -1 = could not be counted
+                $db->begin_transaction();
+                try {
+                    $lock = $db->prepare('SELECT siteID FROM tblSites WHERE siteID = ? FOR UPDATE');
+                    if ($lock === false) {
+                        throw new \RuntimeException('Could not prepare the lock');
+                    }
+                    $lock->bind_param('i', $siteId);
+                    $lock->execute();
+                    $lock->get_result();
+                    $lock->close();
+                    if (RateLimiter::tooMany('pushgolive:' . $siteId, 3, 900) === true) {
+                        $db->rollback();
+                        $turn = 0;
+                    } else {
+                        RateLimiter::recordHit('pushgolive:' . $siteId, 900);
+                        $db->commit();
+                        $turn = 1;
+                    }
+                } catch (\Throwable $e) {
+                    $db->rollback();
+                    $turn = -1;
+                }
+
+                if ($turn === 0) {
+                    $_SESSION['flash_msg']  = 'Too many "we\'re live" pushes sent recently for this site — try again shortly.';
+                    $_SESSION['flash_type'] = 'warning';
+                } elseif ($turn === -1) {
+                    $_SESSION['flash_msg']  = 'The press could not be counted, so nothing was sent. Please try again.';
+                    $_SESSION['flash_type'] = 'danger';
+                } else {
+                    $eventId  = (int) ($_POST['eventID'] ?? 0);
+                    $liveUrl  = $eventId > 0 ? Site::url('live') . '?eventID=' . $eventId : Site::url('live');
+                    $ttl      = (int) (App::settings('push.ttl.golive') ?? '900');
+                    // ⚠️ WHAT WAS WRONG HERE (#612): this read the INSTALLATION's name (the `site.name` setting), so
+                    // with several organisations every organisation's phones were told "<the installation's name> is
+                    // live now", and on a new installation "Portal is live now". Each organisation has its own name;
+                    // the page header uses it this way (templates/header.php): the organisation's own name first,
+                    // then the setting, then a last resort.
+                    $siteName = (string) (Site::branding('name') ?? App::settings('site.name') ?? 'Portal');
+                    $stats = WebPush::sendToChannel(
+                        $siteId,
+                        'livestream',
+                        [
+                            'title' => $siteName . ' is live now',
+                            'body'  => (string) $liveNow['name'],
+                            'url'   => $liveUrl,
+                            'tag'   => 'golive',
+                        ],
+                        $ttl,
+                        'high',
+                        'golive' . $siteId,
+                        'pushLivestream'
+                    );
+                    $_SESSION['flash_msg']  = 'Push sent — ' . $stats['sent'] . ' delivered, ' . $stats['failed'] . ' failed, ' . $stats['pruned'] . ' pruned.';
+                    $_SESSION['flash_type'] = $stats['sent'] > 0 ? 'success' : 'warning';
+                }
             }
         }
 
         // 🔁 Return to wherever the button was posted from — Host Console's
         // "We're live" button lives on a per-event page and should stay
         // there; the allowlist keeps this from ever being an open redirect.
-        $returnTo = (string) ($_POST['returnTo'] ?? '');
-        // The Host Console page now writes this address with the organisation's part in front
-        // (Site::url), so the allow-list must expect that same part. With no part in use the
-        // pattern is exactly what it was before: ^/admin/host-console/event\?id=\d+$ (#536).
-        if ($returnTo !== '' && preg_match('#^' . preg_quote(Site::url('admin/host-console/event'), '#') . '\?id=\d+$#', $returnTo) === 1) {
+        // The Host Console page writes this address with the organisation's part in front
+        // (Site::url), so the allow-list expects that same part (see $cameFrom above, #536).
+        $returnTo = $cameFrom();
+        if ($returnTo !== '') {
             header('Location: ' . $returnTo);
             exit();
         }
@@ -240,7 +307,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <p class="text-secondary mb-0">Channels and weekly schedule for the live embed.</p>
     </div>
     <div class="d-flex gap-2">
-        <form method="post" class="d-inline">
+        <form method="post" class="d-inline" id="golive-form">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="notify_live">
             <button type="submit" class="btn btn-primary btn-sm"
@@ -391,4 +458,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endforeach; endif; ?>
 
+<script>
+// 🛑 Switch the "We're live" button off the moment its form is sent (#612). A double-click sent the form
+// twice with the same form token: the first press worked, the second was refused, and the person was left on
+// a bare "Bad request" page. A button that is already switched off cannot be pressed a second time. The page
+// that comes back after the press has a fresh button. WHAT THIS CANNOT DO: stop a person who reloads the
+// page and presses again; that is a second push, and the limit of three in fifteen minutes still applies.
+(function () {
+    'use strict';
+    var form = document.getElementById('golive-form');
+    if (form === null) { return; }
+    form.addEventListener('submit', function () {
+        var button = form.querySelector('button[type="submit"]');
+        if (button !== null) { button.disabled = true; }
+    });
+}());
+</script>
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

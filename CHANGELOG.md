@@ -2,6 +2,85 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — buttons and links that reached nothing, and the "We're live" push that now really goes (#612)**
+  - **What an administrator should know after upgrading**
+    - Nothing to do. No database change, no new setting, no new address.
+    - Admin, Live Chat: Approve, Hide and Flag now do something. All the buttons grey out when one is pressed, then the
+      page reloads: approved and hidden messages have left the queue, a flagged message stays in it, marked. A refusal
+      shows its words in a box and the page reloads too. The Live Chat app still has to be switched on, as before.
+    - On the backup pages the "<- Maintenance" button is now "<- Admin", and "Maintenance" in the trail at the top is
+      plain text, not a link. The same is true of the retention page (as before) and the health, demo-data and off-site
+      backup pages.
+    - Expenses: an expired form token on the CSV export now returns to the approvals page with its message.
+    - **"Send We're live": the push notification now really goes out. It can be sent from TWO buttons: the Host Console's
+      (on an event's page), which did nothing before, and the one on the livestream channels page
+      (`admin/livestream/channels`).** Who receives it: the devices that subscribed to the livestream notifications of THIS
+      organisation (a signed-in member's device, or a device with no account), once each, up to 500 devices; not another
+      organisation's, not a person whose account or membership of the organisation is switched off. How a member switches it
+      off: Account, Notifications, "We're live now" in the push notifications card (it is shown once Web Push is set up); it
+      stays off when they press Save on the Account page's own card. The notice is "<the organisation's name> is live now".
+      Each button is greyed unless Web Push is set up (Admin, Integrations, Push) and a livestream channel is inside its
+      scheduled window. Only administrators can press it, and the Host Console shows the button only to them. There is a
+      limit of three presses in fifteen minutes per organisation, taken before sending; each press sends again, it does not
+      remember the last. Nothing records who pressed it.
+  - **Fixed**
+    - Admin, Live Chat: Approve, Hide and Flag now work. The page sent its request to `api/live/chat/moderate`, which
+      nothing answers; the handler is at `api/livechat/moderate`. The handler also throws a form token away as soon as it
+      has checked it and never sends the next one back, so any second press from the same page would have been refused
+      ("CSRF check failed"). The page now reloads after EVERY answer (success or refusal) to fetch a fresh token, and the
+      moment one button is pressed every button on the page is greyed out, so a second message cannot be pressed with a
+      token that is already used. If no answer comes back at all (network down) a box says so and the buttons come back
+      without a reload (#612).
+    - The backup, health, demo-data and off-site backup pages: "Maintenance" in the trail of links at the top is no
+      longer a link (it led to "page not found"; there is no Maintenance page), and the "<- Maintenance" button now reads
+      "<- Admin" and goes to Admin (#612).
+    - The trail of links at the top of every page: only the LAST entry is announced to a screen reader as the current
+      page. An earlier entry with no address (for example "Maintenance") is plain words. Before, it was also marked as
+      the current page, so seven Maintenance pages announced "current page" twice (#612).
+    - Expenses, the CSV export: a person whose form token had expired was sent to `expenses`, which is not a page, and saw
+      "page not found" instead of the message. They now go back to the approvals page (`expenses/approve`), which offers
+      the export and shows the message (#612).
+    - The Host Console's "Send We're live" button now reaches the page that acts on it. It posted to `admin/livestream`
+      (the livestream dashboard, which reads nothing posted to it), so pressing it did nothing. It now posts to
+      `admin/livestream/channels` and REALLY sends the "we are live" push notification. (The button on the livestream
+      channels page itself has sent the same push since the 10 September work, #467; on the released versions neither
+      button has worked, because they have no `admin/livestream/channels` address.) (#612)
+    - The "we are live" push, now that it is switched on, goes to the right people and says the right thing (#612):
+      a member who switched "We're live now" off stays switched off after pressing Save on the Account page's
+      "Notification Preferences" card (that card used to throw away every other stored choice, and a missing choice counts as
+      "on"); the push is in the ORGANISATION's own name ("<organisation> is live now"), not the installation's; a person
+      whose account, or whose membership of the organisation, has been switched off is no longer sent it (this is the sender
+      every push uses, so it applies to service reminders and the approvals push too); the Host Console shows the button only
+      to administrators (a coordinator who is not one used to see it and be refused); the button switches itself off when
+      pressed, and a form token that is already used gets a plain sentence and a link back instead of a bare "Bad request";
+      and the limit of three presses in fifteen minutes now counts a press BEFORE sending, so several administrators
+      pressing at the same moment cannot all send.
+  - **Added (tests and a check)**
+    - `tools/audit-checks/check_registered_addresses.py`: every address a page builds with `Site::url()`,
+      `Router::url()`, `Router::urlForScript()` or `Portal.url()`, where it is written out whole, must be registered in
+      `full_schema.sql`, be an `api/{app}/{action}` whose handler file exists AND whose switch
+      `api.{app}.{action}.enabled` the install script seeds, be one the router answers itself, or be a real file in the
+      web folder; and two built addresses may not be glued together (#612).
+    - `tools/go-live-button-selftest.php` (70 checks): on the real pages, the button's form posts to the right address and ONE
+      push, in the organisation's own name, addresses this organisation's subscribed devices only (not a member who switched
+      "We're live now" off, even after pressing Save on the Account card, not a device that asked for reminders only, not a
+      person whose account or membership is switched off, not another organisation's), a second press sends again, a fourth
+      within fifteen minutes is refused, six presses at the same moment send at most three, a member / a coordinator who is not an administrator / a signed-out visitor / no or another
+      person's form token cannot press it, the come-back address cannot leave the portal, and another organisation's
+      administrator cannot open this organisation's console. It never sends a real push: every device address is
+      `http://`, which the sender refuses before any network call (#612).
+    - `tools/live-chat-moderation-selftest.php` (64 checks): opens the real moderation page, reads the address and field
+      names its script uses, makes that request against the real handler and reads the stored message back; checks who may
+      and may not (a member with a genuine token of their own, and a second organisation's administrator in both
+      directions); runs the page's own script in Node.js when it is installed; and checks that the trail of links on the six
+      Maintenance pages has exactly one current page (#612).
+  - **How it was checked.** One independent check of the first part by a fresh Claude agent standing in for Codex: both
+    fixes sound (it ran the real moderation handler through 48 checks on both MySQL versions; nobody who should not
+    can hide a message), one test that would have passed with the permission check deleted, and six small things, all
+    put right. A second, short check of the "We're live" button alone: the button's own change sound, and the older
+    faults listed above found in code it now reaches, all put right. **The fixes after each check were not
+    independently checked.** Not proved: a real browser, a real push service or phone, a real livestream, MariaDB.
+    Codex has not reviewed this.
 - **Fixed — every link keeps the organisation's part of the address (#536, part 2 of 2)**
   - **What it is for.** One installation can serve several organisations, told apart by the first part of the address
     (`/north/calendar`). A link written bare (`/calendar`) leaves the organisation. Part 1 did the shared page

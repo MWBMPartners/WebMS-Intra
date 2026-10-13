@@ -416,14 +416,20 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     Lines waiting for a change that needs approval are on the pending list
     beside it; `--strict` fails while that list holds anything.
 
-    **Every address a page writes is built by `Site::url()`** (#536): never a
-    bare `/page`. In a script printed by PHP use `Router::urlForScript()`; in a
-    script file, `Portal.url()`.
+    **Every address a page writes is built by `Site::url()`** (#536): never
+    a bare `/page`. In a script printed by PHP use `Router::urlForScript()`;
+    in a script file, `Portal.url()`.
     `tools/audit-checks/check_site_aware_addresses.py` fails on a bare
     address anywhere it reads: the list of places still to sweep,
     `site_aware_addresses_pending.txt`, has been EMPTY since 13 October 2026
     and nothing may be added to it (`--strict` fails if a line appears).
-    `tools/site-addresses-selftest.php` reads the real pages. Three things
+    `tools/site-addresses-selftest.php` reads the real pages.
+    `tools/audit-checks/check_registered_addresses.py` fails on an address
+    written out whole in `Site::url()`, `Router::url()`,
+    `Router::urlForScript()` or `Portal.url()` that nothing answers (an
+    `api/` address also needs its `api.{app}.{action}.enabled` switch
+    seeded), and on two built addresses glued together; a new address the
+    router answers by itself must be added to the check (#612). Three things
     the sweep taught: never join two built addresses (`Site::url('a') .
     Site::url('b')` prints the organisation's part twice); a page that
     ACCEPTS a come-back address by a pattern must accept it with the

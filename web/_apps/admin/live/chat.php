@@ -201,21 +201,63 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <script>
-// 🔄 Wire up the moderation buttons. Each button posts to
-//    /api/live/chat/moderate with a rotating CSRF token. On success,
-//    the row is removed (or visually faded for hide).
+// 🔄 Wire up the moderation buttons. Each button posts to `api/livechat/moderate`
+//    (the handler is _apps/livechat/api/moderate.php) with the page's form token.
+//
+//    ⚠️ WHAT WAS WRONG HERE (#612), TWO THINGS THAT HAD NEVER MET THE HANDLER:
+//    1. The request went to `api/live/chat/moderate`. No file answers that:
+//       an `api/{app}/{action}` address is answered by `_apps/{app}/api/{action}.php`
+//       and there is no `_apps/live/api/` folder (`_apps/live/` is the viewers'
+//       livestream page, a different thing). The handler's app is `livechat`.
+//       Every press of Approve, Hide or Flag got "API endpoint not found".
+//    2. The script expected the handler to send back a fresh form token, to use
+//       for the next press. It never does: the handler (like Auth::verifyCsrf())
+//       throws the old token away as soon as it has checked it, and says nothing
+//       about the new one. So any second press from the same page would have been
+//       refused with "CSRF check failed". The page therefore reloads after every
+//       answer: the reloaded page is drawn from the database and carries a fresh
+//       token. Approved and hidden messages have left the queue by then; a
+//       flagged message stays in it, marked as flagged.
+//    Tried and rejected: changing the handler to send the new token back. That
+//    would avoid the reload, but the handler was not part of this change. If it
+//    ever sends one (the other pages that do put it in `meta.csrfToken` of the
+//    reply), this script can use it instead of reloading.
+//
+//    WHAT THE PERSON SEES (#612, after the independent check):
+//    - The moment any button is pressed, EVERY button on the page greys out, not
+//      only the one pressed. Otherwise a second message pressed before the page has
+//      reloaded would be sent with a token the first press has already used up.
+//    - After a success the row fades and the page reloads: the message has left
+//      the queue (approved, hidden) or stays marked (flagged), and the buttons
+//      work again.
+//    - After a refusal (a made-up message, an out-of-date form token) a box shows
+//      the handler's words, and then the page reloads as well, so the queue is
+//      current and every button works again. Before, the buttons stayed live and
+//      every later press said "CSRF check failed" until the person reloaded by hand.
+//    - If no answer comes back at all (the network is down), the box says so and the
+//      buttons come back WITHOUT a reload: the request may never have reached the
+//      portal, so the token may still be good.
+//    Checked by tools/live-chat-moderation-selftest.php, which makes the same
+//    requests this script makes and, where Node.js is installed, runs this very
+//    script with stand-ins for the browser. It cannot show a real browser.
 (function () {
     'use strict';
     var csrfToken = <?php echo json_encode($csrfToken, JSON_THROW_ON_ERROR); ?>;
+    var allButtons = document.querySelectorAll('.js-mod-btn');
 
-    document.querySelectorAll('.js-mod-btn').forEach(function (btn) {
+    // Grey out (or bring back) every moderation button on the page at once.
+    function setAllDisabled(isOff) {
+        allButtons.forEach(function (other) { other.disabled = isOff; });
+    }
+
+    allButtons.forEach(function (btn) {
         btn.addEventListener('click', function () {
             var messageId = parseInt(btn.getAttribute('data-message-id') || '0', 10);
             var action    = btn.getAttribute('data-action') || '';
             if (messageId <= 0 || action === '') { return; }
 
-            btn.disabled = true;
-            fetch('<?php echo Router::urlForScript('api/live/chat/moderate'); ?>', {
+            setAllDisabled(true);
+            fetch('<?php echo Router::urlForScript('api/livechat/moderate'); ?>', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -228,22 +270,22 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             }).then(function (resp) {
                 if (resp.ok !== true || (resp.body && resp.body.status === 'error')) {
                     alert((resp.body && resp.body.message) ? resp.body.message : 'Moderation failed.');
-                    btn.disabled = false;
+                    // The form token is stale after any refusal that got as far as the
+                    // handler; reload for a fresh one instead of leaving dead buttons.
+                    window.location.reload();
                     return;
                 }
-                // 🔄 Rotate the CSRF token for the next click
-                if (resp.body && resp.body.data && resp.body.data.csrfToken) {
-                    csrfToken = resp.body.data.csrfToken;
-                }
-                // 🧹 Remove the row from the queue
+                // 🧹 Fade the row out, then reload: the used form token is gone for
+                //    good (see the note above), and the reloaded page brings a fresh
+                //    one along with the queue as it now stands in the database.
                 var row = btn.closest('.portal-data-row');
                 if (row !== null) {
                     row.style.opacity = '0.4';
-                    setTimeout(function () { row.remove(); }, 250);
                 }
+                setTimeout(function () { window.location.reload(); }, 250);
             }).catch(function () {
                 alert('Network error — try again.');
-                btn.disabled = false;
+                setAllDisabled(false);
             });
         });
     });

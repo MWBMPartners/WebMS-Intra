@@ -385,7 +385,9 @@ if (App::isRootAdmin() === false) {
     http_response_code(403);
     $pageTitle   = 'Demo Data';
     $pageSection = 'admin';
-    $breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => Site::url('admin/maintenance'), 'Demo Data' => ''];
+    // 'Maintenance' has no page of its own, so it is shown without a link (#612). It used to link to
+    // 'admin/maintenance', which is not an address anyone answers.
+    $breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => '', 'Demo Data' => ''];
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
     ?>
     <h1 class="mb-3"><i class="fa-solid fa-flask me-2"></i>Demo Data</h1>
@@ -1633,7 +1635,9 @@ $currentSiteName = is_array($currentSite) === true ? (string) ($currentSite['sit
 
 $pageTitle   = 'Demo Data';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => Site::url('admin/maintenance'), 'Demo Data' => ''];
+// 'Maintenance' has no page of its own, so it is shown without a link (#612). It used to link to
+// 'admin/maintenance', which is not an address anyone answers.
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => '', 'Demo Data' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -1643,7 +1647,7 @@ $csrf = Auth::csrfToken();
         <h1 class="mb-1"><i class="fa-solid fa-flask me-2"></i>Demo Data</h1>
         <p class="text-secondary mb-0">Put a few made-up people and announcements into the portal for training, then take exactly those out again.</p>
     </div>
-    <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Maintenance</a>
+    <a href="<?php echo htmlspecialchars(Site::url('admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Admin</a>
 </div>
 
 <?php if ($flash !== ''): ?>

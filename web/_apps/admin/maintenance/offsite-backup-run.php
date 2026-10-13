@@ -124,7 +124,9 @@ if (App::isRootAdmin() === false) {
     http_response_code(403);
     $pageTitle   = 'Off-site backup';
     $pageSection = 'admin';
-    $breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => Site::url('admin/maintenance'), 'Off-site backup' => Site::url('admin/maintenance/offsite-backup'), 'Run now' => ''];
+    // 'Maintenance' has no page of its own, so it is shown without a link (#612). It used to link to
+    // 'admin/maintenance', which is not an address anyone answers.
+    $breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => '', 'Off-site backup' => Site::url('admin/maintenance/offsite-backup'), 'Run now' => ''];
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
     ?>
     <h1 class="mb-3"><i class="fa-solid fa-cloud-arrow-up me-2"></i>Off-site backup</h1>

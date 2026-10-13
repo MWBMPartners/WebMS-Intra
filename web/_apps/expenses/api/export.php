@@ -42,7 +42,13 @@ if ($isAdmin === false && $isApprover === false) {
 if (Auth::verifyCsrf($_GET['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: ' . Router::url('expenses'));
+    // ⚠️ WHAT WAS WRONG HERE (#612): this sent the person to 'expenses', which is not
+    //    an address anyone answers (the pages are expenses/submit, /approve,
+    //    /treasury and /view), so an expired form token ended in "page not found"
+    //    instead of the message set just above. The export button lives on the
+    //    approvals page (expenses/approve/index.php), which also shows
+    //    `flash_msg`, so that is where the person goes back to.
+    header('Location: ' . Router::url('expenses/approve'));
     exit();
 }
 

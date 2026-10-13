@@ -364,9 +364,24 @@ if (count($breadcrumbs) > 0) {
         //     htmlspecialchars() throw a TypeError, fatalling the page —
         //     cast back to string defensively before escaping.
         $label = (string) $label;
-        if ($i === $total || $url === '') {
+        // ♿ ONLY THE LAST ENTRY IS THE CURRENT PAGE (#612). This used to read
+        //    `$i === $total || $url === ''`, so every entry with no address was
+        //    marked as the current page too. A page whose trail has an entry
+        //    with no address in the middle ("Maintenance", which has no page of
+        //    its own) then had TWO entries marked current, and a screen reader
+        //    announced "current page" twice. An earlier entry with no address
+        //    is now plain words: no link, no "current page", and not drawn in
+        //    the current page's bold style either. WHAT THIS CANNOT DO: a trail
+        //    whose LAST entry has an address still marks that last entry current
+        //    (the page is the last step of its own trail), as it always did.
+        if ($i === $total) {
             // Active (current) breadcrumb
             echo '<li class="breadcrumb-item active" aria-current="page">';
+            echo htmlspecialchars($label, ENT_QUOTES, 'UTF-8');
+            echo '</li>';
+        } elseif ($url === '') {
+            // An earlier entry that has no page of its own: words only.
+            echo '<li class="breadcrumb-item">';
             echo htmlspecialchars($label, ENT_QUOTES, 'UTF-8');
             echo '</li>';
         } else {

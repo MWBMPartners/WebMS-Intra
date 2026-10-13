@@ -70,7 +70,9 @@ $message        = $check['message'];
 
 $pageTitle   = 'Backup Freshness Check';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => Site::url('admin/maintenance'), 'Backups' => ''];
+// 'Maintenance' has no page of its own, so it is shown without a link (#612). It used to link to
+// 'admin/maintenance', which is not an address anyone answers.
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => '', 'Backups' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
 $badgeClass = match ($state) {
@@ -86,7 +88,7 @@ $badgeClass = match ($state) {
         <h1 class="mb-1"><i class="fa-solid fa-box-archive me-2"></i>Backup Freshness</h1>
         <p class="text-secondary mb-0">Current state of the snapshots kept in <code>web/_backups/</code>.</p>
     </div>
-    <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Maintenance</a>
+    <a href="<?php echo htmlspecialchars(Site::url('admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Admin</a>
 </div>
 
 <div class="alert alert-<?php echo $badgeClass; ?>">

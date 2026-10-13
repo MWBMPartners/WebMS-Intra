@@ -73,8 +73,17 @@ $momentMeta = [
 // 📊 Sparkline scale.
 $maxTrend = max(1, max(array_column($trend, 'count')));
 
-// 🔔 "We're live now" push (#322) — same handler as /admin/livestream,
-// posted here with eventID + a returnTo so the host stays on this console.
+// 🔔 "We're live now" push (#322) — the code that acts on it is
+// web/_apps/admin/livestream/index.php, which answers at `admin/livestream/channels`.
+// It is posted there with eventID + a returnTo so the host stays on this console.
+//
+// ⚠️ WHAT WAS WRONG HERE (#612): the form below posted to `admin/livestream`. That is a
+// different page (the livestream dashboard, admin/livestream/dashboard.php), and it reads
+// nothing that is posted to it, so pressing the button did nothing at all, with or without
+// a form token. The comment above used to say "same handler as /admin/livestream", which
+// was the mistake in words. Pressing the button now REALLY sends the push notification to
+// members (it never has, on any installation); see the handler for who receives it.
+// Checked by tools/go-live-button-selftest.php, which never sends a real push.
 $pushConfigured = WebPush::isConfigured();
 $currentlyLive  = Livestream::currentlyLive($siteId);
 
@@ -104,7 +113,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </p>
         </div>
         <div class="d-flex gap-2">
-            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/livestream'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
+            <?php // ⚠️ WHAT WAS WRONG HERE (#612): this page lets in an administrator OR an event coordinator
+                  // (the gate at the top), but the page the button posts to (admin/livestream/channels)
+                  // answers only administrators: for a coordinator who is not an administrator the button was
+                  // drawn switched on and led to a bare "Access Denied". The button is now drawn only for
+                  // somebody that page would let press it, asked with the SAME call that page makes
+                  // (App::isAdmin()), not a copy written another way. WHAT THIS CANNOT DO: a coordinator still
+                  // cannot send "We're live" from here; whether coordinators should be allowed to is the owner's
+                  // decision, and would be a change in that page. ?>
+            <?php if (App::isAdmin() === true): ?>
+            <form method="post" id="golive-form" action="<?php echo htmlspecialchars(Site::url('admin/livestream/channels'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="notify_live">
                 <input type="hidden" name="eventID" value="<?php echo (int) $eventId; ?>">
@@ -115,6 +133,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <i class="fa-solid fa-bullhorn me-1"></i>Send "We're live"
                 </button>
             </form>
+            <script>
+            // 🛑 Switch the button off the moment the form is sent, so a double-click cannot send it twice with
+            // the same form token (the second would be refused and the person left on an error page). #612
+            (function () {
+                'use strict';
+                var form = document.getElementById('golive-form');
+                if (form === null) { return; }
+                form.addEventListener('submit', function () {
+                    var button = form.querySelector('button[type="submit"]');
+                    if (button !== null) { button.disabled = true; }
+                });
+            }());
+            </script>
+            <?php endif; ?>
             <a href="<?php echo htmlspecialchars(Site::url('admin/host-console'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
         </div>
     </div>

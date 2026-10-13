@@ -349,10 +349,20 @@ class WebPush
             //    from a fixed 3-item whitelist, so a substring match here can't
             //    be tricked by attacker-controlled channel text).
             $channelLike = '%"' . $channel . '"%';
+            // ⚠️ WHAT WAS WRONG HERE (#612): the query asked only for the organisation, an active device and the
+            //    channel. A person whose ACCOUNT had been switched off, or whose MEMBERSHIP of this organisation had
+            //    been switched off, still had their device addressed, and could no longer sign in to switch the
+            //    notice off. The two AND-lines below leave such a device out. A device with NO account
+            //    (ps.userID IS NULL) is unchanged: it has nothing to be switched off. A device whose account has
+            //    NO membership row at all is also unchanged (only a membership marked OFF counts as switched off).
+            //    This is the sender every push uses (go-live, service reminders, the approvals push), so it is
+            //    the right place and it applies to all of them.
             $sql = 'SELECT ps.subID, ps.endpoint, ps.p256dhKey, ps.authKey, ps.userID, u.notifyPrefs '
                  . 'FROM tblPushSubscriptions ps '
                  . 'LEFT JOIN tblUsers u ON u.userID = ps.userID '
-                 . 'WHERE ps.siteID = ? AND ps.isActive = 1 AND ps.channels LIKE ?';
+                 . 'WHERE ps.siteID = ? AND ps.isActive = 1 AND ps.channels LIKE ? '
+                 . 'AND (ps.userID IS NULL OR u.isActive = 1) '
+                 . 'AND NOT EXISTS (SELECT 1 FROM tblUserSites us WHERE us.userID = ps.userID AND us.siteID = ps.siteID AND us.isActive = 0)';
             $types  = 'is';
             $params = [$siteId, $channelLike];
             if ($onlyUserIds !== null) {

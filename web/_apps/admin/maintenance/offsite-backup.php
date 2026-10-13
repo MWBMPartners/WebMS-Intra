@@ -187,7 +187,9 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Off-site backup';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => Site::url('admin/maintenance'), 'Off-site backup' => ''];
+// 'Maintenance' has no page of its own, so it is shown without a link (#612). It used to link to
+// 'admin/maintenance', which is not an address anyone answers.
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => '', 'Off-site backup' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
