@@ -17,6 +17,16 @@
  *     These gate the NOTIFICATION content only; per-DEVICE opt-in (which
  *     browsers actually receive a push at all) is the separate
  *     `[data-push-optin]` widget below, backed by Portal\Core\WebPush.
+ *   • Imported events waiting for approval (#514 part 9), for
+ *     administrators: the daily e-mail is switched by `approvalRequests`
+ *     and the push by `pushApprovals` (Portal\Core\ImportNotifier). A
+ *     person who is not an administrator is never sent either, whatever
+ *     these say.
+ *
+ * ADDING A SWITCH: add the key to `$defaults` here AND to `$allowedKeys` in
+ * notifications-save.php in the same change. The save page stores "off"
+ * for every key on its list that the form did not send, so a key on its
+ * list with no switch here is switched off for everybody who presses Save.
  *
  * Stored in tblUsers.notifyPrefs (JSON column from migration 026).
  *
@@ -95,6 +105,7 @@ $defaults = [
     'approvalRequests'      => true,
     'pushLivestream'        => true,
     'pushServiceReminders'  => true,
+    'pushApprovals'         => true,
 ];
 foreach ($defaults as $k => $v) {
     if (array_key_exists($k, $prefs) === false) {
@@ -242,9 +253,33 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
                     <i class="fa-solid fa-circle-info me-1"></i>
                     Browser push notifications are not configured on this site yet.
                 </p>
+                <?php
+                // 🧷 The push switches are not shown while push is not set
+                //    up, and the save page stores "off" for every key the
+                //    form does not send. So each push choice that is ON is
+                //    carried in a hidden field: without it, pressing Save
+                //    here would switch that push off for the person, and it
+                //    would stay off after an administrator set push up.
+                //
+                //    WHAT WAS WRONG. Until #514 part 9 none was carried, so
+                //    Save on this page (to change something else entirely)
+                //    switched "We're live now" and "Service reminders" off
+                //    for that person. Part 9 first carried only its own new
+                //    switch; the independent check of 13 October 2026 ran the
+                //    page and confirmed the two older ones were still lost.
+                //    All three are carried now.
+                //
+                //    A choice that is OFF gets no field, so it stays off.
+                ?>
+                <?php foreach (['pushLivestream', 'pushServiceReminders', 'pushApprovals'] as $pushKey): ?>
+                    <?php if ((bool) ($prefs[$pushKey] ?? false) === true): ?>
+                        <input type="hidden" name="prefs[<?php echo htmlspecialchars($pushKey, ENT_QUOTES, 'UTF-8'); ?>]" value="1">
+                    <?php endif; ?>
+                <?php endforeach; ?>
             <?php else: ?>
                 <?php echo $switchRow('pushLivestream', 'We\'re live now', 'Notify me when a livestream starts (if I\'ve enabled notifications on this device below).'); ?>
                 <?php echo $switchRow('pushServiceReminders', 'Service reminders', 'Notify me shortly before a service I\'ve RSVP\'d to starts.'); ?>
+                <?php echo $switchRow('pushApprovals', 'Imported events waiting for approval', 'For administrators: notify me when an event copied in from an outside calendar starts waiting for approval (if I\'ve enabled notifications on this device below). The notification gives a number only, never an event\'s title.'); ?>
                 <div class="pt-3">
                     <p class="small text-muted mb-2">
                         These preferences control WHAT you're notified about. Whether THIS device
@@ -262,7 +297,7 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
     <div class="card shadow-sm mb-3">
         <div class="card-header"><h2 class="h6 mb-0">Approvals</h2></div>
         <div class="card-body">
-            <?php echo $switchRow('approvalRequests', 'Approval requests', 'Get notified when a workflow step is waiting on you, or when a request you submitted is approved/rejected.'); ?>
+            <?php echo $switchRow('approvalRequests', 'Approval requests', 'Get notified when a workflow step is waiting on you, or when a request you submitted is approved/rejected. For administrators it also covers one e-mail a day, on a day when events copied in from an outside calendar are waiting for approval.'); ?>
         </div>
     </div>
 
@@ -311,6 +346,14 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
             //    either. What quiet hours do stop is a text message that is
             //    not urgent (Sms::send()), and nothing sends that message
             //    afterwards. The words below say exactly that.
+            //
+            //    NO EXCEPTION. #514 part 9 was first built to hold its own
+            //    notice (imported events waiting for approval) during quiet
+            //    hours, and for a few hours on 13 October 2026 this sentence
+            //    named that exception. The owner then decided "hold nothing":
+            //    that notice is sent like every other e-mail, and so is its
+            //    push. Do not add an exception here without that decision
+            //    being changed.
             ?>
             <p class="small text-muted">
                 E-mail from the portal is not held back during Sabbath quiet hours:

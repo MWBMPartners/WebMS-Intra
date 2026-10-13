@@ -97,6 +97,25 @@
  *      document was made with; and when the e-mail to approvers fails after
  *      the withdrawal is stored, the person is still told "withdrawn".
  *
+ * #514 part 9 (13 October 2026) added part N:
+ *   N. The dashboard's card for events copied in from an outside calendar
+ *      that are waiting for approval, read from the REAL dashboard page with
+ *      organisations told apart by the first part of the address: an
+ *      administrator of the organisation is shown the card, its number and a
+ *      link that keeps the organisation's part of the address; a member's
+ *      page holds no trace of it (a number would tell them that hidden
+ *      events exist); another organisation's administrator is shown nothing
+ *      about this one; and the card goes when nothing is waiting, a paused
+ *      calendar's event not counting. Also, through the real pages: the
+ *      copy of "my data" hands an administrator the record of when they
+ *      were told, and a member none; and pressing Save on the notification
+ *      preferences page, while push is not set up and its switches are
+ *      therefore not shown, switches NONE of the three push choices off
+ *      (the new one, and the two older ones, which that Save used to switch
+ *      off: the independent check of part 9 ran it, 13 October 2026). Who
+ *      is E-MAILED or PUSHED, and when, is
+ *      `tools/import-notifier-selftest.php`'s subject.
+ *
  * Roll-out package F2 (12 October 2026, #511) put ONE gate in front of every
  * page: a signed-in person who is not a member of the organisation an
  * address opens is refused there (HTTP 403) before any page runs. So the
@@ -163,7 +182,8 @@
  *   that needs a portal-wide row deleted, so it is checked instead inside a
  *   rolled-back transaction by `tools/app-switch-selftest.php` (part 9).
  * - That mail is sent, or what the dashboard shows beyond the two expense
- *   numbers part M reads.
+ *   numbers part M reads and the one card part N reads. (This line used to
+ *   say "beyond the two expense numbers" only; part N is what changed it.)
  * - Part M: a database server started WITHOUT strict checking, where the
  *   fault of #587 was a stored EMPTY status and a page that said
  *   "withdrawn". This file passes or fails there like anywhere else (its
@@ -209,19 +229,20 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.4.0
+ * @version   1.5.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/478
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/545
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/570
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/548
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/587
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/514
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 285;
+const EXPECTED_CHECKS = 293;
 
 function refuse(string $why): never
 {
@@ -353,6 +374,18 @@ const EV_B     = 916404; // B: public, published, so on A's address only "wrong 
 const EV_GONE     = 916405; // A: public and published, but DELETED
 const EV_IMPORTED = 916406; // A: public and published, but copied in from an outside calendar
 const EV_NONE  = 916499; // matches no event
+// Part N (#514 part 9): two outside calendars of A, three events copied in
+// from them, and an approval row for each (waiting, at first).
+const FEED_N_ON     = 916951; // A: an outside calendar, switched on
+const FEED_N_PAUSED = 916952; // A: an outside calendar, PAUSED
+const EV_N1 = 916451;         // from the switched-on calendar
+const EV_N2 = 916452;         // from the switched-on calendar
+const EV_N3 = 916453;         // from the paused calendar
+const APPR_N1 = 916461;
+const APPR_N2 = 916462;
+const APPR_N3 = 916463;
+/** In the title of every part N event, so "is any of it in this page?" is one search. */
+const IMPORT_MARK = 'ACCESS-WAITING-EVENT';
 const VENUE    = 916701; // A's hall
 const BOOKING  = 916711; // one booking of it, today
 const BOOKING_LATER = 916712; // a second booking, on the day of the events, so one calendar view holds both
@@ -395,6 +428,11 @@ function removeWorld(): void
     q('DELETE FROM tblVenueUsageTypes WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblVenueStatuses WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblVenues WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    // Part N: the record of who was told, then the outside calendars. Their
+    // approval rows go with them (the link cascades), and with the events
+    // removed on the line after.
+    q('DELETE FROM tblExternalApprovalNotices WHERE siteID IN (?, ?) OR userID BETWEEN 916000 AND 916999', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblExternalFeeds WHERE siteID IN (?, ?) OR feedID BETWEEN 916000 AND 916999', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblEvents WHERE siteID IN (?, ?) OR eventID BETWEEN 916000 AND 916999', 'ii', [ORG_A, ORG_B]);
     q('DELETE p FROM tblExpenseClaimPayments p JOIN tblExpenseClaims c ON c.claimID = p.claimID WHERE c.siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE a FROM tblExpenseClaimApprovals a JOIN tblExpenseClaims c ON c.claimID = a.claimID WHERE c.siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
@@ -2353,6 +2391,164 @@ $filed = (int) (one('SELECT COUNT(*) AS n FROM tblErrors WHERE siteID = ? AND er
 ok('…and that failure is on record for the administrator: exactly one line, filed against this organisation (so the step really did fail)', $filed === 1, $filed . ' line(s) found');
 
 // =============================================================================
+head('N. #514 part 9 — the dashboard card for imported events waiting for approval');
+// =============================================================================
+// Two events of A's switched-on outside calendar are waiting, and one of its
+// paused calendar. The card must say 2 (a paused calendar's event can be
+// shown to nobody whatever is decided, so nobody is nudged about it).
+siteSetting(ORG_A, 'approvals.enabled', '1');
+q(
+    "INSERT INTO tblExternalFeeds (feedID, siteID, name, url, isActive) VALUES (?, ?, 'ACCESS outside calendar', 'https://calendar.selftest.invalid/access-on.ics', 1), "
+    . "(?, ?, 'ACCESS paused outside calendar', 'https://calendar.selftest.invalid/access-paused.ics', 0)",
+    'iiii', [FEED_N_ON, ORG_A, FEED_N_PAUSED, ORG_A]
+);
+foreach ([[EV_N1, FEED_N_ON, APPR_N1], [EV_N2, FEED_N_ON, APPR_N2], [EV_N3, FEED_N_PAUSED, APPR_N3]] as [$eventId, $feedId, $approvalId]) {
+    q(
+        'INSERT INTO tblEvents (eventID, siteID, externalFeedID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) '
+        . "VALUES (?, ?, ?, ?, ?, 'ACCESS description', ?, ?, 'UTC', 'published', 0, 0)",
+        'iiissss', [$eventId, ORG_A, $feedId, 'access-waiting-' . $eventId, IMPORT_MARK . ' ' . $eventId, $eventDay . ' 10:00:00', $eventDay . ' 11:00:00']
+    );
+    q(
+        'INSERT INTO tblExternalEventApprovals (approvalID, siteID, feedID, eventID, origin, originID, requestHash, contentHash, status, reason, requestedLevel, '
+        . 'requestedDetail, requestedWebsite, requestedAudienceSummary, snapTitle, snapStart, snapEnd, snapTimezone, snapIsAllDay, createdAt) '
+        . "VALUES (?, ?, ?, ?, 'rule', 1, ?, ?, 'pending', 'new_match', 'public', 'basic', 0, '', ?, ?, ?, 'UTC', 0, UTC_TIMESTAMP())",
+        'iiiisssss',
+        [$approvalId, ORG_A, $feedId, $eventId, hash('sha256', 'access-request-' . $approvalId), hash('sha256', 'access-content-' . $approvalId), IMPORT_MARK . ' ' . $eventId, $eventDay . ' 10:00:00', $eventDay . ' 11:00:00']
+    );
+}
+// ("portal-dashboard-hero" in the checks below is the dashboard's own opening
+// block: it shows that the page read really is the dashboard, so that "the
+// card is not there" cannot be passed by an error page.)
+/** The card's words, as the dashboard writes them. */
+$importsLabel = 'Imported events waiting for approval';
+/** The whole card as the dashboard draws it: its link, then its number, then its words. Gives the link and the number, or null. */
+$importsCard = static function (string $body) use ($importsLabel): ?array {
+    return preg_match(
+        '#<a href="([^"]*)" class="text-decoration-none">\s*<div class="card border-warning h-100">(?:(?!</a>).)*?<div class="h4 mb-0 fw-bold">(\d+)</div>\s*<small class="text-muted">'
+        . preg_quote($importsLabel, '#') . '</small>#s',
+        $body, $m
+    ) === 1 ? ['url' => html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'), 'value' => (int) $m[2]] : null;
+};
+$dashAdm = req($jar['adm'], 'GET', ADDR_A . '/dashboard');
+ok(
+    'A\'s administrator: the dashboard shows the card, with the number 2 (the paused calendar\'s event is not counted) and a link that keeps A\'s part of the address: '
+    . ADDR_A . '/approvals#imports',
+    $dashAdm['status'] === 200 && $importsCard($dashAdm['body']) === ['url' => ADDR_A . '/approvals#imports', 'value' => 2],
+    'HTTP ' . $dashAdm['status'] . '; the card read: ' . json_encode($importsCard($dashAdm['body']))
+);
+$dashMem = req($jar['mem'], 'GET', ADDR_A . '/dashboard');
+ok(
+    'a member of A: the dashboard page holds NO trace of it: not the card, not its words, not its link, not a waiting event\'s title',
+    $dashMem['status'] === 200 && str_contains($dashMem['body'], $importsLabel) === false && str_contains($dashMem['body'], 'approvals#imports') === false
+    && str_contains($dashMem['body'], IMPORT_MARK) === false && str_contains($dashMem['body'], 'portal-dashboard-hero') === true,
+    'HTTP ' . $dashMem['status'] . (str_contains($dashMem['body'], $importsLabel) === true ? '; the card\'s words ARE in the member\'s page' : '')
+);
+$dashBOwn = req($jar['badm'], 'GET', ADDR_B . '/dashboard');
+$dashBatA = req($jar['badm'], 'GET', ADDR_A . '/dashboard');
+ok(
+    'B\'s administrator: their own dashboard (B has nothing waiting) shows no card, and A\'s address refuses them (403) with nothing of A\'s card in the answer',
+    $dashBOwn['status'] === 200 && str_contains($dashBOwn['body'], $importsLabel) === false && str_contains($dashBOwn['body'], 'approvals#imports') === false
+    && $dashBatA['status'] === 403 && str_contains($dashBatA['body'], $importsLabel) === false && str_contains($dashBatA['body'], IMPORT_MARK) === false,
+    'own dashboard HTTP ' . $dashBOwn['status'] . '; A\'s address HTTP ' . $dashBatA['status']
+);
+// Both are decided: only the paused calendar's event is left waiting.
+q("UPDATE tblExternalEventApprovals SET status = 'approved' WHERE approvalID IN (?, ?)", 'ii', [APPR_N1, APPR_N2]);
+$dashNone = req($jar['adm'], 'GET', ADDR_A . '/dashboard');
+ok(
+    'once both are decided the card is gone from the administrator\'s dashboard (not a card saying 0), though the paused calendar\'s event is still waiting',
+    $dashNone['status'] === 200 && str_contains($dashNone['body'], $importsLabel) === false && str_contains($dashNone['body'], 'portal-dashboard-hero') === true
+    && (int) (one("SELECT COUNT(*) AS n FROM tblExternalEventApprovals WHERE siteID = ? AND status = 'pending'", 'i', [ORG_A])['n'] ?? 0) === 1,
+    'HTTP ' . $dashNone['status']
+);
+
+// --- N: the copy of "my data" --------------------------------------------------
+// The scheduled job's memory of who has been told is a row about a person,
+// so the page that hands somebody everything held about them must hand that
+// over too. One row is planted for A's administrator, as the job would write it.
+q(
+    "INSERT INTO tblExternalApprovalNotices (siteID, userID, emailLocalDate, emailOutcome, emailAt, pushUpToApprovalID, pushAt) VALUES (?, ?, ?, 'sent', UTC_TIMESTAMP(), ?, UTC_TIMESTAMP())",
+    'iisi', [ORG_A, ADM, $eventDay, APPR_N2]
+);
+$exportOf = static function (string $who): ?array {
+    $answer = req($who, 'GET', ADDR_A . '/account/data-export');
+    $data   = json_decode($answer['body'], true);
+
+    return $answer['status'] === 200 && is_array($data) === true ? ($data['data']['importedEventNotices'] ?? null) : null;
+};
+$exportAdm = $exportOf($jar['adm']);
+ok(
+    'the copy of "my data": A\'s administrator is handed the record of when they were told, with the organisation, the day (on its own calendar) and what became of the e-mail',
+    is_array($exportAdm) === true && count($exportAdm) === 1 && (int) $exportAdm[0]['siteID'] === ORG_A && $exportAdm[0]['siteName'] === 'Selftest access A'
+    && $exportAdm[0]['lastEmailDay'] === $eventDay && $exportAdm[0]['lastEmailOutcome'] === 'sent' && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', (string) $exportAdm[0]['lastPushAtUtc']) === 1
+    && array_keys($exportAdm[0]) === ['siteID', 'siteName', 'lastEmailDay', 'lastEmailOutcome', 'lastEmailClaimedAtUtc', 'lastPushAtUtc'],
+    json_encode($exportAdm)
+);
+ok('…and a member, who is never told, is handed an empty list there, not somebody else\'s record', $exportOf($jar['mem']) === [], json_encode($exportOf($jar['mem'])));
+
+// --- N: Save on the notification preferences page ---------------------------------
+// Push is not set up in this portal, so the page shows none of the push
+// switches. The save page stores "off" for every switch the form does not
+// send. Pressing Save must not switch a push choice off because of that:
+// not the new one (imported events waiting for approval), and not the two
+// older ones ("We're live now" and "Service reminders"), which it used to.
+/** Every field a browser would send when Save is pressed on the page as shown: ticked boxes, chosen buttons and hidden fields. */
+$fieldsOf = static function (string $html): array {
+    $fields = [];
+    preg_match_all('/<input\b[^>]*>/i', $html, $inputs);
+    foreach ($inputs[0] as $input) {
+        if (preg_match('/\bname="([^"]+)"/', $input, $n) !== 1 || preg_match('/\bvalue="([^"]*)"/', $input, $v) !== 1) {
+            continue;
+        }
+        $type = preg_match('/\btype="([^"]+)"/', $input, $t) === 1 ? strtolower($t[1]) : 'text';
+        if (($type === 'checkbox' || $type === 'radio') && preg_match('/\bchecked\b/', $input) !== 1) {
+            continue;
+        }
+        $fields[html_entity_decode($n[1], ENT_QUOTES, 'UTF-8')] = html_entity_decode($v[1], ENT_QUOTES, 'UTF-8');
+    }
+
+    return $fields;
+};
+/** The three push choices and "Approval requests", as stored for A's administrator: true, false, or "not stored". */
+$storedChoices = static function (): array {
+    $prefs = (array) json_decode((string) (one('SELECT notifyPrefs FROM tblUsers WHERE userID = ?', 'i', [ADM])['notifyPrefs'] ?? 'null'), true);
+    $out   = [];
+    foreach (['pushLivestream', 'pushServiceReminders', 'pushApprovals', 'approvalRequests'] as $key) {
+        $out[$key] = $prefs[$key] ?? 'not stored';
+    }
+
+    return $out;
+};
+/** Which of the three push choices the page carries in a field, as shown. */
+$carried = static fn (array $fields): array => array_values(array_filter(
+    ['pushLivestream', 'pushServiceReminders', 'pushApprovals'],
+    static fn (string $key): bool => ($fields['prefs[' . $key . ']'] ?? '') === '1'
+));
+q('UPDATE tblUsers SET notifyPrefs = NULL WHERE userID = ?', 'i', [ADM]);
+$prefsPage = req($jar['adm'], 'GET', ADDR_A . '/account/notifications');
+$fields    = $fieldsOf($prefsPage['body']);
+$saved     = req($jar['adm'], 'POST', ADDR_A . '/account/notifications/save', $fields);
+ok(
+    'notification preferences, push not set up: the page shows no push switch but carries all three push choices in hidden fields, and pressing Save leaves '
+    . '"pushLivestream", "pushServiceReminders" and "pushApprovals" all ON',
+    $prefsPage['status'] === 200 && str_contains($prefsPage['body'], 'Browser push notifications are not configured') === true
+    && $carried($fields) === ['pushLivestream', 'pushServiceReminders', 'pushApprovals'] && isset($fields['csrf_token']) === true && $saved['status'] === 302
+    && $storedChoices() === ['pushLivestream' => true, 'pushServiceReminders' => true, 'pushApprovals' => true, 'approvalRequests' => true],
+    'page HTTP ' . $prefsPage['status'] . '; save HTTP ' . $saved['status'] . '; carried: ' . json_encode($carried($fields)) . '; stored: ' . json_encode($storedChoices())
+);
+q('UPDATE tblUsers SET notifyPrefs = ? WHERE userID = ?', 'si', ['{"pushApprovals":false,"pushLivestream":false,"pushServiceReminders":true,"approvalRequests":true}', ADM]);
+$prefsPage = req($jar['adm'], 'GET', ADDR_A . '/account/notifications');
+$fields    = $fieldsOf($prefsPage['body']);
+$saved     = req($jar['adm'], 'POST', ADDR_A . '/account/notifications/save', $fields);
+ok(
+    '…and a push choice somebody had switched OFF stays off: with two of the three off, only the one that is on is carried, and Save leaves each as it was, '
+    . 'with "Approval requests" still on',
+    $carried($fields) === ['pushServiceReminders'] && ($fields['prefs[approvalRequests]'] ?? '') === '1' && $saved['status'] === 302
+    && $storedChoices() === ['pushLivestream' => false, 'pushServiceReminders' => true, 'pushApprovals' => false, 'approvalRequests' => true],
+    'save HTTP ' . $saved['status'] . '; carried: ' . json_encode($carried($fields)) . '; stored: ' . json_encode($storedChoices())
+);
+q('UPDATE tblUsers SET notifyPrefs = NULL WHERE userID = ?', 'i', [ADM]);
+
+// =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');
 // =============================================================================
 $log = (string) @file_get_contents($child . $sep . 'php-errors.log');
@@ -2365,6 +2561,7 @@ $left = (int) (one(
     'SELECT (SELECT COUNT(*) FROM tblSites WHERE siteID IN (?, ?)) + (SELECT COUNT(*) FROM tblUsers WHERE userID BETWEEN 916000 AND 916999) '
     . "+ (SELECT COUNT(*) FROM tblExpenseClaims WHERE claimID BETWEEN 916000 AND 916999) + (SELECT COUNT(*) FROM tblSettings WHERE settingKey LIKE '%zz-selftest%') "
     . '+ (SELECT COUNT(*) FROM tblEvents WHERE eventID BETWEEN 916000 AND 916999) + (SELECT COUNT(*) FROM tblVenues WHERE venueID BETWEEN 916000 AND 916999) '
+    . '+ (SELECT COUNT(*) FROM tblExternalFeeds WHERE feedID BETWEEN 916000 AND 916999) + (SELECT COUNT(*) FROM tblExternalEventApprovals WHERE approvalID BETWEEN 916000 AND 916999) '
     . '+ (SELECT COUNT(*) FROM tblKidProfiles WHERE childID BETWEEN 916000 AND 916999) + (SELECT COUNT(*) FROM tblAttendanceServiceTypes WHERE serviceTypeID BETWEEN 916000 AND 916999) '
     . "+ (SELECT COUNT(*) FROM tblSalvationCards WHERE fullName LIKE 'ACCESS card%') + (SELECT COUNT(*) FROM tblLiveChatMessages WHERE displayName LIKE 'ACCESS%' OR body LIKE 'ACCESS-CHAT%') AS n",
     'ii', [ORG_A, ORG_B]

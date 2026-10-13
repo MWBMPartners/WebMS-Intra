@@ -412,6 +412,23 @@ return [
         'reason'   => 'Who approved an expense claim. The approval belongs to the claim and its audit trail, not to the approver, so it is kept and the approver\'s name is removed.',
         'columns'  => ['userID'],
     ],
+    'tblExternalApprovalNotices' => [
+        'decision' => 'erase',
+        // #514 part 9. One row for each administrator in each organisation:
+        // the day they were last sent the daily e-mail about imported events
+        // waiting for approval, and the newest waiting event they were sent
+        // a push about. It is the scheduled job's memory of who has been
+        // told, so that nobody is told twice. It holds no text: no title, no
+        // address, no name.
+        //
+        // No hand-written step in GdprEraser is needed: an entry that says
+        // "erase" and names `userID` gets a delete of its own (see the note
+        // at the top of this list). Deleting the account would remove the
+        // row anyway (the link cascades); the entry makes an erasure that
+        // KEEPS the account row remove it too.
+        'reason'   => 'A record that this administrator was told about imported events waiting for approval. It is about them, and of no use once they are gone',
+        'columns'  => ['userID'],
+    ],
     'tblExternalAudienceMembers' => [
         'decision' => 'erase',
         // #514 part P1. A "person" row names somebody as allowed to see an

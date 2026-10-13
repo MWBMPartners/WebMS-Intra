@@ -49,6 +49,9 @@
  *                          administrator to place — #517)
  *   tblExternalAudienceMembers (outside calendars whose "who may see these
  *                          events" list names you — #514)
+ *   tblExternalApprovalNotices (if you are an administrator: when you were
+ *                          last told that imported events were waiting for
+ *                          approval, and in which organisation — #514 part 9)
  *   tblMailQueue, tblMailQueueFiles (e-mail waiting to be sent to your
  *                          address: its subject, when it was written, what
  *                          state it is in and the names of any attached
@@ -227,6 +230,40 @@ $payload = [
             . 'JOIN tblExternalAudienceMembers am ON am.feedID = xf.feedID '
             . 'WHERE am.userID = ?'
         ),
+        // 🔔 When this person was told that imported events were waiting for
+        // approval (#514 part 9, tblExternalApprovalNotices). There is a row
+        // only for an administrator who has been sent the daily e-mail or the
+        // push, one for each organisation. Handed over: the organisation, the
+        // day of the last daily e-mail and what became of it, and the moment
+        // of the last push.
+        //
+        // TWO KINDS OF TIME, and each key says which. `lastEmailDay` is a
+        // date on THAT ORGANISATION'S OWN calendar, not a UTC date. The two
+        // keys ending in "Utc" are moments in UTC.
+        //
+        // The matching erasure step is the catalogue's own: the entry says
+        // "erase" and names `userID`, so the row is deleted with the person.
+        //
+        // Error 1146 means the table does not exist, because the database
+        // has not been upgraded to include it (migration 218). Then nothing
+        // is held, so the answer is an empty list. Any other database error
+        // is not hidden.
+        'importedEventNotices' => (static function () use ($fetchUserRows): array {
+            try {
+                return $fetchUserRows(
+                    'SELECT n.siteID, s.siteName, n.emailLocalDate AS lastEmailDay, n.emailOutcome AS lastEmailOutcome, '
+                    . 'n.emailAt AS lastEmailClaimedAtUtc, n.pushAt AS lastPushAtUtc '
+                    . 'FROM tblSites s '
+                    . 'JOIN tblExternalApprovalNotices n ON n.siteID = s.siteID '
+                    . 'WHERE n.userID = ?'
+                );
+            } catch (\mysqli_sql_exception $problem) {
+                if ($problem->getCode() === 1146) {
+                    return [];
+                }
+                throw $problem;
+            }
+        })(),
         // 🏛️ Venue Bookings (#429) — export↔erasure parity with the three
         // GdprEraser::catalogue() entries added alongside this block.
         'venueBookingsEdited' => $fetchUserRows(

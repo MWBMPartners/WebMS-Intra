@@ -294,7 +294,10 @@ class WebPush
             ]);
             curl_exec($ch);
             $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-            curl_close($ch);
+            // No curl_close() here. The handle is an object since PHP 8.0 and
+            // is freed when `$ch` goes out of scope; curl_close() has done
+            // nothing since then, and PHP 8.5 raises a "deprecated" notice
+            // each time it is called, which was once for every push sent.
         }
 
         self::recordOutcome((int) ($sub['subID'] ?? 0), $status);
@@ -733,8 +736,13 @@ class WebPush
      * Same missing-key-is-true semantics as cron/user-reminders.php's
      * notifyPrefAllows() (#439) — a user who has never touched the toggle,
      * or whose notifyPrefs JSON predates this feature, still gets notified.
+     *
+     * PUBLIC since #514 part 9, so that ImportNotifier asks HERE whether a
+     * person has switched a notice off and a fourth private copy of this
+     * test is not written (three exist: this one, Workflow's and the
+     * reminder job's).
      */
-    private static function notifyPrefAllows(?string $notifyPrefsJson, string $key): bool
+    public static function notifyPrefAllows(?string $notifyPrefsJson, string $key): bool
     {
         if ($notifyPrefsJson === null || trim($notifyPrefsJson) === '') {
             return true;

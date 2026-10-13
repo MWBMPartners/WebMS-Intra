@@ -47,19 +47,23 @@
  *
  * WHAT THIS PAGE PRINTS, AND WHAT IT MUST NEVER PRINT
  * ---------------------------------------------------
- * One line for the recheck pass (counts only), then one line per calendar,
- * naming it by NUMBER only, then a summary line.
+ * One line for the recheck pass (counts only), one line for the pass that
+ * tells administrators imported events are waiting (counts only, #514 part
+ * 9), then one line per calendar, naming it by NUMBER only, then a summary
+ * line.
  * Never a calendar's name and never its address. Two reasons. Whatever a
  * scheduled task prints usually ends up in an e-mail to whoever set it up,
  * and in the hosting company's own logs. And some of these addresses are
  * secret links — anybody holding one can read the whole diary — so an
  * address printed here has been handed to everyone who can read that mail.
+ * For the same reasons the second line never holds an e-mail address, a
+ * person's name, or the title of an event.
  *
  * @package   Portal\App\Cron
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   2.0.0
+ * @version   2.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/514
  * -----------------------------------------------------------------------------
  */
@@ -67,6 +71,7 @@
 declare(strict_types=1);
 
 use Portal\Core\FeedImporter;
+use Portal\Core\ImportNotifier;
 use Portal\Core\Logger;
 use Portal\Core\Settings;
 use Portal\Core\TimeLimit;
@@ -89,8 +94,14 @@ header('Content-Type: text/plain; charset=utf-8');
 // ⏱️ See "WHY THIS PAGE SETS ITS OWN TIME LIMIT" above. Three times the
 //    job's own budget, because the budget decides when to stop STARTING
 //    calendars and the last one started may still take its full forty
-//    seconds after that.
-TimeLimit::atLeast(FeedImporter::JOB_BUDGET_SECONDS * 3 + 30);
+//    seconds after that. The pass that tells administrators (#514 part 9)
+//    is given its own seconds on top. Its deadline is when it stops
+//    STARTING things. It cannot cut short what is already under way: one
+//    e-mail being sent, or one push call, which waits up to ten seconds for
+//    EACH device it sends to and so can itself outlast these seconds. This
+//    is only the floor PHP is asked for; the job's budget below is what
+//    stops calendars being started late.
+TimeLimit::atLeast(FeedImporter::JOB_BUDGET_SECONDS * 3 + 30 + ImportNotifier::PASS_SECONDS * 3);
 
 $jobStart = microtime(true);
 
@@ -148,6 +159,67 @@ echo 'recheck: due=' . $recheck['due']
     . ' reworked=' . $recheck['reworked']
     . ' problems=' . $recheck['problems']
     . ' notStarted=' . $recheck['notStarted'] . "\n";
+
+// -----------------------------------------------------------------------------
+// 🔔 Tell administrators that imported events are waiting (#514 part 9)
+// -----------------------------------------------------------------------------
+// One pass, straight after the recheck: for every organisation with an event
+// waiting for approval, each administrator gets ONE e-mail a day, and ONE push
+// from each run that finds an event waiting that is newer than the last one
+// they were told about (one push, however many are new). The pass decides who
+// has not been told from the data, so it does not matter how an event came to
+// wait. `ImportNotifier` has the whole account, including why nobody can be
+// told twice.
+//
+// WHY BEFORE THE REFRESHES: it is short and has a deadline of its own, so it
+// cannot be starved by a slow calendar. An event that starts waiting during
+// THIS run's refreshes is told about by the next run, a few minutes later.
+//
+// WHAT IT COSTS THE REFRESHES: its seconds come out of the job's one budget,
+// which is counted from the start of the job. With a slow mail or push
+// service fewer calendars are started in that run; they stay due and are
+// taken first next time.
+//
+// THE DEADLINE IS HANDED OVER HERE, and the pass relies on it: with none it
+// would work through every organisation and every person however long the
+// mail service took, and no calendar would be refreshed in that run.
+// tools/feed-importer-selftest.php runs this file with a stand-in for the
+// class and reads the deadline it was given.
+//
+// WHAT THE NUMBERS MEAN. `emailed`: a mail service accepted it. `kept`: the
+// mail queue has it, and its job is running, so it goes later today.
+// `keptNoMailJob`: the mail queue has it and NO mail job is running, so it
+// will NOT go unless one is started before midnight there. `pushPeople`:
+// people a push was addressed to. `pushAccepted`: devices the push service
+// took it for. (There used to be a `held` number, for people in their quiet
+// hours. The owner decided on 13 October 2026 that quiet hours hold nothing
+// here, so nobody is held and the number is gone.)
+//
+// IT MUST STAY THE SECOND LINE, and hold neither ": ok" nor ": failed", for
+// the reason given above the recheck line. COUNTS ONLY: never an address, a
+// person's name, a calendar's name or the title of an event (see the header).
+// `run()` never throws; the `try` is for the day that stops being true, so
+// that the refreshes below still happen.
+try {
+    $notify = ImportNotifier::run($mysqli, microtime(true) + ImportNotifier::PASS_SECONDS);
+    if ($notify['setUp'] === false) {
+        // New files, and the database upgrade has not been run yet.
+        echo "notify: not set up (the database upgrade has not been run)\n";
+    } else {
+        echo 'notify: organisations=' . $notify['organisations']
+            . ' emailed=' . $notify['emailed']
+            . ' kept=' . $notify['kept']
+            . ' keptNoMailJob=' . $notify['keptNoMailJob']
+            . ' emailProblems=' . $notify['emailProblems']
+            . ' pushPeople=' . $notify['pushPeople']
+            . ' pushAccepted=' . $notify['pushAccepted']
+            . ' notReached=' . $notify['notReached']
+            . ' notStarted=' . $notify['notStarted']
+            . ' problems=' . $notify['problems'] . "\n";
+    }
+} catch (\Throwable $notifyProblem) {
+    echo "notify: stopped early\n";
+}
 
 // -----------------------------------------------------------------------------
 // 🔁 Refresh each one, while there is time

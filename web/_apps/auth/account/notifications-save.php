@@ -6,6 +6,11 @@
  * -----------------------------------------------------------------------------
  * POST-only. Persists the user's notifyPrefs JSON.
  *
+ * EVERY KEY ON `$allowedKeys` MUST HAVE A SWITCH ON notifications.php. An
+ * unticked switch sends nothing, so this page stores "off" for every key on
+ * the list that the form did not send. A key added here with no switch on
+ * the page would be switched off for everybody who presses Save.
+ *
  * @package   Portal\Auth
  * @license   All Rights Reserved
  * @version   1.0.0
@@ -50,6 +55,9 @@ $allowedKeys = [
     'approvalRequests',
     'pushLivestream',
     'pushServiceReminders',
+    // The push to administrators about imported events waiting for approval
+    // (#514 part 9). Its switch is in the page's "Push notifications" card.
+    'pushApprovals',
 ];
 
 $incoming = $_POST['prefs'] ?? [];

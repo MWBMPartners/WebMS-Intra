@@ -6546,6 +6546,39 @@ CREATE TABLE IF NOT EXISTS `tblExternalEventApprovals` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='One date of an outside-calendar event waiting for, or having had, an administrator''s agreement to be shown more widely (#514).';
 
+-- ── from 218_external_approval_notices.sql (#514 part 9) ─────────────────────
+-- 🔔 Who has been told that imported events are waiting, and when. The
+-- scheduled job (web/_core/ImportNotifier.php) sends each administrator one
+-- e-mail a day, and one push from each run that finds something newer
+-- waiting; this table is its only memory. A person's turn is taken by CHANGING their row in one
+-- statement, so two runs at the same moment can never both send.
+--
+-- TWO KINDS OF TIME, KEPT APART. `emailLocalDate` is a date on the
+-- ORGANISATION'S OWN calendar, compared only with today's date on that same
+-- calendar. `emailAt` and `pushAt` are moments in UTC, written by the code
+-- with UTC_TIMESTAMP(), and compared with nothing.
+--
+-- `userID` is a real link to the account, on purpose: a request to be
+-- forgotten and the copy of "my data" find a person by such a link. (The
+-- first plan kept this in tblUserReminderLog, where the number would have
+-- sat in a column called `refID` that nothing could find.)
+CREATE TABLE IF NOT EXISTS `tblExternalApprovalNotices` (
+    `noticeID`  INT NOT NULL AUTO_INCREMENT COMMENT 'The row''s own number.',
+    `siteID`    INT NOT NULL COMMENT 'The organisation whose waiting events the person was told about.',
+    `userID`    INT NOT NULL COMMENT 'The administrator who was told. The row is about this person and goes with them.',
+    `emailLocalDate` DATE NULL COMMENT 'The day of the last daily e-mail claimed for this person: a date on the ORGANISATION''S OWN calendar (its time zone when claimed). NOT a UTC date. Compared only with today''s date on that same calendar.',
+    `emailOutcome`   ENUM('claimed','sent','kept','failed') NULL COMMENT 'claimed = a run took the day and had not finished; sent = a mail service accepted it; kept = it is in the mail queue, which sends it later or lets it lapse at its use-by moment (what became of it is in the mail queue and the send log, not here); failed = it did not go and is not kept. One try a day, on purpose.',
+    `emailAt`   DATETIME NULL COMMENT 'UTC moment of that claim; always written with UTC_TIMESTAMP(), never a default.',
+    `pushUpToApprovalID` INT NOT NULL DEFAULT 0 COMMENT 'The highest waiting approval number this person has been sent a push about. A push goes only for a higher one.',
+    `pushAt`    DATETIME NULL COMMENT 'UTC moment of the last push claim; always written with UTC_TIMESTAMP().',
+    PRIMARY KEY (`noticeID`),
+    UNIQUE KEY `uq_extnotice_site_user` (`siteID`,`userID`),
+    KEY `idx_extnotice_user` (`userID`),
+    CONSTRAINT `fk_extnotice_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_extnotice_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Who has been told that imported events are waiting for approval, and when: one row for each administrator in each organisation (#514 part 9).';
+
 -- ── from 130_anonymous_attendance.sql, `userAgent` removed by
 --    201_drop_checkin_browser_description.sql (#530) — it was written on
 --    every check-in and read by nothing, ever; see that migration's own
@@ -10139,4 +10172,10 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- the `site.timezone` setting is replaced by the mark `site.timezoneKeptAt`,
 -- and three column comments say what each zone column is.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('217_one_time_zone_answer.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- Migration 218 (#514 part 9): who has been told that imported events are
+-- waiting for approval. Its one table, tblExternalApprovalNotices, is above,
+-- straight after tblExternalEventApprovals.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('218_external_approval_notices.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

@@ -2,6 +2,59 @@
 
 
 ## [Unreleased] (alpha)
+- **Added — administrators are told when imported events wait for approval (#514, part 9)**
+  - **What an administrator should know after upgrading**
+    1. **Administrators are now told when imported events are waiting for approval.** Three ways: a card on the dashboard
+       ("Imported events waiting for approval", with the number), one e-mail a day on a day when something is waiting, and a push
+       notification when something newer starts waiting. Only administrators of the organisation are told. A member gets none of
+       the three.
+    2. **The e-mail and the push need the calendar job to be running.** They are sent by the same scheduled job that refreshes outside
+       calendars (`/cron/import-feeds`). If that job is not set up, the dashboard card still works and nothing is e-mailed or pushed.
+       Nothing new has to be added to the hosting company's scheduler.
+    3. **The e-mail also needs a working mail route** (Admin, Integrations, Email), and the push needs push notifications set up.
+       Where neither is set up, nobody is recorded as "told", so the first run after you set one up tells people.
+    4. **The daily e-mail lists each waiting event's title and time.** It goes only to people the approvals list would show those
+       events to. It says when the list was made, because an event can change before the message is read. At most 20 events are
+       listed; the rest are counted, with a link to the list. The push gives a number only, never a title.
+    5. **When it is sent.** The first run at or after 07:00 on the organisation's own clock (its time zone at Admin, Sites). One a day.
+       If the mail service refuses it, it is not tried again that day. If the mail queue has to keep it, it is sent that same day or
+       not at all.
+    6. **How a person stops it.** Account, Notification preferences: "Approval requests" switches the daily e-mail off (and the
+       portal's other e-mails about approvals with it); the new switch "Imported events waiting for approval" (under Push
+       notifications) switches the push off.
+    7. **Sabbath quiet hours hold nothing here.** This notice is sent like every other e-mail of the portal, and so is its push,
+       whether or not the person is in their quiet hours. (Quiet hours stop a text message that is not urgent, as before.)
+    8. **An organisation with no administrator who can be e-mailed:** every global administrator is told as well.
+    9. **A paused calendar's waiting events are not counted** on the card, in the e-mail or in the push. The approvals list still
+       shows them, marked "(paused)".
+    10. **The database upgrade adds one small table** (migration 218). Until it has been run, the calendar job prints
+        `notify: not set up (the database upgrade has not been run)` and tells nobody.
+    11. **If the mail queue's own job is not running**, a daily e-mail that the mail service cannot take at once is kept and will
+        NOT go unless that job is started the same day. The calendar job's line counts those apart, under `keptNoMailJob`.
+    12. **A fault put right on the Notification preferences page.** Pressing Save while push notifications were not set up used to
+        switch "We're live now" and "Service reminders" off for that person. It no longer does. Anybody who pressed Save there
+        before this version, and wants those two, should switch them on again once push is set up.
+  - One pass, `Portal\Core\ImportNotifier::run()`, inside the calendar job (`cron/import-feeds`), works out from the data who has
+    not been told. It does not matter how an event came to wait. The job prints one more line, second, in figures only:
+    `notify: organisations=… emailed=… kept=… keptNoMailJob=… emailProblems=… pushPeople=… pushAccepted=… notReached=… notStarted=… problems=…`.
+  - Nobody is told twice. Each person's turn is taken by changing their row in `tblExternalApprovalNotices` in one statement,
+    so two runs at the same moment cannot both send.
+  - The push goes before the e-mails. A person's push is claimed and sent within milliseconds, so a run that is killed or ends
+    in a fault while e-mails are being sent loses nobody's push.
+  - Times: "today" and "07:00" are read on the organisation's own clock (`Site::timezone()`); the day is compared as a calendar
+    date, never as 24 hours. An event's time in the e-mail is the event's own clock time, never converted, with its time zone named.
+  - A message the mail service cannot take at once is kept by the mail queue with a use-by moment: the start of the
+    organisation's next day. The row then says `kept`, never `sent`.
+  - Erasure and the copy of "my data" both cover the new table (catalogue entry `erase` on `userID`; section
+    `importedEventNotices` in the data export).
+  - `WebPush::notifyPrefAllows()` is now public, so a fourth copy of that test was not written. `WebPush::send()` no longer calls
+    `curl_close()`, which does nothing since PHP 8.0 and raises a "deprecated" notice on PHP 8.5.
+  - **Fixed on the way:** Save on the Notification preferences page, with push not set up, no longer switches the push choices off.
+  - **How it was checked.** `tools/import-notifier-selftest.php` (new): 124 checks on MySQL 8.0.36 and 8.4.11, including both
+    clock-change nights in London and Santiago. One independent check by a fresh Claude agent standing in for Codex found one
+    medium and three small problems (the worst: a push that had been claimed could be lost for good if the run was cut short);
+    all four were fixed, and the fixes were NOT checked a second time. NOT checked at all: a real mail or push service, a real
+    browser, MariaDB. Codex has not reviewed it.
 - **Added — outside calendars: three more kinds of "who may see it" (#514, part 10)**
   - A calendar, a choice or a rule set to "Selected groups and people" can now name a **role** (Admin → Roles, #516), a
     **user group** (Admin → Groups, #517) or a **department** (Admin → Departments, #517), as well as a small group, a

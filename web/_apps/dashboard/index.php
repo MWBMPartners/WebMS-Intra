@@ -14,13 +14,19 @@
  * conditional "My Overdue Loans" widget, same "only shown when non-zero"
  * convention as the non-admin "My Pending Claims" expenses widget above it.
  *
+ * "Imported events waiting for approval" (#514 part 9) — a card for an
+ * administrator of THIS organisation when events copied in from an outside
+ * calendar are waiting for a decision. Who is shown it, and its number, are
+ * decided by Portal\Core\ImportNotifier::dashboardCard(), not here.
+ *
  * @package   Portal\Dashboard
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.9.0
+ * @version   0.10.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/85
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/410
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/514
  * -----------------------------------------------------------------------------
  */
 
@@ -30,6 +36,7 @@ use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\AssetRegister;
 use Portal\Core\EventVisibility;
+use Portal\Core\ImportNotifier;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -130,6 +137,32 @@ if (isset($SETTINGS['calendar']['enabled']) === true && $SETTINGS['calendar']['e
             'url'   => '/calendar',
         ];
     }
+}
+
+// ⏳ Imported events waiting for approval (#514 part 9).
+//
+// Events copied in from an outside calendar can wait for an administrator to
+// approve or decline showing them more widely. Until this card, an
+// administrator learned that only by opening the list.
+//
+// WHO SEES IT is decided inside ImportNotifier::dashboardCard(), by the gate
+// of the approvals list itself (EventVisibility::isAdminOfSite()): a site
+// administrator of THIS organisation, or a global administrator. It answers
+// null for everybody else, and when nothing is waiting, so a member's page
+// holds no card and no number: a count would tell them that hidden events
+// exist.
+//
+// NOT `$isAdmin` (App::isAdmin()), which the cards below use. That also
+// says yes to the old portal-wide "administrator" flag, which says nothing
+// about which organisation somebody belongs to (#514 leak-hunt finding 3).
+//
+// The number covers this organisation only, and only calendars that are
+// switched on (a paused calendar's events can be shown to nobody whatever is
+// decided). The link is built by Site::url() inside the class, so it keeps
+// the organisation's part of the address.
+$importsCard = ImportNotifier::dashboardCard($mysqli, $userId, $siteId);
+if ($importsCard !== null) {
+    $widgets[] = $importsCard;
 }
 
 // 📦 Asset Tracker — "my assets" count + any overdue loans to me (#410).

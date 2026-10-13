@@ -160,7 +160,10 @@
  *      by its own limit reported an end point that was not true, and the
  *      importer deleted real events on the strength of it. Four shapes.
  *   K. The scheduled job: it survives a calendar that throws, prints its
- *      summary, and never prints a calendar's name or address.
+ *      summary, and never prints a calendar's name or address. Its second
+ *      line is the pass that tells administrators imported events are
+ *      waiting (#514 part 9): figures only. (Who is told, and when, is
+ *      `tools/import-notifier-selftest.php`'s subject, not this file's.)
  *   L. Part 7 of #514, the proofs that need a REAL refresh or the real job
  *      (#514 part P7 plan, E17-E20 and E30): a failed refresh changes no
  *      choice, rule or approval; a removed event's waiting row is withdrawn
@@ -238,6 +241,15 @@ set_exception_handler(static function (Throwable $e): void {
 //     that attempt fails, is caught, and writes a puzzling line to PHP's log
 //     in the middle of the checks. With it, it is the no-op it should be,
 //     because no error monitor is configured.
+//
+// THE SCHEDULED JOB NEEDS MORE (#514 part 9). Since part 9 the job also runs
+// the pass that tells administrators imported events are waiting
+// (`ImportNotifier::run()`). The job is run in a process of its own, which
+// loads the list in fi_runJob(): that list holds everything the pass can
+// reach, so that a waiting event in the world never ends the job with "class
+// not found". This file itself calls none of those classes; it reads ONE
+// number from `ImportNotifier` (how many seconds the job should give the
+// pass), for the check that the job hands the pass a deadline.
 $coreDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR;
 foreach ([
     'WindowsTimeZones.php',
@@ -255,9 +267,12 @@ foreach ([
 ] as $classFile) {
     require_once $coreDir . $classFile;
 }
+// Only for its constant PASS_SECONDS: see the note above, and part K.
+require_once $coreDir . 'ImportNotifier.php';
 
 use Portal\Core\EventVisibility;
 use Portal\Core\FeedImporter;
+use Portal\Core\ImportNotifier;
 use Portal\Core\SafeFetch;
 
 // =============================================================================
@@ -1568,6 +1583,11 @@ function fi_reset(): void
         // #514 part P7's four tables, emptied with the rest so no choice, rule
         // or approval row is left pointing at a calendar that has gone.
         'tblExternalEventApprovals', 'tblExternalRuleConditions', 'tblExternalFeedRules', 'tblExternalEventChoices',
+        // #514 part 9's table: who has been told that events are waiting. The
+        // job's pass writes nothing to it in this world (nothing here can
+        // send), but it points at the accounts and organisations emptied
+        // above, so it is emptied with them.
+        'tblExternalApprovalNotices',
     ] as $table) {
         $mysqli->query('TRUNCATE TABLE ' . $table);
     }
@@ -1762,11 +1782,37 @@ function fi_finish(): never
  * A SEPARATE PROCESS is necessary, not tidiness. The job answers a bad token
  * with `exit`, and it is allowed to die on a fault — both of which would take
  * this script with them if it were included here.
+ *
+ * `$standInForPass` true: the process is given a STAND-IN for
+ * `Portal\Core\ImportNotifier` in place of the real class. The stand-in
+ * tells nobody anything. It writes down what the JOB handed it (the deadline,
+ * and how many further arguments) into `pass-was-given.json` beside the
+ * runner, and answers as the real pass does when there is nothing to do. That
+ * is how part K reads the deadline the real job file hands over, which no
+ * check could see from the job's output (#514 part 9, the independent check
+ * of 13 October 2026: with the deadline replaced by "never" every test here
+ * still passed).
  */
-function fi_runJob(string $token = 'p6-selftest-token'): string
+function fi_runJob(string $token = 'p6-selftest-token', bool $standInForPass = false): string
 {
     global $feedDir, $feedPort, $dbName;
-    $runner = $feedDir . DIRECTORY_SEPARATOR . 'job-runner.php';
+    $runner  = $feedDir . DIRECTORY_SEPARATOR . 'job-runner.php';
+    $standIn = $feedDir . DIRECTORY_SEPARATOR . 'notifier-stand-in.php';
+    $given   = $feedDir . DIRECTORY_SEPARATOR . 'pass-was-given.json';
+    @unlink($given);
+    if ($standInForPass === true) {
+        file_put_contents($standIn, "<?php\n"
+            . "// Written by tools/feed-importer-selftest.php. Scratch only; overwritten on every run.\n"
+            . "declare(strict_types=1);\n"
+            . "namespace Portal\\Core;\n"
+            . "final class ImportNotifier\n{\n"
+            . '    public const PASS_SECONDS = ' . ImportNotifier::PASS_SECONDS . ";\n"
+            . "    public static function run(\\mysqli \$db, float \$deadline, mixed ...\$more): array\n    {\n"
+            . '        file_put_contents(' . var_export($given, true) . ", (string) json_encode(['deadline' => \$deadline, 'calledAt' => microtime(true), 'more' => count(\$more)]));\n"
+            . "        return ['setUp' => true, 'mailReady' => false, 'pushReady' => false, 'organisations' => 0, 'emailed' => 0, 'kept' => 0, 'keptNoMailJob' => 0,\n"
+            . "            'emailProblems' => 0, 'pushPeople' => 0, 'pushAccepted' => 0, 'notReached' => 0, 'notStarted' => 0, 'problems' => 0];\n"
+            . "    }\n}\n");
+    }
     $config = [
         'core'  => dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR,
         'job'   => dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_apps'
@@ -1783,8 +1829,22 @@ function fi_runJob(string $token = 'p6-selftest-token'): string
         . "declare(strict_types=1);\n"
         . '$c = ' . var_export($config, true) . ";\n"
         . "foreach (['WindowsTimeZones.php','IcsReader.php','App.php','Settings.php','Site.php','ErrorMonitor.php',"
-        . "'Logger.php','SafeFetch.php','EventVisibility.php','FeedResolver.php','TimeLimit.php','FeedImporter.php'] as \$f)"
+        . "'Logger.php','SafeFetch.php','EventVisibility.php','FeedResolver.php','TimeLimit.php','FeedImporter.php',"
+        // The pass that tells administrators (#514 part 9), and every class it
+        // can reach. With no mail route and no push set up, as here, it asks
+        // only "can anything be sent?" and stops; the rest are loaded so that
+        // a later change to this world cannot end the job with "class not
+        // found" in the middle of a check about something else. (`Sabbath.php`
+        // was on this list while the pass held people in their quiet hours.
+        // It holds nothing now, and no longer reaches for that class.)
+        . "'AppRegistry.php','ExternalAudience.php','FeedAdmin.php','PortalAddress.php','WebPush.php',"
+        . "'MailQueue.php','MailRoutes.php','Mailer.php'] as \$f)"
         . " { require_once \$c['core'] . \$f; }\n"
+        // The pass itself: the real class, or the stand-in that only writes
+        // down what the job handed it (see this function's own comment).
+        . 'require_once ' . var_export($standInForPass === true ? $standIn : dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'ImportNotifier.php', true) . ";\n"
+        // AppRegistry reads the app definitions from this folder.
+        . "define('PORTAL_CORE', rtrim(\$c['core'], DIRECTORY_SEPARATOR));\n"
         . "\\Portal\\Core\\SafeFetch::\$testResolverOverride = ['calendar.test' => ['ips' => ['127.0.0.1'], 'port' => \$c['feedPort']]];\n"
         . "mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);\n"
         . "\$mysqli = new mysqli(\$c['host'], \$c['user'], \$c['pass'], \$c['name'], \$c['port']);\n"
@@ -2795,6 +2855,31 @@ try {
         . 'of those addresses are secret links',
         str_contains($jobOut, 'must never be printed') === false && str_contains($jobOut, 'calendar.test') === false
         && str_contains($jobOut, '://') === false, trim($jobOut));
+    // #514 part 9: the job's SECOND line is the pass that tells administrators
+    // imported events are waiting. Matched against a pattern of figures only,
+    // so it cannot hold an address, a person's name, a calendar's name or an
+    // event's title. Nothing is waiting in this world, so every figure is 0.
+    $jobLines = explode("\n", trim($jobOut));
+    fi_ok('the job\'s second line is the "tell administrators" pass (#514 part 9): counts only, nothing but figures, and neither ": ok" nor ": failed"',
+        preg_match('/\Anotify: organisations=\d+ emailed=\d+ kept=\d+ keptNoMailJob=\d+ emailProblems=\d+ pushPeople=\d+ pushAccepted=\d+ notReached=\d+ notStarted=\d+ problems=\d+\z/', $jobLines[1] ?? '') === 1
+        && str_starts_with($jobLines[0] ?? '', 'recheck: ') === true && substr_count($jobOut, 'notify:') === 1
+        && ($jobLines[1] ?? '') === 'notify: organisations=0 emailed=0 kept=0 keptNoMailJob=0 emailProblems=0 pushPeople=0 pushAccepted=0 notReached=0 notStarted=0 problems=0', trim($jobOut));
+    // #514 part 9: THE JOB HANDS THE PASS A DEADLINE. Without one the pass
+    // would work through every organisation and every person however long
+    // the mail service took, and the refreshes below it would not start. The
+    // real job file is run with a stand-in for the class, which writes down
+    // what it was handed (fi_runJob()).
+    foreach ($jobFeeds as $feedId) {
+        fi_makeDue($feedId);
+    }
+    $standInOut = fi_runJob('p6-selftest-token', true);
+    $given      = json_decode((string) @file_get_contents($feedDir . DIRECTORY_SEPARATOR . 'pass-was-given.json'), true);
+    $gave       = is_array($given) === true ? (float) $given['deadline'] - (float) $given['calledAt'] : -1.0;
+    fi_ok('the job hands the pass a DEADLINE, ' . ImportNotifier::PASS_SECONDS . ' seconds from the moment it calls it, and nothing else (no moment of its own, no stand-in senders); '
+        . 'and it still refreshes every calendar afterwards',
+        is_array($given) === true && abs($gave - ImportNotifier::PASS_SECONDS) < 1.0 && (int) $given['more'] === 0
+        && substr_count($standInOut, ': ok') + substr_count($standInOut, ': unchanged') === 4 && str_contains($standInOut, 'done: due=4') === true,
+        'handed over: ' . json_encode($given) . ' (seconds ahead: ' . $gave . '); the job said: ' . trim($standInOut));
     fi_ok('CONTROL: a wrong token is refused and nothing is refreshed',
         str_contains(fi_runJob('the-wrong-token'), 'Forbidden'), trim(fi_runJob('the-wrong-token')));
 
@@ -2912,6 +2997,24 @@ try {
         $r2['outcome'] === 'ok' && (int) $run2['awaitingApproval'] === 3 && $r2['newPending'] === 0 && (int) $run2['runID'] !== (int) $run1['runID'],
         json_encode([$r2, $run2['awaitingApproval']]));
 
+    // #514 part 9 — the REAL job with three events WAITING. The pass that
+    // tells administrators now has something to look at, so it goes as far as
+    // asking whether anything can be sent (no mail route and no push are set
+    // up here, so the answer is no and nobody is claimed). What this proves
+    // is narrow and matters: the job's process holds every class the pass
+    // reaches, the job does not die, and the line is still figures only.
+    $mysqli->query("DELETE FROM tblSettings WHERE settingKey = 'feeds.cron_token'");
+    $mysqli->query('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) '
+        . "VALUES (NULL, 'feeds.cron_token', 'p6-selftest-token', '', 0)");
+    $jobOut   = fi_runJob();
+    $jobLines = explode("\n", trim($jobOut));
+    fi_ok('with three events waiting, the job still runs to its summary line, and its second line is the "tell administrators" pass in figures only (#514 part 9)',
+        preg_match('/\Anotify: organisations=\d+ emailed=\d+ kept=\d+ keptNoMailJob=\d+ emailProblems=\d+ pushPeople=\d+ pushAccepted=\d+ notReached=\d+ notStarted=\d+ problems=0\z/', $jobLines[1] ?? '') === 1
+        && str_contains($jobOut, 'done: due=') === true && stripos($jobOut, 'Fatal error') === false && stripos($jobOut, 'Uncaught') === false
+        && stripos($jobOut, 'not found') === false, trim($jobOut));
+    fi_ok('...and with nothing set up that could send, nobody is claimed: the pass wrote no row',
+        (int) fi_one('SELECT COUNT(*) AS n FROM tblExternalApprovalNotices')['n'] === 0, json_encode(fi_q('SELECT * FROM tblExternalApprovalNotices')));
+
     // E20 — the job's recheck pass.
     fi_reset();
     $mysqli->query("DELETE FROM tblSettings WHERE settingKey = 'feeds.cron_token'");
@@ -3023,6 +3126,11 @@ try {
         // #514 part P7's four tables, emptied with the rest so no choice, rule
         // or approval row is left pointing at a calendar that has gone.
         'tblExternalEventApprovals', 'tblExternalRuleConditions', 'tblExternalFeedRules', 'tblExternalEventChoices',
+        // #514 part 9's table: who has been told that events are waiting. The
+        // job's pass writes nothing to it in this world (nothing here can
+        // send), but it points at the accounts and organisations emptied
+        // above, so it is emptied with them.
+        'tblExternalApprovalNotices',
     ] as $table) {
         $mysqli->query('TRUNCATE TABLE ' . $table);
     }
