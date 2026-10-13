@@ -389,7 +389,7 @@ if (($argv[1] ?? '') === '--hold-lock') {
 // =============================================================================
 const EXPECTED_S      = 11;   // part S: S1 pages never write around the service layer (4); S2 the importer's UTC writes (2, fix round 1); S3 the server filter (1, chunk P8-3, + its call site 2, P8-3 fix round 1) and S4 message boxes (2, chunk P8-3)
 const EXPECTED_D      = 609;  // part D: 500 from chunk P8-1, + D25's R13-L1 case and D33's three (chunk P8-2), + D34 (chunk P8-3), + D35 (2) and D36 (2) (P8-3 fix round 1), + D37 (3) (fix round 2), + D38 (fix round 3), + D39 (6, chunk P8-4; + 2 in its fix round 1; + 1 in fix round 2; + 1 after the final fault run, m-X05; + 3 after the final whole-part check, F1 and F3); #514 part 10 (roles, user groups and departments, 13 October 2026) adds 71: D1 (1), D3 (3), D7 (16), D8 (5), D15 (1) and D17 (45: its second control, and the R5 oracle cases); the fixes after part 10's independent check add 12 more to D17: six for rows of the new kinds filed under another organisation, and six for "one number, six kinds" (R9)
-const EXPECTED_W      = 312;  // part W: 81 for chunk P8-2's pages (W0-W16, W18-W25); chunk P8-3 grows W21 by 6 and adds W26-W38 (82); its fix round 1 adds a W31 check, W39 (4) and W40 (4); fix round 2 adds W41 (5); fix round 3 adds W42 (3); fix round 4 grows W21 by 2 and adds W43 (1); chunk P8-4 grows W21 by 5 and adds W44 (5), W45 (6), W46 (5), W47 (2), W48 (5), W49 (5), W50 (4), W51 (2) and W52 (5); its fix round 1 adds 2 to W45, 3 to W46, 3 to W48, 1 to W49, 1 to W50, 1 to W52, and W53 (2) and W54 (1); fix round 2 adds 2 to W45, 1 to W48 and 1 to W53; fix round 3 adds 1 to W45; the final whole-part check's fixes add 1 to W50, and W55 (2) and W56 (1); the last narrow check's fixes add 1 to W55, and W57 (4) and W58 (1); W59, the #534 table (roll-out package B, 11 October 2026), adds 32: its set-up (1), six viewers by four addresses (24), its own control (2), an API key answered as before (2, added after the independent check) and the venue booking card (3); roll-out package B2a (12 October 2026) adds a seventh W59 viewer, on a crew (4), and changes the Team Hub and venue card rows it made stricter; roll-out package F2 adds 5 "W59 at the door" checks (the members-only gate put back); #514 part 10 adds W60 (9)
+const EXPECTED_W      = 314;  // part W: 81 for chunk P8-2's pages (W0-W16, W18-W25); chunk P8-3 grows W21 by 6 and adds W26-W38 (82); its fix round 1 adds a W31 check, W39 (4) and W40 (4); fix round 2 adds W41 (5); fix round 3 adds W42 (3); fix round 4 grows W21 by 2 and adds W43 (1); chunk P8-4 grows W21 by 5 and adds W44 (5), W45 (6), W46 (5), W47 (2), W48 (5), W49 (5), W50 (4), W51 (2) and W52 (5); its fix round 1 adds 2 to W45, 3 to W46, 3 to W48, 1 to W49, 1 to W50, 1 to W52, and W53 (2) and W54 (1); fix round 2 adds 2 to W45, 1 to W48 and 1 to W53; fix round 3 adds 1 to W45; the final whole-part check's fixes add 1 to W50, and W55 (2) and W56 (1); the last narrow check's fixes add 1 to W55, and W57 (4) and W58 (1); W59, the #534 table (roll-out package B, 11 October 2026), adds 32: its set-up (1), six viewers by four addresses (24), its own control (2), an API key answered as before (2, added after the independent check) and the venue booking card (3); roll-out package B2a (12 October 2026) adds a seventh W59 viewer, on a crew (4), and changes the Team Hub and venue card rows it made stricter; roll-out package F2 adds 5 "W59 at the door" checks (the members-only gate put back); #514 part 10 adds W60 (9); #514 part 11 adds 2 to W50 (the guide's "told" section, and the approvals help's two switches)
 const EXPECTED_CHECKS = EXPECTED_S + EXPECTED_D + EXPECTED_W;
 
 // 🧩 One part only (SELFTEST_ONLY=S, D or W), or all of them. A one-part run
@@ -5326,11 +5326,43 @@ function pw_run(): void
         );
         $pre50 = $prefix84($gm50);
         pa_ok(
-            'W50 the scheduled-refresh address is a made-up domain labelled as an example; the real key\'s value is nowhere on the page; no notifications are described (part 9 builds them); every link (' . $pre50['count'] . ') keeps the prefix',
+            'W50 the scheduled-refresh address is a made-up domain labelled as an example; the real key\'s value is nowhere on the page; every link (' . $pre50['count'] . ') keeps the prefix',
             str_contains($gm50, 'https://portal.example.org/cron/import-feeds?key=YOUR-KEY') === true && str_contains($gt50, 'That is an example') === true
-            && str_contains($g50['body'], $key50) === false && preg_match('/notification|07:00|quiet hours/i', $gt50) !== 1
+            && str_contains($g50['body'], $key50) === false
             && $pre50['count'] > 0 && $pre50['bad'] === [],
             pa_show($pre50['bad'])
+        );
+        // #514 part 11 (13 October 2026) turned the next check round. Until then
+        // this place REFUSED the words "notification", "07:00" and "quiet hours"
+        // anywhere on the guide ("no notifications are described (part 9 builds
+        // them)"), because the rule was never to describe what is not built.
+        // Part 9 IS built (commit 013a014), so the guide must describe it, and
+        // this check now REQUIRES the "told" section to say what
+        // Portal\Core\ImportNotifier does: web/_core/ImportNotifier.php (its
+        // header; FIRST_HOUR and the "at or after" test in run(); MAX_EVENTS_LISTED;
+        // dashboardCard(); the push carries a number only) and
+        // auth/account/notifications.php (the two switches, and its own quiet
+        // hours sentence). Taking any one of these sentences out of the guide
+        // fails it.
+        $toldHtml50 = $section84($gm50, 'told');
+        $told50     = $plain84($toldHtml50);
+        $toldSaid50 = [
+            'three ways, members get none' => str_contains($told50, 'Administrators of your organisation are told in three ways that imported events are waiting. A member gets none of them.'),
+            'the dashboard card'           => str_contains($told50, 'A card on the dashboard, Imported events waiting for approval, with the number.'),
+            'one e-mail a day with titles' => str_contains($told50, 'One e-mail a day, on a day when something is waiting. It lists each waiting event\'s title and time (up to 20; the rest are counted)'),
+            'a push notification'          => str_contains($told50, 'A push notification to your phone or computer'),
+            'the push gives a number only' => str_contains($told50, 'it gives a number only, never a title.'),
+            'at or after 07:00, own clock' => str_contains($told50, 'The e-mail goes on the first run of the scheduled refresh at or after 07:00 on your organisation\'s own clock'),
+            'nothing held for quiet hours' => str_contains($told50, 'Nothing is held for quiet hours. The e-mail and the push notification are sent like every other e-mail and push message of the portal, whether or not the person is in their Sabbath quiet hours.'),
+            'how each is switched off'     => str_contains($told50, 'Approval requests switches off the daily e-mail')
+                && str_contains($told50, 'Imported events waiting for approval switches off the push notification.')
+                && str_contains($told50, 'Notification preferences page'),
+            'the preferences link'         => str_contains($toldHtml50, 'href="' . PW_A . '/account/notifications"'),
+        ];
+        pa_ok(
+            'W50 the guide\'s "How administrators are told" section says what part 9 does: three ways and members get none; the dashboard card; one e-mail a day with each event\'s title and time; a push notification with a number only; the e-mail at or after 07:00 on the organisation\'s own clock; nothing held for quiet hours; and where each is switched off',
+            in_array(false, $toldSaid50, true) === false,
+            pa_show($toldSaid50)
         );
         $hi50 = pw_main(pw_req($m, 'GET', PW_A . '/help')['body']);
         $hc50 = $section84(pw_req($m, 'GET', PW_A . '/help/calendar')['body'], 'imported');
@@ -5342,6 +5374,16 @@ function pw_run(): void
             && str_contains($ha50, 'id="imported"') === true && str_contains($ha50, 'href="' . $inbox . '#imports"') === true
             && str_contains($ha50, 'href="' . $help84 . '#approval"') === true,
             pa_show([strlen($hi50), strlen($hc50), strlen($ha50)])
+        );
+        // #514 part 11: the approvals help says how administrators hear, and
+        // names the same two switches, and links to the guide's section.
+        $haPlain50 = $plain84($ha50);
+        pa_ok(
+            'W50 the approvals help says administrators are told (dashboard card, one e-mail a day, a push notification), names the two switches "Approval requests" and "Imported events waiting for approval", and links to the guide\'s "told" section',
+            str_contains($haPlain50, 'Administrators are told when dates are waiting: a card on the dashboard, one e-mail a day on a day when something is waiting, and a push notification when something newer starts waiting.') === true
+            && str_contains($haPlain50, 'Approval requests also switches off that daily e-mail, and Imported events waiting for approval switches off the push notification.') === true
+            && str_contains($ha50, 'href="' . $help84 . '#told"') === true,
+            mb_substr($haPlain50, 0, 200)
         );
         // Fix round 1 (the check's MEDIUM 1 and Found 2, 3, 4): the guide says
         // only what the pages offer. A calendar has THREE levels ("Only

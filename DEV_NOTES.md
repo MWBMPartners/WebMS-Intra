@@ -7267,6 +7267,259 @@ table's `siteID` nearby. It does not read SQL held in variables, and does not ch
 tables (by design). `ALLOWED` names offboarding (a whole-portal exit on purpose) and the two erasure
 lists.
 
+## Outside calendars (#514)
+
+An organisation can subscribe the portal to a calendar somebody else publishes (Google, Microsoft 365 or any
+calendar file at a web address). The portal copies its events in, and an administrator decides who sees each one.
+It was built in eleven parts (the plan is in the issue); this section is what a developer must know before
+changing any of it. The administrators' guide is `/help/calendar-imports`; the feature list is in `FEATURES.md`.
+
+### What is where
+
+- **`SafeFetch`** (`web/_core/SafeFetch.php`) — may this address be fetched, and fetches it.
+- **`IcsReader`** and **`WindowsTimeZones`** — turn a calendar file into a list of dates. They open no connection and read
+  no setting, which is what lets them be tested alone.
+- **`FeedImporter`** — the ONE place that writes a copied-in event. Refreshes a calendar and decides what to remove.
+- **`FeedResolver`** — works out who may see each copied-in event, and writes the answer onto the event (`import*` columns).
+- **`EventVisibility`** — the ONE rule that reads those columns. Every place that shows events uses it.
+- **`ExternalAudience`** — the "selected groups and people" lists (`tblExternalAudienceMembers`).
+- **`FeedAdmin`** — every read and write the administrator pages make. The pages are
+  `web/_apps/admin/calendar/feeds*.php`, plus one section of the Approvals inbox (`web/_apps/approvals/_imports-section.php`).
+- **`ImportNotifier`** — tells administrators that dates are waiting.
+- **`web/_apps/cron/import-feeds.php`** — the scheduled job.
+- **Tables**, all `tblExternal…`: `Feeds` (made by migration 129, the older importer, #327, which these replaced; columns added
+  by 204 to 206), then from migrations 204 to 206 and 218: `AudienceMembers`, `EventTags`, `CategoryMap`, `FeedRuns`,
+  `EventChoices`, `FeedRules`, `RuleConditions`, `EventApprovals` and `ApprovalNotices`. All are in `full_schema.sql` too.
+  Migration 207 adds only the page addresses (routes).
+
+### The one rule, and its modes
+
+`EventVisibility::where()` (and `whereForColumn()`, for a query that has a viewer column instead of one viewer) hands a
+caller a piece of SQL to add to its own query, so the database decides row by row. The SQL text depends only on the mode
+and the alias, never on the event or the viewer, so a refused event and a missing one cost the database the same work
+(the #503 lesson). The seven modes (`EventVisibility.php:150-185`): `session` (a page; a signed-in person or nobody),
+`anonymous`, `website` (countdown widget and sitemap), `token` (a personal feed, reminders and push: never administrator
+powers), `invite`, `key` (an API key is treated as the public, never as a member) and `bulkMembers` (the newsletter).
+`add()` refuses a piece whose `?` marks, types string and values do not agree; no audit script can count that for us.
+An event alias or viewer column may not be one of the rule's own inner names (`RESERVED_ALIASES`): it would bind to
+the wrong table and never fail.
+
+- **Imported events** carry `importLevel` (public, members, groups, hidden) and `importDetail` (full, or "basic": title,
+  date and time, and category). They are shown only while their calendar exists AND is switched on, tested live in
+  every query, so pausing hides everything at once. A stored answer expires (`importRecheckAt`, UTC); past it only
+  administrators see the event until it is worked out again. That fails closed.
+- **Why the portal's own events keep `isPublic`.** Seven pages write it (the event form, a member's suggestion, the file
+  import, series edit, moderation, and the events API's create and update), and so does the import job. A second column
+  that could disagree with it would be worse than one. Their two levels are public, or members of the event's own organisation.
+- **"Member" is one test:** an active account with an ACTIVE membership row for the event's own organisation. No row means no,
+  on one organisation or several (#533; an earlier draft treated "no row" as "member" on a single-organisation portal and
+  the owner removed that). **"Administrator"** is a global administrator, or an active site administrator of the event's
+  organisation; the old portal-wide `isAdmin` flag counts for nothing (`EventVisibility::isAdminOfSite()`).
+- **Detail.** `redact()` empties `REDACTED_COLUMNS` for a viewer who may see only title, date and time. An API key gets
+  exactly what a signed-out visitor gets, unless the calendar, a choice or a rule has "Don't show via API" ticked
+  (`importApiOptOut`, written only by `FeedResolver`; the owner's decision of 24 September 2026).
+- **What it cannot do:** recall a copy a browser, calendar app or search engine already took; stop a caller forgetting to
+  use it (that is the audit check, below).
+
+### How an imported event is recognised
+
+By `tblEvents.externalUidHash` (the SHA-256 of the exact bytes of the calendar's UID) plus `externalRecurrenceKey` (which
+date of a repeating event; an identifier, never a time), unique together with `externalFeedID`. **The hash is raw
+bytes (`BINARY(32)`) on purpose.** `tblEvents` compares text without regard to capital letters, so `ABC@x` and `abc@x`,
+two different events under RFC 5545, would overwrite each other on every refresh. Choices (`tblExternalEventChoices`)
+are keyed by this identity, not by `eventID`, so a choice survives the row being removed and brought back; an event
+deleted and re-created at the source gets a new UID and no choice matches it (it falls back to the calendar's setting).
+Migration 205 brought the #327 rows forward: a one-off keeps its row (and members' answers); a renamed event keeps the
+newest; a repeating event (one row for the whole series) and a UID of 255+ characters are left without an identity and
+removed by the first complete refresh, so an answer on such a row is lost.
+
+### Times
+
+Two kinds, never mixed (the owner's rule of 23 September 2026). Moments (`nextFetchAt`, `refreshLeaseUntil`,
+`externalLastSeenAt`, `importRecheckAt`, the notifier's `emailAt` and `pushAt`) are UTC and compared with the
+database's `UTC_TIMESTAMP()`, never PHP's clock. Event times (`startDateTime`, `endDateTime`) are wall-clock readings in
+the event's zone, compared as text and never converted. An end may sort BEFORE its start on the night the clocks go
+back (01:30 then 01:15): the importer stores what the reader gives it and does not "repair" it. The zone times with no zone of their own are read in
+(`FeedImporter::zoneFor()`): the calendar's own zone if set and known; UTC if set but unknown; else the organisation's
+(`Site::timezone()`). A calendar with no zone of its own is refused while the organisation's stored zone is in doubt
+(`zoneInDoubtProblem()`). The reader follows RFC 5545 §3.8.5.3 for repeating events across a clock change (every
+instance keeps the same exact length): the owner chose the standard on 23 September 2026; some calendar programs differ.
+Windows zone names (`GMT Standard Time`) are turned into ordinary ones by `WindowsTimeZones::MAP`. **That file is
+generated:** `php tools/generate-windows-timezones.php` rewrites it from ICU, `--check` compares and changes nothing. It is
+committed, not built at run time, because `intl` is missing on some shared hosts.
+
+### The reader's limits (`IcsReader`)
+
+The file is untrusted, and running out of memory in PHP cannot be caught, so every list whose length the file chooses is
+counted before it is built (`MAX_*` constants), and each per-event limit has a file-wide twin. The rule: never turn
+text from the file into an array before knowing how many pieces it makes. It is not "this cannot happen"; the header lists
+what is still unbounded. Fixed limits include 400 dates for one repeating event and 500,000 lines. **One number is a setting:**
+dates per calendar, default 2,000 (`IcsReader::MAX_EVENTS_PER_FEED`), raised by `feeds.maxEventsPerFeed`
+(read in `FeedImporter`, ceiling `MAX_EVENTS_PER_FEED_CEILING` = 10,000). Reaching it makes the read `capped`.
+It ignores `VTIMEZONE` blocks (zone names are looked up in the system's database), attachments (counted, never
+imported), and everything that is not a `VEVENT`. Not every repeat rule is supported (`UNSUPPORTED_RULE_PARTS`): such a
+series keeps the dates the file states one by one and loses the rest, with a warning.
+
+### `SafeFetch`
+
+Only http and https (`webcal://` and `webcals://` are fetched as https); no user name or password in the address; only ports
+80 and 443; every disguised internal address refused; EVERY address a name gives must be public; the connection is pinned
+to the addresses checked (no DNS rebinding); redirects are followed one at a time and checked again, https to http refused;
+proxies are ignored; size and time are capped. One message (`REFUSED_MESSAGE`) for a private address and for a name that
+does not exist, so nobody can map the host's network. **It never logs an address** (a Google "secret address" is the
+password to the calendar), and neither does the job. Limits: the name lookup has no time limit of its own; the extra
+pre-request check needs libcurl 7.80 or later; a host that allows web requests only through a proxy fails every fetch.
+`Hymnal` uses `isPublicIp()` but its own download is not pinned (a follow-up issue). Outbound webhooks and Web Push do not use `SafeFetch`.
+
+### The importer: what it will never delete
+
+**An incomplete download never removes anything.** Three shapes are incomplete: the connection dropped (`complete = false`),
+the reader hit the per-calendar limit (`capped`), or one event's skipped-date list was cut so dates went missing from
+inside it (`capped`, with NO end point). `capped` is read FIRST. A capped read with no end point removes nothing at all;
+one with an end point removes only what starts strictly before it, and the point itself is not trusted when it is
+"exact: false" (several events can start at that same moment: `removalEndPoint()`). A refresh removes by soft deletion
+(`isDeleted = 1`). Deleting a calendar removes the calendar, every event it brought in, and every answer on them.
+
+- **One refresh at a time, with an END.** A refresh claims the calendar by writing `refreshLeaseUntil` (10 minutes ahead),
+  not a plain "busy" flag, because a killed request would leave a flag set for ever. The next fetch is scheduled when a refresh
+  STARTS, so a calendar that kills the request is not first in line again. Never fetch a calendar more often than every 15
+  minutes (`MIN_FETCH_MINUTES`); "Refresh now" is refused within 60 seconds of the last. The portal keeps 30 days back and
+  12 months ahead.
+- **Lock order.** Every writer of a calendar takes ONE lock first: the calendar's own row, `SELECT … FOR UPDATE`, by number
+  AND organisation (`FeedImporter::lockFeed()`, `FeedAdmin::inFeedLock()`). That covers a refresh, pause, resume, delete, a
+  save, a rule, a choice and a decision. Inside it: do the work, call `FeedResolver::resolveFeed()` with the database's own
+  clock, commit. `FeedResolver` takes no lock and starts no transaction itself. A page decision on dates of several calendars
+  takes one lock per calendar, so it is not all-or-nothing across calendars (`decide()` says what it reports then).
+  `addCalendar()` and `previewRule()` are the two writes outside it, with reasons in `FeedAdmin`'s header.
+
+### Choices, rules and approvals (`FeedResolver`)
+
+Seven steps for each live event (the list is in `FeedResolver`'s header): a duplicate, a private mark with no choice, an
+active choice (a date's own, then the whole series'), the active rules (several combine to the NARROWEST answer), "is it wider
+than the calendar's own setting?", an approval row if it is, and a write that skips unchanged rows. Showing an event to more
+people than the calendar's own setting needs an approval; narrowing never waits. The preview an administrator sees runs the SAME load and
+work-out as the real thing and writes nothing (`previewRule()`), so the two cannot disagree.
+
+- **Approval states** (`tblExternalEventApprovals.status`): `pending` (waiting), `approved`, `declined`, `superseded` (replaced
+  by a newer request or content), `withdrawn` (nothing asks for it any more). `reason`: `new_match`, `content_changed`,
+  `address_changed`, `choice`, `series_match`. Two fingerprints: `requestHash` (WHAT was asked: origin, level, detail,
+  website box, list) and `contentHash` (what viewers would SEE; dates and times are left out on purpose, so a moved date is
+  not asked about again).
+- **The sibling decision** (pass 2 in `FeedResolver::plan()`). A waiting date looks for a decision on another date of the same
+  repeating event with the same request and content, and follows the newest. It is a second pass that looks only at decisions as
+  they stood at the end of the first, so the answer cannot depend on the order the dates were read in; one pass is enough
+  because a row it settles copies an existing decision.
+- A duplicate never gets an approval row; a narrowing choice or rule still applies to it, a widening one does not.
+- Not noticed by itself: a change of the organisation's time zone. Stored `importRecheckAt` moments keep the old zone's day
+  boundaries until each calendar is next worked out (about twenty hours). That belongs with #549.
+
+### Who may be named on a list: the kinds live in four places
+
+`tblExternalAudienceMembers.kind` has six values: `small_group`, `leadership_role`, `role`, `user_group`, `department`,
+`person`. **A new kind changes four places together**, and needs people of that kind in both self-tests' made-up worlds:
+
+1. the rule: the `audience` piece of `EventVisibility`;
+2. its fast copy: `FeedAdmin::whoCanSee()`;
+3. the list class: `ExternalAudience` (`OFFERED_KINDS`, `options()`, `currentMany()`, `labelled()`, `belongsToOrganisation()`);
+4. the picker: `web/_apps/admin/calendar/_audience-picker.php`.
+
+`FeedResolver::audienceSummary()` holds the words ("1 role, 2 user groups") and already knew all six.
+
+- **The fast copy exists for speed, and a test is its tripwire.** After a save the page says "N dates now …". Asking the real
+  rule about every account measured 7 to 9.5 seconds per save at 300 events × 500 accounts, inside the calendar's lock (shared hosting
+  stops a page after 30 to 60). The copy measured 0.03 to 0.11 seconds a save at 1,000 × 2,000 before part 10; part 10 made one reading about three times slower,
+  still under a tenth of a second, and a save makes two (`whoCanSee()`'s docblock has the figures and what was not measured). `tools/feed-admin-selftest.php`
+  (D17) asks the REAL rule about every account of its made-up world, before and after each save, and compares the copy's count AND its
+  answer for every event. **Any change to the rule must be matched in the copy, and the test says so, as long as its world holds
+  the kind of person the change is about.** Four ways that were tried and rejected are listed in `whoCanSee()`'s docblock.
+- **Roles, user groups and departments are not written out in the rule.** The rule and the copy both use the SQL pieces
+  `Roles::holdsSql()`, `UserGroups::memberSql()` and `Departments::memberSql()` hand back, with the organisation handed in being the EVENT'S
+  (`<alias>.siteID`; `am.siteID` in the copy), never the piece's own: that is what keeps another organisation's role from counting. A static
+  property cannot be filled by a method call, so the rule holds the markers `{ROLE}`, `{UGROUP}`, `{DEPT}`, which `piece()`
+  fills in. `EventVisibility` loads the three classes itself (`borrowed()`) because three self-tests load it alone.
+- **One number, six kinds (check R9).** Six tables number their rows separately, so on a real installation the same number can be
+  a role, a group, a department, a small group, a leadership role and somebody's account. Each test world holds one of each
+  with ONE shared number; without it a rule that read one kind's row as another's passed every check. A new kind needs the shared number too.
+- `not_offered` is now only a guard: the test fails if the database's list and `OFFERED_KINDS` ever differ. Another
+  organisation's entry is `gone`, not `not_offered`.
+
+### Telling administrators (`ImportNotifier`, part 9)
+
+The ONE place that decides who is told and what. `run()` never throws and is called only from the job, straight after the recheck pass.
+
+- **One pass reads the data**; it does not hook into the pages that make dates wait. (Rejected: a push fired from six save pages
+  and two places in the importer. A date can start waiting in eight ways and in any written later.)
+- **Nobody is told twice.** The only memory is `tblExternalApprovalNotices` (one row per administrator per organisation). A person's turn is
+  taken by CHANGING their row in one statement; only one run can change it, so two runs at once cannot both send. (Rejected: read, then
+  send. Rejected: `tblUserReminderLog`, whose key would hide the person's number in a column called `refID`, where erasure, the data
+  copy and backup order could not find it.)
+- **Order inside an organisation's turn: the push first, then the e-mails**, and a push claim is always followed by its call. Do not put
+  anything slow between them: a claim is never undone.
+- Every person passes `EventVisibility::isAdminOfSite()`, asked again before a person's push is claimed and just before each message. The
+  events listed come from `FeedAdmin::pendingApprovals()`, the approvals list's own reader. Do not write a second rule.
+- `emailLocalDate` is a date on the ORGANISATION'S calendar; the day is compared only as "is the stored day before today?" and "07:00" as text,
+  so a 23- or 25-hour day cannot move a message. The e-mail carries each waiting event's title and time (the owner, 12 October 2026), the event's
+  own clock time with its zone, never converted, at most 20 events. The push carries a number only. **Quiet hours hold nothing** (the owner,
+  13 October 2026): do not bring a hold back without that decision changing.
+- **Why one try a day.** A provider that is down would otherwise be asked every few minutes. A failed day shows as `emailOutcome = 'failed'`;
+  the card and the list are unaffected. A message the mail queue keeps carries a use-by moment (the start of the organisation's next day), so
+  today's list goes today or not at all; the row says `kept`, never `sent` (`Mailer::send()` answers true for a message only kept).
+- **A route that cannot send claims nothing:** with no mail route no day is claimed, and with push not set up no number is raised.
+- Nothing it logs, pushes or prints may name a person, a calendar or an event; a fault's own words are never logged.
+- The e-mail's link comes from `PortalAddress::absolute()`, not `Site::url()`: a job has no organisation address of its own (#500). The
+  dashboard card's link is `Site::url()`, because a page is drawn for its own organisation.
+- Adding a notification switch: the key goes in `$defaults` in `auth/account/notifications.php` AND in `$allowedKeys` in `notifications-save.php`,
+  in the same change. A switch that is not always shown (the push ones) must be carried in a hidden field while it is hidden, or Save switches it off.
+- Cannot do: know what became of a kept message; keep a push from arriving at night; push about dates that count again because a paused calendar was
+  switched back on; reach a global administrator by push on a device that never subscribed while in that organisation.
+
+### The scheduled job
+
+| Address | How often | Setting that holds its key |
+| --- | --- | --- |
+| `cron/import-feeds?key=<key>` | every 15 minutes | `feeds.cron_token` |
+
+An empty stored key refuses every visit (403), and the comparison is constant-time. It sets its own time limit once, before its loop (`TimeLimit::atLeast()`), not inside it,
+because `set_time_limit()` restarts the count: a job with two hundred calendars would otherwise never reach PHP's limit.
+Its own budget (`JOB_BUDGET_SECONDS`, 50) is what stops it starting more calendars. It prints counts and
+calendar NUMBERS only, never a name or an address: a scheduled task's output usually ends up in an e-mail. One line for the recheck pass, a second
+(`notify: …`, figures only) for the notifier, one per calendar, then a summary. It is not on `Gatekeeper::OPEN_PATHS` (only `cron/mail-queue` is), so a scheduler cannot reach it on a pre-release copy's staff gate; and `Maintenance` lets only `cron/health` through, so it waits while an upgrade is in progress.
+
+### Tests
+
+Each refuses to pass if it checked nothing. Run them on a throwaway database (`docker run --rm`, built from `web/_sql/full_schema.sql`);
+`feed-admin-selftest` needs a throwaway database SERVER of its own (it sets the server's time zone). Details are in each header.
+
+- `tools/ics-reader-selftest.php` — PHP only. `tools/safefetch-selftest.php` — no database; starts a local test server.
+- `tools/event-visibility-selftest.php`, `tools/feed-resolver-selftest.php` — a database.
+- `tools/feed-importer-selftest.php` — a database and a test calendar server.
+- `tools/feed-admin-selftest.php` — a database, and its part W drives the real pages through PHP's built-in server on a scratch copy of `web/`.
+  It reads sentences in the help pages (W50), so changing the guide's wording means changing the check with it.
+- `tools/import-notifier-selftest.php` — a database whose account may create a trigger; sends nothing.
+- `ics-reader`, `event-visibility`, `feed-resolver`, `feed-importer` and `feed-admin` are in `.github/workflows/calendar-selftests.yml`
+  (not yet run on GitHub: no pull request exists). **`safefetch-selftest.php` and `import-notifier-selftest.php` are in no workflow**; adding
+  the second is a one-step change that needs the owner's yes (workflow file).
+
+### What `check_event_visibility.py` cannot see
+
+It finds a line that names `tblEvents` and looks 12 lines above to 25 below for a marker (`EventVisibility::`, `externalFeedID IS NULL` or `IS NOT NULL`). It
+cannot see a query built far from the word (a table name assembled from a variable), a marker next to an unrelated query, a file on its
+allow-list that later gains a new viewer-facing query, or whether the marker is spelled right or applied to the right alias. Those are for the
+self-tests and a review. Its exit code is real, but on a pull request it runs inside the heuristic step that ends `|| true`, so a finding adds
+to the bot's comment and does not fail the run.
+
+### Left alone on purpose: `admin/sites/users.php`'s DELETE
+
+Removing a person from an organisation deletes their `tblUserSites` row. Since #516 and #517 that cascades, through composite links, away their roles,
+user-group memberships and department memberships IN THAT ORGANISATION ONLY. A removed person has no row and is refused by the rule by
+construction, so nothing in #514 needed to change there. Do not "tidy" it to a soft switch-off without reading the rule's membership test.
+
+### Not proved
+
+A real Google or Microsoft 365 calendar (every test calendar is hand-written; two reader checks print SKIPPED); MariaDB; Apache; PHP 8.4; a
+real mail or push service; the pull-request checks on GitHub; the organisation chosen by session or sub-domain (#502). **Codex has not reviewed
+any of it.**
+
 ---
 
-Last updated: September 2026
+Last updated: October 2026

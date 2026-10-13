@@ -75,6 +75,66 @@
     independently checked. Tests: `tools/event-visibility-selftest.php` (192 checks) and
     `tools/feed-admin-selftest.php` (932), on MySQL 8.0.36 and 8.4.11. **Not proved:** a browser, MariaDB, Apache, a
     real Google or Microsoft 365 calendar. Codex has not reviewed this.
+- **Added — outside calendars with their own audiences, choices, rules and approvals (#514, parts 1 to 8; parts 9 and 10 are above)**
+  - **What an administrator should know after upgrading** (the page is "Outside calendars"; it has no Admin menu entry: open it from the note on
+    Calendar, Manage Events, or at `/admin/calendar/feeds`)
+    1. **Calendars you already had keep their setting.** The upgrade (migrations 204 to 207) marks every calendar and every event already copied in as
+       visible to everyone with full detail, exactly as before. A calendar you add from now on starts at "Members of this organisation". **One
+       difference:** from the first refresh after upgrading, an event the outside calendar marks private or confidential is shown only to administrators,
+       until an administrator chooses to show it. The older importer showed those to everyone.
+    2. **Repeating events you had copied in are replaced.** The older importer stored a repeating event as one row. The first complete refresh after
+       upgrading removes that row and writes one row per date. An "I am going" answer given on the old single row is lost; there was no date to move it to.
+       A one-off event keeps its row and its answers. An event renamed in the outside calendar keeps only its newest row.
+    3. **The scheduled job is the same address as before**, `/cron/import-feeds?key=…`, with the key in the `feeds.cron_token` setting (an empty key
+       refuses every visit). Ask your hosting panel's scheduler to visit it every 15 minutes. Without it nothing is refreshed.
+    4. **API keys now get an imported event exactly as a signed-out visitor would see it, never more**, and each calendar, choice and rule has a
+       "Don't show via API" box. Before this version the API sent keys every imported event with every detail, so for a customer who upgrades this
+       is a narrowing: events the outside calendar marks private stop being sent. The Upgrade page says how many calendars now send their
+       public events to keys.
+    5. **Imported events are read-only everywhere else.** The manage pages, series, crews, invitations, attendance, check-in, documents, bookings and
+       the APIs all refuse an imported event as if it did not exist. Change an imported event at its source, or hide it with a choice.
+    6. **Your own members-only events now show to your members in the calendar views** (the owner's answer 4 of 17 September 2026).
+    7. **In three places the importer used to record a moment in the server's own local time; it now records UTC.** (Part 8.)
+  - **Part 8 — the administrator pages** (`6abed16`). Add, pause, resume, refresh now and delete an outside calendar; choose who sees it; match its
+    category words; make a choice for one date or every date; write rules with exceptions and start and end days; preview what people will see; approve
+    or decline waiting dates one at a time or in bulk, from the Approvals inbox or from the calendar's own page (which works with the Approvals app off).
+    A new guide, `/help/calendar-imports`. All writes go through one class, `FeedAdmin`, under the calendar's own row lock; another organisation's
+    calendar looks exactly like one that does not exist. Migration 207 adds the page addresses. Checked: a new self-test, `tools/feed-admin-selftest.php`;
+    one fresh Claude agent checked the whole part standing in for Codex, after Codex ran out of usage twice. **Not proved:** MariaDB, Apache, a real
+    Google or Microsoft 365 calendar, the workflow step on GitHub. Codex has not reviewed it.
+  - **Part 7 — who sees each date** (`12c234f`). `FeedResolver` works out, from the calendar's setting, the rules and the choices, who may see each imported
+    date and how much, and writes the answer onto the event. A date whose audience would GROW waits for an administrator's approval and stays at the
+    narrower setting; narrowing never waits. An event marked private at the source stays with administrators until a choice shows it. Later dates of a
+    repeating event follow an identical decided date. Migration 206 (four tables, two opt-out columns). Checked: `tools/feed-resolver-selftest.php`; a separate
+    challenge of the plan, then three rounds by fresh Claude agents. **Not proved:** a real Google or Microsoft 365 export, MariaDB beyond one section of the
+    migration. Codex has not reviewed it.
+  - **Part 6 — the importer and the scheduled job** (`c8c490b`). A refresh claims the calendar, downloads it, reads it, writes one row per date and removes what the
+    calendar no longer holds. **An incomplete download never removes anything**; this was the whole risk, and three faults found in checking would each have
+    deleted live events (all fixed and guarded). It reopened part 5: the reader now reports "no reliable end point" for a series cut short at its limit.
+    Migration 205 (the importer's tables; the identity of an event as the SHA-256 of its UID, stored as raw bytes so capital letters never collide; the older
+    rows brought forward). Checked: `tools/feed-importer-selftest.php` (its dates are all worked out from today); seven rounds of checking. **Not proved:** a
+    real Google or Microsoft 365 export, an https download against a real certificate, MariaDB. Codex has not reviewed it.
+  - **Part 5 — reading calendar files** (`31bd64e`). `IcsReader` and `WindowsTimeZones` turn a calendar file into dates: repeats, cancelled, added and moved
+    dates, time zones including Microsoft's own names, both nights the clocks change. The file is untrusted, so every list it chooses the length of is counted before
+    it is built. Checked: `tools/ics-reader-selftest.php`, nine rounds. **Not proved:** a real Google or Microsoft 365 export (two checks print SKIPPED
+    and say so; every test calendar is hand-written). Codex has not reviewed it.
+  - **Part 4 — a safe fetcher** (`51cb46b`). `SafeFetch` fetches only public http and https addresses (`webcal://` as https), checks every address a name
+    gives and pins the connection to them, follows redirects one at a time, ignores proxies, caps size and time, and never logs the address. The hymn lookup
+    now refuses what it refuses. Checked: `tools/safefetch-selftest.php`, five rounds. **Not proved:** a real Google or Microsoft 365 calendar, MariaDB,
+    PHP 8.4, Linux, shared hosting, or a machine without the pcntl extension. Codex has not reviewed it.
+  - **Part 3 — imported events are read-only everywhere else** (`4a915db`). Every page and handler that edits, deletes or attaches something to an event by its
+    number refuses an imported one exactly as if it did not exist. New check `tools/audit-checks/check_event_visibility.py`, in the pull-request checks. It is
+    blunt: it looks for a marker near the words `tblEvents` and cannot see a query built far from them. **Not proved:** MariaDB, Apache. Codex has not reviewed it.
+  - **Part 2 — the rule in every place events are shown** (`de31cb8`). Calendar views and search, the event page, downloads, the personal feed, the public
+    landing page, replies, registration, the dashboard, reminders, the newsletter, the countdown widget, the sitemap and the events API. A refused event looks the
+    same as a missing one. At "title, date and time only" the description, place, images, host and partner names, venue and answer counts are removed, in e-mails,
+    push and downloads too. Closes the event page and download parts of #534 and replaces #544's interim fix. **Not proved:** MariaDB, Apache, real mail or push
+    providers. Codex has not reviewed it.
+  - **Part 1 — one rule for who may see an event** (`2cd68f1`). `EventVisibility`, a piece of SQL each query adds to itself, with the strict membership meaning of #533.
+    Migration 204. `tools/event-visibility-selftest.php`. Nothing a visitor saw changed in this part. **Not proved:** a real Google or Microsoft 365 calendar, MariaDB.
+    Codex has not reviewed it.
+  - **Parts 1 to 8 as a whole were checked by Claude agents that did not build them, and no second AI service has seen any of it.** The real-calendar proof (acceptance
+    criterion 3 of #514) is NOT done.
 - **Fixed — one answer to "which time zone?", for an event and for an organisation (#604)**
   - **What an administrator should look at after upgrading** (the organisations page is "Sites" in the Admin menu)
     1. **Admin, Sites: is the time zone listed for each organisation the one you want?** The upgrade wrote there the zone the portal's pages were really showing. If somebody had chosen a different zone on this page before, it has been replaced by that one. Change it with Edit if it is not what you want; from now on this page is the only place it is set.

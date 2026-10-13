@@ -452,6 +452,43 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     retention deliberately does NOT follow the organisation's zone. Test:
     `tools/time-zones-selftest.php`.
 
+    **Outside calendars (#514).** `EventVisibility::where()` is the ONE
+    place that decides who may see an event. Every place that reads
+    `tblEvents` for a viewer uses it, or refuses imported events
+    (`externalFeedID IS NULL`);
+    `tools/audit-checks/check_event_visibility.py` enforces that only by
+    finding one of those near the word `tblEvents`, so it cannot see a query
+    built far from it. `FeedImporter` is the ONE writer of an imported
+    event; nothing else may edit one. An address a person typed is fetched
+    only through `SafeFetch`, and an address is never logged or printed.
+    Every writer of a calendar takes the calendar's row lock first
+    (`FeedAdmin::inFeedLock()`, `FeedImporter::lockFeed()`), and an
+    incomplete download never removes anything. **A new kind of "who may see
+    it" entry changes four places together** (the rule in `EventVisibility`,
+    its fast copy `FeedAdmin::whoCanSee()`, `ExternalAudience`, and the
+    picker `admin/calendar/_audience-picker.php`) and needs people of that
+    kind in the made-up worlds of both `tools/event-visibility-selftest.php`
+    and `tools/feed-admin-selftest.php`, or the tripwire cannot see a copy
+    that ignores it. `Portal\Core\ImportNotifier` is the ONE place that
+    decides who is told that imported events are waiting, and what they are
+    told. A person is told only if `EventVisibility::isAdminOfSite()` says
+    yes, and the events in the e-mail come from
+    `FeedAdmin::pendingApprovals()`: do not write a second rule. Its only
+    memory is `tblExternalApprovalNotices`; `emailLocalDate` there is a date
+    on the organisation's own calendar, never a UTC date. The push goes
+    before the e-mails, and a push claim is always followed by its call.
+    Quiet hours hold nothing (owner, 13 October 2026). Nothing it logs or
+    pushes may name a person, a calendar or an event, and a fault's own
+    words are never logged. A notification switch is added to
+    `notifications.php` and `notifications-save.php` together. The guide
+    `/help/calendar-imports` is pinned by check W50 of
+    `tools/feed-admin-selftest.php`: change both together. Tests:
+    `tools/event-visibility-selftest.php`, `feed-resolver-selftest.php`,
+    `feed-importer-selftest.php`, `feed-admin-selftest.php`,
+    `ics-reader-selftest.php`, `safefetch-selftest.php` and
+    `import-notifier-selftest.php`. The technical record is DEV_NOTES.md,
+    "Outside calendars (#514)".
+
     **The installer asks for an ownership code (#499, #500).**
     `web/_install/owner_code.php` is the ONE place a code is written, counted
     and compared (`hash_equals()`); nothing is shown or acted on without it, and

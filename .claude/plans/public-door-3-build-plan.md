@@ -826,6 +826,21 @@ return [
         //    meetings, safeguarding reviews and pastoral visits at people's
         //    homes. Requiring the new column means publication has to be a
         //    decision somebody took after the public website existed.
+        //    ⚠️ NOTE ADDED 13 October 2026 (#514 part 11; #514 leak-hunt finding 22).
+        //    This door is NOT built yet (no publicSurfaceOptIn column exists in
+        //    web/), and tblEvents now also holds events COPIED IN from outside
+        //    calendars (externalFeedID set, #514). When this filter is built it
+        //    must not treat them like the organisation's own events:
+        //      - For an imported row, require importLevel = 'public' AND
+        //        importWebsite = 1, the test EventVisibility's "website" mode
+        //        makes (MODE_WEBSITE branch of buildWhere()). The per-event
+        //        public tick-box (isPublic / publicSurfaceOptIn) does not apply
+        //        to an imported row.
+        //      - Cut the columns in EventVisibility::REDACTED_COLUMNS
+        //        (description, location and so on) unless the signed-out
+        //        `canSeeFull` is 1 (EventVisibility::fullDetailSelect()).
+        //      - Best of all: ask EventVisibility::where() in "website" mode
+        //        and do not write a second rule.
         'rowFilter' => 'isPublic = 1 AND publicSurfaceOptIn = 1 '
                      . 'AND status = "published" AND isDeleted = 0',
 

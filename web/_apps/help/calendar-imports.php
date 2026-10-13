@@ -13,6 +13,20 @@
  * (chunk P8-4), and the paragraph about API keys is part 7's agreed wording,
  * word for word.
  *
+ * Part 11 of #514 (13 October 2026) added two sections: "kinds" (the six things
+ * a "Selected groups and people" list can name, part 10) and "told" (how
+ * administrators hear that dates wait, part 9). Every statement in them was
+ * checked against `Portal\Core\ImportNotifier`, `ExternalAudience` and the
+ * picker `admin/calendar/_audience-picker.php`.
+ *
+ * Check W50 of `tools/feed-admin-selftest.php` used to refuse the words
+ * "notification", "07:00" and "quiet hours" anywhere on this page, because
+ * part 9 did not exist when it was written and the rule then was never to
+ * describe what is not built. Part 11 turned it round: W50 now REQUIRES the
+ * "told" section to say what part 9 does (the three ways, the 07:00 e-mail,
+ * what each carries, nothing held for quiet hours, and where each is switched
+ * off). If you change that section's wording, change the check with it.
+ *
  * Like every help page it is seeded `isProtected = 0` (migration 005), so it
  * can be read without signing in. It holds nothing secret: the scheduled
  * refresh's key is named only as the setting that holds it, never printed.
@@ -25,7 +39,7 @@
  * @author     MWBM Partners Ltd (t/a MWservices)
  * @copyright  2026-present MWBM Partners Ltd (t/a MWservices)
  * @license    All Rights Reserved
- * @version    1.0.0
+ * @version    1.1.0
  * @link       https://github.com/MWBMPartners/WebMS-Intra/issues/514
  * -----------------------------------------------------------------------------
  */
@@ -39,6 +53,17 @@ $pageTitle   = 'Help - Outside Calendars';
 $pageSection = 'help';
 $breadcrumbs = ['Dashboard' => Site::url(''), 'Help' => Site::url('help'), 'Outside Calendars' => ''];
 $feedsUrl    = Site::url('admin/calendar/feeds');
+// Every other address on this page is built the same way (Site::url), so it
+// keeps the organisation's own address prefix and never ends in a file name.
+$rolesUrl    = Site::url('admin/roles');
+$usersUrl    = Site::url('admin/users');
+$groupsUrl   = Site::url('admin/groups');
+$deptsUrl    = Site::url('admin/departments');
+$sitesUrl    = Site::url('admin/sites');
+$emailUrl    = Site::url('admin/integrations/email');
+$integrationsUrl = Site::url('admin/integrations');
+$inboxUrl    = Site::url('approvals') . '#imports';
+$prefsUrl    = Site::url('account/notifications');
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -59,10 +84,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="d-flex flex-wrap gap-2">
             <a href="#adding" class="badge text-bg-secondary text-decoration-none">Adding a calendar</a>
             <a href="#levels" class="badge text-bg-secondary text-decoration-none">Who sees what</a>
+            <a href="#kinds" class="badge text-bg-secondary text-decoration-none">Groups and people</a>
             <a href="#detail" class="badge text-bg-secondary text-decoration-none">Title, date and time only</a>
             <a href="#choices" class="badge text-bg-secondary text-decoration-none">Choices</a>
             <a href="#rules" class="badge text-bg-secondary text-decoration-none">Rules</a>
             <a href="#approval" class="badge text-bg-secondary text-decoration-none">Approval</a>
+            <a href="#told" class="badge text-bg-secondary text-decoration-none">How you are told</a>
             <a href="#repeating" class="badge text-bg-secondary text-decoration-none">Repeating events</a>
             <a href="#private" class="badge text-bg-secondary text-decoration-none">Private events</a>
             <a href="#dates" class="badge text-bg-secondary text-decoration-none">Start and end days</a>
@@ -106,11 +133,41 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <ul>
         <li><strong>Everyone, including people who are not signed in.</strong></li>
         <li><strong>Members of this organisation</strong> — being a member of this organisation is what this level means; nothing else is needed.</li>
-        <li><strong>Selected groups and people</strong> — the small groups, leadership roles and named people you tick. A named person loses access when they leave the organisation, and gets it back if they rejoin.</li>
+        <li><strong>Selected groups and people</strong> — the small groups, leadership roles, roles, user groups, departments and named people you tick (the next section says what each one is). A named person loses access when they leave the organisation, and gets it back if they rejoin.</li>
     </ul>
     <p class="mb-0">
         Choices and rules (below) can set a different level for particular events, and they offer one more:
         <strong>Only administrators</strong>.
+    </p>
+</section>
+
+<?php // 2b — part 10 of #514 (roles, user groups and departments) and part 11. Each
+      // statement is checked against ExternalAudience (OFFERED_KINDS, MAX_MEMBERS),
+      // EventVisibility's "who a selected groups list lets in" and the picker's own
+      // sentences (admin/calendar/_audience-picker.php). Not a list inside the
+      // "levels" section: W50 counts exactly three list items there. ?>
+<section id="kinds" class="mb-5">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-people-group me-2"></i>What you can tick under "Selected groups and people"</h2>
+    <p>
+        A list can name any mix of the six kinds below, up to 50 entries in all. A person is let in only while they
+        are an active member of your organisation, and only through a group, role or department that belongs to
+        YOUR organisation. One that belongs to another organisation lets nobody in, even a person who is a member of
+        both.
+    </p>
+    <ul>
+        <li><strong>Small groups</strong> — the groups in the Small Groups app. Their active members are let in, while the group is switched on.</li>
+        <li><strong>Leadership roles</strong> — the posts in the Leadership app, such as elder or deacon. A person is let in while they hold the post today (their term has started and has not ended) and the post is switched on.</li>
+        <li><strong>Roles</strong> — what a person may do in the portal, such as Treasurer or Expense Approver. They are not leadership roles. They are managed at <a href="<?php echo $esc($rolesUrl); ?>">Admin, Roles</a> and given to people on the <a href="<?php echo $esc($usersUrl); ?>">Admin, Users</a> page. Whoever holds the role is let in.</li>
+        <li><strong>User groups</strong> — committees and working groups. They are not small groups. They are managed at <a href="<?php echo $esc($groupsUrl); ?>">Admin, Groups</a>. A retired user group lets nobody in.</li>
+        <li><strong>Departments</strong> — what expense claims are charged to. Everyone in the department is included, whatever part they play in it. They are managed at <a href="<?php echo $esc($deptsUrl); ?>">Admin, Departments</a>. A department that is switched off lets nobody in.</li>
+        <li><strong>Named people</strong> — individual members of your organisation, ticked by name.</li>
+    </ul>
+    <p class="mb-0">
+        If a user group is retired or a department is switched off, its people stop seeing the events at once, and
+        see them again if it is switched back on. You cannot newly tick a retired user group or a switched-off
+        department. One that is already on a list stays there, lets nobody in, and is shown under "No longer in
+        effect" until you untick it. A role, user group or department that has been deleted is shown the same way
+        and is removed the next time the list is saved.
     </p>
 </section>
 
@@ -181,6 +238,69 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <li>it is a new date that was not on the choice page when the choice was saved.</li>
     </ul>
     <p class="mb-0">A change to the date or time alone never sends a date back for approval.</p>
+</section>
+
+<?php // 6b — part 9 of #514, written in part 11. Checked against
+      // Portal\Core\ImportNotifier (its header, FIRST_HOUR, MAX_EVENTS_LISTED,
+      // waiting(), recipients(), dashboardCard(), inboxRoute(), run()) and the
+      // two switches on auth/account/notifications.php. Check W50 of
+      // tools/feed-admin-selftest.php pins its main sentences. ?>
+<section id="told" class="mb-5">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-bell me-2"></i>How administrators are told that dates are waiting</h2>
+    <p>
+        Administrators of your organisation are told in three ways that imported events are waiting. A member gets none of them.
+    </p>
+    <ul>
+        <li>
+            <strong>A card on the dashboard</strong>, <em>Imported events waiting for approval</em>, with the number. It
+            shows only while something is waiting, and it opens the list: the
+            <a href="<?php echo $esc($inboxUrl); ?>">Approvals inbox</a>, or Outside calendars if your organisation
+            has the Approvals app switched off.
+        </li>
+        <li>
+            <strong>One e-mail a day</strong>, on a day when something is waiting. It lists each waiting event's title
+            and time (up to 20; the rest are counted), says when the list was made, because an event can be decided or
+            changed before the message is read, and links to the list.
+        </li>
+        <li>
+            <strong>A push notification</strong> to your phone or computer, when a refresh finds a waiting date that is
+            newer than the last one you were told about. It is one push however many dates are new, and it gives a
+            number only, never a title.
+        </li>
+    </ul>
+    <p>
+        <strong>When.</strong> The e-mail goes on the first run of the scheduled refresh at or after 07:00 on your
+        organisation's own clock (its time zone is set at <a href="<?php echo $esc($sitesUrl); ?>">Admin, Sites</a>,
+        Edit). There is no cut-off hour: a refresh that first runs in the afternoon still sends that day's e-mail.
+        There is one try a day: if the mail service refuses it, it is not tried again that day, and a message the
+        mail service could not take at once is sent later the same day or not at all. The push notification goes on
+        the first refresh that finds a newer waiting date, at any hour of the day or night.
+    </p>
+    <p>
+        <strong>What it needs.</strong> Both are sent by the scheduled refresh (see "Setting up the scheduled refresh"
+        below). If that is not set up, the dashboard card still works and nothing is sent. The e-mail also needs the
+        portal's e-mail to be set up (<a href="<?php echo $esc($emailUrl); ?>">Admin, Integrations, Email</a>), and the
+        push needs push notifications to be set up under <a href="<?php echo $esc($integrationsUrl); ?>">Admin, Integrations</a>.
+        Until that is done nobody is recorded as told, so the first refresh after you set it up tells people.
+    </p>
+    <p>
+        <strong>Who.</strong> The administrators of your organisation, global administrators who belong to it included.
+        If none of them has an e-mail address the portal can use, every global administrator is told as well.
+        Each person is shown only what the Approvals list would show them. A paused calendar's waiting dates are not
+        counted; the list still shows them, marked "(paused)".
+    </p>
+    <p>
+        <strong>Switching it off.</strong> Each person can do this on the
+        <a href="<?php echo $esc($prefsUrl); ?>">Notification preferences</a> page: <strong>Approval requests</strong>
+        switches off the daily e-mail (and the portal's other e-mails about approvals with it), and
+        <strong>Imported events waiting for approval</strong> switches off the push notification.
+    </p>
+    <p class="mb-0">
+        <strong>Nothing is held for quiet hours.</strong> The e-mail and the push notification are sent like every
+        other e-mail and push message of the portal, whether or not the person is in their Sabbath quiet hours.
+        (Quiet hours still stop a text message that is not urgent.) Your own device's settings decide whether a push
+        notification makes a sound.
+    </p>
 </section>
 
 <?php // 7 ?>
@@ -262,10 +382,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
           // address (#500), and the key's value is never printed — only the name
           // of the setting that holds it (feeds.cron_token). ?>
     <p><code>https://portal.example.org/cron/import-feeds?key=YOUR-KEY</code></p>
-    <p class="mb-0 small text-muted">
+    <p class="small text-muted">
         That is an example: use your own portal's address, and in place of <code>YOUR-KEY</code> put the value of the
         <code>feeds.cron_token</code> setting on the portal's Settings page. With no key set, the address refuses
         every visit.
+    </p>
+    <p class="mb-0">
+        The same scheduled task also sends the daily e-mail and the push notification described under "How
+        administrators are told that dates are waiting". Without it they are never sent.
     </p>
 </section>
 
@@ -295,6 +419,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         approval</strong>. If your organisation has switched the Approvals app off, open
         <a href="<?php echo $esc($feedsUrl); ?>">Outside calendars</a>, then each calendar's own page: its
         <strong>Waiting for approval</strong> section lists that calendar's waiting dates, with Approve and Decline.
+        While the Approvals app is off, the dashboard card and the link in the daily e-mail open Outside calendars
+        in the same way.
     </p>
 </section>
 
@@ -321,9 +447,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </section>
 
 <?php
-// 18 — notifications. The September list described a daily summary e-mail at
-// 07:00 and Sabbath quiet hours. #514 part 9 builds those; this guide must not
-// describe behaviour that does not exist yet, so part 9 adds that section here
-// when it builds them (the #514 part 8 plan, section 7.3, item 18).
+// The section that tells administrators how they hear about waiting dates
+// ("told", above) was promised here by part 8 and written in part 11, once
+// part 9 had built the behaviour. It describes what part 9 does today: an
+// e-mail from the first run at or after 07:00, nothing held for quiet hours
+// (the owner's decision of 13 October 2026).
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
 ?>

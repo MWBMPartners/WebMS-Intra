@@ -243,6 +243,11 @@ The step-by-step guide is "Upgrading to a newer package" in [docs/INSTALL.md](do
   `*/5 * * * * curl -fsS -H "Authorization: Bearer YOUR_TOKEN" "https://YOUR-PORTAL/cron/mail-queue" > /dev/null`.
   Until it runs, mail goes as it did before, a password reset included, but anything that could not be sent at once
   waits, and the health page shows that in red. After a backup is restored, waiting mail is held.
+- **If you copy events in from outside calendars, add one scheduled job for them**, every 15 minutes (the address is an example:
+  use your portal's own, and the value of the `feeds.cron_token` setting at Admin → Settings in place of `YOUR_KEY`):
+  `*/15 * * * * curl -fsS "https://YOUR-PORTAL/cron/import-feeds?key=YOUR_KEY" > /dev/null`.
+  Without it nothing is refreshed, and administrators are not e-mailed or sent a push notification when imported events
+  are waiting for approval (the dashboard card still shows them). The page is Outside calendars, at `/admin/calendar/feeds`.
 - The full list, including what is not sent when the portal has no usable address, is in `CHANGELOG.md`.
 
 ### Say which copy it is (recommended)

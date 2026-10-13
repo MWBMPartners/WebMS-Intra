@@ -86,6 +86,8 @@ Foundational classes loaded by every request via `bootstrap.php`. All ✅.
 | `Migrator` | Web-based SQL migration runner |
 | `Validator` | Pipe-separated rule validator (`required|email|min:8|…`) |
 | `Asset` | CDN-with-local-fallback loader with SRI |
+| `EventVisibility` | The ONE rule that decides who may see an event, and in how much detail, for every page, download, feed, e-mail, push, widget and API (#514) |
+| `SafeFetch`, `IcsReader`, `WindowsTimeZones`, `FeedImporter`, `FeedResolver`, `FeedAdmin`, `ExternalAudience`, `ImportNotifier` | Outside calendars (#514): fetch an address safely, read a calendar file, copy its events in, work out who may see each, the administrator pages' queries, the "selected groups and people" lists, and telling administrators that dates wait. See "Outside calendars" |
 | `TimeLimit` | Asks PHP for more time safely: never lowers a limit, and copes with hosts that switch the function off (#563) |
 | `Avatar` | Cascade: MS365 → local → Gravatar → generated SVG |
 | `Gatekeeper` | Dev/beta channel access control |
@@ -292,6 +294,7 @@ Events, series, RSVP, exports, and seven view modes.
   older events marked "Europe/London" in an organisation on another clock, with one button to put those right
   (#604).
 - Public + admin-managed views.
+- Events copied in from somebody else's calendar, with their own audience, choices, rules and approvals: see "Outside calendars" below (#514).
 - Crews (#343), volunteer job board (#344), multi-day attendance grid (#345), segment broadcast (#119), registrations (#347) — per-event coordinator tools at `/calendar/event/{crews,jobs,attendance,broadcast}` + `/admin/calendar/registrations`.
 - **Event Team Hub (#386 Phase 1)** — per-event staff/volunteer/organiser landing page at `/calendar/event/hub`, gathering the above tools plus a Resources list and a YouTube/Vimeo/Cloudflare Stream video grid. See the dedicated section below.
 
@@ -314,6 +317,61 @@ Events, series, RSVP, exports, and seven view modes.
 
 **Tables:** `tblEvents`, `tblEventCategories`, `tblEventTypes`, `tblEventSeries`, `tblEventThemes`, `tblEventRecurrence`, `tblEventRsvps`, `tblCalendarMonthThemes`
 **Settings:** `calendar.enabled`, `calendar.displayName`, `calendar.displayIcon`, `calendar.brandColor`, `calendar.defaultView`, `calendar.enablePublicView`, `calendar.allowRecurringEvents`
+
+---
+
+### 🗓️📥 Outside calendars — `/admin/calendar/feeds` ✅ (#514, parts 1 to 10)
+
+An organisation subscribes the portal to a calendar somebody else publishes (Google, Microsoft 365, any calendar file at a
+web address). The portal copies the events in, and an administrator decides who sees each one and how much of it. The
+administrators' guide is `/help/calendar-imports`. The technical record is DEV_NOTES.md, "Outside calendars (#514)".
+
+**Adding and running a calendar**
+- Pages: the list `/admin/calendar/feeds`, add or change one `…/feeds/edit`, one calendar's own page `…/feeds/view`. There is no
+  Admin menu entry: they are reached from the note on Calendar, Manage Events, from the guide and the API keys page, or by their address.
+  Administrators of the organisation only (global administrators of any, one organisation at a time).
+- An address starting `webcal://` works (fetched as `https://`). Addresses that point inside a private network, and names that
+  do not exist, are refused with one message. The address is never written to a log or printed by the job.
+- Pause (hides every event of the calendar at once, keeps them), resume, refresh now (not within a minute of the last), delete
+  (removes the calendar, its events and the answers people gave to them). Each calendar's page lists its last 20 refreshes in plain words.
+- One scheduled job, `/cron/import-feeds?key=…`, every 15 minutes. Key: the `feeds.cron_token` setting. A refresh keeps 30 days back and 12 months
+  ahead, reads repeating events, cancelled and moved dates and time zones (including Microsoft's names), and never removes anything on the
+  strength of an incomplete download. One setting, `feeds.maxEventsPerFeed` (default 2,000, at most 10,000), raises how many dates one
+  calendar may contribute. Attachments and images are never copied in.
+
+**Who sees what**
+- Four levels: Everyone (including signed-out visitors), Members of this organisation, Selected groups and people, and Only administrators
+  (choices and rules only). A calendar has the first three. A choice or rule says how much people outside the calendar's own audience see: "Title, date and time only" (where its form starts) or
+  "Full details", which shows everything the calendar gave. API keys get exactly what a signed-out visitor gets, and each calendar,
+  choice or rule has a "Don't show via API" box. "Also show on the public website" (off by default, for Everyone only) controls the countdown widget and the sitemap.
+- **Six kinds of list.** "Selected groups and people" can name small groups, leadership roles, roles, user groups, departments and named people
+  (up to 50). The form shows each kind as its own group of tick boxes, with a line under Roles, User groups and Departments saying what the thing
+  is and where it is managed. A role, group or department of another organisation lets nobody in. A retired user group or switched-off
+  department cannot be freshly added; one already on a list stays, lets nobody in, and shows under "No longer in effect". One that has been
+  deleted reads "… that no longer exists" and is removed at the next save.
+- **Choices** for one date or every date of a repeating event, and **rules** (categories, title words and location, with exceptions), each with an
+  optional first and last day. The most specific wins; several rules combine to the narrowest. A rule has a preview that writes nothing.
+  An event the outside calendar marks private stays with administrators until a choice (never a rule) shows it, after a warning.
+- Category matching: the outside calendar's category words are matched to the organisation's own categories.
+- Imported events are read-only everywhere else in the portal, and an automatic check (`check_event_visibility.py`) keeps it so.
+  One rule, `EventVisibility`, decides who sees an event in every page, download, feed, e-mail, push, widget and API.
+
+**Approvals.** Showing an event to more people than its calendar's own setting waits for an administrator's approval; narrowing never
+waits. Waiting dates are listed in the Approvals inbox ("Imported events waiting for approval") and on each calendar's own page, which works
+when the Approvals app is switched off. Approve or decline one at a time or ticked in bulk, with a preview of what people would see. A change to the
+title or category (or, at Full details, the description, location or link) asks again; a change of date or time alone does not. Later dates
+of a repeating event follow an identical decided date.
+
+**Administrators are told** (part 9): a card on the dashboard with the number; one e-mail a day on a day when something is waiting, listing each
+waiting event's title and time (up to 20), from the first run of the calendar job at or after 07:00 on the organisation's own clock; and a push
+notification when something newer starts waiting (a number only). Administrators only; "Approval requests" and "Imported events waiting for
+approval" on the Notification preferences page switch them off. Nothing is held for quiet hours. The e-mail and the push need the calendar job.
+
+**Not proved:** a real Google or Microsoft 365 calendar (every test calendar is hand-written), MariaDB, Apache, and the pull-request checks on GitHub. Codex has not reviewed it.
+
+**Tables:** `tblExternalFeeds`, `tblExternalAudienceMembers`, `tblExternalEventTags`, `tblExternalCategoryMap`, `tblExternalFeedRuns`, `tblExternalEventChoices`, `tblExternalFeedRules`, `tblExternalRuleConditions`, `tblExternalEventApprovals`, `tblExternalApprovalNotices`; `tblEvents` gains the `import*` and `external*` columns
+**Settings:** `feeds.cron_token`, `feeds.maxEventsPerFeed`
+**Migrations:** 129 (the older importer), 204, 205, 206, 207, 218
 
 ---
 
@@ -615,6 +673,10 @@ Inbox (#443)" for the full state-machine writeup.
   (`admin/workflows/step-delete.php`), an `isActive` toggle, and an
   `autoAction` selector on the Add Step row (all missing from the
   original #94 CRUD).
+- **Imported events waiting for approval (#514)** have their own section in the inbox, `#imports`, for administrators of the organisation
+  only: dates copied in from an outside calendar that a rule or a choice would show to more people than the calendar's own setting. They
+  are not workflow items; they are decided with Approve and Decline (one at a time or ticked in bulk) through `admin/calendar/feeds/approvals/act`,
+  which still works when the Approvals app is switched off. See "Outside calendars".
 - The seeded `expense_approval` definition (migration 034) stays
   intentionally dormant — Expenses has its own independent, department-
   scoped multi-approver system; the generic engine never drives it.

@@ -262,9 +262,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         exactly the same details; the list shows where each one now stands. If your organisation has switched the
         Approvals app off, these dates are decided on each outside calendar's own page instead.
     </p>
+    <!-- 🔔 #514 part 9, written in part 11. Checked against Portal\Core\ImportNotifier and the two
+         switches on auth/account/notifications.php. -->
+    <p>
+        Administrators are told when dates are waiting: a card on the dashboard, one e-mail a day on a day when
+        something is waiting, and a push notification when something newer starts waiting. Only administrators of your
+        organisation are told. On the <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('account/notifications'), ENT_QUOTES, 'UTF-8'); ?>">Notification preferences</a> page,
+        <strong>Approval requests</strong> also switches off that daily e-mail, and <strong>Imported events waiting
+        for approval</strong> switches off the push notification.
+    </p>
     <p class="mb-0">
         The <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/calendar-imports') . '#approval', ENT_QUOTES, 'UTF-8'); ?>">Outside Calendars Guide</a>
-        explains why a date waits and what sends it back for approval.
+        explains why a date waits and what sends it back for approval, and
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/calendar-imports') . '#told', ENT_QUOTES, 'UTF-8'); ?>">how administrators are told</a>.
     </p>
 </div>
 
