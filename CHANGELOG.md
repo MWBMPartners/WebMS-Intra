@@ -2,6 +2,37 @@
 
 
 ## [Unreleased] (alpha)
+- **Changed — an event's coordinator can send "We're live", and only a signed-in person's device can ask for notices (#612)**
+  - **What an administrator should know after upgrading**
+    - **Coordinators can now send "We're live".** An event coordinator who is not an administrator sees the button on
+      their event's Host Console page and can send the notice for THAT event (not for one they do not coordinate). They
+      still cannot open the livestream channels page or change channels and schedules. Each press counts against the
+      organisation's limit of three in fifteen minutes, and each is recorded in the activity log with who pressed it and
+      for which event.
+    - **Devices stored with no account stop receiving pushes.** Before, a device could be stored without anybody being
+      signed in. Now only a signed-in person's device can ask for notices, and devices stored earlier without an account
+      are no longer sent anything (their records are kept, not deleted). **A person signs in and switches notices on
+      again from that device** (Account, Notifications, "Enable notifications on this device", or the same button on the
+      live page). Nothing changes for anybody who switched notices on while signed in.
+    - **Admin, Integrations, Push now counts only devices that will be sent notices**, for each channel and in total. A
+      new line, "Switched on but never sent anything", counts the rest (no account, or the account or the membership is
+      switched off). The "starting soon" switch now reads "Broadcast "starting soon" to everyone who has reminders
+      switched on"; it used to say "(anonymous)".
+    - No database change. Nothing has to be run after upgrading.
+  - Who may send: only the one action is widened. Opening the livestream channels page and every other action on it stay
+    for administrators. The event must exist and belong to the organisation in hand. A made-up number, another
+    organisation's event, an event the person does not coordinate, a withdrawn coordinator, a deleted event and (for a
+    coordinator) a missing number are all refused and send nothing; to a person who is not an administrator every one of
+    those refusals looks the same.
+  - The subscribe address (`api/push/subscribe`) refuses a request that is not signed in, in plain words, and stores
+    nothing. No page offered that to a visitor; this shuts a door that could be opened by hand. A device is always stored
+    against the signed-in person, never against an account number sent in the request.
+  - A form token, an action or a come-back address sent in an odd shape (a list) is refused the ordinary way. A list as
+    the form token used to answer "Server Error".
+  - Test: `tools/go-live-button-selftest.php` now has 127 checks and fails by itself if it runs a different number.
+  - Not proved: a real push service or phone, a real browser, MariaDB.
+  - Still open, on the issue: a coordinator or an administrator can send for a cancelled or draft event; the scheduled
+    go-live job titles its push with the `site.name` setting, not the organisation's own name.
 - **Fixed — backup codes for two-factor authentication are shown, and can be made again (#613)**
   - **What an administrator must tell people after upgrading**
     1. **Everybody who switched two-factor authentication on before this version has no backup codes.** The set-up

@@ -476,6 +476,16 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     retention deliberately does NOT follow the organisation's zone. Test:
     `tools/time-zones-selftest.php`.
 
+    **The "We're live" push (#612).** In `web/_apps/admin/livestream/index.php`
+    the action `notify_live` is the ONE action open to an event's coordinator:
+    the posted event decides, and must belong to the organisation
+    (`HostConsole::eventBelongsToSite()` and `Auth::isCoordinatorOf()`, the same
+    two calls the Host Console uses to draw the button).
+    `WebPush::sendToChannel()` addresses only a signed-in person's device, and
+    `api/push/subscribe` refuses a request that is not signed in. The counts on
+    Admin, Integrations, Push copy the sender's rule: change both together.
+    Test: `tools/go-live-button-selftest.php`.
+
     **Outside calendars (#514).** `EventVisibility::where()` is the ONE
     place that decides who may see an event. Every place that reads
     `tblEvents` for a viewer uses it, or refuses imported events

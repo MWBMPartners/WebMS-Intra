@@ -59,13 +59,24 @@ $fingerprint  = $publicKey !== '' ? strtoupper(substr(hash('sha256', $publicKey)
 
 // 📊 Subscription counts for this site — never endpoint lists, counts only
 //    (§7 security checklist item 4: no enumeration surface on this page).
-$counts = ['livestream' => 0, 'reminders' => 0, 'announcements' => 0, 'active' => 0, 'pruned' => 0];
+//
+// ⚠️ WHAT WAS WRONG HERE (#612): these numbers counted every stored device that was switched on. Since 13 October 2026
+// only a device WITH AN ACCOUNT is ever sent anything (WebPush::sendToChannel() leaves out a device with no account,
+// and one whose account, or whose membership of this organisation, is switched off), so the numbers over-counted the
+// people a notice would reach. The per-channel numbers and the total below now count only a device that will be sent
+// notices, with the SAME rule as the sender's query ($reachable: keep the two together), and one more number says how
+// many switched-on devices will never be sent anything. WHAT THIS CANNOT DO: say who has switched a kind of notice off
+// for themselves ("We're live now" and so on); that is each person's own choice and is applied when a notice is sent.
+$counts = ['livestream' => 0, 'reminders' => 0, 'announcements' => 0, 'active' => 0, 'unsent' => 0, 'pruned' => 0];
+$reachable = 'ps.isActive = 1 AND ps.userID IS NOT NULL '
+    . 'AND EXISTS (SELECT 1 FROM tblUsers u WHERE u.userID = ps.userID AND u.isActive = 1) '
+    . 'AND NOT EXISTS (SELECT 1 FROM tblUserSites us WHERE us.userID = ps.userID AND us.siteID = ps.siteID AND us.isActive = 0)';
 $stmt = $db->prepare(
-    "SELECT SUM(isActive = 1 AND channels LIKE '%\"livestream\"%') AS liveN, "
-    . "SUM(isActive = 1 AND channels LIKE '%\"reminders\"%') AS remN, "
-    . "SUM(isActive = 1 AND channels LIKE '%\"announcements\"%') AS annN, "
-    . 'SUM(isActive = 1) AS activeN, SUM(isActive = 0) AS prunedN '
-    . 'FROM tblPushSubscriptions WHERE siteID = ?'
+    "SELECT SUM(" . $reachable . " AND ps.channels LIKE '%\"livestream\"%') AS liveN, "
+    . "SUM(" . $reachable . " AND ps.channels LIKE '%\"reminders\"%') AS remN, "
+    . "SUM(" . $reachable . " AND ps.channels LIKE '%\"announcements\"%') AS annN, "
+    . 'SUM(' . $reachable . ') AS activeN, SUM(ps.isActive = 1) AS switchedOnN, SUM(ps.isActive = 0) AS prunedN '
+    . 'FROM tblPushSubscriptions ps WHERE ps.siteID = ?'
 );
 if ($stmt !== false) {
     $stmt->bind_param('i', $siteId);
@@ -77,6 +88,7 @@ if ($stmt !== false) {
         $counts['reminders']     = (int) ($row['remN'] ?? 0);
         $counts['announcements'] = (int) ($row['annN'] ?? 0);
         $counts['active']        = (int) ($row['activeN'] ?? 0);
+        $counts['unsent']        = (int) ($row['switchedOnN'] ?? 0) - $counts['active'];
         $counts['pruned']        = (int) ($row['prunedN'] ?? 0);
     }
 }
@@ -215,7 +227,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="col-md-4 d-flex align-items-end">
                 <div class="form-check">
                     <input type="checkbox" class="form-check-input" id="pushBroadcast" name="reminders_broadcast" value="1" <?php echo $broadcast === true ? 'checked' : ''; ?>>
-                    <label class="form-check-label" for="pushBroadcast">Broadcast "starting soon" (anonymous)</label>
+                    <label class="form-check-label" for="pushBroadcast">Broadcast "starting soon" to everyone who has reminders switched on</label>
                 </div>
             </div>
 
@@ -247,20 +259,27 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card-body">
         <div class="portal-data-list">
             <div class="row py-2 border-bottom">
-                <div class="col-6">Active — livestream channel</div>
+                <div class="col-6">Will be sent notices — livestream channel</div>
                 <div class="col-6 text-end"><?php echo $counts['livestream']; ?></div>
             </div>
             <div class="row py-2 border-bottom">
-                <div class="col-6">Active — reminders channel</div>
+                <div class="col-6">Will be sent notices — reminders channel</div>
                 <div class="col-6 text-end"><?php echo $counts['reminders']; ?></div>
             </div>
             <div class="row py-2 border-bottom">
-                <div class="col-6">Active — announcements channel <span class="text-muted small">(reserved, no sender yet)</span></div>
+                <div class="col-6">Will be sent notices — announcements channel <span class="text-muted small">(reserved, no sender yet)</span></div>
                 <div class="col-6 text-end"><?php echo $counts['announcements']; ?></div>
             </div>
             <div class="row py-2 border-bottom">
-                <div class="col-6">Total active subscriptions</div>
+                <div class="col-6">Total devices that will be sent notices</div>
                 <div class="col-6 text-end"><?php echo $counts['active']; ?></div>
+            </div>
+            <div class="row py-2 border-bottom">
+                <div class="col-6">
+                    Switched on but never sent anything
+                    <span class="text-muted small">(no account, from before a sign-in was needed &mdash; the person signs in and switches notices on again from that device &mdash; or the person's account or membership is switched off)</span>
+                </div>
+                <div class="col-6 text-end"><?php echo $counts['unsent']; ?></div>
             </div>
             <div class="row py-2">
                 <div class="col-6">Pruned (dead endpoint — 404/410, or 8+ consecutive failures)</div>

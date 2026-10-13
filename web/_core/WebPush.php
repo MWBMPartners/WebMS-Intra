@@ -309,8 +309,12 @@ class WebPush
      * Fan-out helper — both channel wirings (go-live, service reminders)
      * call this. Selects active subscriptions on the channel for the site,
      * optionally narrowed to specific users and/or gated by a notifyPrefs
-     * key (anonymous rows always pass — their `channels` opt-in is their
-     * only, sufficient, consent).
+     * key. ONLY A DEVICE WITH AN ACCOUNT IS ADDRESSED (owner, 13 October 2026):
+     * a device with no account is left out, and so is a device whose account
+     * or membership of the organisation is switched off (see the query below).
+     * It used to say "anonymous rows always pass", which stopped being true
+     * when signing in became a condition of subscribing. The notifyPrefs key is
+     * therefore applied to every device that reaches the loop.
      *
      * @param array<string, mixed> $payload ['title'=>…, 'body'=>…, 'url'=>…, 'tag'=>…]
      * @param int[]|null $onlyUserIds Restrict to these userIDs (per-RSVP reminders); null = whole channel.
@@ -352,16 +356,22 @@ class WebPush
             // ⚠️ WHAT WAS WRONG HERE (#612): the query asked only for the organisation, an active device and the
             //    channel. A person whose ACCOUNT had been switched off, or whose MEMBERSHIP of this organisation had
             //    been switched off, still had their device addressed, and could no longer sign in to switch the
-            //    notice off. The two AND-lines below leave such a device out. A device with NO account
-            //    (ps.userID IS NULL) is unchanged: it has nothing to be switched off. A device whose account has
-            //    NO membership row at all is also unchanged (only a membership marked OFF counts as switched off).
+            //    notice off. The two AND-lines below leave such a device out. A device whose account has NO
+            //    membership row at all is unchanged (only a membership marked OFF counts as switched off).
             //    This is the sender every push uses (go-live, service reminders, the approvals push), so it is
             //    the right place and it applies to all of them.
+            //
+            //    A DEVICE WITH NO ACCOUNT IS LEFT OUT TOO (owner, 13 October 2026: "require a sign-in"). It used to
+            //    be addressed (`ps.userID IS NULL OR ...`). Only a signed-in person's device can ask for notices
+            //    now (push/api/subscribe.php), so a device with no account has nobody who can switch the notice
+            //    off. Existing rows are NOT deleted; they just stop being addressed, and a person signs in and
+            //    switches notices on again from that device. A person whose account is later erased also leaves
+            //    their device with no account (the link is set to NULL): it stops being addressed the same way.
             $sql = 'SELECT ps.subID, ps.endpoint, ps.p256dhKey, ps.authKey, ps.userID, u.notifyPrefs '
                  . 'FROM tblPushSubscriptions ps '
                  . 'LEFT JOIN tblUsers u ON u.userID = ps.userID '
                  . 'WHERE ps.siteID = ? AND ps.isActive = 1 AND ps.channels LIKE ? '
-                 . 'AND (ps.userID IS NULL OR u.isActive = 1) '
+                 . 'AND ps.userID IS NOT NULL AND u.isActive = 1 '
                  . 'AND NOT EXISTS (SELECT 1 FROM tblUserSites us WHERE us.userID = ps.userID AND us.siteID = ps.siteID AND us.isActive = 0)';
             $types  = 'is';
             $params = [$siteId, $channelLike];

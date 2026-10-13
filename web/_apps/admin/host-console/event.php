@@ -86,6 +86,8 @@ $maxTrend = max(1, max(array_column($trend, 'count')));
 // Checked by tools/go-live-button-selftest.php, which never sends a real push.
 $pushConfigured = WebPush::isConfigured();
 $currentlyLive  = Livestream::currentlyLive($siteId);
+// Who may press the button: the same two calls the handler makes (see the comment at the button).
+$mayPress = HostConsole::eventBelongsToSite($eventId, $siteId) === true && Auth::isCoordinatorOf($eventId) === true;
 
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? '';
@@ -113,15 +115,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </p>
         </div>
         <div class="d-flex gap-2">
-            <?php // ⚠️ WHAT WAS WRONG HERE (#612): this page lets in an administrator OR an event coordinator
-                  // (the gate at the top), but the page the button posts to (admin/livestream/channels)
-                  // answers only administrators: for a coordinator who is not an administrator the button was
-                  // drawn switched on and led to a bare "Access Denied". The button is now drawn only for
-                  // somebody that page would let press it, asked with the SAME call that page makes
-                  // (App::isAdmin()), not a copy written another way. WHAT THIS CANNOT DO: a coordinator still
-                  // cannot send "We're live" from here; whether coordinators should be allowed to is the owner's
-                  // decision, and would be a change in that page. ?>
-            <?php if (App::isAdmin() === true): ?>
+            <?php // WHO IS SHOWN THE BUTTON (#612). First round: it was drawn for everybody the gate at the top lets in,
+                  // but the page it posts to answered only administrators, so a coordinator got a bare "Access
+                  // Denied"; it was then drawn for administrators only. The owner has since decided (13 October 2026)
+                  // that an event's coordinator may send "We're live" for THEIR event, and that page now lets them,
+                  // for the posted event only. So the button is drawn for whoever that page will let press it, and it
+                  // asks with the SAME two calls that page makes ($mayPress, set above): the event belongs to this
+                  // organisation, and Auth::isCoordinatorOf() for it (true for an administrator too). They are not
+                  // rewritten here in another shape. WHAT THIS CANNOT DO: it cannot make the two agree if one of
+                  // them is changed later. tools/go-live-button-selftest.php checks that the button is drawn exactly
+                  // when a press is accepted for seven kinds of person: a coordinator of the event, a coordinator of
+                  // another event, a coordinator of an event of another organisation, an ordinary member, a
+                  // coordinator whose place was withdrawn, and the coordinator of a deleted event and of an
+                  // imported one. Not for any other kind (an administrator is checked by pressing). ?>
+            <?php if ($mayPress === true): ?>
             <form method="post" id="golive-form" action="<?php echo htmlspecialchars(Site::url('admin/livestream/channels'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="notify_live">

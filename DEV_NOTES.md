@@ -5491,8 +5491,8 @@ independently.
 `cron/push-golive.php` only does anything when its own settings are ALSO
 turned on (both default OFF): `push.golive.auto` (auto-detect a schedule
 window opening, deduped once per channel per day via
-`tblUserReminderLog`) and `push.reminders.broadcast` (anonymous "starting
-soon" broadcast to the whole `reminders` channel when the next scheduled
+`tblUserReminderLog`) and `push.reminders.broadcast` (a "starting
+soon" broadcast to every signed-in person's device on the `reminders` channel when the next scheduled
 stream is within 60 minutes). The PRIMARY go-live trigger doesn't need
 this cron at all — it's the manual **"Send 'We're live' notification"**
 button on `/admin/livestream` and the Host Console, which fires
@@ -5868,8 +5868,30 @@ philosophy, same "no oracle" security reasoning:
   locks the organisation's own `tblSites` row (`SELECT … FOR UPDATE`, the way `Events` and the calendar importer take a
   turn), then asks `RateLimiter::tooMany()` and records the hit with `RateLimiter::recordHit()`, and only then sends.
   The sender's query (`WebPush::sendToChannel()`) leaves out a device whose account is switched off
-  (`tblUsers.isActive = 0`) or whose membership of that organisation is switched off (`tblUserSites.isActive = 0`); a
-  device with no account, or whose account has no membership row at all, is unchanged.
+  (`tblUsers.isActive = 0`) or whose membership of that organisation is switched off (`tblUserSites.isActive = 0`). Since
+  the follow-up of 13 October 2026 a device with NO account is left out too (`ps.userID IS NOT NULL`); an erased
+  account turns its devices into devices with no account, so they stop being addressed as well. A device whose
+  account has no membership row at all is unchanged.
+- **Who may send "We're live"** (`web/_apps/admin/livestream/index.php`, action `notify_live`): a person who is not an
+  administrator is let past the page's gate for a POST whose action is `notify_live` ONLY. With an event number, the
+  event must pass `HostConsole::eventBelongsToSite($eventId, $siteId)` AND the person must pass
+  `Auth::isCoordinatorOf($eventId)` (true for an administrator too; false for a withdrawn coordinator or, when the DBS
+  setting is on, one without a valid check). With NO number only an administrator may send (the channels page's own
+  button posts none). A refused person who is not an administrator always gets the 403 page, so the answer says
+  nothing about which event numbers are real.
+- The Host Console (`event.php`) sets `$mayPress` from the SAME two calls. There is no shared function yet; one would
+  belong in `Portal\Core\HostConsole`. The test compares the button with the handler for seven kinds of person.
+- Activity type `GoLivePushPressed`: description `userID=N, eventID=N` (or `eventID=none`), written after the press
+  is counted and before the send. It holds nothing of the push.
+- `api/push/subscribe` answers 401 before anything else when nobody is signed in, and stores the device against the
+  session's account only. `api/push/unsubscribe` is unchanged on purpose: it needs a form token and the device's own
+  endpoint address, not a sign-in, so a device with no account can still switch itself off.
+- Admin, Integrations, Push has its OWN copy of the sender's rule for its counts (`$reachable` in
+  `admin/integrations/push/index.php`): keep it together with the query in `WebPush::sendToChannel()`.
+- The handler reads `action`, `csrf_token` and `returnTo` as text only (`is_string()`); a list is an empty value.
+  `eventID` is still cast with `(int)`, so a list there is read as event 1 (on the issue).
+- Test: `tools/go-live-button-selftest.php` (127 checks; `GLB_EXPECTED_CHECKS`), parts J (coordinators), K
+  (subscribing) and L (the Integrations page's counts).
 - `web/_apps/auth/account/save.php` (the Account page's "Notification Preferences" card) now reads the stored choices and
   changes only its own three keys (`emailDigest`, `expenseUpdates`, `eventReminders`).
 - `web/_core/templates/header.php` draws the trail of links: only the last entry is `aria-current="page"`; an earlier

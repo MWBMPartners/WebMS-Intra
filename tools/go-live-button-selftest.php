@@ -18,7 +18,10 @@
  * is no place to hand it a stand-in sender, which is how `tools/import-notifier-
  * selftest.php` does it (that class takes the sender as an argument). This test
  * stands the stand-in in at the other end instead: every push subscription it
- * makes has an address starting `http://`. `WebPush::send()` refuses any address
+ * makes that could be sent anything has an address starting `http://` (the one
+ * `https://` device of part K is made on a host that never resolves, is deleted
+ * before anything could address it, and cannot be sent to anyway: see part K).
+ * `WebPush::send()` refuses any address
  * that is not https, BEFORE it encrypts anything or opens a connection, and says
  * so by recording the outcome -1 on that subscription (`lastHttpStatus = -1`,
  * `failCount` one higher). That makes the subscription row a recorder:
@@ -58,9 +61,9 @@
  *      test READS the form from the page (its address and every hidden field) and
  *      posts exactly that. The address must be `admin/livestream/channels`; the
  *      person lands back on that event's Host Console page and is told how many
- *      devices were addressed. ONE push: the members and anonymous devices that
+ *      devices were addressed. ONE push: the devices of signed-in members that
  *      subscribed to the livestream channel in THIS organisation are addressed,
- *      once each. A member who switched "We're live now" off (through the real
+ *      once each (a device with no account is not). A member who switched "We're live now" off (through the real
  *      notification preferences page), a device that only asked for reminders, a
  *      device that is switched off, and the other organisation's devices are not.
  *      The push says "<the organisation's own name> is live now" (not the
@@ -70,10 +73,9 @@
  *      organisation is switched off, are not addressed either.
  *   B. A second press. It sends again; a fourth press within fifteen minutes is
  *      refused by the handler's own limit and sends nothing.
- *   C. Who may not. A member is refused (403) and nothing is sent; an event
- *      coordinator who is not an administrator gets the Host Console WITHOUT the
- *      button (and a hand-made press is refused); a signed-out visitor is sent to
- *      sign in.
+ *   C. Who may not. A member is refused (403) and nothing is sent; a signed-out
+ *      visitor is sent to sign in. (An event's coordinator may send it for their
+ *      event: part J.)
  *   D. The form token. No token, another person's token and a made-up one are
  *      refused (400) and nothing is sent; a GET sends nothing, even with every
  *      field in the address. The same form sent twice (a double-click that got
@@ -98,7 +100,28 @@
  *      organisation's administrator likewise addresses only the first's.
  *   I. Six presses at the same moment (a second server with eight workers, every
  *      send made to take a quarter of a second): at most three of them send.
- *   J. The run left no row of its own behind, and every setting it switched is
+ *   J. An event's coordinator may send it, for that event only (owner's decision of
+ *      13 October 2026). A coordinator of the event who is not an administrator is
+ *      shown the button and sends; a coordinator of ANOTHER event, a coordinator of
+ *      an event of another organisation, an ordinary member, a made-up, negative,
+ *      non-numeric or missing event number are all refused (403) and nothing is
+ *      sent or counted; an administrator naming a made-up or another
+ *      organisation's event is told so and nothing is sent; an administrator with
+ *      no event number still sends (the channels page's own button posts none).
+ *      The console draws the button exactly when the handler accepts. A coordinator
+ *      cannot open the livestream channels page or use any of its other actions.
+ *      One line is written to the activity log: who pressed it and for which event,
+ *      and nothing of the push.
+ *   K. Only a signed-in device can ask for notices (owner's decision of 13 October
+ *      2026). The subscribe address refuses a request from nobody, and from a
+ *      visitor with a real session and form token, in plain words (401) and stores
+ *      nothing; a signed-in member subscribing works as before; a device with no
+ *      account is left out of the push and its row is still there; the unsubscribe
+ *      address still works for a person who is not signed in (keyed by the
+ *      device's own address). This part lives here, not in tools/webpush-selftest.php,
+ *      because that file is standalone (no database, no web server, no sign-in) and
+ *      cannot call a page.
+ *   L. The run left no row of its own behind, and every setting it switched is
  *      back as found.
  *
  * WHAT THIS CANNOT PROVE
@@ -110,8 +133,8 @@
  *
  * SAFETY
  *   - It refuses unless the database's name starts with `selftest_`. It removes
- *     its own rows (accounts 920001 to 920010, organisation 920901, events 920401
- *     and 920402, channels 920601 and 920602, subscriptions 920501 to 920520) and
+ *     its own rows (accounts 920001 to 920012, organisation 920901, events 920401,
+ *     920402 and 920403, channels 920601 and 920602, subscriptions 920501 to 920520) and
  *     every activity-log, error and rate-limit row made after the start.
  *   - The scratch folder is a NEW child of `SELFTEST_WEB_DIR` (or the system's
  *     temporary folder), outside the repository, deleted at the end only if it
@@ -135,7 +158,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/612
  * -----------------------------------------------------------------------------
  */
@@ -152,13 +175,27 @@ const GLB_ADMIN_B = 920007;   // administrator of the SECOND organisation only
 const GLB_MEMBER_B = 920008;  // member of the second organisation, subscribed
 const GLB_GONE    = 920009;   // member of 1 whose ACCOUNT has been switched off, subscribed
 const GLB_LEFT    = 920010;   // member of 1 whose MEMBERSHIP of 1 has been switched off, subscribed
-const GLB_LAST_USER = 920010;
+const GLB_COORD2  = 920011;   // member of 1 and coordinator of the SECOND event of 1 only (not of the first)
+const GLB_COORDX  = 920012;   // member of 1 who is a coordinator of an event of the OTHER organisation
+const GLB_COORDW  = 920013;   // member of 1 who WAS a coordinator of the first event until their place was withdrawn
+const GLB_COORDD  = 920014;   // member of 1 who is a coordinator of a DELETED event and of an IMPORTED one
+const GLB_LAST_USER = 920014;
 const GLB_EVENT   = 920401;   // organisation 1's event
 const GLB_EVENT_B = 920402;   // the second organisation's event
+const GLB_EVENT_2 = 920403;   // organisation 1's SECOND event (a coordinator of the first is not a coordinator of this)
+const GLB_EVENT_DEL = 920404; // organisation 1's event that has been DELETED
+const GLB_EVENT_IMP = 920405; // organisation 1's event that was copied in from an outside calendar (read-only)
+const GLB_FIRST_EVENT = 920401, GLB_LAST_EVENT = 920409;
+/** How many checks a full run makes (with Node.js; two fewer without it). Bring it up to date whenever a check is added or taken out. */
+const GLB_EXPECTED_CHECKS = 127;
 const GLB_ORG_B   = 920901;
 const GLB_CHANNEL = 920601, GLB_CHANNEL_B = 920602;
 /** Subscriptions: ON, OFF, anonymous, reminders only, switched off, then the second organisation's two, then the two people who have left. */
 const GLB_S_ON = 920501, GLB_S_OFF = 920502, GLB_S_ANON = 920503, GLB_S_REM = 920504, GLB_S_DEAD = 920505, GLB_S_B = 920506, GLB_S_BANON = 920507, GLB_S_GONE = 920508, GLB_S_LEFT = 920509;
+/** A second device of a member of 1, and of a member of the second organisation: with the signed-out devices now left out, these are what is addressed. */
+const GLB_S_ON2 = 920510, GLB_S_B2 = 920511;
+/** The device a signed-in person subscribes in part K; its number is not known in advance, so it is found by this address. */
+const GLB_SUBSCRIBE_ENDPOINT = 'https://push.selftest.invalid/subscribed-by-the-test';
 /** What the organisations are called for the run, and the installation's own name, which must NOT be what a push says. */
 const GLB_NAME_A = 'GLB first organisation', GLB_NAME_B = 'GLB second organisation', GLB_NAME_INSTALLATION = 'GLB installation name';
 const GLB_FIRST_SUB = 920501, GLB_LAST_SUB = 920520;
@@ -167,6 +204,9 @@ const GLB_SETTINGS = [
     'push.enabled' => 'true', 'push.vapidPublicKey' => 'selftest-public-key-not-real', 'push.vapidPrivateKey' => 'selftest-private-key-not-real',
     'push.contact' => 'mailto:selftest@selftest.invalid', 'multisite.enabled' => 'false', 'multisite.detectionMode' => 'session',
     'site.name' => GLB_NAME_INSTALLATION,
+    // So that the subscribe address (part K) accepts the made-up https address of the test's own device; see part K for why that
+    // device can still never be sent anything.
+    'push.endpointHostAllowlist' => 'selftest.invalid',
 ];
 /** The flash the handler leaves, as the page shows it, for N devices addressed and all refused before any network call. */
 function glb_sentWords(int $addressed): string
@@ -227,10 +267,11 @@ function glb_tidyDatabase(): void
     $db = glb_db();
     $db->query('SET SESSION foreign_key_checks = 0');
     $db->query('DELETE FROM tblPushSubscriptions WHERE subID BETWEEN ' . GLB_FIRST_SUB . ' AND ' . GLB_LAST_SUB . ' OR userID BETWEEN ' . GLB_ADMIN . ' AND ' . GLB_LAST_USER);
-    $db->query('DELETE FROM tblEventCoordinators WHERE eventID IN (' . GLB_EVENT . ', ' . GLB_EVENT_B . ')');
+    $db->query('DELETE FROM tblEventCoordinators WHERE eventID BETWEEN ' . GLB_FIRST_EVENT . ' AND ' . GLB_LAST_EVENT);
     $db->query('DELETE FROM tblLivestreamSchedule WHERE channelID IN (' . GLB_CHANNEL . ', ' . GLB_CHANNEL_B . ')');
     $db->query('DELETE FROM tblLivestreamChannel WHERE channelID IN (' . GLB_CHANNEL . ', ' . GLB_CHANNEL_B . ')');
-    $db->query('DELETE FROM tblEvents WHERE eventID IN (' . GLB_EVENT . ', ' . GLB_EVENT_B . ')');
+    $db->query('DELETE FROM tblEvents WHERE eventID BETWEEN ' . GLB_FIRST_EVENT . ' AND ' . GLB_LAST_EVENT);
+    $db->query("DELETE FROM tblPushSubscriptions WHERE endpoint = '" . GLB_SUBSCRIBE_ENDPOINT . "'");
     if ($glb['logMark'] !== null) {
         $db->query('DELETE FROM tblActivityLogs WHERE logID > ' . (int) $glb['logMark']);
     }
@@ -717,6 +758,10 @@ $people   = [
     GLB_MEMBER_B => ['memberb', 'Ben Member-B', 0, GLB_ORG_B],
     GLB_GONE     => ['gone', 'Gail Gone', 0, 1],
     GLB_LEFT     => ['left', 'Len Left', 0, 1],
+    GLB_COORD2   => ['coord2', 'Cora Coordinator-Two', 0, 1],
+    GLB_COORDX   => ['coordx', 'Xavier Coordinator-Elsewhere', 0, 1],
+    GLB_COORDW   => ['coordw', 'Wanda Coordinator-Withdrawn', 0, 1],
+    GLB_COORDD   => ['coordd', 'Dale Coordinator-Deleted', 0, 1],
 ];
 foreach ($people as $id => [$who, $name, $isSiteAdmin, $org]) {
     $statement = $db->prepare('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, 0)');
@@ -740,7 +785,7 @@ $db->query('UPDATE tblUserSites SET isActive = 0 WHERE userID = ' . GLB_LEFT . '
 $day   = date('Y-m-d', strtotime('+9 days'));
 $start = $day . ' 10:00:00';
 $end   = $day . ' 11:00:00';
-foreach ([GLB_EVENT => [1, 'glb-event'], GLB_EVENT_B => [GLB_ORG_B, 'glb-event-b']] as $id => [$org, $slug]) {
+foreach ([GLB_EVENT => [1, 'glb-event'], GLB_EVENT_B => [GLB_ORG_B, 'glb-event-b'], GLB_EVENT_2 => [1, 'glb-event-2']] as $id => [$org, $slug]) {
     $statement = $db->prepare(
         'INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) '
         . "VALUES (?, ?, ?, 'GLB livestream', 'GLB description', ?, ?, 'UTC', 'published', 1, 0)"
@@ -748,11 +793,27 @@ foreach ([GLB_EVENT => [1, 'glb-event'], GLB_EVENT_B => [GLB_ORG_B, 'glb-event-b
     $statement->bind_param('iisss', $id, $org, $slug, $start, $end);
     $statement->execute();
 }
-$statement = $db->prepare('INSERT INTO tblEventCoordinators (eventID, userID) VALUES (?, ?)');
-$eventA    = GLB_EVENT;
-$coord     = GLB_COORD;
-$statement->bind_param('ii', $eventA, $coord);
-$statement->execute();
+// Coordinators: GLB_COORD of the first event; GLB_COORD2 of the second event of the first organisation ONLY; GLB_COORDX of the
+// other organisation's event (so a person who passes Auth::isCoordinatorOf() for it, in the wrong organisation).
+// Three more kinds of person who must NOT be able to send (added after the independent check of 13 October 2026, which showed
+// the test passed even when each of these could): GLB_COORDW coordinated the first event but their place has been WITHDRAWN;
+// GLB_COORDD coordinates an event that has been DELETED and one that was IMPORTED from an outside calendar (read-only).
+$deletedId  = GLB_EVENT_DEL;
+$importedId = GLB_EVENT_IMP;
+foreach ([[$deletedId, 'glb-event-deleted', 1, 'NULL'], [$importedId, 'glb-event-imported', 0, '916901']] as [$extraId, $extraSlug, $extraDeleted, $extraFeed]) {
+    $statement = $db->prepare(
+        'INSERT INTO tblEvents (eventID, siteID, externalFeedID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) '
+        . "VALUES (?, 1, " . $extraFeed . ", ?, 'GLB livestream', 'GLB description', ?, ?, 'UTC', 'published', 1, ?)"
+    );
+    $statement->bind_param('isssi', $extraId, $extraSlug, $start, $end, $extraDeleted);
+    $statement->execute();
+}
+foreach ([[GLB_EVENT, GLB_COORD], [GLB_EVENT_2, GLB_COORD2], [GLB_EVENT_B, GLB_COORDX], [GLB_EVENT, GLB_COORDW], [GLB_EVENT_DEL, GLB_COORDD], [GLB_EVENT_IMP, GLB_COORDD]] as [$coordEvent, $coordUser]) {
+    $statement = $db->prepare('INSERT INTO tblEventCoordinators (eventID, userID) VALUES (?, ?)');
+    $statement->bind_param('ii', $coordEvent, $coordUser);
+    $statement->execute();
+}
+$db->query('UPDATE tblEventCoordinators SET revokedAt = NOW() WHERE userID = ' . GLB_COORDW);
 
 // 📺 A channel for each organisation, "live" every day of the week all day, in UTC, so that the run is live whatever time it is run.
 foreach ([GLB_CHANNEL => 1, GLB_CHANNEL_B => GLB_ORG_B] as $channel => $org) {
@@ -778,6 +839,8 @@ $subs = [
     [GLB_S_BANON, GLB_ORG_B, null, '["livestream"]', 1],
     [GLB_S_GONE, 1, GLB_GONE, '["livestream"]', 1],
     [GLB_S_LEFT, 1, GLB_LEFT, '["livestream"]', 1],
+    [GLB_S_ON2, 1, GLB_ON, '["livestream"]', 1],
+    [GLB_S_B2, GLB_ORG_B, GLB_MEMBER_B, '["livestream"]', 1],
 ];
 foreach ($subs as [$id, $org, $user, $channels, $active]) {
     $endpoint  = 'http://push-' . $id . '.selftest.invalid/endpoint-' . $id;
@@ -785,6 +848,11 @@ foreach ($subs as [$id, $org, $user, $channels, $active]) {
     $key       = 'selftest-not-a-key';
     $statement->bind_param('iiissssi', $id, $org, $user, $endpoint, $key, $key, $channels, $active);
     $statement->execute();
+}
+// Part L reads the device COUNTS from Admin, Integrations, Push, so no device but the run's own may be in these two organisations.
+$others = (int) $db->query('SELECT COUNT(*) FROM tblPushSubscriptions WHERE siteID IN (1, ' . GLB_ORG_B . ') AND subID NOT BETWEEN ' . GLB_FIRST_SUB . ' AND ' . GLB_LAST_SUB)->fetch_row()[0];
+if ($others !== 0) {
+    glb_refuse('This database already holds ' . $others . ' push device(s) that are not this test\'s, so the counts on the Integrations page cannot be checked. Use a database built for this run.');
 }
 // Lock one of the three: nothing may start unless every subscription of the run is an http:// address.
 $real = (int) $db->query("SELECT COUNT(*) FROM tblPushSubscriptions WHERE subID BETWEEN " . GLB_FIRST_SUB . ' AND ' . GLB_LAST_SUB . " AND endpoint NOT LIKE 'http://%.selftest.invalid/%'")->fetch_row()[0];
@@ -899,10 +967,10 @@ if (glb_portAnswers($glb['port']) === false) {
 
 echo "The Host Console's \"Send We're live\" button — self-test (#612)\n";
 echo str_repeat('=', 78) . "\n";
-printf("Server process %d, port %d, PHP %s, database server %s. No real push can be sent: every device address is http://.\n", (int) proc_get_status($glb['proc'])['pid'], $glb['port'], PHP_VERSION, $db->server_info);
+printf("Server process %d, port %d, PHP %s, database server %s. No real push can be sent: every device that could be sent anything is an http:// address (part K's one https device is deleted before anything could address it).\n", (int) proc_get_status($glb['proc'])['pid'], $glb['port'], PHP_VERSION, $db->server_info);
 
 $jar = [];
-foreach (['admin', 'off', 'plain', 'coord'] as $who) {
+foreach (['admin', 'off', 'plain', 'coord', 'coord2', 'coordx', 'coordw', 'coordd'] as $who) {
     $jar[$who] = glb_signIn($who, $who);
 }
 
@@ -952,20 +1020,21 @@ glb_check(
 $back = glb_request($jar['admin'], 'GET', $answer['location'] !== '' ? $answer['location'] : glb_consolePath(GLB_EVENT));
 glb_check(glb_flash($back['body']) === glb_sentWords(2), 'and tells them how many devices were addressed: two', glb_flash($back['body']));
 glb_check(
-    glb_addressed(1) === [GLB_S_ON, GLB_S_ANON],
-    'ONE push went to this organisation\'s subscribers: the member who left it on and the signed-out device, once each',
+    glb_addressed(1) === [GLB_S_ON, GLB_S_ON2],
+    'ONE push went to this organisation\'s subscribers: the two devices of the member who left it on, once each (a device with no account is no longer one of them)',
     json_encode(glb_subs()) ?: ''
 );
 $subs = glb_subs();
 glb_check(
     $subs[GLB_S_OFF] === [0, null, 1] && $subs[GLB_S_REM] === [0, null, 1] && $subs[GLB_S_DEAD] === [0, null, 0] && $subs[GLB_S_B] === [0, null, 1] && $subs[GLB_S_BANON] === [0, null, 1]
-        && $subs[GLB_S_GONE] === [0, null, 1] && $subs[GLB_S_LEFT] === [0, null, 1],
+        && $subs[GLB_S_GONE] === [0, null, 1] && $subs[GLB_S_LEFT] === [0, null, 1] && $subs[GLB_S_B2] === [0, null, 1] && $subs[GLB_S_ANON] === [0, null, 1],
     'and to nobody else: not the member who switched it off, not a device that asked for reminders only, not a device switched off, not the other organisation\'s devices, '
-        . 'not the device of a person whose ACCOUNT is switched off, not the device of a person whose MEMBERSHIP of this organisation is switched off',
+        . 'not the device of a person whose ACCOUNT is switched off, not the device of a person whose MEMBERSHIP of this organisation is switched off, '
+        . 'not the device with NO account (it is still stored, untouched)',
     json_encode($subs) ?: ''
 );
 $sent = glb_pushes();
-glb_check(array_column($sent, 'subID') === [GLB_S_ON, GLB_S_ANON], 'the sender was handed the push for exactly those two devices (read from the recorder in the scratch copy of the sender)', json_encode(array_column($sent, 'subID')) ?: '');
+glb_check(array_column($sent, 'subID') === [GLB_S_ON, GLB_S_ON2], 'the sender was handed the push for exactly those two devices (read from the recorder in the scratch copy of the sender)', json_encode(array_column($sent, 'subID')) ?: '');
 $first_ = $sent[0] ?? ['payload' => [], 'ttl' => 0, 'urgency' => '', 'topic' => null];
 glb_check(
     ($first_['payload']['title'] ?? '') === GLB_NAME_A . ' is live now' && str_contains(json_encode($sent) ?: '', GLB_NAME_INSTALLATION) === false,
@@ -985,16 +1054,16 @@ glb_check($statuses === [-1], 'every address was refused by the sender\'s own sa
 echo "\nB. A second press, and the limit\n";
 $second = glb_press($jar['admin'], GLB_EVENT);
 glb_check(
-    ($second['answer']['status'] ?? 0) === 302 && glb_addressed(2) === [GLB_S_ON, GLB_S_ANON] && glb_hits(1) === 2,
+    ($second['answer']['status'] ?? 0) === 302 && glb_addressed(2) === [GLB_S_ON, GLB_S_ON2] && glb_hits(1) === 2,
     'a second press SENDS AGAIN: the same two devices are addressed a second time (nothing remembers the first push), and it counts as a second press',
     json_encode(glb_subs()) ?: ''
 );
 glb_press($jar['admin'], GLB_EVENT);
-glb_check(glb_addressed(3) === [GLB_S_ON, GLB_S_ANON] && glb_hits(1) === 3, 'a third press does the same');
+glb_check(glb_addressed(3) === [GLB_S_ON, GLB_S_ON2] && glb_hits(1) === 3, 'a third press does the same');
 $fourth = glb_press($jar['admin'], GLB_EVENT);
 $words  = glb_flash(glb_request($jar['admin'], 'GET', glb_consolePath(GLB_EVENT))['body']);
 glb_check(
-    ($fourth['answer']['status'] ?? 0) === 302 && glb_addressed(3) === [GLB_S_ON, GLB_S_ANON] && glb_hits(1) === 3 && str_starts_with($words, 'Too many "we\'re live" pushes sent recently'),
+    ($fourth['answer']['status'] ?? 0) === 302 && glb_addressed(3) === [GLB_S_ON, GLB_S_ON2] && glb_hits(1) === 3 && str_starts_with($words, 'Too many "we\'re live" pushes sent recently'),
     'a fourth press within fifteen minutes is refused by the handler\'s own limit: it says so, addresses nobody, and the person lands back on the page',
     $words . ' / ' . json_encode(glb_subs())
 );
@@ -1008,17 +1077,7 @@ $answer = glb_request($jar['plain'], 'POST', $form['action'], ['csrf_token' => $
 glb_check($answer['status'] === 403 && glb_anyAddressed() === 0 && glb_hits(1) === 0, 'an ordinary member, with their own good token, is refused (403) and nothing is sent', 'HTTP ' . $answer['status']);
 $answer = glb_request($jar['plain'], 'GET', glb_consolePath(GLB_EVENT));
 glb_check($answer['status'] === 403 && glb_readForm($answer['body'])['found'] === false, 'and is not shown the button: the Host Console page refuses them too (403)', 'HTTP ' . $answer['status']);
-$coordPage  = glb_request($jar['coord'], 'GET', glb_consolePath(GLB_EVENT));
-$coordForm  = glb_readForm($coordPage['body']);
-$answer     = glb_request($jar['coord'], 'POST', $form['action'], ['csrf_token' => $coordForm['fields']['csrf_token'] ?? ''] + $fieldsOf(GLB_EVENT));
-glb_check(
-    $coordPage['status'] === 200 && $coordForm['found'] === false && str_contains($coordPage['body'], 'Back</a>') === true,
-    'an event coordinator who is not an administrator gets the Host Console page WITHOUT the button (the page asks the same question the handler asks: is this person an administrator?)',
-    'page HTTP ' . $coordPage['status'] . ', button found ' . json_encode($coordForm['found'])
-);
-// Post the button's fields by hand, with a form token the coordinator really holds.
-$answer = glb_request($jar['coord'], 'POST', $form['action'], ['csrf_token' => glb_metaToken($jar['coord'], '/')] + $fieldsOf(GLB_EVENT));
-glb_check($answer['status'] === 403 && glb_anyAddressed() === 0 && glb_hits(1) === 0, 'and posting the button\'s fields by hand as that coordinator is still refused (403), nothing sent', 'HTTP ' . $answer['status']);
+// (An event coordinator who is not an administrator may send it for THEIR event: part J.)
 $answer = glb_request('', 'POST', $form['action'], ['csrf_token' => str_repeat('a', 64)] + $fieldsOf(GLB_EVENT));
 glb_check(in_array($answer['status'], [301, 302, 303], true) && str_contains($answer['location'], 'login') === true && glb_anyAddressed() === 0, 'a signed-out visitor is sent to sign in and nothing is sent', 'HTTP ' . $answer['status'] . ' to "' . $answer['location'] . '"');
 
@@ -1039,7 +1098,7 @@ glb_reset();
 $once   = glb_press($jar['admin'], GLB_EVENT);
 $again  = glb_request($jar['admin'], 'POST', $once['form']['action'] ?? $form['action'], $once['form']['fields'] ?? []);
 glb_check(
-    ($once['answer']['status'] ?? 0) === 302 && $again['status'] === 400 && glb_hits(1) === 1 && glb_addressed(1) === [GLB_S_ON, GLB_S_ANON],
+    ($once['answer']['status'] ?? 0) === 302 && $again['status'] === 400 && glb_hits(1) === 1 && glb_addressed(1) === [GLB_S_ON, GLB_S_ON2],
     'the SAME form sent twice (a double-click that got past the button): the first press works, the second is refused (400, its form token is used up) and sends nothing',
     'HTTP ' . ($once['answer']['status'] ?? '-') . ' then ' . $again['status']
 );
@@ -1111,7 +1170,7 @@ glb_check(
     json_encode($storedNow) ?: ''
 );
 $pressed = glb_press($jar['admin'], GLB_EVENT);
-glb_check(($pressed['answer']['status'] ?? 0) === 302 && glb_addressed(1) === [GLB_S_ON, GLB_S_ANON], 'so a press now still does NOT address that member\'s device', json_encode(glb_subs()) ?: '');
+glb_check(($pressed['answer']['status'] ?? 0) === 302 && glb_addressed(1) === [GLB_S_ON, GLB_S_ON2], 'so a press now still does NOT address that member\'s device', json_encode(glb_subs()) ?: '');
 
 echo "\nG. The button switches itself off when pressed\n";
 $consolePage = glb_request($jar['admin'], 'GET', glb_consolePath(GLB_EVENT));
@@ -1145,18 +1204,18 @@ glb_check($ownPage['status'] === 200 && glb_readForm($ownPage['body'])['found'] 
 $token  = glb_metaToken($jar['admin2'], '/');
 $answer = glb_request($jar['admin2'], 'POST', '/admin/livestream/channels', ['csrf_token' => $token] + $fieldsOf(GLB_EVENT));
 glb_check(
-    $answer['status'] === 302 && glb_addressed(1) === [GLB_S_B, GLB_S_BANON] && glb_hits(GLB_ORG_B) === 1 && glb_hits(1) === 0,
-    'posting the button\'s fields by hand, with the FIRST organisation\'s event number, addresses only THEIR OWN organisation\'s devices (one press, counted against their organisation) and none of the first organisation\'s',
+    $answer['status'] === 302 && glb_anyAddressed() === 0 && glb_hits(GLB_ORG_B) === 0 && glb_hits(1) === 0,
+    'posting the button\'s fields by hand, with the FIRST organisation\'s event number, is refused: the event is not in THEIR organisation, so nothing is sent to anyone and nothing is counted against either organisation (before, it sent to their own devices with a link to the other organisation\'s event)',
     json_encode(glb_subs()) ?: ''
 );
 glb_reset();
 $own = glb_press($jar['admin2'], GLB_EVENT_B);
-glb_check(($own['answer']['status'] ?? 0) === 302 && glb_addressed(1) === [GLB_S_B, GLB_S_BANON], 'their own button, on their own console, addresses the same two of THEIR devices', json_encode(glb_subs()) ?: '');
+glb_check(($own['answer']['status'] ?? 0) === 302 && glb_addressed(1) === [GLB_S_B, GLB_S_B2], 'their own button, on their own console, addresses the same two of THEIR devices', json_encode(glb_subs()) ?: '');
 $titlesB = array_values(array_unique(array_map(static fn (array $p): string => (string) ($p['payload']['title'] ?? ''), glb_pushes())));
 glb_check($titlesB === [GLB_NAME_B . ' is live now'], 'and those devices are told "' . GLB_NAME_B . ' is live now": the SECOND organisation\'s own name, not the first\'s and not the installation\'s', json_encode($titlesB) ?: '');
 glb_reset();
 $ours = glb_press($jar['admin1'], GLB_EVENT);
-glb_check(($ours['answer']['status'] ?? 0) === 302 && glb_addressed(1) === [GLB_S_ON, GLB_S_ANON], 'and the first organisation\'s administrator addresses only the FIRST organisation\'s two devices, none of the second\'s', json_encode(glb_subs()) ?: '');
+glb_check(($ours['answer']['status'] ?? 0) === 302 && glb_addressed(1) === [GLB_S_ON, GLB_S_ON2], 'and the first organisation\'s administrator addresses only the FIRST organisation\'s two devices, none of the second\'s', json_encode(glb_subs()) ?: '');
 $titlesA = array_values(array_unique(array_map(static fn (array $p): string => (string) ($p['payload']['title'] ?? ''), glb_pushes())));
 glb_check($titlesA === [GLB_NAME_A . ' is live now'], 'and they are told "' . GLB_NAME_A . ' is live now": the FIRST organisation\'s own name, each organisation its own', json_encode($titlesA) ?: '');
 $theirEvent = glb_request($jar['admin1'], 'GET', glb_consolePath(GLB_EVENT_B));
@@ -1196,13 +1255,308 @@ glb_check(count(array_filter($six, static fn (array $one): bool => $one['path'] 
 $answers = glb_requestMany($six);
 glb_check(array_column($answers, 'status') === [302, 302, 302, 302, 302, 302], 'all six presses are answered at the same moment, each landing back on the console', json_encode($answers) ?: '');
 glb_check(
-    glb_hits(1) === 3 && glb_addressed(3) === [GLB_S_ON, GLB_S_ANON] && count(glb_pushes()) === 6,
+    glb_hits(1) === 3 && glb_addressed(3) === [GLB_S_ON, GLB_S_ON2] && count(glb_pushes()) === 6,
     'at most THREE of the six sent: three presses counted, each of the two devices addressed three times (six sends in all, not twelve), the rest were refused by the limit',
     'presses counted ' . glb_hits(1) . '; ' . json_encode(glb_subs()) . '; sends ' . count(glb_pushes())
 );
 glb_stopWorkers();
 
-echo "\nJ. The end\n";
+echo "\nJ. An event's coordinator may send it, for that event only\n";
+glb_reset();
+$mark = (int) $db->query('SELECT COALESCE(MAX(logID), 0) FROM tblActivityLogs')->fetch_row()[0];
+$coordPage = glb_request($jar['coord'], 'GET', glb_consolePath(GLB_EVENT));
+$coordForm = glb_readForm($coordPage['body']);
+glb_check($coordPage['status'] === 200 && $coordForm['found'] === true && $coordForm['disabled'] === false && $coordForm['action'] === '/admin/livestream/channels', 'a coordinator of the event, who is not an administrator, is shown the Host Console page WITH the button, switched on, posting to the right address', 'HTTP ' . $coordPage['status']);
+$sentByCoord = glb_press($jar['coord'], GLB_EVENT);
+glb_check(
+    ($sentByCoord['answer']['status'] ?? 0) === 302 && ($sentByCoord['answer']['location'] ?? '') === glb_consolePath(GLB_EVENT) && glb_addressed(1) === [GLB_S_ON, GLB_S_ON2] && glb_hits(1) === 1,
+    'and pressing it SENDS: one push to the same two devices, counted as one press against the organisation, and the coordinator lands back on the console',
+    'HTTP ' . ($sentByCoord['answer']['status'] ?? '-') . '; ' . json_encode(glb_subs())
+);
+$noteRows = $db->query("SELECT userID, activityDescription FROM tblActivityLogs WHERE logID > " . $mark . " AND activityType = 'GoLivePushPressed'")->fetch_all(MYSQLI_ASSOC);
+glb_check(
+    count($noteRows) === 1 && (int) $noteRows[0]['userID'] === GLB_COORD && $noteRows[0]['activityDescription'] === 'userID=' . GLB_COORD . ', eventID=' . GLB_EVENT,
+    'one line was written to the activity log saying WHO pressed it and for which event',
+    json_encode($noteRows) ?: ''
+);
+$noteText = (string) ($noteRows[0]['activityDescription'] ?? '') . ' ' . (string) ($db->query("SELECT activityType FROM tblActivityLogs WHERE logID > " . $mark . " AND activityType = 'GoLivePushPressed'")->fetch_row()[0] ?? '');
+glb_check(
+    str_contains($noteText, 'is live now') === false && str_contains($noteText, 'selftest.invalid') === false && str_contains($noteText, 'GLB channel') === false && str_contains($noteText, '/live') === false && preg_match('/\d{6}.*\d{6}.*\d{6}/', $noteText) !== 1,
+    'and the line holds nothing of the push: no title, no words, no link, no device',
+    $noteText
+);
+$adminLines = (int) $db->query("SELECT COUNT(*) FROM tblActivityLogs WHERE logID > " . $mark . " AND activityType = 'GoLivePushPressed'")->fetch_row()[0];
+glb_reset();
+glb_press($jar['admin'], GLB_EVENT);
+glb_check((int) $db->query("SELECT COUNT(*) FROM tblActivityLogs WHERE logID > " . $mark . " AND activityType = 'GoLivePushPressed'")->fetch_row()[0] === $adminLines + 1 && glb_addressed(1) === [GLB_S_ON, GLB_S_ON2], 'an administrator still sends it for the event, and that is on the log too', json_encode(glb_subs()) ?: '');
+
+glb_reset();
+$fieldsFor = static fn (int $event): array => ['action' => 'notify_live', 'eventID' => (string) $event, 'returnTo' => glb_consolePath($event)];
+$post = static function (string $who, array $fields) use ($jar, $form): array {
+    return glb_request($jar[$who], 'POST', $form['action'], ['csrf_token' => glb_metaToken($jar[$who], '/')] + $fields);
+};
+$logBefore = (int) $db->query('SELECT COUNT(*) FROM tblActivityLogs WHERE activityType = \'GoLivePushPressed\'')->fetch_row()[0];
+$refusals = [
+    'a coordinator of ANOTHER event of the same organisation, naming this one' => ['coord2', $fieldsFor(GLB_EVENT)],
+    'a coordinator of an event of ANOTHER organisation, naming that event in this organisation' => ['coordx', $fieldsFor(GLB_EVENT_B)],
+    'the same person naming this organisation\'s event, which they do not coordinate' => ['coordx', $fieldsFor(GLB_EVENT)],
+    'an ordinary member, naming the event' => ['plain', $fieldsFor(GLB_EVENT)],
+    'a coordinator with a made-up event number' => ['coord', $fieldsFor(999999999)],
+    'a coordinator with a negative event number' => ['coord', $fieldsFor(-5)],
+    'a coordinator with a word for the event number' => ['coord', ['action' => 'notify_live', 'eventID' => 'abc', 'returnTo' => glb_consolePath(GLB_EVENT)]],
+    'a coordinator with NO event number' => ['coord', ['action' => 'notify_live', 'returnTo' => glb_consolePath(GLB_EVENT)]],
+    'a coordinator whose place on the event was WITHDRAWN' => ['coordw', $fieldsFor(GLB_EVENT)],
+    'the coordinator of a DELETED event, naming it' => ['coordd', $fieldsFor(GLB_EVENT_DEL)],
+    'the coordinator of an IMPORTED event, naming it' => ['coordd', $fieldsFor(GLB_EVENT_IMP)],
+];
+foreach ($refusals as $words => [$who, $fields]) {
+    $answer = $post($who, $fields);
+    glb_check($answer['status'] === 403 && glb_anyAddressed() === 0 && glb_hits(1) === 0, $words . ': refused (403), nothing sent, nothing counted', 'HTTP ' . $answer['status'] . '; ' . json_encode(glb_subs()));
+}
+glb_check((int) $db->query('SELECT COUNT(*) FROM tblActivityLogs WHERE activityType = \'GoLivePushPressed\'')->fetch_row()[0] === $logBefore, 'and none of those refusals wrote a "pressed" line to the log');
+$badAdmin = glb_press($jar['admin'], GLB_EVENT, ['eventID' => '999999999']);
+glb_check(
+    ($badAdmin['answer']['status'] ?? 0) === 302 && glb_anyAddressed() === 0 && glb_hits(1) === 0
+        && str_starts_with(glb_flash(glb_request($jar['admin'], 'GET', glb_consolePath(GLB_EVENT))['body']), 'That event was not found in this organisation, so nothing was sent'),
+    'an ADMINISTRATOR naming a made-up event is told so in words, and nothing is sent or counted',
+    'HTTP ' . ($badAdmin['answer']['status'] ?? '-') . '; ' . json_encode(glb_subs())
+);
+$otherEvent = glb_press($jar['admin'], GLB_EVENT, ['eventID' => (string) GLB_EVENT_B]);
+glb_flash(glb_request($jar['admin'], 'GET', glb_consolePath(GLB_EVENT))['body']);
+glb_check(($otherEvent['answer']['status'] ?? 0) === 302 && glb_anyAddressed() === 0 && glb_hits(1) === 0, 'and so is an administrator naming ANOTHER ORGANISATION\'s event: nothing sent or counted', json_encode(glb_subs()) ?: '');
+$noEvent = glb_press($jar['admin'], GLB_EVENT, ['eventID' => null]);
+glb_check(($noEvent['answer']['status'] ?? 0) === 302 && glb_addressed(1) === [GLB_S_ON, GLB_S_ON2] && glb_hits(1) === 1, 'an administrator with NO event number still sends (the livestream channels page\'s own button posts none): the link is then the live page without an event', json_encode(glb_subs()) ?: '');
+glb_check((glb_pushes()[0]['payload']['url'] ?? '') === '/live', 'and its link is /live, with no event number', json_encode(glb_pushes()[0] ?? []) ?: '');
+
+// Console and handler agree, for each kind of person: the button is there exactly when a press is accepted.
+glb_reset();
+$agree = [
+    'a coordinator of the event' => ['coord', GLB_EVENT, true],
+    'a coordinator of another event, looking at this one' => ['coord2', GLB_EVENT, false],
+    'a coordinator of an event of another organisation, looking at this one' => ['coordx', GLB_EVENT, false],
+    'an ordinary member' => ['plain', GLB_EVENT, false],
+    'a coordinator whose place was withdrawn' => ['coordw', GLB_EVENT, false],
+    'the coordinator of a deleted event, looking at it' => ['coordd', GLB_EVENT_DEL, false],
+    'the coordinator of an imported event, looking at it' => ['coordd', GLB_EVENT_IMP, false],
+];
+foreach ($agree as $words => [$who, $event, $should]) {
+    $page   = glb_request($jar[$who], 'GET', glb_consolePath($event));
+    $drawn  = glb_readForm($page['body'])['found'];
+    glb_check($drawn === $should, $words . ': the console ' . ($should ? 'draws' : 'does NOT draw') . ' the button (and the handler ' . ($should ? 'accepts' : 'refuses') . ' them, above)', 'HTTP ' . $page['status'] . ', drawn ' . json_encode($drawn));
+}
+// A coordinator is held to the same form token as everybody (the independent check showed the test passed when the token was
+// asked of administrators only): no token, an empty one and a made-up one send nothing.
+glb_reset();
+$tokenless = ['no form token at all' => null, 'an empty form token' => '', 'a made-up form token' => str_repeat('0', 64)];
+foreach ($tokenless as $words => $token) {
+    $try = glb_press($jar['coord'], GLB_EVENT, ['csrf_token' => $token]);
+    glb_check(($try['answer']['status'] ?? 0) === 400 && glb_anyAddressed() === 0 && glb_hits(1) === 0, 'a COORDINATOR pressing with ' . $words . ' is refused (400) and nothing is sent or counted', 'HTTP ' . ($try['answer']['status'] ?? '-'));
+}
+
+// The limit of three presses in fifteen minutes holds for a coordinator as for an administrator, whoever presses, and a press
+// the limit refuses is NOT written to the log as pressed. A coordinator and an administrator press in turn, five times.
+glb_reset();
+$logMark = (int) $db->query('SELECT COALESCE(MAX(logID), 0) FROM tblActivityLogs')->fetch_row()[0];
+$turns   = [['coord', 'a coordinator'], ['admin', 'an administrator'], ['coord', 'a coordinator'], ['admin', 'an administrator'], ['coord', 'a coordinator']];
+$said    = [];
+foreach ($turns as $n => [$who]) {
+    glb_press($jar[$who], GLB_EVENT);
+    $said[$n] = glb_flash(glb_request($jar[$who], 'GET', glb_consolePath(GLB_EVENT))['body']);
+}
+glb_check(
+    glb_addressed(3) === [GLB_S_ON, GLB_S_ON2] && glb_hits(1) === 3,
+    'a coordinator and an administrator pressing in turn, five presses: THREE are sent (each of the two devices reached three times) and three are counted, the fourth and fifth are not sent',
+    json_encode(glb_subs()) . ' hits ' . glb_hits(1)
+);
+glb_check(
+    str_starts_with($said[3], 'Too many "we\'re live" pushes') === true && str_starts_with($said[4], 'Too many "we\'re live" pushes') === true && str_starts_with($said[0], 'Push sent') === true,
+    'and the fourth press (an administrator\'s) and the fifth (a coordinator\'s) are both told the limit was reached',
+    json_encode($said)
+);
+$lines = $db->query("SELECT userID FROM tblActivityLogs WHERE logID > " . $logMark . " AND activityType = 'GoLivePushPressed' ORDER BY logID")->fetch_all(MYSQLI_NUM);
+glb_check(
+    count($lines) === 3 && array_map(static fn (array $row): int => (int) $row[0], $lines) === [GLB_COORD, GLB_ADMIN, GLB_COORD],
+    'and the log holds exactly three "pressed" lines for those five presses, the three that were sent (a coordinator, an administrator, a coordinator): the two the limit refused were not logged as pressed',
+    json_encode($lines)
+);
+glb_reset();
+
+$own2 = glb_request($jar['coord2'], 'GET', glb_consolePath(GLB_EVENT_2));
+glb_check($own2['status'] === 200 && glb_readForm($own2['body'])['found'] === true, 'a coordinator of the SECOND event is shown the button on THEIR event\'s console', 'HTTP ' . $own2['status']);
+
+// Everything else on that page stays for administrators: opening it, and every other action, for a coordinator who really can send.
+$channelsBefore = (int) $db->query('SELECT COUNT(*) FROM tblLivestreamChannel WHERE channelID IN (' . GLB_CHANNEL . ', ' . GLB_CHANNEL_B . ')')->fetch_row()[0];
+$schedulesBefore = (string) $db->query('SELECT GROUP_CONCAT(CONCAT(scheduleID, ":", isActive) ORDER BY scheduleID) FROM tblLivestreamSchedule WHERE channelID = ' . GLB_CHANNEL)->fetch_row()[0];
+$scheduleOne = (int) $db->query('SELECT MIN(scheduleID) FROM tblLivestreamSchedule WHERE channelID = ' . GLB_CHANNEL)->fetch_row()[0];
+$open = glb_request($jar['coord'], 'GET', '/admin/livestream/channels');
+glb_check($open['status'] === 403 && str_contains($open['body'], 'Add a channel') === false, 'a coordinator cannot OPEN the livestream channels page (403)', 'HTTP ' . $open['status']);
+$others = [
+    'add a channel' => ['action' => 'add_channel', 'name' => 'GLB planted channel', 'platform' => 'custom'],
+    'delete a channel' => ['action' => 'delete_channel', 'channelID' => (string) GLB_CHANNEL],
+    'add a schedule slot' => ['action' => 'add_schedule', 'channelID' => (string) GLB_CHANNEL, 'dayOfWeek' => '1', 'startTime' => '01:00', 'endTime' => '02:00', 'timezone' => 'UTC'],
+    'switch a schedule slot on or off' => ['action' => 'toggle_schedule', 'scheduleID' => (string) $scheduleOne],
+    'delete a schedule slot' => ['action' => 'delete_schedule', 'scheduleID' => (string) $scheduleOne],
+];
+foreach ($others as $words => $fields) {
+    $answer = $post('coord', $fields + ['eventID' => (string) GLB_EVENT]);
+    glb_check($answer['status'] === 403, 'a coordinator cannot ' . $words . ' (403), even with their own event number alongside', 'HTTP ' . $answer['status']);
+}
+$channelsAfter = (int) $db->query('SELECT COUNT(*) FROM tblLivestreamChannel WHERE channelID IN (' . GLB_CHANNEL . ', ' . GLB_CHANNEL_B . ')')->fetch_row()[0];
+$planted = (int) $db->query("SELECT COUNT(*) FROM tblLivestreamChannel WHERE name = 'GLB planted channel'")->fetch_row()[0];
+$schedulesAfter = (string) $db->query('SELECT GROUP_CONCAT(CONCAT(scheduleID, ":", isActive) ORDER BY scheduleID) FROM tblLivestreamSchedule WHERE channelID = ' . GLB_CHANNEL)->fetch_row()[0];
+glb_check($channelsBefore === $channelsAfter && $planted === 0 && $schedulesBefore === $schedulesAfter, 'and none of those changed anything: the channels and every schedule slot are exactly as they were', $channelsBefore . '/' . $channelsAfter . '/' . $planted);
+glb_check(glb_anyAddressed() === 0 && glb_hits(1) === 0, 'and nothing was sent or counted by them');
+$db->query("DELETE FROM tblLivestreamChannel WHERE name = 'GLB planted channel'");
+
+// Odd shapes. A POSTED VALUE THAT IS A LIST (`csrf_token[]=x`, `action[]=x`, `returnTo[]=x`) is refused the ordinary way and
+// raises no PHP warning and no error: it used to give "Server Error" (500) for a form token and a PHP warning for an action, and
+// since this page started letting people who are not administrators past its first line, any signed-in person could do either.
+glb_reset();
+$errorLog = static function (): string {
+    global $glb;
+    return (string) @file_get_contents($glb['child'] . '/php-errors.log');
+};
+$logBefore = strlen($errorLog());
+$plainToken = glb_metaToken($jar['plain'], '/');
+$listToken = glb_request($jar['plain'], 'POST', $form['action'], ['csrf_token' => ['x'], 'action' => 'notify_live', 'eventID' => (string) GLB_EVENT, 'returnTo' => glb_consolePath(GLB_EVENT)]);
+glb_check(
+    $listToken['status'] === 400 && str_contains($listToken['body'], 'This page was out of date') === true && glb_anyAddressed() === 0 && glb_hits(1) === 0,
+    'a form token sent as a LIST is refused like a wrong token (400, the "out of date" page), not answered with a server error (500); nothing is sent',
+    'HTTP ' . $listToken['status']
+);
+$listAction = glb_request($jar['plain'], 'POST', $form['action'], ['csrf_token' => $plainToken, 'action' => ['notify_live'], 'eventID' => (string) GLB_EVENT]);
+glb_check($listAction['status'] === 403 && glb_anyAddressed() === 0, 'an action sent as a LIST, by an ordinary member, is refused the ordinary way (403): an unknown action', 'HTTP ' . $listAction['status']);
+$adminToken  = glb_metaToken($jar['admin'], '/');
+$listAdmin   = glb_request($jar['admin'], 'POST', $form['action'], ['csrf_token' => $adminToken, 'action' => ['notify_live'], 'eventID' => (string) GLB_EVENT]);
+glb_check($listAdmin['status'] === 302 && $listAdmin['location'] === '/admin/livestream' && glb_anyAddressed() === 0 && glb_hits(1) === 0, 'the same sent by an administrator is an unknown action too: quietly back to the dashboard, nothing sent or counted', 'HTTP ' . $listAdmin['status'] . ' to "' . $listAdmin['location'] . '"');
+$listBack    = glb_request($jar['admin'], 'POST', $form['action'], ['csrf_token' => glb_metaToken($jar['admin'], '/'), 'action' => 'notify_live', 'eventID' => (string) GLB_EVENT, 'returnTo' => [glb_consolePath(GLB_EVENT)]]);
+glb_check($listBack['status'] === 302 && $listBack['location'] === '/admin/livestream', 'and a come-back address sent as a list is not an address: the person lands on the default page', 'HTTP ' . $listBack['status'] . ' to "' . $listBack['location'] . '"');
+$newErrors = substr($errorLog(), $logBefore);
+glb_check(
+    str_contains($newErrors, 'Array to string') === false && str_contains($newErrors, 'TypeError') === false && str_contains($newErrors, 'Uncaught') === false,
+    'and none of those four wrote a PHP warning or error to the server\'s error log',
+    mb_substr($newErrors, 0, 300)
+);
+glb_reset();
+
+echo "\nK. Only a signed-in device can ask for notices\n";
+glb_reset();
+$devices = static function (string $endpoint) use ($db): int {
+    $statement = $db->prepare('SELECT COUNT(*) FROM tblPushSubscriptions WHERE endpoint = ?');
+    $statement->bind_param('s', $endpoint);
+    $statement->execute();
+    return (int) $statement->get_result()->fetch_row()[0];
+};
+// A device made up for this part. The address is https and on the allowed list ONLY so that the subscribe address accepts it
+// (the list is switched to "selftest.invalid" for the run); it can still never be sent anything: the host never resolves, the
+// sender only allows https to a host on that list, the made-up signing key cannot sign, the keys below are not a real key
+// pair, and the row is deleted at the end of this part, before anything else could address it.
+// The body also carries another person's account number under every name a careless handler might read (the administrator's):
+// the device must be stored against the SIGNED-IN person's account, never against one named in the request.
+$subscribeBody = static fn (): string => json_encode([
+    'userID' => GLB_ADMIN, 'user_id' => GLB_ADMIN, 'userId' => GLB_ADMIN,
+    'endpoint' => GLB_SUBSCRIBE_ENDPOINT,
+    'keys' => ['p256dh' => rtrim(strtr(base64_encode("\x04" . random_bytes(64)), '+/', '-_'), '='), 'auth' => rtrim(strtr(base64_encode(random_bytes(16)), '+/', '-_'), '=')],
+    'channels' => ['livestream'],
+], JSON_THROW_ON_ERROR) ?: '';
+$subscribe = static function (string $jarFile, ?string $csrf) use ($subscribeBody): array {
+    global $glb;
+    $handle = curl_init('http://127.0.0.1:' . $glb['port'] . '/api/push/subscribe');
+    $headers = ['Expect:', 'Content-Type: application/json'];
+    if ($csrf !== null) {
+        $headers[] = 'X-CSRF-Token: ' . $csrf;
+    }
+    $options = [CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 60, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*',
+        CURLOPT_HTTPHEADER => $headers, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $subscribeBody()];
+    if ($jarFile !== '') {
+        $options[CURLOPT_COOKIEJAR]  = $jarFile;
+        $options[CURLOPT_COOKIEFILE] = $jarFile;
+    }
+    curl_setopt_array($handle, $options);
+    $raw  = (string) curl_exec($handle);
+    $size = (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE);
+    $json = json_decode(substr($raw, $size), true);
+    return ['status' => (int) curl_getinfo($handle, CURLINFO_HTTP_CODE), 'json' => is_array($json) ? $json : [], 'mine' => preg_match('/^X-Go-Live-Selftest:\s*' . $glb['token'] . '\s*$/mi', substr($raw, 0, $size)) === 1];
+};
+$nobody = $subscribe('', null);
+glb_check($nobody['status'] === 401 && $nobody['mine'] === true && str_contains((string) ($nobody['json']['error'] ?? ''), 'Please sign in') && $devices(GLB_SUBSCRIBE_ENDPOINT) === 0, 'a request from nobody (no session at all) is refused (401) in plain words, and stores nothing', 'HTTP ' . $nobody['status'] . ' ' . json_encode($nobody['json']));
+$visitorJar = $glb['child'] . '/jar-visitor.txt';
+$visitorPage = glb_request($visitorJar, 'GET', '/login');
+$visitorToken = glb_formToken($visitorPage['body']);
+$visitor = $subscribe($visitorJar, $visitorToken);
+glb_check($visitor['status'] === 401 && str_contains((string) ($visitor['json']['error'] ?? ''), 'Please sign in') && $devices(GLB_SUBSCRIBE_ENDPOINT) === 0, 'a visitor with a session and a real form token (the sign-in page\'s) is refused the same way, and nothing is stored', 'HTTP ' . $visitor['status'] . ' ' . json_encode($visitor['json']));
+$memberToken = glb_metaToken($jar['plain'], '/');
+$signedIn = $subscribe($jar['plain'], $memberToken);
+$stored = $db->query("SELECT userID, siteID, channels, isActive FROM tblPushSubscriptions WHERE endpoint = '" . GLB_SUBSCRIBE_ENDPOINT . "'")->fetch_assoc();
+glb_check(
+    $signedIn['status'] === 200 && ($signedIn['json']['ok'] ?? false) === true && $stored !== null && (int) $stored['userID'] === GLB_PLAIN && (int) $stored['siteID'] === 1 && $stored['channels'] === '["livestream"]' && (int) $stored['isActive'] === 1,
+    'a SIGNED-IN member subscribing works as before: the device is stored for THAT member (even though the request names the administrator\'s account number), in this organisation, on the livestream channel',
+    'HTTP ' . $signedIn['status'] . ' ' . json_encode($signedIn['json']) . ' ' . json_encode($stored)
+);
+// The unsubscribe address, for a person who is NOT signed in: it is keyed by the device's own address (a long, unguessable
+// address the push service made up), so a visitor's session and form token are enough to switch a device off if they hold
+// that address. This is unchanged and deliberate: it lets a device with no account switch itself off.
+$unsubHandle = curl_init('http://127.0.0.1:' . $glb['port'] . '/api/push/unsubscribe');
+curl_setopt_array($unsubHandle, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 60, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*',
+    CURLOPT_HTTPHEADER => ['Expect:', 'Content-Type: application/json', 'X-CSRF-Token: ' . glb_formToken(glb_request($visitorJar, 'GET', '/login')['body'])],
+    CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode(['endpoint' => GLB_SUBSCRIBE_ENDPOINT]), CURLOPT_COOKIEJAR => $visitorJar, CURLOPT_COOKIEFILE => $visitorJar]);
+$unsubAnswer = json_decode((string) curl_exec($unsubHandle), true);
+$activeNow   = (int) $db->query("SELECT isActive FROM tblPushSubscriptions WHERE endpoint = '" . GLB_SUBSCRIBE_ENDPOINT . "'")->fetch_row()[0];
+glb_check(is_array($unsubAnswer) && ($unsubAnswer['ok'] ?? false) === true && $activeNow === 0, 'the UNSUBSCRIBE address, unchanged, still works for a person who is not signed in, because they hold the device\'s own address: the device is switched off (not deleted)', json_encode($unsubAnswer) . ' active=' . $activeNow);
+$db->query("DELETE FROM tblPushSubscriptions WHERE endpoint = '" . GLB_SUBSCRIBE_ENDPOINT . "'");
+$before = glb_subs();
+$press = glb_press($jar['admin'], GLB_EVENT);
+$after = glb_subs();
+glb_check(
+    ($press['answer']['status'] ?? 0) === 302 && glb_addressed(1) === [GLB_S_ON, GLB_S_ON2] && $after[GLB_S_ANON] === [0, null, 1] && $after[GLB_S_BANON] === [0, null, 1],
+    'a device with NO account is left out of the push (organisation 1\'s and the other organisation\'s) ...',
+    json_encode($after) ?: ''
+);
+glb_check(
+    count($before) === count($after) && (int) $db->query('SELECT COUNT(*) FROM tblPushSubscriptions WHERE subID IN (' . GLB_S_ANON . ', ' . GLB_S_BANON . ') AND userID IS NULL')->fetch_row()[0] === 2,
+    '... and its row is still there, still with no account: nothing was deleted'
+);
+
+echo "\nL. What an administrator is told about the devices\n";
+// Admin, Integrations, Push counted every stored device that was switched on, including devices with no account that are never
+// sent anything now, so the number overstated who a notice would reach. It now counts only a device that WILL be sent notices
+// (the same rule as the sender's query) and says in words how many switched-on devices never will be. Read from the real page,
+// as the first organisation's administrator. The run's own devices are the only ones in this database (checked at the start).
+// (No glb_reset() here: part M reads the outcomes the devices have recorded, over the whole run.)
+$integrations = glb_request($jar['admin1'], 'GET', '/admin/integrations/push');
+$numbers = [];
+if (preg_match_all('#<div class="row py-2[^"]*">\s*<div class="col-6">(.*?)</div>\s*<div class="col-6 text-end">(\d+)</div>#s', $integrations['body'], $rows, PREG_SET_ORDER) > 0) {
+    foreach ($rows as $row) {
+        $numbers[trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($row[1]), ENT_QUOTES, 'UTF-8')))] = (int) $row[2];
+    }
+}
+$numberFor = static function (string $startsWith) use ($numbers): ?int {
+    foreach ($numbers as $label => $count) {
+        if (str_starts_with($label, $startsWith) === true) {
+            return $count;
+        }
+    }
+    return null;
+};
+glb_check($integrations['status'] === 200 && count($numbers) >= 6, 'the administrator opens Admin, Integrations, Push and the device counts are on the page', 'HTTP ' . $integrations['status'] . ', ' . count($numbers) . ' number(s)');
+glb_check(
+    $numberFor('Will be sent notices — livestream channel') === 3 && $numberFor('Will be sent notices — reminders channel') === 3 && $numberFor('Will be sent notices — announcements channel') === 0,
+    'the per-channel numbers count only devices that will be sent notices: livestream 3, reminders 3, announcements 0 (a device with no account, one whose account or membership is switched off, and one switched off, are not in them)',
+    json_encode($numbers)
+);
+glb_check($numberFor('Total devices that will be sent notices') === 4, 'the total counts the four devices that will be sent anything (the member\'s two, one of a member who switched a kind of notice off, and a reminders-only one)', json_encode($numbers));
+glb_check(
+    $numberFor('Switched on but never sent anything') === 3 && $numberFor('Pruned') === 1,
+    'and a separate number says how many switched-on devices will NEVER be sent anything (3: no account, account switched off, membership switched off); the switched-off device is the one pruned',
+    json_encode($numbers)
+);
+glb_check(
+    str_contains($integrations['body'], '(anonymous)') === false && str_contains($integrations['body'], 'to everyone who has reminders switched on') === true,
+    'the "starting soon" switch is no longer labelled "(anonymous)" (no device without an account is sent anything): it says it goes to everyone who has reminders switched on',
+    ''
+);
+
+echo "\nM. The end\n";
 $statuses = array_values(array_unique(array_filter(array_column(glb_subs(), 1), static fn ($s): bool => $s !== null)));
 glb_check($statuses === [-1], 'over the whole run, the only outcome any device ever recorded is -1 (refused before any network call): a real answer from a push service would be another number', json_encode($statuses) ?: '');
 $errors = (int) $db->query('SELECT COUNT(*) FROM tblErrors WHERE errorID > ' . (int) $glb['errMark'] . " AND (requestURL LIKE '%livestream%' OR requestURL LIKE '%host-console%')")->fetch_row()[0];
@@ -1213,8 +1567,8 @@ $left = (int) glb_db()->query(
     . '(SELECT COUNT(*) FROM tblUsers WHERE userID BETWEEN ' . GLB_ADMIN . ' AND ' . GLB_LAST_USER . ') + '
     . '(SELECT COUNT(*) FROM tblUserSites WHERE userID BETWEEN ' . GLB_ADMIN . ' AND ' . GLB_LAST_USER . ' OR siteID = ' . GLB_ORG_B . ') + '
     . '(SELECT COUNT(*) FROM tblLocalAccounts WHERE userID BETWEEN ' . GLB_ADMIN . ' AND ' . GLB_LAST_USER . ') + '
-    . '(SELECT COUNT(*) FROM tblEvents WHERE eventID IN (' . GLB_EVENT . ', ' . GLB_EVENT_B . ')) + '
-    . '(SELECT COUNT(*) FROM tblEventCoordinators WHERE eventID IN (' . GLB_EVENT . ', ' . GLB_EVENT_B . ')) + '
+    . '(SELECT COUNT(*) FROM tblEvents WHERE eventID BETWEEN ' . GLB_FIRST_EVENT . ' AND ' . GLB_LAST_EVENT . ') + '
+    . '(SELECT COUNT(*) FROM tblEventCoordinators WHERE eventID BETWEEN ' . GLB_FIRST_EVENT . ' AND ' . GLB_LAST_EVENT . ' OR userID BETWEEN ' . GLB_ADMIN . ' AND ' . GLB_LAST_USER . ') + '
     . '(SELECT COUNT(*) FROM tblLivestreamChannel WHERE channelID IN (' . GLB_CHANNEL . ', ' . GLB_CHANNEL_B . ')) + '
     . '(SELECT COUNT(*) FROM tblLivestreamSchedule WHERE channelID IN (' . GLB_CHANNEL . ', ' . GLB_CHANNEL_B . ')) + '
     . '(SELECT COUNT(*) FROM tblSites WHERE siteID = ' . GLB_ORG_B . ') + '
@@ -1230,8 +1584,15 @@ foreach (array_keys(GLB_SETTINGS) as $key) {
     $row = glb_db()->query("SELECT settingValue, isSensitive FROM tblSettings WHERE settingKey = '" . $key . "' AND siteID IS NULL")->fetch_row();
     $now[$key] = [(string) ($row[0] ?? ''), (int) ($row[1] ?? -1)];
 }
-glb_check($now === $glb['putBack'], 'and the seven settings the run switched (Web Push, its three key and contact settings, the installation\'s name, and several organisations on and how they are told apart) are back as they were found', json_encode($now) . ' against ' . json_encode($glb['putBack']));
+glb_check($now === $glb['putBack'], 'and the eight settings the run switched (Web Push, its three key and contact settings, the installation\'s name, the allowed push hosts, and several organisations on and how they are told apart) are back as they were found', json_encode($now) . ' against ' . json_encode($glb['putBack']));
 
+// The number of checks a full run makes. A different number means a part was skipped or ran twice, so it is a failure of its own.
+// Without Node.js the two checks that run the page scripts do not run, so two fewer are expected (and the last line says so).
+$expectedChecks = GLB_EXPECTED_CHECKS - ($glb['nodeSkipped'] === true ? 2 : 0);
+if ($glb['pass'] + $glb['fail'] !== $expectedChecks) {
+    $glb['fail']++;
+    printf("FAIL — this run made %d checks and a full run makes %d (a part was skipped, ran twice, or checks were added without bringing GLB_EXPECTED_CHECKS up to date)\n", $glb['pass'] + $glb['fail'] - 1, $expectedChecks);
+}
 printf("\n%d passed, %d failed.\n", $glb['pass'], $glb['fail']);
 if ($glb['fail'] > 0) {
     echo "FAILED\n";

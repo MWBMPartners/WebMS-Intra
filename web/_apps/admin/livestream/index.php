@@ -14,7 +14,9 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\HostConsole;
 use Portal\Core\Livestream;
+use Portal\Core\Logger;
 use Portal\Core\RateLimiter;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -22,7 +24,24 @@ use Portal\Core\WebPush;
 
 Auth::ensureSession();
 Auth::requireLogin();
-if (App::isAdmin() === false) {
+
+// 🚪 WHO GETS IN. This page is for administrators, with ONE exception added on 13 October 2026 (the owner: "coordinators
+// of that event too"): an event's coordinator may send the "We're live" push for THAT event. So a person who is not an
+// administrator gets past here ONLY for a POST whose action is `notify_live`; opening the page, and every other action
+// (adding and deleting channels, adding, switching and deleting schedule slots), stay for administrators. Whether this
+// particular person may send for this particular event is decided inside the `notify_live` action below, where the
+// event number is read; a person refused there gets the same 403 page as here.
+//
+// ⚠️ A POSTED VALUE THAT IS A LIST (#612, after the independent check). `action=notify_live` is read here as TEXT only:
+// `action[]=x` used to be turned into text with `(string)`, which raises a PHP warning ("Array to string conversion")
+// and is reachable by ANY signed-in person since this page started letting non-administrators past this line. A list
+// where text belongs now counts as an empty action: an unknown action, refused the ordinary way (403 here for a person
+// who is not an administrator, and for an administrator the same quiet return to the dashboard as any unknown action).
+// The same is done for the form token and the come-back address below.
+$postedAction = is_string($_POST['action'] ?? null) === true ? (string) $_POST['action'] : '';
+$isAdmin      = App::isAdmin() === true;
+$isGoLivePost = $_SERVER['REQUEST_METHOD'] === 'POST' && $postedAction === 'notify_live';
+if ($isAdmin === false && $isGoLivePost === false) {
     Router::renderError(403);
     return;
 }
@@ -36,7 +55,7 @@ $siteId = Site::id();
 // (Site::url) then the page, `?id=` and digits, anchored at both ends. It is an allow-list, so it can never be
 // an open redirect: anything that is not that one page comes back as ''.
 $cameFrom = static function (): string {
-    $returnTo = (string) ($_POST['returnTo'] ?? '');
+    $returnTo = is_string($_POST['returnTo'] ?? null) === true ? (string) $_POST['returnTo'] : '';
     if ($returnTo !== '' && preg_match('#^' . preg_quote(Site::url('admin/host-console/event'), '#') . '\?id=\d+$#', $returnTo) === 1) {
         return $returnTo;
     }
@@ -45,7 +64,10 @@ $cameFrom = static function (): string {
 
 // 📝 POST handling — single endpoint, action-dispatched.
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+    // A form token sent as a LIST (`csrf_token[]=x`) made Auth::verifyCsrf() fail with a type error, which answered "Server
+    // Error" (500). It is now an empty token, refused the ordinary way, with the "out of date" page below (#612).
+    $postedToken = is_string($_POST['csrf_token'] ?? null) === true ? (string) $_POST['csrf_token'] : '';
+    if (Auth::verifyCsrf($postedToken) === false) {
         // ⚠️ WHAT WAS WRONG HERE (#612): this answered a bare "Bad request" and nothing else. A double-click
         // on "Send We're live" sends the form twice with the same form token; the first press uses the token
         // up, the second is refused HERE, and the administrator was left on that bare page with no sign that
@@ -62,7 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             . '</body></html>';
         exit();
     }
-    $action = (string) ($_POST['action'] ?? '');
+    $action = $postedAction;
 
     if ($action === 'add_channel') {
         $name      = trim((string) ($_POST['name'] ?? ''));
@@ -158,7 +180,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // 📣 "We're live now" manual push (#322) — the PRIMARY, deterministic
         // go-live trigger. Also postable from the Host Console (which passes
         // an eventID so the push URL binds the live/chat widget to that event).
-        if (WebPush::isConfigured() === false) {
+
+        // 👤 WHO MAY SEND IT (owner, 13 October 2026: "coordinators of that event too"). The EVENT that is posted decides.
+        //    - An event number is given: the event must exist and belong to THIS organisation
+        //      (HostConsole::eventBelongsToSite(), the Host Console's own check), AND the person must pass the
+        //      Host Console's own test for that event, Auth::isCoordinatorOf($eventId): the SAME two calls event.php
+        //      makes, not a second copy of them. That call is true for an administrator too, and for a coordinator
+        //      whose place has not been withdrawn. Without the first call a coordinator of an event of ANOTHER
+        //      organisation would pass the second.
+        //    - NO event number is given (the button on this page itself posts none): only an administrator may send.
+        //    A made-up number, another organisation's event and a negative number are refused; to a person who is not
+        //    an administrator they all look the same (the 403 page), so the answer says nothing about which numbers
+        //    are real; an administrator is told in words, and nothing is sent. A WORD where a number belongs
+        //    (`eventID=abc`) is not refused as such: PHP reads it as 0, which is "no number", so it is treated exactly
+        //    like a missing one: a 403 for a person who is not an administrator, and for an ADMINISTRATOR the push IS
+        //    sent (this page's own button posts no number either), with a link that names no event. A number followed by
+        //    letters (`930401abc`) is read as the number in front of them.
+        //    The limit of three presses in fifteen minutes stays per ORGANISATION, whoever presses, below.
+        $eventId  = (int) ($_POST['eventID'] ?? 0);
+        $mayPress = $eventId !== 0
+            ? (HostConsole::eventBelongsToSite($eventId, $siteId) === true && Auth::isCoordinatorOf($eventId) === true)
+            : $isAdmin;
+        if ($mayPress === false && $isAdmin === false) {
+            Router::renderError(403);
+            return;
+        }
+
+        if ($mayPress === false) {
+            $_SESSION['flash_msg']  = 'That event was not found in this organisation, so nothing was sent.';
+            $_SESSION['flash_type'] = 'warning';
+        } elseif (WebPush::isConfigured() === false) {
             $_SESSION['flash_msg']  = 'Web Push is not configured yet — set it up at /admin/integrations/push first.';
             $_SESSION['flash_type'] = 'danger';
         } else {
@@ -207,7 +258,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_SESSION['flash_msg']  = 'The press could not be counted, so nothing was sent. Please try again.';
                     $_SESSION['flash_type'] = 'danger';
                 } else {
-                    $eventId  = (int) ($_POST['eventID'] ?? 0);
+                    // 📝 WHO PRESSED IT (#612). Nothing recorded who sent this notice, and now that an event's
+                    //    coordinator may send it too, something has to. One activity line: the person (in the log's
+                    //    own account column and, as a number, in the words) and the event. NOTHING of the push goes
+                    //    into it: no title, no text, no link, no device, no count of devices. Written before the
+                    //    send, so a send that crashes is still on record.
+                    $pressedBy = (int) ($_SESSION['user_id'] ?? 0);
+                    Logger::activity('GoLivePushPressed', 'userID=' . $pressedBy . ', eventID=' . ($eventId > 0 ? (string) $eventId : 'none'), $pressedBy);
                     $liveUrl  = $eventId > 0 ? Site::url('live') . '?eventID=' . $eventId : Site::url('live');
                     $ttl      = (int) (App::settings('push.ttl.golive') ?? '900');
                     // ⚠️ WHAT WAS WRONG HERE (#612): this read the INSTALLATION's name (the `site.name` setting), so

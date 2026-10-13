@@ -23,10 +23,15 @@
  *   starting-soon     — `push.reminders.broadcast` (per-site). If
  *                       `Livestream::nextScheduled($siteId)` starts within
  *                       60 minutes, broadcast to the WHOLE "reminders"
- *                       channel (no onlyUserIds) — the anonymous-viewer
- *                       counterpart to cron/event-reminders.php's per-RSVP
- *                       1h push (which only reaches logged-in RSVP'd
- *                       users). Dedupe: once per channel per day
+ *                       channel (no onlyUserIds) — everyone with an account
+ *                       who has reminders switched on, not only those who
+ *                       RSVP'd (cron/event-reminders.php's per-RSVP 1h push
+ *                       is the narrower one). It used to be called the
+ *                       "anonymous" broadcast because devices with no
+ *                       account were addressed too; since 13 October 2026
+ *                       they are not (WebPush::sendToChannel() leaves them
+ *                       out), so it reaches signed-in people's devices only.
+ *                       Dedupe: once per channel per day
  *                       (refType='push-service-1h').
  *
  * TOKEN GATE: `?key=` vs `push.cron_token`, constant-time `hash_equals()`,
@@ -191,7 +196,8 @@ foreach ($siteIds as $siteId) {
     }
 
     // -------------------------------------------------------------------
-    // ⏳ Anonymous "starting soon" broadcast (push.reminders.broadcast, default OFF).
+    // ⏳ "Starting soon" broadcast to the whole reminders channel (push.reminders.broadcast, default OFF).
+    //    Devices with an account only (see the note at the top of this file).
     // -------------------------------------------------------------------
     $broadcastOn = (string) (App::settingForSite('push.reminders.broadcast', $siteId) ?? 'false');
     if ($broadcastOn === 'true') {
