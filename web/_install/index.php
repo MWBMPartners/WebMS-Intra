@@ -1,30 +1,75 @@
 <?php
-// Path: install/index.php
+// Path: _install/index.php
 /**
  * -----------------------------------------------------------------------------
  * WebMS Intra — Installation Wizard
  * -----------------------------------------------------------------------------
- * Self-contained installation wizard for first-time portal setup. Guides the
- * administrator through database configuration, schema creation, initial user
- * setup, and encryption key generation.
+ * The first-time set-up of a portal, for somebody who has nothing but a
+ * hosting panel: no command line, no file-transfer program, no GitHub.
  *
- * This file operates independently of the bootstrap/core framework since those
- * require a working database connection to function.
+ * This file runs with NONE of the portal loaded, because the portal cannot
+ * start without the database login this wizard exists to write. It is reached
+ * through the web folder's index.php, whenever `_auth_keys/auth_creds.php` is
+ * missing. It loads only files that need nothing but PHP: version.php,
+ * brand-defaults.php, DbServer.php, Channel.php, PortalAddress.php, and its
+ * own helpers in this folder.
  *
- * Steps:
- *   1. Welcome & prerequisites check (PHP version, extensions)
- *   2. Database configuration (host, user, pass, name, port)
- *   3. Schema installation (tables + seed data from full_schema.sql)
- *   4. Admin user creation (first portal administrator)
- *   5. Encryption key generation
- *   6. Complete — redirect to login
+ * WHO MAY USE IT (#499, #500). Until October 2026 the only guard was "already
+ * installed", so a stranger who reached a fresh upload first could point it
+ * at a database of their own, make themselves administrator, and own a portal
+ * running on the customer's address. Now:
+ *   - It refuses to run at all when it shows one of the two signs that the
+ *     website is pointed at the folder that holds `_core`, where every
+ *     private file is in reach of a browser: it was opened directly and not
+ *     through the web folder, or the address asked for has the web folder's
+ *     own name in it. (It cannot see the third sign: a folder list,
+ *     "Forbidden" or "Not found" at the plain address. That is the web
+ *     server's answer, and no file of the portal runs.)
+ *   - Nothing past the first page is shown, and NO form is acted on, until
+ *     the visitor has typed the ownership code the installer wrote into
+ *     `_auth_keys/install-code.php` (see owner_code.php). The first page
+ *     shows a stranger nothing about the server: no version, no path, no
+ *     checks.
+ *   - The finish asks for the code again.
+ *   - Every form carries a token kept in the session, so another website
+ *     cannot post a database of its choosing into a wizard somebody has
+ *     already unlocked.
+ *
+ * THE PAGES, in the order a person meets them:
+ *   code   Prove this is your hosting: the ownership code
+ *   1      Checks: what the server has, and which copy of the portal this is
+ *   1.5    What kind of organisation this is (the product name)
+ *   2      The database: where it is and how to sign in to it
+ *   2.5    What to do when that database already holds tables
+ *   3      Build the tables
+ *   4      The first administrator
+ *   4.5    Web addresses: the portal's own address and the support e-mail
+ *   5      Finish: the private folders, the key file, the settings, the lock
+ *   done   What was set up and what to do next (drawn in the SAME answer as
+ *          the finish: from the next request on, the web folder's index.php
+ *          starts the portal and this wizard can no longer be reached)
+ *
+ * WHAT IT CANNOT DO
+ *   - Know that the address typed on the Web addresses page really reaches
+ *     this portal. That is set in the hosting panel.
+ *   - Protect an installation on a web server that ignores `.htaccess` files
+ *     AND is pointed at the wrong folder.
+ *   - Notice a website pointed at the wrong folder when the web server
+ *     hides the web folder's name from the address (a rewrite or an alias
+ *     set up in the hosting panel).
+ *   - Send anything. No e-mail leaves the installer, and it calls nothing
+ *     outside the server except the database it is told about.
+ *
+ * Test: tools/installer-selftest.php
  *
  * @package   Portal\Install
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   2.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/84
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/499
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/500
  * -----------------------------------------------------------------------------
  */
 
@@ -43,6 +88,17 @@ define('INSTALL_LOCK_FILE', INSTALL_AUTH_DIR . DIRECTORY_SEPARATOR . '.installed
 // Even though this installer is bootstrap-free, _core/version.php is a
 // plain `return <string>` and safe to `require` independently.
 define('INSTALL_VERSION', (string) (require INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'version.php'));
+
+// 🙈 PHP's own error text is never printed into these pages.
+//
+//    The portal's start-up decides this for every other page, but the wizard
+//    runs without it, so until October 2026 it printed whatever the hosting's
+//    settings said, and on much shared hosting that is "print everything". A
+//    warning carries the full path of this file, which tells a stranger the
+//    account's name and how the server is laid out. Errors still go to PHP's
+//    error log, where the hosting panel shows them. An error nothing catches
+//    gets the plain page drawn by the handler further down.
+ini_set('display_errors', '0');
 
 // 🔌 What steps 3 and 4 say when installGetDb() hands back no connection.
 //    It used to read "Database connection lost. Please go back to Step 2.",
@@ -65,6 +121,19 @@ const INSTALL_NO_CONNECTION_MESSAGE = 'The installer has no database connection 
 //    because the connection itself is now opened through it.
 require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'DbServer.php';
 
+// 🧭 Portal\Core\Channel says which copy of the portal this is, and
+//    🌐 Portal\Core\PortalAddress checks the address typed on the Web
+//    addresses page. Both are written to be loaded alone. ONLY
+//    PortalAddress::check() may be called here: everything below it in that
+//    file needs the database and the rest of the portal.
+require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Channel.php';
+require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'PortalAddress.php';
+
+// 🔑 The ownership code, and (through it) the helpers this wizard shares with
+//    the upgrade page: the private folders' "refuse everything" file and the
+//    words for the channel.
+require_once __DIR__ . DIRECTORY_SEPARATOR . 'owner_code.php';
+
 // 🏷️ Brand presets (issue #296) — loaded from _core/brand-defaults.php.
 // Same bootstrap-free contract: plain `return <array>` so we can require
 // it without the autoloader. We resolve the active preset from the session
@@ -72,18 +141,60 @@ require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR 
 // generic preset for any earlier step where the user hasn't chosen yet.
 $INSTALL_BRAND_PRESETS = (array) (require INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'brand-defaults.php');
 
-// ---------------------------------------------------------------------------
-// Block re-installation if lock file exists
-// ---------------------------------------------------------------------------
-if (is_file(INSTALL_LOCK_FILE) === true || is_file(INSTALL_CREDS_FILE) === true) {
-    http_response_code(403);
-    // 🎨 Themed lockout page — picks up the OS prefers-color-scheme and
-    // uses the same indigo palette as the rest of the installer / portal,
-    // so links / buttons are readable in both light and dark modes
-    // without relying on Bootstrap or browser defaults.
-    echo '<!doctype html><html><head><title>Already Installed</title>'
+// 🌐 INSTALL_WEB_FOLDER — the web folder, or null when this file was opened
+//    directly.
+//
+//    The wizard is meant to be reached in ONE way: the web folder's index.php
+//    finds no database login and hands the request here. PHP records which
+//    file did that, and the folder of that file is the web folder, whatever
+//    the hosting calls it. It is the same folder the portal's start-up will
+//    be told once the installation is finished (`__DIR__` in that index.php),
+//    so the channel shown here is the channel the portal will then have.
+//
+//    When nothing handed the request here, the web server ran this file by
+//    itself. That can only happen when the website is pointed at the folder
+//    that holds `_core`: see the refusal just below.
+//
+//    REJECTED: DOCUMENT_ROOT and SCRIPT_FILENAME. Both are what the web
+//    server reports, and on some hosting a visitor's Host header shapes them;
+//    Channel.php says why the channel must never be read from either.
+$installCalledFrom = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1)[0]['file'] ?? null;
+$installWebFolder  = is_string($installCalledFrom) === true ? dirname($installCalledFrom) : null;
+// Only a folder that sits directly inside the folder that holds `_core` is a
+// web folder of THIS installation. Anything else is treated as "not known".
+if ($installWebFolder !== null && realpath(dirname($installWebFolder)) !== INSTALL_ROOT) {
+    $installWebFolder = null;
+}
+define('INSTALL_WEB_FOLDER', $installWebFolder);
+
+/**
+ * 🧾 One small page that stands by itself, then stop.
+ *
+ * For the three moments when the wizard cannot draw its ordinary page: it is
+ * already installed, it was opened directly, or something broke that nothing
+ * caught. The page picks up the visitor's light or dark setting and uses the
+ * portal's colours, with no outside stylesheet, so it reads properly even
+ * when nothing else on the server works.
+ *
+ * @param int    $status   The HTTP status to answer with.
+ * @param string $heading  The page's title and its one top-level heading. Plain text.
+ * @param string $bodyHtml What goes under the heading. HTML: every value in
+ *                         it must already be escaped by whoever built it.
+ */
+function installPlainPage(int $status, string $heading, string $bodyHtml): never
+{
+    if (headers_sent() === false) {
+        http_response_code($status);
+        header('Content-Type: text/html; charset=utf-8');
+        // Never kept by a browser or a cache in between, and never indexed.
+        header('Cache-Control: no-store');
+        header('X-Robots-Tag: noindex, nofollow');
+    }
+    $title = htmlspecialchars($heading, ENT_QUOTES, 'UTF-8');
+    echo '<!doctype html><html lang="en"><head><title>' . $title . '</title>'
        . '<meta charset="utf-8">'
        . '<meta name="viewport" content="width=device-width,initial-scale=1">'
+       . '<meta name="robots" content="noindex, nofollow">'
        . '<style>'
        . ':root{'
        .   '--bg:#f7f8fa;--surface:#ffffff;--text:#1b2330;--muted:#6b7280;'
@@ -97,68 +208,410 @@ if (is_file(INSTALL_LOCK_FILE) === true || is_file(INSTALL_CREDS_FILE) === true)
        . '}}'
        . 'html,body{height:100%;}'
        . 'body{font-family:"Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;'
-       .   'background:var(--bg);color:var(--text);text-align:center;'
+       .   'background:var(--bg);color:var(--text);'
        .   'padding:4rem 1.25rem;margin:0;line-height:1.55;}'
-       . '.card{max-width:560px;margin:0 auto;background:var(--surface);'
+       . '.card{max-width:600px;margin:0 auto;background:var(--surface);'
        .   'border:1px solid var(--border);border-radius:.75rem;padding:2.5rem 2rem;'
        .   'box-shadow:0 4px 6px -1px rgba(16,24,40,.08),0 2px 4px -2px rgba(16,24,40,.06);}'
-       . 'h1{margin:0 0 1rem;font-weight:600;letter-spacing:-.01em;}'
-       . 'p{margin:0 0 1rem;color:var(--text);}'
+       . 'h1{margin:0 0 1rem;font-weight:600;letter-spacing:-.01em;font-size:1.6rem;}'
+       . 'p,li{margin:0 0 1rem;color:var(--text);}'
+       . 'ol,ul{padding-left:1.25rem;margin:0 0 1rem;}'
        . 'code{background:var(--code-bg);color:var(--code-text);'
-       .   'padding:.125rem .4rem;border-radius:.375rem;font-size:.9em;'
+       .   'padding:.125rem .4rem;border-radius:.375rem;font-size:.9em;overflow-wrap:anywhere;'
        .   'font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;}'
        . '.btn{display:inline-block;padding:.625rem 1.25rem;background:var(--primary);'
-       .   'color:#fff;text-decoration:none;border-radius:.375rem;margin-top:1rem;'
+       .   'color:#fff;text-decoration:none;border-radius:.375rem;margin-top:.5rem;'
        .   'font-weight:500;transition:background 120ms ease;}'
        . '.btn:hover,.btn:focus{background:var(--primary-hover);color:#fff;}'
        . '</style></head>'
-       . '<body><div class="card"><h1>Already Installed</h1>'
-       . '<p>The portal has already been installed. To re-run the installer, '
-       . 'remove both the lock file and credentials file from the <code>_auth_keys/</code> directory.</p>'
-       . '<a class="btn" href="/">Go to Portal</a></div></body></html>';
+       . '<body><main class="card"><h1>' . $title . '</h1>' . $bodyHtml . '</main></body></html>';
     exit();
+}
+
+/**
+ * 🚫 The page for a website that is pointed at the wrong folder, then stop.
+ *
+ * One page for the two signs of that mistake (see the two refusals further
+ * down), so that both give the same plain words about what to change in the
+ * hosting panel. It writes nothing and offers no form.
+ *
+ * @param string|null $webFolderName The web folder's own name, when the
+ *                                   installer knows it (the request came
+ *                                   through the web folder); null when it was
+ *                                   opened directly and cannot know.
+ */
+function installWrongFolderPage(?string $webFolderName): never
+{
+    $name = $webFolderName === null ? '' : htmlspecialchars($webFolderName, ENT_QUOTES, 'UTF-8');
+
+    // The three steps, the same for both signs. Only the second differs: it
+    // names the web folder when the installer knows what it is called.
+    $whatToDo = '<p><strong>What to do, in your hosting panel:</strong></p>'
+        . '<ol><li>Find the setting for the folder this website is served from. Hosting companies call it the '
+        . '&ldquo;web directory&rdquo;, the &ldquo;document root&rdquo; or the &ldquo;site folder&rdquo;.</li>'
+        . ($webFolderName === null
+            ? '<li>Change it to the web folder <em>inside</em> the folder it points at now: the one that holds '
+              . '<code>index.php</code> and a folder named <code>assets</code>. The installation guide (<code>INSTALL.md</code>, '
+              . 'in the package) says what that folder is called.</li>'
+            : '<li>Change it to the web folder <em>inside</em> the folder it points at now. That folder is named <code>' . $name
+              . '</code>: it is the one that holds <code>index.php</code> and a folder named <code>assets</code>.</li>')
+        . '<li>Wait until the change has taken effect (some hosts take a few minutes), then open your website&rsquo;s plain '
+        . 'address, with nothing after it. The installer starts by itself.</li></ol>'
+        . '<p>Nothing has been installed and nothing has been changed.</p>';
+
+    if ($webFolderName === null) {
+        installPlainPage(
+            403,
+            'The website is pointing at the wrong folder',
+            '<p>The portal&rsquo;s files are on the server, but this page was opened from inside them. That means the website&rsquo;s '
+            . 'address is set to the folder that holds <code>_core</code>, <code>_apps</code> and <code>_install</code>. Those folders '
+            . 'are private: with the address set like this, anybody could ask the server for the files in them.</p>'
+            . $whatToDo
+        );
+    }
+
+    // The heading here does not say "is pointing at the wrong folder",
+    // because from an address alone that is likely and not certain: the
+    // folder's name may simply have been typed into the address of a rightly
+    // pointed website. The page says which case is which.
+    installPlainPage(
+        403,
+        'The installer will not run at this address',
+        '<p>The address you opened has the name of the portal&rsquo;s web folder in it (<code>' . $name . '</code>). On a website '
+        . 'that is set up correctly that name is never part of an address, so the installer has stopped.</p>'
+        . '<p><strong>If your website&rsquo;s plain address, with nothing after it, shows a list of folders, '
+        . '&ldquo;Forbidden&rdquo; or &ldquo;Not found&rdquo;,</strong> the website is pointing at the wrong folder: its address is '
+        . 'set to the folder that holds <code>_core</code>, <code>_apps</code> and <code>_install</code>. Those folders are '
+        . 'private: with the address set like this, anybody could ask the server for the files in them.</p>'
+        . $whatToDo
+        . '<p>If your website&rsquo;s plain address already shows the installer, the setting is right. Use the plain address, and '
+        . 'leave <code>' . $name . '</code> out of it.</p>'
+    );
+}
+
+// 🧯 An error that nothing below catches.
+//
+//    Without this the visitor gets a blank page, or the hosting company's own
+//    error page, at the one moment they most need to be told what to do. The
+//    real message goes to PHP's error log and is NOT shown: it can hold a
+//    path, or part of a database query.
+set_exception_handler(static function (\Throwable $problem): void {
+    error_log('[WebMS-Intra] Installer: ' . get_class($problem) . ': ' . $problem->getMessage()
+        . ' at ' . $problem->getFile() . ':' . $problem->getLine());
+    installPlainPage(
+        500,
+        'The installer hit a problem',
+        '<p>Something went wrong that the installer did not expect, so it stopped. It has not gone on to change anything else.</p>'
+        . '<p><strong>What to do:</strong> go back and try the step again. If this page comes back, look in your hosting panel for '
+        . 'the PHP error log (often called &ldquo;Error log&rdquo;): the newest line that begins <code>[WebMS-Intra] Installer</code> '
+        . 'says what happened. Send that line to whoever supports your portal.</p>'
+        . '<p><a class="btn" href="?step=1">Back to the installer</a></p>'
+    );
+});
+
+// ---------------------------------------------------------------------------
+// Block re-installation if lock file exists
+// ---------------------------------------------------------------------------
+// The lock file OR the database login: either one means a portal is, or was,
+// installed here. Once the login exists the web folder's index.php starts the
+// portal and never hands a request to this wizard again, so in practice this
+// page is seen only by somebody who opened this file directly.
+if (is_file(INSTALL_LOCK_FILE) === true || is_file(INSTALL_CREDS_FILE) === true) {
+    installPlainPage(
+        403,
+        'Already installed',
+        '<p>The portal has already been installed here, so the installer will not run.</p>'
+        . '<p>Running it again is for whoever looks after the hosting: it needs the files <code>.installed</code> and '
+        . '<code>auth_creds.php</code> to be removed from the <code>_auth_keys</code> folder first. Do not do that on a '
+        . 'working portal without a backup of the database and of the whole <code>_auth_keys</code> folder.</p>'
+        . '<p><a class="btn" href="/">Go to the portal</a></p>'
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 🚫 Opened directly: the website is pointed at the wrong folder
+// ---------------------------------------------------------------------------
+// See INSTALL_WEB_FOLDER above. An installation finished from here would
+// have its database login, its key file, its uploads and its backups all
+// inside the folder the web server hands out. So nothing is offered: no
+// code is written, no form is shown. The web folder is not named, because
+// from here the installer cannot know which folder it is. The page itself is
+// installWrongFolderPage(), shared with the second sign just below.
+if (INSTALL_WEB_FOLDER === null) {
+    installWrongFolderPage(null);
+}
+
+// ---------------------------------------------------------------------------
+// 🚫 Reached through the web folder's own name: the same mistake, half hidden
+// ---------------------------------------------------------------------------
+// WHAT WAS WRONG (found by the check of 13 October 2026). With the website
+// pointed at the folder that holds `_core`, the plain address shows a folder
+// list, "Forbidden" or "Not found", and `/_install/` is refused just above.
+// But `/<the web folder's name>/` ran the web folder's index.php, which
+// handed the request here exactly as it does on a rightly pointed website:
+// the installer ran with no warning and finished, and a stranger was then
+// handed `/_auth_keys/enc.key`.
+//
+// The sign is in the ADDRESS: on a rightly pointed website the web folder is
+// the top of the address, so its name never appears in one. So when any part
+// of the address asked for IS the web folder's name, nothing is offered: no
+// code is written, no form is shown. The name is read from the folder itself
+// (INSTALL_WEB_FOLDER, which is where the file that handed the request over
+// really sits) and never from anything typed or from what the web server
+// reports about itself.
+//
+// EVERY part of the address is looked at, not only the first, so that a
+// package unpacked into a folder of an existing website
+// (`/portal/<web folder>/`) is caught as well. Capitals are ignored, because
+// many disks do not tell `HTTPDOCS` from `httpdocs`. The address is decoded
+// first: `/%68ttpdocs/` reaches the same folder. A full stop or a space at
+// the end of a part is ignored, because Windows drops both from a name.
+//
+// The address is taken apart BY HAND, not with parse_url(). REJECTED:
+// parse_url(), which was the first draft. It reads `//httpdocs/index.php` as
+// a host named "httpdocs" with the path `/index.php`, while a web server
+// reads the same request as the folder `httpdocs`: the one address that
+// mattered would have been waved through.
+//
+// REJECTED: SCRIPT_NAME, which would say the same thing more directly. It is
+// worked out by the web server from its own settings, and a host that sets it
+// oddly would shut an owner out of a rightly pointed website with advice to
+// change a setting that is already right. The address is what the person
+// typed, so a refusal here can always be explained to them.
+//
+// WHAT IT COSTS: on a rightly pointed website, an address with the web
+// folder's name typed into it by mistake is refused too. The page says so,
+// and says to use the plain address. A website served on purpose under a
+// path named after the web folder cannot use the installer at all; the
+// installation guide already asks for the portal to be at the top of its
+// address.
+//
+// WHAT IT CANNOT DO: see the mistake when the web server hides the folder's
+// name from the address, reports no address at all, or is reached by the
+// short name Windows gives a long folder name (`ADMIN_~1`).
+$installAddressAsked = is_string($_SERVER['REQUEST_URI'] ?? null) === true ? $_SERVER['REQUEST_URI'] : '';
+// Only the path: what comes before the first "?" or "#".
+$installPathAsked = explode('#', explode('?', $installAddressAsked, 2)[0], 2)[0];
+// A request may carry the whole address (`https://name/path`; proxies send
+// that). The scheme and the name are then taken off, so that a web folder
+// named after the website's own name is not mistaken for a part of the path.
+if (preg_match('#^[A-Za-z][A-Za-z0-9+.\-]*://[^/\\\\]*#', $installPathAsked, $installAddressLead) === 1) {
+    $installPathAsked = substr($installPathAsked, strlen($installAddressLead[0]));
+}
+$installWebFolderName = strtolower(basename(INSTALL_WEB_FOLDER));
+foreach (preg_split('#[/\\\\]+#', rawurldecode($installPathAsked)) ?: [] as $installPathPart) {
+    if ($installWebFolderName !== '' && strtolower(rtrim($installPathPart, ' .')) === $installWebFolderName) {
+        installWrongFolderPage(basename(INSTALL_WEB_FOLDER));
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Session for wizard state
 // ---------------------------------------------------------------------------
+// 🔒 The same cookie rules the portal itself uses (Auth::prepareSessionStart()),
+//    written out here because the wizard cannot load Auth. They matter more
+//    than they did: the session now carries the proof that this visitor typed
+//    the ownership code. `httponly` keeps the cookie from scripts; `samesite`
+//    stops another website's form bringing the cookie with it; `secure` keeps
+//    it off plain http where the site has https. The session's NAME is left
+//    alone on purpose: step 2 recognises somebody who is signed in to the
+//    portal by reading the portal's own session.
 if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path'     => '/',
+        'domain'   => '',
+        'secure'   => (isset($_SERVER['HTTPS']) === true && $_SERVER['HTTPS'] !== 'off'),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    // A session cookie PHP itself would refuse is dropped before the session
+    // starts, as the portal does (#509): otherwise session_start() raises a
+    // warning and the visitor is left with no session at all, so the code
+    // they type is forgotten at once and asked for again, for ever.
+    $installCookie = session_name();
+    if (isset($_COOKIE[$installCookie]) === true
+        && (is_string($_COOKIE[$installCookie]) === false
+            || preg_match('/^[a-zA-Z0-9,-]{1,256}$/', $_COOKIE[$installCookie]) !== 1)
+    ) {
+        unset($_COOKIE[$installCookie]);
+    }
     session_start();
 }
+
+/**
+ * ✍️ One form field or address field as text. A hand-made request can send a
+ * list where text is expected (`db_host[]=x`); handing a list to trim() or
+ * htmlspecialchars() ends the page with an error. A list is read as empty.
+ *
+ * @param string $name   The field's name.
+ * @param string $source 'post' (the default), or 'get'.
+ */
+function installField(string $name, string $source = 'post'): string
+{
+    $value = $source === 'get' ? ($_GET[$name] ?? '') : ($_POST[$name] ?? '');
+
+    return is_string($value) === true ? $value : '';
+}
+
+/**
+ * 🎫 The token every form of the wizard carries, kept in the session.
+ *
+ * WHY. The ownership code keeps strangers out, but once the owner has typed
+ * it their browser holds an unlocked session. Without a token, a page on
+ * another website could post the database step for them, with a database of
+ * its own choosing, and the owner would carry on installing onto it without
+ * knowing. A form that does not carry this token is not acted on.
+ */
+function installFormToken(): string
+{
+    if (is_string($_SESSION['install_form_token'] ?? null) === false || strlen($_SESSION['install_form_token']) !== 64) {
+        $_SESSION['install_form_token'] = bin2hex(random_bytes(32));
+    }
+
+    return $_SESSION['install_form_token'];
+}
+
+/** The hidden field that carries the token, ready to print inside a form. */
+function installTokenField(): string
+{
+    return '<input type="hidden" name="install_token" value="' . htmlspecialchars(installFormToken(), ENT_QUOTES, 'UTF-8') . '">';
+}
+
+/**
+ * 🪪 A mark for the database a page was drawn for.
+ *
+ * WHY. The choice page ("carry on, or wipe") and the "Build the tables" page
+ * are each ABOUT one database, and the session holds only the database typed
+ * last. With two tabs open, or after the browser's Back button, a page drawn
+ * for database ONE can still be on the screen when the session has moved on
+ * to database TWO. Its button would then be acted on for TWO: the person
+ * would confirm a wipe on a page that describes one database and have it
+ * recorded for another. So both forms carry this mark, and a form whose mark
+ * is not the mark of the database the installer holds NOW is not acted on.
+ *
+ * It is made from the database's identity (see installDbIdentity()) and this
+ * session's form token, so it says nothing readable about the database and
+ * is worth nothing in another session.
+ *
+ * @return string 64 characters; '' when the installer holds no database.
+ */
+function installDatabaseMark(): string
+{
+    $identity = installDbIdentity($_SESSION['install_db'] ?? null);
+
+    return $identity === '' ? '' : hash_hmac('sha256', $identity, installFormToken());
+}
+
+/** The hidden field that carries that mark, ready to print inside a form. */
+function installDatabaseField(): string
+{
+    return '<input type="hidden" name="install_for" value="' . htmlspecialchars(installDatabaseMark(), ENT_QUOTES, 'UTF-8') . '">';
+}
+
+/** Was the form just sent drawn for the database the installer holds now? Never true when it holds none. */
+function installFormIsForThisDatabase(): bool
+{
+    $mark = installDatabaseMark();
+
+    return $mark !== '' && hash_equals($mark, installField('install_for')) === true;
+}
+
+/** What a form is told when it was drawn for another database. Nothing has been done by then. */
+const INSTALL_OTHER_DATABASE_MESSAGE = 'That button was on a page drawn for a different database from the one the installer '
+    . 'holds now. This happens when the database details are typed again in another tab, or after the browser\'s Back '
+    . 'button. Nothing was built and nothing was removed. This page is about the database the installer holds now: '
+    . 'check its name below before you choose.';
+
+/**
+ * 🔑 Has this visitor typed the ownership code that is in the file NOW?
+ *
+ * The session holds a fingerprint of the code that was accepted, never the
+ * code. It must equal the fingerprint of the code file as it stands on this
+ * request. So when the code is replaced (ten wrong tries by anybody), or the
+ * file goes, every session let in by the old code is asked again.
+ */
+function installOwnerPassed(): bool
+{
+    $kept = $_SESSION['install_owner'] ?? null;
+    $now  = installCodeFingerprint(INSTALL_AUTH_DIR);
+
+    return is_string($kept) === true && $kept !== '' && $now !== '' && hash_equals($now, $kept) === true;
+}
+
+// ---------------------------------------------------------------------------
+// 🔑 The ownership code: make sure there is one, and see who has typed it
+// ---------------------------------------------------------------------------
+// Written on the first visit by anybody, which is the point: the stranger
+// who gets here first causes a code to be written that they cannot read.
+// `$ownerCodeProblem` is '' unless the file could not be written.
+$ownerCodeProblem = installCodeEnsure(INSTALL_ROOT, INSTALL_AUTH_DIR);
+$ownerPassed      = installOwnerPassed();
+// Somebody who typed a code that has since been replaced is told so, once
+// they are asked again: otherwise the same code would simply be "wrong".
+$ownerCodeChanged = ($ownerPassed === false && is_string($_SESSION['install_owner'] ?? null) === true);
+
+// 🧭 Which copy of the portal this is, and how that was decided. Asked of
+//    the one place that decides it, with the same two things the portal's
+//    start-up will hand it, so the answer is the one the finished portal has.
+$installChannel      = \Portal\Core\Channel::decide(INSTALL_ROOT, INSTALL_WEB_FOLDER);
+$installChannelWords = installChannelWords(
+    $installChannel['channel'],
+    $installChannel['source'],
+    basename(INSTALL_WEB_FOLDER),
+    installChannelFileIgnored(INSTALL_ROOT, $installChannel['source'])
+);
 
 // ---------------------------------------------------------------------------
 // Determine current step
 // ---------------------------------------------------------------------------
-// 🪞 Step is normally 1-6, with two fractional intermediate pages encoded as
-//    string steps so they remain unambiguous in URLs without changing the
-//    integer comparisons used throughout the file:
+// 🪞 Step is normally 1-6, with three in-between pages encoded as string
+//    steps so they remain unambiguous in URLs without changing the integer
+//    comparisons used throughout the file:
 //      • '1.5' — organisation type (brand) picker (issue #296)
 //      • '2.5' — existing-data choice (continue / drop)
+//      • '4.5' — web addresses (#500)
 //    Tracked via separate booleans so the integer $step still flows linearly.
-$rawStep = (string) ($_GET['step'] ?? ($_POST['step'] ?? '1'));
+//    Step 6, "done", is never reached by its number: see $justFinished.
+$rawStep = installField('step', 'get');
+if ($rawStep === '') {
+    $rawStep = installField('step');
+}
 $isIndustryStep = ($rawStep === '1.5');
 $isChoiceStep   = ($rawStep === '2.5');
-$step = $isChoiceStep ? 2 : ($isIndustryStep ? 1 : (int) $rawStep);
-if ($step < 1 || $step > 6) {
+$isAddressStep  = ($rawStep === '4.5');
+$step = $isChoiceStep ? 2 : ($isIndustryStep ? 1 : ($isAddressStep ? 4 : (int) $rawStep));
+if ($step < 1 || $step > 5) {
     $step = 1;
     $isChoiceStep = false;
     $isIndustryStep = false;
+    $isAddressStep = false;
 }
+// Set by the finish, in the request that finishes: the only way to the last
+// page. It used to be `?step=6`, which nobody could ever see: the finish
+// wrote the database login and redirected, and from that moment the web
+// folder's index.php started the portal on every request, this one included.
+$justFinished = false;
+// What the finish did, for the last page to say.
+$finishReport = [];
 
 // Enforce step progression — cannot skip ahead without completing prior steps
 if (($step >= 3 || $isChoiceStep) && isset($_SESSION['install_db']) === false) {
     $step = 2; // DB credentials not yet configured
     $isChoiceStep = false;
+    $isAddressStep = false;
 }
-if ($step === 6 && is_file(INSTALL_LOCK_FILE) === false) {
-    $step = 5; // Finalization not yet completed
+// The finish needs the two addresses: without them, back to their page.
+if ($step === 5 && is_array($_SESSION['install_addresses'] ?? null) === false) {
+    $step = 4;
+    $isAddressStep = true;
 }
 
 // 🏷️ Resolve the active brand preset from the session pick (Step 1.5).
 //    Defaults to the generic preset for steps that haven't picked yet.
 //    All hardcoded "WebMS Intra" references in the installer use these
 //    variables, so the wizard rebrands the moment the admin chooses.
-$selectedIndustry = (string) ($_SESSION['install_industry'] ?? '');
+$selectedIndustry = is_string($_SESSION['install_industry'] ?? null) === true ? $_SESSION['install_industry'] : '';
 $INSTALL_BRAND = $INSTALL_BRAND_PRESETS[$selectedIndustry]
               ?? $INSTALL_BRAND_PRESETS['']
               ?? ['name' => 'WebMS Intra', 'tagline' => 'Internal Management System', 'publisher' => 'MWBM Partners Ltd (t/a MWservices)'];
@@ -166,7 +619,7 @@ $INSTALL_PRODUCT_NAME      = (string) ($INSTALL_BRAND['name']      ?? 'WebMS Int
 $INSTALL_PRODUCT_TAGLINE   = (string) ($INSTALL_BRAND['tagline']   ?? 'Internal Management System');
 $INSTALL_PRODUCT_PUBLISHER = (string) ($INSTALL_BRAND['publisher'] ?? 'MWBM Partners Ltd (t/a MWservices)');
 
-// 🎨 Asset folder slug — points at web/public_html/assets/images/brandkit/assets/<slug>/.
+// 🎨 Asset folder slug — points at the web folder's assets/images/brandkit/assets/<slug>/.
 //    Drives the favicon + apple-touch-icon in the installer head. The default
 //    (webms-intra) ships first; once Step 1.5 saves the picked industry into
 //    $_SESSION['install_industry'], the next render of the wizard automatically
@@ -189,19 +642,79 @@ if (preg_match('/^[a-z0-9\-]{1,40}$/', $INSTALL_BRAND_ASSET_FOLDER) !== 1) {
 $error = '';
 $success = '';
 
+// 🔍 The words for what a database already holds (DB_STATE_…). Loaded for
+//    every request. It used to be loaded only inside step 2's handler, while
+//    the page AFTER it (2.5, "this database already holds tables") and that
+//    page's own handler both use its constants: so that page ended with
+//    "Undefined constant" for everybody, and neither "continue with what is
+//    there" nor "start again" could be reached.
+require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_install' . DIRECTORY_SEPARATOR . 'db_state.php';
+
+// What the code page says when a code is refused. Never how close it was.
+const INSTALL_WRONG_CODE_MESSAGE = 'That is not the code in the file. Open the file again and copy the code exactly: '
+    . 'sixteen letters in four groups. Nothing has been changed.';
+const INSTALL_NEW_CODE_MESSAGE = 'That is not the code in the file. It was the tenth wrong code in a row, so the installer '
+    . 'has written a NEW code into the same file and the old one no longer works. Open the file again and type the new code.';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = $_POST['action'] ?? '';
+    $action = installField('action');
+
+    // 🎫 A form that does not carry this session's token is not acted on:
+    //    see installFormToken(). It is the first test, before the code is
+    //    even looked at, so a form posted from another website can do
+    //    nothing at all, not even use up a wrong try.
+    if (hash_equals(installFormToken(), installField('install_token')) === false) {
+        $error = 'That form could not be used: it came from a page that had gone out of date. This happens when the '
+               . 'installer has been left open for a long time, or when the browser is not keeping the installer\'s '
+               . 'cookie. Nothing has been changed. Please try again; if you see this every time, allow cookies for '
+               . 'this website.';
+        $action = '';
+    }
+
+    // 🔑 The ownership code, typed on the first page.
+    if ($action === 'owner_code') {
+        $judged = installCodeJudge(INSTALL_AUTH_DIR, installField('owner_code'));
+        if ($judged === INSTALL_CODE_RIGHT) {
+            // A new session number for the session that is now trusted, so a
+            // number somebody else knew before this moment is worth nothing.
+            session_regenerate_id(true);
+            $_SESSION['install_owner'] = installCodeFingerprint(INSTALL_AUTH_DIR);
+            header('Location: ?step=1');
+            exit();
+        }
+        if ($judged === INSTALL_CODE_REPLACED) {
+            $error = INSTALL_NEW_CODE_MESSAGE;
+        } elseif ($judged === INSTALL_CODE_BLANK) {
+            $error = 'Type the code from the file into the box, then press Continue.';
+        } elseif ($judged === INSTALL_CODE_NO_FILE) {
+            $error = 'The file that holds the code could not be read just now. Reload this page: the installer writes a '
+                   . 'new one when it is missing.';
+        } else {
+            $error = INSTALL_WRONG_CODE_MESSAGE;
+        }
+        // Whatever the answer, this request is not let in.
+        $ownerPassed = false;
+        $action      = '';
+    }
+
+    // 🚪 THE GATE. Without the code, no other form is acted on: not the
+    //    database step (which would make this server connect to any address
+    //    a stranger names), not the finish, nothing. The page drawn below is
+    //    then the code page, whatever step was asked for.
+    if ($ownerPassed === false) {
+        $action = '';
+    }
 
     // Step 2: Test and save database credentials
     if ($action === 'db_config') {
-        $dbHost = trim($_POST['db_host'] ?? '');
-        $dbUser = trim($_POST['db_user'] ?? '');
-        $dbPass = $_POST['db_pass'] ?? '';
-        $dbName = trim($_POST['db_name'] ?? '');
-        $dbPort = (int) ($_POST['db_port'] ?? 3306);
+        $dbHost = trim(installField('db_host'));
+        $dbUser = trim(installField('db_user'));
+        $dbPass = installField('db_pass');
+        $dbName = trim(installField('db_name'));
+        $dbPort = installField('db_port') === '' ? 3306 : (int) installField('db_port');
 
         if ($dbHost === '' || $dbUser === '' || $dbName === '') {
-            $error = 'Database host, username, and database name are required.';
+            $error = 'Please fill in the database host, the user name and the database name.';
             $step = 2;
         } elseif (preg_match('//u', $dbName) !== 1
             || preg_match_all('/./us', $dbName) > 64
@@ -470,11 +983,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'port' => $dbPort,
                     ];
 
+                    // 🧽 A DATABASE HAS BEEN LET THROUGH: ANY EARLIER CHOICE
+                    //    IS FORGOTTEN, here and nowhere later.
+                    //
+                    //    A choice ("carry on" or "wipe") is an answer about
+                    //    what one database held when the installer looked at
+                    //    it. Typing the details again is asking the question
+                    //    again, even for the same database: it may hold
+                    //    something else by now. WHAT WAS WRONG: a database
+                    //    that was not empty was sent on to the choice page
+                    //    with the earlier choice still in the session, so a
+                    //    wipe confirmed for one database was carried out on
+                    //    the next one typed (see db_state.php).
+                    installChoiceForget();
+
                     // 🔍 Probe DB state so we can route the user appropriately.
                     //    See _install/db_state.php for the classification rules.
-                    require_once INSTALL_ROOT
-                        . DIRECTORY_SEPARATOR . '_install'
-                        . DIRECTORY_SEPARATOR . 'db_state.php';
                     $policy = (array) (require INSTALL_ROOT
                         . DIRECTORY_SEPARATOR . '_install'
                         . DIRECTORY_SEPARATOR . 'upgrade-policy.php');
@@ -484,6 +1008,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $policy,
                         is_file(INSTALL_LOCK_FILE)
                     );
+                    // 👥 How many accounts it holds, for the choice page to
+                    //    show: somebody about to wipe what they take for a
+                    //    half-built database should see that people are in it.
+                    $state['accounts'] = installAccountCount($testConn);
                     $_SESSION['install_db_state'] = $state;
 
                     // 🔐 THERE IS ALREADY A PORTAL HERE. WHO IS ASKING?
@@ -508,76 +1036,159 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     //    usual helpers, because this wizard deliberately runs
                     //    without the portal's start-up code - that is what lets
                     //    it work on a broken installation.
-                    if ($state['state'] !== DB_STATE_EMPTY) {
+                    //
+                    //    🔑 ONE CASE IS LET THROUGH WITHOUT A SIGN-IN (#499):
+                    //    a database that holds tables but has NEVER FINISHED
+                    //    an installation, which is one with no installed
+                    //    version recorded (the finish is what records it).
+                    //
+                    //    Why: that is what this wizard itself leaves behind
+                    //    when somebody's session ends between building the
+                    //    tables and the finish. Shared hosting ends a session
+                    //    after about twenty minutes of quiet, which is less
+                    //    time than it takes to think of a good password.
+                    //    Until October 2026 the question below was asked
+                    //    there too, and nobody could ever answer it: there
+                    //    is no installed portal to sign in to, and often no
+                    //    account. The only way forward was to empty the
+                    //    database by hand in another tool.
+                    //
+                    //    What stands in for the sign-in is the ownership
+                    //    code, which every visitor who gets this far has
+                    //    typed: proof that they can open this hosting
+                    //    account's files. With that, and the database login
+                    //    they have just typed, they could already do
+                    //    anything to this database with any other tool.
+                    //
+                    //    WHAT THIS CANNOT TELL APART: an installation that
+                    //    never finished, and a finished portal so old that
+                    //    it never recorded its version (or one whose record
+                    //    was emptied). Both are let through on the code. So
+                    //    the choice page never says "nothing was finished
+                    //    here": it says no finished installation is
+                    //    RECORDED, and how many accounts the database holds.
+                    //
+                    //    🧳 BUT ONLY WHEN EVERYTHING THERE IS THE PORTAL'S.
+                    //    The next page offers to wipe, and the wipe removes
+                    //    every table whose name begins with "tbl". That is
+                    //    right for the portal's own tables and a disaster
+                    //    for another program's that happen to be named the
+                    //    same way and share the database. While this page
+                    //    could not be reached that could not happen; now
+                    //    that it can, a database holding any such table the
+                    //    install script does not make is refused outright:
+                    //    not built into, not wiped, nothing kept.
+                    $whoIsAsking = '';
+                    if ($state['state'] !== DB_STATE_EMPTY && $state['installed_version'] !== null) {
                         $whoIsAsking = installElevatedAdminCheck($testConn);
-                        if ($whoIsAsking !== '') {
-                            // 🚫 THROW THE CREDENTIALS AWAY, not just the page.
-                            //
-                            //    Refusing to show the next page is not enough.
-                            //    The database details had already been kept in
-                            //    the session by the lines above, and the step
-                            //    that actually builds or wipes the database
-                            //    reads them from there. So somebody refused here
-                            //    could simply send the next step directly and it
-                            //    would run, using the details this step had
-                            //    helpfully stored for them.
-                            //
-                            //    Removing them means the refused visitor has
-                            //    nothing to carry forward: every later step
-                            //    finds no connection details and stops.
-                            unset($_SESSION['install_db'], $_SESSION['install_db_state'],
-                                  $_SESSION['install_action']);
-
-                            // Deliberately NOT closed here. The line below closes
-                            // it on every path, and closing a mysqli connection
-                            // twice throws an Error - which is not a
-                            // mysqli_sql_exception, so the catch below would miss
-                            // it and the wizard would die with a blank page
-                            // instead of showing the explanation.
-                            $error = $whoIsAsking;
-                            $step  = 2;
+                    } elseif ($state['state'] !== DB_STATE_EMPTY) {
+                        $notOurs = installTablesNotOurs($testConn);
+                        if ($notOurs === null) {
+                            $whoIsAsking = 'This database is not empty, and the installer could not work out whether what is in '
+                                         . 'it belongs to this portal. To be safe it will not build into it or wipe it. Give the '
+                                         . 'portal a database of its own: create a new, empty one in your hosting panel and type '
+                                         . 'its name here. Nothing has been changed.';
+                        } elseif ($notOurs !== []) {
+                            $whoIsAsking = 'This database is not empty, and not everything in it is this portal\'s: it holds '
+                                         . count($notOurs) . (count($notOurs) === 1 ? ' table' : ' tables') . ' the portal does not '
+                                         . 'make (' . implode(', ', array_slice($notOurs, 0, 3)) . (count($notOurs) > 3 ? ' and others' : '')
+                                         . '). The installer will not build into such a database or wipe it, because it could not '
+                                         . 'do either without touching what is not its own. Give the portal a database of its '
+                                         . 'own: create a new, empty one in your hosting panel and type its name here. Nothing '
+                                         . 'has been changed.';
                         }
+                    }
+                    if ($whoIsAsking !== '') {
+                        // 🚫 THROW THE CREDENTIALS AWAY, not just the page.
+                        //
+                        //    Refusing to show the next page is not enough.
+                        //    The database details had already been kept in
+                        //    the session by the lines above, and the step
+                        //    that actually builds or wipes the database
+                        //    reads them from there. So somebody refused here
+                        //    could simply send the next step directly and it
+                        //    would run, using the details this step had
+                        //    helpfully stored for them.
+                        //
+                        //    Removing them means the refused visitor has
+                        //    nothing to carry forward: every later step
+                        //    finds no connection details and stops.
+                        unset($_SESSION['install_db'], $_SESSION['install_db_state']);
+                        installChoiceForget();
+
+                        // Deliberately NOT closed here. The line below closes
+                        // it on every path, and closing a mysqli connection
+                        // twice throws an Error - which is not a
+                        // mysqli_sql_exception, so the catch below would miss
+                        // it and the wizard would die with a blank page
+                        // instead of showing the explanation.
+                        $error = $whoIsAsking;
+                        $step  = 2;
                     }
 
                     $testConn->close();
 
-                    if ($error !== '') {
-                        // The gate above refused. Fall through to redraw step 2
-                        // with the explanation; change nothing.
-                    } elseif ($state['state'] === DB_STATE_EMPTY) {
-                        // Fresh install — straight to schema install.
-                        $_SESSION['install_action'] = 'fresh';
-                        header('Location: ?step=3');
-                        exit();
-                    }
-                    if ($state['state'] === DB_STATE_INSTALLED_CURRENT) {
-                        // 🔄 Already installed, and already at this exact
-                        //    version. There is nothing to upgrade.
-                        //
-                        //    This used to write the lock file back and bounce
-                        //    the visitor straight to the portal, which was
-                        //    unhelpful in the one situation where somebody has
-                        //    deliberately come to the installer: they want to
-                        //    start again from nothing.
-                        //
-                        //    So show them the choice page instead. It offers
-                        //    going back to the portal, and it offers wiping
-                        //    everything and reinstalling - behind the same
-                        //    confirmation as every other destructive path here.
-                        //    Nothing is decided for them.
+                    if ($error === '') {
+                        if ($state['state'] === DB_STATE_EMPTY) {
+                            // Fresh install — straight to schema install.
+                            // "Empty when looked at" is kept as this
+                            // database's choice, so that the build step has
+                            // one to go on and never has to guess.
+                            installChoiceKeep('fresh');
+                            header('Location: ?step=3');
+                            exit();
+                        }
+                        // Anything else holds tables already: the choice
+                        // page. That includes a portal that is installed and
+                        // already at this exact version. That case used to
+                        // write the lock file back and bounce the visitor
+                        // straight to the portal, which was unhelpful in the
+                        // one situation where somebody has deliberately come
+                        // to the installer: they want to start again from
+                        // nothing. The choice page offers that behind the
+                        // same confirmation as every other destructive path
+                        // here, and decides nothing for them.
                         header('Location: ?step=2.5');
                         exit();
                     }
 
-                    // PARTIAL, INSTALLED_UPGRADE, or FRESH_REQUIRED →
-                    // render the step-2.5 choice page.
-                    header('Location: ?step=2.5');
-                    exit();
+                    // 🚫 The gate above refused. The step is drawn again
+                    //    with its explanation, and nothing is changed.
+                    //
+                    //    WHAT WAS WRONG: the redirect to the choice page just
+                    //    above used to be outside any test, so a refusal ran
+                    //    into it too. The visitor was sent to the choice
+                    //    page, which (the login having been thrown away)
+                    //    sent them back to this form with no word of
+                    //    explanation: the careful sentences the gate returns
+                    //    were never shown to anybody. The connection is
+                    //    closed already, so it is marked as such for the
+                    //    line after this block: closing it twice throws.
+                    $testConn = null;
                 }
 
-                $testConn->close();
+                if ($testConn !== null) {
+                    $testConn->close();
+                }
             } catch (\mysqli_sql_exception $e) {
-                $error = 'Database connection failed: ' . $e->getMessage();
+                // What to check, by what the database (or the attempt to
+                // reach it) said. The server's own words are kept at the end:
+                // they are what a hosting company's support will ask for.
+                $code = $e->getCode();
+                if ($code === 1045) {
+                    $what = 'The database refused that user name and password. Check both against your hosting panel; '
+                          . 'copying and pasting them avoids a mistyped character.';
+                } elseif ($code === 1044 || $code === 1049) {
+                    $what = 'The user name and password were accepted, but that user is not allowed to use a database of '
+                          . 'that name. Check the database\'s name, and in your hosting panel check that this user has been '
+                          . 'given access to it.';
+                } elseif ($code >= 2000 && $code < 2100) {
+                    $what = 'No database server answered at that address. Check the host name and the port against your '
+                          . 'hosting panel. Many hosts use "localhost"; others give the database a host name of its own.';
+                } else {
+                    $what = 'The database could not be used.';
+                }
+                $error = $what . ' Nothing has been changed. What the server said: ' . $e->getMessage();
                 $step = 2;
             }
         }
@@ -585,17 +1196,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Step 2.5: Existing-data choice (Continue vs Drop)
     if ($action === 'install_action') {
-        $choice = (string) ($_POST['install_action_choice'] ?? '');
+        $choice = installField('install_action_choice');
         $state = $_SESSION['install_db_state'] ?? null;
         $allowContinue = is_array($state)
             && ($state['state'] ?? '') !== DB_STATE_FRESH_REQUIRED;
 
-        if ($choice !== 'continue' && $choice !== 'drop') {
-            $error = 'Please choose how to proceed.';
+        if (isset($_SESSION['install_db']) === false) {
+            // No database is held, so there is nothing to choose about. This
+            // used to record the choice anyway and send the visitor round to
+            // the database step without a word.
+            $error = 'The installer no longer holds the database details, so nothing was chosen and nothing has been '
+                   . 'changed. That happens when it has been left open for a long time. Please type them again.';
+            $isChoiceStep = false;
+            $step = 2;
+        } elseif (installFormIsForThisDatabase() === false) {
+            // 🪪 The page this form was on described ANOTHER database: see
+            //    installDatabaseMark(). No choice is recorded. The choice
+            //    page is drawn again, for the database the installer holds
+            //    now.
+            $error = INSTALL_OTHER_DATABASE_MESSAGE;
+            $isChoiceStep = true;
+        } elseif ($choice !== 'continue' && $choice !== 'drop') {
+            $error = 'Please choose one of the two: carry on with what is there, or wipe it and start again.';
             $isChoiceStep = true;
         } elseif ($choice === 'continue' && $allowContinue === false) {
-            $error = 'Continue is not available — this installation predates the '
-                   . 'force-fresh threshold. You must drop and rebuild.';
+            $error = 'Carrying on is not possible here: the portal in this database is too old to be brought up to '
+                   . 'date in place. The only choice is to wipe it and start again. Back it up first if you need anything in it.';
             $isChoiceStep = true;
         } elseif ($choice === 'drop') {
             // 🛡️ Destructive — require the user to confirm by typing
@@ -606,20 +1232,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 . DIRECTORY_SEPARATOR . 'upgrade-policy.php');
             $needHost = (bool) ($policy['require_hostname_confirmation_for_drop'] ?? true);
             $expected = $needHost === true
-                ? ($_SERVER['HTTP_HOST'] ?? 'DROP')
+                ? (is_string($_SERVER['HTTP_HOST'] ?? null) === true ? $_SERVER['HTTP_HOST'] : 'DROP')
                 : 'DROP';
-            $typed = (string) ($_POST['drop_confirm'] ?? '');
+            $typed = installField('drop_confirm');
             if (trim($typed) !== trim($expected)) {
-                $error = 'Confirmation text didn\'t match. Type exactly: '
-                       . htmlspecialchars($expected, ENT_QUOTES, 'UTF-8');
+                // Not escaped here: the page escapes every message once, as
+                // it prints it. Escaping it twice showed "&amp;" to the reader.
+                $error = 'Nothing was wiped: the text typed to confirm was not the text asked for. To wipe, type exactly: '
+                       . $expected;
                 $isChoiceStep = true;
             } else {
-                $_SESSION['install_action'] = 'drop';
+                // Kept for THIS database and no other: installChoiceKeep().
+                installChoiceKeep('drop');
                 header('Location: ?step=3');
                 exit();
             }
         } else {
-            $_SESSION['install_action'] = 'continue';
+            installChoiceKeep('continue');
             header('Location: ?step=3');
             exit();
         }
@@ -629,7 +1258,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     //    Stores the choice in session only — actual tblSettings seeding
     //    happens in Step 3 after full_schema.sql runs.
     if ($action === 'select_industry') {
-        $picked = (string) ($_POST['industry'] ?? '');
+        $picked = installField('industry');
         // Defensive: only accept keys that exist in the brand presets file.
         if (isset($INSTALL_BRAND_PRESETS[$picked]) === false) {
             $picked = '';
@@ -642,17 +1271,74 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Step 3: Install schema
     if ($action === 'install_schema') {
         $db = installGetDb();
+
+        // 🚦 MAY THIS DATABASE BE BUILT INTO, AND MAY IT BE WIPED FIRST?
+        //
+        //    Asked here, of the database this request is about to touch, and
+        //    answered from the choice held FOR THAT DATABASE
+        //    (installChoiceHeld() in db_state.php). Three rules:
+        //
+        //    1. The form must have been drawn for this database. A "Build
+        //       the tables" button left on the screen from an earlier
+        //       database is not acted on (see installDatabaseMark()).
+        //    2. With no choice held, the database is LOOKED AT now. Empty:
+        //       there is nothing to choose, so it is built into. Not empty,
+        //       or it cannot be looked at: nothing is built and nothing is
+        //       removed, and the choice page is drawn so that the choice is
+        //       made for this database. WHAT WAS WRONG: this step went ahead
+        //       on whatever the session said, so opening it by its address
+        //       skipped the choice page altogether.
+        //    3. It wipes ONLY when the choice held for this database is the
+        //       wipe: `$wipeThisDatabase` below is the one place that is
+        //       decided, and the uploaded files are emptied only inside that
+        //       same wipe.
+        //
+        //    `$buildChoice` stays '' when the build is refused.
+        $buildChoice  = '';
+        $buildRefused = '';
+        if ($db !== null) {
+            if (installFormIsForThisDatabase() === false) {
+                $buildRefused = INSTALL_OTHER_DATABASE_MESSAGE;
+            } else {
+                $buildChoice = installChoiceHeld();
+                if ($buildChoice === '') {
+                    $tablesNow = installPortalTableCount($db);
+                    if ($tablesNow === 0) {
+                        installChoiceKeep('fresh');
+                        $buildChoice = 'fresh';
+                    } elseif ($tablesNow > 0) {
+                        $buildRefused = 'Nothing was built and nothing was removed. This database is not empty, and no choice '
+                                      . 'has been made for it yet. Choose below what to do with it.';
+                    } else {
+                        $buildRefused = 'Nothing was built and nothing was removed. The installer could not look at what this '
+                                      . 'database holds, and no choice has been made for it yet. Choose below what to do with '
+                                      . 'it; if this message comes back, go Back and type the database details again.';
+                    }
+                }
+            }
+            if ($buildRefused !== '') {
+                $db->close();
+            }
+        }
+
         if ($db === null) {
             $error = INSTALL_NO_CONNECTION_MESSAGE;
             $step = 2;
+        } elseif ($buildRefused !== '') {
+            // The choice page, for the database the installer holds now.
+            $error = $buildRefused;
+            $step = 2;
+            $isChoiceStep = true;
         } else {
             // 🪦 Drop-and-rebuild path. If the user explicitly opted for
             //    a fresh install from step 2.5, wipe every portal table
             //    before running full_schema.sql. We disable FK checks
             //    for the duration so dependent tables can drop in any
             //    order. This intentionally destroys data — the choice
-            //    page has already confirmed the user's intent.
-            if (($_SESSION['install_action'] ?? '') === 'drop') {
+            //    page has already confirmed the user's intent, FOR THIS
+            //    DATABASE: see the three rules above.
+            $wipeThisDatabase = ($buildChoice === 'drop');
+            if ($wipeThisDatabase === true) {
                 try {
                     $db->query('SET FOREIGN_KEY_CHECKS = 0');
                     $rs = $db->query("SHOW TABLES LIKE 'tbl%'");
@@ -687,12 +1373,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     //    somebody wipes the wrong installation, the snapshots
                     //    are the only way back, and destroying them at the same
                     //    moment would remove the last line of defence.
+                    //
+                    //    NOTHING ON THE DISK IS EMPTIED ANYWHERE ELSE. These
+                    //    lines are inside the wipe of this database and run
+                    //    only as part of it; the installer calls
+                    //    installClearDirectory() nowhere but here.
                     $uploadsDir = INSTALL_ROOT . DIRECTORY_SEPARATOR . '_uploads';
                     if (is_dir($uploadsDir) === true) {
                         installClearDirectory($uploadsDir);
                     }
+                    // 🧹 The wipe has been done ONCE, as asked. The choice is
+                    //    changed to "built into an empty database" so that
+                    //    pressing this step's button a second time (after
+                    //    going Back from the administrator step, say) builds
+                    //    over what is there and does not wipe it all again,
+                    //    the new administrator included.
+                    installChoiceKeep('fresh');
                 } catch (\mysqli_sql_exception $e) {
-                    $error = 'Drop-and-rebuild failed during table drop: '
+                    $error = 'The old tables could not all be removed. What the database said: '
                            . $e->getMessage();
                     $step = 3;
                 }
@@ -702,7 +1400,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $schemaFile = INSTALL_SQL . DIRECTORY_SEPARATOR . 'full_schema.sql';
             if (is_readable($schemaFile) === false) {
-                $error = 'Schema file not found: _sql/full_schema.sql';
+                $error = 'The tables were not built: the install script (the file full_schema.sql, in the folder _sql) is '
+                       . 'not on the server or cannot be read. Upload the folder _sql again from the package, whole, then press the button again.';
                 $step = 3;
             } else {
                 $sql = file_get_contents($schemaFile);
@@ -736,7 +1435,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } while ($db->more_results() === true && $db->next_result());
 
                     if ($queryError !== '') {
-                        $error = 'Schema installation error: ' . $queryError;
+                        $error = 'The tables could not all be built. Nothing was removed. What the database said: ' . $queryError
+                               . ' Press the button again; if the same message comes back, send it to whoever supports your portal.';
                         $step = 3;
                     } else {
                         // 🪞 Apply all numbered migrations after full_schema.sql.
@@ -809,7 +1509,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
 
                         if ($migError !== '') {
-                            $error = 'Migration error: ' . $migError;
+                            $error = 'The tables were built, but one of the numbered database upgrades that follow could not be '
+                                   . 'applied. Nothing was removed. The file, and what the database said: ' . $migError
+                                   . ' Press the button again; if the same message comes back, send it to whoever supports your portal.';
                             $step = 3;
                         } else {
                             // 🏷️ Seed the product brand preset chosen in Step 1.5
@@ -852,7 +1554,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
                 } catch (\mysqli_sql_exception $e) {
-                    $error = 'Schema installation error: ' . $e->getMessage();
+                    $error = 'The tables could not all be built. Nothing was removed. What the database said: ' . $e->getMessage()
+                           . ' Press the button again; if the same message comes back, send it to whoever supports your portal.';
                     $step = 3;
                 }
             }
@@ -862,10 +1565,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Step 4: Create admin user
     if ($action === 'create_admin') {
-        $adminName  = trim($_POST['admin_name'] ?? '');
-        $adminEmail = trim($_POST['admin_email'] ?? '');
-        $adminPass  = $_POST['admin_pass'] ?? '';
-        $adminPass2 = $_POST['admin_pass2'] ?? '';
+        $adminName  = trim(installField('admin_name'));
+        $adminEmail = trim(installField('admin_email'));
+        $adminPass  = installField('admin_pass');
+        $adminPass2 = installField('admin_pass2');
 
         // 🛡️ Self-contained password policy — mirrors Auth::validatePassword() defaults
         // (the installer runs before bootstrap.php is available).
@@ -890,16 +1593,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($adminName === '' || $adminEmail === '' || $adminPass === '') {
-            $error = 'All fields are required.';
+            $error = 'Please fill in every box: your name, your e-mail address and the password twice.';
             $step = 4;
         } elseif (filter_var($adminEmail, FILTER_VALIDATE_EMAIL) === false) {
-            $error = 'Please enter a valid email address.';
+            $error = 'That is not an e-mail address. Type it as name@example.org.';
+            $step = 4;
+        } elseif (strlen($adminEmail) > 50 || strlen($adminName) > 255) {
+            // 📏 The e-mail address is also this account's sign-in name, and a
+            //    sign-in name holds 50 characters (tblLocalAccounts.username).
+            //    The database refuses anything longer, as it should. Until
+            //    October 2026 that refusal came AFTER the account's first half
+            //    had been saved, which left an administrator who could not
+            //    sign in and whose address could not be used again.
+            $error = strlen($adminEmail) > 50
+                ? 'That e-mail address is longer than 50 characters, which is the most a sign-in name can hold. Use a '
+                  . 'shorter address for this first account; other administrators can be added once the portal is running.'
+                : 'That name is longer than 255 characters. Please shorten it.';
             $step = 4;
         } elseif (count($pwErrors) > 0) {
-            $error = 'Password does not meet policy: ' . implode(' ', $pwErrors);
+            $error = 'That password cannot be used. ' . implode(' ', $pwErrors);
             $step = 4;
         } elseif ($adminPass !== $adminPass2) {
-            $error = 'Passwords do not match.';
+            $error = 'The two passwords are not the same. Type the same password in both boxes.';
             $step = 4;
         } else {
             $db = installGetDb();
@@ -916,7 +1631,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // belt-and-braces — under strict mode they're effectively
                 // dead code, but they keep the handler safe if a future
                 // change toggles mysqli_report back to silent.
+                //
+                // 🧾 ALL OR NOTHING. The account is four writes (the person,
+                // their password, their place in the organisation, the
+                // site's contact address). They are made as one piece, so a
+                // failure in the second cannot leave the first behind: a
+                // person with no password is an administrator nobody can
+                // sign in as, holding an e-mail address that cannot be used
+                // for a second attempt.
                 try {
+                    $db->begin_transaction();
                     // Insert admin user. Note: tblUsers has NO siteID column —
                     // multi-site assignment is via tblUserSites (inserted
                     // below). An earlier version of this handler included
@@ -929,7 +1653,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         . 'VALUES (?, ?, 1, 1, 1, NOW())'
                     );
                     if ($stmt === false) {
-                        $error = 'Failed to prepare user insert: ' . $db->error;
+                        $db->rollback();
+                        $error = 'The administrator account could not be created, and nothing was saved. What the database '
+                               . 'said: ' . $db->error;
                         $step = 4;
                     } else {
                         $stmt->bind_param('ss', $adminName, $adminEmail);
@@ -969,12 +1695,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $stmtSetting->close();
                         }
 
+                        $db->commit();
                         $db->close();
-                        header('Location: ?step=5');
+                        header('Location: ?step=4.5');
                         exit();
                     }
                 } catch (\mysqli_sql_exception $e) {
-                    $error = 'Failed to create administrator: ' . $e->getMessage();
+                    // Undo whatever part of the account was written.
+                    try {
+                        $db->rollback();
+                    } catch (\mysqli_sql_exception) {
+                        // The connection has gone; the database undoes an
+                        // unfinished piece of work by itself in that case.
+                    }
+                    if ($e->getCode() === 1062) {
+                        // 1062: "duplicate entry". An account with this
+                        // address is already there.
+                        $error = 'An account with that e-mail address is already in this database, most likely made by an '
+                               . 'earlier run of this installer. Nothing was changed. If you know that account\'s password, '
+                               . 'use "Keep the administrator that is already there" below. If you do not, type a different '
+                               . 'e-mail address here, or go back to the database step and choose to start again from nothing.';
+                    } else {
+                        error_log('[WebMS-Intra] Installer: could not create the administrator: ' . $e->getMessage());
+                        $error = 'The administrator account could not be created, and nothing was saved. What the database '
+                               . 'said: ' . $e->getMessage();
+                    }
                     $step = 4;
                 }
                 $db->close();
@@ -982,27 +1727,214 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // Step 5: Generate encryption key and save config
+    // Step 4.5: Web addresses (#500)
+    //
+    //    Nothing is written to the database here. The two addresses are kept
+    //    in the session and stored by the finish. Going Back and correcting
+    //    a mistyped address works before the finish is pressed, and also
+    //    after a finish that stopped part way: the finish fills a setting
+    //    that holds nothing yet, and may replace a value THIS RUN filled in
+    //    itself, and only that (see installFillSetting() and step 5 of the
+    //    finish). An address the database held before this run is never
+    //    replaced.
+    if ($action === 'web_addresses') {
+        // The same two checks as the "Web addresses" card on the
+        // organisation settings page (_apps/admin/settings/organisation/save.php),
+        // so that nothing can be stored here that the portal would later
+        // refuse or ignore. ONE DIFFERENCE, on purpose: here the portal's
+        // address may not be left empty. With none stored, every link in an
+        // e-mail is built from whatever address the request arrived at, and
+        // a visitor chooses that; the installation is the one moment when
+        // somebody is certain to be looking at the question.
+        $checked = \Portal\Core\PortalAddress::check(installField('portal_address'));
+        $support = trim(installField('support_email'));
+        if ($checked['problem'] !== '') {
+            $error = 'Nothing was saved. ' . $checked['problem'];
+        } elseif ($checked['address'] === '') {
+            $error = 'Nothing was saved. Type the address people will use to reach this portal, for example '
+                   . 'https://portal.example.org. It is needed so that links in e-mails point at this portal and '
+                   . 'nowhere else. You can change it later in Admin, Settings, Organisation.';
+        } elseif ($support !== '' && (strlen($support) > 254 || filter_var($support, FILTER_VALIDATE_EMAIL) === false)) {
+            $error = 'Nothing was saved. The support e-mail address is not an e-mail address: type it as '
+                   . 'name@example.org, or leave the box empty to show none.';
+        } else {
+            $_SESSION['install_addresses'] = ['address' => $checked['address'], 'support' => $support];
+            header('Location: ?step=5');
+            exit();
+        }
+        $step = 4;
+        $isAddressStep = true;
+    }
+
+    // Step 5: The finish
+    //
+    //    Everything that turns a database with tables in it into a working,
+    //    private installation, in an order chosen so that a failure part way
+    //    leaves something the same form can simply be sent again for:
+    //
+    //      1. the ownership code, typed again
+    //      2. the database still answers, and an administrator exists
+    //      3. the three private folders, each with its "refuse everything" file
+    //      4. the key file (an existing one is KEPT)
+    //      5. the two addresses, into the settings
+    //      6. the database login file   <- from here the portal can start
+    //      7. the installed version, the lock file, and the code file removed
+    //
+    //    The login file comes after everything that can fail and be retried,
+    //    because the moment it exists this wizard can no longer be reached.
+    //    The installed version comes after it, because a database that has a
+    //    version recorded is treated as a finished portal (see step 2).
     if ($action === 'finalize') {
-        // Create _auth_keys directory if needed
-        if (is_dir(INSTALL_AUTH_DIR) === false) {
-            if (mkdir(INSTALL_AUTH_DIR, 0750, true) === false) {
-                $error = 'Failed to create _auth_keys directory. Please create it manually '
-                       . 'and ensure the web server can write to it.';
-                $step = 5;
+        $step      = 5;
+        $dbCreds   = is_array($_SESSION['install_db'] ?? null) === true ? $_SESSION['install_db'] : null;
+        $addresses = is_array($_SESSION['install_addresses'] ?? null) === true ? $_SESSION['install_addresses'] : null;
+        $writeDb   = null;
+
+        // 1. 🔑 The code AGAIN, from the form and not from the session. A
+        //    session is a cookie; this is the request that writes the
+        //    database login and makes the installation permanent, so it asks
+        //    for the one thing only the owner can read.
+        $judged = installCodeJudge(INSTALL_AUTH_DIR, installField('owner_code'));
+        if ($judged !== INSTALL_CODE_RIGHT) {
+            if ($judged === INSTALL_CODE_REPLACED) {
+                $error = INSTALL_NEW_CODE_MESSAGE;
+            } elseif ($judged === INSTALL_CODE_BLANK) {
+                $error = 'Type the installation code into the box to finish. It is the same code you typed at the start, '
+                       . 'from the same file. Nothing has been changed.';
+            } elseif ($judged === INSTALL_CODE_NO_FILE) {
+                $error = 'The file that holds the installation code could not be read just now, so nothing was done. '
+                       . 'Reload this page: the installer writes a new code file when there is none, and asks for it.';
+            } else {
+                $error = INSTALL_WRONG_CODE_MESSAGE;
+            }
+            // A code that was replaced, or a file that went, ends this
+            // session's pass as well: the code page is what comes next.
+            $ownerPassed      = installOwnerPassed();
+            $ownerCodeChanged = ($ownerPassed === false);
+        } elseif ($dbCreds === null) {
+            $error = 'The database details have been lost, most likely because the installer was left open for a long '
+                   . 'time. Please type them again: the installer keeps nothing of them. What was already built in the '
+                   . 'database is still there, and nothing has been changed.';
+            $step  = 2;
+        } elseif ($addresses === null) {
+            $error = 'The portal\'s address has not been given yet. Please fill in this page first.';
+            $step  = 4;
+            $isAddressStep = true;
+        }
+
+        // 2. The database, and somebody to sign in as.
+        if ($error === '') {
+            $writeDb = installGetDb();
+            if ($writeDb === null) {
+                $error = INSTALL_NO_CONNECTION_MESSAGE;
+                $step  = 2;
+            }
+        }
+        if ($error === '') {
+            // A finished installation nobody can sign in to is the worst
+            // result this wizard could give: it locks itself, and the only
+            // way back in is by hand. So the finish checks first.
+            $administrators = installAdministratorCount($writeDb);
+            if ($administrators < 0) {
+                $error = 'The portal\'s tables could not be read, so the installation cannot be finished yet. Go back to '
+                       . 'the step that builds the tables and press its button again.';
+                $step  = 3;
+            } elseif ($administrators === 0) {
+                $error = 'There is no administrator account yet, so nobody could sign in to the finished portal. '
+                       . 'Please create one first.';
+                $step  = 4;
             }
         }
 
+        // 3. 🔒 The private folders. Before the key and the login are
+        //    written, so that neither is ever in a folder without the file.
+        $folders = ['made' => [], 'written' => [], 'problems' => []];
         if ($error === '') {
-            $dbCreds = $_SESSION['install_db'] ?? null;
-            if ($dbCreds === null) {
-                $error = 'Database credentials lost from session. Please restart installation.';
-                $step = 2;
+            $folders = installProtectPrivateFolders(INSTALL_ROOT);
+            if ($folders['problems'] !== []) {
+                $error = 'The installation was not finished, because ' . implode(', and ', $folders['problems'])
+                       . '. In your hosting panel\'s file manager, open the folder that holds _core. Make sure the folders '
+                       . implode(', ', INSTALL_PRIVATE_FOLDERS) . ' exist there and that the website may write to them '
+                       . '(your host\'s help pages say which permissions that needs; 755 is the usual answer). Then '
+                       . 'press Finish again.';
             }
         }
 
+        // 4. 🗝️ The key file. Every password and key later saved in Settings
+        //    is encrypted with it.
+        //
+        //    AN EXISTING KEY IS KEPT. This used to write a new key every
+        //    time, without looking. On a database that already holds
+        //    encrypted settings (the "continue with what is there" choice),
+        //    that silently made every one of them unreadable for good.
+        //    A key that is "there" is exactly what the portal counts as a
+        //    key: a real file, readable, and not empty
+        //    (SecretSettings::keyFileContents()).
+        $keyWasThere = false;
         if ($error === '') {
-            // Write auth_creds.php
+            clearstatcache(true, INSTALL_ENC_KEY_FILE);
+            $keyWasThere = is_file(INSTALL_ENC_KEY_FILE) === true && is_readable(INSTALL_ENC_KEY_FILE) === true
+                && (string) @file_get_contents(INSTALL_ENC_KEY_FILE) !== '';
+            if ($keyWasThere === false) {
+                // 32 random bytes, written as 64 characters. Read back and
+                // compared before it counts: a full disk writes an empty
+                // file without complaint, and an empty key file is no key.
+                if (installWriteFile(INSTALL_ENC_KEY_FILE, bin2hex(random_bytes(32))) === false) {
+                    $error = 'The installation was not finished, because the key file (enc.key) could not be written into the '
+                           . '_auth_keys folder. Check that the disk is not full and that the website may write to that '
+                           . 'folder; if something else named enc.key is in it that is not a file, remove it. Then press '
+                           . 'Finish again.';
+                }
+            }
+        }
+
+        // 5. 🌐 The two addresses.
+        //
+        //    🧾 WHAT THIS RUN FILLED IN ITSELF IS REMEMBERED, in the session,
+        //    with the database it was filled into. WHAT WAS WRONG: this step
+        //    stores the addresses BEFORE the database login is written, so
+        //    that a failure there can be retried. But after such a failure
+        //    the address typed first was already in the database. Somebody
+        //    who then went Back and corrected it had the correction thrown
+        //    away, and the last page told them the database "already had an
+        //    address saved": true only because the installer itself had
+        //    saved it, a minute earlier. Now a value this run wrote may be
+        //    replaced by this run. A value that was there before, or that
+        //    anybody has changed since, is still kept, and the memory is
+        //    worth nothing for another database or another session.
+        if ($error === '') {
+            $filledBefore = is_array($_SESSION['install_filled'] ?? null) === true
+                && is_array($_SESSION['install_filled']['values'] ?? null) === true
+                && is_string($_SESSION['install_filled']['database'] ?? null) === true
+                && hash_equals(installDbIdentity($dbCreds), $_SESSION['install_filled']['database']) === true
+                ? $_SESSION['install_filled']['values'] : [];
+            try {
+                $finishReport['addressTyped'] = (string) ($addresses['address'] ?? '');
+                $finishReport['supportTyped'] = (string) ($addresses['support'] ?? '');
+                foreach ([
+                    'address' => [\Portal\Core\PortalAddress::SETTING, $finishReport['addressTyped']],
+                    'support' => ['portal.support.email', $finishReport['supportTyped']],
+                ] as $which => [$settingKey, $typedValue]) {
+                    $ownEarlier = is_string($filledBefore[$settingKey] ?? null) === true ? $filledBefore[$settingKey] : null;
+                    $stored     = installFillSetting($writeDb, $settingKey, $typedValue, $ownEarlier);
+                    $finishReport[$which] = $stored['value'];
+                    if ($stored['wrote'] === true) {
+                        $filledBefore[$settingKey] = $stored['value'];
+                    }
+                }
+                // Kept at once, so that it is there if a later step of this
+                // finish fails. A finish that completes throws it away.
+                $_SESSION['install_filled'] = ['database' => installDbIdentity($dbCreds), 'values' => $filledBefore];
+            } catch (\mysqli_sql_exception $e) {
+                error_log('[WebMS-Intra] Installer: could not store the web addresses: ' . $e->getMessage());
+                $error = 'The installation was not finished, because the portal\'s address could not be saved in the '
+                       . 'database. Nothing else was written. Press Finish again; if this comes back, go back to the step '
+                       . 'that builds the tables and press its button again first.';
+            }
+        }
+
+        // 6. The database login. From this line on the portal can start.
+        if ($error === '') {
             $credsContent = "<?php\n"
                           . "// Database credentials — auto-generated by installer\n"
                           . "// DO NOT commit this file to version control.\n"
@@ -1013,82 +1945,249 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                           . "    'db_name' => " . var_export($dbCreds['name'], true) . ",\n"
                           . "    'db_port' => " . var_export($dbCreds['port'], true) . ",\n"
                           . "];\n";
-
-            if (file_put_contents(INSTALL_CREDS_FILE, $credsContent) === false) {
-                $error = 'Failed to write credentials file. Please check directory permissions for _auth_keys/.';
-                $step = 5;
+            if (installWriteFile(INSTALL_CREDS_FILE, $credsContent) === false) {
+                // Whatever part of it did reach the disk is removed: a
+                // half-written login file would lock this wizard out and
+                // start a portal that cannot connect.
+                @unlink(INSTALL_CREDS_FILE);
+                $error = 'The installation was not finished, because the file that holds the database login could not be '
+                       . 'written into the _auth_keys folder. Check that the disk is not full and that the website may '
+                       . 'write to that folder, then press Finish again.';
             }
         }
 
+        // 7. The version, the lock, and the code's work is done.
         if ($error === '') {
-            // Generate encryption key (32 random bytes, hex-encoded)
-            $encKey = bin2hex(random_bytes(32));
-            if (file_put_contents(INSTALL_ENC_KEY_FILE, $encKey) === false) {
-                $error = 'Failed to write encryption key file.';
-                $step = 5;
-            }
-        }
-
-        if ($error === '') {
-            // 🆔 Record the version this DB is now at, AND clear any
-            //    maintenance flag the upgrade flow might have left
-            //    behind. We reconnect with the credentials just written
-            //    rather than reuse the test connection (which has been
-            //    closed several steps ago).
-            $writeDb = installGetDb();
-            if ($writeDb !== null) {
-                try {
-                    $stmt = $writeDb->prepare(
-                        "INSERT INTO `tblSettings` "
-                        . "(`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) "
-                        . "VALUES (NULL, 'portal.installed_version', ?, '', 0) "
-                        . "ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`)"
-                    );
-                    if ($stmt !== false) {
-                        $stmt->bind_param('s', $v);
-                        $v = INSTALL_VERSION;
-                        $stmt->execute();
-                        $stmt->close();
-                    }
-                    // 🚧 Clear maintenance flag in case a drop-and-rebuild
-                    //    or interrupted upgrade left it on.
-                    $writeDb->query(
-                        "UPDATE `tblSettings` "
-                        . "SET `settingValue` = '0' "
-                        . "WHERE `settingKey` = 'portal.maintenance.active'"
-                    );
-                } catch (\mysqli_sql_exception $e) {
-                    // 🛡️ Non-fatal — the install completes either way;
-                    //    the maintenance gate just falls back to the
-                    //    "legacy install — assume current" default.
+            // 🆔 Record the version this database is now at, and clear any
+            //    maintenance flag a drop-and-rebuild might have left on.
+            //    Not fatal: the portal runs without either (the maintenance
+            //    gate falls back to "an older install: assume current").
+            $finishReport['versionRecorded'] = false;
+            try {
+                $stmt = $writeDb->prepare(
+                    "INSERT INTO `tblSettings` "
+                    . "(`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) "
+                    . "VALUES (NULL, 'portal.installed_version', ?, '', 0) "
+                    . "ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`)"
+                );
+                if ($stmt !== false) {
+                    $v = INSTALL_VERSION;
+                    $stmt->bind_param('s', $v);
+                    $stmt->execute();
+                    $stmt->close();
+                    $finishReport['versionRecorded'] = true;
                 }
-                $writeDb->close();
+                $writeDb->query(
+                    "UPDATE `tblSettings` "
+                    . "SET `settingValue` = '0' "
+                    . "WHERE `settingKey` = 'portal.maintenance.active'"
+                );
+            } catch (\mysqli_sql_exception $e) {
+                error_log('[WebMS-Intra] Installer: could not record the installed version: ' . $e->getMessage());
             }
 
             // Create lock file to prevent re-installation
-            file_put_contents(INSTALL_LOCK_FILE, date('c') . "\n" . 'Installed by ' . $INSTALL_PRODUCT_NAME . ' installer v' . INSTALL_VERSION);
+            @file_put_contents(INSTALL_LOCK_FILE, date('c') . "\n" . 'Installed by ' . $INSTALL_PRODUCT_NAME . ' installer v' . INSTALL_VERSION);
+            @chmod(INSTALL_LOCK_FILE, 0640);
 
-            // Set restrictive permissions
-            chmod(INSTALL_CREDS_FILE, 0640);
-            chmod(INSTALL_ENC_KEY_FILE, 0640);
-            chmod(INSTALL_LOCK_FILE, 0640);
+            // 🔑 The code has done its work. Removed so that it is not left
+            //    lying in the folder that is about to hold real secrets. A
+            //    code file the owner made read-only (the code page suggests
+            //    it) is removed all the same; where the hosting will not let
+            //    it go, the last page says what is left and what to do.
+            $finishReport['codeRemoved'] = installCodeRemove(INSTALL_AUTH_DIR);
 
-            // Clear session install data
-            unset($_SESSION['install_db']);
-            unset($_SESSION['install_action']);
-            unset($_SESSION['install_db_state']);
+            $finishReport['keyWasThere'] = $keyWasThere;
+            $finishReport['folders']     = $folders;
+            $finishReport['database']    = (string) $dbCreds['name'];
 
-            header('Location: ?step=6');
-            exit();
+            // Clear everything the wizard kept in the session. The session
+            // itself is left: it may be a signed-in administrator's.
+            unset(
+                $_SESSION['install_db'],
+                $_SESSION[INSTALL_CHOICE_KEY],
+                $_SESSION['install_filled'],
+                $_SESSION['install_db_state'],
+                $_SESSION['install_db_server'],
+                $_SESSION['install_addresses'],
+                $_SESSION['install_industry'],
+                $_SESSION['install_owner'],
+                $_SESSION['install_form_token']
+            );
+
+            $justFinished = true;
+        }
+
+        if ($writeDb !== null) {
+            $writeDb->close();
         }
     }
 }
 
 /**
- * Helper: get a database connection from session credentials.
+ * 💾 Write one of the installation's own files, and make sure it arrived.
  *
- * @return mysqli|null
+ * file_put_contents() reports how many bytes it wrote, and on a full disk
+ * that can be fewer than it was given, or none, with no error raised. So the
+ * count is checked AND the file is read back and compared. The file is then
+ * made readable by its owner and the owner's group only; a host that refuses
+ * that change loses nothing.
+ *
+ * @return bool True only when the file now holds exactly `$contents`.
  */
+function installWriteFile(string $file, string $contents): bool
+{
+    if (@file_put_contents($file, $contents, LOCK_EX) !== strlen($contents)) {
+        return false;
+    }
+    clearstatcache(true, $file);
+    if (is_file($file) === false || @file_get_contents($file) !== $contents) {
+        return false;
+    }
+    @chmod($file, 0640);
+
+    return true;
+}
+
+/**
+ * 👤 How many accounts could sign in to the finished portal as its
+ * administrator: active, and a global administrator.
+ *
+ * @return int The count; -1 when the table could not be read at all.
+ */
+function installAdministratorCount(\mysqli $db): int
+{
+    try {
+        $result = $db->query('SELECT COUNT(*) FROM tblUsers WHERE isRootAdmin = 1 AND isActive = 1');
+        if ($result === false) {
+            return -1;
+        }
+        $count = (int) ($result->fetch_row()[0] ?? 0);
+        $result->free();
+
+        return $count;
+    } catch (\mysqli_sql_exception) {
+        return -1;
+    }
+}
+
+/**
+ * 🔢 How many tables whose names begin with "tbl" the database holds now:
+ * the same question step 2 asks before it calls a database empty.
+ *
+ * @return int The count; -1 when it could not be counted, which the build
+ *             step treats as "not empty" (it then builds nothing).
+ */
+function installPortalTableCount(\mysqli $db): int
+{
+    try {
+        $result = $db->query("SHOW TABLES LIKE 'tbl%'");
+        if ($result === false) {
+            return -1;
+        }
+        $count = (int) $result->num_rows;
+        $result->free();
+
+        return $count;
+    } catch (\mysqli_sql_exception) {
+        return -1;
+    }
+}
+
+/**
+ * 👥 How many accounts the database holds: every row of the table of people,
+ * switched on or off, administrator or not.
+ *
+ * @return int The count; -1 when there is no such table or it could not be
+ *             read (a database that was built only part of the way).
+ */
+function installAccountCount(\mysqli $db): int
+{
+    try {
+        $result = $db->query('SELECT COUNT(*) FROM tblUsers');
+        if ($result === false) {
+            return -1;
+        }
+        $count = (int) ($result->fetch_row()[0] ?? 0);
+        $result->free();
+
+        return $count;
+    } catch (\mysqli_sql_exception) {
+        return -1;
+    }
+}
+
+/**
+ * 🧩 Give ONE installation-wide setting its value, ONLY IF IT HOLDS NOTHING
+ * YET or holds what this run of the installer put there itself, and say what
+ * it holds afterwards.
+ *
+ * NEVER A PLAIN INSERT. The install script has already seeded a row for each
+ * of these settings, empty. An installation-wide row has nothing in its
+ * organisation column, and the table's first unique key (setting name and
+ * organisation) does not see two such rows as duplicates: MySQL never treats
+ * one "nothing" as equal to another. So on a database without the second
+ * unique key (uq_setting_key_scope, migration 187) a plain insert ADDS a
+ * second row, and the portal reads whichever it happens to find; on a
+ * database with it, the insert is refused with an error. Wrong both ways.
+ * This looks for the row first and changes it by its own number. It inserts
+ * only when there is no row at all.
+ *
+ * ONLY IF EMPTY, because the wizard may be finishing over a database that
+ * already holds a portal ("continue with what is there"). An address somebody
+ * already saved there is the one every sent e-mail's links rely on, and it is
+ * kept. The last page says so when what is stored is not what was typed.
+ *
+ * THE ONE EXCEPTION is `$ownEarlier`: the value this same run wrote into this
+ * setting during an earlier press of Finish that stopped part way. When the
+ * setting still holds exactly that, it is this run's own value and not
+ * somebody's saved one, so the corrected value replaces it. If anything else
+ * is there (somebody changed it in between), it is kept like any other.
+ *
+ * @param string|null $ownEarlier What this run itself wrote here earlier, or
+ *                                null when it wrote nothing.
+ *
+ * @return array{value: string, wrote: bool} What the setting holds now, and
+ *         whether this call is what put it there.
+ *
+ * @throws \mysqli_sql_exception When the table cannot be read or written.
+ */
+function installFillSetting(\mysqli $db, string $key, string $value, ?string $ownEarlier = null): array
+{
+    $find = $db->prepare('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL ORDER BY settingID ASC LIMIT 1');
+    $find->bind_param('s', $key);
+    $find->execute();
+    $row = $find->get_result()->fetch_assoc();
+    $find->close();
+
+    if ($row === null) {
+        $add = $db->prepare('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (NULL, ?, ?, \'\', 0)');
+        $add->bind_param('ss', $key, $value);
+        $add->execute();
+        $add->close();
+
+        return ['value' => $value, 'wrote' => true];
+    }
+
+    $held = (string) ($row['settingValue'] ?? '');
+    // An empty setting may be filled. A setting that holds this run's own
+    // earlier value may be changed, to nothing as well: a support address
+    // typed by mistake can be taken out again.
+    $isOurs = ($ownEarlier !== null && $ownEarlier !== '' && hash_equals($ownEarlier, $held) === true);
+    if (($held !== '' && $isOurs === false) || $held === $value) {
+        // Kept. It still counts as this run's own when it is the value this
+        // run wrote and nothing has changed it.
+        return ['value' => $held, 'wrote' => false];
+    }
+    $id   = (int) $row['settingID'];
+    $fill = $db->prepare('UPDATE tblSettings SET settingValue = ?, updatedAt = NOW() WHERE settingID = ?');
+    $fill->bind_param('si', $value, $id);
+    $fill->execute();
+    $fill->close();
+
+    return ['value' => $value, 'wrote' => true];
+}
+
 /**
  * 🗑️ Empty a folder, leaving the folder itself in place.
  *
@@ -1208,6 +2307,55 @@ function installElevatedAdminCheck(\mysqli $conn): string
 }
 
 /**
+ * 🧳 The tables in a database that are NOT this portal's, among those the
+ * wipe would remove (every table whose name begins with "tbl").
+ *
+ * "This portal's" means: a table the install script makes. Names are
+ * compared without regard to capitals, because some database servers store
+ * every table name in small letters.
+ *
+ * WHAT IT CANNOT DO: recognise a table an OLDER release of the portal made
+ * and a later one removed. Such a table is called "not the portal's", and
+ * the database is refused: the safe mistake. It also says nothing about
+ * tables whose names do not begin with "tbl": the wipe never touches those.
+ *
+ * @param \mysqli $conn An open connection, with the database chosen.
+ *
+ * @return list<string>|null Their names (empty when everything is the
+ *                           portal's); null when it could not be worked out,
+ *                           which the caller must treat as a refusal.
+ */
+function installTablesNotOurs(\mysqli $conn): ?array
+{
+    $script = @file_get_contents(INSTALL_SQL . DIRECTORY_SEPARATOR . 'full_schema.sql');
+    if (is_string($script) === false
+        || (int) preg_match_all('/CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+`?(tbl[A-Za-z0-9_]+)`?/i', $script, $made) < 1
+    ) {
+        return null;
+    }
+    $ours = array_flip(array_map('strtolower', $made[1]));
+
+    try {
+        $result = $conn->query("SHOW TABLES LIKE 'tbl%'");
+        if ($result === false) {
+            return null;
+        }
+        $notOurs = [];
+        while (($row = $result->fetch_array(MYSQLI_NUM)) !== null) {
+            $name = (string) $row[0];
+            if (isset($ours[strtolower($name)]) === false) {
+                $notOurs[] = $name;
+            }
+        }
+        $result->free();
+
+        return $notOurs;
+    } catch (\mysqli_sql_exception) {
+        return null;
+    }
+}
+
+/**
  * 🔌 Open the wizard's working connection, from the details step 2 kept.
  *
  * This is the connection that loads the install script and every migration,
@@ -1223,8 +2371,10 @@ function installElevatedAdminCheck(\mysqli $conn): string
  * null by showing step 2's form again with INSTALL_NO_CONNECTION_MESSAGE. That
  * message cannot say WHICH reason it was, because null carries no reason; the
  * full explanation appears once the visitor sends step 2's form again, and
- * the message tells them so. Step 5 only uses this to record the
- * version it installed, and leaves that out when there is no connection.
+ * the message tells them so. The finish (step 5) answers null the same way:
+ * it stores the portal's address through this connection, and writes nothing
+ * at all without it. (It used to carry on without one, because recording the
+ * installed version was all it did with it.)
  *
  * WHAT IT DOES NOT CATCH: a database that will not SAY how strict the
  * connection is. That is judged a warning, not a refusal, so the connection
@@ -1259,51 +2409,83 @@ function installGetDb(): ?mysqli
 }
 
 // ---------------------------------------------------------------------------
-// Prerequisites check (used in step 1)
+// The first checks (drawn at step 1)
 // ---------------------------------------------------------------------------
+// Each row says what is needed ('label'), whether it is there ('pass'), what
+// was found ('value') and, for a row that can fail, what to do about it in a
+// hosting panel ('fix'). A row with 'note' set is information: it is never a
+// pass or a fail and never hides the Continue button.
+//
+// These are a SCREEN, not a gate: a later step can still be asked for by its
+// address. That is deliberate. Each thing checked here that a later step
+// truly depends on is refused again at that step, with its own message.
+$installExtension = static function (string $name, string $label, string $why): array {
+    $loaded = extension_loaded($name);
+
+    return [
+        'label' => $label,
+        'pass'  => $loaded,
+        'value' => $loaded === true ? 'Switched on' : 'Not switched on',
+        'fix'   => $why . ' In your hosting panel, look for the list of PHP extensions for this website and tick "'
+                 . $name . '". If there is no such list, ask your hosting company to switch it on.',
+    ];
+};
+// A folder the finish will need: there and writable, or not there yet and
+// able to be made (the folder that holds _core is writable).
+$installCanHave = static function (string $name): bool {
+    $folder = INSTALL_ROOT . DIRECTORY_SEPARATOR . $name;
+
+    return is_dir($folder) === true ? is_writable($folder) : (file_exists($folder) === false && is_writable(INSTALL_ROOT) === true);
+};
+$installSchemaFile  = INSTALL_SQL . DIRECTORY_SEPARATOR . 'full_schema.sql';
+$installWebRules    = INSTALL_WEB_FOLDER . DIRECTORY_SEPARATOR . '.htaccess';
+$installWebRulesOk  = is_file($installWebRules) === true && (int) filesize($installWebRules) > 0;
+$installFoldersOk   = $installCanHave('_auth_keys') === true && $installCanHave('_uploads') === true && $installCanHave('_backups') === true;
+
 $prereqs = [
     'php_version' => [
-        'label' => 'PHP 8.4+',
+        'label' => 'PHP 8.4 or newer',
         'pass'  => version_compare(PHP_VERSION, '8.4.0', '>='),
-        'value' => PHP_VERSION,
+        'value' => 'This website runs PHP ' . PHP_VERSION,
+        'fix'   => 'The portal is written for PHP 8.4 and does not run on anything older. In your hosting panel, find the '
+                 . 'PHP version setting for this website and choose 8.4 or newer.',
     ],
-    'mysqli' => [
-        'label' => 'MySQLi extension',
-        'pass'  => extension_loaded('mysqli'),
-        'value' => extension_loaded('mysqli') ? 'Loaded' : 'Missing',
-    ],
-    'sodium' => [
-        'label' => 'Sodium extension (encryption)',
-        'pass'  => extension_loaded('sodium'),
-        'value' => extension_loaded('sodium') ? 'Loaded' : 'Missing',
-    ],
-    'json' => [
-        'label' => 'JSON extension',
-        'pass'  => extension_loaded('json'),
-        'value' => extension_loaded('json') ? 'Loaded' : 'Missing',
-    ],
-    'mbstring' => [
-        'label' => 'Multibyte String extension',
-        'pass'  => extension_loaded('mbstring'),
-        'value' => extension_loaded('mbstring') ? 'Loaded' : 'Missing',
-    ],
-    'sql_dir' => [
-        'label' => '_sql/ directory readable',
-        'pass'  => is_dir(INSTALL_SQL) && is_readable(INSTALL_SQL),
-        'value' => is_dir(INSTALL_SQL) ? 'Found' : 'Missing',
-    ],
+    'mysqli'   => $installExtension('mysqli', 'PHP can talk to a MySQL database (the "mysqli" extension)', 'Everything the portal keeps is in the database.'),
+    'sodium'   => $installExtension('sodium', 'PHP can encrypt (the "sodium" extension)', 'Passwords and keys saved in Settings are stored encrypted.'),
+    'json'     => $installExtension('json', 'PHP can read and write JSON (the "json" extension)', 'Settings, backups and the programming interface all use it.'),
+    'mbstring' => $installExtension('mbstring', 'PHP can handle text in every alphabet (the "mbstring" extension)', 'Names and messages are not always in plain English letters.'),
     'schema_file' => [
-        'label' => 'full_schema.sql exists',
-        'pass'  => is_readable(INSTALL_SQL . DIRECTORY_SEPARATOR . 'full_schema.sql'),
-        'value' => is_readable(INSTALL_SQL . DIRECTORY_SEPARATOR . 'full_schema.sql') ? 'Found' : 'Missing',
+        'label' => 'The database scripts were uploaded (the _sql folder)',
+        'pass'  => is_dir(INSTALL_SQL) === true && is_readable($installSchemaFile) === true,
+        'value' => is_dir(INSTALL_SQL) === false ? 'The folder _sql is missing' : (is_readable($installSchemaFile) === true ? 'Found' : 'The file full_schema.sql is missing from it'),
+        'fix'   => 'The installer builds the database from the files in the folder _sql, beside _core. Upload that folder '
+                 . 'again from the package, whole.',
     ],
-    'auth_dir_writable' => [
-        'label' => '_auth_keys/ writable (or creatable)',
-        'pass'  => (is_dir(INSTALL_AUTH_DIR) && is_writable(INSTALL_AUTH_DIR))
-                   || is_writable(INSTALL_ROOT),
-        'value' => is_dir(INSTALL_AUTH_DIR)
-                   ? (is_writable(INSTALL_AUTH_DIR) ? 'Writable' : 'Not writable')
-                   : (is_writable(INSTALL_ROOT) ? 'Can create' : 'Not writable'),
+    'private_folders' => [
+        'label' => 'The portal can keep its private folders (_auth_keys, _uploads and _backups)',
+        'pass'  => $installFoldersOk,
+        'value' => $installFoldersOk === true ? 'Can be made and written to' : 'At least one cannot be made or written to',
+        'fix'   => 'These three folders hold the database login and key, everything people upload, and the database '
+                 . 'backups. The installer makes them beside _core. In your hosting panel\'s file manager, open the folder '
+                 . 'that holds _core and either allow the website to write to it, or create the three folders yourself and '
+                 . 'allow the website to write to each (your host\'s help pages say which permissions that needs; 755 '
+                 . 'is the usual answer).',
+    ],
+    'web_rules' => [
+        'label' => 'The web folder\'s rules file (.htaccess) was uploaded',
+        'pass'  => $installWebRulesOk,
+        'value' => $installWebRulesOk === true ? 'Found' : 'Missing, or empty',
+        'fix'   => 'Files whose names begin with a full stop are hidden by many file managers, and are often left behind '
+                 . 'when a folder is uploaded. Without this one, no address in the portal works except its front page. In '
+                 . 'your file manager switch on "show hidden files", then upload the file named .htaccess from the '
+                 . 'package\'s web folder into this website\'s web folder (the folder that holds index.php and assets).',
+    ],
+    'channel' => [
+        'label'  => 'Which copy of the portal this is',
+        'pass'   => true,
+        'note'   => true,
+        'value'  => 'This is ' . $installChannelWords['copy'] . '. ' . $installChannelWords['how'],
+        'advice' => $installChannelWords['advice'],
     ],
 ];
 $allPrereqsPassed = true;
@@ -1315,23 +2497,110 @@ foreach ($prereqs as $p) {
 }
 
 // ---------------------------------------------------------------------------
-// Render the page
+// Which page is drawn
 // ---------------------------------------------------------------------------
-$stepTitles = [
-    1 => 'Welcome',
-    2 => 'Database Configuration',
-    3 => 'Install Schema',
-    4 => 'Create Admin User',
-    5 => 'Finalize Setup',
-    6 => 'Installation Complete',
-];
-$pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
+// One of these, in this order of precedence. Without the ownership code
+// nothing but the code page is ever drawn, whatever step the address asks for
+// and whatever a form said. `done` is tested first only because the finish
+// has by then thrown the session's pass away; it is set in one place, by a
+// finish that passed the gate AND was given the code again.
+//
+// 🚦 The "Build the tables" page is never drawn for a database no choice is
+//    held for: the choice page is drawn in its place. With no choice held,
+//    the database was not empty when the database step looked at it (an
+//    empty one is given its choice there and then), so the question has
+//    still to be answered. This is what somebody meets who opens the build
+//    step by its address, or lands on it with the browser's Back button,
+//    after typing another database.
+if ($step === 3 && $isChoiceStep === false && $isIndustryStep === false && $isAddressStep === false
+    && isset($_SESSION['install_db']) === true && installChoiceHeld() === ''
+) {
+    $step = 2;
+    $isChoiceStep = true;
+}
+if ($justFinished === true) {
+    $installPage = 'done';
+} elseif ($ownerPassed === false) {
+    $installPage = 'code';
+} elseif ($isIndustryStep === true) {
+    $installPage = 'organisation';
+} elseif ($isChoiceStep === true) {
+    $installPage = 'existing';
+} elseif ($isAddressStep === true) {
+    $installPage = 'addresses';
+} else {
+    $installPage = [1 => 'checks', 2 => 'database', 3 => 'tables', 4 => 'administrator', 5 => 'finish'][$step];
+}
+
+// The stages shown as the row of numbers at the top, and which one each page
+// belongs to. Seven, not the old six: the code and the web addresses are
+// stages a person passes through, and a row that skipped them would show
+// the same number for two different pages.
+$installStages = ['Your code', 'Checks', 'Database', 'Tables', 'Administrator', 'Web addresses', 'Finish'];
+$installStage  = [
+    'code' => 1, 'checks' => 2, 'organisation' => 2, 'database' => 3, 'existing' => 3, 'tables' => 4,
+    'administrator' => 5, 'addresses' => 6, 'finish' => 7, 'done' => 8,
+][$installPage];
+
+$pageTitle = 'Install — ' . [
+    'code'          => 'Your installation code',
+    'checks'        => 'Checks',
+    'organisation'  => 'Kind of organisation',
+    'database'      => 'The database',
+    'existing'      => 'A database that is not empty',
+    'tables'        => 'Build the tables',
+    'administrator' => 'The first administrator',
+    'addresses'     => 'Web addresses',
+    'finish'        => 'Finish',
+    'done'          => 'Installation complete',
+][$installPage];
+
+// What the address and administrator pages need from the database, read
+// only for those pages and only once the code has been given.
+$installAdministrators = 0;
+if ($installPage === 'administrator') {
+    $installPeek = installGetDb();
+    if ($installPeek !== null) {
+        $installAdministrators = max(0, installAdministratorCount($installPeek));
+        $installPeek->close();
+    }
+}
+// The address offered on the Web addresses page: what was typed last time,
+// else what was kept, else the address this very request arrived at. That
+// last one is only a suggestion for the person to check, because a visitor
+// chooses it; it is run through the same check as anything typed, and left
+// out when it does not pass. (PortalAddress::fromRequest() works it out the
+// same way, but belongs to the part of that file that needs the portal.)
+$installAddressOffered = '';
+$installSupportOffered = '';
+if ($installPage === 'addresses' || $installPage === 'finish') {
+    $kept = is_array($_SESSION['install_addresses'] ?? null) === true ? $_SESSION['install_addresses'] : [];
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && installField('action') === 'web_addresses') {
+        $installAddressOffered = installField('portal_address');
+        $installSupportOffered = installField('support_email');
+    } elseif ($kept !== []) {
+        $installAddressOffered = (string) ($kept['address'] ?? '');
+        $installSupportOffered = (string) ($kept['support'] ?? '');
+    } else {
+        $https  = strtolower(is_string($_SERVER['HTTPS'] ?? null) === true ? $_SERVER['HTTPS'] : '');
+        $scheme = ($https !== '' && $https !== 'off') ? 'https' : 'http';
+        $host   = is_string($_SERVER['HTTP_HOST'] ?? null) === true ? $_SERVER['HTTP_HOST'] : '';
+        $guess  = $host === '' ? ['address' => '', 'problem' => ''] : \Portal\Core\PortalAddress::check($scheme . '://' . $host);
+        $installAddressOffered = $guess['problem'] === '' ? $guess['address'] : '';
+    }
+}
+
+// Nothing here is kept by a browser or a cache in between, and no search
+// engine is invited in: these pages hold a form for a database password.
+header('Cache-Control: no-store');
+header('X-Robots-Tag: noindex, nofollow');
 
 ?><!doctype html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
     <title><?php echo htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8'); ?></title>
     <?php
         // 🎨 Brand-aware favicons. Default is WebMS Intra; once the admin picks
@@ -1528,10 +2797,32 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
          * =================================================================*/
         .step-row {
             display: flex;
+            flex-wrap: wrap;
             justify-content: center;
             align-items: center;
             gap: 0.75rem;
-            margin-bottom: 2rem;
+            margin: 0 0 2rem;
+            padding: 0;
+            list-style: none;
+        }
+        /* Seven dots do not fit across a narrow phone at full size. */
+        @media (max-width: 575.98px) {
+            .step-row { gap: 0.375rem; }
+            .step-row .step-badge { width: 2rem; height: 2rem; font-size: 0.8125rem; }
+        }
+        /* Read out by a screen reader, not shown. Written here, not borrowed
+         * from Bootstrap, so the dots still read as bare numbers when the
+         * outside stylesheet does not load. */
+        .install-sr {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            margin: -1px;
+            padding: 0;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
         }
         .step-badge {
             width: 2.25rem;
@@ -1675,6 +2966,10 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
             padding-top: 1.5rem;
             border-top: 1px solid var(--portal-border);
             align-items: center;
+            /* Two buttons with long labels do not fit side by side on a
+             * narrow phone: the second drops below the first. */
+            flex-wrap: wrap;
+            gap: 0.75rem;
         }
         .install-card .btn {
             font-weight: 500;
@@ -1728,29 +3023,44 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
         }
 
         /* =====================================================================
-         * Prerequisites table (step 1) — kept readable but tighter
+         * The list of checks (step 1), and the summaries at the finish.
+         * A list, not a table: each row has a sentence of "what to do"
+         * under it, and a table cannot hold that on a narrow phone.
          * =================================================================*/
-        .install-card .table {
-            margin-bottom: 1.5rem;
-            font-size: 0.9375rem;
+        .install-checks {
+            list-style: none;
+            margin: 0 0 1.5rem;
+            padding: 0;
+            border-top: 1px solid var(--portal-border);
         }
-        .install-card .table thead th {
-            color: var(--portal-text-muted);
-            font-weight: 600;
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
+        .install-check {
+            padding: 0.75rem 0;
             border-bottom: 1px solid var(--portal-border);
-            padding: 0.625rem 0.5rem;
-            background: transparent;
+            overflow-wrap: anywhere;
         }
-        .install-card .table td {
-            padding: 0.6875rem 0.5rem;
-            vertical-align: middle;
-            border-color: var(--portal-border);
+        .install-check > span,
+        .install-check > strong { display: block; }
+        .install-check-label { font-weight: 600; margin-top: 0.125rem; }
+        .install-check-value { color: var(--portal-text-muted); }
+        .install-check-fix   { margin-top: 0.375rem; font-size: 0.875rem; }
+        .prereq-pass { color: var(--portal-success); font-weight: 500; font-size: 0.8125rem; }
+        .prereq-fail { color: var(--portal-danger);  font-weight: 500; font-size: 0.8125rem; }
+        .prereq-warn { color: var(--portal-warning); font-weight: 500; font-size: 0.8125rem; }
+        .prereq-note { color: var(--portal-text-muted); font-weight: 500; font-size: 0.8125rem; }
+
+        /* The numbered instructions on the code page. */
+        .install-steps { padding-left: 1.25rem; margin-bottom: 1.5rem; }
+        .install-steps li { margin-bottom: 0.5rem; overflow-wrap: anywhere; }
+
+        /* The box the code is typed into: wide letters, shown as capitals
+         * whatever is typed (the installer does not mind which). */
+        .install-card .install-code-input {
+            font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            max-width: 22rem;
         }
-        .prereq-pass { color: var(--portal-success); font-weight: 500; }
-        .prereq-fail { color: var(--portal-danger);  font-weight: 500; }
+        .install-card .install-code-input::placeholder { letter-spacing: 0.04em; }
 
         /* =====================================================================
          * 🔗 Defensive anchor styling — bind <a> directly to the brand link
@@ -1955,51 +3265,107 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
         </button>
     </div>
 
-    <!-- Header -->
+    <!-- Header. The version is shown only once the ownership code has been
+         given: which release a server runs is the first thing somebody
+         looking for a way in wants to know. -->
     <div class="install-header">
         <h1><?php echo htmlspecialchars($INSTALL_PRODUCT_NAME, ENT_QUOTES, 'UTF-8'); ?></h1>
-        <p class="install-tagline">Installation Wizard &mdash; v<?php echo INSTALL_VERSION; ?></p>
+        <p class="install-tagline">Installation<?php if ($ownerPassed === true): ?> &mdash; version <?php echo htmlspecialchars(INSTALL_VERSION, ENT_QUOTES, 'UTF-8'); ?><?php endif; ?></p>
     </div>
 
-    <!-- Step indicator -->
-    <div class="step-row">
-        <?php for ($i = 1; $i <= 6; $i++): ?>
+    <!-- Step indicator: one numbered dot for each stage, named for a screen
+         reader and on hover. -->
+    <ol class="step-row" aria-label="The stages of the installation">
+        <?php foreach ($installStages as $index => $stageName): ?>
             <?php
-            $cls = 'step-pending';
-            if ($i < $step) {
-                $cls = 'step-done';
-            } elseif ($i === $step) {
-                $cls = 'step-active';
+            $number = $index + 1;
+            $cls    = 'step-pending';
+            $when   = 'to come';
+            if ($number < $installStage) {
+                $cls  = 'step-done';
+                $when = 'done';
+            } elseif ($number === $installStage) {
+                $cls  = 'step-active';
+                $when = 'this page';
             }
             ?>
-            <span class="step-badge <?php echo $cls; ?>"><?php echo $i; ?></span>
-        <?php endfor; ?>
-    </div>
+            <li class="step-badge <?php echo $cls; ?>" title="<?php echo htmlspecialchars($stageName, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $number === $installStage ? ' aria-current="step"' : ''; ?>>
+                <span class="install-sr">Stage </span><?php echo $number; ?><span class="install-sr">: <?php echo htmlspecialchars($stageName . ' (' . $when . ')', ENT_QUOTES, 'UTF-8'); ?></span>
+            </li>
+        <?php endforeach; ?>
+    </ol>
 
     <!-- Error / success messages -->
     <?php if ($error !== ''): ?>
-        <div class="alert alert-danger install-card"><?php echo htmlspecialchars($error, ENT_QUOTES, 'UTF-8'); ?></div>
+        <div class="alert alert-danger install-card" role="alert" id="install-error"><?php echo htmlspecialchars($error, ENT_QUOTES, 'UTF-8'); ?></div>
     <?php endif; ?>
     <?php if ($success !== ''): ?>
         <div class="alert alert-success install-card"><?php echo htmlspecialchars($success, ENT_QUOTES, 'UTF-8'); ?></div>
     <?php endif; ?>
 
     <!-- Step content -->
-    <div class="card install-card shadow-sm">
+    <div class="card install-card shadow-sm" id="install-page" data-install-page="<?php echo htmlspecialchars($installPage, ENT_QUOTES, 'UTF-8'); ?>">
         <div class="card-body p-4">
 
-<?php if ($isIndustryStep === true): ?>
+<?php if ($installPage === 'code'): ?>
+            <!-- THE OWNERSHIP CODE. Everything on this page is the same for
+                 every visitor: it says nothing about the server. -->
+            <h2 class="h5 mb-3">First, show that this is your hosting</h2>
+            <p>Anybody on the internet can open this page. So before it does anything, the installer has to know that you are the person who put the portal on this server. It has written a code into a file on the server. Only somebody who can open the hosting account&rsquo;s files can read it.</p>
+
+            <?php if ($ownerCodeChanged === true && $ownerCodeProblem === ''): ?>
+                <div class="alert alert-info" id="install-code-changed">
+                    <strong>The code has changed since you typed it.</strong>
+                    That happens when ten wrong codes are tried in a row, by anybody, or when the file was removed. Open the file again and type the code that is in it now. Nothing you have done so far has been lost.
+                </div>
+            <?php endif; ?>
+
+            <?php if ($ownerCodeProblem !== ''): ?>
+                <div class="alert alert-warning" id="install-code-problem">
+                    <strong>The installer could not write its code file,</strong> because <?php echo htmlspecialchars($ownerCodeProblem, ENT_QUOTES, 'UTF-8'); ?>.
+                    <p class="mb-0 mt-2"><strong>What to do:</strong> in your hosting panel&rsquo;s file manager, open the folder you uploaded the portal into (the one that holds <code>_apps</code>, <code>_core</code> and <code>_install</code>). If there is no folder named <code>_auth_keys</code> there, create one. Then allow the website to write to it: your host&rsquo;s help pages say which permissions that needs, and 755 is the usual answer. Come back and press the button below.</p>
+                </div>
+                <a href="?step=1" class="btn btn-primary">Try again</a>
+            <?php else: ?>
+                <h3 class="h6 mt-4 mb-2">Where the code is</h3>
+                <ol class="install-steps">
+                    <li>Open your hosting panel&rsquo;s <strong>file manager</strong>: the page where the portal&rsquo;s files were uploaded.</li>
+                    <li>Go to the folder the portal was uploaded into. It is the one that holds the folders <code>_apps</code>, <code>_core</code> and <code>_install</code>, one level above the web folder (the folder that holds <code>index.php</code>).</li>
+                    <li>Open the folder <code>_auth_keys</code>. The installer has just made it; if you do not see it, press the file manager&rsquo;s Refresh or Reload button.</li>
+                    <li>Open the file <code>install-code.php</code> with <strong>View</strong> or <strong>Edit</strong>, and do not change it. If your file manager will not open it, download it and open it with any text editor, such as Notepad.</li>
+                    <li>The code is on the line that begins <strong>YOUR CODE IS</strong>: sixteen letters in four groups of four.</li>
+                </ol>
+
+                <form method="post" autocomplete="off">
+                    <?php echo installTokenField(); ?>
+                    <input type="hidden" name="action" value="owner_code">
+                    <div class="mb-3">
+                        <label for="owner_code" class="form-label">Installation code</label>
+                        <input type="text" class="form-control install-code-input" id="owner_code" name="owner_code"
+                               required maxlength="40" autocomplete="off" autocapitalize="characters" spellcheck="false"
+                               placeholder="XXXX-XXXX-XXXX-XXXX" aria-describedby="owner_code_help">
+                        <div class="form-text" id="owner_code_help">Capital or small letters, with or without the dashes. There are no digits in it.</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Continue &rarr;</button>
+                </form>
+                <p class="text-muted small mt-3 mb-0">After ten wrong codes in a row the installer writes a new code into the same file. If your code is refused, open the file again.</p>
+                <p class="text-muted small mt-2 mb-0" id="install-code-readonly">If the code keeps changing because somebody else keeps sending wrong ones, set the file <code>install-code.php</code> to read-only in the file manager after you have read it (usually under &ldquo;Permissions&rdquo;): the code then stays as it is.</p>
+                <p class="text-muted small mt-2 mb-0" id="install-code-again">If you are asked for this code again part way through, the installer was left open too long and has forgotten where it was. Type the code again. The database details have to be typed again too; what was already built in the database is kept.</p>
+            <?php endif; ?>
+
+<?php elseif ($installPage === 'organisation'): ?>
             <!-- STEP 1.5: Organisation Type — picks the product brand preset (#296) -->
             <h2 class="h5 mb-3">What kind of organisation is this?</h2>
-            <p>The portal can ship as a generic management system, or as a tailored sub-brand (e.g. <strong>ChurchMS</strong> for places of worship). Your choice affects only the visible product name, tagline, and default assets — every app and feature remains available.</p>
-            <p class="text-muted small">You can change this later via Admin &rarr; Settings &rarr; <code>portal.industry</code>.</p>
+            <p>This decides the name the portal goes by and the artwork it starts with. For a place of worship it is called <strong>ChurchMS</strong>; the general choice keeps the name <strong>WebMS Intra</strong>. Every feature is there whichever you choose.</p>
+            <p class="text-muted small">It can be changed later in Admin, Settings, where it is called <code>portal.industry</code>.</p>
 
             <form method="post" autocomplete="off">
+                <?php echo installTokenField(); ?>
                 <input type="hidden" name="action" value="select_industry">
                 <input type="hidden" name="step" value="1.5">
 
                 <div class="mb-3">
-                    <label for="industry" class="form-label">Organisation type</label>
+                    <label for="industry" class="form-label">Kind of organisation</label>
                     <select id="industry" name="industry" class="form-select" required>
                         <?php foreach ($INSTALL_BRAND_PRESETS as $key => $preset):
                             // Skip the unnamed alias of generic — '' and 'generic' map to the same preset
@@ -2009,51 +3375,55 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
                             <option value="<?php echo htmlspecialchars((string) $key, ENT_QUOTES, 'UTF-8'); ?>"
                                     <?php echo $isSelected === true ? 'selected' : ''; ?>>
                                 <?php echo htmlspecialchars((string) ($preset['displayLabel'] ?? $key), ENT_QUOTES, 'UTF-8'); ?>
-                                — will install as <?php echo htmlspecialchars((string) ($preset['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
+                                — will be called <?php echo htmlspecialchars((string) ($preset['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
                     <div class="form-text">
-                        Picking <em>Generic</em> keeps the historical <strong>WebMS Intra</strong> branding.
-                        Picking <em>Church / Place of Worship</em> rebrands the install to <strong>ChurchMS</strong>.
-                        Other sub-brands (School, Charity, Community, Small Business) ship functional starter artwork rather than designer-finished marks (#306) — safe to install, but a designer pass on the wordmark is recommended before using one as your public-facing brand.
+                        The school, charity, community and small-business choices come with simple starter artwork, not finished logos. They are fine to install, but worth replacing with your own artwork before the public sees it.
                     </div>
                 </div>
 
-                <div class="d-flex gap-2">
+                <div class="d-flex justify-content-between">
                     <a href="?step=1" class="btn btn-outline-secondary">&larr; Back</a>
                     <button type="submit" class="btn btn-primary">Continue &rarr;</button>
                 </div>
             </form>
 
-<?php elseif ($step === 1): ?>
-            <!-- STEP 1: Welcome & Prerequisites -->
-            <h2 class="h5 mb-3">Welcome</h2>
-            <p>This wizard will guide you through installing <?php echo htmlspecialchars($INSTALL_PRODUCT_NAME, ENT_QUOTES, 'UTF-8'); ?>. Before proceeding, let's check that your server meets the requirements.</p>
+<?php elseif ($installPage === 'checks'): ?>
+            <!-- STEP 1: the first checks -->
+            <h2 class="h5 mb-3">Checks</h2>
+            <p>Thank you. Before anything is installed, here is what <?php echo htmlspecialchars($INSTALL_PRODUCT_NAME, ENT_QUOTES, 'UTF-8'); ?> needs from this server, and whether it is there.</p>
 
-            <h3 class="h6 mt-4 mb-2">Server Prerequisites</h3>
-            <table class="table table-sm">
-                <thead><tr><th>Requirement</th><th>Status</th><th>Value</th></tr></thead>
-                <tbody>
-                <?php foreach ($prereqs as $p): ?>
-                    <tr>
-                        <td><?php echo htmlspecialchars($p['label'], ENT_QUOTES, 'UTF-8'); ?></td>
-                        <td>
-                            <?php if ($p['pass'] === true): ?>
-                                <span class="prereq-pass">&#10004; Pass</span>
-                            <?php else: ?>
-                                <span class="prereq-fail">&#10008; Fail</span>
-                            <?php endif; ?>
-                        </td>
-                        <td class="text-muted"><?php echo htmlspecialchars($p['value'], ENT_QUOTES, 'UTF-8'); ?></td>
-                    </tr>
+            <ul class="install-checks" id="install-checks">
+                <?php foreach ($prereqs as $checkKey => $p): ?>
+                    <?php
+                    $isNote  = ($p['note'] ?? false) === true;
+                    $assumed = ($checkKey === 'channel' && $installChannelWords['assumed'] === true);
+                    ?>
+                    <li class="install-check" data-check="<?php echo htmlspecialchars((string) $checkKey, ENT_QUOTES, 'UTF-8'); ?>">
+                        <?php if ($isNote === true): ?>
+                            <span class="<?php echo $assumed === true ? 'prereq-warn' : 'prereq-note'; ?>"><?php echo $assumed === true ? '&#9888; Assumed' : '&#9432; For your information'; ?></span>
+                        <?php elseif ($p['pass'] === true): ?>
+                            <span class="prereq-pass">&#10004; In order</span>
+                        <?php else: ?>
+                            <span class="prereq-fail">&#10008; Needs attention</span>
+                        <?php endif; ?>
+                        <strong class="install-check-label"><?php echo htmlspecialchars($p['label'], ENT_QUOTES, 'UTF-8'); ?></strong>
+                        <span class="install-check-value"><?php echo htmlspecialchars($p['value'], ENT_QUOTES, 'UTF-8'); ?></span>
+                        <?php if ($isNote === false && $p['pass'] === false): ?>
+                            <span class="install-check-fix"><strong>What to do:</strong> <?php echo htmlspecialchars((string) ($p['fix'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+                        <?php endif; ?>
+                        <?php foreach (($p['advice'] ?? []) as $advice): ?>
+                            <span class="install-check-fix"><?php echo htmlspecialchars((string) $advice, ENT_QUOTES, 'UTF-8'); ?></span>
+                        <?php endforeach; ?>
+                    </li>
                 <?php endforeach; ?>
-                </tbody>
-            </table>
+            </ul>
 
             <p class="text-muted small">
-                Your database is checked separately, at the next step. It cannot be
-                checked here, because the wizard has to connect to it first and it does
+                Your database is checked separately, at the database step. It cannot be
+                checked here, because the installer has to connect to it first and it does
                 not yet know where it is or how to sign in. Once it connects it will
                 tell you which database product and version you are running, and whether
                 it is one this portal supports.
@@ -2062,64 +3432,74 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
             <?php if ($allPrereqsPassed === true): ?>
                 <a href="?step=1.5" class="btn btn-primary">Continue &rarr;</a>
             <?php else: ?>
-                <div class="alert alert-warning mt-3 mb-0">
-                    Some prerequisites are not met. Please resolve the issues above before continuing.
+                <div class="alert alert-warning mt-3">
+                    Something above needs attention before the portal can be installed. Each one says what to do. When you have done it, check again.
                 </div>
+                <a href="?step=1" class="btn btn-outline-secondary">Check again</a>
             <?php endif; ?>
 
-<?php elseif ($step === 2): ?>
-            <!-- STEP 2: Database Configuration -->
-            <h2 class="h5 mb-3">Database Configuration</h2>
-            <p>Enter your MySQL database credentials. If the database does not exist, the installer will attempt to create it.</p>
-            <p class="text-muted small">On shared hosting (e.g. DreamHost), you may need to create the database via your hosting control panel first.</p>
+<?php elseif ($installPage === 'database'): ?>
+            <!-- STEP 2: the database -->
+            <?php
+            // What was typed, shown again after a refusal. NOT the password:
+            // a password is never printed back into a page.
+            $typedOr = static fn (string $name, string $default): string => array_key_exists($name, $_POST) === true ? installField($name) : $default;
+            ?>
+            <h2 class="h5 mb-3">The database</h2>
+            <p>The portal keeps everything in a MySQL database. Your hosting panel has a page for databases, often called &ldquo;MySQL Databases&rdquo;. Create an empty database there and a database user, give that user full rights to the database, then type the details below exactly as the panel shows them.</p>
+            <p class="text-muted small" id="install-database-button">Pressing the button tests the connection and looks at what the database holds. If there is no database of the name you type and this user is allowed to create one, the button creates it, empty. No table is built yet, and nothing in a database that is already there is changed.</p>
 
             <form method="post" autocomplete="off">
+                <?php echo installTokenField(); ?>
                 <input type="hidden" name="action" value="db_config">
                 <input type="hidden" name="step" value="2">
 
                 <div class="mb-3">
-                    <label for="db_host" class="form-label">Database Host</label>
+                    <label for="db_host" class="form-label">Database host</label>
                     <input type="text" class="form-control" id="db_host" name="db_host"
-                           value="<?php echo htmlspecialchars($_POST['db_host'] ?? 'localhost', ENT_QUOTES, 'UTF-8'); ?>" required>
-                    <div class="form-text">Usually <code>localhost</code> or a hostname provided by your host.</div>
+                           value="<?php echo htmlspecialchars($typedOr('db_host', 'localhost'), ENT_QUOTES, 'UTF-8'); ?>" required>
+                    <div class="form-text">Often <code>localhost</code>. Some hosts give the database a host name of its own; the panel shows it.</div>
                 </div>
 
                 <div class="row">
                     <div class="col-md-8 mb-3">
-                        <label for="db_user" class="form-label">Database Username</label>
+                        <label for="db_user" class="form-label">Database user name</label>
                         <input type="text" class="form-control" id="db_user" name="db_user"
-                               value="<?php echo htmlspecialchars($_POST['db_user'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" required>
+                               value="<?php echo htmlspecialchars($typedOr('db_user', ''), ENT_QUOTES, 'UTF-8'); ?>" required>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label for="db_port" class="form-label">Port</label>
-                        <input type="number" class="form-control" id="db_port" name="db_port"
-                               value="<?php echo (int) ($_POST['db_port'] ?? 3306); ?>">
+                        <input type="number" class="form-control" id="db_port" name="db_port" min="1" max="65535"
+                               value="<?php echo (int) $typedOr('db_port', '3306'); ?>">
+                        <div class="form-text">3306 unless your host says otherwise.</div>
                     </div>
                 </div>
 
                 <div class="mb-3">
-                    <label for="db_pass" class="form-label">Database Password</label>
-                    <input type="password" class="form-control" id="db_pass" name="db_pass"
-                           value="<?php echo htmlspecialchars($_POST['db_pass'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                    <label for="db_pass" class="form-label">Database password</label>
+                    <input type="password" class="form-control" id="db_pass" name="db_pass" autocomplete="off">
+                    <?php if ($error !== ''): ?>
+                        <div class="form-text">Please type the password again: it is never shown back.</div>
+                    <?php endif; ?>
                 </div>
 
                 <div class="mb-3">
-                    <label for="db_name" class="form-label">Database Name</label>
+                    <label for="db_name" class="form-label">Database name</label>
                     <input type="text" class="form-control" id="db_name" name="db_name"
-                           value="<?php echo htmlspecialchars($_POST['db_name'] ?? 'webms_intra', ENT_QUOTES, 'UTF-8'); ?>" required>
-                    <div class="form-text">If this database does not exist, the installer will try to create it.</div>
+                           value="<?php echo htmlspecialchars($typedOr('db_name', 'webms_intra'), ENT_QUOTES, 'UTF-8'); ?>" required>
+                    <div class="form-text">The name of the empty database you made. If there is no database of this name and this user is allowed to create one, the installer creates it.</div>
                 </div>
 
                 <div class="d-flex justify-content-between">
-                    <a href="?step=1" class="btn btn-outline-secondary">&larr; Back</a>
-                    <button type="submit" class="btn btn-primary">Test Connection &amp; Continue &rarr;</button>
+                    <a href="?step=1.5" class="btn btn-outline-secondary">&larr; Back</a>
+                    <button type="submit" class="btn btn-primary">Test the connection &rarr;</button>
                 </div>
             </form>
 
-<?php elseif ($isChoiceStep === true): ?>
+<?php elseif ($installPage === 'existing'): ?>
             <!-- STEP 2.5: Existing-data choice -->
             <?php
-            $stateInfo  = $_SESSION['install_db_state'] ?? ['state' => DB_STATE_PARTIAL];
+            $stateInfo  = is_array($_SESSION['install_db_state'] ?? null) === true ? $_SESSION['install_db_state'] : ['state' => DB_STATE_PARTIAL];
             $stateCode  = (string) ($stateInfo['state'] ?? DB_STATE_PARTIAL);
             $tableCount = (int) ($stateInfo['table_count'] ?? 0);
             $installedV = $stateInfo['installed_version'] ?? null;
@@ -2135,12 +3515,18 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
                 . DIRECTORY_SEPARATOR . '_install'
                 . DIRECTORY_SEPARATOR . 'upgrade-policy.php');
             $confirmExpected = ((bool) ($policyArr['require_hostname_confirmation_for_drop'] ?? true))
-                ? ($_SERVER['HTTP_HOST'] ?? 'DROP')
+                ? (is_string($_SERVER['HTTP_HOST'] ?? null) === true ? $_SERVER['HTTP_HOST'] : 'DROP')
                 : 'DROP';
+            // 🪪 Which database this page is about, and 👥 how many accounts
+            //    it held when the database step looked: -1 when they could
+            //    not be counted (no table of people, in a database built
+            //    only part of the way).
+            $existingDb       = is_array($_SESSION['install_db'] ?? null) === true ? $_SESSION['install_db'] : [];
+            $existingAccounts = is_int($stateInfo['accounts'] ?? null) === true ? $stateInfo['accounts'] : -1;
             ?>
             <h2 class="h5 mb-3"><?php echo $isCurrent === true
                 ? 'This portal is already installed and up to date'
-                : 'Existing Database Detected'; ?></h2>
+                : 'This database is not empty'; ?></h2>
 
             <?php
             // 🛢️ Same database version panel as step 3 — shown here too, because
@@ -2181,13 +3567,25 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
                     <code><?php echo htmlspecialchars(INSTALL_VERSION, ENT_QUOTES, 'UTF-8'); ?></code>
                     — an upgrade is needed.
                 </div>
+            <?php elseif ($isPartial === true && $installedV === null): ?>
+                <?php
+                // ✍️ "No finished installation is RECORDED", never "none was
+                //    ever finished". The installer cannot tell an install
+                //    that stopped part way from a working portal whose
+                //    version was never written down (the version has only
+                //    been recorded since May 2026) or was emptied. It used to
+                //    say "no installation was ever finished in it" to
+                //    somebody looking at a portal with three people in it.
+                ?>
+                <div class="alert alert-warning" id="install-existing-unfinished">
+                    <strong>This database already holds <?php echo $tableCount; ?> of the portal&rsquo;s tables, and no finished installation is recorded in it.</strong>
+                    That is what this installer leaves behind when it is interrupted part way: for example when it was left open so long that it forgot where it was. It is also what a working portal looks like if it was installed before the portal began to record its version. The number of accounts below helps to tell which this is: an interrupted installation holds none, or only the administrator it had just made. You can carry on with what is there, or wipe it and start again.
+                </div>
             <?php elseif ($isPartial === true): ?>
-                <div class="alert alert-warning">
-                    <strong>A previous installation didn't complete.</strong>
-                    The database has <?php echo $tableCount; ?> portal tables
-                    but the installation lock file is missing.
-                    You can either continue from where you left off (your data
-                    will be preserved) or drop the existing tables and start fresh.
+                <div class="alert alert-warning" id="install-existing-finished">
+                    <strong>This database already holds a portal,</strong> installed at version
+                    <code><?php echo htmlspecialchars((string) $installedV, ENT_QUOTES, 'UTF-8'); ?></code>, with <?php echo $tableCount; ?> tables.
+                    These files have not been set up to use it yet. You can carry on with what is there, which keeps everything in it, or wipe it and start again.
                 </div>
             <?php elseif ($isForce === true): ?>
                 <div class="alert alert-danger">
@@ -2201,7 +3599,20 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
                 </div>
             <?php endif; ?>
 
+            <p id="install-existing-accounts">
+                This page is about the database <code><?php echo htmlspecialchars((string) ($existingDb['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></code> on <code><?php echo htmlspecialchars((string) ($existingDb['host'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></code>.
+                <?php if ($existingAccounts > 0): ?>
+                    <strong>It holds <?php echo $existingAccounts === 1 ? '1 account' : (int) $existingAccounts . ' accounts'; ?>:</strong> people who can sign in to a portal. Wiping it removes <?php echo $existingAccounts === 1 ? 'that account' : 'every one of them'; ?>, with everything else in it.
+                <?php elseif ($existingAccounts === 0): ?>
+                    <strong>It holds no accounts:</strong> nobody has been added to it yet.
+                <?php else: ?>
+                    The installer could not count the accounts in it, because the table that holds them is not there or cannot be read.
+                <?php endif; ?>
+            </p>
+
             <form method="post">
+                <?php echo installTokenField(); ?>
+                <?php echo installDatabaseField(); ?>
                 <input type="hidden" name="action" value="install_action">
                 <input type="hidden" name="step"   value="2.5">
 
@@ -2212,22 +3623,15 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
                                value="continue"
                                <?php echo $canContinue === false ? 'disabled' : 'checked'; ?>>
                         <label class="form-check-label" for="choice_continue">
-                            <strong>Continue with existing data</strong>
+                            <strong>Carry on with what is there</strong>
                             <?php if ($isUpgrade === true): ?>
                                 <span class="badge bg-info text-dark ms-1">Upgrade</span>
                             <?php elseif ($isPartial === true): ?>
                                 <span class="badge bg-success text-dark ms-1">Recommended</span>
                             <?php endif; ?>
-                            <div class="text-muted small mt-1">
-                                <?php if ($isUpgrade === true): ?>
-                                    A full JSON backup of every table will be written to
-                                    <code>web/_backups/</code> before any migration runs.
-                                    Migrations are idempotent (additive) — no data is lost.
-                                <?php else: ?>
-                                    Existing tables will pick up any missing columns via
-                                    idempotent migrations. Your data is preserved.
-                                <?php endif; ?>
-                            </div>
+                            <span class="d-block text-muted small mt-1">
+                                Any table that is missing is built, and any that is out of date is brought up to date. Nothing in the database is removed.
+                            </span>
                         </label>
                     </div>
                 </div>
@@ -2239,24 +3643,20 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
                                value="drop"
                                <?php echo $isForce === true ? 'checked' : ''; ?>>
                         <label class="form-check-label" for="choice_drop">
-                            <strong>Drop existing tables and start fresh</strong>
-                            <span class="badge bg-danger ms-1">Destructive</span>
-                            <div class="text-muted small mt-1">
-                                Every portal table will be <code>DROP</code>ped,
-                                then recreated from scratch. <strong>All existing
-                                data will be lost.</strong> Type the portal
-                                hostname below to confirm.
-                            </div>
-                            <div class="mt-2">
-                                <label class="form-label small" for="drop_confirm">
-                                    Confirmation (type
-                                    <code><?php echo htmlspecialchars($confirmExpected, ENT_QUOTES, 'UTF-8'); ?></code>):
-                                </label>
-                                <input type="text" class="form-control form-control-sm"
-                                       id="drop_confirm" name="drop_confirm"
-                                       placeholder="Hostname or 'DROP'">
-                            </div>
+                            <strong>Wipe it and start again from nothing</strong>
+                            <span class="badge bg-danger ms-1">Cannot be undone</span>
+                            <span class="d-block text-muted small mt-1">
+                                Every table of the portal is deleted from this database (every table whose name begins with <code>tbl</code>), with everything in it, and so is every file people have uploaded. Backups already in the <code>_backups</code> folder are kept. <strong>To confirm, type the text shown below.</strong>
+                            </span>
                         </label>
+                        <div class="mt-2">
+                            <label class="form-label small" for="drop_confirm">
+                                To wipe, type
+                                <code><?php echo htmlspecialchars($confirmExpected, ENT_QUOTES, 'UTF-8'); ?></code> here:
+                            </label>
+                            <input type="text" class="form-control form-control-sm"
+                                   id="drop_confirm" name="drop_confirm" autocomplete="off">
+                        </div>
                     </div>
                 </div>
 
@@ -2266,10 +3666,20 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
                 </div>
             </form>
 
-<?php elseif ($step === 3): ?>
-            <!-- STEP 3: Install Schema -->
-            <h2 class="h5 mb-3">Install Database Schema</h2>
-            <p>The database connection was successful. Click the button below to create all tables and seed initial data.</p>
+<?php elseif ($installPage === 'tables'): ?>
+            <!-- STEP 3: build the tables -->
+            <?php
+            // 🪪 Which database this page is about, and whether the choice
+            //    HELD FOR IT is the wipe. Read through installChoiceHeld(),
+            //    like the build step itself, so the page and the button can
+            //    never disagree about what is going to happen.
+            $tablesDb   = is_array($_SESSION['install_db'] ?? null) === true ? $_SESSION['install_db'] : [];
+            $tablesWipe = (installChoiceHeld() === 'drop');
+            $tablesName = '<code>' . htmlspecialchars((string) ($tablesDb['name'] ?? ''), ENT_QUOTES, 'UTF-8') . '</code> on <code>'
+                        . htmlspecialchars((string) ($tablesDb['host'] ?? ''), ENT_QUOTES, 'UTF-8') . '</code>';
+            ?>
+            <h2 class="h5 mb-3">Build the tables</h2>
+            <p>The connection works. The button below builds the portal&rsquo;s tables in the database <?php echo $tablesName; ?> and fills in its starting settings.</p>
 
             <?php
             // 🛢️ What database did we actually connect to, and is it a version
@@ -2280,51 +3690,81 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
                 . DIRECTORY_SEPARATOR . 'db_server_banner.php';
             ?>
 
+            <?php if ($tablesWipe === true): ?>
+                <?php
+                // ⚠️ THE WIPE IS SAID HERE, on the page whose button carries
+                //    it out. This page used to say only "a table that is
+                //    already there is kept", even when the next press was
+                //    about to delete every one of them.
+                ?>
+                <div class="alert alert-warning" id="install-tables-wipe" role="alert">
+                    <strong>This will WIPE the database <?php echo $tablesName; ?> first.</strong>
+                    You chose &ldquo;Wipe it and start again from nothing&rdquo; for this database. Pressing the button deletes every table of the portal in it (every table whose name begins with <code>tbl</code>), with everything in those tables, and every file people have uploaded. It cannot be undone. Backups already in the <code>_backups</code> folder are kept.
+                    <span class="d-block mt-2">If that is not the database you mean, or not what you mean to do, press Back: nothing has been removed yet.</span>
+                </div>
+            <?php endif; ?>
+
             <div class="alert alert-info">
                 <strong>What will happen:</strong>
                 <ul class="mb-0 mt-1">
-                    <li>All portal tables will be created (using <code>CREATE TABLE IF NOT EXISTS</code>)</li>
-                    <li>Default settings, routes, and seed data will be inserted</li>
-                    <li>Existing data will not be overwritten</li>
+                    <?php if ($tablesWipe === true): ?>
+                        <li>First the portal&rsquo;s tables in this database are deleted, and so is every uploaded file.</li>
+                        <li>Then every table the portal needs is created again, empty, and the starting settings and the list of the portal&rsquo;s pages are filled in.</li>
+                    <?php else: ?>
+                        <li>Every table the portal needs is created. A table that is already there is kept, with what is in it.</li>
+                        <li>The starting settings and the list of the portal&rsquo;s pages are filled in. A setting that already has a value keeps it.</li>
+                    <?php endif; ?>
+                    <li>This can take a minute or two. Wait for the next page, and do not press the button twice.</li>
                 </ul>
             </div>
 
             <form method="post">
+                <?php echo installTokenField(); ?>
+                <?php echo installDatabaseField(); ?>
                 <input type="hidden" name="action" value="install_schema">
                 <input type="hidden" name="step" value="3">
                 <div class="d-flex justify-content-between">
                     <a href="?step=2" class="btn btn-outline-secondary">&larr; Back</a>
-                    <button type="submit" class="btn btn-primary">Install Schema &rarr;</button>
+                    <button type="submit" class="btn btn-primary">Build the tables &rarr;</button>
                 </div>
             </form>
 
-<?php elseif ($step === 4): ?>
-            <!-- STEP 4: Create Admin User -->
-            <h2 class="h5 mb-3">Create Administrator Account</h2>
-            <p>Create the first portal administrator. This account will have full access to all portal features.</p>
+<?php elseif ($installPage === 'administrator'): ?>
+            <!-- STEP 4: the first administrator -->
+            <h2 class="h5 mb-3">The first administrator</h2>
+            <p>This makes the first account: yours. It is a global administrator, which means it can change everything in the portal and add everybody else. Its e-mail address is also the name it signs in with.</p>
+
+            <?php if ($installAdministrators > 0): ?>
+                <div class="alert alert-info" id="install-administrator-exists">
+                    <strong>This database already has <?php echo $installAdministrators === 1 ? 'an administrator account' : (int) $installAdministrators . ' administrator accounts'; ?>,</strong>
+                    made before now, most likely by an earlier run of this installer. If you know its password you do not need another.
+                    <p class="mb-0 mt-2"><a href="?step=4.5" class="btn btn-sm btn-outline-secondary">Keep the administrator that is already there &rarr;</a></p>
+                </div>
+            <?php endif; ?>
 
             <form method="post" autocomplete="off">
+                <?php echo installTokenField(); ?>
                 <input type="hidden" name="action" value="create_admin">
                 <input type="hidden" name="step" value="4">
 
                 <div class="mb-3">
-                    <label for="admin_name" class="form-label">Full Name</label>
-                    <input type="text" class="form-control" id="admin_name" name="admin_name"
-                           value="<?php echo htmlspecialchars($_POST['admin_name'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" required>
+                    <label for="admin_name" class="form-label">Your name</label>
+                    <input type="text" class="form-control" id="admin_name" name="admin_name" maxlength="255"
+                           value="<?php echo htmlspecialchars(installField('admin_name'), ENT_QUOTES, 'UTF-8'); ?>" required>
                 </div>
 
                 <div class="mb-3">
-                    <label for="admin_email" class="form-label">Email Address</label>
-                    <input type="email" class="form-control" id="admin_email" name="admin_email"
-                           value="<?php echo htmlspecialchars($_POST['admin_email'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" required>
-                    <div class="form-text">This will also be used as the login username for local authentication.</div>
+                    <label for="admin_email" class="form-label">Your e-mail address</label>
+                    <input type="email" class="form-control" id="admin_email" name="admin_email" maxlength="50"
+                           value="<?php echo htmlspecialchars(installField('admin_email'), ENT_QUOTES, 'UTF-8'); ?>" required>
+                    <div class="form-text">You sign in with this address, so it can be 50 characters at most.</div>
                 </div>
 
                 <div class="row">
                     <div class="col-md-6 mb-3">
                         <label for="admin_pass" class="form-label">Password</label>
                         <input type="password" class="form-control" id="admin_pass" name="admin_pass"
-                               required minlength="12" maxlength="128"
+                               required minlength="12" maxlength="128" autocomplete="new-password"
                                data-portal-password-input>
                         <div class="portal-password-strength mt-2" data-portal-password-meter hidden>
                             <div class="progress" style="height:6px;">
@@ -2334,82 +3774,211 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
                         </div>
                     </div>
                     <div class="col-md-6 mb-3">
-                        <label for="admin_pass2" class="form-label">Confirm Password</label>
+                        <label for="admin_pass2" class="form-label">The same password again</label>
                         <input type="password" class="form-control" id="admin_pass2" name="admin_pass2"
-                               required minlength="12" maxlength="128">
+                               required minlength="12" maxlength="128" autocomplete="new-password">
                     </div>
                 </div>
                 <div class="alert alert-light border small mb-3">
-                    <strong>Password must include:</strong>
+                    <strong>The password needs all of these:</strong>
                     <ul class="mb-0 ps-3">
                         <li>At least 12 characters</li>
-                        <li>At least one uppercase letter (A-Z)</li>
-                        <li>At least one lowercase letter (a-z)</li>
-                        <li>At least one number (0-9)</li>
-                        <li>At least one special character (e.g. !@#$%^&amp;*)</li>
+                        <li>At least one capital letter (A-Z)</li>
+                        <li>At least one small letter (a-z)</li>
+                        <li>At least one digit (0-9)</li>
+                        <li>At least one other character, such as ! @ # $ % ^ &amp; *</li>
                     </ul>
                 </div>
 
                 <div class="d-flex justify-content-between">
                     <a href="?step=3" class="btn btn-outline-secondary">&larr; Back</a>
-                    <button type="submit" class="btn btn-primary">Create Account &rarr;</button>
+                    <button type="submit" class="btn btn-primary">Create the account &rarr;</button>
                 </div>
             </form>
 
-<?php elseif ($step === 5): ?>
-            <!-- STEP 5: Finalize -->
-            <h2 class="h5 mb-3">Finalize Setup</h2>
-            <p>Final step: generate the encryption key and save the configuration files.</p>
+<?php elseif ($installPage === 'addresses'): ?>
+            <!-- STEP 4.5: web addresses (#500) -->
+            <h2 class="h5 mb-3">Web addresses</h2>
+            <p>Two addresses the portal cannot work out for itself. Both can be changed later in Admin, Settings, Organisation.</p>
 
-            <div class="alert alert-info">
-                <strong>This will create:</strong>
-                <ul class="mb-0 mt-1">
-                    <li><code>_auth_keys/auth_creds.php</code> &mdash; Database credentials</li>
-                    <li><code>_auth_keys/enc.key</code> &mdash; Encryption key for sensitive settings</li>
-                    <li><code>_auth_keys/.installed</code> &mdash; Lock file to prevent re-installation</li>
-                </ul>
-            </div>
+            <form method="post" autocomplete="off">
+                <?php echo installTokenField(); ?>
+                <input type="hidden" name="action" value="web_addresses">
+                <input type="hidden" name="step" value="4.5">
 
-            <div class="alert alert-warning">
-                <strong>Important:</strong> These files contain sensitive data. Ensure the <code>_auth_keys/</code>
-                directory is not accessible via the web server. The default <code>.htaccess</code> should block access.
-            </div>
+                <div class="mb-3">
+                    <label for="portal_address" class="form-label">The address of this portal</label>
+                    <input type="text" inputmode="url" class="form-control" id="portal_address" name="portal_address"
+                           maxlength="255" autocomplete="off" autocapitalize="none" spellcheck="false" required
+                           value="<?php echo htmlspecialchars($installAddressOffered, ENT_QUOTES, 'UTF-8'); ?>" aria-describedby="portal_address_help">
+                    <div class="form-text text-break" id="portal_address_help">
+                        The address people type to reach this portal, with nothing after the name: for example <code>https://portal.example.org</code>. Every link in an e-mail the portal sends, such as a link to set a new password, begins with it. The installer has filled in the address you are using now. <strong>Check it,</strong> and make sure it begins with <code>https://</code> if your website has a security certificate.
+                    </div>
+                </div>
 
-            <form method="post">
-                <input type="hidden" name="action" value="finalize">
-                <input type="hidden" name="step" value="5">
+                <div class="mb-3">
+                    <label for="support_email" class="form-label">Support e-mail address <span class="text-muted">(you may leave this empty)</span></label>
+                    <input type="email" class="form-control" id="support_email" name="support_email" maxlength="254" autocomplete="off"
+                           value="<?php echo htmlspecialchars($installSupportOffered, ENT_QUOTES, 'UTF-8'); ?>" aria-describedby="support_email_help">
+                    <div class="form-text" id="support_email_help">
+                        Where people should write when they need help. It is shown on the Help page &ldquo;Getting Support&rdquo; and at the foot of e-mails the portal sends. With none, the Help page tells people to ask an administrator.
+                    </div>
+                </div>
+
                 <div class="d-flex justify-content-between">
                     <a href="?step=4" class="btn btn-outline-secondary">&larr; Back</a>
-                    <button type="submit" class="btn btn-success">Finalize Installation</button>
+                    <button type="submit" class="btn btn-primary">Continue &rarr;</button>
                 </div>
             </form>
 
-<?php elseif ($step === 6): ?>
-            <!-- STEP 6: Complete -->
-            <h2 class="h5 mb-3 text-success">Installation Complete!</h2>
-            <p><?php echo htmlspecialchars($INSTALL_PRODUCT_NAME, ENT_QUOTES, 'UTF-8'); ?> has been successfully installed. Your portal is ready to use.</p>
+<?php elseif ($installPage === 'finish'): ?>
+            <!-- STEP 5: the finish -->
+            <?php
+            $finishDb = is_array($_SESSION['install_db'] ?? null) === true ? $_SESSION['install_db'] : [];
+            ?>
+            <h2 class="h5 mb-3">Finish</h2>
+            <p>Everything is ready. This last step makes the installation permanent. Please read what it is about to set up.</p>
 
-            <div class="alert alert-success">
-                <ul class="mb-0">
-                    <li>Database tables and seed data created</li>
-                    <li>Administrator account created</li>
-                    <li>Encryption key generated</li>
-                    <li>Configuration files saved</li>
+            <ul class="install-checks" id="install-summary">
+                <li class="install-check">
+                    <strong class="install-check-label">The database</strong>
+                    <span class="install-check-value"><code><?php echo htmlspecialchars((string) ($finishDb['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></code> on <code><?php echo htmlspecialchars((string) ($finishDb['host'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></code>. If that is not the database you typed in, stop here and go back.</span>
+                </li>
+                <li class="install-check">
+                    <strong class="install-check-label">The address of this portal</strong>
+                    <span class="install-check-value"><code><?php echo htmlspecialchars($installAddressOffered, ENT_QUOTES, 'UTF-8'); ?></code></span>
+                    <?php if (str_starts_with($installAddressOffered, 'http://') === true): ?>
+                        <span class="install-check-fix">This begins with http, not https, so what people send to it is not encrypted. Use https for a real installation: go back and change it if your website has a security certificate.</span>
+                    <?php endif; ?>
+                </li>
+                <li class="install-check">
+                    <strong class="install-check-label">Support e-mail address</strong>
+                    <span class="install-check-value"><?php echo $installSupportOffered === '' ? 'None' : '<code>' . htmlspecialchars($installSupportOffered, ENT_QUOTES, 'UTF-8') . '</code>'; ?></span>
+                </li>
+                <li class="install-check">
+                    <strong class="install-check-label">Which copy of the portal this is</strong>
+                    <span class="install-check-value">This is <?php echo htmlspecialchars($installChannelWords['copy'] . '. ' . $installChannelWords['how'], ENT_QUOTES, 'UTF-8'); ?></span>
+                </li>
+            </ul>
+
+            <div class="alert alert-info">
+                <strong>What pressing the button does:</strong>
+                <ul class="mb-0 mt-1">
+                    <li>Makes the folders <code>_uploads</code> and <code>_backups</code>, and puts a file in them and in <code>_auth_keys</code> that tells the web server to refuse every request for anything inside.</li>
+                    <li>Writes the key file, <code>_auth_keys/enc.key</code>, which every password and key saved in Settings is encrypted with. A key file that is already there is kept.</li>
+                    <li>Saves the two addresses above, and writes the database login into <code>_auth_keys/auth_creds.php</code>.</li>
+                    <li>Locks the installer, so that it cannot be run again, and deletes the installation code.</li>
                 </ul>
             </div>
 
+            <form method="post" autocomplete="off">
+                <?php echo installTokenField(); ?>
+                <input type="hidden" name="action" value="finalize">
+                <input type="hidden" name="step" value="5">
+                <div class="mb-3">
+                    <label for="owner_code" class="form-label">Your installation code, once more</label>
+                    <input type="text" class="form-control install-code-input" id="owner_code" name="owner_code"
+                           required maxlength="40" autocomplete="off" autocapitalize="characters" spellcheck="false"
+                           placeholder="XXXX-XXXX-XXXX-XXXX" aria-describedby="owner_code_help">
+                    <div class="form-text" id="owner_code_help">The same code as at the start, from the file <code>install-code.php</code> in the folder <code>_auth_keys</code>. It is asked for again because this is the step that makes the installation permanent.</div>
+                </div>
+                <div class="d-flex justify-content-between">
+                    <a href="?step=4.5" class="btn btn-outline-secondary">&larr; Back</a>
+                    <button type="submit" class="btn btn-success">Finish the installation</button>
+                </div>
+            </form>
+
+<?php elseif ($installPage === 'done'): ?>
+            <!-- DONE. Drawn once, in the answer to the finish itself. -->
+            <?php
+            $doneAddress = (string) ($finishReport['address'] ?? '');
+            $doneSupport = (string) ($finishReport['support'] ?? '');
+            ?>
+            <h2 class="h5 mb-3 text-success">Installation complete</h2>
+            <p><?php echo htmlspecialchars($INSTALL_PRODUCT_NAME, ENT_QUOTES, 'UTF-8'); ?> is installed and ready to use. <strong>This page is shown only once:</strong> read it now, and note the part about backing up the key file.</p>
+
+            <ul class="install-checks" id="install-done">
+                <li class="install-check" data-done="address">
+                    <strong class="install-check-label">The address used in e-mails</strong>
+                    <span class="install-check-value">Every link in an e-mail the portal sends will begin with <code><?php echo htmlspecialchars($doneAddress, ENT_QUOTES, 'UTF-8'); ?></code>.</span>
+                    <?php if ($doneAddress !== (string) ($finishReport['addressTyped'] ?? '')): ?>
+                        <span class="install-check-fix">That is not the address you typed (<code><?php echo htmlspecialchars((string) ($finishReport['addressTyped'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></code>). This database already had an address saved, and it was kept. To change it, sign in and open Admin, Settings, Organisation.</span>
+                    <?php endif; ?>
+                    <?php if (str_starts_with($doneAddress, 'http://') === true): ?>
+                        <span class="install-check-fix">It begins with http, not https, so what people send to it is not encrypted. Once your website has a security certificate, change it in Admin, Settings, Organisation.</span>
+                    <?php endif; ?>
+                </li>
+                <li class="install-check" data-done="support">
+                    <strong class="install-check-label">Support e-mail address</strong>
+                    <span class="install-check-value"><?php echo $doneSupport === '' ? 'None is set. The Help page tells people to ask an administrator.' : '<code>' . htmlspecialchars($doneSupport, ENT_QUOTES, 'UTF-8') . '</code>'; ?></span>
+                </li>
+                <li class="install-check" data-done="channel" data-channel-source="<?php echo htmlspecialchars((string) $installChannel['source'], ENT_QUOTES, 'UTF-8'); ?>">
+                    <strong class="install-check-label">Which copy of the portal this is</strong>
+                    <span class="install-check-value">This is <?php echo htmlspecialchars($installChannelWords['copy'] . '. ' . $installChannelWords['how'], ENT_QUOTES, 'UTF-8'); ?></span>
+                    <?php foreach ($installChannelWords['advice'] as $advice): ?>
+                        <span class="install-check-fix"><?php echo htmlspecialchars((string) $advice, ENT_QUOTES, 'UTF-8'); ?></span>
+                    <?php endforeach; ?>
+                    <?php if ($installChannel['channel'] !== 'prod'): ?>
+                        <span class="install-check-fix">Because this is a test copy, the staff sign-in gate stands in front of it: every page asks for a staff sign-in first, unless that gate has been switched off in Settings. The account you have just made is staff.</span>
+                    <?php endif; ?>
+                </li>
+            </ul>
+
+            <div class="alert alert-warning" id="install-done-key">
+                <strong>Back up the key file together with the database.</strong>
+                The file <code>enc.key</code>, in the folder <code>_auth_keys</code>, is what every password and key saved in the portal&rsquo;s Settings is encrypted with<?php echo ($finishReport['keyWasThere'] ?? false) === true ? ' (a key file was already there, and it was kept)' : ''; ?>. A backup of the database is not complete without it: restored without the same key file, none of those saved secrets can be read, and each has to be typed in again. Keep a copy of the whole <code>_auth_keys</code> folder somewhere safe and private, and keep it with every backup of the database.
+            </div>
+
+            <?php
+            // 🔒 What is said about the three private folders is what the
+            //    finish FOUND, folder by folder. It used to say that each
+            //    "holds a file that tells the web server to refuse every
+            //    request" whatever was in them, which was untrue for a
+            //    folder holding a rules file of somebody's own that does not
+            //    refuse (the installer leaves such a file alone).
+            $doneOwnRules = array_values(array_filter(($finishReport['folders']['own'] ?? []), 'is_string'));
+            $doneRefusing = array_values(array_diff(INSTALL_PRIVATE_FOLDERS, $doneOwnRules));
+            $doneNames    = static function (array $names): string {
+                $names = array_map(static fn (string $name): string => '<code>' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . '</code>', $names);
+                $last  = array_pop($names);
+
+                return $names === [] ? (string) $last : implode(', ', $names) . ' and ' . $last;
+            };
+            ?>
+            <div class="alert <?php echo $doneOwnRules === [] ? 'alert-success' : 'alert-warning'; ?>" id="install-done-private">
+                <strong>The private folders.</strong>
+                <?php if ($doneRefusing !== []): ?>
+                    <?php echo $doneNames($doneRefusing); ?> <?php echo count($doneRefusing) === 1 ? 'holds' : 'each hold'; ?> a file that tells the web server to refuse every request for anything inside. That is a second lock, not the first: it works on Apache web servers only.
+                <?php endif; ?>
+                <?php if ($doneOwnRules !== []): ?>
+                    <span id="install-done-own-rules"><?php echo $doneNames($doneOwnRules); ?> <?php echo count($doneOwnRules) === 1 ? 'holds a rules file (<code>.htaccess</code>) of its own, which the installer left as it is. It does' : 'each hold a rules file (<code>.htaccess</code>) of their own, which the installer left as they are. They do'; ?> not hold the line <code><?php echo htmlspecialchars(INSTALL_REFUSE_RULE, ENT_QUOTES, 'UTF-8'); ?></code>, so the installer cannot say that requests are refused there. If you did not write that file, delete it in the file manager and open Admin, Upgrade: the portal then writes its own.</span>
+                <?php endif; ?>
+                What really keeps these folders private is that your website&rsquo;s address points at the web folder and not at the folder above it.
+                <?php if (($finishReport['codeRemoved'] ?? false) === true): ?>
+                    The installation code has been deleted.
+                <?php else: ?>
+                    <span id="install-done-code-left">The file that held the installation code, <code>install-code.php</code> in the folder <code>_auth_keys</code>, could not be deleted. Its code opens nothing any more, because the installer is locked. Delete the file yourself in the file manager.</span>
+                <?php endif; ?>
+            </div>
+
+            <?php if (($finishReport['versionRecorded'] ?? false) === false): ?>
+                <div class="alert alert-warning" id="install-done-version">
+                    <strong>One thing could not be recorded:</strong> which version the database is at. The portal works without it. If the portal later says an upgrade is waiting, sign in as the administrator and open Admin, Upgrade.
+                </div>
+            <?php endif; ?>
+
             <div class="alert alert-info">
-                <strong>Next steps:</strong>
+                <strong>What to do next:</strong>
                 <ol class="mb-0 mt-1">
-                    <li>Log in with the administrator account you just created</li>
-                    <li>Configure your site settings (name, timezone, branding)</li>
-                    <li>Set up authentication providers (MS365, Google) if needed</li>
-                    <li>Create additional user accounts</li>
+                    <li>Sign in with the e-mail address and password of the administrator account.</li>
+                    <li>In Admin, Settings, set your organisation&rsquo;s name, time zone and artwork.</li>
+                    <li>In Admin, Integrations, Email, tell the portal how to send e-mail, and send yourself a test.</li>
+                    <li>Add the people who will use the portal.</li>
                 </ol>
             </div>
 
             <div class="text-center mt-4">
-                <a href="/" class="btn btn-primary btn-lg">Go to Portal &rarr;</a>
+                <a href="/" class="btn btn-primary btn-lg">Go to the sign-in page &rarr;</a>
             </div>
 
 <?php endif; ?>
@@ -2419,7 +3988,7 @@ $pageTitle = 'Install — ' . ($stepTitles[$step] ?? $INSTALL_PRODUCT_NAME);
 
     <!-- Footer -->
     <div class="install-footer">
-        <?php echo htmlspecialchars($INSTALL_PRODUCT_NAME, ENT_QUOTES, 'UTF-8'); ?> v<?php echo INSTALL_VERSION; ?> &copy; <?php echo date('Y'); ?> <?php echo htmlspecialchars($INSTALL_PRODUCT_PUBLISHER, ENT_QUOTES, 'UTF-8'); ?>
+        <?php echo htmlspecialchars($INSTALL_PRODUCT_NAME, ENT_QUOTES, 'UTF-8'); ?><?php if ($ownerPassed === true || $justFinished === true): ?> v<?php echo htmlspecialchars(INSTALL_VERSION, ENT_QUOTES, 'UTF-8'); ?><?php endif; ?> &copy; <?php echo date('Y'); ?> <?php echo htmlspecialchars($INSTALL_PRODUCT_PUBLISHER, ENT_QUOTES, 'UTF-8'); ?>
     </div>
 
 </div>

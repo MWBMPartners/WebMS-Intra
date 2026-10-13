@@ -87,14 +87,3 @@ _apps/tasks
 _apps/visitors
 _apps/widget
 _apps/worship
-
-# [not in a slice] one single file outside the app folders, owned by another
-# package. (There were four. `_core/Auth.php` and
-# `public_html/offline/index.php` came off on 13 October 2026: the three
-# redirects left in the first are built by Site::url(), and the second's one
-# link stays bare with its reason on the line. `_core/ExpenseMailer.php` came
-# off the same day: its four links inside e-mails are whole addresses now,
-# built by PortalAddress (#500).)
-#   _install/upgrade.php: three redirects and a breadcrumb on the database
-#     upgrade page.
-_install/upgrade.php

@@ -17,11 +17,18 @@
  *   STATE_INSTALLED_UPGRADE  → step 2.5 with upgrade messaging
  *   STATE_FRESH_REQUIRED     → step 2.5 with continue option DISABLED
  *
+ * It also keeps THE CHOICE made for a database that is not empty ("carry on"
+ * or "wipe"), tied to the one database it was made for: see
+ * installDbIdentity(), installChoiceKeep() and installChoiceHeld() at the
+ * foot of this file. They live here, and not in `_install/index.php`, so
+ * that tools/installer-selftest.php can load them alone and hand them every
+ * case in a table.
+ *
  * @package   Portal\Install
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * -----------------------------------------------------------------------------
  */
 
@@ -179,4 +186,114 @@ function detectDbState(
         'has_settings'      => $hasSettings,
         'notes'             => $notes,
     ];
+}
+
+// ---------------------------------------------------------------------------
+// 🪪 The choice made for ONE database, and which database that was
+// ---------------------------------------------------------------------------
+// WHAT WAS WRONG (found by the check of 13 October 2026). The choice was kept
+// in the session as one bare word, 'drop' or 'continue', with nothing to say
+// which database it had been made for. Somebody chose "wipe" and confirmed it
+// for database ONE, went Back, typed database TWO, opened the build step by
+// its address and pressed "Build the tables": database TWO was wiped, and
+// its uploaded files with it, though no choice had ever been made for it.
+//
+// THE CURE has three parts, and each stands without the others:
+//   1. The choice is kept TOGETHER WITH the identity of the database it was
+//      made for, and installChoiceHeld() answers "none" the moment the
+//      database the installer holds is not that one.
+//   2. The database step forgets any earlier choice whenever it lets a
+//      database through (in `_install/index.php`).
+//   3. The build step wipes only on a wipe choice held for the database it
+//      is about to touch, and builds nothing into a database that is not
+//      empty while no choice is held for it (also there).
+//
+// WHAT THIS CANNOT DO: tell two databases apart that are reached by the same
+// server name, port, database name and user (a server that was swapped for
+// another behind one address). And it knows nothing of what a database holds:
+// the build step looks at that for itself.
+
+/** The session key the choice is kept under. An older session may still hold a bare word there: that is "no choice". */
+const INSTALL_CHOICE_KEY = 'install_action';
+
+/** The three choices: built into an empty database, carried on with, or wiped first. */
+const INSTALL_CHOICES = ['fresh', 'continue', 'drop'];
+
+/**
+ * 🪪 Which database a set of connection details means: the server, the port,
+ * the database's name and the user. NOT the password: the same database
+ * reached with a corrected password is still the same database.
+ *
+ * The four are compared exactly as they were typed. `LOCALHOST` and
+ * `localhost` are the same server, and this calls them different: that only
+ * ever means a choice has to be made again, which is the safe mistake.
+ *
+ * @param mixed $details What step 2 kept (`host`, `user`, `name`, `port`), or
+ *                       anything else when it kept nothing.
+ *
+ * @return string '' when the details are not a database's; otherwise text
+ *                that is the same for the same four values and for no others.
+ */
+function installDbIdentity(mixed $details): string
+{
+    if (is_array($details) === false) {
+        return '';
+    }
+    foreach (['host', 'user', 'name', 'port'] as $part) {
+        if (isset($details[$part]) === false || is_scalar($details[$part]) === false) {
+            return '';
+        }
+    }
+    // JSON keeps the four apart whatever characters they hold: joined with a
+    // plain separator, host "a" with name "b|c" would equal host "a|b" with
+    // name "c".
+    $identity = json_encode([(string) $details['host'], (int) $details['port'], (string) $details['name'], (string) $details['user']]);
+
+    return is_string($identity) === true ? $identity : '';
+}
+
+/**
+ * ✍️ Keep a choice FOR THE DATABASE THE INSTALLER HOLDS NOW (`install_db` in
+ * the session). With no database held, or a word that is not a choice,
+ * nothing is kept and any earlier choice is forgotten.
+ */
+function installChoiceKeep(string $choice): void
+{
+    $identity = installDbIdentity($_SESSION['install_db'] ?? null);
+    if ($identity === '' || in_array($choice, INSTALL_CHOICES, true) === false) {
+        installChoiceForget();
+
+        return;
+    }
+    $_SESSION[INSTALL_CHOICE_KEY] = ['choice' => $choice, 'database' => $identity];
+}
+
+/** 🧽 Forget the choice, whatever database it was for. */
+function installChoiceForget(): void
+{
+    unset($_SESSION[INSTALL_CHOICE_KEY]);
+}
+
+/**
+ * 🔎 The choice held for the database the installer holds NOW, or '' when
+ * there is none: no choice was made, no database is held, or the choice was
+ * made for a database whose server, port, name or user differs.
+ *
+ * Every reader of the choice goes through here. Nothing in the installer may
+ * read the session's entry directly: that is how a wipe chosen for one
+ * database once reached another.
+ */
+function installChoiceHeld(): string
+{
+    $kept     = $_SESSION[INSTALL_CHOICE_KEY] ?? null;
+    $identity = installDbIdentity($_SESSION['install_db'] ?? null);
+    if (is_array($kept) === false || $identity === ''
+        || is_string($kept['choice'] ?? null) === false || is_string($kept['database'] ?? null) === false
+        || in_array($kept['choice'], INSTALL_CHOICES, true) === false
+        || hash_equals($identity, $kept['database']) === false
+    ) {
+        return '';
+    }
+
+    return $kept['choice'];
 }

@@ -564,6 +564,13 @@ OWN_DOMAIN="$(python3 "$CHECKER" --print-own-domains | head -n 1)"
 printf '<?php\n// planted by the package self-test\n$address = "https://portal.%s.uk/";\n' "$(printf '%s' "$OWN_DOMAIN" | tr '[:lower:]' '[:upper:]')" > "$C/domain"
 PLANT_DOMAIN="$(new_commit "$PASSABLE" own-domain web/_core/PlantedAddress.php "$C/domain")" || exit 1
 LOST_FILE="$(new_commit "$PASSABLE" lost-file web/_includes/helper.php "$C/php")" || exit 1
+# The ONE file a left-out folder may hold is its own "refuse everything" file,
+# byte for byte the copy in _core/ (roll-out package F5). Two that are not
+# that: the folder's own rules file with other wording, and the right wording
+# one folder further down.
+git -C "$R" show "$PASSABLE:web/_core/.htaccess" > "$C/htaccess-of-core" || exit 1
+REFUSE_REWORDED="$(new_commit "$PASSABLE" refuse-reworded web/_includes/.htaccess "$C/htaccess-refuse-all")" || exit 1
+REFUSE_DEEPER="$(new_commit "$PASSABLE" refuse-deeper web/_functions/kept/.htaccess "$C/htaccess-of-core")" || exit 1
 BRAND_ZIP="$(new_commit "$PASSABLE" changed-archive web/public_html/assets/images/brandkit/WebMSChurchMS.zip "$C/zip")" || exit 1
 # A link: git's mode 120000, pointing out of the package.
 export GIT_INDEX_FILE="$SCRATCH/index.link"
@@ -678,6 +685,20 @@ if wanted T04; then
     tree T04 "$LOST_FILE"
     check "T04 a real file in web/_includes/: refused, not left out silently" rc_is T04 1
     check "T04 … and it says which file and why" has T04 "web/_includes/helper.php — a real file in a folder the package leaves out"
+fi
+if wanted T04b; then
+    # The base holds the "refuse everything" file in both left-out folders. It
+    # is left out with them, by name, and that is not a failure.
+    tree T04b "$PASSABLE"
+    check "T04b the 'refuse everything' file in the two left-out folders: accepted" rc_is T04b 0
+    check "T04b … and each is named as left out" has T04b "web/_functions/.htaccess, web/_includes/.gitkeep, web/_includes/.htaccess"
+    check "T04b … and the run reached its end" has T04b "may be packaged; the run reached its end."
+    tree T04c "$REFUSE_REWORDED"
+    check "T04b the same file with other wording: refused" rc_is T04c 1
+    check "T04b … as a real file that would be lost" has T04c "web/_includes/.htaccess — a real file in a folder the package leaves out"
+    tree T04d "$REFUSE_DEEPER"
+    check "T04b the right wording one folder further down: refused" rc_is T04d 1
+    check "T04b … as a real file that would be lost" has T04d "web/_functions/kept/.htaccess — a real file in a folder the package leaves out"
 fi
 if wanted T05; then
     tree T05 "$BRAND_ZIP"
@@ -822,6 +843,18 @@ if wanted B08; then
     check "B08 a real file in web/_includes/: the build stops" rc_is B08 1
     check "B08 … saying which folder" has B08 "web/_includes holds a real file"
     check "B08 … no zip was made" no_zip B08
+fi
+if wanted B08b; then
+    # The build's own copy of the same rule (see T04b). The file that IS let
+    # through is in every other build here, since the base holds it.
+    build B08b "$REFUSE_REWORDED"
+    check "B08b the 'refuse everything' file of a left-out folder, with other wording: the build stops" rc_is B08b 1
+    check "B08b … saying which folder" has B08b "web/_includes holds a real file"
+    check "B08b … no zip was made" no_zip B08b
+    build B08c "$REFUSE_DEEPER"
+    check "B08b the right wording one folder further down: the build stops" rc_is B08c 1
+    check "B08b … saying which folder" has B08c "web/_functions holds a real file"
+    check "B08b … no zip was made" no_zip B08c
 fi
 if wanted B09; then
     build B09 "$LINK"

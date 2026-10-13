@@ -83,9 +83,10 @@ REPO_WEB_FOLDER="public_html"
 
 # Left out of the package. Three are placeholders nothing deploys (the owner
 # chose on 14 September 2026 to keep them in the repository and leave them
-# out here); two hold nothing but a placeholder file, and a real file in
-# either stops the build (step 2). check-package.py has its own copy of these
-# lists ON PURPOSE: if the two disagree, the check fails.
+# out here); two hold nothing but a placeholder file and the "refuse
+# everything" file, and any other file in either stops the build (step 2).
+# check-package.py has its own copy of these lists ON PURPOSE: if the two
+# disagree, the check fails.
 REMOVED_PLACEHOLDER_FOLDERS=(private_html public_html_landing public_html_redir)
 REMOVED_EMPTY_FOLDERS=(_includes _functions)
 
@@ -237,9 +238,25 @@ echo "== 2. Leaving out what is not part of an installation"
 # A real file in one of the two "empty" folders would vanish from every
 # installation without anybody having decided that. Stop here, before the
 # downloads. check-package.py makes the same test from git's own list.
+#
+# ONE file there is not "a real file that would be lost": the folder's own
+# "refuse everything" file (roll-out package F5). It protects nothing but the
+# folder it sits in, so it is left out with the folder. It is let through
+# ONLY when it is the folder's own .htaccess AND is byte for byte the copy in
+# _core/; a rules file of any other name, place or wording still stops the
+# build, exactly as before.
+real_files_left_out() {
+    local folder="$1" file
+    while IFS= read -r -d '' file; do
+        if [[ "$file" == "$folder/.htaccess" ]] && [[ -f "$STAGE/_core/.htaccess" ]] && cmp -s "$file" "$STAGE/_core/.htaccess"; then
+            continue
+        fi
+        printf '%s\n' "$file"
+    done < <(find "$folder" -type f ! -name .gitkeep -print0)
+}
 for NAME in "${REMOVED_EMPTY_FOLDERS[@]}"; do
-    if [[ -d "$STAGE/$NAME" ]] && [[ -n "$(find "$STAGE/$NAME" -type f ! -name .gitkeep -print)" ]]; then
-        find "$STAGE/$NAME" -type f ! -name .gitkeep -print >&2
+    if [[ -d "$STAGE/$NAME" ]] && [[ -n "$(real_files_left_out "$STAGE/$NAME")" ]]; then
+        real_files_left_out "$STAGE/$NAME" >&2
         stop "web/$NAME holds a real file at $SHORT, and the package leaves that folder out. Move the file, or take $NAME out of REMOVED_EMPTY_FOLDERS here and out of REMOVED_EMPTY_FOLDERS in check-package.py"
     fi
 done

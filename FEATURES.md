@@ -677,20 +677,32 @@ PWA offline fallback page.
 
 ---
 
-### 🛠️ Installer — `/install/` ✅
+### 🛠️ Installer ✅
 
-Self-contained 6-step setup wizard (bootstrap-free).
+Runs by itself the first time the portal's address is opened, when no database login exists yet. It loads none of
+the portal. Made for somebody with only a hosting panel (#499, #500).
 
-- Prerequisites check (PHP version, extensions, paths).
-- DB credentials + connection test.
-- Schema install from `full_schema.sql`.
-- Admin account creation — **enforces the same 12-char-min password policy as the rest of the portal (#132)**, with the client-side strength meter inline.
-- Encryption key generation.
-- Lock file written; further installation attempts blocked.
-
----
-
-## Cross-cutting
+- **Ownership code first.** A code written into `_auth_keys/install-code.php`, which only somebody who can open the
+  hosting's files can read. Nothing else is shown or acted on without it. Ten wrong tries write a new code. Asked
+  for again at the finish.
+- **Refuses on two signs that the website is pointed at the wrong folder:** opened directly, or reached at an
+  address that has the web folder's name in it.
+- **Checks**, each with what to do when it fails: PHP 8.4, the four PHP extensions, the database scripts, the
+  private folders, the web folder's `.htaccess`. Says which copy of the portal this is and how that was decided.
+- **Kind of organisation** (the product name), **database** (tested before any table is built; created if it is
+  missing and the user may), **tables**.
+- **A database that is not empty**: names it, shows how many accounts it holds, and offers "carry on" or "wipe".
+  The choice is held for that one database; the build page says in amber when a wipe is coming.
+- **First administrator**, saved all or nothing — **the same 12-character password rules as the rest of the portal
+  (#132)**, with the strength meter.
+- **Web addresses**: the portal's own address and the support e-mail address.
+- **Finish**: makes `_uploads` and `_backups`; writes the "refuse everything" file into the three private folders;
+  writes the key file, or keeps the one that is there; saves the addresses; writes the database login; locks itself.
+- **Last page, shown once**: the address used in e-mails, which copy this is, to back up the key file with the
+  database, which private folders refuse requests, what to do next.
+- A session lost part way asks for the code again; the database details are then typed again, and what was built
+  is kept.
+- Test: `tools/installer-selftest.php`.
 
 ### 🎨 UI / Design system ✅ (Phase 11)
 

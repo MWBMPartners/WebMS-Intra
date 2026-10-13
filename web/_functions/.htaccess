@@ -1,0 +1,23 @@
+# =============================================================================
+# Refuse every request for anything in this folder.
+#
+# Nothing here is ever meant to be fetched by a browser: the portal's own code
+# reads these files from disk. On a correct installation this folder sits
+# OUTSIDE the web folder and this file is never consulted. It matters only when
+# a hosting panel is pointed at the wrong folder (the one that holds _core,
+# instead of the web folder inside it): without it the web server would then
+# hand out these files to anybody who asked.
+#
+# The same file, byte for byte, sits in _apps, _core, _functions, _includes,
+# _lang, _sql and _vendor, and the installation package copies it into
+# _libraries. The installer writes it into _auth_keys, _uploads and _backups
+# when an installation is finished, and the upgrade page puts it back there
+# whenever it is missing.
+#
+# WHAT IT CANNOT DO: it is read only by Apache 2.4 or later (and servers that
+# follow its rules files) with rules files switched on for this folder. On any
+# other web server it does nothing, and the folder must be kept out of reach
+# by where it is. An installation made before October 2026 does not have it in
+# _auth_keys, _uploads or _backups until its upgrade page has been opened once.
+# =============================================================================
+Require all denied

@@ -64,7 +64,7 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     ├── _lang/                       # Translation files (en.php, cy.php, etc.)
     ├── _vendor/simplejwt/           # Lightweight RS256 JWT verifier
     ├── _sql/                        # Numbered SQL migration files
-    ├── _install/                    # 6-step install wizard (run before first boot)
+    ├── _install/                    # the installer and the upgrade page
     ├── _auth_keys/                  # DB credentials, encryption key (gitignored)
     ├── _includes/                   # Shared includes (future)
     ├── _functions/                  # Shared functions (future)
@@ -194,11 +194,15 @@ rather than a destination.
 
 ### Fresh Installation
 
-1. Upload `web/` contents to the server domain directory
-2. Navigate to the portal URL in your browser — the installation wizard will start automatically
-3. Follow the 6-step wizard: prerequisites check, database config, schema install, admin account, encryption key generation
-4. Upload dompdf to `_libraries/dompdf/` (download from github.com/dompdf/dompdf)
-5. Log in and configure site settings and OAuth providers as needed
+The step-by-step guide for somebody with only a hosting panel is [docs/INSTALL.md](docs/INSTALL.md). In short:
+
+1. Upload the package so that the website's address points at the **web folder** and every other folder sits one
+   level above it. Never point an address at the folder that holds `_core`.
+2. Open the portal's plain address in a browser. The installer starts by itself. A list of folders, "Forbidden" or
+   "Not found" there means the address points at the wrong folder.
+3. Read the installation code from `_auth_keys/install-code.php` in the hosting panel's file manager and type it in.
+4. Follow the steps: checks, kind of organisation, database, tables, first administrator, web addresses, finish.
+5. Keep a copy of the `_auth_keys` folder with every backup of the database.
 
 ### Upgrading
 

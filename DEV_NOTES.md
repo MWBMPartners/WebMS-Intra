@@ -5745,6 +5745,73 @@ philosophy, same "no oracle" security reasoning:
 
 ---
 
+## The installer (#499, #500)
+
+`web/_install/index.php` runs with none of the portal loaded. It is reached only through the web folder's
+`index.php`, when `_auth_keys/auth_creds.php` is missing.
+
+- **Who may use it.** `web/_install/owner_code.php` writes a code into `_auth_keys/install-code.php` on the first
+  visit by anybody and judges what is typed. Wrong tries are counted IN THE FILE, because a session is a cookie the
+  guesser throws away. The session of somebody who typed the code holds a fingerprint of it, compared with the file
+  on every request: a replaced code ends every session the old one let in. `installCodesMatch()` is the one
+  comparison and it is `hash_equals()`. Do not add a second one.
+- **The code file is read and written under a file lock.** `installCodeJudge()` locks the whole file while it
+  reads, judges and writes; `installCodeRead()` waits for that lock with a shared one. Without the shared lock a
+  page view could read the file while it was empty for a moment, take that for "no code file" and write a new
+  code: 200 wrong codes at once then gave 13 to 18 new codes where 20 were due. Do not read that file any other
+  way. Writing a new file and renaming it into place was rejected: it swaps the file under requests still waiting
+  for the lock.
+- **No form is acted on without the code**, and every form carries a token kept in the session (a page on another
+  website must not be able to post the database step into a wizard somebody has unlocked).
+- **Two refusals for a website pointed at the folder that holds `_core`.** (1) Opened directly: the web folder is
+  the folder of the file that handed the request over (`INSTALL_WEB_FOLDER`), and none means the web server ran
+  `_install/index.php` itself. (2) Any part of the address asked for is the web folder's own name: on a rightly
+  pointed website that name is never in an address. The name comes from the folder itself, never from anything
+  typed or from what the web server reports. Neither can catch the commonest sign, a folder list, "Forbidden" or
+  "Not found" at the plain address, because no file of the portal runs then.
+- **A choice belongs to ONE database.** "Carry on" or "wipe" is kept together with the identity of the database it
+  was made for (server, port, name and user), by `installChoiceKeep()` in `web/_install/db_state.php`, and
+  `installChoiceHeld()` answers "none" the moment the database held is another. The database step forgets any
+  earlier choice whenever it lets a database through. The build step wipes only on a wipe held for the database it
+  is about to touch, and with no choice held for a database that is not empty it builds nothing and draws the
+  choice page. Both forms also carry a mark for the database their page was drawn for (`installDatabaseMark()`),
+  so a page left open in another tab is not acted on for a different database. **Never read the session's choice
+  directly:** that is how a wipe confirmed for one database once wiped another (found by the check of 13 October
+  2026). Uploaded files are emptied in one place only, inside that wipe.
+- **The last page is drawn in the answer to the finish.** Once `auth_creds.php` exists the front controller starts
+  the portal on every request, so nothing after that request can reach the installer.
+- **The order of the finish matters**: code, database and administrator, private folders, key file, addresses, the
+  database login, then the installed version and the lock. The login is last of what can fail, because it is what
+  locks the installer; the version comes after it, because a database with a version recorded counts as a finished
+  portal. Because the addresses are stored before the login, a finish that stops at the login has already stored
+  them: the session remembers which values this run filled in (`install_filled`), and a later press may replace
+  those, and only those.
+- **A database that holds tables but no installed version** has "no finished installation recorded". That is what
+  an interrupted installation leaves, and also what a working portal looks like if it was installed before the
+  version was recorded (29 May 2026) or had the record emptied. The installer cannot tell them apart, so it never
+  says "nothing was finished here", and the choice page shows how many accounts the database holds. It lets the
+  code stand in for the sign-in there, but only when every `tbl…` table in it is one the install script makes
+  (`installTablesNotOurs()`); otherwise it refuses. With a version recorded it demands a signed-in global
+  administrator.
+- **Shared with the upgrade page**: `web/_install/install_common.php` holds the private folders' "refuse
+  everything" file and the words for the channel. A rules file with no rule in it is written again; one that holds
+  a rule is left alone, and `installProtectFolder()` reports whether it holds the refusal, so that no page claims a
+  protection that is not there. The channel is still decided only in `Portal\Core\Channel`;
+  `installChannelFileIgnored()` only notices a `.channel` file that the decision did not come from.
+- **Only `PortalAddress::check()`** may be called from the installer.
+- **Do not type `public_html` into a string under `web/`** (`tools/channel-selftest.php` D04): the installer names
+  the three folders through `Channel::FOLDER_NAMES`.
+- Test: `tools/installer-selftest.php` (130 checks; 131 with `SELFTEST_DB_PORT_2`, a second throwaway server, for
+  "the same database name on another server"). It makes and drops three databases named `selftest_inst_…`, so run
+  it only against a throwaway server, and not as the system's administrator account.
+
+**The package and the two empty folders.** `web/_functions` and `web/_includes` now hold the "refuse everything"
+file as well. The package still leaves both folders out. `build.sh` and `check-package.py` let exactly one file
+through there: the folder's own `.htaccess`, while it is byte for byte the copy in `web/_core`. Anything else in
+either folder still stops the build (`package-selftest.sh` cases T04b and B08b).
+
+---
+
 ## Secret settings (#597, #497)
 
 - **Back up `_auth_keys/enc.key` together with the database, every time.**

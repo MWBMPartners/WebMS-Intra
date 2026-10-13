@@ -50,7 +50,7 @@ A build that will be published names its tag: `--tag v1.5.0` with `live`, or `--
 
 ## What is in a package
 
-Everything git holds under `web/`, except: the three placeholder folders (`private_html`, `public_html_landing`, `public_html_redir`), the two empty ones (`_includes`, `_functions`) and every `.gitkeep`. Each file left out is printed by name. A real file in `_includes` or `_functions` stops the build, because leaving it out would lose it without anybody deciding that.
+Everything git holds under `web/`, except: the three placeholder folders (`private_html`, `public_html_landing`, `public_html_redir`), the two empty ones (`_includes`, `_functions`) and every `.gitkeep`. Each file left out is printed by name. A real file in `_includes` or `_functions` stops the build, because leaving it out would lose it without anybody deciding that. The one file let through there is the folder's own "refuse everything" `.htaccess`, and only while it is byte for byte the copy in `_core`: it protects nothing but the folder it sits in, so it is left out with the folder.
 
 Added by the build: `_libraries/dompdf/` (every file on `dompdf-files.sha256`, plus `VERSION.txt`, which the fetch script writes last, and nothing else); the fallback copies under `<web folder>/assets/`; and at the top `.channel` (one word), `VERSION.txt` (five lines: product, version, channel, commit, time built), `CHANGELOG.md` and `INSTALL.md`.
 
@@ -133,7 +133,7 @@ It touches nothing in the repository: it works in a scratch clone in the system'
 It plants faults and requires each to be refused for its own reason. **It proves the guards catch what is planted in it, and nothing more.** What it plants:
 
 - the 76 files an independent check planted on 12 October 2026, and twenty kinds of file on no list;
-- PHP inside the web folder under names that do not end in `.php`; five `.htaccess` files nobody named, or changed since they were read;
+- PHP inside the web folder under names that do not end in `.php`; five `.htaccess` files nobody named, or changed since they were read; the "refuse everything" file of a left-out folder with other wording, and with the right wording one folder further down;
 - pictures and fonts that are real except for one thing (bytes after the end, an archive or a PHP tag or a key inside a well-formed part, a length that is wrong), and drawings that hold a script, an event attribute or a link out;
 - endings with a capital letter; the database login as JSON; a dump under an upgrade's name; a page outside the brand kit;
 - a PHP file with a mistake in it, read by an ordinary PHP and by one whose exit code is lost, and under the name `Mixed.Php`;

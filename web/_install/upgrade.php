@@ -1,5 +1,5 @@
 <?php
-// Path: install/upgrade.php
+// Path: _install/upgrade.php
 /**
  * -----------------------------------------------------------------------------
  * WebMS Intra — Upgrade Handler
@@ -21,12 +21,32 @@
  * losing a secret are at SecretSettings::repairStoredRows(). It runs on every
  * press of the button, and a second run changes nothing the first one did.
  *
+ * TWO THINGS IT DOES EVERY TIME IT IS OPENED (#499, #500), with or without
+ * a press of the button:
+ *   - It says which copy of the portal this is and how that was decided
+ *     (the portal's start-up decided it, in Portal\Core\Channel; this page
+ *     only puts the answer into words).
+ *   - It puts back the "refuse everything" file in the three private folders
+ *     the installation makes for itself (_auth_keys, _uploads, _backups)
+ *     wherever it is missing or holds no rule (empty, comments only, or
+ *     cut short), and says so. An installation made
+ *     before the installer wrote those files gets them this way. What that
+ *     file can and cannot do is at the top of install_common.php.
+ *
+ * EVERY ADDRESS THIS PAGE WRITES is built by Site::url() (#536): its three
+ * redirects and its breadcrumb used to be written out as "/admin/upgrade"
+ * and "/admin". Where organisations are told apart by the first part of the
+ * address, those sent an administrator of one organisation to the default
+ * one in the middle of an upgrade.
+ *
  * @package   Portal\Install
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.3.0
+ * @version   1.4.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/84
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/499
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/536
  * -----------------------------------------------------------------------------
  */
 
@@ -34,6 +54,10 @@ declare(strict_types=1);
 
 // Load the full portal bootstrap (requires working config)
 require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
+
+// 🧰 What this page shares with the installer: the private folders' "refuse
+//    everything" file, and the words for the channel.
+require_once __DIR__ . DIRECTORY_SEPARATOR . 'install_common.php';
 
 use Portal\Core\App;
 use Portal\Core\Auth;
@@ -92,8 +116,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         //    in the middle of upgrading their database.
         //
         //    This file is reached at /admin/upgrade, through a one-line proxy
-        //    at _apps/admin/upgrade.php. That is the address to return to.
-        header('Location: /admin/upgrade');
+        //    at _apps/admin/upgrade.php. That is the address to return to,
+        //    built by Site::url() so that it keeps the organisation's part
+        //    of the address where organisations are told apart that way.
+        header('Location: ' . Site::url('admin/upgrade'));
         exit();
     }
 
@@ -157,7 +183,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     . 'The recovery guide covers the other causes.';
             $_SESSION['flash_type'] = 'danger';
             \Portal\Core\Maintenance::setActive(false);
-            header('Location: /admin/upgrade');
+            header('Location: ' . Site::url('admin/upgrade'));
             exit();
         }
 
@@ -200,7 +226,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // only on the page this refusal leads to.
                 $_SESSION['upgrade_may_go_on'] = true;
                 \Portal\Core\Maintenance::setActive(false);
-                header('Location: /admin/upgrade');
+                header('Location: ' . Site::url('admin/upgrade'));
                 exit();
             }
             // Going on, deliberately. Recorded first, so that the record does
@@ -365,6 +391,35 @@ try {
     $executedErr = 'Could not read executed-migrations list: ' . $e->getMessage();
 }
 
+// 🔒 The "refuse everything" file in the three private folders: put back
+//    wherever it is missing or holds no rule, every time this page is drawn. Done
+//    here, after the form handling above, so that what was put back is said
+//    on the page the reader actually sees (a refused form redirects, and
+//    this then runs on the page it lands on). It never throws: a folder it
+//    cannot write to is reported below, and the page carries on.
+$privateFolders = installProtectPrivateFolders(PORTAL_ROOT);
+
+// 🧭 Which copy of the portal this is, and how that was decided, in words.
+//    The decision is start-up's (Portal\Core\Channel); nothing is decided
+//    here. Only the web folder's own name is handed over, never its path.
+$channelWords = defined('PORTAL_ENV_SOURCE') === true
+    ? installChannelWords(
+        (string) PORTAL_ENV,
+        (string) PORTAL_ENV_SOURCE,
+        basename((string) PORTAL_WEBROOT),
+        // A `.channel` file that is there but was not understood is said to
+        // be that, and not "nothing says".
+        installChannelFileIgnored(PORTAL_ROOT, (string) PORTAL_ENV_SOURCE)
+    )
+    : null;
+
+/** "a", "a and b", "a, b and c": a list of names as a person writes it. */
+$inWords = static function (array $names): string {
+    $last = array_pop($names);
+
+    return $names === [] ? (string) $last : implode(', ', $names) . ' and ' . $last;
+};
+
 // Page metadata
 $pageTitle   = 'Upgrade Portal';
 $pageSection = 'admin';
@@ -375,7 +430,7 @@ $pageSection = 'admin';
 // one mistake. header.php now guards against the wrong shape too (see its
 // own comment), but the fix belongs here: the trail should be right in
 // the first place.
-$breadcrumbs = ['Admin' => '/admin', 'Upgrade' => ''];
+$breadcrumbs = ['Admin' => Site::url('admin'), 'Upgrade' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -421,8 +476,37 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <span class="text-warning"><?php echo count($pending); ?> pending</span>
                         <?php endif; ?>
                     </p>
+                    <?php if ($channelWords !== null): ?>
+                        <?php // 🧭 No <div> inside this one: tools/installer-selftest.php reads it up to its first closing </div>. ?>
+                        <div class="mt-3 pt-3 border-top small text-break" id="upgrade-channel" data-channel-source="<?php echo htmlspecialchars((string) PORTAL_ENV_SOURCE, ENT_QUOTES, 'UTF-8'); ?>">
+                            <p class="mb-1"><strong>Which copy this is:</strong>
+                                This is <?php echo htmlspecialchars($channelWords['copy'] . '. ' . $channelWords['how'], ENT_QUOTES, 'UTF-8'); ?></p>
+                            <?php foreach ($channelWords['advice'] as $advice): ?>
+                                <p class="mb-1 text-muted"><?php echo htmlspecialchars($advice, ENT_QUOTES, 'UTF-8'); ?></p>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
                 </div>
             </div>
+
+            <?php if ($privateFolders['written'] !== [] || $privateFolders['problems'] !== []): ?>
+                <!-- 🔒 #499: the "refuse everything" file, put back where it was missing -->
+                <div class="alert <?php echo $privateFolders['problems'] !== [] ? 'alert-warning' : 'alert-info'; ?> small" id="upgrade-private-folders">
+                    <?php if ($privateFolders['written'] !== []): ?>
+                        <strong>A missing safety file has been put back.</strong>
+                        The file that tells the web server to refuse every request for anything inside was missing, or held no rule, in
+                        <?php echo htmlspecialchars($inWords($privateFolders['written']), ENT_QUOTES, 'UTF-8'); ?>.
+                        It is there again now. It matters only if the website&rsquo;s address is ever pointed at the folder that holds
+                        <code>_core</code>, and it works on Apache web servers only.
+                    <?php endif; ?>
+                    <?php if ($privateFolders['problems'] !== []): ?>
+                        <strong>A safety file could not be put back:</strong>
+                        <?php echo htmlspecialchars(implode('; ', $privateFolders['problems']), ENT_QUOTES, 'UTF-8'); ?>.
+                        What to do: in the hosting panel&rsquo;s file manager, check that the folder exists beside <code>_core</code> and that the
+                        website may write to it, then open this page again.
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
 
             <?php if ($ranWithoutWayBack !== ''): ?>
                 <!-- 🚩 This run went ahead although its snapshot cannot be put back whole -->

@@ -2,6 +2,74 @@
 
 
 ## [Unreleased] (alpha)
+- **The installer (#499, #500): it now asks who you are, and finishes a complete installation**
+  - **What was wrong.** Anybody who reached a freshly uploaded portal before its owner could type the details of a
+    database of their own, make themselves administrator, and own a portal running on the customer's address. The
+    installer's only guard was "already installed".
+  - **The ownership code.** The first time the installer is opened it writes a code into
+    `_auth_keys/install-code.php` and asks for it. Only somebody who can open the hosting account's files can read
+    that file (opened in a browser it shows nothing). Nothing past the first page is shown, and no form is acted on,
+    without the code. The finish asks for it again. A wrong code is refused in the same words however close it was;
+    the tenth wrong try in a row writes a new code, also when many wrong codes arrive at the same instant (200 at
+    once are counted as 200). If somebody keeps the code changing by sending wrong ones, the owner can make the file
+    read-only after reading it; the finish still removes it.
+  - **A website pointed at the wrong folder is refused, two ways.** The installer will not run when it is opened
+    from inside the portal's own folders, or when the address has the web folder's own name in it (for example
+    `/admin_html/`). Both mean the website's address is set to the folder that holds `_core`. It says what to
+    change in the hosting panel and writes nothing. What it cannot catch: at the plain address such a website
+    shows a list of folders, "Forbidden" or "Not found", and no file of the portal runs at all.
+  - **Web addresses.** The installer asks for the portal's own address (filled in with the address in use, for the
+    person to check) and the support e-mail address, and checks both exactly as Admin, Settings, Organisation does.
+    The address is stored only if the database holds none yet, and never as a second row. An address corrected
+    after a finish that stopped part way replaces the one that finish had stored.
+  - **The private folders.** The finish makes `_uploads` and `_backups`, and writes the "refuse everything" file
+    into those and into `_auth_keys`. A rules file there that holds no rule (empty, comments only, or cut short) is
+    written again; one of somebody's own that holds a rule is left alone, and the last page says so when it does not
+    hold the refusal. The upgrade page does the same every time it is opened. The same file also ships in
+    `_functions` and `_includes` (seven folders in all); the installation package leaves those two folders out, file
+    included.
+  - **The key file.** A key file that is already there is KEPT. The installer used to write a new one every time,
+    which made every secret already stored in the database unreadable. An empty file in its place is replaced. The
+    last page says to back the key file up together with the database.
+  - **Which copy this is.** The first checks, the finish and the upgrade page say which copy of the portal this is
+    and how that was decided. A missing `.channel` file never stops an installation: the copy is assumed to be the
+    live one, the pages say ASSUMED, and they give the file to create and the word to put in it. A `.channel` file
+    holding a word the portal does not know is said to be exactly that, with the words it does know.
+  - **The last page is now real.** "Installation complete" could never be seen: the finish redirected, and by then
+    the portal had taken over. It is now drawn in the same answer as the finish, once, and says the address used in
+    e-mails, which copy this is, to back up the key file, and what to do next.
+  - **A database that is not empty.**
+    - The page for it ended in an error for everybody, so neither "carry on" nor "wipe and start again" could be
+      reached. It now opens, names the database, and shows how many accounts the database holds. It says "no
+      finished installation is recorded", not "none was ever finished": a working portal installed before the
+      version was recorded looks the same.
+    - **A choice belongs to the one database it was made for.** "Wipe" confirmed for one database is never carried
+      out on another: typing database details again forgets any earlier choice; the build step builds nothing into
+      a database that is not empty until a choice is held for it; and a page drawn for one database is not acted on
+      for another (two tabs, or the browser's Back button). When the choice held is the wipe, the "Build the
+      tables" page says so in amber and names the database. Uploaded files are emptied only as part of that wipe.
+    - A session lost after the tables were built was a dead end: the installer demanded a signed-in global
+      administrator of a portal that was not installed. A database with no finished installation recorded is now
+      let through on the ownership code. A database holding a finished portal still demands the sign-in, and now
+      says so (a stray redirect used to throw the explanation away).
+    - After "wipe and start again", pressing "build the tables" a second time wiped everything again.
+    - **A database shared with another program is refused.** "Wipe and start again" removes every table whose name
+      begins with `tbl`. A database with no finished installation recorded that also holds a `tbl…` table the
+      portal does not make is refused by name at the database step: not built into, not wiped.
+  - The first administrator was saved in two halves. An e-mail address longer than 50 characters left an
+    administrator who could not sign in and whose address could not be used again. It is now all or nothing.
+  - **The upgrade page** builds its three redirects and its breadcrumb with `Site::url()`, and is off the pending
+    list of `check_site_aware_addresses.py`.
+  - PHP's own error text is never printed into the installer's pages, whatever the hosting's settings say.
+  - Self-test: `tools/installer-selftest.php` (130 checks, 131 when a second database server is named; MySQL 8.0.36
+    and 8.4.11). It drives the real installer in a scratch copy against a throwaway database.
+- **Upgrading — nothing has to be done**
+  - An installed portal never runs the installer. Open Admin, Upgrade once after uploading: it puts the "refuse
+    everything" file into `_auth_keys`, `_uploads` and `_backups`, and tells you which copy the portal thinks it is.
+  - **Seven "refuse everything" files** (`.htaccess` in `_apps`, `_core`, `_functions`, `_includes`, `_lang`,
+    `_sql`, `_vendor`; the installer writes the same file into `_auth_keys`, `_uploads` and `_backups`). They matter
+    only when a hosting panel is pointed at the wrong folder, and only on Apache.
+  - Review of the installer (#499, #500): one independent check by a fresh Claude agent standing in for Codex found no way for a stranger to take the portal (21 addresses and 11 hand-made forms without the code all get the first page) and two medium and five small faults, one of which could wipe a second database by the owner's own slip. One round fixed those, with that scenario and four variations proved by counting the second database's rows before and after; that round was not independently checked. Run on MySQL 8.0.36 and 8.4.11; not on Apache, a real hosting panel, PHP 8.4 or MariaDB. Not reviewed by Codex yet.
 - **The mail queue (#592, part 3): what an administrator must do after upgrading**
   **Add one scheduled job. It is the only thing that sends mail that is waiting.**
   1. Run the database upgrade (Admin, Upgrade). It adds migration 216.

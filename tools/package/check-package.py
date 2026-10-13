@@ -50,7 +50,9 @@ public-door-6-configurable-domains-and-package.md` section 6.6)
        the committed list, byte for byte, and none is missing. Nothing else is
        in the package except the documented additions. No links.
   --   What was left out is said, by name. A real file in web/_includes/ or
-       web/_functions/ fails, because the build would leave it out.
+       web/_functions/ fails, because the build would leave it out. The one
+       file let through there is the folder's own "refuse everything" file,
+       and only while it is byte for byte the copy in web/_core/.
   --   The allow list: every name uses only plain characters and an ending
        in small letters, and every file is of an allowed kind in an allowed
        place. A picture or a font is followed from its first part to its
@@ -211,9 +213,10 @@ REPO_WEB_FOLDER = "public_html"
 #     domain; the owner chose on 14 September 2026 to keep them in the
 #     repository and have the package leave them out. What is left out is
 #     printed by name on every run.
-#   - _includes and _functions hold nothing but a placeholder file. A REAL
-#     file there fails the check (see guard_left_out): until 12 October 2026 it
-#     was left out without a word, and the build passed with the file absent.
+#   - _includes and _functions hold nothing but a placeholder file and the
+#     "refuse everything" file. Any OTHER file there fails the check (see
+#     guard_left_out): until 12 October 2026 it was left out without a word,
+#     and the build passed with the file absent.
 REMOVED_PLACEHOLDER_FOLDERS = ("private_html", "public_html_landing", "public_html_redir")
 REMOVED_EMPTY_FOLDERS = ("_includes", "_functions")
 REMOVED_FOLDERS = REMOVED_PLACEHOLDER_FOLDERS + REMOVED_EMPTY_FOLDERS
@@ -334,25 +337,29 @@ ALLOWED_HTACCESS = {
     ),
     # The five "refuse everything" files (roll-out package F3). One file, five
     # places, so one checksum. They hold no rule that switches anything on.
+    # The same file also sits in web/_includes and web/_functions (roll-out
+    # package F5), and those two are NOT named here: the package leaves both
+    # folders out, file and all (see guard_left_out). Should one of them ever
+    # be shipped, a build will print the line to add.
     "_apps/.htaccess": (
-        "9e16e2fbc09e5d0c749b7e31aa5ffc783e40c95dc1356c98a16661a9a81e488f",
-        "refuses every request: one comment and 'Require all denied'. The same file in five private folders (read 12 October 2026)",
+        "b1f4d428ffa07a2072588c220a7a0dc022a32f6deb578b802c9e6c87e4de5d95",
+        "refuses every request: one comment and 'Require all denied'. The same file in five private folders (read 13 October 2026)",
     ),
     "_core/.htaccess": (
-        "9e16e2fbc09e5d0c749b7e31aa5ffc783e40c95dc1356c98a16661a9a81e488f",
-        "refuses every request: one comment and 'Require all denied'. The same file in five private folders (read 12 October 2026)",
+        "b1f4d428ffa07a2072588c220a7a0dc022a32f6deb578b802c9e6c87e4de5d95",
+        "refuses every request: one comment and 'Require all denied'. The same file in five private folders (read 13 October 2026)",
     ),
     "_lang/.htaccess": (
-        "9e16e2fbc09e5d0c749b7e31aa5ffc783e40c95dc1356c98a16661a9a81e488f",
-        "refuses every request: one comment and 'Require all denied'. The same file in five private folders (read 12 October 2026)",
+        "b1f4d428ffa07a2072588c220a7a0dc022a32f6deb578b802c9e6c87e4de5d95",
+        "refuses every request: one comment and 'Require all denied'. The same file in five private folders (read 13 October 2026)",
     ),
     "_sql/.htaccess": (
-        "9e16e2fbc09e5d0c749b7e31aa5ffc783e40c95dc1356c98a16661a9a81e488f",
-        "refuses every request: one comment and 'Require all denied'. The same file in five private folders (read 12 October 2026)",
+        "b1f4d428ffa07a2072588c220a7a0dc022a32f6deb578b802c9e6c87e4de5d95",
+        "refuses every request: one comment and 'Require all denied'. The same file in five private folders (read 13 October 2026)",
     ),
     "_vendor/.htaccess": (
-        "9e16e2fbc09e5d0c749b7e31aa5ffc783e40c95dc1356c98a16661a9a81e488f",
-        "refuses every request: one comment and 'Require all denied'. The same file in five private folders (read 12 October 2026)",
+        "b1f4d428ffa07a2072588c220a7a0dc022a32f6deb578b802c9e6c87e4de5d95",
+        "refuses every request: one comment and 'Require all denied'. The same file in five private folders (read 13 October 2026)",
     ),
 }
 # The second net for every .htaccess EXCEPT the web folder's own: a line that
@@ -614,6 +621,9 @@ class Package:
         # git's list of web/ at the commit: package path -> git's name for the bytes.
         self.from_git: dict[str, str] = {}
         self.left_out: list[str] = []
+        # The same for what is left out, so that guard_left_out can tell the
+        # one file it lets through by its bytes and not by its name alone.
+        self.left_out_blobs: dict[str, str] = {}
         for entry in git(repo, "ls-tree", "-r", "-z", self.commit, "--", "web/").split(b"\0"):
             if entry == b"":
                 continue
@@ -621,6 +631,7 @@ class Package:
             rel = path.decode("utf-8", errors="surrogateescape")[len("web/"):]
             if is_removed(rel):
                 self.left_out.append(rel)
+                self.left_out_blobs[rel] = meta.split()[2].decode()
                 continue
             self.from_git[to_package_path(rel, self.web_folder)] = meta.split()[2].decode()
 
@@ -728,6 +739,25 @@ def guard_listing(pkg: Package, report: Report) -> None:
         )
 
 
+def is_refuse_file_of_left_out_folder(pkg: Package, rel: str) -> bool:
+    """True for the ONE real file a left-out folder may hold: its own "refuse
+    everything" file (roll-out package F5).
+
+    That file protects nothing but the folder it sits in, so leaving it out
+    with the folder loses nothing. It is recognised by ALL of: it is the
+    .htaccess directly inside _includes or _functions, and git holds for it
+    exactly the bytes it holds for _core/.htaccess (whose own wording and
+    checksum guard_allow_list holds). A rules file anywhere else under those
+    folders, or one whose wording has drifted, is still a real file that
+    would be lost, and still fails."""
+    parts = rel.split("/")
+    shipped = pkg.from_git.get("_core/.htaccess")
+    return (
+        len(parts) == 2 and parts[0] in REMOVED_EMPTY_FOLDERS and parts[1] == ".htaccess"
+        and shipped is not None and pkg.left_out_blobs.get(rel) == shipped
+    )
+
+
 def guard_left_out(pkg: Package, report: Report) -> None:
     """Says what the package leaves out, and fails when that would lose a real file."""
     guard = "what the package leaves out"
@@ -737,6 +767,7 @@ def guard_left_out(pkg: Package, report: Report) -> None:
         "in build.sh AND in check-package.py"
         for rel in sorted(pkg.left_out)
         if rel.split("/")[0] in REMOVED_EMPTY_FOLDERS and rel.split("/")[-1] not in REMOVED_FILE_NAMES
+        and not is_refuse_file_of_left_out_folder(pkg, rel)
     ]
     if lost:
         report.failed(guard, f"{len(lost)} real file(s) would be left out without anybody deciding it", lost)
@@ -745,8 +776,8 @@ def guard_left_out(pkg: Package, report: Report) -> None:
     more = f", and {len(pkg.left_out) - 15} more" if len(pkg.left_out) > 15 else ""
     report.passed(
         guard,
-        f"{len(pkg.left_out)} file(s) in git are left out on purpose (placeholders and the three folders "
-        f"nothing deploys): {shown}{more}",
+        f"{len(pkg.left_out)} file(s) in git are left out on purpose (placeholders, the 'refuse everything' file "
+        f"of each folder that is left out, and the three folders nothing deploys): {shown}{more}",
     )
 
 

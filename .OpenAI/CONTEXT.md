@@ -427,6 +427,20 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     `Europe/London`, whatever zone the event is in (#604). An organisation's
     zone is `tblSites.timezone`. Never type a zone into the code.
 
+    **The installer asks for an ownership code (#499, #500).**
+    `web/_install/owner_code.php` is the ONE place a code is written, counted
+    and compared (`hash_equals()`); nothing is shown or acted on without it, and
+    the finish asks again. Read the code file only through `installCodeRead()`
+    (it waits for the writer's lock). The installer refuses when opened
+    directly, and when the address has the web folder's name in it. **A choice
+    for a database that is not empty ("carry on" or "wipe") belongs to ONE
+    database:** read it only through `installChoiceHeld()` in
+    `web/_install/db_state.php`, never from the session. The private folders'
+    "refuse everything" file and the words for the channel are in
+    `web/_install/install_common.php`, shared with the upgrade page. A missing
+    `.channel` file never stops an install. Test: `tools/installer-
+    selftest.php`.
+
 15. **The ApiRouter trap.** Any address starting `api/` is intercepted
     before the normal routing table is ever consulted, and resolved purely
     by naming convention to `_apps/{appName}/api/{action}.php`. A handler
