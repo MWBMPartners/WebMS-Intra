@@ -1473,6 +1473,27 @@ $mysqli = new mysqli(
 $mysqli->set_charset('utf8mb4');
 $SETTINGS = ['feeds' => ['cron_token' => 'p6-selftest-token']];
 
+// 🕰️ Tell `Site` where this database keeps an organisation's time zone, as the
+//    portal's own start-up does (#604). Start-up hands Site the settings it has
+//    just loaded, and Site looks in them for the mark migration 217 leaves:
+//    with it, an organisation's zone is read from its own row
+//    (`tblSites.timezone`); without it, from the old `site.timezone` setting.
+//    This file never loads start-up, so it does that one step itself, from the
+//    mark as the DATABASE holds it. It is run again once the made-up world is
+//    in place, as a new request would be: Site remembers a zone it has already
+//    looked up for the length of one request.
+function fi_startSite(): void
+{
+    global $mysqli;
+    $mark = $mysqli->query("SELECT settingValue FROM tblSettings WHERE settingKey = 'site.timezoneKeptAt' AND siteID IS NULL")->fetch_row();
+    \Portal\Core\Site::init($mysqli, ['site' => ['timezoneKeptAt' => (string) ($mark[0] ?? '')]], 1);
+}
+fi_startSite();
+if (\Portal\Core\Site::timezoneFacts()['inRow'] === false) {
+    echo "REFUSED — this database does not hold migration 217's mark, so an organisation's zone would be read from the old setting. Build it from web/_sql/full_schema.sql. Nothing was checked.\n";
+    exit(1);
+}
+
 // =============================================================================
 // 🛠️ Small helpers
 // =============================================================================
@@ -1554,8 +1575,11 @@ function fi_reset(): void
 
     // Organisation 1 exists only so the portal's own error log — which stamps
     // whichever organisation a request began in — has somewhere to write.
-    $mysqli->query('INSERT INTO tblSites (siteID, siteKey, siteName, isActive) VALUES '
-        . "(1, 'default', 'Default', 1), (" . SITE_A . ", 'orga', 'Organisation A', 1)");
+    // Organisation A's zone goes in its OWN ROW, the one place it is kept since
+    // #604. Everything imported for it is stored in that zone. (It used to be
+    // given further down as the installation's `site.timezone` setting.)
+    $mysqli->query('INSERT INTO tblSites (siteID, siteKey, siteName, timezone, isActive) VALUES '
+        . "(1, 'default', 'Default', 'UTC', 1), (" . SITE_A . ", 'orga', 'Organisation A', '" . SITE_ZONE . "', 1)");
     $mysqli->query('INSERT INTO tblUsers (userID, emailAddress, fullName, isActive, isAdmin, isRootAdmin) VALUES'
         . ' (' . VIEWER_1 . ", 'v1@p6.test', 'Vee One',   1, 0, 0),"
         . ' (' . VIEWER_6 . ", 'v6@p6.test', 'Vee Six',   1, 0, 0),"
@@ -1565,10 +1589,9 @@ function fi_reset(): void
         . ' (' . VIEWER_6 . ', ' . SITE_A . ', 1, 1, 0)');
     $mysqli->query('INSERT INTO tblEventCategories (categoryID, siteID, categoryName, categorySlug) VALUES'
         . ' (7, ' . SITE_A . ", 'Outreach', 'outreach'), (9, " . SITE_A . ", 'General', 'general')");
-    // The organisation's own time zone. Everything imported is stored in it.
     $mysqli->query("DELETE FROM tblSettings WHERE settingKey IN ('site.timezone', 'feeds.maxEventsPerFeed')");
-    $mysqli->query('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) '
-        . "VALUES (NULL, 'site.timezone', '" . SITE_ZONE . "', 'UTC', 0)");
+    // The organisations above are new rows: Site must look them up afresh.
+    fi_startSite();
 }
 
 /** Add a calendar the way the admin page does, and give back its number. */
@@ -1638,7 +1661,7 @@ function fi_url(string $path): string
 function fi_live(int $feedId): array
 {
     return fi_q(
-        'SELECT eventID, eventName, eventSlug, startDateTime, endDateTime, timezone, eventTimezone, isAllDay, '
+        'SELECT eventID, eventName, eventSlug, startDateTime, endDateTime, timezone, isAllDay, '
         . 'isPublic, isDeleted, status, importLevel, importDetail, importSource, categoryID, externalPrivate, '
         . 'externalRecurrenceKey, seriesID, LOWER(HEX(externalUidHash)) AS uidHex, externalUid, externalLastSeenAt '
         . 'FROM tblEvents WHERE externalFeedID = ? AND isDeleted = 0 ORDER BY startDateTime, eventName',
@@ -1767,6 +1790,10 @@ function fi_runJob(string $token = 'p6-selftest-token'): string
         . "\$mysqli = new mysqli(\$c['host'], \$c['user'], \$c['pass'], \$c['name'], \$c['port']);\n"
         . "\$mysqli->set_charset('utf8mb4');\n"
         . "\$SETTINGS = ['feeds' => ['cron_token' => 'p6-selftest-token']];\n"
+        // As the portal's start-up does (#604): Site is told, from the mark the
+        // DATABASE holds, that an organisation's zone is kept in its own row.
+        . "\$mark = \$mysqli->query(\"SELECT settingValue FROM tblSettings WHERE settingKey = 'site.timezoneKeptAt' AND siteID IS NULL\")->fetch_row();\n"
+        . "\\Portal\\Core\\Site::init(\$mysqli, ['site' => ['timezoneKeptAt' => (string) (\$mark[0] ?? '')]], 1);\n"
         . "\$_GET['key'] = (string) (\$argv[1] ?? '');\n"
         . "\$run = static function () use (&\$mysqli, &\$SETTINGS): void { require \$GLOBALS['c']['job']; };\n"
         . "\$GLOBALS['c'] = \$c;\n"
@@ -1941,7 +1968,9 @@ try {
         $shapes['public']    = $shapes['public'] && $row['importLevel'] === 'public';
         $shapes['full']      = $shapes['full'] && $row['importDetail'] === 'full';
         $shapes['calendar']  = $shapes['calendar'] && $row['importSource'] === 'calendar';
-        $shapes['zone']      = $shapes['zone'] && $row['timezone'] === SITE_ZONE && $row['eventTimezone'] === SITE_ZONE;
+        // The ONE column an event's zone is kept in (#604). This used to look at a
+        // second column as well, `eventTimezone`, which migration 217 removed.
+        $shapes['zone']      = $shapes['zone'] && $row['timezone'] === SITE_ZONE;
         $shapes['slug']      = $shapes['slug'] && str_starts_with((string) $row['eventSlug'], 'imp-');
         $shapes['notPublic'] = $shapes['notPublic'] && (int) $row['isPublic'] === 0;
     }
@@ -2097,9 +2126,9 @@ try {
     $feed = fi_addFeed('Edge of the period', fi_url('/f/seq-6.ics'));
     fi_refresh($feed);
     $mysqli->query('INSERT INTO tblEvents (siteID, externalFeedID, externalUidHash, externalRecurrenceKey, eventSlug, '
-        . 'eventName, startDateTime, endDateTime, status, isPublic, isDeleted, importLevel, importDetail, externalLastSeenAt) '
+        . 'eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted, importLevel, importDetail, externalLastSeenAt) '
         . 'VALUES (' . SITE_A . ', ' . $feed . ", UNHEX('" . str_repeat('ab', 32) . "'), '', 'fi-edge-row', "
-        . "'Sitting on the very end', '" . $endText . "', '" . $endText . "', 'published', 0, 0, 'hidden', 'basic', "
+        . "'Sitting on the very end', '" . $endText . "', '" . $endText . "', '" . SITE_ZONE . "', 'published', 0, 0, 'hidden', 'basic', "
         . "'2020-01-01 00:00:00')");
     $r    = fi_refresh($feed, null, true);
     $edge = fi_one("SELECT isDeleted FROM tblEvents WHERE eventSlug = 'fi-edge-row'");

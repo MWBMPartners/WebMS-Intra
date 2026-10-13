@@ -717,21 +717,21 @@ $today    = date('Y-m-d');
 $eventDay = date('Y-m-d', strtotime('+9 days'));
 foreach ([[EV_INT, ORG_A, 'internal', 'published', 0], [EV_PUB, ORG_A, 'public', 'published', 1], [EV_DRAFT, ORG_A, 'draft', 'draft', 1], [EV_B, ORG_B, 'other-org', 'published', 1]] as [$id, $site, $kind, $status, $public]) {
     q(
-        'INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, eventTimezone, status, isPublic, isDeleted) '
-        . "VALUES (?, ?, ?, ?, 'ACCESS description', ?, ?, 'UTC', 'UTC', ?, ?, 0)",
+        'INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) '
+        . "VALUES (?, ?, ?, ?, 'ACCESS description', ?, ?, 'UTC', ?, ?, 0)",
         'iisssssi', [$id, $site, 'access-' . $kind, 'ACCESS ' . $kind . ' event', $eventDay . ' 10:00:00', $eventDay . ' 11:00:00', $status, $public]
     );
 }
 // J: two more events of A whose number a check-in or a decision card must NOT keep: one deleted, and one
 //    copied in from an outside calendar (the calendar's own row is not needed: nothing links the two tables).
 q(
-    'INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, eventTimezone, status, isPublic, isDeleted) '
-    . "VALUES (?, ?, 'access-deleted', 'ACCESS deleted event', 'ACCESS description', ?, ?, 'UTC', 'UTC', 'published', 1, 1)",
+    'INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) '
+    . "VALUES (?, ?, 'access-deleted', 'ACCESS deleted event', 'ACCESS description', ?, ?, 'UTC', 'published', 1, 1)",
     'iiss', [EV_GONE, ORG_A, $eventDay . ' 10:00:00', $eventDay . ' 11:00:00']
 );
 q(
-    'INSERT INTO tblEvents (eventID, siteID, externalFeedID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, eventTimezone, status, isPublic, isDeleted) '
-    . "VALUES (?, ?, 916901, 'access-imported', 'ACCESS imported event', 'ACCESS description', ?, ?, 'UTC', 'UTC', 'published', 1, 0)",
+    'INSERT INTO tblEvents (eventID, siteID, externalFeedID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) '
+    . "VALUES (?, ?, 916901, 'access-imported', 'ACCESS imported event', 'ACCESS description', ?, ?, 'UTC', 'published', 1, 0)",
     'iiss', [EV_IMPORTED, ORG_A, $eventDay . ' 10:00:00', $eventDay . ' 11:00:00']
 );
 // F: one pending registration on A's internal event, one on B's event.

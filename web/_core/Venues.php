@@ -11,8 +11,9 @@
  *
  * WALL-CLOCK RULE (make-or-break, non-negotiable): Booking rows are
  * wall-clock venue-local DATE+TIME. tblEvents datetimes are wall-clock
- * event-local in event.timezone/eventTimezone (the column comment saying
- * "stored in UTC" is a known doc bug — see #429 follow-ups).
+ * event-local in tblEvents.timezone, the one column an event's zone is kept
+ * in since #604 (the column comment saying "stored in UTC" is a known doc
+ * bug — see #429 follow-ups).
  * classifyEventCoverage() compares wall-clock to wall-clock; when the two
  * IANA zones are equal there is NO conversion at all; UTC is never involved.
  * Never "fix" bookings or events into UTC.
@@ -3555,12 +3556,10 @@ class Venues
             $roomId = null;
         }
 
-        try {
-            $evTzName = (string) ($event['timezone'] ?? '');
-            $evTz = new \DateTimeZone($evTzName !== '' ? $evTzName : 'Europe/London');
-        } catch (\Throwable $e) {
-            $evTz = new \DateTimeZone('Europe/London');
-        }
+        // 🕰️ The event's own zone, or the organisation's when the stored one
+        //    cannot be opened (#604). The fallback used to be "Europe/London",
+        //    typed in here, which is wrong for a customer anywhere else.
+        $evTz = Site::zoneFor((string) ($event['timezone'] ?? ''));
         $venTz = self::venueTimezone($venue);
 
         $startRaw = (string) $event['startDateTime'];

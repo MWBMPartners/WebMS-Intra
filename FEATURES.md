@@ -285,7 +285,12 @@ Events, series, RSVP, exports, and seven view modes.
 - Event categories + types (hierarchical, per-site).
 - Recurring rules: weekly / fortnightly / monthly / quarterly / yearly / custom.
 - RSVP system (#88) — capacity, waitlist, confirmation emails.
-- iCal export (`/calendar/export`).
+- iCal export (`/calendar/export`). The feed people subscribe to and the download carry each event's own time
+  zone and its stored time; a personal feed is on the holder's own organisation's clock (#604).
+- An event's time zone is chosen from a list on the event form; a new event starts on the organisation's zone.
+  The events API's create takes an optional `timezone`. Manage Events lists events with no usable zone, and
+  older events marked "Europe/London" in an organisation on another clock, with one button to put those right
+  (#604).
 - Public + admin-managed views.
 - Crews (#343), volunteer job board (#344), multi-day attendance grid (#345), segment broadcast (#119), registrations (#347) — per-event coordinator tools at `/calendar/event/{crews,jobs,attendance,broadcast}` + `/admin/calendar/registrations`.
 - **Event Team Hub (#386 Phase 1)** — per-event staff/volunteer/organiser landing page at `/calendar/event/hub`, gathering the above tools plus a Resources list and a YouTube/Vimeo/Cloudflare Stream video grid. See the dedicated section below.
@@ -840,6 +845,8 @@ another repo, ever**.
   but cannot be chosen yet (#536).
 - A person with several organisations chooses one after signing in (`/site/choose`) and can switch later; a person
   with one is put straight into it.
+- An organisation's time zone is set on Admin → Sites (Edit) and nowhere else (#604). Admin → Health has a
+  "Time zones" line that says how many organisations and events have no zone the portal knows.
 - **Links stay inside the organisation (#536, part 1 of 2).** Where organisations are told apart by the first
   part of the address, the menu, page header, footer, error pages, "closed for maintenance" page, sign-in
   redirects (Microsoft and Google included), sign-out page and the portal's own script files all keep that part.

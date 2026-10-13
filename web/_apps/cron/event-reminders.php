@@ -9,11 +9,11 @@
  * windows and writes one tblEventReminderLog row per (eventID,
  * reminderType) to enforce single-shot semantics.
  *
- * Windows:
- *   24h  — startDateTime between NOW+23h45m and NOW+24h15m
- *   1h   — startDateTime between NOW+45m  and NOW+75m
- *   day  — once per day at 06:30-08:00 local — coordinator/admin
- *          summary of today's events
+ * Windows (each counted from the MOMENT the event starts; see "IS IT TIME?"):
+ *   24h  — the start is between 23h45m and 24h15m away
+ *   1h   — the start is between 45m and 75m away
+ *   day  — once, between 06:00 and 08:59 on the EVENT's own clock, on the
+ *          day it starts: a coordinator/admin summary
  *
  * WEB PUSH (#322): the 1h window ALSO fans a push out to the same RSVP'd
  * ("going"/"confirmed") userIDs, on the `reminders` channel, gated on their
@@ -38,24 +38,69 @@
  * portal's own events only (imported events have no coordinators). The
  * output line stays counts only.
  *
- * WHICH TIME ZONE AN EVENT'S START IS IN (#592). An event's start is a time
- * on a clock, and the clock's zone is `tblEvents.timezone`: the column the
- * event form writes, and the one the event page, the calendar feed and the
- * export read. The use-by moment of every reminder here is worked out in it
- * (MailQueue::useBy()), and in the ORGANISATION's own zone (`tblSites.
- * timezone`) when the event's is not one PHP knows: the form's zone box is
- * free text, so it can be mistyped, and a reminder must not be lost for that.
- * WHAT WAS WRONG: this read `tblEvents.eventTimezone`, which only the feed
- * importer writes. For every event made in the portal that column holds its
- * default, "Europe/London", so the use-by moment of an event in any other
- * zone was hours out: a reminder for an event an hour away in a zone west of
- * London was thrown away at once, and one for an event east of it could
- * still go after the event had started.
- * WHAT THIS DOES NOT PUT RIGHT: WHEN a reminder is made. The three queries
- * below still compare the event's clock time with the DATABASE SERVER's own
- * clock (NOW()), as they always have, so a reminder for an event in another
- * zone than the server's is made at the wrong moment. That is older than
- * the mail queue and is not changed here.
+ * WHICH TIME ZONE AN EVENT'S START IS IN (#592, #604). An event's start is
+ * a time on a clock, and the clock's zone is `tblEvents.timezone`, the ONE
+ * column an event's zone is kept in. When that is not a zone PHP can open
+ * (an event saved before the form checked its zone box), the ORGANISATION's
+ * own zone is used, from Site::timezone(): a reminder must not be lost for a
+ * slip of the finger. (This once read a second column, `eventTimezone`, which
+ * held "Europe/London" for every event made in the portal. Migration 217
+ * removed it.)
+ *
+ * IS IT TIME? (#604). That is a question about a MOMENT, so it is asked of
+ * moments: the event's start, turned from its clock time and zone into UTC
+ * (eventStartMoment(), which uses MailQueue::useBy(), the same conversion the
+ * use-by moments come from), against the database's own UTC clock, read ONCE
+ * at the top of the run (UTC_TIMESTAMP()).
+ * WHAT WAS WRONG: the three queries compared the event's CLOCK time with the
+ * database server's clock (NOW(), CURDATE()). Those are the same thing only
+ * when the event, the database server and the organisation are all in one
+ * zone and no clock has changed. For an event in another zone the reminder
+ * was made hours early or late, or never, since a window is half an hour
+ * wide. And on the two nights a year a clock changes, "24 hours before" by
+ * the clock is 23 or 25 hours before in fact.
+ * The database cannot turn a zone name into an offset without tables many
+ * hosts do not load, so each query takes a WIDE net (every event whose clock
+ * time is within a day before and two days after now, far more than any
+ * zone's distance from UTC) and the exact test is made here, per event.
+ * Hours and minutes are counted in SECONDS between two moments.
+ *
+ * THE DAY-BEFORE REMINDER IS 24 HOURS OF REAL TIME AHEAD (86,400 seconds),
+ * on purpose: "a fixed length of time before the start" is what it is. That
+ * is NOT always "the day before" on the event's calendar, because two days a
+ * year are 23 or 25 hours long. So the reminder's WORDS are checked against
+ * the event's own calendar before anything is sent:
+ *   - When the moment EXACTLY 24 hours before the start is already the
+ *     event's own day (a start late on the day the clocks go back, which is
+ *     longer than 24 hours), there is no day before on which this reminder
+ *     could be due. It is recorded as made, so it is not tried again, and
+ *     NOTHING IS SENT. The one-hour reminder still goes.
+ *   - 24 hours before a start early on the day after the 23-hour day is two
+ *     days before on the calendar. The reminder names the day ("is on Monday
+ *     29 Mar") and does not say "tomorrow".
+ *   - A CALL THAT IS MERELY LATE still sends. The window is half an hour
+ *     wide, so for a start in the last minutes of a day the first call
+ *     inside it can land just after midnight, on the event's own day (a
+ *     23:55 start, with the job called on the hour). The reminder goes, with
+ *     the day named, and its use-by moment is then the event's START, since
+ *     naming the day stays true until then.
+ *     (Decided by the coordinator, 13 October 2026. The first fix held back
+ *     EVERY reminder whose call came on the event's own day, and its log
+ *     line blamed "a 25-hour day" for an ordinary Thursday: the second check
+ *     ran the job every 30 minutes and a 23:55 start got no reminder in 8 of
+ *     9 zones. Called every 15 minutes, as the page says, it did not
+ *     happen; one missed call was enough.)
+ * (This header used to say "no day is taken to be 24 hours long", which was
+ * untrue of this window, and the first two cases went out saying "tomorrow":
+ * found by the independent check, 13 October 2026.)
+ *
+ * ONCE. The `tblEventReminderLog` row is still what makes a reminder
+ * single-shot, and a moment happens once: on the night an hour is repeated
+ * its window is not entered twice, and on the night an hour is missing it is
+ * not jumped over. WHAT THIS CANNOT DO: say which of the two happenings a
+ * start time inside a repeated hour means. PHP chooses, by zone (see
+ * MailQueue::useBy()); the reminder and its use-by moment follow the same
+ * choice, so they cannot disagree with each other.
  *
  * @link https://github.com/MWBMPartners/webMS-Intra/issues/329
  * @link https://github.com/MWBMPartners/webMS-Intra/issues/322
@@ -69,6 +114,7 @@ use Portal\Core\Logger;
 use Portal\Core\Mailer;
 use Portal\Core\MailQueue;
 use Portal\Core\Settings;
+use Portal\Core\Site;
 use Portal\Core\WebPush;
 
 // 🔑 Token gate (constant-time compare).
@@ -83,6 +129,54 @@ if ((string) Settings::get('reminders.enabled', '1') !== '1') {
 
 header('Content-Type: text/plain; charset=utf-8');
 $stats = ['24h' => 0, '1h' => 0, 'day' => 0];
+
+// 🕰️ NOW, as the database's own UTC clock gives it, read once for the whole
+//    run so that every event is judged against the same moment. Not PHP's
+//    time(): the mail queue's moments are the database's too, and two clocks
+//    on two machines need not agree.
+$nowRow = $mysqli->query('SELECT UTC_TIMESTAMP() AS nowUtc')->fetch_assoc();
+$nowUtc = new \DateTimeImmutable((string) $nowRow['nowUtc'], new \DateTimeZone('UTC'));
+$nowTs  = $nowUtc->getTimestamp();
+
+/**
+ * 🕰️ The MOMENT an event starts, as seconds since 1970, or null when its
+ * stored start cannot be read at all.
+ *
+ * Its clock time is read in its own zone, or the organisation's when that
+ * cannot be opened: MailQueue::useBy() does both steps, and is also where
+ * the reminder's use-by moment comes from, so "is it time?" and "is it too
+ * late?" are answered from one conversion.
+ *
+ * @param array<string, mixed> $event Needs startDateTime, timezone and siteID.
+ */
+function eventStartMoment(array $event): ?int
+{
+    $utc = MailQueue::useBy((string) $event['startDateTime'], (string) $event['timezone'], Site::timezone((int) $event['siteID']));
+    if (preg_match('/\A\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\z/', $utc) !== 1) {
+        return null;
+    }
+
+    return (new \DateTimeImmutable($utc, new \DateTimeZone('UTC')))->getTimestamp();
+}
+
+/**
+ * A stored clock time, set out for a person ("Sunday 29 Mar, 10:00").
+ *
+ * The stored text is already what the event's clock shows, so it is only
+ * re-shaped. It is read as UTC for that, because UTC has no clock changes:
+ * no hour is missing and none is repeated, so the reading that goes in is
+ * the reading that comes out. (This used strtotime() and date(), which read
+ * it on PHP's clock: a time the organisation's clock skips on the night it
+ * goes forward came out an hour later in the reminder.)
+ */
+function eventClockText(string $stored, string $format): string
+{
+    try {
+        return (new \DateTimeImmutable($stored, new \DateTimeZone('UTC')))->format($format);
+    } catch (\Throwable $e) {
+        return $stored;
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // Helper: send a single batch and log
@@ -241,29 +335,73 @@ function eventRsvpUserIds(\mysqli $db, int $eventId): array
 // viewer in a single pass). Marker text for
 // tools/audit-checks/check_event_visibility.py, since the real call sits
 // further up this file than the check's own search window reaches.
+// 🕰️ The WIDE net (see "IS IT TIME?" at the top): clock times from a day
+//    before now to two days after, on the database's UTC clock. No zone is
+//    more than 14 hours from UTC, so every event that could be 24 hours or
+//    one hour away in its own zone is inside it. The exact test follows, on
+//    moments. The same net serves the one-hour window below. (WHO is
+//    reminded is still decided per recipient by
+//    EventVisibility::whereForColumn(), inside sendReminderBatch(), as the
+//    note above says.)
 $stmt = $mysqli->prepare(
-    'SELECT e.eventID, e.eventName, e.eventSlug, e.startDateTime, e.timezone, s.timezone AS siteTimezone, e.locationName, e.externalFeedID FROM tblEvents e JOIN tblSites s ON s.siteID = e.siteID '
+    'SELECT e.eventID, e.siteID, e.eventName, e.eventSlug, e.startDateTime, e.timezone, e.locationName, e.externalFeedID FROM tblEvents e '
     . 'WHERE e.isDeleted = 0 AND e.status = "published" '
-    . '  AND e.startDateTime BETWEEN DATE_ADD(NOW(), INTERVAL 23 HOUR) + INTERVAL 45 MINUTE '
-    . '                          AND DATE_ADD(NOW(), INTERVAL 24 HOUR) + INTERVAL 15 MINUTE '
+    . '  AND e.startDateTime BETWEEN UTC_TIMESTAMP() - INTERVAL 1 DAY AND UTC_TIMESTAMP() + INTERVAL 2 DAY '
     . '  AND NOT EXISTS (SELECT 1 FROM tblEventReminderLog l WHERE l.eventID = e.eventID AND l.reminderType = "24h")'
 );
 $stmt->execute();
 $result = $stmt->get_result();
 while ($e = $result->fetch_assoc()) {
-    $when = date('l j M, H:i', strtotime((string) $e['startDateTime']));
-    $subject = 'Reminder: ' . (string) $e['eventName'] . ' tomorrow';
+    // ⏱️ Is the start between 23h45m and 24h15m away? Counted in seconds
+    //    between two moments, so the answer is the same on a night the
+    //    clocks change: 24 hours before is 24 hours before.
+    $startTs = eventStartMoment($e);
+    if ($startTs === null || ($startTs - $nowTs) < 85500 || ($startTs - $nowTs) > 87300) {
+        continue;
+    }
+    $siteZone = Site::timezone((int) $e['siteID']);
+    // 📅 Which DAY is it, on the event's own clock, and which day is the
+    //    event? See "THE DAY-BEFORE REMINDER" at the top of this file.
+    $eventZone = Site::zoneFor((string) $e['timezone'], (int) $e['siteID']);
+    $eventNow  = $nowUtc->setTimezone($eventZone);
+    $eventDay  = substr((string) $e['startDateTime'], 0, 10);
+    // The moment EXACTLY 24 hours before the start, whenever this call came.
+    // Asked of that moment and not of "now", so that a call a few minutes
+    // late is not mistaken for the long day (see "A CALL THAT IS MERELY LATE").
+    $dayBefore = (new \DateTimeImmutable('@' . ($startTs - 86400)))->setTimezone($eventZone);
+    if ($dayBefore->format('Y-m-d') >= $eventDay) {
+        // There is no day before on which this reminder could be due.
+        // Recorded as made, so that no later run tries again; nothing sent.
+        $skip = $mysqli->prepare('INSERT INTO tblEventReminderLog (eventID, reminderType, recipientCount) VALUES (?, "24h", 0) ON DUPLICATE KEY UPDATE recipientCount = recipientCount');
+        $skipId = (int) $e['eventID'];
+        $skip->bind_param('i', $skipId);
+        $skip->execute();
+        $skip->close();
+        Logger::activity('EventReminderNotSent', 'Event #' . $skipId . ' type=24h: nothing sent, because exactly 24 hours before its start ('
+            . $dayBefore->format('Y-m-d H:i') . ' on its own clock) is already the event\'s own day: the clocks go back that day, so it is longer than 24 hours');
+        continue;
+    }
+    // Has the event's own day begun at THIS call? Only a late call can make it so (the test above has passed).
+    $ownDayBegun = $eventNow->format('Y-m-d') >= $eventDay;
+    // "tomorrow" only when it is; otherwise the day itself ("on Monday 29 Mar").
+    $dayWords = $eventNow->modify('+1 day')->format('Y-m-d') === $eventDay ? 'tomorrow' : 'on ' . eventClockText((string) $e['startDateTime'], 'l j M');
+    $when = eventClockText((string) $e['startDateTime'], 'l j M, H:i');
+    $subject = 'Reminder: ' . (string) $e['eventName'] . ' ' . $dayWords;
     // Two bodies (#514 part P2): the same text with and without the location.
     $where = empty($e['locationName']) === false ? '<p><strong>Where:</strong> ' . htmlspecialchars((string) $e['locationName'], ENT_QUOTES, 'UTF-8') . '</p>' : '';
-    $head  = '<p>This is a reminder that <strong>' . htmlspecialchars((string) $e['eventName'], ENT_QUOTES, 'UTF-8') . '</strong> is tomorrow.</p>'
+    $head  = '<p>This is a reminder that <strong>' . htmlspecialchars((string) $e['eventName'], ENT_QUOTES, 'UTF-8') . '</strong> is ' . htmlspecialchars($dayWords, ENT_QUOTES, 'UTF-8') . '.</p>'
            . '<p><strong>When:</strong> ' . htmlspecialchars($when, ENT_QUOTES, 'UTF-8') . '</p>';
     $tail  = '<p>See you there!</p>';
     // Use-by: the START OF THE EVENT'S OWN DAY, on the event's own clock.
-    // This reminder says "is tomorrow"; from midnight that is untrue, and a
-    // person who believed it would come a day late. (Who gets it is still
+    // This reminder says "is tomorrow" (or names the day); from that midnight
+    // it is untrue, and a person who believed it would come a day late. (Who gets it is still
     // decided per recipient by EventVisibility::whereForColumn(), inside
     // sendReminderBatch(): see the note above this loop's query.)
-    $useBy = MailQueue::useBy(substr((string) $e['startDateTime'], 0, 10), (string) $e['timezone'], (string) $e['siteTimezone']);
+    // A LATE CALL is the one exception: that midnight has already passed, so
+    // a reminder kept in the mail queue with it would be thrown away unsent.
+    // It names the day, which stays true until the event starts, so its
+    // use-by moment is the START.
+    $useBy = MailQueue::useBy($ownDayBegun === true ? (string) $e['startDateTime'] : $eventDay, (string) $e['timezone'], $siteZone);
     $stats['24h'] += sendReminderBatch($mysqli, $e, '24h', $subject, $head . $where . $tail, $head . $tail, $useBy);
 }
 $stmt->close();
@@ -276,24 +414,30 @@ $stmt->close();
 // inside sendReminderBatch() — see that query's own comment for the full
 // explanation of why the rule cannot apply to this outer query.
 $stmt = $mysqli->prepare(
-    'SELECT e.eventID, e.siteID, e.eventName, e.eventSlug, e.startDateTime, e.timezone, s.timezone AS siteTimezone, e.locationName, e.externalFeedID FROM tblEvents e JOIN tblSites s ON s.siteID = e.siteID '
+    'SELECT e.eventID, e.siteID, e.eventName, e.eventSlug, e.startDateTime, e.timezone, e.locationName, e.externalFeedID FROM tblEvents e '
     . 'WHERE e.isDeleted = 0 AND e.status = "published" '
-    . '  AND e.startDateTime BETWEEN DATE_ADD(NOW(), INTERVAL 45 MINUTE) '
-    . '                          AND DATE_ADD(NOW(), INTERVAL 75 MINUTE) '
+    . '  AND e.startDateTime BETWEEN UTC_TIMESTAMP() - INTERVAL 1 DAY AND UTC_TIMESTAMP() + INTERVAL 2 DAY '
     . '  AND NOT EXISTS (SELECT 1 FROM tblEventReminderLog l WHERE l.eventID = e.eventID AND l.reminderType = "1h")'
 );
 $stmt->execute();
 $result = $stmt->get_result();
 $pushConfigured = WebPush::isConfigured();
 while ($e = $result->fetch_assoc()) {
-    $when = date('H:i', strtotime((string) $e['startDateTime']));
+    // ⏱️ Is the start between 45 and 75 minutes away? In seconds, between
+    //    two moments (see the 24h window above).
+    $startTs = eventStartMoment($e);
+    if ($startTs === null || ($startTs - $nowTs) < 2700 || ($startTs - $nowTs) > 4500) {
+        continue;
+    }
+    $siteZone = Site::timezone((int) $e['siteID']);
+    $when = eventClockText((string) $e['startDateTime'], 'H:i');
     $subject = '⏰ Starting soon: ' . (string) $e['eventName'];
     // Two bodies (#514 part P2): the same text with and without the location.
     $head  = '<p><strong>' . htmlspecialchars((string) $e['eventName'], ENT_QUOTES, 'UTF-8') . '</strong> starts at ' . htmlspecialchars($when, ENT_QUOTES, 'UTF-8') . '.</p>';
     $where = empty($e['locationName']) === false ? '<p><strong>Where:</strong> ' . htmlspecialchars((string) $e['locationName'], ENT_QUOTES, 'UTF-8') . '</p>' : '';
     $tail  = '<p>See you in about an hour!</p>';
     // Use-by: the moment the event STARTS, on the event's own clock.
-    $useBy = MailQueue::useBy((string) $e['startDateTime'], (string) $e['timezone'], (string) $e['siteTimezone']);
+    $useBy = MailQueue::useBy((string) $e['startDateTime'], (string) $e['timezone'], $siteZone);
     $stats['1h'] += sendReminderBatch($mysqli, $e, '1h', $subject, $head . $where . $tail, $head . $tail, $useBy);
 
     // 🔔 Web Push companion (#322) — same RSVP'd users, riding the SAME
@@ -333,22 +477,41 @@ $stmt->close();
 // ─────────────────────────────────────────────────────────────────────
 // Day-of summary (07:00 hour window, once per event per day)
 // ─────────────────────────────────────────────────────────────────────
-$hour = (int) date('H');
-if ($hour >= 6 && $hour <= 8) {
+// 🕰️ "Today" and "between six and nine in the morning" are both read on the
+//    EVENT's own clock, from the one moment taken at the top of the run.
+//    WHAT WAS WRONG: the hour came from PHP's clock (the organisation the job
+//    happened to be called for) and "today" from the database server's
+//    (CURDATE()), so an event in another zone got its summary at the wrong
+//    time of day, or on the wrong day, or not at all.
+//    The net here is by DATE: the day the UTC clock shows, the one before
+//    and the one after, because no zone's date is further from UTC's than
+//    that. Always entered (the old test on PHP's hour is gone): which events
+//    are in their own morning is not known until each one is looked at.
+{
     // #514 part P2: the portal's own events only (`externalFeedID IS NULL`).
     // Imported events have no coordinators, and the recipients below include
     // every holder of the older portal-wide `isAdmin` flag in EVERY
     // organisation (`u.isAdmin = 1`) — a separate, older fault to be reported
     // under #514 part P11, which must not also start carrying imported events.
     $stmt = $mysqli->prepare(
-        'SELECT e.eventID, e.eventName, e.startDateTime, e.timezone, s.timezone AS siteTimezone FROM tblEvents e JOIN tblSites s ON s.siteID = e.siteID '
+        'SELECT e.eventID, e.siteID, e.eventName, e.startDateTime, e.timezone FROM tblEvents e '
         . 'WHERE e.isDeleted = 0 AND e.externalFeedID IS NULL AND e.status = "published" '
-        . '  AND DATE(e.startDateTime) = CURDATE() '
+        . '  AND e.startDateTime >= UTC_DATE() - INTERVAL 1 DAY AND e.startDateTime < UTC_DATE() + INTERVAL 2 DAY '
         . '  AND NOT EXISTS (SELECT 1 FROM tblEventReminderLog l WHERE l.eventID = e.eventID AND l.reminderType = "day")'
     );
     $stmt->execute();
     $result = $stmt->get_result();
     while ($e = $result->fetch_assoc()) {
+        // ⏱️ Is it between 06:00 and 08:59 where the event is, on the day it
+        //    starts there? The clock reading comes from converting the one
+        //    moment into the event's zone, so it is right on a 23-hour and
+        //    a 25-hour day alike.
+        $siteZone  = Site::timezone((int) $e['siteID']);
+        $eventNow  = $nowUtc->setTimezone(Site::zoneFor((string) $e['timezone'], (int) $e['siteID']));
+        $eventHour = (int) $eventNow->format('G');
+        if ($eventHour < 6 || $eventHour > 8 || $eventNow->format('Y-m-d') !== substr((string) $e['startDateTime'], 0, 10)) {
+            continue;
+        }
         $eid = (int) $e['eventID'];
 
         // 📧 Recipients: admins + coordinators.
@@ -374,7 +537,7 @@ if ($hour >= 6 && $hour <= 8) {
         $rc = (int) ($stm->get_result()->fetch_assoc()['c'] ?? 0);
         $stm->close();
 
-        $when = date('H:i', strtotime((string) $e['startDateTime']));
+        $when = eventClockText((string) $e['startDateTime'], 'H:i');
         $subject = '📋 Today: ' . (string) $e['eventName'];
         $body  = '<p><strong>' . htmlspecialchars((string) $e['eventName'], ENT_QUOTES, 'UTF-8') . '</strong> is today at ' . htmlspecialchars($when, ENT_QUOTES, 'UTF-8') . '.</p>'
                . '<p><strong>Confirmed RSVPs:</strong> ' . $rc . '</p>'
@@ -383,7 +546,7 @@ if ($hour >= 6 && $hour <= 8) {
         // Use-by: the moment the event STARTS ("is today at …" is no use to
         // a coordinator after that). Counted as sent only when a mail
         // service took it: see sendReminderBatch().
-        $useBy = MailQueue::useBy((string) $e['startDateTime'], (string) $e['timezone'], (string) $e['siteTimezone']);
+        $useBy = MailQueue::useBy((string) $e['startDateTime'], (string) $e['timezone'], $siteZone);
         $sent  = 0;
         foreach ($recipients as $email) {
             if (filter_var($email, FILTER_VALIDATE_EMAIL) !== false) {

@@ -186,6 +186,11 @@ if ($stmt !== false) {
             'startsAt'     => (string) $r['startDateTime'],
             'endsAt'       => (string) ($r['endDateTime'] ?? ''),
             'allDay'       => (int) $r['isAllDay'] === 1,
+            // 🕰️ The event's own zone (#604). The statement above has always
+            //    read it; it was never handed on, so every event in this
+            //    feed went out as a "Europe/London" time, whatever zone it
+            //    was in.
+            'timezone'     => (string) $r['timezone'],
         ];
         // #514 part P2: no LAST-MODIFIED at "title, date and time only" — when
         // an event last changed can itself tell somebody that its hidden
@@ -232,7 +237,16 @@ try {
 }
 
 $siteName = (string) (App::settings()['site']['name'] ?? 'Portal');
-$ics = Ical::emit($siteName . ' — My Calendar', $events);
+// 🕰️ The file's own zone is the zone of the organisation the FEED IS FOR:
+//    the holder's own, worked out near the top of this file ($siteId). It is
+//    the zone of every entry that names none, which is each rota duty.
+//    WHAT WAS WRONG: no zone was given, so the file took the organisation of
+//    the ADDRESS that was asked (Site::timezone() with nothing said). A feed
+//    is asked for with a token and no sign-in, so that is the default
+//    organisation: a member of a second organisation, in Tokyo, was sent a
+//    09:30 duty as 09:30 on the first organisation's clock (found by the
+//    independent check, 13 October 2026).
+$ics = Ical::emit($siteName . ' — My Calendar', $events, Site::timezone($siteId));
 
 header('Content-Type: text/calendar; charset=utf-8');
 header('Cache-Control: private, max-age=900');

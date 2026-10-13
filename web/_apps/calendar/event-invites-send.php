@@ -108,17 +108,18 @@ $bodyHtml = '<p>Hi' . ($display !== '' ? ' ' . htmlspecialchars($display, ENT_QU
 //    "[delivered]" and say "Invite emailed." Now it asks what became of it.
 //    Use-by: the moment the event STARTS, on the event's own clock. An
 //    invitation that arrives after that is no use to anybody.
-//    The clock's zone is `tblEvents.timezone`, the column the event form
-//    writes and the event page shows; when it is not a zone PHP knows (the
-//    form's box is free text) the ORGANISATION's own zone is used, so the
-//    invitation is still kept. WHAT WAS WRONG: this read `eventTimezone`,
-//    which only the feed importer writes, so every event made in the portal
-//    was taken to be on London's clock.
+//    The clock's zone is `tblEvents.timezone`, the one column an event's
+//    zone is kept in; when it is not a zone PHP can open (an event saved
+//    before the form checked its zone box) the ORGANISATION's own zone is
+//    used, from Site::timezone(), so the invitation is still kept. WHAT WAS
+//    WRONG: this read a second column, which only the feed importer wrote,
+//    so every event made in the portal was taken to be on London's clock.
+//    Migration 217 removed that column (#604).
 $sent    = false;
 $waiting = false;
 if ($rsvpUrl !== '' && class_exists(Mailer::class) === true && method_exists(Mailer::class, 'send') === true) {
     try {
-        $useBy   = MailQueue::useBy((string) $event['startDateTime'], (string) $event['timezone'], (string) (Site::current()['timezone'] ?? ''));
+        $useBy   = MailQueue::useBy((string) $event['startDateTime'], (string) $event['timezone'], Site::timezone());
         $kept    = (bool) Mailer::send($email, $subject, $bodyHtml, [], ['expiresAt' => $useBy]);
         $waiting = $kept === true && Mailer::lastIsWaiting() === true;
         $sent    = $kept === true && $waiting === false;

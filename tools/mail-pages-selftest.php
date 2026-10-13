@@ -401,6 +401,19 @@ function stopServer(mixed &$proc): void
 }
 
 /** Put back everything this run changed, ONCE. Also registered as a shutdown function. */
+/**
+ * 🕰️ Give the default organisation a time zone, in its OWN ROW: the one place
+ * an organisation's zone is kept since #604. What it held is remembered the
+ * first time, and put back by the clean-up. (This test used to set the
+ * "site.timezone" setting, which migration 217 removed: nothing reads it.)
+ */
+function organisationZone(string $zone): void
+{
+    global $state;
+    $state['siteZone'] ??= (string) (one('SELECT timezone FROM tblSites WHERE siteID = 1')['timezone'] ?? 'UTC');
+    q('UPDATE tblSites SET timezone = ? WHERE siteID = 1', 's', [$zone]);
+}
+
 function cleanup(): void
 {
     global $state;
@@ -423,6 +436,10 @@ function cleanup(): void
     }
     stopServer($state['mailProc']);
     try {
+        // The organisation's zone, put back as it was (see organisationZone()).
+        if (isset($state['siteZone']) === true) {
+            q('UPDATE tblSites SET timezone = ? WHERE siteID = 1', 's', [$state['siteZone']]);
+        }
         foreach ($state['settings'] as $key => $before) {
             if ($before === null) {
                 q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [(string) $key]);
@@ -888,8 +905,8 @@ foreach (PEOPLE as $who => $id) {
 // An event with two people going to it, for the broadcast of P12. Its date is worked out from today.
 $eventDay = date('Y-m-d', strtotime('+9 days'));
 q(
-    'INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, eventTimezone, status, isPublic, isDeleted) '
-    . "VALUES (?, 1, 'mail-pages-selftest', 'Selftest mail event', 'Made by the mail pages self-test', ?, ?, 'UTC', 'UTC', 'published', 0, 0)",
+    'INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) '
+    . "VALUES (?, 1, 'mail-pages-selftest', 'Selftest mail event', 'Made by the mail pages self-test', ?, ?, 'UTC', 'published', 0, 0)",
     'iss',
     [EVENT_ID, $eventDay . ' 10:00:00', $eventDay . ' 11:00:00']
 );
@@ -1157,7 +1174,7 @@ dropCopies();
 setting('portal.trustedProxies', '127.0.0.1');
 setting('portal.trustedProxyHeader', 'x-forwarded-for');
 // 🕐 A time zone that is never UTC, so that a time shown without being converted would be seen.
-setting('site.timezone', 'Pacific/Auckland');
+organisationZone('Pacific/Auckland');
 setting('site.name', 'Selftest Portal');
 // The calendar is switched off on a fresh install; P12 sends an event broadcast.
 setting('calendar.enabled', 'true');

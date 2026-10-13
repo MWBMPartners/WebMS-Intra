@@ -3365,9 +3365,10 @@ final class FeedAdmin
      * `date('Y-m-d')` after bootstrap.php has set PHP to the organisation's
      * zone; ruleToday() gives the date from the database's clock in the
      * organisation's zone, so it does not depend on which zone PHP happens
-     * to be in. The two agree ONLY when `site.timezone` is spelled exactly
-     * as a name in `timezone_identifiers_list()` — see ruleToday() for the
-     * exception. It is worked out ONCE per save and used for both readings,
+     * to be in. Since #604 the two are the same zone: start-up and
+     * ruleToday() both ask Site::timezone(). (They used to differ for an
+     * oddly spelled zone; see ruleToday().) It is worked out ONCE per save
+     * and used for both readings,
      * so a save that runs across midnight compares like with like.
      *
      * HOW THE SELF-TEST CHECKS THIS DATE (D17, fix rounds 5 and 6): it pins
@@ -3391,9 +3392,10 @@ final class FeedAdmin
      * the events (with their calendar), and — only when some event is at
      * "groups" — ONE for the people of every list in use; two readings per
      * save. Plus, once per save, ruleToday()'s two: `SELECT UTC_TIMESTAMP()`
-     * (FeedResolver::databaseNowUtc()) and the organisation's
-     * `site.timezone` setting (FeedResolver::organisationZone(), which is
-     * not cached). Never one per event or per person.
+     * (FeedResolver::databaseNowUtc()) and the organisation's zone
+     * (FeedResolver::organisationZone(), which asks Site::timezone(): one
+     * statement the first time an organisation other than the request's own
+     * is asked about, none after that). Never one per event or per person.
      *
      * Against the version before it (the one that compared list entries,
      * built in fix round 3), this costs a save 2 statements more: the
@@ -3529,19 +3531,16 @@ final class FeedAdmin
      * `date()`. Throws, like `FeedResolver::databaseNowUtc()`, when the
      * database cannot be asked — inside a save that rolls the save back.
      *
-     * WHAT IT CANNOT PROMISE (check round 5, LOW 1): this is the date the
-     * PAGES give the rule only when the organisation's `site.timezone` is
-     * spelled exactly as a name in PHP's `timezone_identifiers_list()`.
-     * bootstrap.php switches PHP to the organisation's zone only for such an
-     * exact name; FeedResolver::organisationZone(), used here, trims the
-     * value and accepts any spelling PHP's DateTimeZone understands. So with
-     * an unusual spelling — `europe/london`, or a leading space — the pages
-     * stay on UTC while this uses London, and the two dates differ for as
-     * long as local midnight and UTC midnight are apart (an hour a day in a
-     * London summer). In that hour a term that ended "yesterday" by one and
-     * "today" by the other is judged differently. That disagreement between
-     * bootstrap.php and the resolver is tracked by #549; neither is changed
-     * here.
+     * THE SAME ZONE AS THE PAGES (#604). This used to carry a warning: PHP
+     * was switched to the organisation's zone by start-up only for an exact
+     * zone name, while FeedResolver::organisationZone() trimmed the stored
+     * text and took any spelling PHP could open. So with `europe/london`, or
+     * a space in front, the pages were on UTC while this used London, and
+     * for the hours between the two midnights a term that ended "yesterday"
+     * by one and "today" by the other was judged differently. Both now ask
+     * Site::timezone(), which keeps start-up's test, so the date here is the
+     * date the pages give the rule. For such a spelling that date is UTC's,
+     * as it always was on the pages.
      */
     private static function ruleToday(\mysqli $db, int $siteId): string
     {

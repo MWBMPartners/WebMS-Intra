@@ -40,10 +40,18 @@
  * ---------------------------------------
  * "Keep until" is a date, held as text `YYYY-MM-DD`, and worked out with whole
  * calendar years. No moment in time is involved except one question, asked
- * once and as late as possible: what is today's date where the organisation
- * is (`tblSites.timezone`)? So the two nights a year the clocks change cannot
- * move a date: nothing here adds hours, and nothing here assumes a day is 24
- * hours long.
+ * once and as late as possible: what is today's date? It is asked of the LAST
+ * place on Earth to reach a date, whatever zone the organisation is in (see
+ * timezoneOfSite() for why), so a name is never cleared early. It is cleared
+ * LATE instead, by the distance between the organisation's clock and that
+ * place's: 12 or 13 hours for London, and up to 26 hours in the zones
+ * furthest ahead of UTC. (This said "at most a day late", which is untrue
+ * for those: found by the second check, 13 October 2026.) The two nights a
+ * year the clocks change cannot move a date: nothing here adds hours, and
+ * nothing here assumes a day is 24 hours long.
+ * ONE date here is not that one: the "Confirmed on" date an administrator's
+ * tick stores. People read it, so it is the organisation's OWN date (see
+ * saveForSite()). It decides nothing.
  *
  * WHAT THIS CANNOT DO
  * -------------------
@@ -570,25 +578,36 @@ class GivingRetention
     }
 
     /**
-     * The organisation's own time zone, as stored. '' when it cannot be read;
-     * today() then answers on the cautious side.
+     * The zone "today" is asked in for an organisation: ALWAYS "not known"
+     * (''), so that today() answers for the last place on Earth to reach a
+     * date. The coordinator decided this on 13 October 2026, by the rule that
+     * a deletion that cannot be undone must never come sooner.
+     *
+     * WHAT WAS HERE, AND WHY IT WENT. This first read the organisation's own
+     * row. Then (#604) it asked Site::timezone(), the one answer the pages
+     * use, on the view that every reader of the organisation's zone should
+     * follow the pages. For a date that decides when a donor's name is
+     * cleared, that was wrong. The independent check ran seven pairs of
+     * stored zones on the unchanged portal and on the new one: wherever an
+     * installation's two stored zones had differed, "today" arrived SOONER
+     * than before, by up to 17 hours (an organisation's row on Los Angeles,
+     * its setting on Tokyo), and a name due that day was cleared that much
+     * early. Giving retention is therefore the ONE reader of an
+     * organisation's zone that does not follow the pages.
+     *
+     * WHAT IT COSTS: a name is cleared later than the organisation's own
+     * midnight would have it, by the distance between its clock and the last
+     * place's: 12 or 13 hours for London, 26 hours for the place furthest
+     * ahead of UTC. Never earlier, anywhere.
+     *
+     * The organisation is still taken as an argument, so that the call reads
+     * as what it is asking and a later decision has somewhere to go.
      */
     private static function timezoneOfSite(int $siteId): string
     {
-        try {
-            $stmt = App::db()->prepare('SELECT timezone FROM tblSites WHERE siteID = ? LIMIT 1');
-            if ($stmt === false) {
-                return '';
-            }
-            $stmt->bind_param('i', $siteId);
-            $stmt->execute();
-            $row = $stmt->get_result()->fetch_row();
-            $stmt->close();
+        unset($siteId);
 
-            return trim((string) ($row[0] ?? ''));
-        } catch (\Throwable $e) {
-            return '';
-        }
+        return '';
     }
 
     /**
@@ -624,16 +643,30 @@ class GivingRetention
      * means (the general settings editor, or the database). That is why
      * ruleForSite() reads every value defensively.
      *
+     * TWO DATES ARE CALLED "TODAY" HERE, AND THEY ARE NOT THE SAME ONE.
+     * Whether a save would let records be cleared (rule 3) is decided on the
+     * date the clearing itself goes by: the last place on Earth's (see
+     * timezoneOfSite()). The "Confirmed on" date a tick stores is a date
+     * PEOPLE READ, on the settings page and in the audit line written when a
+     * name is cleared, so it is the organisation's OWN date, from
+     * Site::timezone(). It used to be taken from the first: an administrator
+     * in Auckland who ticked the box at two in the morning of the 14th was
+     * recorded as confirming on the 13th, and one in London was a day out
+     * from midnight until 12:00 UTC (found by the second check, 13 October
+     * 2026). The stored date decides nothing; only people read it.
+     *
      * @param array<string, mixed> $posted countryCode, scope, years, confirmed,
      *   yearEndMonth, yearEndDay, hold, understood. The three tick boxes
      *   count as ticked when they hold the text "1".
-     * @param string|null          $today  For tests.
+     * @param string|null             $today For tests: ONE date used as both of the dates above.
+     * @param \DateTimeImmutable|null $now   For tests: the moment to work both dates out from,
+     *                                       each in its own place. Null means now. Not read when `$today` is given.
      *
      * @return array{saved: bool, type: string, message: string, changes: string[], newlyDue: int}
      *   `type` is the colour of the message (success, warning or danger).
      *   `changes` is what changed, in words, for the activity log.
      */
-    public static function saveForSite(\mysqli $db, int $siteId, array $posted, ?string $today = null, ?string $path = null): array
+    public static function saveForSite(\mysqli $db, int $siteId, array $posted, ?string $today = null, ?string $path = null, ?\DateTimeImmutable $now = null): array
     {
         $refuse = static fn (string $why): array => [
             'saved' => false, 'type' => 'danger', 'message' => $why . ' Nothing was saved.', 'changes' => [], 'newlyDue' => 0,
@@ -677,7 +710,9 @@ class GivingRetention
         $understood = $text('understood') === '1';
 
         $old        = self::ruleForSite($siteId, $path);
-        $today      = $today ?? self::today((string) $old['timezone']);
+        // 📅 The date people read, then the date that decides. See "TWO DATES" above.
+        $ownToday   = $today ?? self::today(Site::timezone($siteId), $now);
+        $today      = $today ?? self::today((string) $old['timezone'], $now);
         $suggestion = self::suggestionFor($country, $path);
         $years      = $yearsOwn ?? (int) $suggestion['years'];
 
@@ -691,7 +726,7 @@ class GivingRetention
             } else {
                 $confirmed   = true;
                 $yearsOwn    = $years;
-                $confirmedOn = $old['confirmed'] === true && (string) $old['confirmedOn'] !== '' ? (string) $old['confirmedOn'] : $today;
+                $confirmedOn = $old['confirmed'] === true && (string) $old['confirmedOn'] !== '' ? (string) $old['confirmedOn'] : $ownToday;
             }
         }
 
@@ -807,13 +842,20 @@ class GivingRetention
     // =========================================================================
 
     /**
-     * 📅 Today's date where an organisation is.
+     * 📅 Today's date in one zone, or at the last place on Earth when the
+     *    zone given is empty or is not one.
      *
      * The one place a moment in time is turned into a date. If the zone is
      * empty or is not a real zone, the answer is the date at the place on
      * Earth where the day starts LAST (twelve hours behind UTC). No real
-     * place is on an earlier date than that, so a record can be cleared a
-     * little late because of a bad zone, and never early.
+     * place is on an earlier date than that, so a record can be cleared
+     * late, and never early.
+     * EVERY DATE THAT DECIDES A CLEARING IS ASKED WITH NO ZONE, and so is the
+     * last place's: ruleForSite() gives '' as the rule's zone on purpose (see
+     * timezoneOfSite()). (This comment used to be headed "today's date where
+     * an organisation is", which stopped being what the clearing asks.)
+     * A zone IS given for the one date people read: saveForSite()'s
+     * "Confirmed on".
      *
      * (Rejected: falling back to UTC. For an organisation east of Greenwich
      * that is harmless; for one in the Americas with a broken zone it would
@@ -952,7 +994,8 @@ class GivingRetention
      *                  lets anything be cleared.
      *
      * @param array<string, mixed> $rule  From ruleForSite().
-     * @param string|null          $today `YYYY-MM-DD` where the organisation is. Null means now. For tests.
+     * @param string|null          $today `YYYY-MM-DD`. Null means today's date at the last place on Earth to
+     *                                    reach it (the rule's zone is always ''; see timezoneOfSite()). For tests.
      *
      * @return array{state: string, keepUntil: string, countedFrom: string, usedFallback: bool, today: string}
      */

@@ -321,7 +321,10 @@ function maintenance_health_probes(\mysqli $db): array
     try {
         $mailQueue = \Portal\Core\MailQueue::health(
             $db,
-            (string) (\Portal\Core\Site::current()['timezone'] ?? 'UTC'),
+            // The organisation's zone, from the one place that answers it
+            // (#604). This read the organisation's row itself, which could
+            // differ from the zone every other page was in.
+            \Portal\Core\Site::timezone(),
             ($probes['Email']['state'] ?? '') === 'ok'
         );
         if ($mailQueue !== null) {
@@ -330,6 +333,47 @@ function maintenance_health_probes(\mysqli $db): array
     } catch (\Throwable $e) {
         $probes['Mail queue'] = ['state' => 'warn', 'label' => 'Check failed', 'detail' => 'The mail queue could not be looked at. The reason is in the server\'s error log.'];
         error_log('Health: the mail queue check failed: ' . get_class($e) . ': ' . mb_substr($e->getMessage(), 0, 300));
+    }
+
+    // 4d. Time zones (#604): is every organisation's and every event's zone
+    //     one the portal can use? Three things are looked for, and each is
+    //     amber, because nothing is broken yet but a time may be shown on a
+    //     clock nobody meant:
+    //       - migration 217 has not run, so organisations' zones are still
+    //         read from the old setting (also what a missing mark row looks
+    //         like: Site::zoneLockedInGeneralEditor());
+    //       - an organisation whose stored zone is not a zone name: UTC is
+    //         used for it, and where PHP could still open the text the
+    //         calendar importer refuses that organisation's zone-less
+    //         calendars until one is chosen (Site::timezoneFacts());
+    //       - events saved with a zone PHP cannot open: read on their
+    //         organisation's clock until put right (Events::withUnknownZone()).
+    //     The words hold numbers only, never an organisation's or an event's
+    //     name: this line is also in the report an outside monitor reads.
+    try {
+        $zoneFacts   = \Portal\Core\Site::timezoneFacts();
+        $zoneOrgs    = \Portal\Core\Site::organisationsWithUnknownZone($db);
+        $zoneEvents  = \Portal\Core\Events::withUnknownZone($db, null, 1)['count'];
+        $zoneDoubts  = count(array_filter($zoneOrgs, static fn (array $o): bool => $o['inDoubt'] === true));
+        $zoneNotes   = [];
+        if ($zoneFacts['inRow'] === false) {
+            $zoneNotes[] = 'The database has not been through the time-zone upgrade (217), so each organisation\'s time zone is still read from the old "site.timezone" setting. Run the upgrade at Admin, Upgrade.';
+        }
+        if (count($zoneOrgs) > 0) {
+            $zoneNotes[] = count($zoneOrgs) . (count($zoneOrgs) === 1 ? ' organisation has' : ' organisations have')
+                . ' a stored time zone that is not a time zone name, so UTC is used. Choose the right one at Admin, Organisations.'
+                . ($zoneDoubts > 0 ? ' Until then, outside calendars with no time zone of their own are not imported for ' . $zoneDoubts . ' of them.' : '');
+        }
+        if ($zoneEvents > 0) {
+            $zoneNotes[] = $zoneEvents . ($zoneEvents === 1 ? ' event is' : ' events are')
+                . ' saved with a time zone the portal does not know, and read on the organisation\'s clock meanwhile. They are listed at Calendar, Manage Events.';
+        }
+        $probes['Time zones'] = $zoneNotes === []
+            ? ['state' => 'ok', 'label' => $zoneFacts['zone'], 'detail' => 'This organisation\'s time zone. Every organisation and every event has a time zone the portal knows.']
+            : ['state' => 'warn', 'label' => 'Needs a look', 'detail' => implode(' ', $zoneNotes)];
+    } catch (\Throwable $e) {
+        $probes['Time zones'] = ['state' => 'warn', 'label' => 'Check failed', 'detail' => 'The time zones could not be looked at. The reason is in the server\'s error log.'];
+        error_log('Health: the time zone check failed: ' . get_class($e) . ': ' . mb_substr($e->getMessage(), 0, 300));
     }
 
     // 5. Sessions — PHP native sessions, count files in the configured save_path

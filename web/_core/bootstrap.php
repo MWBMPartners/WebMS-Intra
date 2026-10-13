@@ -712,15 +712,6 @@ if (headers_sent() === false) {
     }
 }
 
-// 🕐 Update timezone to the configured value (overrides the UTC default above)
-// Site-specific timezone from tblSites takes priority over the settings value
-if (isset($SETTINGS['site']['timezone']) === true && $SETTINGS['site']['timezone'] !== '') {
-    $tz = $SETTINGS['site']['timezone'];
-    if (in_array($tz, timezone_identifiers_list(), true) === true) {
-        date_default_timezone_set($tz);
-    }
-}
-
 // 🏛️ ---------------------------------------------------------------------------
 // 7. Initialise App registry
 // -----------------------------------------------------------------------------
@@ -739,6 +730,29 @@ if (isset($SETTINGS['site']['timezone']) === true && $SETTINGS['site']['timezone
 // See: core/Site.php
 
 \Portal\Core\Site::init($mysqli, $SETTINGS, $preDetectedSiteID);
+
+// 🕐 ---------------------------------------------------------------------------
+// 7b-2. PHP's time zone: the organisation's own (#604)
+// -----------------------------------------------------------------------------
+// From here on every `date()` on every page is in the organisation's zone.
+// Site::timezone() is the ONE place that answers which zone that is, and it
+// always answers a name PHP knows (UTC when none has been chosen), so this
+// cannot fail.
+//
+// WHAT WAS HERE, AND WHY IT MOVED. This used to sit just above step 7, and
+// read the `site.timezone` SETTING, under a comment saying the organisation's
+// own row took priority. It never read the row. So an installation had two
+// places for one fact, and the pages followed one while the mail lines, the
+// rota reminder and giving retention followed the other. It moved below
+// Site::init() because Site has to know the organisation before it can be
+// asked. Nothing between the old place and this one uses the clock: only
+// App::init() and Site::init() run there, and neither reads the time (both
+// were read through for this on 13 October 2026).
+//
+// On a database that has not run migration 217 yet, Site::timezone() answers
+// exactly what the old lines did, from the same setting, so the hour between
+// new files arriving and Upgrade being pressed moves nothing.
+date_default_timezone_set(\Portal\Core\Site::timezone());
 
 // 🚨 ---------------------------------------------------------------------------
 // 7c. Say so if a stored secret cannot be read (#497)

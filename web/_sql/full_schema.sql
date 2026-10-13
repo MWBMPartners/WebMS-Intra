@@ -78,8 +78,11 @@ CREATE TABLE IF NOT EXISTS `tblSites` (
                     COMMENT 'Hex colour for site branding (default: Linear-style indigo)',
     `copyrightOrg`  VARCHAR(255) COLLATE utf8mb4_general_ci DEFAULT NULL
                     COMMENT 'Copyright holder name for footer',
+    -- 🕰️ The ONE place an organisation's zone is kept (#604, migration 217).
+    -- It used to be kept here AND in a `site.timezone` setting, and the two
+    -- could differ. Only Portal\Core\Site::timezone() reads it.
     `timezone`      VARCHAR(50)  COLLATE utf8mb4_general_ci DEFAULT 'UTC'
-                    COMMENT 'Site-specific timezone identifier',
+                    COMMENT 'The time zone of this organisation: an IANA name. The ONE place it is kept (#604), set at Admin, Organisations. Read only through Site::timezone(), which answers UTC for text that is not a zone name.',
     `isActive`      TINYINT(1)   NOT NULL DEFAULT 1,
     `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -1105,9 +1108,14 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `description`   TEXT         DEFAULT NULL,
     `startDateTime` DATETIME     NOT NULL COMMENT 'Event start — wall-clock local (venue/site local); NOT UTC',
     `endDateTime`   DATETIME     DEFAULT NULL COMMENT 'Event end — wall-clock local (venue/site local); NOT UTC',
-    `timezone`      VARCHAR(50)  NOT NULL DEFAULT 'Europe/London',
-    -- Per-event IANA timezone for display, added separately by migration 070 (#238)
-    `eventTimezone` VARCHAR(64)  NOT NULL DEFAULT 'Europe/London' COMMENT 'IANA timezone for event display (#238)',
+    -- 🕰️ The ONE column an event's zone is kept in (#604, migration 217).
+    -- There used to be a second, `eventTimezone` (migration 070), which only
+    -- the calendar importer wrote; for every event made in the portal it held
+    -- "Europe/London" whatever zone the event was in. It is gone. This column
+    -- has NO DEFAULT on purpose: its default was "Europe/London" too, so a
+    -- writer that named no zone quietly stored London for every customer. Now
+    -- the database refuses such a writer.
+    `timezone`      VARCHAR(50)  NOT NULL COMMENT 'The zone startDateTime and endDateTime are a clock reading in: an IANA name such as Pacific/Auckland. The ONE column an event keeps its zone in (#604). No default, on purpose: every writer names the zone, and takes the zone of the organisation when none is given.',
     `isAllDay`      TINYINT(1)   NOT NULL DEFAULT 0,
 
     -- 📍 Location fields (can override series location)
@@ -1833,8 +1841,39 @@ INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `default
 VALUES ('site.tagline', 'Staff and Volunteer Admin Portal', 0, NULL)
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
+-- 🕰️ There is no `site.timezone` setting any more (#604, migration 217). An
+--    organisation's zone is kept in its own row, `tblSites`.`timezone`, and
+--    nowhere else. The row below is the mark that says so: while it is
+--    absent, Portal\Core\Site::timezone() takes the database for one that
+--    has not been through migration 217 and reads the old setting instead.
+--
+--    IT IS WRITTEN ONLY INTO A DATABASE THAT NEVER HELD THE OLD ARRANGEMENT:
+--    one with no `site.timezone` row and no `tblEvents`.`eventTimezone`
+--    column. This script is not only run on an empty database. The
+--    installer's "carry on with what is there" choice runs it over an OLDER
+--    database, then every numbered migration. Written without the test, the
+--    mark went in first; migration 217 then found it, took the organisations
+--    for already brought into line, skipped its copy and deleted the old
+--    setting. Every organisation's zone was lost: pages that had been on
+--    Auckland were on UTC, and nothing was listed, because "UTC" is a real
+--    zone (found by the independent check, 13 October 2026, on both MySQL
+--    versions). With the test, such a database gets no mark here, migration
+--    217 does its work, and writes the mark itself.
+--    WHAT THE TEST CANNOT SEE: an older database from which somebody had
+--    deleted every `site.timezone` row AND which is older than the column
+--    (before migration 070). Nothing in such a database says which it is.
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
-VALUES ('site.timezone', 'UTC', 0, 'UTC')
+SELECT 'site.timezoneKeptAt', 'organisation', 0, 'organisation'
+  FROM DUAL
+ WHERE NOT EXISTS (
+           SELECT 1 FROM (
+               SELECT `settingID` FROM `tblSettings` WHERE `settingKey` = 'site.timezone'
+           ) AS oldSetting
+       )
+   AND NOT EXISTS (
+           SELECT 1 FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tblEvents' AND COLUMN_NAME = 'eventTimezone'
+       )
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
@@ -7814,7 +7853,7 @@ CREATE TABLE IF NOT EXISTS `tblVenues` (
     `what3words`     VARCHAR(100)  DEFAULT NULL COMMENT 'what3words address',
     `geocodedAt`     DATETIME      DEFAULT NULL COMMENT 'When lat/lng last set by the Geocoder (migration 180)',
     `geocodeSource`  VARCHAR(20)   DEFAULT NULL COMMENT 'google, nominatim, manual or w3w',
-    `timezone`       VARCHAR(64)  NOT NULL DEFAULT 'Europe/London' COMMENT 'IANA timezone — booking dates/times are wall-clock LOCAL to the venue (§8.4); mirrors tblEvents.eventTimezone style',
+    `timezone`       VARCHAR(64)  NOT NULL DEFAULT 'Europe/London' COMMENT 'IANA timezone — booking dates/times are wall-clock LOCAL to the venue (§8.4); the same idea as tblEvents.timezone',
     `caretakerName`  VARCHAR(150) DEFAULT NULL COMMENT 'On-site contact for access/keys, when different from the landlord org contact',
     `caretakerPhone` VARCHAR(50)  DEFAULT NULL,
     `notes`          TEXT         DEFAULT NULL COMMENT 'Access arrangements, parking, alarm codes go in a vault doc NOT here — free operational notes only',
@@ -10093,4 +10132,11 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('216_mail_queue.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- Migration 217 (#604): one answer to "which time zone?". Its changes are
+-- above: `tblEvents`.`eventTimezone` is gone and `timezone` has no default,
+-- the `site.timezone` setting is replaced by the mark `site.timezoneKeptAt`,
+-- and three column comments say what each zone column is.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('217_one_time_zone_answer.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

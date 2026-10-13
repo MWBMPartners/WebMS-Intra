@@ -31,6 +31,7 @@
 declare(strict_types=1);
 
 use Portal\Core\I18n;
+use Portal\Core\Site;
 
 // 📌 Extract values for pre-population (edit mode)
 $ev = $editEvent ?? [];
@@ -49,6 +50,14 @@ $selectedVenueId = (isset($ev['venueID']) === true && (int) $ev['venueID'] > 0)
     ? (int) $ev['venueID']
     : $defaultVenueId;
 $selectedRoomId  = (int) ($ev['roomID'] ?? 0);
+
+// 🕰️ A stored start or end, as the date-and-time box wants it
+//    ("2026-03-29T01:30"). The stored text is a reading of the EVENT's clock,
+//    so it is only re-shaped, never read as a moment. It used to go through
+//    `new DateTime()`, which reads it on PHP's clock (the organisation's):
+//    a time that clock skips on the night it goes forward came back an hour
+//    later, and pressing Save then stored the wrong hour (#604).
+$clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T', $stored), 0, 16);
 ?>
 
 <div class="row g-3">
@@ -88,19 +97,46 @@ $selectedRoomId  = (int) ($ev['roomID'] ?? 0);
     <div class="col-12 col-md-4">
         <label class="form-label">Start Date/Time <span class="text-danger">*</span></label>
         <input type="datetime-local" class="form-control" name="startDateTime" required
-               value="<?php echo htmlspecialchars(isset($ev['startDateTime']) === true ? (new DateTime($ev['startDateTime']))->format('Y-m-d\TH:i') : '', ENT_QUOTES, 'UTF-8'); ?>">
+               value="<?php echo htmlspecialchars(isset($ev['startDateTime']) === true ? $clockForBox((string) $ev['startDateTime']) : '', ENT_QUOTES, 'UTF-8'); ?>">
     </div>
 
     <div class="col-12 col-md-4">
         <label class="form-label">End Date/Time</label>
         <input type="datetime-local" class="form-control" name="endDateTime"
-               value="<?php echo htmlspecialchars(isset($ev['endDateTime']) === true && $ev['endDateTime'] !== null ? (new DateTime($ev['endDateTime']))->format('Y-m-d\TH:i') : '', ENT_QUOTES, 'UTF-8'); ?>">
+               value="<?php echo htmlspecialchars(isset($ev['endDateTime']) === true && $ev['endDateTime'] !== null ? $clockForBox((string) $ev['endDateTime']) : '', ENT_QUOTES, 'UTF-8'); ?>">
     </div>
 
+    <?php
+    // 🕰️ The zone the two times above are a clock reading in (#604). A list
+    //    of real zone names, where there used to be a free-text box that
+    //    stored whatever was typed. A new event starts on the organisation's
+    //    own zone (it used to start on "Europe/London", typed in here). An
+    //    existing event shows the zone it has: one that is not on the list
+    //    but that PHP can still open is offered "as saved", so opening and
+    //    saving the form changes nothing; one PHP cannot open at all leaves
+    //    the box on "Choose…", and the save handler refuses until one is
+    //    chosen.
+    $zoneStored = $isEdit === true ? (string) ($ev['timezone'] ?? '') : Site::timezone();
+    $zoneOnList = Site::isZoneName($zoneStored);
+    $zoneKept   = $zoneOnList === false && Site::phpCanOpenZone($zoneStored) === true;
+    $zoneFieldId = 'eventTimezone-' . ($isEdit === true ? 'edit' : 'new');
+    ?>
     <div class="col-12 col-md-2">
-        <label class="form-label">Timezone</label>
-        <input type="text" class="form-control" name="timezone"
-               value="<?php echo htmlspecialchars($ev['timezone'] ?? 'Europe/London', ENT_QUOTES, 'UTF-8'); ?>">
+        <label class="form-label" for="<?php echo $zoneFieldId; ?>">Time zone</label>
+        <select class="form-select" name="timezone" id="<?php echo $zoneFieldId; ?>" required>
+            <?php if ($zoneOnList === false && $zoneKept === false): ?>
+                <option value="" selected>Choose a time zone…</option>
+            <?php endif; ?>
+            <?php if ($zoneKept === true): ?>
+                <option value="<?php echo htmlspecialchars($zoneStored, ENT_QUOTES, 'UTF-8'); ?>" selected><?php echo htmlspecialchars($zoneStored, ENT_QUOTES, 'UTF-8'); ?> (as saved)</option>
+            <?php endif; ?>
+            <?php foreach (Site::zoneNames() as $zoneName): ?>
+                <option value="<?php echo htmlspecialchars($zoneName, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $zoneName === $zoneStored ? ' selected' : ''; ?>><?php echo htmlspecialchars($zoneName, ENT_QUOTES, 'UTF-8'); ?></option>
+            <?php endforeach; ?>
+        </select>
+        <?php if ($isEdit === true && $zoneOnList === false && $zoneKept === false): ?>
+            <div class="form-text text-danger">This event was saved with "<?php echo htmlspecialchars($zoneStored, ENT_QUOTES, 'UTF-8'); ?>", which is not a time zone name the portal knows. Choose the right one.</div>
+        <?php endif; ?>
     </div>
 
     <div class="col-12 col-md-2 d-flex align-items-end">

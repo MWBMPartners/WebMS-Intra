@@ -470,7 +470,9 @@ if ($jsonLdAllowed === true && $isVisibleStatus === true):
         'cancelled' => 'https://schema.org/EventCancelled',
         'postponed' => 'https://schema.org/EventPostponed',
     ];
-    $tz = (string) ($event['timezone'] ?? 'Europe/London');
+    // The event's own zone (tblEvents.timezone). No zone is typed in here as a
+    // stand-in (#604): text PHP cannot open gives no start below, as before.
+    $tz = (string) ($event['timezone'] ?? '');
     try {
         $dtStart = new \DateTimeImmutable((string) $event['startDateTime'], new \DateTimeZone($tz));
         $dtEnd   = !empty($event['endDateTime']) ? new \DateTimeImmutable((string) $event['endDateTime'], new \DateTimeZone($tz)) : null;

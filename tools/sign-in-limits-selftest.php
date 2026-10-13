@@ -108,9 +108,10 @@
  *   They are removed at the START (in case an earlier run was interrupted)
  *   and at the END.
  * - It changes portal-wide settings for the run (the mail settings, the three
- *   sign-in limits, `portal.trustedProxies`, `site.timezone`,
- *   `maintenance.cronToken`) and puts each back exactly, including whether it
- *   was marked as stored encrypted.
+ *   sign-in limits, `portal.trustedProxies`, `maintenance.cronToken`) and
+ *   puts each back exactly, including whether it was marked as stored
+ *   encrypted. It also gives the default organisation a time zone, in its own
+ *   row, and puts that back.
  *   So do not run it at the same moment as another test on the same database.
  * - The scratch folder is a NEW child of `SELFTEST_WEB_DIR` (or the system's
  *   temporary folder). It refuses if that folder contains the repository or
@@ -391,6 +392,19 @@ function stopServer(mixed &$proc): void
 }
 
 /** Put back everything this run changed, ONCE. Also registered as a shutdown function. */
+/**
+ * 🕰️ Give the default organisation a time zone, in its OWN ROW: the one place
+ * an organisation's zone is kept since #604. What it held is remembered the
+ * first time, and put back by the clean-up. (This test used to set the
+ * "site.timezone" setting, which migration 217 removed: nothing reads it.)
+ */
+function organisationZone(string $zone): void
+{
+    global $state;
+    $state['siteZone'] ??= (string) (one('SELECT timezone FROM tblSites WHERE siteID = 1')['timezone'] ?? 'UTC');
+    q('UPDATE tblSites SET timezone = ? WHERE siteID = 1', 's', [$zone]);
+}
+
 function cleanup(): void
 {
     global $state;
@@ -404,6 +418,10 @@ function cleanup(): void
         stopServer($state['extra'][$n]);
     }
     try {
+        // The organisation's zone, put back as it was (see organisationZone()).
+        if (isset($state['siteZone']) === true) {
+            q('UPDATE tblSites SET timezone = ? WHERE siteID = 1', 's', [$state['siteZone']]);
+        }
         foreach ($state['settings'] as $key => $before) {
             if ($before === null) {
                 q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [(string) $key]);
@@ -820,7 +838,7 @@ foreach (['Pacific/Auckland', 'America/Los_Angeles'] as $candidate) {
 if ($zone === '') {
     refuse('could not choose a time zone at least two hours away from the database server\'s');
 }
-setting('site.timezone', $zone);
+organisationZone($zone);
 // The monitor's address (part H) needs a token.
 $cronToken = bin2hex(random_bytes(16));
 setting('maintenance.cronToken', $cronToken);

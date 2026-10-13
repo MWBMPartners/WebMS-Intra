@@ -73,6 +73,22 @@
 #      catches faults of the #553 / #555 kind. The file's body is checked
 #      against a checksum first, so an edit to it fails the phase. Kept as a
 #      permanent test (owner's decision 9, 12 October 2026).
+#   7. The installer's "carry on with what is there", over an OLDER database
+#      whose two time-zone places differ (#604). That choice loads TODAY's
+#      install script over the database and then every numbered migration,
+#      ignoring which have run. The older database here is March's install
+#      script taken up to migration 216: it has the old `site.timezone`
+#      setting and the old `eventTimezone` column, and has never seen
+#      migration 217. Its setting is put on Pacific/Auckland while its
+#      organisation's row says UTC, and a second organisation is given a row
+#      (New York) and a setting of its own (Paris). Afterwards each
+#      organisation's row must hold the zone its pages were showing, the old
+#      setting must be gone and the mark there; a second pass must change
+#      nothing. WHY IT IS HERE: the install script once wrote migration 217's
+#      mark first, so 217 took every organisation for already brought into
+#      line, copied nothing and deleted the setting. Pages went from Auckland
+#      to UTC, with nothing to say so. Phases 1 to 6 could not see it: none
+#      of them takes this path over a database whose two places differ.
 #
 # And three DATA checks, between phases 4 and 5. Migration 210 holds one
 # statement that changes stored data: it empties an attendance session's
@@ -90,9 +106,9 @@
 #   0 — all phases and the data checks pass (the warnings noted above do not
 #   affect this).
 #   non-zero — phases 1 to 4 and the data checks stop the run at the first
-#   hard failure. Phases 5 and 6 BOTH always run, because they start from
-#   different databases and one failing says nothing about the other; the run
-#   then fails if either did.
+#   hard failure. Phases 5, 6 and 7 ALL always run, because they start from
+#   different databases and one failing says nothing about the others; the
+#   run then fails if any did.
 #
 # Requires: docker + git + bash 4+. Which MySQL it runs against comes from the
 # E2E_MYSQL_VERSION environment variable — an EXACT version such as 8.0.36
@@ -103,7 +119,7 @@
 # MySQL 8 line production itself runs is not confirmed — see #475.
 #
 # Usage:
-#   tools/e2e-migrations/run.sh                # run all six phases and the data checks on MySQL 8.0.36
+#   tools/e2e-migrations/run.sh                # run all seven phases and the data checks on MySQL 8.0.36
 #   E2E_MYSQL_VERSION=8.4.11 tools/e2e-migrations/run.sh   # the same, on MySQL 8.4.11
 #   E2E_BASE_REF=<commit, tag or branch> tools/e2e-migrations/run.sh   # phase 5 starts from there instead of origin/main
 #     (phase 5's named exceptions, KNOWN_P5_*, are written for origin/main: from
@@ -996,11 +1012,11 @@ e2e-${tag}-session-3-none | points at no event"
                   INSERT INTO tblAttendanceServiceTypes (siteID, typeName, typeSlug)
                       VALUES (@site, 'e2e data check ${tag}', 'e2e-data-check-${tag}');
                   SET @type := LAST_INSERT_ID();
-                  INSERT INTO tblEvents (siteID, eventName, eventSlug, startDateTime)
-                      VALUES (@site, 'e2e live event ${tag}', 'e2e-${tag}-live-event', '2020-01-05 10:00:00');
+                  INSERT INTO tblEvents (siteID, eventName, eventSlug, startDateTime, timezone)
+                      VALUES (@site, 'e2e live event ${tag}', 'e2e-${tag}-live-event', '2020-01-05 10:00:00', 'UTC');
                   SET @live := LAST_INSERT_ID();
-                  INSERT INTO tblEvents (siteID, eventName, eventSlug, startDateTime)
-                      VALUES (@site, 'e2e deleted event ${tag}', 'e2e-${tag}-deleted-event', '2020-01-05 10:00:00');
+                  INSERT INTO tblEvents (siteID, eventName, eventSlug, startDateTime, timezone)
+                      VALUES (@site, 'e2e deleted event ${tag}', 'e2e-${tag}-deleted-event', '2020-01-05 10:00:00', 'UTC');
                   SET @gone := LAST_INSERT_ID();
                   INSERT INTO tblAttendanceSessions (siteID, serviceTypeID, eventID, sessionDate, notes, updatedAt) VALUES
                       (@site, @type, @live, '2020-01-05', 'e2e-${tag}-session-1-live', '${kept_at}'),
@@ -1633,19 +1649,123 @@ phase6_upgrade_from_oldest_install_script() {
     return 0
 }
 
-# Both always run (see "Exit" in the header). `|| P5_RC=1` rather than reading
-# $? afterwards: under `set -e` a failing call would end the script before the
-# next line could look at it.
+# -----------------------------------------------------------------------------
+# Phase 7 — the installer's "carry on" over an older database whose two
+# time-zone places differ (#604). See the header for what it is and why.
+#
+# What it cannot show: the installer's own pages. It runs the SQL their
+# "carry on" step runs (today's install script, then every migration), through
+# the mysql command-line client, as the other phases do.
+# -----------------------------------------------------------------------------
+# The two organisations' zones in number order, the count of old setting rows,
+# of marks, and of old columns, as one line.
+phase7_zone_state() {
+    mysql_q "SELECT CONCAT(
+                 (SELECT GROUP_CONCAT(COALESCE(timezone, '(empty)') ORDER BY siteID SEPARATOR ' ') FROM tblSites),
+                 ' | old setting rows ', (SELECT COUNT(*) FROM tblSettings WHERE settingKey = 'site.timezone'),
+                 ' | marks ', (SELECT COUNT(*) FROM tblSettings WHERE settingKey = 'site.timezoneKeptAt' AND siteID IS NULL AND settingValue = 'organisation'),
+                 ' | old columns ', (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tblEvents' AND COLUMN_NAME = 'eventTimezone'));"
+}
+
+phase7_installer_carry_on_over_an_older_database() {
+    echo
+    echo "═════ Phase 7: the installer's \"carry on\" over an older database whose two time-zone places differ ═════"
+    local file name
+    local done_list="${SNAP_DIR}/p7_done.txt"
+    local err_file="${SNAP_DIR}/p7_err.txt"
+    echo "  Building the older database: the install script of 6 March 2026, then this checkout's migrations up to 216 …"
+    if ! reset_db || ! mysql_file "${OLDEST_SCHEMA}"; then
+        echo "✗ phase 7 FAILED — the frozen install script did not load on MySQL ${E2E_MYSQL_VERSION}" >&2
+        return 1
+    fi
+    if ! mysql_q "SELECT filename FROM tblMigrations;" > "${done_list}"; then
+        echo "✗ phase 7 FAILED — could not read tblMigrations" >&2
+        return 1
+    fi
+    # Plain glob, same reason as in run_all_migrations: a path with a space.
+    for file in "${SQL_DIR}"/[0-9]*.sql; do
+        [[ -e "${file}" ]] || continue
+        name="$(basename "${file}")"
+        # Nothing numbered 217 or later: this database has never seen migration 217.
+        [[ "${name:0:3}" < "217" ]] || continue
+        if grep -Fxq -- "${name}" "${done_list}"; then
+            continue
+        fi
+        if ! mysql_file "${file}" 2> "${err_file}"; then
+            echo "✗ phase 7 FAILED — the older database could not be built: ${name} stopped. The database said:" >&2
+            grep -v 'Using a password on the command line' "${err_file}" | sed 's/^/      /' >&2 || true
+            return 1
+        fi
+        mysql_q "INSERT IGNORE INTO tblMigrations (filename) VALUES ('${name}');" >/dev/null 2>&1 || true
+    done
+    # Its two places are set apart. The default organisation's row keeps what it
+    # has (UTC); the installation's setting says Auckland, which is what its
+    # pages show. A second organisation: its row says New York, its own
+    # setting Paris.
+    if ! mysql_q "UPDATE tblSites SET timezone = 'UTC' WHERE siteID = 1;
+                  DELETE FROM tblSettings WHERE settingKey = 'site.timezone';
+                  INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (NULL, 'site.timezone', 'Pacific/Auckland', 'UTC', 0);
+                  INSERT INTO tblSites (siteKey, siteName, timezone, isActive) VALUES ('e2e-second', 'e2e second organisation', 'America/New_York', 1);
+                  INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (LAST_INSERT_ID(), 'site.timezone', 'Europe/Paris', 'UTC', 0);" >/dev/null; then
+        echo "✗ phase 7 FAILED — the older database's two time-zone places could not be set apart" >&2
+        return 1
+    fi
+    local before after again
+    before="$(phase7_zone_state)" || return 1
+    echo "  the older database: ${before}"
+    if [[ "${before}" != "UTC America/New_York | old setting rows 2 | marks 0 | old columns 1" ]]; then
+        echo "✗ phase 7 FAILED — the older database is not the one this phase is about (it must have the old setting, the old column and no mark). Nothing was proved." >&2
+        return 1
+    fi
+
+    echo "  Carrying on: today's install script over it, then every migration, ignoring which have run …"
+    if ! mysql_file "${SQL_DIR}/full_schema.sql" 2> "${err_file}"; then
+        echo "✗ phase 7 FAILED — today's install script did not load over the older database. The database said:" >&2
+        grep -v 'Using a password on the command line' "${err_file}" | sed 's/^/      /' >&2 || true
+        return 1
+    fi
+    if ! replay_all_migrations; then
+        echo "✗ phase 7 FAILED — a migration stopped on the carry-on path" >&2
+        return 1
+    fi
+    after="$(phase7_zone_state)" || return 1
+    echo "  afterwards:         ${after}"
+    if [[ "${after}" != "Pacific/Auckland Europe/Paris | old setting rows 0 | marks 1 | old columns 0" ]]; then
+        echo "✗ phase 7 FAILED — after the installer's \"carry on\", each organisation's row must hold the zone its pages were showing (Pacific/Auckland, then Europe/Paris), with the old setting and the old column gone and the mark there. Found: ${after}" >&2
+        echo "    If the rows still say UTC and America/New_York, the install script wrote migration 217's mark before 217 ran, and every organisation's zone was lost." >&2
+        return 1
+    fi
+    echo "  ✓ each organisation's row holds the zone its pages were showing; the old setting and the old column are gone; the mark is there"
+
+    if ! mysql_file "${SQL_DIR}/full_schema.sql" 2> "${err_file}" || ! replay_all_migrations > /dev/null; then
+        echo "✗ phase 7 FAILED — the same path a second time did not run" >&2
+        return 1
+    fi
+    again="$(phase7_zone_state)" || return 1
+    if [[ "${again}" != "${after}" ]]; then
+        echo "✗ phase 7 FAILED — the same path a second time changed something. First: ${after}. Second: ${again}" >&2
+        return 1
+    fi
+    echo "  ✓ the same path a second time changes nothing"
+    return 0
+}
+
+# All three always run (see "Exit" in the header). `|| P5_RC=1` rather than
+# reading $? afterwards: under `set -e` a failing call would end the script
+# before the next line could look at it.
 P5_RC=0
 P6_RC=0
+P7_RC=0
 phase5_upgrade_from_last_release || P5_RC=1
 phase6_upgrade_from_oldest_install_script || P6_RC=1
+phase7_installer_carry_on_over_an_older_database || P7_RC=1
 
-if [[ "${P5_RC}" -ne 0 || "${P6_RC}" -ne 0 ]]; then
+if [[ "${P5_RC}" -ne 0 || "${P6_RC}" -ne 0 || "${P7_RC}" -ne 0 ]]; then
     echo
     echo "═════ FAILED ═════" >&2
     [[ "${P5_RC}" -ne 0 ]] && echo "  ✗ phase 5 (upgrade from the last release) failed" >&2
     [[ "${P6_RC}" -ne 0 ]] && echo "  ✗ phase 6 (upgrade from the oldest install script) failed" >&2
+    [[ "${P7_RC}" -ne 0 ]] && echo "  ✗ phase 7 (the installer's \"carry on\" over an older database) failed" >&2
     exit 1
 fi
 

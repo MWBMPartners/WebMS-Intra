@@ -3530,7 +3530,9 @@ class GdprEraser
      *    Portal\Core\GivingRetention::stateOfKeptRow() answers "due", which
      *    needs all FOUR: the donor's account has really been emptied; no
      *    hold; a number of years an administrator has confirmed; and a
-     *    keep-until date that has passed where the organisation is, counted
+     *    keep-until date that has passed at the LAST place on Earth to reach
+     *    a date (not merely where the organisation is: see
+     *    GivingRetention::timezoneOfSite(), #604), counted
      *    from the LATER of the date on the kept row and the newest gift still
      *    linked to the donor. A caller cannot clear early by forgetting a
      *    test, because there is no test for it to forget.
@@ -3594,7 +3596,7 @@ class GdprEraser
      *     organisation for that reason.
      *
      * @param int         $keptDonorId The row of `tblGivingKeptDonors`.
-     * @param string|null $today       `YYYY-MM-DD` where the organisation is. Null means now. For tests.
+     * @param string|null $today       `YYYY-MM-DD`. Null means today's date at the last place on Earth to reach it. For tests.
      *
      * @return string 'cleared', or why not: 'not-erased' (the account has not
      *   been emptied: no run of the erasure got that far), 'on-hold', 'not-confirmed',

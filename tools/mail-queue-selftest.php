@@ -169,7 +169,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 154;
+const EXPECTED_CHECKS = 155;
 
 /** What a child process prints before its findings, so they can be found in whatever else it printed. */
 const RESULT_MARK = '@@mail-queue-selftest@@';
@@ -433,6 +433,7 @@ const EVENT_TODAY = 931504; // an event "today" by the database's date, for the 
 const EVENT_EAST  = 931505; // an event that really starts in an hour, in Sydney's zone (F3)
 const EVENT_ODD   = 931506; // an event whose zone box holds something that is not a zone (F3)
 const EVENT_TOMORROW = 931507; // an event the reminder job takes to start in 24 hours, in New York's zone (F3)
+const EVENT_LATE  = 931508; // an event whose day-before reminder is made by a LATE call, on the event's own day (F3)
 const EVENT_CHANGE = 931510; // four events, one on each clock-change day, numbered from here (F3)
 const REQUEST_ID  = 931900; // the erasure request of Q9
 const REQUEST_RACE = 931901; // the erasure request of F9
@@ -1169,11 +1170,13 @@ function noJob(): void
 /**
  * 🗓️ One event of the portal's own, WITH THE COLUMNS THE EVENT FORM WRITES
  * (web/_apps/calendar/manage/save.php): its time zone goes into `timezone`,
- * and `eventTimezone` is not named at all, so it holds its default, as it
- * does for every event made in the portal. Its end is an hour after its start.
+ * the one column an event's zone is kept in. Its end is an hour after its
+ * start.
  *
- * The test's events used to set BOTH zone columns by hand, to the same value.
- * That is why it could not see the reminders reading the wrong one.
+ * There used to be a second zone column, `eventTimezone`, which the form
+ * never wrote, and this test's events once set BOTH by hand to the same
+ * value. That is why it could not see the reminders reading the wrong one.
+ * Migration 217 removed the column (#604).
  */
 function eventAsTheFormMakesIt(int $eventId, string $slug, string $name, string $start, string $zone): void
 {
@@ -3147,22 +3150,21 @@ if (part('F2', 'A record says "waiting", not "sent", for mail that was only kept
 if (part('F3', 'A use-by moment is worked out on the EVENT\'s own clock: a reminder is not thrown away early, nothing goes after its event has started, and a reminder job counts only what went (M3, M2)') === true) {
 // =============================================================================
     // EVERY EVENT IN THIS PART IS MADE AS THE EVENT FORM MAKES IT: its zone is
-    // in `timezone`, and `eventTimezone` holds its default, "Europe/London".
-    // None of them is in London's zone. The use-by moment of a reminder and of
-    // an invitation used to be read from `eventTimezone`, so every event made
-    // in the portal was taken to be on London's clock, and this part could not
-    // see it: its one event set both columns by hand to the same value.
+    // in `timezone`, the one column an event's zone is kept in. None of them
+    // is in London's zone. The use-by moment of a reminder and of an
+    // invitation used to be read from a second column, `eventTimezone`, which
+    // held "Europe/London" for every event made in the portal, and this part
+    // could not see it: its one event set both columns by hand to the same
+    // value. Migration 217 removed that column (#604).
     //
-    // The reminder job decides WHEN to make a reminder by comparing an event's
-    // clock time with the DATABASE SERVER's own clock (that is older than the
-    // mail queue, and is not what is tested here). So the first event's clock
-    // time is written an hour ahead of that clock, and this part needs that
-    // clock to be UTC, as the databases this test is run on are. Anything else
-    // is a refusal, never a quiet pass.
-    $offset = (int) one("SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', @@global.time_zone)) AS s")['s'];
-    if ($offset !== 0) {
-        refuse('part F3 needs the database server\'s own clock to be UTC (it is ' . $offset . ' seconds from it)');
-    }
+    // WHEN A REMINDER IS MADE. Since #604 the reminder job decides from
+    // MOMENTS: the event's start, turned from its clock time and zone into
+    // UTC, against the database's own UTC clock. So each event below REALLY
+    // starts when its reminder says: an hour from now, and 24 hours from now,
+    // on New York's clock. (The job used to compare an event's clock time with
+    // the database SERVER's clock, and this part's events were written an hour
+    // ahead of THAT clock to make it fire. An event in New York was then
+    // reminded about four or five hours early, which this part took as given.)
     /** The database's UTC clock, as seconds since 1970, so that this part's "now" is the portal's "now". */
     $dbNow = static fn (): int => (int) one("SELECT TIMESTAMPDIFF(SECOND, '1970-01-01 00:00:00', UTC_TIMESTAMP()) AS s")['s'];
     /** Does this time on a clock happen TWICE in that zone (the night the clocks go back)? Such a time has two moments, and this part must not build on one. */
@@ -3177,17 +3179,29 @@ if (part('F3', 'A use-by moment is worked out on the EVENT\'s own clock: a remin
 
         return false;
     };
-    // "Today" must still be today when the job is asked a moment from now.
-    if (86400 - ($dbNow() % 86400) < 90) {
-        sleep(91);
-    }
+    /** A moment, as New York's clock shows it. */
+    $inNewYork = static fn (int $moment): string => (new DateTimeImmutable('@' . $moment))->setTimezone(new DateTimeZone('America/New_York'))->format('Y-m-d H:i:s');
 
-    // 1. NEW YORK. Its clock time is 60 minutes ahead of the database's
-    //    clock, so the job takes it to start in an hour. On New York's own
-    //    clock that same time is four or five hours further off.
-    $soon = gmdate('Y-m-d H:i:s', $dbNow() + 3600);
-    if ($twice($soon, 'America/New_York') === true) {
-        refuse('part F3 cannot be run in this one hour of the year: the time it would give its first event happens twice on New York\'s clock tonight. Run the test again in an hour');
+    // 1. NEW YORK. It starts 60 minutes from now, so the job makes its
+    //    "starting soon" reminder in this run.
+    $soonAt = $dbNow() + 3600;
+    $soon   = $inNewYork($soonAt);
+    // 2. An event that starts 24 hours from now, also in New York, with one
+    //    person going: the "is tomorrow" reminder. (86,400 seconds is a
+    //    length of time here, not "a day": the job's window is counted the
+    //    same way.)
+    $tomorrow = $inNewYork($dbNow() + 86400);
+    if ($twice($soon, 'America/New_York') === true || $twice($tomorrow, 'America/New_York') === true) {
+        refuse('part F3 cannot be run in these hours of the year: a time it would give one of its events happens twice on New York\'s clock. Run the test again in an hour');
+    }
+    // The reminder says "is tomorrow" only when the event's own day IS the day after today on its clock. On
+    // two days a year that is not so for an event 24 hours away: 24 hours before a start late on the 25-hour
+    // day is that same day (nothing is sent then), and 24 hours before a start just after midnight following
+    // the 23-hour day is two days before (the reminder names the day). tools/time-zones-selftest.php holds
+    // both. This part is about the use-by moment of an ordinary "is tomorrow" reminder, so it steps aside.
+    $newYorkToday = substr($inNewYork($dbNow()), 0, 10);
+    if ((new DateTimeImmutable($newYorkToday, new DateTimeZone('UTC')))->modify('+1 day')->format('Y-m-d') !== substr($tomorrow, 0, 10)) {
+        refuse('part F3 cannot be run in this hour of the year: 24 hours from now is not "tomorrow" on New York\'s clock, because its clocks change in between. Run the test again in an hour or two');
     }
     eventAsTheFormMakesIt(EVENT_SOON, 'mail-queue-selftest-soon', 'Selftest queue event soon', $soon, 'America/New_York');
     foreach (['other', 'third', 'fourth'] as $who) {
@@ -3195,22 +3209,34 @@ if (part('F3', 'A use-by moment is worked out on the EVENT\'s own clock: a remin
     }
     // Its own "day of" summary is not what is looked at: marked as already done.
     q("INSERT INTO tblEventReminderLog (eventID, reminderType, recipientCount) VALUES (?, 'day', 0)", 'i', [EVENT_SOON]);
-    // 2. An event the job takes to start in 24 hours, also in New York, with
-    //    one person going: the "is tomorrow" reminder.
-    $tomorrow = gmdate('Y-m-d H:i:s', $dbNow() + 86400);
     eventAsTheFormMakesIt(EVENT_TOMORROW, 'mail-queue-selftest-tomorrow', 'Selftest queue event next day', $tomorrow, 'America/New_York');
     q("INSERT INTO tblEventRSVPs (eventID, userID, siteID, response, status) VALUES (?, ?, 1, 'going', 'confirmed')", 'ii', [EVENT_TOMORROW, PEOPLE['other']]);
     q("INSERT INTO tblEventReminderLog (eventID, reminderType, recipientCount) VALUES (?, 'day', 0)", 'i', [EVENT_TOMORROW]);
-    // 3. An event "today" by the database's date, for the job's "day of"
+    // 2b. A LATE CALL (the second check of #604, 13 October 2026). An event at 23:52 on a clock that reads two
+    //     minutes past midnight NOW: its start is 23 hours 50 minutes away, inside the day-before window, and
+    //     this run is the first call inside it, on the event's OWN day. (That is what a 23:55 start gets when
+    //     the job is called on the hour.) The reminder must still be made, with the day named, and kept with
+    //     the event's START as its use-by moment. The start of its day, which every other day-before reminder
+    //     carries, is already two minutes in the past: kept with that, it would be thrown away unsent.
+    //     The clock is a fixed distance from UTC, worked out from now so that this needs no particular hour
+    //     ("+09:17", say). PHP and the database both read a zone written that way.
+    $lateOffset = ((2 - intdiv($dbNow() % 86400, 60)) % 1440 + 1440) % 1440; // minutes ahead of UTC at which a clock reads 00:02 now
+    $lateOffset = $lateOffset > 840 ? $lateOffset - 1440 : $lateOffset;      // no clock is more than 14 hours ahead: the same reading, behind UTC
+    $lateZone   = sprintf('%s%02d:%02d', $lateOffset < 0 ? '-' : '+', intdiv(abs($lateOffset), 60), abs($lateOffset) % 60);
+    $lateDay    = gmdate('Y-m-d', $dbNow() + $lateOffset * 60);
+    $late       = $lateDay . ' 23:52:00';
+    eventAsTheFormMakesIt(EVENT_LATE, 'mail-queue-selftest-late', 'Selftest queue event late call', $late, $lateZone);
+    q("INSERT INTO tblEventRSVPs (eventID, userID, siteID, response, status) VALUES (?, ?, 1, 'going', 'confirmed')", 'ii', [EVENT_LATE, PEOPLE['other']]);
+    q("INSERT INTO tblEventReminderLog (eventID, reminderType, recipientCount) VALUES (?, 'day', 0)", 'i', [EVENT_LATE]);
+    // 3. An event that is TODAY on its own clock, for the job's "day of"
     //    summary. Its zone box holds something that is NOT a zone ("Londn"),
-    //    so its use-by moment has to be worked out on the organisation's own
-    //    clock. Nobody is going to it, so it gets no other reminder.
-    $today = gmdate('Y-m-d', $dbNow()) . ' 23:59:00';
-    eventAsTheFormMakesIt(EVENT_TODAY, 'mail-queue-selftest-today', 'Selftest queue event today', $today, 'Londn');
-    // The job makes "day of" summaries only between six and nine in the
-    // morning on the clock PHP is set to, which the portal takes from the
-    // organisation. So for this one request the organisation is given a zone
-    // where it is seven o'clock now, in both places the portal keeps one.
+    //    so "today", "between six and nine in the morning" and its use-by
+    //    moment all have to be worked out on the ORGANISATION's own clock.
+    //    For this one request the organisation is given a zone where it is
+    //    seven in the morning now, in its own row: the one place its zone is
+    //    kept since #604. (This used to set the "site.timezone" setting as
+    //    well, the second place, which migration 217 removed.) Nobody is going
+    //    to the event, so it gets no other reminder.
     $atSeven = '';
     foreach (timezone_identifiers_list() as $name) {
         if ((new DateTimeImmutable('now', new DateTimeZone($name)))->format('G') === '7') {
@@ -3221,13 +3247,12 @@ if (part('F3', 'A use-by moment is worked out on the EVENT\'s own clock: a remin
     if ($atSeven === '') {
         refuse('part F3 found no time zone in which it is seven in the morning now');
     }
-    $settingWas = (string) (one("SELECT settingValue FROM tblSettings WHERE settingKey = 'site.timezone' AND siteID IS NULL")['settingValue'] ?? 'UTC');
-    $siteWas    = (string) one('SELECT timezone FROM tblSites WHERE siteID = 1')['timezone'];
-    setting('site.timezone', $atSeven);
+    $today = (new DateTimeImmutable('@' . $dbNow()))->setTimezone(new DateTimeZone($atSeven))->format('Y-m-d') . ' 23:59:00';
+    eventAsTheFormMakesIt(EVENT_TODAY, 'mail-queue-selftest-today', 'Selftest queue event today', $today, 'Londn');
+    $siteWas = (string) one('SELECT timezone FROM tblSites WHERE siteID = 1')['timezone'];
     organisationZone($atSeven);
     serverDown();
     $cron = req('', 'GET', '/cron/event-reminders?key=' . $jobToken, null, ip(2));
-    setting('site.timezone', $settingWas);
     organisationZone($siteWas);
     $soonRows  = queued("subject LIKE '%Starting soon: Selftest queue event soon'");
     $dayRows   = queued("subject LIKE '%Today: Selftest queue event today'");
@@ -3236,18 +3261,28 @@ if (part('F3', 'A use-by moment is worked out on the EVENT\'s own clock: a remin
     $trueStart = utcOf($soon, 'America/New_York');
     $logged    = one("SELECT recipientCount FROM tblEventReminderLog WHERE eventID = ? AND reminderType = '1h'", 'i', [EVENT_SOON]);
     ok(
-        'the reminder job with the mail server down, for an event in New York\'s zone made as the form makes it: its three "starting soon" reminders are KEPT, the job reports 0 sent and how many wait (it used to report them as sent), and each carries as its use-by moment the event\'s start ON NEW YORK\'S CLOCK, which is hours later than the same time read on London\'s (what it used to be given)',
+        'the reminder job with the mail server down, for an event in New York\'s zone that really starts in an hour, made as the form makes it: its three "starting soon" reminders are KEPT, the job reports 0 sent and how many wait (it used to report them as sent), and each carries as its use-by moment the event\'s start ON NEW YORK\'S CLOCK, an hour from now, which is hours later than the same time read on London\'s (what it used to be given)',
         $cron['status'] === 200 && preg_match('/"1h":0[,}]/', $cron['body']) === 1 && preg_match('/"waiting":(\d+)[,}]/', $cron['body'], $w) === 1 && (int) $w[1] === $allKept
-            && count($soonRows) === 3 && array_values(array_unique(array_column($soonRows, 'expiresAt'))) === [$trueStart]
+            && count($soonRows) === 3 && array_values(array_unique(array_column($soonRows, 'expiresAt'))) === [$trueStart] && $trueStart === gmdate('Y-m-d H:i:s', $soonAt)
             && strtotime($trueStart . ' UTC') - strtotime(utcOf($soon, 'Europe/London') . ' UTC') >= 4 * 3600 && $logged !== null && (int) $logged['recipientCount'] === 0,
         'HTTP ' . $cron['status'] . ' ' . $cron['body'] . '; kept ' . count($soonRows) . ' of ' . $allKept . ', use-by ' . json_encode(array_values(array_unique(array_column($soonRows, 'expiresAt'))))
             . '; the start on New York\'s clock is ' . $trueStart . ' UTC, on London\'s ' . utcOf($soon, 'Europe/London') . ' UTC'
     );
     ok(
-        'the "is tomorrow" reminder for an event the job takes to start in 24 hours is kept with the START OF THE EVENT\'S OWN DAY, on New York\'s clock, as its use-by moment: from then on "tomorrow" would be untrue',
+        'the "is tomorrow" reminder for an event that starts 24 hours from now is kept with the START OF THE EVENT\'S OWN DAY, on New York\'s clock, as its use-by moment: from then on "tomorrow" would be untrue',
         preg_match('/"24h":0[,}]/', $cron['body']) === 1 && count($nextRows) === 1 && $nextRows[0]['toRecipients'] === mailOf('other')
             && $nextRows[0]['expiresAt'] === utcOf(substr($tomorrow, 0, 10), 'America/New_York') && $nextRows[0]['expiresAt'] !== utcOf($tomorrow, 'America/New_York'),
         'kept ' . count($nextRows) . ', use-by ' . json_encode($nextRows[0]['expiresAt'] ?? null) . '; that day starts ' . utcOf(substr($tomorrow, 0, 10), 'America/New_York') . ' UTC on New York\'s clock'
+    );
+    $lateRows = queued("subject LIKE '%Selftest queue event late call%'");
+    $lateSubject = 'Reminder: Selftest queue event late call on ' . (new DateTimeImmutable($lateDay, new DateTimeZone('UTC')))->format('l j M');
+    ok(
+        'a LATE CALL: the day-before reminder for a 23:52 start, first reached two minutes into the event\'s own day (on a clock at ' . $lateZone . '), is still MADE, with the day named and not "tomorrow", and is kept with the event\'s START as its use-by moment, not the start of its day, which has already passed',
+        count($lateRows) === 1 && str_ends_with((string) $lateRows[0]['subject'], $lateSubject) === true && $lateRows[0]['toRecipients'] === mailOf('other')
+            && $lateRows[0]['expiresAt'] === utcOf($late, $lateZone) && $lateRows[0]['expiresAt'] !== utcOf($lateDay, $lateZone)
+            && strtotime((string) $lateRows[0]['expiresAt'] . ' UTC') > $dbNow() && strtotime(utcOf($lateDay, $lateZone) . ' UTC') <= $dbNow(),
+        'kept ' . count($lateRows) . ': subject ' . json_encode($lateRows[0]['subject'] ?? null) . ' (looked for one ending ' . json_encode($lateSubject) . '), use-by ' . json_encode($lateRows[0]['expiresAt'] ?? null)
+            . '; the event starts ' . utcOf($late, $lateZone) . ' UTC and its day began ' . utcOf($lateDay, $lateZone) . ' UTC'
     );
     ok(
         'the job\'s "day of" summary for an event that is today is kept as well (for the administrator, at least), with the moment THAT event starts as its use-by moment; it used to be sent with none. That event\'s zone box holds "Londn", so the moment is worked out on the ORGANISATION\'s clock (' . $atSeven . ' for this one request), and the summary is not lost for the mistyped zone',
@@ -3255,17 +3290,18 @@ if (part('F3', 'A use-by moment is worked out on the EVENT\'s own clock: a remin
             && array_values(array_unique(array_column($dayRows, 'expiresAt'))) === [utcOf($today, $atSeven)],
         'kept ' . count($dayRows) . ', use-by ' . json_encode(array_values(array_unique(array_column($dayRows, 'expiresAt')))) . '; on the organisation\'s clock that event starts ' . utcOf($today, $atSeven) . ' UTC'
     );
-    // Two hours pass and the mail server is back. On New York's clock the
-    // event is still hours away: the reminders must GO. (Read on London's
-    // clock their use-by moment had passed, and all three were thrown away.)
-    later(7200);
+    // Forty minutes pass and the mail server is back. The event is still
+    // twenty minutes away: the reminders must GO. (Read on London's clock
+    // their use-by moment was hours in the past before they were even kept,
+    // and all three were thrown away.)
+    later(2400);
     useServer('accept');
     $ran  = runQueue();
     $mail = mailSince('accept');
     $to   = array_merge([], ...array_column($mail['messages'], 'to'));
     $went = array_values(array_intersect([mailOf('other'), mailOf('third'), mailOf('fourth')], $to));
     ok(
-        'two hours later, with the mail server back, the three reminders are DELIVERED, not thrown away: the event has not started on its own clock',
+        'forty minutes later, with the mail server back, the three reminders are DELIVERED, not thrown away: the event has not started on its own clock',
         count($went) === 3 && queued("subject LIKE '%Starting soon: Selftest queue event soon'") === [],
         'delivered to ' . count($went) . ' of the three; the run ' . json_encode($ran)
     );

@@ -22,6 +22,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
+use Portal\Core\Events;
 use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\Venues;
@@ -251,6 +252,84 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?> alert-dismissible fade show">
         <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+<?php endif; ?>
+
+<?php
+// 🕰️ Events saved with a time zone the portal cannot use (#604): found,
+//    counted and listed here for an administrator, and never changed for
+//    them. See Events::withUnknownZone() for why there can be any. A failure
+//    to look must not stop this page, so it is caught and logged.
+$unknownZoneEvents = ['count' => 0, 'events' => []];
+try {
+    $unknownZoneEvents = Events::withUnknownZone($mysqli, $siteId);
+} catch (\Throwable $e) {
+    error_log('Manage Events could not look for events with an unknown time zone: ' . $e->getMessage());
+}
+?>
+<?php if ($unknownZoneEvents['count'] > 0): ?>
+    <div class="alert alert-warning" role="alert" id="events-unknown-zone" data-count="<?php echo (int) $unknownZoneEvents['count']; ?>">
+        <p class="mb-2">
+            <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
+            <strong><?php echo (int) $unknownZoneEvents['count']; ?> <?php echo $unknownZoneEvents['count'] === 1 ? 'event is' : 'events are'; ?> saved with a time zone the portal does not know.</strong>
+            Until the right one is chosen, <?php echo $unknownZoneEvents['count'] === 1 ? 'its times are' : 'their times are'; ?> read on this organisation's own clock (<?php echo htmlspecialchars(Site::timezone(), ENT_QUOTES, 'UTF-8'); ?>), which may not be what was meant. Nothing has been changed for you: open each one, choose its time zone and save.
+        </p>
+        <ul class="mb-0">
+            <?php foreach ($unknownZoneEvents['events'] as $zoneEvent): ?>
+                <li>
+                    <a class="alert-link" href="<?php echo htmlspecialchars(Site::url('calendar/manage'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo (int) $zoneEvent['eventID']; ?>"><?php echo htmlspecialchars($zoneEvent['eventName'], ENT_QUOTES, 'UTF-8'); ?></a>
+                    · <?php echo htmlspecialchars(substr($zoneEvent['startDateTime'], 0, 16), ENT_QUOTES, 'UTF-8'); ?>
+                    · saved as "<?php echo htmlspecialchars($zoneEvent['timezone'], ENT_QUOTES, 'UTF-8'); ?>"
+                </li>
+            <?php endforeach; ?>
+        </ul>
+        <?php if ($unknownZoneEvents['count'] > count($unknownZoneEvents['events'])): ?>
+            <p class="mb-0 mt-2 small">The newest <?php echo count($unknownZoneEvents['events']); ?> are listed. The rest appear here as these are put right.</p>
+        <?php endif; ?>
+    </div>
+<?php endif; ?>
+
+<?php
+// 🕰️ Events made before the time-zone upgrade and still marked
+//    "Europe/London", in an organisation whose clock differs (#604): see
+//    Events::markedLondonBeforeUpgrade(). Found and listed, with one button
+//    to put them all on the organisation's zone. Never changed without it.
+$londonMarked = ['count' => 0, 'coming' => 0, 'zone' => '', 'ids' => [], 'events' => []];
+try {
+    $londonMarked = Events::markedLondonBeforeUpgrade($mysqli, $siteId);
+} catch (\Throwable $e) {
+    error_log('Manage Events could not look for events marked Europe/London before the upgrade: ' . $e->getMessage());
+}
+?>
+<?php if ($londonMarked['count'] > 0): ?>
+    <div class="alert alert-warning" role="alert" id="events-marked-london" data-count="<?php echo (int) $londonMarked['count']; ?>" data-coming="<?php echo (int) $londonMarked['coming']; ?>">
+        <p class="mb-2">
+            <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
+            <strong><?php echo (int) $londonMarked['count']; ?> <?php echo $londonMarked['count'] === 1 ? 'event' : 'events'; ?> made before this version <?php echo $londonMarked['count'] === 1 ? 'is' : 'are'; ?> marked "Europe/London", and this organisation's time zone is <?php echo htmlspecialchars($londonMarked['zone'], ENT_QUOTES, 'UTF-8'); ?>.</strong>
+            <?php echo (int) $londonMarked['coming']; ?> of them <?php echo $londonMarked['coming'] === 1 ? 'is' : 'are'; ?> still to come.
+        </p>
+        <p class="mb-2">Why: before this version the event form filled its time zone box with Europe/London for every organisation, and the file import, the events API and members' suggestions stored it whatever the organisation. Reminders, the calendar feed and the calendar download go by the event's own time zone, so for these events they follow London's clock, not yours.</p>
+        <?php if (count($londonMarked['events']) > 0): ?>
+            <ul class="mb-2">
+                <?php foreach ($londonMarked['events'] as $londonEvent): ?>
+                    <li>
+                        <a class="alert-link" href="<?php echo htmlspecialchars(Site::url('calendar/manage'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo (int) $londonEvent['eventID']; ?>"><?php echo htmlspecialchars($londonEvent['eventName'], ENT_QUOTES, 'UTF-8'); ?></a>
+                        · <?php echo htmlspecialchars(substr($londonEvent['startDateTime'], 0, 16), ENT_QUOTES, 'UTF-8'); ?>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+            <?php if ($londonMarked['coming'] > count($londonMarked['events'])): ?>
+                <p class="mb-2 small">The next <?php echo count($londonMarked['events']); ?> of the <?php echo (int) $londonMarked['coming']; ?> still to come are listed.</p>
+            <?php endif; ?>
+        <?php endif; ?>
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/save'), ENT_QUOTES, 'UTF-8'); ?>" class="mb-2">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+            <input type="hidden" name="action" value="zones-to-organisation">
+            <button type="submit" class="btn btn-sm btn-warning" data-confirm="Set the time zone of all <?php echo (int) $londonMarked['count']; ?> of these events to <?php echo htmlspecialchars($londonMarked['zone'], ENT_QUOTES, 'UTF-8'); ?>? Their times are not changed.">
+                <i class="fa-solid fa-clock me-1" aria-hidden="true"></i>Set all <?php echo (int) $londonMarked['count']; ?> to <?php echo htmlspecialchars($londonMarked['zone'], ENT_QUOTES, 'UTF-8'); ?>
+            </button>
+        </form>
+        <p class="mb-0 small">The button changes each event's time zone only, past events and coming ones, never the time stored for it: 19:00 stays 19:00, on your clock. If one of these events really is in London, do not press it: leave that event as it is, and open the others one by one to choose their time zone.</p>
     </div>
 <?php endif; ?>
 

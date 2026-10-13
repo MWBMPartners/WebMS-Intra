@@ -144,13 +144,21 @@ $base  = trim((string) $base, '-');
 $base  = $base === '' ? 'event' : mb_substr($base, 0, 180);
 $slug  = $base . '-' . substr(bin2hex(random_bytes(2)), 0, 4);
 
-// 11 params, types = i (siteID) + s s s s s (name/slug/desc/start/end) + s (loc) + i (cat) + i (submitterId) + s s (name/email).
+// 🕰️ THE ZONE (#604). The start and end were read just above on PHP's clock,
+//    which start-up sets to this organisation's zone, so that is the zone
+//    stored beside them: Site::timezone(), the same answer start-up used.
+//    WHAT WAS WRONG: this statement had "Europe/London" written into it, so a
+//    suggestion made in any other organisation was stored as a London time
+//    and shown hours out once approved.
+$zoneArg = Site::timezone();
+
+// 12 params, types = i (siteID) + s s s s s (name/slug/desc/start/end) + s (zone) + s (loc) + i (cat) + i (submitterId) + s s (name/email).
 $stmt = $mysqli->prepare(
     'INSERT INTO tblEvents '
     . '(siteID, eventName, eventSlug, description, startDateTime, endDateTime, timezone, isAllDay, '
     . ' locationName, categoryID, status, isPublic, '
     . ' submissionStatus, submittedByID, submitterName, submitterEmail, submittedAt) '
-    . 'VALUES (?, ?, ?, ?, ?, ?, "Europe/London", 0, ?, ?, "draft", 0, '
+    . 'VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, "draft", 0, '
     . '        "pending", ?, ?, ?, NOW())'
 );
 if ($stmt === false) {
@@ -158,7 +166,7 @@ if ($stmt === false) {
     header('Location: /calendar/submit?err=db', true, 302);
     exit();
 }
-$stmt->bind_param('isssssiiiss', $siteId, $eventName, $slug, $descArg, $startUtc, $endUtc, $locArg, $categoryArg, $submitterId, $nameArg, $emailArg);
+$stmt->bind_param('issssssiiiss', $siteId, $eventName, $slug, $descArg, $startUtc, $endUtc, $zoneArg, $locArg, $categoryArg, $submitterId, $nameArg, $emailArg);
 $ok = $stmt->execute();
 $newId = (int) $stmt->insert_id;
 $stmt->close();

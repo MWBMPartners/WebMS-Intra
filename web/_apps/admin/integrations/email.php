@@ -291,28 +291,18 @@ if ($senderEmail !== '' && str_contains($senderEmail, '@') === true) {
 }
 
 // 🕰️ ONE time zone for EVERY moment this page shows (MailQueue::shown()
-//    converts once, and names the zone beside the moment).
+//    converts once, and names the zone beside the moment): the
+//    organisation's, from Site::timezone(), the one place that answers it
+//    (#604).
 //
-//    WHICH ZONE. The portal keeps an organisation's zone in two places, and
-//    they can differ: the organisation's own row (`tblSites.timezone`, set
-//    at Admin, Organisations, and "UTC" until somebody sets it), and the
-//    `site.timezone` setting, which the portal's start-up makes PHP's own
-//    zone. The queue's part of this page used the first and the rest of the
-//    page the second, so ONE PAGE SHOWED THE SAME MOMENT TWICE, IN TWO
-//    ZONES. Now the whole page uses the organisation's own row when it has
-//    been set to something, and PHP's zone otherwise. That is the order the
-//    start-up's own note gives (the organisation's row comes first), and no
-//    list on this page loses a zone it showed before.
-//    REJECTED: the organisation's row alone. An installation that set only
-//    the setting would have seen "Recent sends" go from its own zone to UTC.
-//
-//    WHAT THIS CANNOT DO: tell an organisation that chose UTC on purpose
-//    from one that never chose; or make the admin dashboard and the health
-//    page agree with this page for an installation that set only the
-//    setting (those two read the organisation's row alone). Every moment
-//    names its zone, so none of them is ever wrong, only differently told.
-$siteZone = (string) (Site::current()['timezone'] ?? '');
-$zone     = ($siteZone !== '' && $siteZone !== 'UTC') ? $siteZone : date_default_timezone_get();
+//    WHAT WAS HERE. The portal kept an organisation's zone in two places
+//    that could differ. This page first showed the same moment twice, in
+//    two zones; then it used the organisation's own row unless that was
+//    UTC, and PHP's zone otherwise, which still left it disagreeing with the
+//    admin dashboard and the health page for some installations. Migration
+//    217 brought the two places into line and Site::timezone() answers for
+//    all of them, so the three pages now tell a moment on the same clock.
+$zone = Site::timezone();
 /** A moment stored in UTC, as this page shows it: in that one zone, with the zone's short name beside it. */
 $showMoment = static fn (string $utc): string => MailQueue::shown($utc, $zone);
 // ⚠️ Certificate checking is off, or one certificate is accepted. Read from

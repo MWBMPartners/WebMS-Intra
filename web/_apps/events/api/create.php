@@ -12,6 +12,10 @@
  *     "eventName":      "Worship Service",      (required)
  *     "startDateTime":  "2026-06-01T10:00:00",  (required, ISO 8601)
  *     "endDateTime":    "2026-06-01T11:30:00",  (optional)
+ *     "timezone":       "Pacific/Auckland",     (optional: the zone the two
+ *                                                times are a clock reading
+ *                                                in; the organisation's own
+ *                                                when left out)
  *     "isAllDay":       false,                   (optional, default false)
  *     "locationName":   "Main Hall",            (optional)
  *     "categoryID":     7,                       (optional)
@@ -21,9 +25,22 @@
  *     "description":    "Order of service…"     (optional)
  *   }
  *
+ * WHICH TIME ZONE (#604). An event's start and end are stored as a time on
+ * a clock, with the clock's zone beside them in `tblEvents.timezone`. This
+ * handler used to store neither rightly: it left the zone to the column's
+ * default, "Europe/London", for every customer everywhere, and it wrote the
+ * clock time in whatever zone PHP happened to be in for the request. Now the
+ * zone is the one given in the body, or the organisation's own
+ * (Site::timezone()), and the times are written on THAT clock. A time given
+ * with its own offset ("2026-06-01T10:00:00+12:00") is a moment, and is
+ * turned into the reading of the event's clock at that moment. A zone that
+ * is not a name the portal knows is refused; it is never replaced by a guess.
+ *
  * @package   Portal\API
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * -----------------------------------------------------------------------------
  */
 
@@ -47,18 +64,39 @@ if ($eventName === '' || $startDateTime === '') {
     ApiResponse::error('eventName and startDateTime are required', 400);
 }
 
-// 📅 Validate datetimes
-$start = strtotime($startDateTime);
-if ($start === false) {
+// 🕰️ The zone the event's times are a clock reading in: the one given, or
+//    the organisation's own. See "WHICH TIME ZONE" at the top of this file.
+$zoneGiven = trim((string) ($body['timezone'] ?? ''));
+if ($zoneGiven !== '' && Site::isZoneName($zoneGiven) === false) {
+    ApiResponse::error(
+        'timezone is not a time zone name the portal knows. Give a full name, spelled exactly, such as "'
+        . Site::timezone() . '", or leave timezone out to use the organisation\'s own. Nothing was created.',
+        422
+    );
+}
+$zoneName = $zoneGiven !== '' ? $zoneGiven : Site::timezone();
+$zone     = new \DateTimeZone($zoneName);
+
+// 📅 Validate datetimes. Each is read on the event's own clock unless it
+//    carries an offset of its own, and then put ONTO the event's clock.
+//    (This used strtotime() and date(), which read and wrote on PHP's clock:
+//    the organisation the address belongs to, not the one the key is for.)
+try {
+    $startAt = (new \DateTimeImmutable($startDateTime, $zone))->setTimezone($zone);
+} catch (\Throwable $e) {
     ApiResponse::error('startDateTime is not a valid timestamp', 400);
 }
 $endDateTime = isset($body['endDateTime']) === true && $body['endDateTime'] !== ''
     ? trim((string) $body['endDateTime'])
     : null;
-$endTs = null;
+$endAt = null;
 if ($endDateTime !== null) {
-    $endTs = strtotime($endDateTime);
-    if ($endTs === false || $endTs < $start) {
+    try {
+        $endAt = (new \DateTimeImmutable($endDateTime, $zone))->setTimezone($zone);
+    } catch (\Throwable $e) {
+        $endAt = null;
+    }
+    if ($endAt === null || $endAt->getTimestamp() < $startAt->getTimestamp()) {
         ApiResponse::error('endDateTime must be a valid timestamp and ≥ startDateTime', 400);
     }
 }
@@ -107,17 +145,17 @@ $slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $eventName), '-'));
 $slug = substr($slug !== '' ? $slug : 'event-' . bin2hex(random_bytes(4)), 0, 100);
 
 $siteId    = Site::id();
-$startSql  = date('Y-m-d H:i:s', $start);
-$endSql    = $endTs !== null ? date('Y-m-d H:i:s', $endTs) : null;
+$startSql  = $startAt->format('Y-m-d H:i:s');
+$endSql    = $endAt !== null ? $endAt->format('Y-m-d H:i:s') : null;
 $creatorId = ApiAuth::actorUserId();
 
 $db = App::db();
 $stmt = $db->prepare(
     'INSERT INTO tblEvents '
-    . '(siteID, eventName, eventSlug, description, startDateTime, endDateTime, '
+    . '(siteID, eventName, eventSlug, description, startDateTime, endDateTime, timezone, '
     . 'isAllDay, locationName, status, isPublic, isFeatured, categoryID, typeID, createdByID, '
     . 'locationAddress, locationWebURL, locationPhone, locationEmail, locationGeoLat, locationGeoLng, locationW3W) '
-    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
 );
 if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'API_EVENT_CREATE_PREP', $db->error, '');
@@ -125,9 +163,10 @@ if ($stmt === false) {
 }
 // 📍 #456 Chunk A: 14 -> 21 placeholders/vars (+locationAddress[s], +locationWebURL[s],
 // +locationPhone[s], +locationEmail[s], +locationGeoLat[d], +locationGeoLng[d], +locationW3W[s]).
+// 🕰️ #604: 21 -> 22 (+timezone[s], after endDateTime).
 $stmt->bind_param(
-    'isssssisssiiiissssdds',
-    $siteId, $eventName, $slug, $description, $startSql, $endSql,
+    'issssssisssiiiissssdds',
+    $siteId, $eventName, $slug, $description, $startSql, $endSql, $zoneName,
     $isAllDay, $locationName, $status, $isPublic, $isFeatured,
     $categoryId, $typeId, $creatorId,
     $locationAddress, $locationWebURL, $locationPhone, $locationEmail, $locationGeoLat, $locationGeoLng, $locationW3W

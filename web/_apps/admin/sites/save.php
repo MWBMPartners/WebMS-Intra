@@ -57,7 +57,11 @@ $logoPath     = trim($_POST['logoPath'] ?? '/assets/images/logo.svg');
 $faviconPath  = trim($_POST['faviconPath'] ?? '');
 $primaryColor = trim($_POST['primaryColor'] ?? '#5e6ad2');
 $copyrightOrg = trim($_POST['copyrightOrg'] ?? '');
-$timezone     = trim($_POST['timezone'] ?? 'UTC');
+// The zone box as posted; '' when it was left out. What it may hold is decided
+// under "Validate timezone" below.
+$timezone     = trim((string) ($_POST['timezone'] ?? ''));
+// Added to "saved" while the form does not take a zone: see "BEFORE MIGRATION 217 HAS RUN" below.
+$zoneNotTakenWords = ' Its time zone was NOT changed: this installation has not yet run its database upgrade. Run it at Admin, Upgrade, then choose the time zone here.';
 $isActive     = isset($_POST['isActive']) ? 1 : 0;
 
 // 🔍 Validate primaryColor as #RGB or #RRGGBB hex; fall back to indigo default
@@ -81,9 +85,43 @@ if (preg_match('/^[a-z0-9\-]+$/', $siteKey) !== 1) {
     exit();
 }
 
-// 🔍 Validate timezone
-if (in_array($timezone, timezone_identifiers_list(), true) === false) {
-    $timezone = 'UTC';
+// 🔍 Validate timezone (#604). The organisation's row is the ONE place its
+//    zone is kept, and Site::timezone() answers UTC for anything stored here
+//    that is not a zone name. So only a real name may be stored: one from
+//    the list the form offers, by the same test (Site::isZoneName()).
+//    WHAT WAS WRONG: anything else was quietly stored as "UTC". The form's
+//    box shows nothing selected for an organisation whose stored zone is not
+//    on the list, so saving any other change to such an organisation (its
+//    name, say) silently replaced its zone with UTC and nobody was told.
+//    Now it is refused, naming the box, and nothing is saved.
+//
+//    🚧 BEFORE MIGRATION 217 HAS RUN (new files in place, Upgrade not yet
+//    pressed) THIS FORM DOES NOT TAKE A ZONE AT ALL. Until then the portal
+//    still follows the old setting, and the migration writes what that
+//    setting says over every organisation's row. A zone saved here in that
+//    gap answered "updated successfully", changed nothing anybody could see,
+//    and was then replaced (found by the independent check, 13 October
+//    2026). So the row is left exactly as it is, a new organisation gets the
+//    column's own "none chosen", and the message below says to run the
+//    upgrade first. Everything else on the form is saved as usual.
+$zoneNotTaken = Site::timezoneFacts()['inRow'] === false;
+if ($zoneNotTaken === true) {
+    $timezone  = Site::ZONE_WHEN_NONE;
+    $zoneStmt  = $siteID > 0 ? $db->prepare('SELECT timezone FROM tblSites WHERE siteID = ? LIMIT 1') : false;
+    if ($zoneStmt !== false) {
+        $zoneStmt->bind_param('i', $siteID);
+        $zoneStmt->execute();
+        $timezone = (string) ($zoneStmt->get_result()->fetch_assoc()['timezone'] ?? Site::ZONE_WHEN_NONE);
+        $zoneStmt->close();
+    }
+} elseif (Site::isZoneName($timezone) === false) {
+    $_SESSION['flash_msg'] = $timezone === ''
+        ? 'Choose the organisation\'s time zone in the "Time zone" box. Nothing was saved.'
+        : 'The "Time zone" box holds "' . mb_substr($timezone, 0, 64) . '", which is not a time zone name the portal knows. '
+            . 'Choose one from the list. Nothing was saved.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('admin/sites'), true, 302);
+    exit();
 }
 
 // 🔒 #502 — the organisation's OWN ADDRESS, used when each organisation has
@@ -325,7 +363,7 @@ if ($siteID > 0) {
 
     if ($stmt->execute() === true) {
         Logger::activity('SiteUpdate', 'Updated site #' . $siteID . ' (' . $siteName . ')');
-        $_SESSION['flash_msg'] = 'Site "' . $siteName . '" updated successfully.';
+        $_SESSION['flash_msg'] = 'Site "' . $siteName . '" updated successfully.' . ($zoneNotTaken === true ? $zoneNotTakenWords : '');
         $_SESSION['flash_type'] = 'success';
     } else {
         $_SESSION['flash_msg'] = 'Failed to update site: ' . $stmt->error;
@@ -380,7 +418,7 @@ if ($siteID > 0) {
         $db->commit();
 
         Logger::activity('SiteCreate', 'Created site #' . $newSiteId . ' (' . $siteName . ')');
-        $_SESSION['flash_msg'] = 'Site "' . $siteName . '" created successfully.';
+        $_SESSION['flash_msg'] = 'Site "' . $siteName . '" created successfully.' . ($zoneNotTaken === true ? $zoneNotTakenWords : '');
         $_SESSION['flash_type'] = 'success';
     } catch (\Throwable $e) {
         $db->rollback();

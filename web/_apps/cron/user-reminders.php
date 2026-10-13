@@ -467,7 +467,7 @@ foreach ($siteIds as $siteId) {
                     $lastDuty = (string) max(array_column($group['slots'], 'slotDate'));
                     $useBy    = MailQueue::useBy(
                         date('Y-m-d', (int) strtotime($lastDuty . ' +1 day')),
-                        (string) (Site::current()['timezone'] ?? date_default_timezone_get())
+                        Site::timezone($siteId)
                     );
                     if (Mailer::send($group['email'], $subject, $body, [], ['expiresAt' => $useBy]) === true && Mailer::lastOutcome() === Mailer::OUTCOME_SENT) {
                         $mailed = 1;

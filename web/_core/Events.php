@@ -407,4 +407,250 @@ class Events
 
         return $rows;
     }
+
+    /**
+     * 🕰️ Events stored with a time zone PHP cannot open (#604), for an
+     * administrator to put right: how many there are, and the first few.
+     *
+     * WHY THERE ARE ANY. Until #604 the event form's zone box was free text
+     * and was stored exactly as typed, so "London" or "GMT+1" could be
+     * saved. Such an event's times cannot be placed on any clock, so every
+     * reader falls back to the organisation's own zone (Site::zoneFor()).
+     * That may not be what whoever typed it meant, and only a person can
+     * say, so these are FOUND AND LISTED, never changed here.
+     *
+     * An old name PHP still opens ("US/Eastern") is not listed: such an
+     * event is shown on the clock it names, as it always was.
+     *
+     * HOW. A database cannot say whether PHP knows a zone, so the different
+     * zone texts in use are read first (a handful, whatever the number of
+     * events), each is tried in PHP, and only then are the events holding a
+     * failed one fetched. Deleted events are left out, and so are events
+     * copied in from an outside calendar (`externalFeedID IS NULL` in every
+     * statement): the importer only ever stores a zone PHP has just opened,
+     * and nobody could put such an event right from the portal anyway.
+     *
+     * @param int|null $siteId One organisation, or null for every organisation.
+     * @param int      $limit  How many events to return at most; the count is of all of them.
+     *
+     * @return array{count:int, events:list<array{eventID:int, siteID:int, eventName:string, startDateTime:string, timezone:string}>}
+     */
+    public static function withUnknownZone(mysqli $db, ?int $siteId = null, int $limit = 25): array
+    {
+        $none = ['count' => 0, 'events' => []];
+
+        $stmt = $siteId === null
+            ? $db->prepare('SELECT DISTINCT timezone FROM tblEvents WHERE isDeleted = 0 AND externalFeedID IS NULL')
+            : $db->prepare('SELECT DISTINCT timezone FROM tblEvents WHERE isDeleted = 0 AND externalFeedID IS NULL AND siteID = ?');
+        if ($stmt === false) {
+            return $none;
+        }
+        if ($siteId !== null) {
+            $stmt->bind_param('i', $siteId);
+        }
+        $stmt->execute();
+        $unknown = [];
+        $result  = $stmt->get_result();
+        while ($row = $result->fetch_assoc()) {
+            $zone = (string) ($row['timezone'] ?? '');
+            if (Site::phpCanOpenZone($zone) === false) {
+                $unknown[] = $zone;
+            }
+        }
+        $stmt->close();
+        if ($unknown === []) {
+            return $none;
+        }
+
+        $marks  = implode(', ', array_fill(0, count($unknown), '?'));
+        $types  = str_repeat('s', count($unknown));
+        $values = $unknown;
+        $scope  = '';
+        if ($siteId !== null) {
+            $scope    = ' AND siteID = ?';
+            $types   .= 'i';
+            $values[] = $siteId;
+        }
+
+        $stmt = $db->prepare('SELECT COUNT(*) AS n FROM tblEvents WHERE isDeleted = 0 AND externalFeedID IS NULL AND timezone IN (' . $marks . ')' . $scope);
+        if ($stmt === false) {
+            return $none;
+        }
+        $stmt->bind_param($types, ...$values);
+        $stmt->execute();
+        $count = (int) ($stmt->get_result()->fetch_assoc()['n'] ?? 0);
+        $stmt->close();
+
+        $limit = max(1, $limit);
+        $stmt  = $db->prepare(
+            'SELECT eventID, siteID, eventName, startDateTime, timezone FROM tblEvents '
+            . 'WHERE isDeleted = 0 AND externalFeedID IS NULL AND timezone IN (' . $marks . ')' . $scope . ' ORDER BY startDateTime DESC, eventID DESC LIMIT ?'
+        );
+        if ($stmt === false) {
+            return ['count' => $count, 'events' => []];
+        }
+        $types   .= 'i';
+        $values[] = $limit;
+        $stmt->bind_param($types, ...$values);
+        $stmt->execute();
+        $events = [];
+        $result = $stmt->get_result();
+        while ($row = $result->fetch_assoc()) {
+            $events[] = [
+                'eventID'       => (int) $row['eventID'],
+                'siteID'        => (int) $row['siteID'],
+                'eventName'     => (string) $row['eventName'],
+                'startDateTime' => (string) $row['startDateTime'],
+                'timezone'      => (string) $row['timezone'],
+            ];
+        }
+        $stmt->close();
+
+        return ['count' => $count, 'events' => $events];
+    }
+
+    /**
+     * The zone the OLD event form filled its box with, for every
+     * organisation. It is looked for here, and never written by anything.
+     */
+    private const OLD_FORM_ZONE = 'Europe/London';
+
+    /**
+     * 🕰️ This organisation's events, made BEFORE its time-zone upgrade, that
+     * are still marked "Europe/London" although the organisation's own clock
+     * tells a different time (#604).
+     *
+     * WHY THERE ARE ANY. Before #604 the event form filled its zone box with
+     * "Europe/London" for every organisation, and the file import, the
+     * events API and members' suggestions stored it whatever the
+     * organisation. Nobody outside London's zone noticed, because the old
+     * reminder job ignored an event's zone. Now reminders, the calendar feed
+     * and the download go by the event's own zone, so such an event goes out
+     * on London's clock: in the independent check's run, a Los Angeles
+     * organisation's 19:00 event was reminded about at 09:53.
+     * The portal cannot tell these from events truly in London, so it does
+     * NOT guess: migration 217 leaves them alone, and this FINDS them for an
+     * administrator, who can put them right in one go
+     * (moveLondonMarkedToOrganisationZone()) or one by one.
+     *
+     * WHICH EVENTS: the portal's own (not copied in from an outside
+     * calendar, whose zone the importer chose), not deleted, stored zone
+     * "Europe/London" AS THE DATABASE COMPARES TEXT, made before the moment
+     * migration 217's mark was written, AND whose start is a different
+     * moment on London's clock than on the organisation's.
+     * "As the database compares text" is not letter for letter: the column's
+     * comparison takes no notice of capitals or of spaces after the name, so
+     * "europe/london" and "Europe/London " (typed by hand into the old
+     * free-text box) are found and changed too. That is meant: the portal
+     * reads both on London's clock, so they have the same fault as the rest.
+     * "GB", an emptied box and every other spelling are left alone. (This
+     * comment used to say "exactly", which was not exact: found by the
+     * second check, 13 October 2026.) That last test is why an organisation in
+     * Dublin or Lisbon is never bothered: their clocks agree with London's.
+     * Nothing is found for an organisation in London's own zone, or one whose
+     * stored zone is not a zone name (there is no clock to move them to).
+     *
+     * WHAT IT CANNOT DO: tell an event truly in London from one merely
+     * marked so; the notice says to leave such an event alone. And "before
+     * the upgrade" is judged on the database's own clock, which both moments
+     * were written by.
+     *
+     * @param int $limit How many COMING events to list at most; the counts are of all of them.
+     *
+     * @return array{count:int, coming:int, zone:string, ids:list<int>, events:list<array{eventID:int, eventName:string, startDateTime:string}>}
+     */
+    public static function markedLondonBeforeUpgrade(mysqli $db, int $siteId, int $limit = 25): array
+    {
+        $found = ['count' => 0, 'coming' => 0, 'zone' => '', 'ids' => [], 'events' => []];
+        $facts = Site::timezoneFacts($siteId);
+        if ($facts['inRow'] === false || $facts['known'] === false || $facts['zone'] === self::OLD_FORM_ZONE) {
+            return $found;
+        }
+        $stmt = $db->prepare(
+            'SELECT e.eventID, e.eventName, e.startDateTime FROM tblEvents e '
+            . 'WHERE e.siteID = ? AND e.isDeleted = 0 AND e.externalFeedID IS NULL AND e.timezone = ? '
+            . '  AND e.createdAt < (SELECT m.updatedAt FROM tblSettings m WHERE m.settingKey = ? AND m.siteID IS NULL LIMIT 1) '
+            . 'ORDER BY e.startDateTime ASC, e.eventID ASC'
+        );
+        if ($stmt === false) {
+            return $found;
+        }
+        $oldZone = self::OLD_FORM_ZONE;
+        $markKey = Site::ZONE_MARK_KEY;
+        $stmt->bind_param('iss', $siteId, $oldZone, $markKey);
+        $stmt->execute();
+        $london = new \DateTimeZone($oldZone);
+        $own    = new \DateTimeZone($facts['zone']);
+        // "Still to come" is judged as clock times are compared here: as text, on the organisation's own clock.
+        $nowClock = (new \DateTimeImmutable('now', $own))->format('Y-m-d H:i:s');
+        $result   = $stmt->get_result();
+        while ($row = $result->fetch_assoc()) {
+            $start = (string) $row['startDateTime'];
+            try {
+                $same = (new \DateTimeImmutable($start, $london))->getTimestamp() === (new \DateTimeImmutable($start, $own))->getTimestamp();
+            } catch (\Throwable $e) {
+                continue; // a start that cannot be read is no clock time to compare
+            }
+            if ($same === true) {
+                continue;
+            }
+            $found['ids'][] = (int) $row['eventID'];
+            if ($start >= $nowClock) {
+                $found['coming']++;
+                if (count($found['events']) < max(1, $limit)) {
+                    $found['events'][] = ['eventID' => (int) $row['eventID'], 'eventName' => (string) $row['eventName'], 'startDateTime' => $start];
+                }
+            }
+        }
+        $stmt->close();
+        $found['count'] = count($found['ids']);
+        $found['zone']  = $facts['zone'];
+
+        return $found;
+    }
+
+    /**
+     * 🕰️ Set every event markedLondonBeforeUpgrade() finds, past and coming,
+     * to the organisation's own zone. The Manage Events button. All of them
+     * or none: one transaction.
+     *
+     * IT CHANGES THE ZONE ONLY, never a stored clock time: 19:00 marked
+     * "Europe/London" becomes 19:00 on the organisation's clock, which is
+     * what whoever typed 19:00 there meant. The caller has already checked
+     * who is asking and the form token, and writes the activity log's line.
+     *
+     * @return int How many events were changed.
+     *
+     * @throws \Throwable When the database refuses; nothing is changed then.
+     */
+    public static function moveLondonMarkedToOrganisationZone(mysqli $db, int $siteId): int
+    {
+        $found = self::markedLondonBeforeUpgrade($db, $siteId, 1);
+        if ($found['ids'] === []) {
+            return 0;
+        }
+        $oldZone = self::OLD_FORM_ZONE;
+        $changed = 0;
+        $db->begin_transaction();
+        try {
+            foreach (array_chunk($found['ids'], 500) as $ids) {
+                // The zone it is leaving is in the statement too, so an event edited meanwhile is left as its editor set it.
+                // (Compared as the finder compares it: without regard to capitals or a space after the name.)
+                $stmt = $db->prepare(
+                    'UPDATE tblEvents SET timezone = ? WHERE siteID = ? AND externalFeedID IS NULL AND timezone = ? '
+                    . 'AND eventID IN (' . implode(', ', array_fill(0, count($ids), '?')) . ')'
+                );
+                $stmt->bind_param('sis' . str_repeat('i', count($ids)), $found['zone'], $siteId, $oldZone, ...$ids);
+                $stmt->execute();
+                $changed += $stmt->affected_rows;
+                $stmt->close();
+            }
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollback();
+            throw $e;
+        }
+
+        return $changed;
+    }
 }

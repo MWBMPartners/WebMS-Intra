@@ -321,6 +321,14 @@ final class FeedImporter
         $siteId   = (int) $feed['siteID'];
         $deadline = $started + self::PER_FEED_SECONDS;
 
+        // 🕰️ Refuse, before anything is fetched or changed, a calendar whose
+        //    times the portal cannot place on a clock (#604): see
+        //    zoneInDoubtProblem(). recordFailure() touches no event.
+        $zoneProblem = self::zoneInDoubtProblem($feed);
+        if ($zoneProblem !== '') {
+            return self::recordFailure($db, $feed, $runStart, $zoneProblem, null, 0, $trigger, $byUserId);
+        }
+
         // ---------------------------------------------------------------------
         // 2️⃣ Download it
         // ---------------------------------------------------------------------
@@ -1047,6 +1055,43 @@ final class FeedImporter
      *
      * @param array<string,mixed> $feed
      */
+    /**
+     * 🕰️ Why this calendar cannot be imported for want of a time zone, in
+     * words for an administrator; '' when it can.
+     *
+     * A calendar with no zone of its own is read in its organisation's. When
+     * the organisation's stored zone is text that is not a zone name by the
+     * portal's test, yet PHP could still open it ("US/Eastern",
+     * "europe/london", a stray space: Site::timezoneFacts(), `inDoubt`),
+     * nobody can say which clock was meant. Until #604 this importer read
+     * such text as the zone it names, while every page of the same
+     * organisation was on UTC. Carrying on in either would be a guess: one
+     * moves every event of the calendar by hours at the next import, the
+     * other was never what the pages showed. So it refuses, and says what
+     * to do. Nothing already imported is changed by a refusal.
+     *
+     * NOT refused: text PHP cannot open at all (both the pages and this
+     * importer always answered UTC for that, so there is no doubt), and a
+     * calendar that names its own zone (the organisation's is not used).
+     *
+     * @param array<string,mixed> $feed
+     */
+    public static function zoneInDoubtProblem(array $feed): string
+    {
+        if (trim((string) ($feed['timezone'] ?? '')) !== '') {
+            return '';
+        }
+        $facts = Site::timezoneFacts((int) $feed['siteID']);
+        if ($facts['inDoubt'] === false) {
+            return '';
+        }
+
+        return 'Not imported, and nothing was changed: this calendar gives no time zone of its own, and the '
+            . 'organisation\'s time zone is stored as "' . self::forColumn($facts['stored'], 64) . '", which is not a time zone '
+            . 'name the portal knows. Choose the organisation\'s time zone at Admin, Organisations (Edit, Time zone), '
+            . 'or give this calendar its own time zone, then refresh it.';
+    }
+
     private static function zoneFor(\mysqli $db, array $feed): DateTimeZone
     {
         unset($db);
@@ -1153,20 +1198,24 @@ final class FeedImporter
         $updated     = 0;
         $skipped     = 0;
 
+        // 🕰️ The zone goes into `timezone`, the ONE column an event's zone is
+        //    kept in (#604). Both statements used to write the same value
+        //    into a second column as well, `eventTimezone`, which nothing
+        //    else in the portal wrote; migration 217 removed it.
         $update = $db->prepare(
             'UPDATE tblEvents SET eventName = ?, description = ?, startDateTime = ?, endDateTime = ?, '
-            . 'timezone = ?, eventTimezone = ?, isAllDay = ?, locationName = ?, externalUrl = ?, '
+            . 'timezone = ?, isAllDay = ?, locationName = ?, externalUrl = ?, '
             . 'status = ?, externalPrivate = ?, externalDuplicate = ?, externalLastSeenAt = ?, '
             . 'externalUid = ?, seriesID = ?, isPublic = 0, isDeleted = 0, deletedAt = NULL '
             . 'WHERE eventID = ?'
         );
         $insert = $db->prepare(
             'INSERT INTO tblEvents (siteID, externalFeedID, externalUidHash, externalRecurrenceKey, '
-            . 'eventSlug, eventName, description, startDateTime, endDateTime, timezone, eventTimezone, '
+            . 'eventSlug, eventName, description, startDateTime, endDateTime, timezone, '
             . 'isAllDay, locationName, externalUrl, status, externalPrivate, externalDuplicate, '
             . 'externalLastSeenAt, externalUid, seriesID, isPublic, isDeleted, importLevel, '
             . 'importDetail, importApiOptOut, registrationEnabled) '
-            . "VALUES (?, ?, UNHEX(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'hidden', 'basic', 1, 0)"
+            . "VALUES (?, ?, UNHEX(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'hidden', 'basic', 1, 0)"
         );
         // 🔒 A brand-new row is written NARROW — hidden, title-only, and not
         //    for API keys (`importApiOptOut = 1`, #514 part P7) — and
@@ -1226,12 +1275,11 @@ final class FeedImporter
                 // belongs to `FeedResolver`; and `categoryID`, which the
                 // resolver also owns.
                 $update->bind_param(
-                    'ssssssisssiissii',
+                    'sssssisssiissii',
                     $name,
                     $description,
                     $start,
                     $end,
-                    $zoneName,
                     $zoneName,
                     $isAllDay,
                     $location,
@@ -1252,7 +1300,7 @@ final class FeedImporter
             } else {
                 $slug = self::eventSlug($feedId, $uidHex, $key);
                 $insert->bind_param(
-                    'iisssssssssisssiissi',
+                    'iissssssssisssiissi',
                     $siteId,
                     $feedId,
                     $uidHex,
@@ -1262,7 +1310,6 @@ final class FeedImporter
                     $description,
                     $start,
                     $end,
-                    $zoneName,
                     $zoneName,
                     $isAllDay,
                     $location,

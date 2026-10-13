@@ -532,7 +532,9 @@ foreach ($events as $ev) {
         'startsAt'    => (string) $ev['startDateTime'],
         'endsAt'      => (string) ($ev['endDateTime'] ?? ''),
         'allDay'      => $isAllDay,
-        'timezone'    => (string) ($ev['timezone'] ?? 'Europe/London'),
+        // The event's own zone; the organisation's as the stand-in (#604). The
+        // stand-in used to be "Europe/London", typed in here.
+        'timezone'    => (string) ($ev['timezone'] ?? Site::timezone()),
         // 🔗 Link back to the event's own page. Site::url() adds the
         //    organisation's part of the address when the portal tells
         //    organisations apart by address ("path mode", for example

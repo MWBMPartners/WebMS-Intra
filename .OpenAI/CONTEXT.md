@@ -362,9 +362,8 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     job is running (only the job's own page records that it ran); while it is
     not, the portal sends as it did before the queue. Every queue moment is UTC
     from `UTC_TIMESTAMP()`; a time on a clock becomes one through
-    `MailQueue::useBy()`. **An event's time zone is `tblEvents.timezone`, the
-    column the event form writes; never read `tblEvents.eventTimezone` for it**
-    (only the feed importer writes that one). The certificate is always checked unless a global administrator has
+    `MailQueue::useBy()`. An event's time zone is `tblEvents.timezone` (the only zone
+    column an event has). The certificate is always checked unless a global administrator has
     deliberately decided otherwise: `MailRoutes::certificateCheck()` is the ONE
     place `mail.smtp.certCheck` is read (`on`, `off`, or `only:<fingerprint>`;
     anything else counts as `on`). A failure holds mail, and so does restoring a
@@ -439,12 +438,19 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     `Captcha::closedNotice()` itself. An address that is recorded or sent goes
     through `Logger::withoutJobToken()`.
 
-    **An event's time zone is `tblEvents.timezone`** (the column the event form
-    writes, and the event page, the calendar feed and the export read). Do NOT
-    read `tblEvents.eventTimezone` for an event's zone: only the feed importer
-    writes it, so for every event made in the portal it holds its default,
-    `Europe/London`, whatever zone the event is in (#604). An organisation's
-    zone is `tblSites.timezone`. Never type a zone into the code.
+    **Time zones (#604).** `Site::timezone()` is the ONE place that answers
+    an organisation's zone, and `Site::isZoneName()` the one test of what a
+    zone name is. Do not read `tblSites.timezone` anywhere else, and do not
+    bring back a `site.timezone` setting. `Site::zoneFor()` gives the zone
+    to read a stored event time in. A stored event time is a reading of the
+    event's own clock: never pass it through `strtotime()`/`date()`. Every
+    `INSERT INTO tblEvents` names `timezone` (the column has no default).
+    Migration 217's mark (`site.timezoneKeptAt`) is written by the install
+    script only into a database that never held the old arrangement, so the
+    installer's "carry on" choice keeps every organisation's zone. A column
+    removed by a migration goes on `DbBackup::REMOVED_COLUMNS`. Giving
+    retention deliberately does NOT follow the organisation's zone. Test:
+    `tools/time-zones-selftest.php`.
 
     **The installer asks for an ownership code (#499, #500).**
     `web/_install/owner_code.php` is the ONE place a code is written, counted

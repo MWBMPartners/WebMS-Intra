@@ -275,13 +275,14 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 }
 
 // Classes, one by one, never through `bootstrap.php` — the exact list and
-// order the settled plan names (section 11.1): App (FeedResolver's
-// organisationZone() reads a setting through it), ErrorMonitor, Logger,
+// order the settled plan names (section 11.1): App, and since #604 Site
+// (FeedResolver's organisationZone() asks Site for the organisation's zone,
+// and Site reaches the database through App), ErrorMonitor, Logger,
 // SafeFetch, ApiKey, EventVisibility, FeedResolver, FeedImporter (not
 // called directly by FeedAdmin, but part P8-2 will change it, and loading
 // it here now costs nothing), ExternalAudience, FeedAdmin.
 $coreDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR;
-foreach (['App.php', 'ErrorMonitor.php', 'Logger.php', 'SafeFetch.php', 'ApiKey.php', 'EventVisibility.php',
+foreach (['App.php', 'Site.php', 'ErrorMonitor.php', 'Logger.php', 'SafeFetch.php', 'ApiKey.php', 'EventVisibility.php',
     'FeedResolver.php', 'FeedImporter.php', 'ExternalAudience.php', 'FeedAdmin.php'] as $classFile) {
     require_once $coreDir . $classFile;
 }
@@ -291,11 +292,33 @@ use Portal\Core\ExternalAudience;
 use Portal\Core\FeedAdmin;
 use Portal\Core\FeedResolver;
 use Portal\Core\SafeFetch;
+use Portal\Core\Site;
 
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 // `$mysqli` is a global on purpose: `App::db()` falls back to it, which is
-// how `FeedResolver::organisationZone()` reaches the settings table.
+// how `Site` reaches the organisation's row for `FeedResolver::organisationZone()`.
 $mysqli = pa_connect();
+
+// 🕰️ Tell `Site` where this database keeps an organisation's time zone, as the
+//    portal's own start-up does (#604). Start-up hands Site the settings it has
+//    just loaded, and Site looks in them for the mark migration 217 leaves:
+//    with it, an organisation's zone is read from its own row
+//    (`tblSites.timezone`); without it, from the old `site.timezone` setting.
+//    This file never loads start-up, so it does that one step itself, from the
+//    mark as the DATABASE holds it. It is run again after a check changes an
+//    organisation's zone, as a new request would be: Site remembers a zone it
+//    has already looked up for the length of one request.
+function pa_startSite(): void
+{
+    global $mysqli;
+    $mark = $mysqli->query("SELECT settingValue FROM tblSettings WHERE settingKey = 'site.timezoneKeptAt' AND siteID IS NULL")->fetch_row();
+    Site::init($mysqli, ['site' => ['timezoneKeptAt' => (string) ($mark[0] ?? '')]], 1);
+}
+pa_startSite();
+if (Site::timezoneFacts()['inRow'] === false) {
+    echo "REFUSED — this database does not hold migration 217's mark, so an organisation's zone would be read from the old setting. Build it from web/_sql/full_schema.sql. Nothing was checked.\n";
+    exit(1);
+}
 
 // 🔒 A second PROCESS that holds one calendar's row lock, the way a refresh
 //    in progress does, then does one thing and commits (fix round 2,
@@ -715,8 +738,8 @@ function pa_removeWorld(): void
     pa_q('DELETE FROM tblActivityLogs WHERE userID BETWEEN 910000 AND 910099 OR siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     pa_q('DELETE FROM tblUserSites WHERE siteID IN (?, ?) OR userID BETWEEN 910000 AND 910099', 'ii', [ORG_A, ORG_B]);
     pa_q('DELETE FROM tblUsers WHERE userID BETWEEN 910000 AND 910099');
-    // Every setting of the two made-up organisations (site.timezone, and
-    // part W's calendar.enabled) — no real organisation has these numbers.
+    // Every setting of the two made-up organisations (part W's
+    // calendar.enabled) — no real organisation has these numbers.
     pa_q('DELETE FROM tblSettings WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     pa_q('DELETE FROM tblSites WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
 }
@@ -732,14 +755,13 @@ function pa_removeWorld(): void
 function pa_resetWorld(): void
 {
     pa_removeWorld();
+    // Each organisation's zone goes in its OWN ROW, the one place it is kept
+    // since #604. (It used to be given here as a `site.timezone` setting.)
     pa_q(
-        "INSERT INTO tblSites (siteID, siteKey, siteName, isActive) VALUES (?, 'selftest-p8-a', 'Selftest P8 A', 1), (?, 'selftest-p8-b', 'Selftest P8 B BONLY', 1)",
-        'ii', [ORG_A, ORG_B]
-    );
-    pa_q(
-        "INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, 'site.timezone', ?, 'UTC', 0), (?, 'site.timezone', ?, 'UTC', 0)",
+        "INSERT INTO tblSites (siteID, siteKey, siteName, timezone, isActive) VALUES (?, 'selftest-p8-a', 'Selftest P8 A', ?, 1), (?, 'selftest-p8-b', 'Selftest P8 B BONLY', ?, 1)",
         'isis', [ORG_A, SITE_ZONE, ORG_B, SITE_ZONE_B]
     );
+    pa_startSite();
     pa_q(
         'INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES '
         . "(?, 'Selftest M', 'm.p8@selftest.invalid', 1, 0, 0), "
@@ -1006,10 +1028,10 @@ function pa_event(int $feedId, string $uid, string $title, array $opts = []): in
     $stmt = $mysqli->prepare(
         'INSERT INTO tblEvents (eventID, siteID, externalFeedID, externalUid, externalUidHash, externalRecurrenceKey, '
         . 'eventSlug, eventName, description, locationName, externalUrl, startDateTime, endDateTime, timezone, '
-        . 'eventTimezone, status, isPublic, isDeleted, importLevel, importDetail, importApiOptOut, externalPrivate, '
+        . 'status, isPublic, isDeleted, importLevel, importDetail, importApiOptOut, externalPrivate, '
         . 'externalDuplicate, categoryID, externalLastSeenAt) VALUES '
         . '(?, ?, ?, ?, ' . ((($opts['noIdentity'] ?? false) === true) ? 'NULL' : 'UNHEX(SHA2(?, 256))')
-        . ", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', 0, ?, 'hidden', 'basic', 1, ?, ?, ?, UTC_TIMESTAMP())"
+        . ", ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', 0, ?, 'hidden', 'basic', 1, ?, ?, ?, UTC_TIMESTAMP())"
     );
     // 🪤 mysqli_stmt::bind_param() binds by reference, so every value is
     //    worked out into its OWN variable first, then the list spread.
@@ -1024,17 +1046,17 @@ function pa_event(int $feedId, string $uid, string $title, array $opts = []): in
     if (($opts['noIdentity'] ?? false) === true) {
         $params = [
             $id, $org, $feedId, $uid, $recurrenceKey, $eventSlug, $title,
-            $description, $location, $url, $start, $end, $zone, $zone,
+            $description, $location, $url, $start, $end, $zone,
             $isDeleted, $isPrivate, $isDuplicate, $categoryId,
         ];
-        $stmt->bind_param('iiisssssssssssiiii', ...$params);
+        $stmt->bind_param('iiissssssssssiiii', ...$params);
     } else {
         $params = [
             $id, $org, $feedId, $uid, $uid, $recurrenceKey, $eventSlug, $title,
-            $description, $location, $url, $start, $end, $zone, $zone,
+            $description, $location, $url, $start, $end, $zone,
             $isDeleted, $isPrivate, $isDuplicate, $categoryId,
         ];
-        $stmt->bind_param('iiissssssssssssiiii', ...$params);
+        $stmt->bind_param('iiisssssssssssiiii', ...$params);
     }
     $stmt->execute();
     $stmt->close();
@@ -2745,15 +2767,19 @@ function pw_run(): void
         }
         pa_ok('W3 nothing was changed by any of those', pa_fp() === $fp3);
         // Signed out: the Router sends a visitor to the sign-in page before
-        // the page runs. PLAN DEVIATION, the code wins: the plan expected
-        // "/selftest-p8-a/login…", but Auth::requireLogin() always redirects
-        // to "/login?redirect=<the address asked for>" (Auth.php); the
-        // organisation's own address comes back through `redirect`.
-        $w3out = pw_req($out, 'GET', $list);
+        // the page runs. It is the ORGANISATION'S OWN sign-in page
+        // ("/selftest-p8-a/login…"), with the address asked for coming back
+        // through `redirect`. (This check used to expect the bare "/login",
+        // which is what Auth::requireLogin() sent until commit 0c302af, #536
+        // part 1, made the sign-in redirect keep the organisation's part of
+        // the address, as the house rule asks. The code was right and this
+        // expectation was out of date: it failed from that commit on.)
+        $signIn = PW_A . '/login?redirect=';
+        $w3out  = pw_req($out, 'GET', $list);
         pa_ok(
-            'W3 signed out: a redirect to the sign-in page, carrying the organisation\'s own address back',
-            $w3out['status'] === 302 && str_starts_with($w3out['location'], '/login?redirect=') === true
-            && urldecode(substr($w3out['location'], strlen('/login?redirect='))) === $list,
+            'W3 signed out: a redirect to the organisation\'s own sign-in page, carrying the address asked for back',
+            $w3out['status'] === 302 && str_starts_with($w3out['location'], $signIn) === true
+            && urldecode(substr($w3out['location'], strlen($signIn))) === $list,
             'HTTP ' . $w3out['status'] . ' ' . $w3out['location']
         );
 
@@ -3539,10 +3565,11 @@ function pw_run(): void
         $w26out = [];
         foreach ([$choiceUrl26, $ruleOld26] as $url) {
             $r        = pw_req($out, 'GET', $url);
-            $w26out[] = $r['status'] === 302 && str_starts_with($r['location'], '/login?redirect=') === true
-                && urldecode(substr($r['location'], strlen('/login?redirect='))) === $url;
+            // The organisation's own sign-in page: see W3 for why this is not the bare "/login" any more.
+            $w26out[] = $r['status'] === 302 && str_starts_with($r['location'], PW_A . '/login?redirect=') === true
+                && urldecode(substr($r['location'], strlen(PW_A . '/login?redirect='))) === $url;
         }
-        pa_ok('W26 signed out: both pages send the visitor to the sign-in page, carrying the organisation\'s own address back', $w26out === [true, true], pa_show($w26out));
+        pa_ok('W26 signed out: both pages send the visitor to the organisation\'s own sign-in page, carrying the address asked for back', $w26out === [true, true], pa_show($w26out));
 
         // ---------------------------------------------------------------------
         pa_heading('W27 — another organisation\'s event, calendar or rule looks exactly like one that does not exist');
@@ -5635,10 +5662,10 @@ function pw_run(): void
         $day59 = pa_todayLocal()->modify('+9 days')->format('Y-m-d');
         foreach ([['public', 'published', 1, 0], ['internal', 'published', 0, 0], ['draft', 'draft', 1, 0], ['deleted', 'published', 1, 1]] as [$kind59, $status59, $public59, $deleted59]) {
             pa_q(
-                'INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, eventTimezone, status, isPublic, isDeleted) '
-                . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                'iissssssssii',
-                [$w59[$kind59], ORG_A, 'w59-' . $kind59, 'W59 ' . $kind59 . ' w59mark' . $w59[$kind59], 'W59 description', $day59 . ' 10:00:00', $day59 . ' 11:00:00', SITE_ZONE, SITE_ZONE, $status59, $public59, $deleted59]
+                'INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) '
+                . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                'iisssssssii',
+                [$w59[$kind59], ORG_A, 'w59-' . $kind59, 'W59 ' . $kind59 . ' w59mark' . $w59[$kind59], 'W59 description', $day59 . ' 10:00:00', $day59 . ' 11:00:00', SITE_ZONE, $status59, $public59, $deleted59]
             );
             pa_q("INSERT INTO tblEventHubResources (eventID, section, resourceType, title, body) VALUES (?, 'W59', 'note', ?, 'W59 team note')", 'is', [$w59[$kind59], 'Hub note w59mark' . $w59[$kind59]]);
             pa_q("INSERT INTO tblEventHubVideos (eventID, provider, videoRef, title) VALUES (?, 'youtube', 'w59ref', ?)", 'is', [$w59[$kind59], 'Hub video w59mark' . $w59[$kind59]]);

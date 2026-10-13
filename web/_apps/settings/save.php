@@ -357,6 +357,26 @@ if ($settingId > 0) {
         exit();
     }
 
+    // 🔒 Nor is an organisation's time zone changed here (#604), by anybody.
+    //    It used to be this page's "site.timezone" setting, kept as well as
+    //    the zone on the organisation itself, and the two could differ.
+    //    Migration 217 brought them into line and the organisation's own row
+    //    is now the only place (Admin, Organisations), where the box offers
+    //    real zone names. Nothing reads "site.timezone" any more, and
+    //    changing that migration's mark would send every page back to UTC.
+    //    See Site::zoneLockedInGeneralEditor().
+    if (Site::zoneLockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '": an organisation\'s time zone is chosen at Admin, Organisations and nowhere else',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = Site::zoneLockedMessage();
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
     // 🔒 Nor are the mail server's name and the two certificate rows changed
     //    here (#592), by anybody, a global administrator included. They are
     //    changed on the e-mail page (Admin, Integrations, Email), which asks
@@ -713,6 +733,23 @@ if ($settingId > 0) {
             $_SESSION['user_id'] ?? null
         );
         $_SESSION['flash_msg']  = Site::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
+    // 🔒 Nor may the old time-zone setting, or migration 217's mark, be
+    //    ADDED here (#604). Nothing reads "site.timezone" once that migration
+    //    has run, so a row typed in would only mislead whoever found it: the
+    //    organisation's zone is chosen at Admin, Organisations. See
+    //    Site::zoneLockedInGeneralEditor().
+    if (Site::zoneLockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsInsertRefused',
+            'Refused: "' . $settingKey . '": an organisation\'s time zone is chosen at Admin, Organisations and nowhere else',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = Site::zoneLockedMessage();
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();

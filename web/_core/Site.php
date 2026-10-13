@@ -49,6 +49,11 @@
  *   Site::addressOf($site)                        — where another organisation's front
  *                                                   page is, in the way in use
  *   Site::modeProblems($mode, $db)                — why a way cannot be chosen now
+ *   Site::timezone($siteId)                       — the ONE answer to "what is this
+ *                                                   organisation's time zone?" (#604)
+ *   Site::timezoneFacts($siteId)                  — that answer, with what is stored and
+ *                                                   whether the stored text is a zone
+ *   Site::zoneFor($stored, $siteId)               — the zone to read a stored clock time in
  *   Site::reset()                                 — clear cached state
  *
  * @package   Portal\Core
@@ -209,6 +214,26 @@ class Site
     /** @var array<int, list<array<string,mixed>>> Per-request cache for organisationsFor(). */
     private static array $organisationsCache = [];
 
+    /**
+     * Has migration 217 put every organisation's zone into its own row?
+     * Read at init() from the mark that migration writes (ZONE_MARK_KEY).
+     * False until then, and timezone() answers from the old setting.
+     */
+    private static bool $zoneInRow = false;
+
+    /**
+     * The old `site.timezone` setting exactly as start-up was handed it, for
+     * the organisation the settings were loaded for ($settingsSiteId). Null
+     * when there was none. Used only while $zoneInRow is false.
+     */
+    private static ?string $oldZoneSetting = null;
+
+    /** @var int The organisation the settings given to init() were loaded for. */
+    private static int $settingsSiteId = 1;
+
+    /** @var array<int, string> Per-request cache: another organisation's stored zone text. */
+    private static array $zoneTextCache = [];
+
     /* ====================================================================== */
     /* Initialisation                                                         */
     /* ====================================================================== */
@@ -226,6 +251,15 @@ class Site
     public static function init(\mysqli $db, array $settings, int $preDetectedId): void
     {
         self::$resolved = true;
+
+        // 🕰️ Where this installation keeps an organisation's time zone (#604):
+        //    see timezone(). Taken from the settings start-up has just
+        //    loaded, so it costs no question to the database.
+        $oldZone               = $settings['site']['timezone'] ?? null;
+        self::$zoneInRow       = (($settings['site']['timezoneKeptAt'] ?? '') === self::ZONE_MARK_VALUE);
+        self::$oldZoneSetting  = is_string($oldZone) === true ? $oldZone : null;
+        self::$settingsSiteId  = $preDetectedId;
+        self::$zoneTextCache   = [];
 
         // 🔍 Is multi-organisation on, and which way? Use what preDetect()
         //    read from the portal-wide rows, so the organisation is worked
@@ -337,13 +371,305 @@ class Site
             return $site['copyrightOrg'];
         }
         if ($key === 'timezone') {
-            return $site['timezone'];
+            // The one answer (#604), never the row's raw text: see timezone().
+            return self::timezone();
         }
         if ($key === 'key') {
             return $site['siteKey'];
         }
 
         return null;
+    }
+
+    /* ====================================================================== */
+    /* 🕰️ The organisation's time zone (#604)                                 */
+    /* ====================================================================== */
+
+    /**
+     * The mark migration 217 writes, as an installation-wide setting, once
+     * every organisation's row holds the zone its pages were showing. While
+     * it is absent the rows have NOT been brought into line and are not read.
+     */
+    public const ZONE_MARK_KEY   = 'site.timezoneKeptAt';
+    public const ZONE_MARK_VALUE = 'organisation';
+
+    /** The setting that used to decide PHP's zone. Read only while the mark is absent. */
+    public const OLD_ZONE_KEY = 'site.timezone';
+
+    /**
+     * The answer when no zone has been chosen, or the stored text is not a
+     * zone name. Not a guess at where the customer is: it is what start-up
+     * has always used until told otherwise (bootstrap.php sets PHP to UTC
+     * before anything is loaded).
+     */
+    public const ZONE_WHEN_NONE = 'UTC';
+
+    /**
+     * What the general settings editor says when it refuses either setting
+     * above. TWO STATES, AND EACH HAS ITS OWN WORDS. It used to be one
+     * sentence ("is not a setting any more… chosen at Admin, Organisations…
+     * and nowhere else"), which is untrue between new files arriving and
+     * Upgrade being pressed: until migration 217 has run the old setting is
+     * still what every page follows, and Admin, Organisations does not take a
+     * zone yet (found by the independent check, 13 October 2026).
+     */
+    public static function zoneLockedMessage(): string
+    {
+        if (self::$zoneInRow === false) {
+            return 'Time zones cannot be changed just now. This installation has new files and has not yet run their '
+                . 'database upgrade: run it at Admin, Upgrade. After that an organisation\'s time zone is chosen at '
+                . 'Admin, Organisations. Nothing was changed.';
+        }
+
+        return 'An organisation\'s time zone is not a setting any more. It is chosen at Admin, '
+            . 'Organisations (the organisation\'s Edit button, "Time zone"), and nowhere else. Nothing was changed.';
+    }
+
+    /**
+     * 🕰️ THE ONE ANSWER to "what is this organisation's time zone?" (#604).
+     *
+     * Always a zone name PHP's main list knows, so it can be handed straight
+     * to `new DateTimeZone()` or `date_default_timezone_set()`. Start-up asks
+     * it to set PHP's zone, and so do the mail queue, the health page, the
+     * admin dashboard, the e-mail page, the reminder jobs, giving retention
+     * and the calendar importer. Do not read `tblSites.timezone` or the old
+     * setting anywhere else.
+     *
+     * WHAT WAS WRONG. The zone was kept in two places that could differ: the
+     * organisation's row (`tblSites.timezone`, set at Admin, Organisations)
+     * and the `site.timezone` setting. Start-up read only the setting, so
+     * most pages followed it; the mail lines on the dashboard and the health
+     * page, the rota reminder and giving retention read the row; the e-mail
+     * page read the row unless it was UTC; and the calendar importer read
+     * the setting with a looser test of what a zone is. Run on 13 October
+     * 2026: in 9 of 13 combinations of the two values one installation gave
+     * two different answers.
+     *
+     * WHERE THE ANSWER COMES FROM
+     *   - Once migration 217 has run (its mark is in the settings): the
+     *     organisation's own row, and nothing else. That migration first
+     *     wrote into each row what start-up was answering, so no ordinary
+     *     page moved. A `site.timezone` setting put back afterwards is NOT
+     *     read.
+     *   - Before it has run (new files have arrived and Upgrade has not been
+     *     pressed yet): exactly what start-up answered before, from the old
+     *     setting. The rows are not in line yet, so reading them would move
+     *     every page of an installation whose two places differed.
+     *
+     * WHAT COUNTS AS A ZONE: start-up's own test and no other, an exact name
+     * from PHP's main list (isZoneName()). Stored text that fails it answers
+     * UTC, as it always did for pages. REJECTED: accepting anything PHP can
+     * open ("US/Eastern", "europe/london", " Europe/London"). The importer
+     * used to, so it and the pages disagreed; taking its test would have
+     * moved every page of such an installation by hours on the day of the
+     * upgrade. See timezoneFacts() for what happens to those instead.
+     *
+     * WHAT THIS CANNOT DO: fail. If the database cannot be asked, the answer
+     * is UTC and the reason goes to the server's error log. Nor can it tell
+     * an organisation that chose UTC from one that never chose.
+     *
+     * @param int|null $siteId The organisation; null for the current one.
+     */
+    public static function timezone(?int $siteId = null): string
+    {
+        return self::timezoneFacts($siteId)['zone'];
+    }
+
+    /**
+     * The answer of timezone() together with what it was worked out from.
+     *
+     *   zone     the answer (see timezone()).
+     *   stored   the text it came from, exactly as stored; '' when none.
+     *   known    true when that text is a zone name by start-up's test.
+     *   inDoubt  true when it is NOT, yet PHP can still open it as a zone
+     *            once the spaces round it are removed: an old name
+     *            ("US/Eastern"), other capitals, a stray space. The pages of
+     *            such an organisation have always shown UTC while the
+     *            calendar importer read the same text as the zone it names.
+     *            Nobody can know which was meant, so the importer refuses a
+     *            calendar with no zone of its own there until an
+     *            administrator chooses (FeedImporter), and the organisation
+     *            is listed on the health page and on Admin, Organisations.
+     *            False for text PHP cannot open at all ("Auckland"): both
+     *            readers answered UTC for that, so there is no doubt.
+     *   inRow    true once migration 217 has run and the row is the source.
+     *
+     * @return array{zone:string, stored:string, known:bool, inDoubt:bool, inRow:bool}
+     */
+    public static function timezoneFacts(?int $siteId = null): array
+    {
+        $siteId = $siteId ?? self::$currentSiteID;
+        $stored = '';
+        try {
+            $stored = self::$zoneInRow === true ? self::zoneTextOfRow($siteId) : self::zoneTextOfOldSetting($siteId);
+        } catch (\Throwable $e) {
+            // Start-up asks this on every request, before any error handler
+            // exists. UTC is what PHP is already set to at that point.
+            error_log('[WebMS-Intra] The time zone of organisation ' . $siteId . ' could not be read; UTC is used: ' . $e->getMessage());
+        }
+        $known = self::isZoneName($stored);
+
+        return [
+            'zone'    => $known === true ? $stored : self::ZONE_WHEN_NONE,
+            'stored'  => $stored,
+            'known'   => $known,
+            'inDoubt' => $known === false && self::phpCanOpenZone($stored) === true,
+            'inRow'   => self::$zoneInRow,
+        ];
+    }
+
+    /**
+     * Is this text a zone name? START-UP'S OWN TEST, kept word for word in
+     * what it accepts: an exact name from PHP's main list, capitals and all,
+     * with no space round it. The organisation form, the event form and the
+     * events API use it too, so nothing new can be stored that fails it.
+     */
+    public static function isZoneName(string $text): bool
+    {
+        static $names = null;
+        if ($names === null) {
+            $names = array_flip(timezone_identifiers_list());
+        }
+
+        return isset($names[$text]);
+    }
+
+    /**
+     * The zone names a form offers: PHP's main list, the same one
+     * isZoneName() tests against.
+     *
+     * @return list<string>
+     */
+    public static function zoneNames(): array
+    {
+        return timezone_identifiers_list();
+    }
+
+    /**
+     * The zone to read a STORED clock time in (an event's start, say): the
+     * zone stored beside it when PHP can open it, and the organisation's
+     * own when it cannot.
+     *
+     * It is looser than isZoneName() on purpose. An event saved years ago as
+     * "US/Eastern" has always been shown on that clock, and must go on being.
+     * Only text PHP cannot open at all falls back, and then to the
+     * organisation's zone: this used to be "Europe/London", typed into four
+     * different files, which was wrong for every customer anywhere else.
+     * MailQueue::useBy() applies the same two steps.
+     *
+     * @param string   $stored The zone text stored with the clock time.
+     * @param int|null $siteId The organisation it belongs to; null for the current one.
+     */
+    public static function zoneFor(string $stored, ?int $siteId = null): \DateTimeZone
+    {
+        if (self::phpCanOpenZone($stored) === true) {
+            return new \DateTimeZone(trim($stored));
+        }
+
+        return new \DateTimeZone(self::timezone($siteId));
+    }
+
+    /** Can PHP open this text as a zone, once the spaces round it are removed? */
+    public static function phpCanOpenZone(string $text): bool
+    {
+        $name = trim($text);
+        if ($name === '') {
+            return false;
+        }
+        try {
+            new \DateTimeZone($name);
+        } catch (\Throwable $e) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Every organisation whose stored zone is not a zone name, for the
+     * health page and Admin, Organisations. Empty until migration 217 has
+     * run: before that the rows are not the source, so they prove nothing.
+     *
+     * @return list<array{siteID:int, siteName:string, stored:string, inDoubt:bool}>
+     */
+    public static function organisationsWithUnknownZone(\mysqli $db): array
+    {
+        if (self::$zoneInRow === false) {
+            return [];
+        }
+        $found  = [];
+        $result = $db->query('SELECT siteID, siteName, timezone FROM tblSites ORDER BY siteName ASC');
+        if ($result === false) {
+            return [];
+        }
+        while ($row = $result->fetch_assoc()) {
+            $stored = (string) ($row['timezone'] ?? '');
+            if (self::isZoneName($stored) === false) {
+                $found[] = [
+                    'siteID'   => (int) $row['siteID'],
+                    'siteName' => (string) $row['siteName'],
+                    'stored'   => $stored,
+                    'inDoubt'  => self::phpCanOpenZone($stored),
+                ];
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * 🔒 Is this setting kept out of the GENERAL settings editor (/settings)?
+     *
+     * Yes for the old zone setting and for migration 217's mark. Nothing
+     * reads the first once the mark is there, so a row typed in would only
+     * mislead whoever found it; and removing the mark would send every
+     * organisation back to the old setting, which no longer exists, so every
+     * page would fall to UTC. The editor asks in the same three places as
+     * lockedInGeneralEditor(): change, add and delete.
+     *
+     * WHAT IT CANNOT DO: stop either row being changed straight in the
+     * database. The health page says so when the mark is missing.
+     */
+    public static function zoneLockedInGeneralEditor(string $key): bool
+    {
+        return strcasecmp($key, self::OLD_ZONE_KEY) === 0 || strcasecmp($key, self::ZONE_MARK_KEY) === 0;
+    }
+
+    /** The organisation's row, as stored: '' when there is no such organisation or the column is empty. */
+    private static function zoneTextOfRow(int $siteId): string
+    {
+        if ($siteId === self::$currentSiteID && self::$currentSite !== null) {
+            return (string) (self::$currentSite['timezone'] ?? '');
+        }
+        if (isset(self::$zoneTextCache[$siteId]) === true) {
+            return self::$zoneTextCache[$siteId];
+        }
+        $stmt = App::db()->prepare('SELECT timezone FROM tblSites WHERE siteID = ? LIMIT 1');
+        if ($stmt === false) {
+            return '';
+        }
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return self::$zoneTextCache[$siteId] = (string) ($row['timezone'] ?? '');
+    }
+
+    /**
+     * What start-up read before migration 217: the organisation's own
+     * `site.timezone` setting when it has one (an empty one counts, and
+     * means UTC), else the installation's. For the organisation the settings
+     * were loaded for it is the very value start-up was handed; for another
+     * one, App::settingForSite() applies the same order.
+     */
+    private static function zoneTextOfOldSetting(int $siteId): string
+    {
+        if ($siteId === self::$settingsSiteId) {
+            return (string) (self::$oldZoneSetting ?? '');
+        }
+
+        return (string) (App::settingForSite(self::OLD_ZONE_KEY, $siteId) ?? '');
     }
 
     /**
@@ -1709,5 +2035,9 @@ class Site
         self::$sessionState = self::SESSION_NOT_USED;
         self::$resolvedUserId = 0;
         self::$organisationsCache = [];
+        self::$zoneInRow = false;
+        self::$oldZoneSetting = null;
+        self::$settingsSiteId = 1;
+        self::$zoneTextCache = [];
     }
 }

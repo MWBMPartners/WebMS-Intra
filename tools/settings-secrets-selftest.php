@@ -2352,8 +2352,8 @@ store('visitors.public_capture_enabled', '1', 0);
 store('chat.enabled', 'true', 0);
 $eventDay = date('Y-m-d', strtotime('+9 days')); // worked out from today, never a fixed date
 q(
-    'INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, eventTimezone, status, isPublic, isDeleted) '
-    . "VALUES (?, 1, 's597-selftest-chat', 'S597 selftest chat event', 'Made by a test. Please ignore.', ?, ?, 'UTC', 'UTC', 'published', 1, 0)",
+    'INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) '
+    . "VALUES (?, 1, 's597-selftest-chat', 'S597 selftest chat event', 'Made by a test. Please ignore.', ?, ?, 'UTC', 'published', 1, 0)",
     'iss',
     [CHAT_EVENT, $eventDay . ' 10:00:00', $eventDay . ' 11:00:00']
 );

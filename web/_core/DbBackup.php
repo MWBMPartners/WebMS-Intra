@@ -138,6 +138,38 @@ class DbBackup
     public const FORMAT = 2;
 
     /**
+     * 🧹 Columns a migration has REMOVED from the database, which a snapshot
+     * taken before that migration still carries: table, then the columns.
+     * Their saved values are NOT written back, and that is all that is done
+     * with them.
+     *
+     * WHY A LIST, AND NOT "skip any column the database does not have". A
+     * column missing from the database usually means the snapshot belongs to
+     * a different release, and writing the row without it would lose data in
+     * silence. So an unknown column still stops the restore, and only a
+     * removal somebody has thought about, and written down here with why its
+     * values may go, is let through.
+     *
+     *   tblEvents.eventTimezone (#604, migration 217): a second copy of an
+     *   event's time zone that only the calendar importer wrote, always with
+     *   the same value as `timezone`, so it never held anything `timezone`
+     *   lacks. Without this entry every snapshot taken before that migration
+     *   would be refused by a database that has run it (tried on 13 October
+     *   2026: "Unknown column"). (Its value used to be moved into `timezone`
+     *   where that was empty. For an event saved with its zone box emptied
+     *   the old column held only its default, "Europe/London", so that was a
+     *   guess; migration 217 no longer makes it either.)
+     *
+     * While the database still HAS the column (new files, migration not yet
+     * run), nothing here applies and the value is written back as before.
+     *
+     * @var array<string, list<string>>
+     */
+    private const REMOVED_COLUMNS = [
+        'tblEvents' => ['eventTimezone'],
+    ];
+
+    /**
      * Column types whose values travel as TEXT, and column types whose values
      * travel as BYTES (base64). Each type here was put through a snapshot and a
      * restore on a real database and came back identical; the self-test
@@ -405,6 +437,30 @@ class DbBackup
         }
         $answer->free();
         return $facts;
+    }
+
+    /**
+     * One saved row without the columns of REMOVED_COLUMNS that the database
+     * no longer has. Their values are dropped: see the list for why each may
+     * be.
+     *
+     * Both ways of putting rows back call this for every row, before they
+     * decide which columns to write, so the two cannot differ.
+     *
+     * @param array<string, string|null>          $row
+     * @param array<string, array<string, mixed>> $tableFacts The table's columns as the database has them now.
+     *
+     * @return array<string, string|null>
+     */
+    private static function withoutRemovedColumns(string $table, array $row, array $tableFacts): array
+    {
+        foreach (self::REMOVED_COLUMNS[$table] ?? [] as $gone) {
+            if (isset($tableFacts[$gone]) === false) {
+                unset($row[$gone]);
+            }
+        }
+
+        return $row;
     }
 
     /** 'text', 'bytes', or null for a type this class has not been taught. */
@@ -2467,6 +2523,8 @@ class DbBackup
 
         try {
             foreach ($this->rows($dir, $table, $format) as $row) {
+                // 🧹 A column a migration has since removed: see REMOVED_COLUMNS.
+                $row = self::withoutRemovedColumns($table, $row, $tableFacts);
                 if ($columns === null) {
                     // An old snapshot may still carry a column the database
                     // works out for itself; an INSERT naming one is refused.
@@ -3276,6 +3334,8 @@ class DbBackup
             $statement         = null;
             try {
                 foreach ($rows as $row) {
+                    // 🧹 As in loadTable(): see REMOVED_COLUMNS.
+                    $row = self::withoutRemovedColumns($table, $row, $tableFacts);
                     if ($statement === null) {
                         foreach (array_keys($row) as $column) {
                             if (($tableFacts[$column]['generated'] ?? false) === false) {

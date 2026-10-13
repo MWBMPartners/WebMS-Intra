@@ -21,6 +21,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
+use Portal\Core\Events;
 use Portal\Core\Geocoder;
 use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
@@ -51,13 +52,48 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 $action = $_POST['action'] ?? '';
 
 // -----------------------------------------------------------------------------
+// 🕰️ The one button on Manage Events (#604): set this organisation's events
+//    made before the time-zone upgrade, and still marked "Europe/London", to
+//    the organisation's own zone. See Events::markedLondonBeforeUpgrade() for
+//    which events and why. It is handled here, before any event form field
+//    is read, because it posts none. Who may press it: whoever may manage
+//    events here (the check at the top of this file), with a form token
+//    (just above). The zone changes; no stored time does.
+// -----------------------------------------------------------------------------
+if ($action === 'zones-to-organisation') {
+    try {
+        $movedZone = Site::timezone();
+        $moved     = Events::moveLondonMarkedToOrganisationZone($mysqli, Site::id());
+        Logger::activity(
+            'EventZonesSetToOrganisation',
+            'Set the time zone of ' . $moved . ' event(s) made before the time-zone upgrade from "Europe/London" to the organisation\'s own, '
+                . $movedZone . '. Their stored times were not changed.',
+            isset($_SESSION['user_id']) === true ? (int) $_SESSION['user_id'] : null
+        );
+        $_SESSION['flash_msg']  = $moved === 0
+            ? 'No event needed changing.'
+            : $moved . ($moved === 1 ? ' event is' : ' events are') . ' now on this organisation\'s time zone (' . $movedZone . '). No stored time was changed.';
+        $_SESSION['flash_type'] = 'success';
+    } catch (\Throwable $e) {
+        error_log('Manage Events could not set the old events\' time zone: ' . $e->getMessage());
+        $_SESSION['flash_msg']  = 'The events\' time zone could not be changed, so nothing was changed. The reason is in the server\'s error log.';
+        $_SESSION['flash_type'] = 'danger';
+    }
+    header('Location: ' . Site::url('calendar/manage'));
+    exit();
+}
+
+// -----------------------------------------------------------------------------
 // 📋 Collect form data
 // -----------------------------------------------------------------------------
 $eventName     = trim($_POST['eventName'] ?? '');
 $description   = trim($_POST['description'] ?? '');
 $startDateTime = trim($_POST['startDateTime'] ?? '');
 $endDateTime   = trim($_POST['endDateTime'] ?? '');
-$timezone      = trim($_POST['timezone'] ?? 'Europe/London');
+// The zone box as posted; '' when it was left out. What it may hold is decided
+// under "THE EVENT'S TIME ZONE" below. (An absent box used to become
+// "Europe/London", typed in here.)
+$timezone      = trim((string) ($_POST['timezone'] ?? ''));
 $isAllDay      = isset($_POST['isAllDay']) === true ? 1 : 0;
 $categoryID    = ((int) ($_POST['categoryID'] ?? 0)) ?: null;
 $typeID        = ((int) ($_POST['typeID'] ?? 0)) ?: null;
@@ -193,6 +229,53 @@ if (
     $_SESSION['flash_msg']  = 'The event cannot end before it starts. Please check the dates.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: /calendar/manage');
+    exit();
+}
+
+// 🕰️ THE EVENT'S TIME ZONE (#604). The start and end above are times on a
+//    clock, and `tblEvents.timezone` says which clock. The box used to be free
+//    text, stored exactly as typed, so "London", "GMT+1" or a slip of the
+//    finger was saved, and every reader then had to guess (most guessed
+//    London). Now only a real zone name is stored:
+//      - a name from PHP's main list (Site::isZoneName(), the list the form
+//        offers) is taken;
+//      - no zone at all means the ORGANISATION's own for a new event, and
+//        "leave it as it is" for an existing one;
+//      - an existing event keeps a zone it already has that is not on the
+//        list but that PHP can still open (an old name such as
+//        "US/Eastern"): it has always been shown on that clock;
+//      - anything else is refused, naming the box, and nothing is saved.
+//    It is never replaced by a guess. This sits before the uploads below, so
+//    a refusal leaves nothing behind.
+$storedZone = null;
+if ($action === 'update') {
+    // The portal's own events only (`externalFeedID IS NULL`): an event copied in
+    // from an outside calendar cannot be edited here at all (the UPDATE below
+    // refuses one too), so its zone is none of this form's business.
+    $zoneStmt = $mysqli->prepare('SELECT timezone FROM tblEvents WHERE eventID = ? AND siteID = ? AND externalFeedID IS NULL LIMIT 1');
+    if ($zoneStmt !== false) {
+        $zoneEventId = (int) ($_POST['eventID'] ?? 0);
+        $zoneSiteId  = Site::id();
+        $zoneStmt->bind_param('ii', $zoneEventId, $zoneSiteId);
+        $zoneStmt->execute();
+        $zoneRow = $zoneStmt->get_result()->fetch_assoc();
+        $zoneStmt->close();
+        $storedZone = $zoneRow !== null ? (string) $zoneRow['timezone'] : null;
+    }
+}
+$keepsStoredZone = $storedZone !== null && Site::phpCanOpenZone($storedZone) === true
+    && ($timezone === '' || $timezone === $storedZone);
+if ($keepsStoredZone === true) {
+    $timezone = $storedZone;
+} elseif ($timezone === '' && $action === 'create') {
+    $timezone = Site::timezone();
+} elseif (Site::isZoneName($timezone) === false) {
+    $_SESSION['flash_msg']  = $timezone === ''
+        ? 'Choose a time zone for the event in the "Time zone" box. Nothing was saved.'
+        : 'The "Time zone" box holds "' . mb_substr($timezone, 0, 64) . '", which is not a time zone name the portal knows. '
+            . 'Choose one from the list. Nothing was saved.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('calendar/manage'));
     exit();
 }
 

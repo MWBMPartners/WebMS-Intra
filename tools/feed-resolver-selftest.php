@@ -124,11 +124,12 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // The classes, one by one, never through `bootstrap.php` (which reads the real
 // `web/_auth_keys/` and would connect to whatever database the developer's own
-// portal points at). `App` is here because `FeedResolver::organisationZone()`
-// reads a setting through it; `Logger` and `ErrorMonitor` because the importer
-// class, loaded for its `zoneFor()`, names them.
+// portal points at). `App` and `Site` are here because
+// `FeedResolver::organisationZone()` asks Site for the organisation's zone, and
+// Site reaches the database through App; `Logger` and `ErrorMonitor` because
+// the importer class, loaded for its `zoneFor()`, names them.
 $coreDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR;
-foreach (['App.php', 'ErrorMonitor.php', 'Logger.php', 'EventVisibility.php', 'FeedResolver.php', 'FeedImporter.php',
+foreach (['App.php', 'Site.php', 'ErrorMonitor.php', 'Logger.php', 'EventVisibility.php', 'FeedResolver.php', 'FeedImporter.php',
     'GdprEraser.php'] as $classFile) {
     require_once $coreDir . $classFile;
 }
@@ -137,6 +138,7 @@ use Portal\Core\EventVisibility;
 use Portal\Core\FeedImporter;
 use Portal\Core\FeedResolver;
 use Portal\Core\GdprEraser;
+use Portal\Core\Site;
 
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 // `$mysqli` is a global on purpose: `App::db()` falls back to it, which is how
@@ -150,6 +152,27 @@ $mysqli = new mysqli(
     getenv('SELFTEST_DB_PORT') !== false ? (int) getenv('SELFTEST_DB_PORT') : 3306
 );
 $mysqli->set_charset('utf8mb4');
+
+// 🕰️ Tell `Site` where this database keeps an organisation's time zone, as the
+//    portal's own start-up does (#604). Start-up hands Site the settings it has
+//    just loaded, and Site looks in them for the mark migration 217 leaves:
+//    with it, an organisation's zone is read from its own row
+//    (`tblSites.timezone`); without it, from the old `site.timezone` setting.
+//    This file never loads start-up, so it does that one step itself, from the
+//    mark as the DATABASE holds it. It is run again after a check changes an
+//    organisation's zone, as a new request would be: Site remembers a zone it
+//    has already looked up for the length of one request.
+function fr_startSite(): void
+{
+    global $mysqli;
+    $mark = $mysqli->query("SELECT settingValue FROM tblSettings WHERE settingKey = 'site.timezoneKeptAt' AND siteID IS NULL")->fetch_row();
+    Site::init($mysqli, ['site' => ['timezoneKeptAt' => (string) ($mark[0] ?? '')]], 1);
+}
+fr_startSite();
+if (Site::timezoneFacts()['inRow'] === false) {
+    echo "REFUSED — this database does not hold migration 217's mark, so an organisation's zone would be read from the old setting. Build it from web/_sql/full_schema.sql. Nothing was checked.\n";
+    exit(1);
+}
 
 // =============================================================================
 // 🗺️ The made-up world (every number 900000 or more)
@@ -425,7 +448,7 @@ function fr_removeWorld(): void
     fr_q('DELETE FROM tblSmallGroups WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     fr_q('DELETE FROM tblUserSites WHERE siteID IN (?, ?) OR userID BETWEEN 900000 AND 900099', 'ii', [ORG_A, ORG_B]);
     fr_q('DELETE FROM tblUsers WHERE userID BETWEEN 900000 AND 900099');
-    fr_q("DELETE FROM tblSettings WHERE settingKey = 'site.timezone' AND siteID IN (?, ?)", 'ii', [ORG_A, ORG_B]);
+    fr_q("DELETE FROM tblSettings WHERE settingKey = 'site.timezone' AND siteID IN (?, ?)", 'ii', [ORG_A, ORG_B]); // only E28 writes one, to show it is not read
     fr_q('DELETE FROM tblSites WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
 }
 
@@ -433,9 +456,11 @@ function fr_removeWorld(): void
 function fr_resetWorld(): void
 {
     fr_removeWorld();
-    fr_q("INSERT INTO tblSites (siteID, siteKey, siteName, isActive) VALUES (?, 'selftest-p7-a', 'Selftest A', 1), (?, 'selftest-p7-b', 'Selftest B', 1)", 'ii', [ORG_A, ORG_B]);
-    fr_q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, 'site.timezone', ?, 'UTC', 0), (?, 'site.timezone', ?, 'UTC', 0)",
+    // Each organisation's zone goes in its OWN ROW, the one place it is kept since
+    // #604. (It used to be given here as a `site.timezone` setting for each.)
+    fr_q("INSERT INTO tblSites (siteID, siteKey, siteName, timezone, isActive) VALUES (?, 'selftest-p7-a', 'Selftest A', ?, 1), (?, 'selftest-p7-b', 'Selftest B', ?, 1)",
         'isis', [ORG_A, SITE_ZONE, ORG_B, SITE_ZONE_B]);
+    fr_startSite();
     fr_q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES '
         . "(?, 'Selftest U1', 'u1.p7@selftest.invalid', 1, 0, 0), (?, 'Selftest U6', 'u6.p7@selftest.invalid', 1, 0, 0), "
         . "(?, 'Selftest U8', 'u8.p7@selftest.invalid', 1, 0, 1), (?, 'Selftest UX', 'ux.p7@selftest.invalid', 1, 0, 0)",
@@ -508,13 +533,13 @@ function fr_event(int $feedId, string $uid, string $title, array $opts = []): in
     $end   = $day . ' 21:00:00';
     fr_q(
         'INSERT INTO tblEvents (eventID, siteID, externalFeedID, externalUid, externalUidHash, externalRecurrenceKey, eventSlug, eventName, '
-        . 'description, locationName, externalUrl, startDateTime, endDateTime, timezone, eventTimezone, status, isPublic, isDeleted, '
+        . 'description, locationName, externalUrl, startDateTime, endDateTime, timezone, status, isPublic, isDeleted, '
         . "importLevel, importDetail, importApiOptOut, externalPrivate, externalDuplicate, externalLastSeenAt) VALUES "
-        . "(?, ?, ?, ?, UNHEX(SHA2(?, 256)), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', 0, ?, 'hidden', 'basic', 1, ?, ?, UTC_TIMESTAMP())",
-        'iiissssssssssssiii',
+        . "(?, ?, ?, ?, UNHEX(SHA2(?, 256)), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', 0, ?, 'hidden', 'basic', 1, ?, ?, UTC_TIMESTAMP())",
+        'iiisssssssssssiii',
         [$id, $org, $feedId, $uid, $uid, (string) ($opts['key'] ?? ''), 'imp-selftest-p7-' . $id, $title,
             $opts['description'] ?? 'A description', $opts['location'] ?? 'A hall', $opts['url'] ?? 'https://example.invalid/e',
-            $start, $end, $zone, $zone, (int) ($opts['deleted'] ?? 0), (int) ($opts['private'] ?? 0), (int) ($opts['duplicate'] ?? 0)]
+            $start, $end, $zone, (int) ($opts['deleted'] ?? 0), (int) ($opts['private'] ?? 0), (int) ($opts['duplicate'] ?? 0)]
     );
     foreach ((array) ($opts['tags'] ?? []) as $tag) {
         fr_q('INSERT INTO tblExternalEventTags (eventID, tag) VALUES (?, ?)', 'is', [$id, (string) $tag]);
@@ -2148,11 +2173,16 @@ try {
     fr_ok('KEEP-WORKING: no zone of its own → the organisation\'s (Europe/London)', $name(['timezone' => '', 'siteID' => ORG_A]) === SITE_ZONE,
         $name(['timezone' => '', 'siteID' => ORG_A]));
     fr_ok('organisationZone() for A → Europe/London', FeedResolver::organisationZone(ORG_A)->getName() === SITE_ZONE);
-    fr_q("DELETE FROM tblSettings WHERE settingKey = 'site.timezone' AND siteID = ?", 'i', [ORG_A]);
-    $fallback = (string) (fr_one("SELECT settingValue FROM tblSettings WHERE settingKey = 'site.timezone' AND siteID IS NULL")['settingValue'] ?? '');
-    $expectFallback = ($fallback === '') ? 'UTC' : $fallback;
-    fr_ok('with A\'s own setting removed → the portal-wide setting, or UTC when there is none (here: ' . $expectFallback . ')',
-        $name(['timezone' => '', 'siteID' => ORG_A]) === $expectFallback && FeedResolver::organisationZone(ORG_A)->getName() === $expectFallback,
+    // The organisation's zone is its own ROW and nothing else (#604). This check
+    // used to remove A's `site.timezone` setting and expect the portal-wide one;
+    // there is no such setting to fall back to any more. What must hold now:
+    // stored text that is not a zone name answers UTC, and a `site.timezone`
+    // setting put back for A by hand is NOT read.
+    fr_q("UPDATE tblSites SET timezone = 'Mars/Olympus' WHERE siteID = ?", 'i', [ORG_A]);
+    fr_q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, 'site.timezone', 'America/New_York', 'UTC', 0)", 'i', [ORG_A]);
+    fr_startSite();
+    fr_ok('with A\'s stored zone changed to text that is not a zone name → UTC, and the old "site.timezone" setting, put back for A by hand, is not read',
+        $name(['timezone' => '', 'siteID' => ORG_A]) === 'UTC' && FeedResolver::organisationZone(ORG_A)->getName() === 'UTC',
         $name(['timezone' => '', 'siteID' => ORG_A]));
 
     // -------------------------------------------------------------------------

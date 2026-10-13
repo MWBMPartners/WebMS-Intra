@@ -116,6 +116,21 @@ $setupLabel = Site::isMultisiteEnabled() === true
     </a>
 </div>
 
+<?php
+// 🚧 Before migration 217 has run, this page does not take a time zone
+//    (#604): see admin/sites/save.php. It says so, with the way to the
+//    upgrade, and each card shows the zone the portal is really using.
+$zonesWait = Site::timezoneFacts()['inRow'] === false;
+?>
+<?php if ($zonesWait === true): ?>
+<div class="alert alert-warning" role="alert" id="zones-wait-for-upgrade">
+    <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
+    <strong>Time zones cannot be chosen here yet.</strong>
+    This installation has new files and has not yet run their database upgrade. Until it has, each organisation's time zone is still read from the old setting, and a zone chosen here would not be used.
+    <a class="alert-link" href="<?php echo htmlspecialchars(Site::url('admin/upgrade'), ENT_QUOTES, 'UTF-8'); ?>">Run the upgrade first</a>, then choose time zones here.
+</div>
+<?php endif; ?>
+
 <?php if (count($sites) === 0): ?>
 <div class="alert alert-info">
     <i class="fa-solid fa-info-circle me-1"></i> No sites configured yet.
@@ -130,7 +145,15 @@ $setupLabel = Site::isMultisiteEnabled() === true
     $sHost      = htmlspecialchars($site['hostPattern'] ?? '—', ENT_QUOTES, 'UTF-8');
     $sColor     = htmlspecialchars($site['primaryColor'] ?? '#0d6efd', ENT_QUOTES, 'UTF-8');
     $sCopyright = htmlspecialchars($site['copyrightOrg'] ?? '—', ENT_QUOTES, 'UTF-8');
-    $sTz        = htmlspecialchars($site['timezone'] ?? 'UTC', ENT_QUOTES, 'UTF-8');
+    // 🕰️ The zone exactly as stored, and whether it is a zone name (#604).
+    //    Site::timezone() answers UTC for stored text that is not one, so the
+    //    card says so instead of showing text the portal is not using.
+    //    Before migration 217 has run the row is not what the portal uses, so
+    //    the card shows the zone it IS using and no warning about the row.
+    $sTzStored  = $zonesWait === true ? Site::timezone($sId) : (string) ($site['timezone'] ?? '');
+    $sTzKnown   = Site::isZoneName($sTzStored);
+    $sTzInDoubt = $sTzKnown === false && Site::phpCanOpenZone($sTzStored) === true;
+    $sTz        = htmlspecialchars($sTzStored, ENT_QUOTES, 'UTF-8');
     $sActive    = ((string) $site['isActive'] === '1');
     $sUsers     = $userCounts[$sId] ?? 0;
     ?>
@@ -167,8 +190,21 @@ $setupLabel = Site::isMultisiteEnabled() === true
                     <dt class="col-5">Own address</dt>
                     <dd class="col-7"><?php echo $sHost; ?></dd>
 
-                    <dt class="col-5">Timezone</dt>
-                    <dd class="col-7"><?php echo $sTz; ?></dd>
+                    <dt class="col-5">Time zone</dt>
+                    <dd class="col-7">
+                        <?php if ($sTzKnown === true): ?>
+                            <?php echo $sTz; ?>
+                        <?php else: ?>
+                            <span class="text-danger" data-zone-problem="<?php echo $sTzInDoubt === true ? 'in-doubt' : 'unknown'; ?>">
+                                <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
+                                <?php echo $sTzStored === '' ? 'None chosen' : 'Stored as "' . $sTz . '", which is not a time zone name the portal knows'; ?>.
+                                UTC is used. Choose the right one with Edit.
+                                <?php if ($sTzInDoubt === true): ?>
+                                    Until then, outside calendars with no time zone of their own are not imported for this organisation.
+                                <?php endif; ?>
+                            </span>
+                        <?php endif; ?>
+                    </dd>
 
                     <dt class="col-5">Copyright</dt>
                     <dd class="col-7"><?php echo $sCopyright; ?></dd>
@@ -251,10 +287,20 @@ $setupLabel = Site::isMultisiteEnabled() === true
                     <input type="text" class="form-control" id="formCopyrightOrg" name="copyrightOrg" maxlength="255">
                 </div>
                 <div class="mb-3">
-                    <label for="formTimezone" class="form-label">Timezone</label>
-                    <select class="form-select" id="formTimezone" name="timezone">
+                    <label for="formTimezone" class="form-label">Time zone</label>
+                    <?php
+                    // 🕰️ A list of real zone names (Site::zoneNames(), the list
+                    //    Site::isZoneName() tests against). The first, empty
+                    //    choice is what shows for an organisation whose stored
+                    //    zone is not on the list: the box is required, so a
+                    //    zone has to be CHOSEN before anything can be saved,
+                    //    and the save handler refuses an empty one too. It
+                    //    used to show nothing selected and save "UTC".
+                    ?>
+                    <select class="form-select" id="formTimezone" name="timezone" <?php echo $zonesWait === true ? 'disabled' : 'required'; ?>>
+                        <option value="">Choose a time zone…</option>
                         <?php
-                        $tzList = timezone_identifiers_list();
+                        $tzList = Site::zoneNames();
                         foreach ($tzList as $tz) {
                             echo '<option value="' . htmlspecialchars($tz, ENT_QUOTES, 'UTF-8') . '">'
                                 . htmlspecialchars($tz, ENT_QUOTES, 'UTF-8') . '</option>';
@@ -302,7 +348,12 @@ function editSite(site) {
     document.getElementById('formFaviconPath').value = site.faviconPath || '';
     document.getElementById('formPrimaryColor').value = site.primaryColor || '#5e6ad2';
     document.getElementById('formCopyrightOrg').value = site.copyrightOrg || '';
-    document.getElementById('formTimezone').value = site.timezone || 'UTC';
+    // The stored zone; when it is not on the list this leaves the box on
+    // "Choose a time zone…", which has to be answered before saving (#604).
+    document.getElementById('formTimezone').value = site.timezone || '';
+    if (document.getElementById('formTimezone').selectedIndex < 0) {
+        document.getElementById('formTimezone').value = '';
+    }
     document.getElementById('formIsActive').checked = (String(site.isActive) === '1');
     document.getElementById('modalTitleText').textContent = 'Edit Site';
 }

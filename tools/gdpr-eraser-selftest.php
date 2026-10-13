@@ -142,10 +142,23 @@
  *
  * WHAT IT CANNOT PROVE
  * --------------------
- * - Section 12 uses today's real date (it has to: the job asks what today is
- *   where the organisation is). The arithmetic on other dates, on the
- *   clock-change nights and at a financial-year boundary is in
- *   tools/giving-retention-selftest.php, which needs no database.
+ * - Sections 11 to 16 use today's real date (they have to: the clearing reads
+ *   the clock itself). The date it asks for is the one at the LAST place on
+ *   Earth to reach a date, twelve hours behind UTC, whatever zone the
+ *   organisation is in (#604), and that is the date this test works out for
+ *   itself, in ge_now(). (It used to work out London's and New York's own
+ *   dates, which is what the clearing asked before #604: from London's
+ *   midnight until 12:00 UTC the test then failed on correct code, and at
+ *   no hour could it see early clearing come back. Found by the second
+ *   check, 13 October 2026.) So ONE run sees one hour of the day. To see
+ *   another, the two clock readers (ge_now() here, and the one in
+ *   GivingRetention::today()) are moved together in a COPY of the checkout;
+ *   that was done at three other hours when this was changed. Section 16
+ *   is the part that does not depend on the hour: Kiritimati's own date is
+ *   ahead of the last place's at every hour of every day.
+ *   The arithmetic on other dates, on the clock-change nights and at a
+ *   financial-year boundary is in tools/giving-retention-selftest.php,
+ *   which needs no database.
  * - The rows the LOOP makes are not linked to each other the way real data is
  *   (each has its own made-up numbers). Section 3b adds a small hand-built
  *   set that is linked, and section 4b checks the database's own cascade
@@ -213,10 +226,10 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 223;
+const EXPECTED_CHECKS = 225;
 
 // The headings that must all be reached for a pass.
-const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15'];
+const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16'];
 
 // 🗺️ The made-up people and requests. Every number is 920000 or higher, far
 //    above anything the fresh-install script seeds.
@@ -265,6 +278,9 @@ const REQ_N       = 940086;
 const REQ_O       = 940087;
 const SITE_G1     = 3;      // "tax gifts only" (the default rule), in Europe/London
 const SITE_G2     = 4;      // "every gift", in Pacific/Auckland
+const SITE_K      = 12;     // section 16: "tax gifts only", in Pacific/Kiritimati, fourteen hours AHEAD of UTC
+const P_Q         = 920088; // section 16: an erased donor there, kept until today at the last place on Earth
+const REQ_Q       = 940088;
 // Section 14 (the fix round after the independent check of 12 October 2026).
 const P_R     = 920091; // a run stops, she gives again, and the request is run again
 const P_ST    = 920092; // a run stops, the request is cancelled, and he stays a member
@@ -476,6 +492,16 @@ $mysqli = new mysqli(
     getenv('SELFTEST_DB_PORT') !== false ? (int) getenv('SELFTEST_DB_PORT') : 3306
 );
 $mysqli->set_charset('utf8mb4');
+
+// 🕰️ Where this installation keeps an organisation's time zone (#604). The
+//    portal's start-up tells Site that from its settings; this test loads its
+//    classes one by one, so it says so itself, as the three calendar-feed
+//    tests do. Without it Site::timezone() answers UTC for every organisation
+//    made below, and the checks on the "Confirmed on" date (sections 13 and
+//    16), which is the organisation's OWN date, could not tell one
+//    organisation's date from another's.
+$zoneMark = $mysqli->query("SELECT settingValue FROM tblSettings WHERE settingKey = 'site.timezoneKeptAt' AND siteID IS NULL")->fetch_row();
+\Portal\Core\Site::init($mysqli, ['site' => ['timezoneKeptAt' => (string) ($zoneMark[0] ?? '')]], 1);
 
 $GLOBALS['ge_pass']     = 0;
 $GLOBALS['ge_fail']     = 0;
@@ -3003,8 +3029,32 @@ ge_section('11', 'Giving records: what keeps the donor\'s name, with rows that r
 //          and a statement she downloaded for herself.
 //   Ian    gives at 3, with no declaration and no statement.
 //   Kay    is never erased. Everything of hers must come through untouched.
-$zoneG1 = new DateTimeZone('Europe/London');
-$todayG1 = (new DateTimeImmutable('now', $zoneG1))->format('Y-m-d');
+/**
+ * The moment this test takes as "now", in UTC.
+ *
+ * ONE reader, on purpose. Everything below that needs "today" starts from
+ * it, so a COPY of this file can be run "at another hour of the day" by
+ * moving this one line together with the clock reader in
+ * GivingRetention::today(). Never moved in the checkout itself.
+ */
+function ge_now(): DateTimeImmutable
+{
+    return new DateTimeImmutable('now', new DateTimeZone('UTC'));
+}
+
+// "TODAY", for everything about WHEN a kept name is cleared, is the date
+// TWELVE HOURS BEHIND UTC: the last place on Earth to reach a date, which is
+// what the clearing asks since #604, for every organisation alike. Worked out
+// here by taking twelve hours off UTC, not by the code under test and not
+// through a zone's rules. (See "WHAT IT CANNOT PROVE" at the top for what
+// this used to be.) The run takes under a minute and this is read once, so a
+// run begun in the last minutes before 12:00 UTC is refused, not left to fail
+// half way through when that date moves on.
+if (ge_now()->format('H:i') >= '11:55' && ge_now()->format('H:i') < '12:00') {
+    echo "REFUSED — it is within five minutes of 12:00 UTC, when the date at the last place on Earth changes; the giving sections read it once. Run this again after 12:00 UTC. Nothing more was checked.\n";
+    exit(1);
+}
+$todayG1 = ge_now()->modify('-12 hours')->format('Y-m-d');
 $ago = static fn (int $days): string => (new DateTimeImmutable($todayG1, new DateTimeZone('UTC')))->modify('-' . $days . ' days')->format('Y-m-d');
 
 /** Write one organisation's own value of a setting, as the settings page does. */
@@ -3508,7 +3558,9 @@ $mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
 ge_request(REQ_N, P_N, 'nia.stuck@selftest.invalid', 'Nia Stuck', 'processing');
 $resultN = ge_execute(REQ_N, P_N);
 $keptN   = (int) (ge_one('SELECT keptDonorID FROM tblGivingKeptDonors WHERE siteID = 5 AND donorID = ?', 'i', [P_N])['keptDonorID'] ?? 0);
-$todayG3 = (new DateTimeImmutable('now', new DateTimeZone('America/New_York')))->format('Y-m-d'); // worked out here, not by the code under test
+// The date the clearing goes by is the same for every organisation: the last place on Earth's. (This worked out
+// New York's OWN date, which is what the clearing asked before #604.)
+$todayG3 = $todayG1;
 ge_q('UPDATE tblGivingKeptDonors SET lastGiftDate = ? WHERE keptDonorID = ?', 'si', [$boundary($todayG3, 2)['due'], $keptN]);
 ge_q('UPDATE tblGivingEntry SET donatedAt = ? WHERE entryID = ?', 'si', [$boundary($todayG3, 2)['due'], ge_id($nGift)]);
 ge_setting(5, GivingRetention::KEY_YEARS, '1');
@@ -3638,13 +3690,20 @@ ge_ok('a country whose figure is under the minimum is followed at the MINIMUM ('
     $raisedCode !== '' && $raisedRule['suggestion']['kind'] === 'raised' && $raisedRule['years'] === $real['minimumSuggestedYears']
     && $raisedRule['suggestion']['yearsFound'] < $real['minimumSuggestedYears'], json_encode($raisedRule['suggestion']['kind']));
 
-$ticked  = GivingRetention::saveForSite($mysqli, SITE_G2, $form(['countryCode' => $foundCode, 'scope' => 'all', 'confirmed' => '1', 'yearEndMonth' => '4', 'yearEndDay' => '5']));
-$ruleG2  = GivingRetention::ruleForSite(SITE_G2);
-$todayG2 = (new DateTimeImmutable('now', new DateTimeZone('Pacific/Auckland')))->format('Y-m-d'); // worked out here, not by the code under test
-ge_ok('TICKING "CONFIRMED" fixes the figure: the suggestion on screen is written into the organisation\'s own setting, with today\'s date where the organisation is',
+// "Confirmed on" is a date PEOPLE READ, so it is the organisation's OWN date (Auckland's), not the last place on
+// Earth's, which is a day or two behind it at every hour. Auckland's date is read here just before the save and
+// just after it, and the stored date must be one of those two (they differ only when its midnight falls between).
+// (This allowed "today or the day before" in Auckland, and the day before is exactly what the last place's date
+// is there: so when #604 stored THAT date by mistake, this check passed. Found by the second check.)
+$ownDateG2 = static fn (): string => ge_now()->setTimezone(new DateTimeZone('Pacific/Auckland'))->format('Y-m-d'); // worked out here, not by the code under test
+$todayG2   = $ownDateG2();
+$ticked    = GivingRetention::saveForSite($mysqli, SITE_G2, $form(['countryCode' => $foundCode, 'scope' => 'all', 'confirmed' => '1', 'yearEndMonth' => '4', 'yearEndDay' => '5']));
+$ruleG2    = GivingRetention::ruleForSite(SITE_G2);
+ge_ok('TICKING "CONFIRMED" fixes the figure: the suggestion on screen is written into the organisation\'s own setting, with today\'s date where the organisation IS (Auckland\'s own, which is ahead of the date the clearing goes by)',
     $ticked['saved'] === true && $ruleG2['confirmed'] === true && $ruleG2['yearsOwn'] === $wanted['years'] && $ruleG2['years'] === $wanted['years']
-    && in_array($ruleG2['confirmedOn'], [$todayG2, (new DateTimeImmutable($todayG2))->modify('-1 day')->format('Y-m-d')], true) === true
-    && $givingSettings(SITE_G2)[GivingRetention::KEY_YEARS] === (string) $wanted['years'], json_encode([$ticked, $givingSettings(SITE_G2)]));
+    && in_array($ruleG2['confirmedOn'], [$todayG2, $ownDateG2()], true) === true && $ruleG2['confirmedOn'] > $todayG1
+    && $givingSettings(SITE_G2)[GivingRetention::KEY_YEARS] === (string) $wanted['years'],
+    json_encode([$ticked, $givingSettings(SITE_G2), 'Auckland\'s own date' => $todayG2, 'the last place\'s' => $todayG1]));
 $changed = GivingRetention::saveForSite($mysqli, SITE_G2, $form(['countryCode' => $foundCode, 'scope' => 'all', 'years' => (string) ($wanted['years'] + 3), 'confirmed' => '1', 'yearEndMonth' => '4', 'yearEndDay' => '5']));
 $ruleG2  = GivingRetention::ruleForSite(SITE_G2);
 ge_ok('CHANGING THE FIGURE UN-TICKS IT, even with the box still ticked: saved, not confirmed any more, and the message says to tick it again once the new figure is confirmed',
@@ -4467,5 +4526,61 @@ ge_ok('A RUN THAT HELD NO GIVING RECORDS BUT DELETED SOMETHING: before any run t
     && ge_row($xn['membership']) === null && count($changedXn) >= 1
     && GdprEraser::runHasChangedAnything(REQ_XN) === true && GdprEraser::givingStepHasRun(REQ_XN) === false,
     json_encode([$askedBefore, $statusF(REQ_XN), ge_row($xn['membership']), count($changedXn), GdprEraser::runHasChangedAnything(REQ_XN)]));
+
+// =============================================================================
+ge_section('16', 'An organisation far ahead of UTC: a name is cleared by the last place on Earth\'s date, and "Confirmed on" is its own (#604, second check, 13 October 2026)');
+// =============================================================================
+// Kiritimati is fourteen hours ahead of UTC and the last place on Earth is
+// twelve behind, so Kiritimati's own date is one or two days AHEAD of the
+// date the clearing goes by, at every hour of every day. That makes this the
+// one part of the giving sections that does not depend on when it is run.
+//
+// Kiri's record is kept until TODAY at the last place on Earth: not yet due.
+// On Kiritimati's own calendar that date has already passed. A clearing that
+// asked "today" where the organisation is would call the record due and
+// empty the name a day or two early, and that cannot be undone. The second
+// check planted exactly that at the place that decides
+// (GivingRetention::stateOfKeptRow()) and every test passed.
+// WHAT THIS CANNOT DO: on 29 February the keep-until date found below can be
+// the day AFTER today (no date two years earlier lands on a 29th), and for
+// most of that one day Kiritimati's own date is that same day after. The
+// check still passes on correct code then, but could not see the fault.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+ge_insert('tblSites', [], ['siteID' => SITE_K, 'timezone' => 'Pacific/Kiritimati']);
+$catK = ge_id(ge_insert('tblGivingCategory', [], ['siteID' => SITE_K]));
+ge_user(P_Q, 'Kiri Ahead', 'kiri.ahead@selftest.invalid');
+$q = ['declaration' => ge_declaration(SITE_K, P_Q, $ago(900), '9 Dateline Drive', 'DL9 9DL'), 'gift' => ge_gift(SITE_K, P_Q, $ago(5), 300, $catK)];
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+ge_request(REQ_Q, P_Q, 'kiri.ahead@selftest.invalid', 'Kiri Ahead', 'processing');
+$resultQ = ge_execute(REQ_Q, P_Q);
+$keptQ   = (int) (ge_one('SELECT keptDonorID FROM tblGivingKeptDonors WHERE siteID = ? AND donorID = ?', 'ii', [SITE_K, P_Q])['keptDonorID'] ?? 0);
+// The same line as section 12: one year kept, no year end, so "keep until" is
+// the last gift plus two calendar years. `notDue` is the earliest last-gift
+// date whose record is kept until today (the last place's) or later.
+ge_q('UPDATE tblGivingKeptDonors SET lastGiftDate = ? WHERE keptDonorID = ?', 'si', [$edge['notDue'], $keptQ]);
+ge_q('UPDATE tblGivingEntry SET donatedAt = ? WHERE entryID = ?', 'si', [$edge['notDue'], ge_id($q['gift'])]);
+$ownDateK = static fn (): string => ge_now()->setTimezone(new DateTimeZone('Pacific/Kiritimati'))->format('Y-m-d'); // worked out here, not by the code under test
+$ownK     = $ownDateK();
+// The administrator there ticks "confirmed", through the real save. Its rule
+// 3 ("a slip of the finger must not clear records") is decided on the date
+// the clearing goes by: on that date nothing becomes due, so the save goes
+// through without the "I understand" box. Decided on Kiritimati's own date
+// it would be refused, as about to clear one record.
+$tickK = GivingRetention::saveForSite($mysqli, SITE_K, $form(['years' => '1', 'confirmed' => '1']));
+$ruleK = GivingRetention::ruleForSite(SITE_K);
+ge_ok('"CONFIRMED ON" IS THE ORGANISATION\'S OWN DATE, for one fourteen hours ahead of UTC: the tick is saved with Kiritimati\'s date, which is later than the date the clearing goes by; and the save is not refused as "about to clear a record", because that is decided on the last place on Earth\'s date',
+    is_array($resultQ) === true && $resultQ['failed'] === 0 && $keptQ > 0 && $tickK['saved'] === true && $tickK['newlyDue'] === 0 && $ruleK['confirmed'] === true && $ruleK['years'] === 1
+    && in_array($ruleK['confirmedOn'], [$ownK, $ownDateK()], true) === true && $ruleK['confirmedOn'] > $todayG1 && $ruleK['timezone'] === ''
+    && \Portal\Core\Site::timezone(SITE_K) === 'Pacific/Kiritimati',
+    json_encode([$tickK, 'confirmedOn' => $ruleK['confirmedOn'], 'Kiritimati\'s own date' => $ownK, 'the last place\'s' => $todayG1, 'the rule\'s zone' => $ruleK['timezone'],
+        'the pages\' zone for it' => \Portal\Core\Site::timezone(SITE_K)]));
+$stateK   = GivingRetention::stateOfKeptRow($mysqli, $ruleK, SITE_K, P_Q, $edge['notDue']);
+$askedK   = GdprEraser::clearKeptGivingIdentity($keptQ);
+$keptKNow = ge_one('SELECT fullName, address, clearedAt FROM tblGivingKeptDonors WHERE keptDonorID = ?', 'i', [$keptQ]);
+ge_ok('KEPT UNTIL TODAY AT THE LAST PLACE ON EARTH IS NOT CLEARED, though in Kiritimati that date has already passed: confirmed, no hold, the account emptied, and the clearing still answers "not-due"; the name, the address and the gift\'s donor are all still there. It answers so at every hour of the day',
+    $stateK['state'] === 'not-due' && $stateK['today'] === $todayG1 && $stateK['accountEmptied'] === true && $stateK['keepUntil'] >= $todayG1
+    && $askedK === 'not-due' && $keptKNow['fullName'] === 'Kiri Ahead' && $keptKNow['address'] === '9 Dateline Drive' && $keptKNow['clearedAt'] === null
+    && (int) ge_row($q['gift'])['donorID'] === P_Q && ge_row($q['declaration'])['address'] === '9 Dateline Drive',
+    json_encode(['state' => $stateK, 'the clearing said' => $askedK, 'kept row' => $keptKNow, 'Kiritimati\'s own date' => $ownK]));
 
 ge_finish();

@@ -171,6 +171,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
             exit();
         }
 
+        // 🔒 Nor can the old time-zone setting, or migration 217's mark, be
+        //    deleted here (#604), by anybody. Deleting the mark would send
+        //    every organisation back to reading "site.timezone", which that
+        //    migration removed, so every page would fall to UTC. See
+        //    Site::zoneLockedInGeneralEditor().
+        if ($lockedKey !== null && Site::zoneLockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
+            Logger::activity(
+                'SettingsDeleteRefused',
+                'Refused: "' . (string) $lockedKey['settingKey'] . '": an organisation\'s time zone is chosen at Admin, Organisations, and this row cannot be deleted here',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = Site::zoneLockedMessage();
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('settings'));
+            exit();
+        }
+
         // 🔒 Nor can the mail server's name or either certificate row be
         //    deleted here (#592), by anybody. The save handler refuses to
         //    change them, and a delete is not a smaller act: with the name's
@@ -588,8 +605,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     // 🔒 And for the version the database is recorded at (#499): the
                                     //    Upgrade page's button writes it, and both handlers refuse it.
                                     $versionLocked = \Portal\Core\Maintenance::lockedInGeneralEditor((string) $row['settingKey']);
+                                    // 🔒 And for an organisation's time zone (#604): chosen at Admin,
+                                    //    Organisations, which only a global administrator can open.
+                                    $zoneLocked = Site::zoneLockedInGeneralEditor((string) $row['settingKey']);
                                     ?>
-                                    <?php if ($mailLocked === true): ?>
+                                    <?php if ($zoneLocked === true && Site::timezoneFacts()['inRow'] === false): ?>
+                                        <?php // Before migration 217 has run, neither page takes a zone: the way on is the upgrade. ?>
+                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/upgrade'), ENT_QUOTES, 'UTF-8'); ?>">Run the upgrade first (Admin, Upgrade); then time zones are chosen at Admin, Organisations</a>
+                                    <?php elseif ($zoneLocked === true && $isRoot === true): ?>
+                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/sites'), ENT_QUOTES, 'UTF-8'); ?>">Time zones are chosen at Admin, Organisations</a>
+                                    <?php elseif ($zoneLocked === true): ?>
+                                        <span class="small text-secondary">Time zones are chosen by a global administrator, at Admin, Organisations</span>
+                                    <?php elseif ($mailLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/integrations/email'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo $isRoot === true ? 'Changed at Admin, Integrations, Email' : 'Changed by a global administrator, at Admin, Integrations, Email'; ?></a>
                                     <?php elseif ($versionLocked === true && $isRoot === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/upgrade'), ENT_QUOTES, 'UTF-8'); ?>">Recorded by the Upgrade page</a>
@@ -611,7 +638,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         <i class="fa-solid fa-pen"></i>
                                     </button>
                                     <?php endif; ?>
-                                    <?php if ($isRoot === true && $isGivingRule === false && $organisationsLocked === false && $mailLocked === false && $versionLocked === false): ?>
+                                    <?php if ($isRoot === true && $isGivingRule === false && $organisationsLocked === false && $mailLocked === false && $versionLocked === false && $zoneLocked === false): ?>
                                         <form method="post" action="/settings" class="d-inline">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                             <input type="hidden" name="action" value="delete">

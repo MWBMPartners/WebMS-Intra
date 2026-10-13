@@ -724,8 +724,8 @@ foreach ([[P, ORG_A, 0], [P, ORG_B, 0], [Q, ORG_A, 0], [R, ORG_B, 1], [X, ORG_A,
 $today    = date('Y-m-d');
 $eventDay = date('Y-m-d', strtotime('+9 days'));
 q(
-    'INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, eventTimezone, status, isPublic, isDeleted) '
-    . "VALUES (?, ?, 'modesb-internal', 'MODESB internal event', 'MODESB-EVENT-DESCRIPTION', ?, ?, 'UTC', 'UTC', 'published', 0, 0)",
+    'INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, description, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) '
+    . "VALUES (?, ?, 'modesb-internal', 'MODESB internal event', 'MODESB-EVENT-DESCRIPTION', ?, ?, 'UTC', 'published', 0, 0)",
     'iiss', [EV_B, ORG_B, $eventDay . ' 10:00:00', $eventDay . ' 11:00:00']
 );
 q("INSERT INTO tblAttendanceServiceTypes (serviceTypeID, siteID, typeName, typeSlug, isActive) VALUES (?, ?, 'MODESB service', 'modesb-service', 1)", 'ii', [SERVICE_B, ORG_B]);

@@ -41,18 +41,21 @@ $db     = App::db();
 // 🔍 Verify the event exists + belongs to this site
 // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
 $check = $db->prepare(
-    'SELECT eventID FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL LIMIT 1'
+    'SELECT eventID, timezone FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL LIMIT 1'
 );
 if ($check === false) {
     ApiResponse::error('Database error', 500);
 }
 $check->bind_param('ii', $eventId, $siteId);
 $check->execute();
-$exists = $check->get_result()->fetch_assoc() !== null;
+$found = $check->get_result()->fetch_assoc();
 $check->close();
-if ($exists === false) {
+if ($found === null) {
     ApiResponse::error('Event not found', 404);
 }
+// 🕰️ The clock this event's times are a reading of (#604): its own zone, or
+//    the organisation's when the stored one cannot be opened.
+$eventZone = Site::zoneFor((string) $found['timezone']);
 
 // 🛠️ Build dynamic UPDATE — only includes columns the caller provided
 $columnMap = [
@@ -89,11 +92,16 @@ foreach ($columnMap as $col => $type) {
         ApiResponse::error("status must be one of: " . implode(', ', $validStatuses), 400);
     }
     if (in_array($col, ['startDateTime', 'endDateTime'], true) === true && $value !== null && $value !== '') {
-        $ts = strtotime((string) $value);
-        if ($ts === false) {
+        // Read on the EVENT's clock unless the value carries an offset of
+        // its own, then written as that clock's reading. This used
+        // strtotime() and date(), which are PHP's clock: for an event in
+        // another zone than the organisation's the stored time was out by
+        // the difference between the two.
+        try {
+            $value = (new \DateTimeImmutable((string) $value, $eventZone))->setTimezone($eventZone)->format('Y-m-d H:i:s');
+        } catch (\Throwable $e) {
             ApiResponse::error("$col is not a valid timestamp", 400);
         }
-        $value = date('Y-m-d H:i:s', $ts);
     }
     if (in_array($col, ['isAllDay', 'isPublic', 'isFeatured'], true) === true) {
         $value = (bool) $value === true ? 1 : 0;

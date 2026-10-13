@@ -17,6 +17,7 @@ declare(strict_types=1);
 
 use Portal\Core\Departments;
 use Portal\Core\Roles;
+use Portal\Core\Site;
 
 $pageTitle   = 'Help - Admin Guide';
 $pageSection = 'help';
@@ -58,6 +59,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#logs" class="badge text-bg-secondary text-decoration-none">Viewing Logs</a>
             <a href="#csv-export" class="badge text-bg-secondary text-decoration-none">CSV Export</a>
             <a href="#web-addresses" class="badge text-bg-secondary text-decoration-none">The Portal&rsquo;s Web Address</a>
+            <a href="#time-zones" class="badge text-bg-secondary text-decoration-none">Time Zones</a>
             <a href="#smtp-mailbox" class="badge text-bg-secondary text-decoration-none">SMTP Mailbox</a>
             <a href="#ms365-shared-mailbox" class="badge text-bg-secondary text-decoration-none">MS365 Shared Mailbox</a>
             <a href="#server-info" class="badge text-bg-secondary text-decoration-none">Server Information</a>
@@ -817,6 +819,40 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <ul class="mb-0">
         <li>It does not move the portal or change what address reaches it. That is set with your hosting company.</li>
         <li>It does not check that the address works. If it is mistyped, e-mails still go and their links open nothing.</li>
+    </ul>
+</div>
+
+<!-- Section: Time zones (#604).
+     Every statement here is held true by tools/time-zones-selftest.php. If the
+     "Time zone" box at Admin, Organisations or on the event form changes,
+     change this with it. -->
+<div class="portal-card p-4 mb-4" id="time-zones">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-clock me-2 text-primary"></i>Time Zones</h2>
+
+    <p>The portal is a diary, so every time in it belongs to a time zone. There are two kinds, and each is kept in one place.</p>
+
+    <h3 class="h5 mt-4 mb-3">The organisation&rsquo;s time zone</h3>
+    <ul class="mb-3">
+        <li class="mb-2"><strong>Where it is chosen:</strong> <a href="<?php echo htmlspecialchars(Site::url('admin/sites'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Organisations</a>, the organisation&rsquo;s <strong>Edit</strong> button, <strong>Time zone</strong>. Only a global administrator can open that page. It is not a setting on the general Settings page any more, and that page refuses it.</li>
+        <li class="mb-2"><strong>What follows it:</strong> the times pages show, what counts as &ldquo;today&rdquo;, the dates in the mail queue and on the health page, and the zone a new event starts on.</li>
+        <li class="mb-2"><strong>The box is a list of real zone names</strong>, such as <code>Pacific/Auckland</code>. Nothing else can be saved.</li>
+        <li class="mb-2"><strong>If an organisation&rsquo;s card says its zone &ldquo;is not a time zone name the portal knows&rdquo;</strong>, the portal is using UTC for it until you choose one. That can happen to a zone typed long ago. Where the stored text could still be read as a zone, outside calendars that give no time zone of their own are not imported for that organisation until you choose: the portal will not guess which clock their times are on. Nothing already imported is changed.</li>
+    </ul>
+
+    <h3 class="h5 mt-4 mb-3">An event&rsquo;s time zone</h3>
+    <ul class="mb-3">
+        <li class="mb-2">Each event has its own, chosen from the same list in the <strong>Time zone</strong> box on the event form. A new event starts on the organisation&rsquo;s zone. Change it only for an event that happens somewhere else, or an online one run for another region.</li>
+        <li class="mb-2">An event&rsquo;s start and end are times on <em>that</em> clock. The event page, the calendar feed people subscribe to, the downloaded calendar file, reminders and the hired-venue check all read them on it.</li>
+        <li class="mb-2"><strong>If Manage Events lists events &ldquo;saved with a time zone the portal does not know&rdquo;</strong>, those were saved when the box was free text, or with the box emptied. Their times are read on the organisation&rsquo;s clock meanwhile. Open each one, choose its zone and save. The portal does not change them for you, because only you know what was meant.</li>
+        <li class="mb-2"><strong>If Manage Events says events made before this version are marked &ldquo;Europe/London&rdquo;</strong>, and your organisation is not on London&rsquo;s clock: until this version the event form filled its box with Europe/London for every organisation, and the file import, the events API and members&rsquo; suggestions stored it too. Reminders, the calendar feed and the calendar download go by the event&rsquo;s own zone, so for those events they follow London&rsquo;s clock. The notice lists the ones still to come and has one button that sets them all, past and coming, to your organisation&rsquo;s zone. It changes the zone only, never the time stored. If one of them really is in London, do not press the button: open the others one by one.</li>
+    </ul>
+
+    <h3 class="h5 mt-4 mb-3">What it does not do</h3>
+    <ul class="mb-0">
+        <li>Changing an organisation&rsquo;s zone does not move its events: each keeps the zone it was saved with.</li>
+        <li>It does not decide when an erased donor&rsquo;s name is cleared (Giving Records and Erasure). That date is taken at the last place on Earth to reach it, whatever your zone, so a name is never cleared early. It is cleared later instead: about half a day later for an organisation on London&rsquo;s clock, and up to 26 hours later for one in the countries furthest ahead of it. The &ldquo;Confirmed on&rdquo; date shown on the Giving Records page is your own organisation&rsquo;s date on the day the box was ticked.</li>
+        <li>While new files are in place and their database upgrade has not been run, neither this box nor the Settings page takes a time zone: run the upgrade first.</li>
+        <li>A start time inside the hour that happens twice on the night the clocks go back can mean either of two moments. The portal takes one and uses it for the reminder as well, so the two agree, but it cannot know which you meant. Avoid starting an event in that hour.</li>
     </ul>
 </div>
 

@@ -103,9 +103,10 @@
  *       still shows its warning, still lapses by itself, and can still be
  *       switched back on.
  *   N8  The page itself: one top-level heading, no <table>, "Nothing is
- *       waiting." for an empty queue, and every moment on it in ONE zone
- *       (the organisation's own row; the "site.timezone" setting when that
- *       row was never set), with the zone named.
+ *       waiting." for an empty queue, and every moment on it in ONE zone,
+ *       the organisation's (its own row, the one place it is kept since
+ *       #604; an old "site.timezone" setting put back by hand is not read),
+ *       with the zone named.
  *   C8  Nothing any page printed, and nothing logged or stored, holds a
  *       message body, a reset link or the mailbox's password, after a run
  *       that used all three ways through.
@@ -2867,19 +2868,20 @@ if (part('N8', 'The page itself: one top-level heading, no <table>, "Nothing is 
             && count($moments[1]) >= 8 && array_values(array_diff(array_unique($moments[1]), ['EDT', 'EST'])) === [],
         count($moments[1]) . ' moment(s) on the page, in the zone(s) ' . json_encode(array_values(array_unique($moments[1])))
     );
-    // 🌏 The other way round. The organisation's own row has never been set (it says "UTC"), and the installation's
-    //    `site.timezone` setting names a zone: the zone the rest of the portal shows its times in. The whole page follows it.
-    $zoneWas = stored('site.timezone');
-    q("UPDATE tblSites SET timezone = 'UTC' WHERE siteID = 1");
-    setting('site.timezone', 'Pacific/Auckland');
-    $bySetting = emailPage($rootJar, ip(1));
+    // 🌏 The organisation's zone is its OWN ROW and nothing else (#604). This check used to leave the row at "UTC", set
+    //    the installation's `site.timezone` setting to another zone and expect the whole page to follow the SETTING: that
+    //    was the second place the zone was kept, and migration 217 removed it. What must hold now: the page follows the
+    //    row when it is changed, and an old "site.timezone" setting put back by hand, naming yet another zone, is NOT read.
+    q("UPDATE tblSites SET timezone = 'Pacific/Auckland' WHERE siteID = 1");
+    q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (NULL, 'site.timezone', 'Asia/Tokyo', 'UTC', 0)");
+    $byRow = emailPage($rootJar, ip(1));
+    q("DELETE FROM tblSettings WHERE settingKey = 'site.timezone'");
     q('UPDATE tblSites SET timezone = ? WHERE siteID = 1', 's', [ORG_ZONE]);
-    setting('site.timezone', $zoneWas);
-    preg_match_all('/\d{1,2} [A-Z][a-z]{2} \d{4}, \d\d:\d\d ([A-Za-z0-9+-]{2,6})/', words($bySetting), $momentsToo);
+    preg_match_all('/\d{1,2} [A-Z][a-z]{2} \d{4}, \d\d:\d\d ([A-Za-z0-9+-]{2,6})/', words($byRow), $momentsToo);
     ok(
-        'and when the organisation\'s own row has never been set, every moment on the page is in the zone of the installation\'s "site.timezone" setting instead: still ONE zone for the whole page, the queue included, and "Recent sends" keeps the zone it has always shown',
-        $zoneWas !== '(no such row)' && count($momentsToo[1]) >= 8 && array_values(array_diff(array_unique($momentsToo[1]), ['NZDT', 'NZST'])) === []
-            && preg_match('/Kept \d{1,2} \w{3} \d{4}, \d\d:\d\d NZ[DS]T/', words(rowOnPage($bySetting, $wait))) === 1,
+        'and when the organisation\'s own zone is changed, every moment on the page follows it: still ONE zone for the whole page, the queue and "Recent sends" included; an old "site.timezone" setting put back by hand, naming a third zone, is not read',
+        count($momentsToo[1]) >= 8 && array_values(array_diff(array_unique($momentsToo[1]), ['NZDT', 'NZST'])) === []
+            && preg_match('/Kept \d{1,2} \w{3} \d{4}, \d\d:\d\d NZ[DS]T/', words(rowOnPage($byRow, $wait))) === 1,
         count($momentsToo[1]) . ' moment(s) on the page, in the zone(s) ' . json_encode(array_values(array_unique($momentsToo[1])))
     );
     // The queue's own part of the page: from the certificate card to the card after the queue.

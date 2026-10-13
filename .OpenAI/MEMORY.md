@@ -463,9 +463,9 @@ approver without the role can block a claim for ever.
 when the clocks change (owner's standing rule, 23 September 2026).** The portal
 is a diary — services, lessons, rotas, room bookings, reminders, livestreams — so
 an hour wrong is a congregation at a locked building or a reminder sent after the
-event. A site has a zone (`tblSites.timezone`, default `UTC`) and an event may
-have its own (`tblEvents.eventTimezone`), so neither may be assumed and no zone
-may be hard-coded. Three mistakes this codebase has actually made, all found by
+event. An organisation has a zone (its own row, answered only by `Site::timezone()`) and
+an event has its own (`tblEvents.timezone`, the one zone column since #604), so
+neither may be assumed and no zone may be hard-coded. Three mistakes this codebase has actually made, all found by
 checking rather than by anything failing. First, treating a wall-clock time as a
 moment: a venue booking of "every Tuesday 19:00 to 21:00" broke on the
 clock-change weekend (#435). Second, using a length taken from

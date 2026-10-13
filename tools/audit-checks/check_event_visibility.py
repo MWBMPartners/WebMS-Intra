@@ -308,9 +308,19 @@ FILE_ALLOWLIST: dict[str, str] = {
 # something harmless (comment reworded, whitespace) does not silently
 # stop being watched either; the entry itself must be moved to match.
 LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
-    ("_apps/calendar/manage/save.php", 393): (
+    # Moved from 393 to 476 by #604, which added the event form's zone check
+    # and the "old events marked Europe/London" button above it. The probe itself
+    # is unchanged.
+    ("_apps/calendar/manage/save.php", 476): (
         "SELECT eventID FROM tblEvents WHERE eventSlug = ? AND siteID = ?",
         "the slug-uniqueness probe on event CREATE must search every event, imported ones included, so two events can never share a slug regardless of origin",
+    ),
+    # Not a query at all (#604): the backup's list of columns a migration has
+    # removed NAMES the table, so that a snapshot taken before migration 217
+    # can still be put back. It reads no event.
+    ("_core/DbBackup.php", 169): (
+        "'tblEvents' => ['eventTimezone'],",
+        "names tblEvents in the backup's list of removed columns; no row of any event is read on this line",
     ),
 }
 

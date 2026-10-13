@@ -446,11 +446,13 @@ function brs_addByteRows(): void
 {
     brs_sql(
         "INSERT INTO tblExternalFeeds (feedID, siteID, name, url) VALUES (970701, 1, 'Self-test calendar', 'https://calendar.example.com/self-test.ics')",
-        "INSERT INTO tblEvents (eventID, siteID, eventName, eventSlug, startDateTime, externalFeedID, externalUidHash) VALUES "
-        . "(970501, 1, 'Ordinary event — côté jardin 🍂', 'brs-ordinary', '2026-10-25 01:30:00', NULL, NULL), "
-        . "(970502, 1, 'Imported event', 'brs-imported', '2026-11-01 10:00:00', 970701, UNHEX(SHA2('uid-1@example.com', 256))), "
-        . "(970503, 1, 'Imported, awkward bytes', 'brs-awkward', '2026-11-02 10:00:00', 970701, UNHEX('FF00FE80C328A0A1E28200000A0D22275C7B7D5B5D2C3A00000000000000FF00')), "
-        . "(970504, 1, 'Imported, ends in zero bytes', 'brs-zeros', '2026-11-03 10:00:00', 970701, UNHEX('4142000000000000000000000000000000000000000000000000000000000000'))",
+        // Each event names its zone: since #604 the column has no default, and
+        // the database refuses an event with none. 'UTC' is a test value.
+        "INSERT INTO tblEvents (eventID, siteID, eventName, eventSlug, startDateTime, timezone, externalFeedID, externalUidHash) VALUES "
+        . "(970501, 1, 'Ordinary event — côté jardin 🍂', 'brs-ordinary', '2026-10-25 01:30:00', 'UTC', NULL, NULL), "
+        . "(970502, 1, 'Imported event', 'brs-imported', '2026-11-01 10:00:00', 'UTC', 970701, UNHEX(SHA2('uid-1@example.com', 256))), "
+        . "(970503, 1, 'Imported, awkward bytes', 'brs-awkward', '2026-11-02 10:00:00', 'UTC', 970701, UNHEX('FF00FE80C328A0A1E28200000A0D22275C7B7D5B5D2C3A00000000000000FF00')), "
+        . "(970504, 1, 'Imported, ends in zero bytes', 'brs-zeros', '2026-11-03 10:00:00', 'UTC', 970701, UNHEX('4142000000000000000000000000000000000000000000000000000000000000'))",
         "INSERT INTO tblExternalEventChoices (choiceID, siteID, feedID, scope, externalUidHash, audienceLevel, createdAt) VALUES "
         . "(970801, 1, 970701, 'series', UNHEX(SHA2('uid-1@example.com', 256)), 'members', '2026-10-01 09:00:00')"
     );
@@ -929,7 +931,7 @@ function brs_proof1(): void
         'UPDATE tblEvents SET externalUidHash = UNHEX(REPEAT(\'11\', 32)) WHERE eventID = 970503',
         'DELETE FROM tblExternalEventChoices WHERE choiceID = 970801',
         'DELETE FROM tblEvents WHERE eventID = 970504',
-        "INSERT INTO tblEvents (eventID, siteID, eventName, eventSlug, startDateTime) VALUES (970599, 1, 'Added after the snapshot', 'brs-added', '2026-12-01 10:00:00')"
+        "INSERT INTO tblEvents (eventID, siteID, eventName, eventSlug, startDateTime, timezone) VALUES (970599, 1, 'Added after the snapshot', 'brs-added', '2026-12-01 10:00:00', 'UTC')"
     );
     brs_check(brs_differences($before, brs_fingerprint()) !== '', 'the damage really changed the database');
 
@@ -1639,7 +1641,7 @@ function brs_proof16(): void
     //     then), one for no event.
     brs_sessionLink(false);
     brs_sql(
-        "INSERT INTO tblEvents (eventID, siteID, eventName, eventSlug, startDateTime) VALUES (970501, 1, 'A live event', 'brs-live', '2026-11-01 10:00:00')",
+        "INSERT INTO tblEvents (eventID, siteID, eventName, eventSlug, startDateTime, timezone) VALUES (970501, 1, 'A live event', 'brs-live', '2026-11-01 10:00:00', 'UTC')",
         "INSERT INTO tblAttendanceServiceTypes (serviceTypeID, typeName, typeSlug) VALUES (970001, 'Self-test service', 'brs-service')",
         "INSERT INTO tblAttendanceSessions (sessionID, siteID, serviceTypeID, eventID, sessionDate, createdAt, updatedAt) VALUES "
         . "(970001, 1, 970001, 970501, '2026-11-01', '2020-01-02 03:04:05', '2020-01-02 03:04:05'), "
@@ -2697,6 +2699,115 @@ try {
 Brs::$bigRows = isset($options['rows']) === true ? max(1000, (int) $options['rows']) : 60000;
 Brs::$memory  = isset($options['memory']) === true ? (string) $options['memory'] : '32M';
 Brs::$root    = rtrim(sys_get_temp_dir(), '/') . '/backup-restore-selftest-' . getmypid();
+/** Run a migration file exactly as it is written, on the writer's connection. Throws on the first error. */
+function brs_runMigration(string $file): void
+{
+    $writer = Brs::$writer;
+    $writer->multi_query((string) file_get_contents(dirname(__DIR__) . '/web/_sql/' . $file));
+    do {
+        $result = $writer->store_result();
+        if ($result instanceof mysqli_result) {
+            $result->free();
+        }
+    } while ($writer->more_results() === true && $writer->next_result() === true);
+}
+
+/**
+ * 25 — a snapshot taken BEFORE migration 217 goes back onto a database that
+ * has run it (#604).
+ *
+ * Migration 217 removes a column (`tblEvents.eventTimezone`) and moves an
+ * organisation's time zone out of a setting and into its own row. A snapshot
+ * taken the day before still holds a value of the removed column for every
+ * event, the old setting, and none of the migration's own traces. Put back
+ * onto the upgraded database it used to be REFUSED ("Unknown column"), which
+ * is no way back at the very moment one is needed. This proves the whole
+ * journey: the snapshot goes back; every event keeps exactly what its own
+ * `timezone` held, and the removed column's values are let go (an event whose
+ * zone box had been emptied stays empty: the removed column held only its
+ * default for it, and neither the restore nor the migration copies that in);
+ * and when the upgrade then runs 217 again (its record went with the restore),
+ * the organisation ends on the zone ITS pages were showing when the snapshot
+ * was taken, not on a zone chosen since.
+ *
+ * It changes the shape of a table on the way, so it takes a snapshot of the
+ * starting state first and puts THAT back at the end, whatever happened.
+ */
+function brs_proof25(): void
+{
+    $backup = brs_backup('p25');
+    $start  = $backup->snapshot('proof 25, the starting state');
+    if (brs_check($start['success'] === true, 'the starting state is saved, to be put back at the end', brs_say($start)) === false) {
+        return;
+    }
+    $hasOldColumn = static fn (): bool => (int) Brs::$writer->query(
+        "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tblEvents' AND COLUMN_NAME = 'eventTimezone'"
+    )->fetch_row()[0] === 1;
+    $zoneOf = static fn (int $event): string => (string) (Brs::$writer->query('SELECT timezone FROM tblEvents WHERE eventID = ' . $event)->fetch_row()[0] ?? '(no such event)');
+    $org    = static fn (): string => (string) (Brs::$writer->query('SELECT timezone FROM tblSites WHERE siteID = 1')->fetch_row()[0] ?? '(empty)');
+    $count  = static fn (string $where): int => (int) Brs::$writer->query('SELECT COUNT(*) FROM tblSettings WHERE ' . $where)->fetch_row()[0];
+
+    try {
+        // 1. An installation that has NOT run migration 217: the second zone
+        //    column is there, the zone setting is there (and differs from the
+        //    organisation's row), and the migration has left no trace.
+        brs_sql(
+            "ALTER TABLE tblEvents ADD COLUMN eventTimezone VARCHAR(64) NOT NULL DEFAULT 'Europe/London' COMMENT 'IANA timezone for event display (#238)'",
+            "ALTER TABLE tblEvents MODIFY COLUMN timezone VARCHAR(50) NOT NULL DEFAULT 'Europe/London'",
+            "DELETE FROM tblMigrations WHERE filename = '217_one_time_zone_answer.sql'",
+            "DELETE FROM tblSettings WHERE settingKey = 'site.timezoneKeptAt'",
+            "INSERT INTO tblSettings (settingID, siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (970901, NULL, 'site.timezone', 'Pacific/Auckland', 'UTC', 0)",
+            "UPDATE tblSites SET timezone = 'UTC' WHERE siteID = 1",
+            "INSERT INTO tblEvents (eventID, siteID, eventName, eventSlug, startDateTime, timezone, eventTimezone) VALUES "
+            . "(970801, 1, 'The two columns agree', 'brs-zone-same', '2026-12-01 10:00:00', 'America/New_York', 'America/New_York'), "
+            . "(970802, 1, 'Made in the portal', 'brs-zone-portal', '2026-12-02 10:00:00', 'Pacific/Auckland', 'Europe/London'), "
+            . "(970803, 1, 'The zone box emptied on the old form', 'brs-zone-empty', '2026-12-03 10:00:00', '', 'Europe/London')"
+        );
+        $older = $backup->snapshot('proof 25, before migration 217');
+        if (brs_check($older['success'] === true, 'a snapshot is taken on a database that has not run migration 217', brs_say($older)) === false) {
+            return;
+        }
+
+        // 2. The upgrade.
+        brs_runMigration('217_one_time_zone_answer.sql');
+        brs_check(
+            $hasOldColumn() === false && $org() === 'Pacific/Auckland' && $zoneOf(970803) === '',
+            'migration 217 runs: the second column is gone, the organisation\'s row holds the zone its pages were showing, and the event whose zone box was emptied is left empty',
+            'old column there: ' . json_encode($hasOldColumn()) . '; organisation: ' . $org() . '; the third event: ' . $zoneOf(970803)
+        );
+
+        // 3. Life goes on: a zone is chosen at Admin, Organisations, and events change.
+        brs_sql("UPDATE tblSites SET timezone = 'Asia/Tokyo' WHERE siteID = 1", "UPDATE tblEvents SET timezone = 'UTC' WHERE eventID IN (970801, 970802, 970803)");
+
+        // 4. The older snapshot is put back onto the upgraded database.
+        $restored = $backup->restoreAll($older['directory'], false);
+        brs_check($restored['success'] === true, 'the snapshot taken before the migration is put back onto the database that has run it (it used to be refused: "Unknown column")', brs_say($restored));
+        brs_check(
+            $zoneOf(970801) === 'America/New_York' && $zoneOf(970802) === 'Pacific/Auckland' && $zoneOf(970803) === '' && $hasOldColumn() === false,
+            'every event has exactly what its own `timezone` held in the snapshot, the empty one included (the removed column\'s "Europe/London" is NOT put into it); the removed column is not brought back',
+            json_encode([$zoneOf(970801), $zoneOf(970802), $zoneOf(970803)]) . '; old column there: ' . json_encode($hasOldColumn())
+        );
+        brs_check(
+            $org() === 'UTC' && $count("settingKey = 'site.timezone' AND settingValue = 'Pacific/Auckland'") === 1 && $count("settingKey = 'site.timezoneKeptAt'") === 0,
+            'the organisation\'s row, the old setting and the missing mark are all as the snapshot held them: a database that has not been through the migration',
+            'organisation: ' . $org() . '; old setting rows: ' . $count("settingKey = 'site.timezone'") . '; mark rows: ' . $count("settingKey = 'site.timezoneKeptAt'")
+        );
+
+        // 5. The upgrade runs the migration again: its record went with the restore.
+        brs_runMigration('217_one_time_zone_answer.sql');
+        brs_check(
+            $org() === 'Pacific/Auckland' && $count("settingKey = 'site.timezone'") === 0 && $count("settingKey = 'site.timezoneKeptAt' AND settingValue = 'organisation'") === 1,
+            'and run again, the migration brings the restored organisation into line: the zone its pages were showing when the snapshot was taken, not the one chosen afterwards',
+            'organisation: ' . $org() . '; old setting rows: ' . $count("settingKey = 'site.timezone'") . '; mark rows: ' . $count("settingKey = 'site.timezoneKeptAt'")
+        );
+    } finally {
+        // Whatever happened: the table's shape as migration 217 leaves it, then the starting state.
+        brs_runMigration('217_one_time_zone_answer.sql');
+        $back = $backup->restoreAll($start['directory'], false);
+        brs_check($back['success'] === true, 'the starting state is put back', brs_say($back));
+    }
+}
+
 mkdir(Brs::$root, 0750, true);
 Brs::$root    = (string) realpath(Brs::$root);
 // The scratch folder holds whole copies of the database, so it is removed
@@ -2727,6 +2838,7 @@ $proofs = [
     22 => ['Tables that are not in the snapshot: what putting it back does to them is counted and said', 'brs_proof22', false],
     23 => ['An undo the database does not confirm closes the connection, and the result says so', 'brs_proof23', false],
     24 => ['A value not on its column\'s list of choices: the snapshot says at once that it cannot be put back whole', 'brs_proof24', false],
+    25 => ['A snapshot taken before migration 217 goes back onto a database that has run it (#604)', 'brs_proof25', false],
     // These four need the large table, so they run together at the end.
     5  => ['A large table under a fixed memory limit (#579)', 'brs_proof5', true],
     7  => ['A snapshot that fails or is killed is never counted as a backup', 'brs_proof7', true],

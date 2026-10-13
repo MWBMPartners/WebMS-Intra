@@ -199,8 +199,8 @@
           },
           "timezone": {
             "type": "string",
-            "example": "Europe/London",
-            "nullable": true
+            "description": "The time zone the start and end are a clock reading in: a full IANA name. An event has exactly one; there is no second zone field.",
+            "example": "Pacific/Auckland"
           },
           "isAllDay": {
             "type": "integer",
@@ -370,6 +370,11 @@
             "type": "string",
             "format": "date-time",
             "nullable": true
+          },
+          "timezone": {
+            "type": "string",
+            "description": "Optional. The time zone the start and end are a clock reading in: a full IANA name, spelled exactly. Left out, the event takes its organisation's own zone. A start or end given with an offset of its own is a moment, and is stored as this zone's clock reads at that moment. A name the portal does not know is refused with 422 and nothing is created.",
+            "example": "Pacific/Auckland"
           },
           "isAllDay": {
             "type": "boolean",

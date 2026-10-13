@@ -200,9 +200,15 @@ $isPublic   = EventVisibility::isPublicSelect('e', $ruleMode);
     ? ['e.eventID', 'i', $eventId]
     : ['e.eventSlug', 's', $slug];
 $event = null;
+// 🕰️ `e.timezone` is the event's zone, and the only column it is kept in
+//    (#604). This statement used to hand out a second one as well,
+//    `eventTimezone`, which for every event made in the portal held
+//    "Europe/London" whatever zone the event was in. Migration 217 removed
+//    the column, so that field is gone from the answer; the API description
+//    never listed it.
 $stmt = $db->prepare(sprintf(
     'SELECT e.eventID, e.siteID, e.seriesID, e.categoryID, e.typeID, e.eventName, e.eventSlug, e.description, '
-    . 'e.startDateTime, e.endDateTime, e.timezone, e.eventTimezone, e.isAllDay, '
+    . 'e.startDateTime, e.endDateTime, e.timezone, e.isAllDay, '
     . 'e.locationName, e.locationAddress, e.locationWebURL, e.locationGeoLat, e.locationGeoLng, e.locationW3W, '
     . 'e.locationPhone, e.locationEmail, e.hostOrgName, e.partnerOrgs, e.heroImage, e.posterImage, e.profileImage, '
     . 'e.status, %s, e.isFeatured, e.isDeleted, e.deletedAt, e.capacity, '

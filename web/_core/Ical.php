@@ -11,12 +11,30 @@
  * everything calendar clients (Google, Apple, Outlook) need. Vendor a
  * library if/when bidirectional CalDAV becomes a requirement.
  *
+ * WHICH CLOCK A STORED TIME IS ON (#604). An event's start and end are
+ * stored as a time on a clock ("19:00"), with the clock's zone beside them
+ * in `tblEvents.timezone`. So a calendar file carries the stored time AS IT
+ * IS, with that zone named (`DTSTART;TZID=Pacific/Auckland:20261104T190000`).
+ * WHAT WAS WRONG, found by tools/time-zones-selftest.php on 13 October 2026:
+ *   - a timed event's stored time was read as if it were UTC and then moved
+ *     into the event's zone, so the file was out by the zone's distance from
+ *     UTC: a 10:00 event in London went out as 11:00 all summer, and a 19:00
+ *     event in Auckland as 08:00 the next day;
+ *   - an all-day event's date was read on PHP's clock and written on UTC's,
+ *     so it went out a day early anywhere east of Greenwich, and in London in
+ *     summer; and the day after its last day was found by adding 86,400
+ *     seconds, which is not a day on the two nights a year a clock changes;
+ *   - the zone used when an entry named none was "Europe/London", written
+ *     into emit()'s own signature. It is the organisation's, from
+ *     Site::timezone().
+ *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/271
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/604
  * -----------------------------------------------------------------------------
  */
 
@@ -40,8 +58,18 @@ class Ical
      * additive: callers that don't set them (feed.php, account-feed.php)
      * see byte-identical output to before these keys existed.
      */
-    public static function emit(string $calendarName, array $events, string $timezone = 'Europe/London'): string
+    public static function emit(string $calendarName, array $events, ?string $timezone = null): string
     {
+        // 🕰️ The calendar's own zone: the one given, which a caller whose
+        //    file is for ONE organisation must give (the personal feed does:
+        //    the holder's own organisation). With none given it is the
+        //    organisation of the request (Site::timezone()), which is right
+        //    for a signed-in page such as the download. It names the zone the
+        //    file declares, and is the zone of any entry that names none or
+        //    names one PHP cannot open (a rota duty; an event saved with text
+        //    that is no zone). The default used to be "Europe/London".
+        $timezone = ($timezone !== null && Site::phpCanOpenZone($timezone) === true) ? trim($timezone) : Site::timezone();
+
         $lines = [];
         $lines[] = 'BEGIN:VCALENDAR';
         $lines[] = 'VERSION:2.0';
@@ -65,18 +93,22 @@ class Ical
             $lines[] = 'DTSTAMP:' . gmdate('Ymd\THis\Z');
             $startsAt = (string) $e['startsAt'];
             $allDay = ($e['allDay'] ?? false) === true;
-            $eventTz = (string) ($e['timezone'] ?? $timezone);
+            $eventTz = Site::phpCanOpenZone((string) ($e['timezone'] ?? '')) === true ? trim((string) $e['timezone']) : $timezone;
             if ($allDay === true) {
-                $lines[] = 'DTSTART;VALUE=DATE:' . gmdate('Ymd', strtotime($startsAt));
+                // 📅 A date, taken from the stored text as it stands. The end
+                //    is the day AFTER the last day (an all-day end is the
+                //    first day NOT covered, RFC 5545 §3.6.1), found by
+                //    counting one day on the calendar.
+                $lines[] = 'DTSTART;VALUE=DATE:' . self::clockText($startsAt, 'Ymd');
                 if (isset($e['endsAt']) === true && $e['endsAt'] !== null && $e['endsAt'] !== '') {
-                    $lines[] = 'DTEND;VALUE=DATE:' . gmdate('Ymd', strtotime((string) $e['endsAt']) + 86400);
+                    $lines[] = 'DTEND;VALUE=DATE:' . self::clockText((string) $e['endsAt'], 'Ymd', 1);
                 }
             } else {
-                // 🕐 Emit with TZID so the time renders in the right zone
-                //     instead of "floating" — RFC 5545 §3.3.5.
-                $lines[] = 'DTSTART;TZID=' . self::escapeText($eventTz) . ':' . self::localTime($startsAt, $eventTz);
+                // 🕐 The stored time, with the zone of the clock it is on
+                //     named beside it — RFC 5545 §3.3.5.
+                $lines[] = 'DTSTART;TZID=' . self::escapeText($eventTz) . ':' . self::clockText($startsAt, 'Ymd\THis');
                 if (isset($e['endsAt']) === true && $e['endsAt'] !== null && $e['endsAt'] !== '') {
-                    $lines[] = 'DTEND;TZID=' . self::escapeText($eventTz) . ':' . self::localTime((string) $e['endsAt'], $eventTz);
+                    $lines[] = 'DTEND;TZID=' . self::escapeText($eventTz) . ':' . self::clockText((string) $e['endsAt'], 'Ymd\THis');
                 }
             }
             $lines[] = 'SUMMARY:' . self::escapeText((string) $e['summary']);
@@ -173,13 +205,37 @@ class Ical
         return $sign . str_pad((string) $hh, 2, '0', STR_PAD_LEFT) . str_pad((string) $mm, 2, '0', STR_PAD_LEFT);
     }
 
-    private static function localTime(string $datetime, string $tz): string
+    /**
+     * 🕰️ A stored time on a clock, set out as a calendar file wants it.
+     *
+     * The stored text ("2026-11-04 19:00:00", or a date alone) is ALREADY
+     * what the event's clock shows, so it is only re-shaped: never moved
+     * from one zone to another. It is read as UTC for that, because UTC has
+     * no clock changes: no hour is missing and none is repeated, so the
+     * reading that goes in is the reading that comes out, and a day added
+     * is one day on the calendar whatever night it falls on.
+     *
+     * This replaced localTime(), which read the text as a MOMENT in UTC and
+     * converted it into the event's zone: see "WHICH CLOCK A STORED TIME IS
+     * ON" at the top of this file for what that did.
+     *
+     * @param string $stored  The stored clock time or date.
+     * @param string $format  'Ymd\THis' for a time, 'Ymd' for a date.
+     * @param int    $addDays Days to count on (for the day after an all-day event's last day).
+     */
+    private static function clockText(string $stored, string $format, int $addDays = 0): string
     {
         try {
-            $dt = new \DateTimeImmutable($datetime, new \DateTimeZone('UTC'));
-            return $dt->setTimezone(new \DateTimeZone($tz))->format('Ymd\THis');
+            $reading = new \DateTimeImmutable($stored, new \DateTimeZone('UTC'));
+            if ($addDays !== 0) {
+                $reading = $reading->modify(($addDays > 0 ? '+' : '') . $addDays . ' day');
+            }
+
+            return $reading->format($format);
         } catch (\Exception $e) {
-            return gmdate('Ymd\THis', strtotime($datetime));
+            // Text that is not a date at all: sent as it stands, digits only,
+            // so the file still parses and the fault is visible in it.
+            return (string) preg_replace('/[^0-9T]/', '', str_replace(' ', 'T', $stored));
         }
     }
 

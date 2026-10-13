@@ -545,7 +545,10 @@ $mailUnchecked   = null;
 $mailHeldCount   = 0;
 if ($isUmbrella === true) {
     try {
-        $mailZone      = (string) (Site::current()['timezone'] ?? 'UTC');
+        // The organisation's zone, from the ONE place that answers it (#604).
+        // This used to read the organisation's row itself, which could
+        // differ from the zone every other page was in.
+        $mailZone      = Site::timezone();
         $mailUnchecked = MailRoutes::standingWarning($mysqli, $mailZone);
         if (Mailer::provider() === MailRoutes::SMTP) {
             $mailHeld = MailRoutes::certificateOnRecord($mysqli, $mailZone);

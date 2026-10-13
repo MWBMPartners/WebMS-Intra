@@ -55,7 +55,11 @@ $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli): array {
     if ($handle === false) {
         return ['rows' => [], 'errors' => ['Could not open uploaded file.']];
     }
-    $header = fgetcsv($handle);
+    // The separator, the quote and the escape character are each written out,
+    // as the values PHP has always used here. Left to its default, PHP 8.4 and
+    // later log a notice for every file read, because that default is going to
+    // change; written out, the file is read exactly as before on every version.
+    $header = fgetcsv($handle, null, ',', '"', '\\');
     if ($header === false || count($header) < 2) {
         fclose($handle);
         return ['rows' => [], 'errors' => ['CSV must have at least 2 columns including eventName + startDateTime.']];
@@ -96,7 +100,7 @@ $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli): array {
     $rows   = [];
     $errors = [];
     $rowNum = 1;  // header is row 1
-    while (($data = fgetcsv($handle)) !== false) {
+    while (($data = fgetcsv($handle, null, ',', '"', '\\')) !== false) {
         $rowNum++;
         if (count(array_filter($data, fn ($v) => trim((string) $v) !== '')) === 0) {
             continue;  // empty row
@@ -200,11 +204,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (count($rows) === 0) {
                 $error = 'No preview data — re-upload the file.';
             } else {
+                // 🕰️ THE ZONE (#604). Each row's start and end are read below
+                //    with strtotime() and written with date(), both on PHP's
+                //    clock, which start-up sets to this organisation's zone.
+                //    So that is the zone stored beside them: Site::timezone(),
+                //    the answer start-up itself used. WHAT WAS WRONG: this
+                //    statement named no zone at all, so every imported event
+                //    took the column's default, "Europe/London", wherever the
+                //    organisation was. WHAT IT CANNOT DO: take a zone per row.
+                //    The file has no column for one.
+                $importZone = Site::timezone();
                 $stmt = $mysqli->prepare(
                     'INSERT INTO tblEvents '
-                    . '(siteID, eventName, eventSlug, description, startDateTime, endDateTime, '
+                    . '(siteID, eventName, eventSlug, description, startDateTime, endDateTime, timezone, '
                     . 'isAllDay, locationName, status, isPublic, isFeatured, categoryID, typeID, createdByID) '
-                    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 );
                 if ($stmt === false) {
                     $error = t('error.db_import_prepare');
@@ -234,8 +248,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $typeId  = $r['typeID']     !== null ? (int) $r['typeID']     : null;
 
                         $stmt->bind_param(
-                            'isssssisssiiii',
-                            $siteId, $name, $slug, $desc, $startSql, $endSql,
+                            'issssssisssiiii',
+                            $siteId, $name, $slug, $desc, $startSql, $endSql, $importZone,
                             $allDay, $loc, $status, $isPub, $isFeat,
                             $catId, $typeId, $userId
                         );

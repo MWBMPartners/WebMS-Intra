@@ -86,7 +86,9 @@ if ($account === null) {
 
 $start    = (string) $event['startDateTime'];
 $end      = (string) ($event['endDateTime'] ?? '');
-$timezone = (string) ($event['timezone'] ?? 'UTC');
+// The event's own zone, or the organisation's when the stored one cannot be
+// opened (#604): Zoom is given a real zone name either way.
+$timezone = Site::zoneFor((string) ($event['timezone'] ?? ''))->getName();
 $duration = 60;
 if ($end !== '') {
     $startTs = (int) strtotime($start);

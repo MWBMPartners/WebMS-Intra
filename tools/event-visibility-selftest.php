@@ -447,9 +447,10 @@ try {
         run(
             $db,
             'INSERT INTO tblEvents (eventID, siteID, externalFeedID, externalUid, eventName, eventSlug, description, locationName,'
-            . ' startDateTime, endDateTime, status, isPublic, importLevel, importDetail, importWebsite, importApiOptOut, importAudienceType,'
+            . ' startDateTime, endDateTime, timezone, status, isPublic, importLevel, importDetail, importWebsite, importApiOptOut, importAudienceType,'
             . ' importAudienceID, importSource, externalPrivate, importRecheckAt)'
-            . " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+            // The zone is named (#604: an event with none is refused by the database). 'UTC' is a test value.
+            . " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UTC', 'published', ?, ?, ?, ?, ?, ?, ?, ?, ?,"
             . ' CASE ? WHEN -1 THEN UTC_TIMESTAMP() - INTERVAL 1 HOUR WHEN 1 THEN UTC_TIMESTAMP() + INTERVAL 1 HOUR ELSE NULL END)',
             'iiisssssssissiisisii',
             [

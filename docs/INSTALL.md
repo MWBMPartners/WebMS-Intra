@@ -272,8 +272,7 @@ The last page is shown **once**. It tells you:
   somebody's own, the installer left it alone and the page names the folder;
 - that the installation code has been deleted. On a few hosts the file cannot be deleted; the page then says so,
   and you delete `_auth_keys/install-code.php` yourself. Its code opens nothing by then;
-- what to do next. That list is short; step 11 below is the full one. (The page says "In Admin, Settings, set
-  your organisation's name, time zone and artwork". Step 11 says exactly where each of those is.)
+- what to do next. That list is short; step 11 below is the full one.
 
 ## 11. Straight afterwards
 
@@ -287,16 +286,15 @@ portal's own address with a few words after it: `/admin/settings/organisation` m
    restored without it loses every one of them.
 2. **Sign in** with the administrator's e-mail address and password. The installer's last page has a button to
    the sign-in page; so does the portal's plain address.
-3. **Give the portal your organisation's name and time zone.** Each is kept in two places today, and both have
-   to be set. Until they are, the portal calls itself "Portal" and keeps its clock on UTC (the world's standard
-   time, which has no summer time).
+3. **Give the portal your organisation's name and time zone.** Until they are set, the portal calls itself
+   "Portal" and keeps its clock on UTC (the world's standard time, which has no summer time).
    - Open **Admin, then Sites**. Press "Edit" on the one organisation listed. Change "Site Name" and the
-     copyright name below it (printed at the foot of every page), choose your "Timezone" from the list, and save.
-     This is the name on every page once somebody has signed in.
-   - Open **Admin, then Settings**. The page is one long list of named settings. Find `site.name`, press the
-     pencil button on its line, type your organisation's name and press "Save Changes". Do the same for
-     `site.timezone`, typing the same time zone as you chose above, for example `Europe/London`. This is the name
-     on the sign-in page, and the time zone the portal's clock runs on.
+     copyright name below it (printed at the foot of every page), choose your "Time zone" from the list, and
+     save. This is the name on every page once somebody has signed in, and the time zone the portal's clock runs
+     on. This page is the only place the time zone is set.
+   - The name is kept in a second place as well, and both have to be set. Open **Admin, then Settings**. The page
+     is one long list of named settings. Find `site.name`, press the pencil button on its line, type your
+     organisation's name and press "Save Changes". This is the name on the sign-in page.
 4. **Check the portal's own address and the support address** at `/admin/settings/organisation`, under "Web
    addresses". They are the two you typed at step 9.
 5. **Tell the portal how to send e-mail** at `/admin/integrations/email`, and send yourself a test from that page.

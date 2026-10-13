@@ -543,31 +543,27 @@ final class FeedResolver
     // =========================================================================
 
     /**
-     * The organisation's own time zone: the `site.timezone` setting for that
-     * organisation, and UTC when it is empty or not a zone PHP knows.
+     * The organisation's own time zone, as a zone object: Site::timezone(),
+     * the one place that answers it for the whole portal (#604).
      *
-     * The ONE place #514 reads it. `FeedImporter::zoneFor()` uses it for a
-     * calendar with no zone of its own, and date windows are counted in it,
-     * so the zone events are stored in and the zone windows are counted in
-     * can never be two different ideas.
+     * `FeedImporter::zoneFor()` uses it for a calendar with no zone of its
+     * own, and date windows are counted in it, so the zone events are stored
+     * in and the zone windows are counted in can never be two different
+     * ideas.
      *
-     * What this cannot settle: `web/_core/bootstrap.php` carries a comment
-     * saying `tblSites.timezone` takes priority, but reads only the setting.
-     * #514 follows what the code does; the disagreement is for #549.
+     * WHAT WAS HERE. This read the `site.timezone` setting itself and took
+     * anything PHP could open, after trimming it ("US/Eastern",
+     * "europe/london", a stray space). Start-up read the same setting and
+     * took only an exact name, so for such text the pages were on UTC while
+     * calendars were read in the zone it named. Now both ask Site, which
+     * keeps start-up's test, so date windows are counted on the same clock
+     * the pages use. A calendar with no zone of its own is NOT quietly read
+     * in UTC there: the importer refuses it until an administrator chooses
+     * the organisation's zone (FeedImporter::zoneInDoubtProblem()).
      */
     public static function organisationZone(int $siteId): DateTimeZone
     {
-        $named = trim((string) (App::settingForSite('site.timezone', $siteId) ?? ''));
-        if ($named === '') {
-            return new DateTimeZone('UTC');
-        }
-        try {
-            return new DateTimeZone($named);
-        } catch (\Throwable $unknown) {
-            // A mistyped zone must not stop anything working; UTC is the
-            // plain, predictable answer, and the same one the importer gives.
-            return new DateTimeZone('UTC');
-        }
+        return new DateTimeZone(Site::timezone($siteId));
     }
 
     /**

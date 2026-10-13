@@ -162,8 +162,9 @@ function addEvent(mysqli $db, int $id, int $site, int $days, ?int $feed = null, 
 {
     run(
         $db,
-        'INSERT INTO tblEvents (eventID, siteID, eventName, eventSlug, startDateTime, status, isDeleted, externalFeedID) '
-        . "VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY), 'published', ?, ?)",
+        // The zone is named (#604: an event with none is refused by the database). 'UTC' is a test value.
+        'INSERT INTO tblEvents (eventID, siteID, eventName, eventSlug, startDateTime, timezone, status, isDeleted, externalFeedID) '
+        . "VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY), 'UTC', 'published', ?, ?)",
         'iissiii',
         [$id, $site, 'Selftest event ' . $id, 'selftest-' . $id, $days, $deleted, $feed]
     );
