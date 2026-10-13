@@ -365,8 +365,12 @@ a locked building, a volunteer missing a shift, or a reminder that goes out afte
 the event it was reminding people about.
 
 **Where the time zone comes from.** A site has one (`tblSites.timezone`, default
-`UTC`), and an event may have its own (`tblEvents.eventTimezone`, default
-`Europe/London`). Neither may be assumed: a customer in another country, or a
+`UTC`), and an event has its own: **`tblEvents.timezone`**, the column the event form
+writes and the event page, the calendar feed and the export read (default
+`Europe/London`). **Do not read `tblEvents.eventTimezone` for an event's zone:** only the
+feed importer writes it, so for every event made in the portal it holds its default
+whatever zone the event is in (#604; a builder read it on 13 October 2026 and threw
+reminders away early). Neither may be assumed: a customer in another country, or a
 church running an online service for a different region, is the ordinary case,
 not the exotic one. **Never hard-code a zone**, for the same reason no web
 address is hard-coded — this is a product, not one customer's installation.

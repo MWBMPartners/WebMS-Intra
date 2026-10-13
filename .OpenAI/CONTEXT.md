@@ -408,6 +408,13 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     `Captcha::closedNotice()` itself. An address that is recorded or sent goes
     through `Logger::withoutJobToken()`.
 
+    **An event's time zone is `tblEvents.timezone`** (the column the event form
+    writes, and the event page, the calendar feed and the export read). Do NOT
+    read `tblEvents.eventTimezone` for an event's zone: only the feed importer
+    writes it, so for every event made in the portal it holds its default,
+    `Europe/London`, whatever zone the event is in (#604). An organisation's
+    zone is `tblSites.timezone`. Never type a zone into the code.
+
 15. **The ApiRouter trap.** Any address starting `api/` is intercepted
     before the normal routing table is ever consulted, and resolved purely
     by naming convention to `_apps/{appName}/api/{action}.php`. A handler
