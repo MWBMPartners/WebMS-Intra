@@ -57,6 +57,23 @@
  * The older portal-wide `isAdmin` flag counts for nothing here: it says
  * nothing about which organisation somebody belongs to.
  *
+ * WHO A "SELECTED GROUPS" LIST LETS IN (six kinds since part P10 of #514)
+ * ----------------------------------------------------------------------
+ * A member of the event's organisation who is named on the list, or who is
+ * in one of its small groups, holds one of its leadership roles today,
+ * holds one of its roles (#516), or is in one of its user groups or
+ * departments (#517). Every one of those must belong to the EVENT'S OWN
+ * organisation and — where the kind has an on/off switch — be switched on.
+ * Another organisation's role, user group or department on a list matches
+ * nobody, even for a person who is a member of both organisations.
+ *
+ * The last three tests are not written here. They are the pieces of SQL
+ * `Roles::holdsSql()`, `UserGroups::memberSql()` and
+ * `Departments::memberSql()` hand back, so "who holds a role" and "who is in
+ * a group" each have ONE definition, kept by the class that owns the tables.
+ * This file loads those three classes itself when nothing else has (see
+ * `borrowed()`), so it can still be loaded on its own.
+ *
  * MODES
  * -----
  * The caller names a MODE, which says who is looking and which parts of
@@ -103,6 +120,9 @@
  *   write their own "who is signed in" line. Every other method takes
  *   every input as an argument, so the self-test can load this file with
  *   no start-up code at all.
+ * - It cannot tell a role that was deleted from one that never existed, and
+ *   it does not need to: both match nobody. Roles have no on/off switch, so
+ *   there is no "switched-off role" for it to refuse.
  * - A row at the "groups" level makes the database do slightly more work
  *   than a public row in the same statement. It is not a separate query;
  *   the difference in time is accepted (#514 plan, section 1.3).
@@ -176,7 +196,9 @@ final class EventVisibility
     /**
      * Short table names used INSIDE the rule's own sub-queries, plus the
      * ones inside the fragments `Roles`, `UserGroups` and `Departments`
-     * hand back (which part P10 of #514 will put inside the rule).
+     * hand back (which part P10 of #514 put inside the rule: `ur16`/`us16`,
+     * `g17`/`ug17`/`us17` and `d17`/`ud17`/`us17`). If one of those classes
+     * ever renames a short name, add the new one here in the same change.
      *
      * A caller's event alias, or the table part of a viewer column, must
      * never be one of these. If it were, a reference such as `am.siteID`
@@ -194,7 +216,8 @@ final class EventVisibility
      *
      * In the SQL: {E} is the event alias, {V} the viewer (a `?` bound as a
      * whole number, or a column name), {T} today's date (a `?` bound as
-     * text), {OT}/{OI} whose audience list to read.
+     * text), {OT}/{OI} whose audience list to read, and {ROLE}, {UGROUP}
+     * and {DEPT} the three borrowed tests (see below).
      * In `binds`: one letter per bound value, in the order the `?` marks
      * appear — V for the viewer, T for today. A viewer given as a column
      * binds nothing, so its V letters add no value.
@@ -209,10 +232,22 @@ final class EventVisibility
      * through reflection and prove that `where()` really does refuse it.
      * Nothing in this class ever writes to it.
      *
-     * The role, user_group and department branches are `(0 = 1)`, matching
-     * nobody, until part P10 of #514 puts the fragments from #516 and #517
-     * there (`Roles::holdsSql()`, `UserGroups::memberSql()`,
-     * `Departments::memberSql()`), each adding one V.
+     * THE ROLE, USER GROUP AND DEPARTMENT BRANCHES (part P10 of #514). Each
+     * is a marker here — {ROLE}, {UGROUP}, {DEPT} — that `piece()` fills in
+     * with the piece of SQL `Roles::holdsSql()`, `UserGroups::memberSql()`
+     * or `Departments::memberSql()` hands back (see `borrowed()`). Each of
+     * those holds the viewer exactly once, so each adds one V letter: the
+     * last three of 'VVVTTVVV'. Until part P10 these three branches were
+     * `(0 = 1)`, matching nobody.
+     *
+     * Two ways of doing this were tried and rejected, so nobody tries them
+     * again (both proved on 12 October 2026, before part P10 was built):
+     *   - calling the three methods right here, inside the property. PHP
+     *     refuses a method call in a property's starting value ("Constant
+     *     expression contains invalid operations");
+     *   - handing the three methods the {V} marker, to be filled in later.
+     *     They accept only `?` or a plain column name and throw on anything
+     *     else — rightly, since that check is what keeps them safe to use.
      *
      * @var array<string, array{sql: string, binds: string}>
      */
@@ -238,11 +273,12 @@ final class EventVisibility
             'binds' => 'V',
         ],
         // 📋 IN_AUDIENCE(V, OT, OI): the viewer is on the owner's list —
-        //    named, or through a small group or a current leadership role of
-        //    the SAME organisation. Every reference is checked against the
-        //    event's organisation here as well as when the list was saved,
-        //    and a group or role that has been switched off or deleted
-        //    matches nobody (fails closed).
+        //    named, or through a small group, a current leadership role, a
+        //    role, a user group or a department of the SAME organisation.
+        //    Every reference is checked against the event's organisation
+        //    here as well as when the list was saved, and a group, role or
+        //    department that has been switched off or deleted matches
+        //    nobody (fails closed).
         //
         //    tblSmallGroupMembers is written out in full, with no short name,
         //    on purpose. The #514 plan wrote `FROM tblSmallGroupMembers sgm`;
@@ -263,11 +299,13 @@ final class EventVisibility
                 . ' JOIN tblLeadershipRoles lr ON lr.roleID = la.roleID AND lr.siteID = {E}.siteID AND lr.isActive = 1'
                 . ' WHERE la.roleID = am.refID AND la.userID = {V} AND la.siteID = {E}.siteID AND la.isActive = 1'
                 . ' AND (la.startDate IS NULL OR la.startDate <= {T}) AND (la.endDate IS NULL OR la.endDate >= {T})))'
-                . ' OR (am.kind = \'role\' AND (0 = 1))'
-                . ' OR (am.kind = \'user_group\' AND (0 = 1))'
-                . ' OR (am.kind = \'department\' AND (0 = 1))'
+                . ' OR (am.kind = \'role\' AND {ROLE})'
+                . ' OR (am.kind = \'user_group\' AND {UGROUP})'
+                . ' OR (am.kind = \'department\' AND {DEPT})'
                 . ' ))',
-            'binds' => 'VVVTT',
+            // person, small group, leadership role and its two dates, then
+            // role, user group, department — the order the marks appear.
+            'binds' => 'VVVTTVVV',
         ],
     ];
 
@@ -737,7 +775,13 @@ final class EventVisibility
     private static function piece(string $name, string $e, array $viewer, string $today, array $extra = []): array
     {
         $template = self::$pieces[$name];
-        $sql = strtr($template['sql'], ['{E}' => $e, '{V}' => $viewer['expr'], '{T}' => '?'] + $extra);
+        // 🧩 Only the audience piece holds the three borrowed markers, so
+        //    only it asks for them: the administrator and member pieces
+        //    never load the three classes at all. strtr() swaps every
+        //    marker in ONE pass and never reads its own output again, so a
+        //    `?` inside a borrowed piece is left exactly as it is.
+        $borrowed = ($name === 'audience') ? self::borrowed($viewer['expr'], $e) : [];
+        $sql = strtr($template['sql'], ['{E}' => $e, '{V}' => $viewer['expr'], '{T}' => '?'] + $extra + $borrowed);
 
         $types = '';
         $params = [];
@@ -756,6 +800,79 @@ final class EventVisibility
         }
 
         return self::add($sql, $types, $params);
+    }
+
+    /**
+     * The three tests the audience piece borrows (#514 part P10): does the
+     * viewer hold the listed ROLE, and is the viewer in the listed USER
+     * GROUP or DEPARTMENT — each in the EVENT'S OWN organisation.
+     *
+     * Each is asked of the class that owns those tables, with the same three
+     * things: the viewer, the number on the list row (`am.refID`), and the
+     * organisation. All three need an ACTIVE membership row of that
+     * organisation; a user group or department must also be switched on
+     * (`isActive = 1`; a department whose flag is empty counts as off).
+     *
+     * 🔒 THE ORGANISATION IS ALWAYS THE EVENT'S (`<alias>.siteID`), never
+     *    the viewer's and never the piece's own inner table. That is what
+     *    makes another organisation's role, group or department on a list
+     *    match nobody: a person who is a member of both organisations, and
+     *    holds the role in the OTHER one, has no holding row carrying THIS
+     *    organisation's number. (The tables themselves stop a holding row
+     *    from naming one organisation and a role of another: the foreign
+     *    keys `fk_user_role_role_site`, `fk_user_group_group_site` and
+     *    `fk_user_dept_dept_site` each tie the pair together.) Handing a
+     *    piece its own inner column instead — `ur16.siteID`, say — would
+     *    compare that column with itself, which is always true, and let
+     *    that person in. `tools/event-visibility-selftest.php` plants
+     *    exactly that mistake's victims (V18, V23 and V24).
+     *
+     * WHAT THESE CANNOT DO: they never let a global administrator through
+     * (that is the administrator branch's job, and it is switched off in
+     * some modes on purpose), and the role test does not look at
+     * `tblRoles` at all — a deleted role simply has no holding rows left,
+     * because they are deleted with it.
+     *
+     * WHY THE CLASS FILES ARE LOADED HERE. In the running portal the
+     * autoloader finds them and the `require_once` below never runs. But
+     * THREE self-tests load this file with no autoloader and without
+     * naming the three class files themselves:
+     * `tools/feed-resolver-selftest.php`,
+     * `tools/feed-importer-selftest.php` and this class's own,
+     * `tools/event-visibility-selftest.php`. Without the lines below they
+     * would stop with "class not found" at the first statement that holds
+     * the list test — whoever it is built for, a signed-out visitor
+     * included. That is a `where()` in session, anonymous, token or invite
+     * mode, and the detail answer in every mode but "key".
+     * (An earlier version of this comment said four, counting
+     * `tools/feed-admin-selftest.php`. That one has no autoloader either,
+     * but it names the three files in its own list, and so does not need
+     * these lines. The check of 13 October 2026 took the loader out and
+     * found that out; each of the three named above was then run without
+     * it and did stop.)
+     * `class_exists()` asks the autoloader first, so a class is never
+     * loaded twice. Loading the three files runs nothing: each only
+     * declares its class.
+     *
+     * @param string $viewerExpr `?` or a checked `alias.column` (see columnViewer()).
+     * @param string $e          Checked event alias.
+     *
+     * @return array{'{ROLE}': string, '{UGROUP}': string, '{DEPT}': string}
+     */
+    private static function borrowed(string $viewerExpr, string $e): array
+    {
+        foreach (['Roles', 'UserGroups', 'Departments'] as $class) {
+            if (class_exists(__NAMESPACE__ . '\\' . $class) === false) {
+                require_once __DIR__ . DIRECTORY_SEPARATOR . $class . '.php';
+            }
+        }
+        $organisation = $e . '.siteID';
+
+        return [
+            '{ROLE}'   => Roles::holdsSql($viewerExpr, 'am.refID', $organisation),
+            '{UGROUP}' => UserGroups::memberSql($viewerExpr, 'am.refID', $organisation),
+            '{DEPT}'   => Departments::memberSql($viewerExpr, 'am.refID', $organisation),
+        ];
     }
 
     /**

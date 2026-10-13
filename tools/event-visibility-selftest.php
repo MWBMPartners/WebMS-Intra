@@ -46,6 +46,68 @@
  * a key needed the website box and got full detail only on a Public
  * calendar — owner answer 3 of 17 September, replaced).
  *
+ * PART 10 OF #514 (viewers V17-V24, events E50-E52, calendar F6)
+ * ---------------------------------------------------------------
+ * Part 10 lets a "selected groups" list name a role (#516), a user group or
+ * a department (#517). Until then the rule answered "nobody" for all three.
+ * Checks R1 to R4, in a section of their own, prove with answers WRITTEN BY
+ * HAND:
+ *   R1 the right people are let in and nobody else — not a former member
+ *      who still holds all three, a switched-off account that does, or
+ *      somebody in a switched-off department;
+ *   R2 ANOTHER ORGANISATION'S role, user group or department on a list
+ *      matches nobody, even for a person who is a member of both
+ *      organisations (V18, V23, V24). E35's three rows of those kinds
+ *      pointed at the number 1 until part 10; they now point at
+ *      organisation B's role, user group and department;
+ *   R3 every change takes effect on the very next call;
+ *   R4 the form that binds the viewer and the form that takes the viewer
+ *      from a column agree, and a miscounted viewer is refused outright.
+ * On 13 October 2026 fourteen faults were planted, one at a time, in a
+ * scratch copy (never in the checkout), and each made this test fail on the
+ * check meant to catch it: a kind left matching nobody (three), the member
+ * test dropped (two), a holding judged by its OWN organisation instead of
+ * the event's (three), the list row's organisation not tested (one), a
+ * retired user group or a switched-off department still counting (two,
+ * planted in UserGroups and Departments), and a viewer letter too few, too
+ * many, or left as before part 10 (three).
+ * ONE NUMBER, SIX KINDS (check R9; viewers V40-V45, events E60-E65)
+ * ------------------------------------------------------------------
+ * The independent check of part 10 (13 October 2026) then planted two
+ * faults that the fourteen above had not thought of, and BOTH PASSED all
+ * 179 checks this test then had: the test `am.kind = 'role'` taken out of
+ * the rule (so a list row of any kind was read as a role number), and a
+ * department row also read as a user group number. Nothing was wrong in the
+ * rule. The fixture could not tell, because no two things in it shared a
+ * number — and on a real installation they do: six tables count their rows
+ * separately, and a fresh install already holds roles 1 to 14.
+ * So organisation A now has a role, a user group, a department, a small
+ * group and a leadership role that ALL carry one number, which is also one
+ * person's account number, each with one person of its own; and six events
+ * are each listed for ONE of those kinds. R9 requires each event to be seen
+ * by its own kind's person and by none of the other five. That holds every
+ * pair of kinds apart, both ways round.
+ * The same day those two faults, and the same slip in every other branch
+ * (eight in all: the kind test dropped from the role, user group,
+ * department, small group and leadership role branches; a department row
+ * read as a user group; a leadership role row read as a role; a small group
+ * row read as a user group), were planted in a copy, and each failed R9.
+ * The PERSON branch is held a little differently. It compares the row's
+ * `userID` column, which the portal fills for a person's row only, so on
+ * the portal's own rows dropping its kind test changes no answer. The role
+ * row of E61 therefore carries V1's number in that column, by hand: with
+ * the person branch's kind test dropped, V1 would be let in as if named.
+ * That fault was planted too, and failed R9.
+ *
+ * WHAT R1 TO R4 CANNOT SHOW. A "cache" cannot be planted in a class that
+ * only builds SQL text, so R3 shows that the rule reads live; it has no
+ * planted fault of its own beyond the two on/off tests. And one fault was
+ * planted expecting it to pass unnoticed, and it did: the membership test
+ * taken out of `Roles::holdsSql()` alone. The rule's own member test
+ * refuses a former member first, so nothing here can tell.
+ * `tools/roles-selftest.php` compares that piece of SQL word for word, and
+ * does fail on it (run the same day).
+ *
  * SAFETY
  * ------
  * It writes to the database it is given, so it REFUSES to run unless the
@@ -206,13 +268,19 @@ function setText(array $set): string
 const ORG_A = 900001;
 const ORG_B = 900002;
 
-// Viewers. V0 is nobody; V17-V20 are kept free for part P10; V30-V39 are
-// the extra cases (see the header).
+// Viewers. V0 is nobody; V1-V16 are the plan's; V17-V24 are part P10's
+// (roles, user groups and departments); V30-V39 are the extra cases (see
+// the header).
 $viewers = ['V0' => 0];
-for ($i = 1; $i <= 16; $i++) {
+for ($i = 1; $i <= 24; $i++) {
     $viewers['V' . $i] = 900100 + $i;
 }
 for ($i = 30; $i <= 39; $i++) {
+    $viewers['V' . $i] = 900100 + $i;
+}
+// V40-V45: the "one number, six kinds" people (added after part P10's
+// independent check, 13 October 2026; see SAME_NUMBER below).
+for ($i = 40; $i <= 45; $i++) {
     $viewers['V' . $i] = 900100 + $i;
 }
 
@@ -223,6 +291,7 @@ const F4 = 900204; // A, switched off, public
 const FB = 900205; // B, active, members
 const FB2 = 900206; // B, active, public (extra: only E31, an event of A, points at it)
 const F5 = 900207;  // A, active, public, "Don't show via API" ticked (#514 part P7: only E48 points at it)
+const F6 = 900208;  // A, active, groups (#514 part P10): its list names A's role, user group and department — and B's
 
 const G1 = 900401; // small group of A, active
 const G2 = 900402; // small group of A, switched off
@@ -230,8 +299,38 @@ const G3 = 900403; // small group of B, active (extra: put on A's F3 list, must 
 const L1 = 900451; // leadership role "Elder" of A, active
 const L2 = 900452; // leadership role of A, switched off (extra)
 const CHOICE_E10 = 900500; // the single-date choice owning E10's list {L1}
-const CHOICE_E35 = 900502; // extra: owns E35's list (a row of B naming V38; role, user group, department rows)
+const CHOICE_E35 = 900502; // extra: owns E35's list (a row of B naming V38; and organisation B's role, user group and department)
+const CHOICE_E52 = 900507; // part P10: owns E52's list, an event of B, naming B's own role, user group and department
 const RULE_E33 = 900610; // extra: owns E33's list {L1, L2}
+// Part P10 (#514): the three kinds of grouping #516 and #517 built. Each
+// organisation has one of each, so "the other organisation's" can be put on
+// a list and must match nobody.
+const RO_A = 900701; // role of A (tblRoles) — roles have no on/off switch
+const RO_B = 900702; // role of B
+const UG_A = 900711; // user group of A (tblGroups), in use
+const UG_B = 900712; // user group of B, in use
+const DP_A = 900721; // department of A (tblDepts), SWITCHED OFF in the fixture; check R3 switches it on and off
+const DP_B = 900722; // department of B, in use
+// 🔢 ONE NUMBER, SIX KINDS (added after part P10's independent check).
+//    A list row says what it names in TWO parts: a kind and a number. Six
+//    tables number their rows separately, so on a real installation the
+//    same number means a role, a user group, a department, a small group, a
+//    leadership role AND a person's account all at once (a fresh install
+//    already holds roles 1 to 14; the first user group an organisation makes
+//    is number 1 too). Until this was added every number in this fixture was
+//    different, so a rule that read a row of one kind as another kind's
+//    number passed every check here — the check planted exactly that and it
+//    did. Now organisation A has one of EACH carrying this one number, with
+//    a different person in each, and six events each listed for one kind
+//    only (E60 to E65). It is V40's own account number.
+const SAME_NUMBER = 900140;
+// The six lists, one per kind, each naming SAME_NUMBER and nothing else.
+const CHOICE_E60 = 900520; // person
+const CHOICE_E61 = 900521; // role
+const CHOICE_E62 = 900522; // user group
+const CHOICE_E63 = 900523; // department
+const CHOICE_E64 = 900524; // small group
+const CHOICE_E65 = 900525; // leadership role
 
 // The plan's fifteen events are numbered 900301-900321 and the extra cases
 // 900330-900345, so "the plan's events only" is simply eventID <= 900329.
@@ -243,6 +342,9 @@ $events = [
     'E36' => 900336, 'E37' => 900337, 'E38' => 900338, 'E40' => 900340, 'E41' => 900341,
     'E42' => 900342, 'E43' => 900343, 'E44' => 900344, 'E45' => 900345,
     'E46' => 900346, 'E47' => 900347, 'E48' => 900348,
+    'E50' => 900350, 'E51' => 900351, 'E52' => 900352, // part P10
+    // one number, six kinds: each listed for ONE kind only, all naming SAME_NUMBER
+    'E60' => 900360, 'E61' => 900361, 'E62' => 900362, 'E63' => 900363, 'E64' => 900364, 'E65' => 900365,
 ];
 const PLAN_LAST_EVENT = 900329;
 $eventName = array_flip($events);
@@ -264,6 +366,16 @@ function removeFixture(mysqli $db): void
     run($db, 'DELETE FROM tblLeadershipRoles WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     run($db, 'DELETE FROM tblSmallGroupMembers WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     run($db, 'DELETE FROM tblSmallGroups WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    // Part P10's holdings, then what they hold. The holdings would go with
+    // the membership rows anyway; the departments would NOT go with their
+    // organisation (that link has no "delete with it"), and leaving one
+    // behind would stop the organisations being removed at all.
+    run($db, 'DELETE FROM tblUserRoles WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    run($db, 'DELETE FROM tblUserGroups WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    run($db, 'DELETE FROM tblUserDepts WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    run($db, 'DELETE FROM tblRoles WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    run($db, 'DELETE FROM tblGroups WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    run($db, 'DELETE FROM tblDepts WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     run($db, 'DELETE FROM tblUserSites WHERE siteID IN (?, ?) OR userID BETWEEN 900100 AND 900199', 'ii', [ORG_A, ORG_B]);
     run($db, 'DELETE FROM tblUsers WHERE userID BETWEEN 900100 AND 900199');
     run($db, 'DELETE FROM tblSites WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
@@ -305,6 +417,11 @@ try {
         'V5' => [0, 0, 0], 'V6' => [1, 0, 0], 'V7' => [1, 0, 0], 'V8' => [1, 0, 1],
         'V9' => [1, 1, 0], 'V10' => [1, 0, 0], 'V11' => [1, 0, 0], 'V12' => [1, 0, 0],
         'V13' => [1, 0, 0], 'V14' => [1, 0, 0], 'V15' => [1, 0, 0], 'V16' => [1, 0, 0],
+        // part P10 (V22's ACCOUNT is switched off)
+        'V17' => [1, 0, 0], 'V18' => [1, 0, 0], 'V19' => [1, 0, 0], 'V20' => [1, 0, 0],
+        'V21' => [1, 0, 0], 'V22' => [0, 0, 0], 'V23' => [1, 0, 0], 'V24' => [1, 0, 0],
+        // one number, six kinds (all plain, active members of A)
+        'V40' => [1, 0, 0], 'V41' => [1, 0, 0], 'V42' => [1, 0, 0], 'V43' => [1, 0, 0], 'V44' => [1, 0, 0], 'V45' => [1, 0, 0],
         // extra cases
         'V30' => [1, 0, 0], 'V31' => [1, 0, 0], 'V32' => [0, 0, 1], 'V33' => [0, 0, 0], 'V34' => [1, 0, 0],
         'V35' => [1, 0, 0], 'V36' => [1, 0, 0], 'V37' => [1, 0, 0], 'V38' => [1, 0, 0], 'V39' => [1, 1, 0],
@@ -324,6 +441,15 @@ try {
         ['V6', ORG_A, 1, 1, 0], ['V7', ORG_B, 1, 1, 0], ['V9', ORG_A, 1, 0, 0], ['V10', ORG_A, 1, 0, 0],
         ['V11', ORG_A, 1, 0, 0], ['V12', ORG_A, 1, 0, 0], ['V13', ORG_A, 1, 0, 0], ['V14', ORG_A, 1, 0, 0],
         ['V15', ORG_A, 1, 0, 0], ['V16', ORG_A, 0, 0, 0],
+        // part P10: V21's row in A is switched off (a FORMER member whose
+        // holdings were never tidied away); V18, V23 and V24 are active
+        // members of BOTH organisations
+        ['V17', ORG_A, 1, 0, 0], ['V18', ORG_A, 1, 0, 0], ['V18', ORG_B, 1, 0, 0], ['V19', ORG_A, 1, 0, 0],
+        ['V20', ORG_A, 1, 0, 0], ['V21', ORG_A, 0, 0, 0], ['V22', ORG_A, 1, 0, 0],
+        ['V23', ORG_A, 1, 0, 0], ['V23', ORG_B, 1, 0, 0], ['V24', ORG_A, 1, 0, 0], ['V24', ORG_B, 1, 0, 0],
+        // one number, six kinds
+        ['V40', ORG_A, 1, 0, 0], ['V41', ORG_A, 1, 0, 0], ['V42', ORG_A, 1, 0, 0], ['V43', ORG_A, 1, 0, 0],
+        ['V44', ORG_A, 1, 0, 0], ['V45', ORG_A, 1, 0, 0],
         // extra cases (V32 and V39 have no membership rows at all)
         ['V30', ORG_A, 0, 1, 0], ['V31', ORG_A, 1, 0, 1], ['V33', ORG_A, 1, 1, 0], ['V34', ORG_A, 1, 0, 0],
         ['V35', ORG_A, 1, 0, 0], ['V36', ORG_A, 1, 0, 0], ['V37', ORG_A, 1, 0, 0], ['V37', ORG_B, 1, 0, 0],
@@ -358,11 +484,66 @@ try {
         ]
     );
 
+    // 🧩 Part P10 (#514): one role, one user group and one department in each
+    //    organisation, then who holds what. ORDER MATTERS: the membership
+    //    rows (above) and these three rows must exist BEFORE any holding,
+    //    because every holding is tied to both by a two-column link — a
+    //    holding of organisation B's role filed under organisation A cannot
+    //    be written at all.
+    //    A's department DP_A starts SWITCHED OFF; the others are in use.
+    run($db, "INSERT INTO tblRoles (roleID, siteID, roleKey, roleName, isStandard) VALUES (?, ?, 'selftest_p514_role', 'Selftest role R', 0), (?, ?, 'selftest_p514_role', 'Selftest role R of B', 0)", 'iiii', [RO_A, ORG_A, RO_B, ORG_B]);
+    run($db, "INSERT INTO tblGroups (groupID, siteID, groupName, isActive) VALUES (?, ?, 'Selftest user group UG', 1), (?, ?, 'Selftest user group UG of B', 1)", 'iiii', [UG_A, ORG_A, UG_B, ORG_B]);
+    run($db, "INSERT INTO tblDepts (deptID, siteID, deptName, isActive) VALUES (?, ?, 'Selftest department D', 0), (?, ?, 'Selftest department D of B', 1)", 'iiii', [DP_A, ORG_A, DP_B, ORG_B]);
+    // Who holds what: [viewer, organisation, role or null, user group or null, department or null]
+    //   V17 holds A's role.            V19 is in A's user group.      V20 is in A's department (switched off).
+    //   V21 (row in A switched off) and V22 (account switched off) each hold ALL THREE of A's.
+    //   V18 holds B's role, V23 is in B's user group, V24 is in B's department — and nothing of A's.
+    $holdings = [
+        ['V17', ORG_A, RO_A, null, null], ['V19', ORG_A, null, UG_A, null], ['V20', ORG_A, null, null, DP_A],
+        ['V21', ORG_A, RO_A, UG_A, DP_A], ['V22', ORG_A, RO_A, UG_A, DP_A],
+        ['V18', ORG_B, RO_B, null, null], ['V23', ORG_B, null, UG_B, null], ['V24', ORG_B, null, null, DP_B],
+    ];
+    foreach ($holdings as [$name, $org, $role, $group, $dept]) {
+        if ($role !== null) {
+            run($db, 'INSERT INTO tblUserRoles (userID, roleID, siteID) VALUES (?, ?, ?)', 'iii', [$viewers[$name], $role, $org]);
+        }
+        if ($group !== null) {
+            run($db, 'INSERT INTO tblUserGroups (userID, groupID, siteID) VALUES (?, ?, ?)', 'iii', [$viewers[$name], $group, $org]);
+        }
+        if ($dept !== null) {
+            run($db, 'INSERT INTO tblUserDepts (userID, deptID, siteID) VALUES (?, ?, ?)', 'iii', [$viewers[$name], $dept, $org]);
+        }
+    }
+
+    // 🔢 One number, six kinds (see SAME_NUMBER). Organisation A gets a role,
+    //    a user group, a department, a small group and a leadership role that
+    //    ALL carry the number 900140 — which is also V40's account number —
+    //    and each has exactly one person, who holds nothing else:
+    //      V40 is the person with that account number   V41 holds the role
+    //      V42 is in the user group                      V43 is in the department
+    //      V44 is in the small group                     V45 holds the leadership role
+    //    All five are switched on, so the ONLY thing that keeps, say, V41 away
+    //    from an event listed for "department 900140" is the rule reading the
+    //    row's kind.
+    if ($viewers['V40'] !== SAME_NUMBER) {
+        throw new LogicException('The fixture is wrong: SAME_NUMBER must be V40\'s own account number.');
+    }
+    run($db, "INSERT INTO tblRoles (roleID, siteID, roleKey, roleName, isStandard) VALUES (?, ?, 'selftest_p514_same', 'Selftest same-number role', 0)", 'ii', [SAME_NUMBER, ORG_A]);
+    run($db, "INSERT INTO tblGroups (groupID, siteID, groupName, isActive) VALUES (?, ?, 'Selftest same-number user group', 1)", 'ii', [SAME_NUMBER, ORG_A]);
+    run($db, "INSERT INTO tblDepts (deptID, siteID, deptName, isActive) VALUES (?, ?, 'Selftest same-number department', 1)", 'ii', [SAME_NUMBER, ORG_A]);
+    run($db, "INSERT INTO tblSmallGroups (groupID, siteID, groupName, groupSlug, isActive) VALUES (?, ?, 'Selftest same-number small group', 'selftest-p514-same', 1)", 'ii', [SAME_NUMBER, ORG_A]);
+    run($db, "INSERT INTO tblLeadershipRoles (roleID, siteID, roleName, roleSlug, isActive) VALUES (?, ?, 'Selftest same-number leadership role', 'selftest-p514-same', 1)", 'ii', [SAME_NUMBER, ORG_A]);
+    run($db, 'INSERT INTO tblUserRoles (userID, roleID, siteID) VALUES (?, ?, ?)', 'iii', [$viewers['V41'], SAME_NUMBER, ORG_A]);
+    run($db, 'INSERT INTO tblUserGroups (userID, groupID, siteID) VALUES (?, ?, ?)', 'iii', [$viewers['V42'], SAME_NUMBER, ORG_A]);
+    run($db, 'INSERT INTO tblUserDepts (userID, deptID, siteID) VALUES (?, ?, ?)', 'iii', [$viewers['V43'], SAME_NUMBER, ORG_A]);
+    run($db, "INSERT INTO tblSmallGroupMembers (siteID, groupID, userID, status) VALUES (?, ?, ?, 'active')", 'iii', [ORG_A, SAME_NUMBER, $viewers['V44']]);
+    run($db, "INSERT INTO tblLeadershipAssignments (siteID, roleID, userID, startDate, endDate, isActive) VALUES (?, ?, ?, '2020-01-01', NULL, 1)", 'iii', [ORG_A, SAME_NUMBER, $viewers['V45']]);
+
     // Calendars: [feedID, organisation, isActive, audienceLevel, apiOptOut]
     // `apiOptOut` is named on every row (#514 part P7): 0, "send to API keys",
     // everywhere except F5, whose box is ticked.
     $calendars = [[F1, ORG_A, 1, 'public', 0], [F2, ORG_A, 1, 'members', 0], [F3, ORG_A, 1, 'groups', 0], [F4, ORG_A, 0, 'public', 0],
-        [FB, ORG_B, 1, 'members', 0], [FB2, ORG_B, 1, 'public', 0], [F5, ORG_A, 1, 'public', 1]];
+        [FB, ORG_B, 1, 'members', 0], [FB2, ORG_B, 1, 'public', 0], [F5, ORG_A, 1, 'public', 1], [F6, ORG_A, 1, 'groups', 0]];
     foreach ($calendars as [$feed, $org, $active, $level, $feedApi]) {
         run(
             $db,
@@ -376,7 +557,14 @@ try {
     // Extra cases: G3 (a group of B) on F3's list, which must match nobody;
     // rule 900610's {L1, L2 switched off}; choice 900502's rows — one naming
     // V38 but carrying organisation B, and one each of the three kinds part
-    // P10 switches on (all of which must match nobody until then).
+    // P10 switched on, each pointing at ORGANISATION B's role, user group
+    // and department (so all three must match nobody, for good: check R2).
+    // Until part P10 those three rows pointed at the number 1 and matched
+    // nobody only because the rule answered "nobody" for the whole kind.
+    // Part P10: F6's own list names A's role, user group and department AND
+    // B's three (written in by hand: the form refuses another organisation's);
+    // choice 900507, of organisation B, names B's own three (the control
+    // that V18, V23 and V24 really do hold them, there).
     // [organisation, calendar, ownerType, ownerID, kind, refID, userID]
     $audience = [
         [ORG_A, F3, 'feed', F3, 'small_group', G1, null], [ORG_A, F3, 'feed', F3, 'small_group', G2, null],
@@ -385,8 +573,27 @@ try {
         [ORG_A, F3, 'feed', F3, 'small_group', G3, null],
         [ORG_A, F2, 'rule', RULE_E33, 'leadership_role', L1, null], [ORG_A, F2, 'rule', RULE_E33, 'leadership_role', L2, null],
         [ORG_B, F2, 'choice', CHOICE_E35, 'person', $viewers['V38'], $viewers['V38']],
-        [ORG_A, F2, 'choice', CHOICE_E35, 'role', 1, null], [ORG_A, F2, 'choice', CHOICE_E35, 'user_group', 1, null],
-        [ORG_A, F2, 'choice', CHOICE_E35, 'department', 1, null],
+        [ORG_A, F2, 'choice', CHOICE_E35, 'role', RO_B, null], [ORG_A, F2, 'choice', CHOICE_E35, 'user_group', UG_B, null],
+        [ORG_A, F2, 'choice', CHOICE_E35, 'department', DP_B, null],
+        // part P10
+        [ORG_A, F6, 'feed', F6, 'role', RO_A, null], [ORG_A, F6, 'feed', F6, 'user_group', UG_A, null],
+        [ORG_A, F6, 'feed', F6, 'department', DP_A, null],
+        [ORG_A, F6, 'feed', F6, 'role', RO_B, null], [ORG_A, F6, 'feed', F6, 'user_group', UG_B, null],
+        [ORG_A, F6, 'feed', F6, 'department', DP_B, null],
+        [ORG_B, FB, 'choice', CHOICE_E52, 'role', RO_B, null], [ORG_B, FB, 'choice', CHOICE_E52, 'user_group', UG_B, null],
+        [ORG_B, FB, 'choice', CHOICE_E52, 'department', DP_B, null],
+        // one number, six kinds: six lists, each ONE row, all naming SAME_NUMBER.
+        // The ROLE row also carries V1's account number in its `userID`
+        // column, on purpose. The portal fills that column for a person's
+        // row only; on a row of any other kind it means nothing, and the
+        // rule must not read it. It is what lets R9 hold the PERSON branch's
+        // own kind test: without that test, V1 would be let in as if named.
+        [ORG_A, F2, 'choice', CHOICE_E60, 'person', SAME_NUMBER, SAME_NUMBER],
+        [ORG_A, F2, 'choice', CHOICE_E61, 'role', SAME_NUMBER, $viewers['V1']],
+        [ORG_A, F2, 'choice', CHOICE_E62, 'user_group', SAME_NUMBER, null],
+        [ORG_A, F2, 'choice', CHOICE_E63, 'department', SAME_NUMBER, null],
+        [ORG_A, F2, 'choice', CHOICE_E64, 'small_group', SAME_NUMBER, null],
+        [ORG_A, F2, 'choice', CHOICE_E65, 'leadership_role', SAME_NUMBER, null],
     ];
     foreach ($audience as [$org, $feed, $ownerType, $ownerId, $kind, $refId, $userId]) {
         run(
@@ -422,7 +629,7 @@ try {
         ['E31', ORG_A, FB2,    1, 'public',  'full',  1, 'feed',   FB2,        'calendar', 0, 0],  // A's event on B's public calendar
         ['E32', ORG_A, F1,     1, 'public',  'full',  1, 'feed',   F1,         'calendar', 0, 1],  // stored answer runs out in an hour: still trusted
         ['E33', ORG_A, F2,     1, 'groups',  'full',  0, 'rule',   RULE_E33,   'rule',     0, 0],  // list {L1, L2 switched off}
-        ['E35', ORG_A, F2,     1, 'groups',  'full',  0, 'choice', CHOICE_E35, 'date',     0, 0],  // list: V38 on a row of B; P10's kinds
+        ['E35', ORG_A, F2,     1, 'groups',  'full',  0, 'choice', CHOICE_E35, 'date',     0, 0],  // list: V38 on a row of B; B's role, user group and department
         ['E36', ORG_A, F1,     1, 'public',  'full',  1, 'choice', 900503,     'date',     1, 0],  // private-marked, chosen public + website at FULL detail
         ['E37', ORG_A, F3,     1, 'public',  'basic', 0, 'rule',   900611,     'rule',     0, 0],  // public at basic, on a groups calendar
         ['E38', ORG_A, F2,     1, 'public',  'basic', 0, 'rule',   900612,     'rule',     1, 0],  // private-marked, public at basic, members calendar
@@ -436,6 +643,17 @@ try {
         ['E46', ORG_A, F1,     0, 'public',  'full',  0, 'feed',   F1,         'calendar', 0, 0],  // public, full, opted out of the API
         ['E47', ORG_A, F1,     0, 'public',  'full',  1, 'feed',   F1,         'calendar', 0, 0],  // public + website ticked, opted out of the API
         ['E48', ORG_A, F5,     0, 'public',  'full',  0, 'feed',   F5,         'calendar', 0, 0],  // stored answer 0, but its calendar's box is ticked
+        // #514 part P10: roles, user groups and departments on a list
+        ['E50', ORG_A, F6,     1, 'groups',  'full',  0, 'feed',   F6,         'calendar', 0, 0],  // list: A's role, user group, (switched-off) department — and B's three
+        ['E51', ORG_A, F6,     1, 'public',  'basic', 0, 'rule',   900614,     'rule',     0, 0],  // public at basic on F6: full detail only through F6's list
+        ['E52', ORG_B, FB,     1, 'groups',  'full',  0, 'choice', CHOICE_E52, 'date',     0, 0],  // an event of B, list: B's own role, user group, department
+        // one number, six kinds: each event's list is ONE row naming SAME_NUMBER
+        ['E60', ORG_A, F2,     1, 'groups',  'full',  0, 'choice', CHOICE_E60, 'date',     0, 0],  // list: the PERSON whose account is that number (V40)
+        ['E61', ORG_A, F2,     1, 'groups',  'full',  0, 'choice', CHOICE_E61, 'date',     0, 0],  // list: the ROLE with that number (V41 holds it)
+        ['E62', ORG_A, F2,     1, 'groups',  'full',  0, 'choice', CHOICE_E62, 'date',     0, 0],  // list: the USER GROUP with that number (V42)
+        ['E63', ORG_A, F2,     1, 'groups',  'full',  0, 'choice', CHOICE_E63, 'date',     0, 0],  // list: the DEPARTMENT with that number (V43)
+        ['E64', ORG_A, F2,     1, 'groups',  'full',  0, 'choice', CHOICE_E64, 'date',     0, 0],  // list: the SMALL GROUP with that number (V44)
+        ['E65', ORG_A, F2,     1, 'groups',  'full',  0, 'choice', CHOICE_E65, 'date',     0, 0],  // list: the LEADERSHIP ROLE with that number (V45)
     ];
     // `importApiOptOut` is named on EVERY fixture event, 0 unless listed here.
     // The column defaults to 1 (the resolver's narrow default, migration 206),
@@ -530,6 +748,13 @@ try {
         'V6' => $v6, 'V7' => $withB($v0), 'V8' => $withB($v6), 'V9' => $v1, 'V10' => $plus($v1, 'E5'),
         'V11' => $v1, 'V12' => $v1, 'V13' => $plus($v1, 'E10'), 'V14' => $v1, 'V15' => $plus($v1, 'E5'),
         'V16' => $v0,
+        // part P10, on the plan's events (none of which is on a list of the
+        // new kinds, so each is simply a member, a former member, a
+        // switched-off account, or a member of both organisations)
+        'V17' => $v1, 'V18' => $withB($v1), 'V19' => $v1, 'V20' => $v1, 'V21' => $v0, 'V22' => $v0,
+        'V23' => $withB($v1), 'V24' => $withB($v1),
+        // one number, six kinds: plain members of A on the plan's events
+        'V40' => $v1, 'V41' => $v1, 'V42' => $v1, 'V43' => $v1, 'V44' => $v1, 'V45' => $v1,
         // extra cases, on the plan's events
         'V30' => $v0, 'V31' => $v6, 'V32' => $v0, 'V33' => $v0, 'V34' => $v1, 'V35' => $v1, 'V36' => $v1,
         'V37' => $withB($v1), 'V38' => $withB($v1), 'V39' => $v0,
@@ -542,6 +767,13 @@ try {
         'V12' => 'member of A, in switched-off group G2', 'V13' => 'member of A, current Elder',
         'V14' => 'member of A, Elder term ended yesterday', 'V15' => 'member of A, named on F3',
         'V16' => 'named on F3, row in A switched off',
+        'V17' => 'member of A, holds A\'s role R', 'V18' => 'member of A and B, holds only B\'s role',
+        'V19' => 'member of A, in A\'s user group UG', 'V20' => 'member of A, in A\'s department D, which is switched off',
+        'V21' => 'holds all three of A\'s, row in A switched off', 'V22' => 'holds all three of A\'s, ACCOUNT switched off',
+        'V23' => 'member of A and B, in only B\'s user group', 'V24' => 'member of A and B, in only B\'s department',
+        'V40' => 'member of A whose account number is the shared number', 'V41' => 'member of A, holds the role with the shared number',
+        'V42' => 'member of A, in the user group with the shared number', 'V43' => 'member of A, in the department with the shared number',
+        'V44' => 'member of A, in the small group with the shared number', 'V45' => 'member of A, holds the leadership role with the shared number',
         'V30' => 'site-administrator flag on A, but the row is switched off', 'V31' => 'isSiteRootAdmin of A (not isSiteAdmin)',
         'V32' => 'global administrator whose account is switched off', 'V33' => 'site administrator of A whose ACCOUNT is switched off',
         'V34' => 'member of A, assigned to the switched-off role L2', 'V35' => 'member of A, Elder assignment switched off',
@@ -591,7 +823,7 @@ try {
     $got = $seersOf('E33', $admins);
     check('E33 (list {Elder, switched-off role L2}): among non-administrators only V13 sees it — not V34 (switched-off role), V35 (switched-off assignment) or V36 (term starts tomorrow)', $got === ['V13'], 'got ' . setText($got));
     $got = $seersOf('E35', $admins);
-    check('E35 (V38 named only on a list row of organisation B; role, user group and department rows): no non-administrator sees it', $got === [], 'got ' . setText($got));
+    check('E35 (V38 named only on a list row of organisation B; and organisation B\'s role, user group and department on A\'s list): no non-administrator sees it — R2, see the part 10 section for who it would be', $got === [], 'got ' . setText($got));
     $got = $seersOf('E30', $admins);
     check('E30 (its audience points at another owner\'s list): no non-administrator sees it', $got === [], 'got ' . setText($got));
     $got = $seersOf('E42');
@@ -834,6 +1066,221 @@ try {
     }
 
     // -------------------------------------------------------------------------
+    echo "\n=== part 10 (#514): roles, user groups and departments on a list — checks R1 to R4 ===\n";
+    // WHAT THIS SECTION IS FOR. Until part P10 the rule answered "nobody" for
+    // a list entry that names a role, a user group or a department. It now
+    // asks Roles, UserGroups and Departments who holds or is in them. A
+    // mistake here shows somebody an event they must not see, so every
+    // expected answer below is WRITTEN BY HAND, never worked out by the code
+    // under test:
+    //   E50 — "selected groups" on calendar F6, whose list names A's role R,
+    //         A's user group UG, A's department D (switched off), and — put
+    //         there by hand — organisation B's role, user group and department;
+    //   E51 — public at basic detail on F6, so only F6's list gives full detail;
+    //   E52 — an event of organisation B whose list names B's own three;
+    //   E35 — an event of A whose list names only B's three (and V38 on a row
+    //         of B). It is older than part P10: see the header.
+    /** @return list<string> every viewer, in the fixture's order, who sees $event in $mode */
+    $whoSees = static function (string $event, string $mode) use ($visible, $viewers): array {
+        $who = [];
+        foreach ($viewers as $name => $id) {
+            if (in_array($event, $visible($mode, $id, null, true), true) === true) {
+                $who[] = $name;
+            }
+        }
+
+        return $who;
+    };
+    /** Does this one viewer see E50, signed in? Asked afresh every time (check R3 depends on that). */
+    $seesE50 = static fn (string $name): bool => in_array('E50', $visible(EventVisibility::MODE_SESSION, $viewers[$name], null, true), true);
+
+    // ---- R1: the three kinds let the right people in, and nobody else ----
+    $e50Session = ['V6', 'V8', 'V17', 'V19', 'V31'];
+    $got = $whoSees('E50', EventVisibility::MODE_SESSION);
+    check('R1 E50 (list: A\'s role R, user group UG and switched-off department D), signed in: exactly V17 (holds R), V19 (in UG) and the administrators V6, V8 and V31 — not V20 (D is switched off), V21 (a former member holding all three), V22 (a switched-off account holding all three), V1 (a plain member) or V0 (nobody)',
+        $got === $e50Session, 'got ' . setText($got));
+    $got = $whoSees('E50', EventVisibility::MODE_TOKEN);
+    check('R1 E50 in token mode (a personal feed, no administrator powers): exactly V17 and V19', $got === ['V17', 'V19'], 'got ' . setText($got));
+    $leaks = [];
+    foreach ([EventVisibility::MODE_ANONYMOUS, EventVisibility::MODE_WEBSITE, EventVisibility::MODE_KEY, EventVisibility::MODE_BULK_MEMBERS] as $mode) {
+        // These modes always look as nobody, so the holder V17 is passed on
+        // purpose: a mode that started trusting the viewer it is handed
+        // would show it here.
+        foreach (array_intersect($visible($mode, $viewers['V17'], null, true), ['E50', 'E52', 'E35']) as $e) {
+            $leaks[] = "{$e} in {$mode}";
+        }
+    }
+    check('R1 a signed-out visitor, the public website, an API key and the newsletter list never see E50, E52 or E35 (asked while handing each mode the holder V17)', $leaks === [], implode('; ', $leaks));
+    $wantFull = ['V0' => 0, 'V1' => 0, 'V6' => 1, 'V17' => 1, 'V19' => 1, 'V20' => 0, 'V21' => 0, 'V22' => 0];
+    $gotFull = [];
+    foreach ($wantFull as $name => $unused) {
+        $gotFull[$name] = $canSeeFull(EventVisibility::MODE_SESSION, $viewers[$name], $events['E51']);
+    }
+    check('R1 full detail of E51 (public, basic, on F6) comes only through F6\'s list: 1 for V17, V19 and the administrator V6; 0 for V0, V1, V20, V21 and V22',
+        $gotFull === $wantFull, json_encode($gotFull));
+
+    // ---- R2: another organisation's role, user group or department NEVER counts ----
+    // V18, V23 and V24 are active members of BOTH organisations. Each holds
+    // exactly one thing, in organisation B: the role, the user group, the
+    // department. A's lists (E35's and F6's) name those three of B's. If the
+    // rule tied a holding to the wrong organisation — the viewer's, or the
+    // holding's own — they would see A's events. They must not.
+    $crossOrg = ['V18', 'V23', 'V24'];
+    $areMembersOfA = [];
+    foreach ($crossOrg as $name) {
+        $areMembersOfA[$name] = in_array('E4', $visible(EventVisibility::MODE_SESSION, $viewers[$name]), true); // E4 is a members-only event of A
+    }
+    check('R2 set-up: V18, V23 and V24 really are members of A (each sees A\'s members-only E4), so only the list can be keeping them out',
+        $areMembersOfA === ['V18' => true, 'V23' => true, 'V24' => true], json_encode($areMembersOfA));
+    $got = $whoSees('E52', EventVisibility::MODE_TOKEN);
+    check('R2 control: E52, an event of organisation B listing B\'s own role, user group and department, is seen (token mode) by exactly V18, V23 and V24 — their holdings are real, there',
+        $got === $crossOrg, 'got ' . setText($got));
+    $wrongly = [];
+    foreach ([EventVisibility::MODE_SESSION, EventVisibility::MODE_TOKEN, EventVisibility::MODE_INVITE] as $mode) {
+        foreach (['E35', 'E50'] as $e) {
+            foreach (array_intersect($whoSees($e, $mode), $crossOrg) as $name) {
+                $wrongly[] = "{$name} sees {$e} in {$mode}";
+            }
+        }
+    }
+    check('R2 ANOTHER ORGANISATION\'S ROLE, USER GROUP OR DEPARTMENT NEVER COUNTS: V18 (holds B\'s role), V23 (in B\'s user group) and V24 (in B\'s department) see neither E35 nor E50, whose lists name those three of B\'s — in session, token and invite mode',
+        $wrongly === [], implode('; ', $wrongly));
+    $gotFull = [];
+    foreach ($crossOrg as $name) {
+        $gotFull[$name] = $canSeeFull(EventVisibility::MODE_SESSION, $viewers[$name], $events['E51']);
+    }
+    check('R2 …and they get title, date and time only on E51, whose calendar\'s list names B\'s three', $gotFull === ['V18' => 0, 'V23' => 0, 'V24' => 0], json_encode($gotFull));
+    $got = array_values(array_diff($whoSees('E52', EventVisibility::MODE_SESSION), ['V7', 'V8']));
+    check('R2 the other way round: A\'s holders (V17, V19, V20) do not see B\'s E52 — signed in, only V18, V23, V24 and B\'s administrators V7 and V8 do', $got === $crossOrg, 'got ' . setText($got));
+
+    // ---- R3: every change takes effect on the very next call ----
+    // Nothing is cached anywhere: the rule is SQL, read at the moment
+    // somebody looks. Each step changes ONE row the way the portal's own
+    // pages would, asks again at once, and then puts the row back, so the
+    // fixture ends this section exactly as it began (the last check says so).
+    $v17 = $viewers['V17'];
+    $before = $seesE50('V17');
+    run($db, 'DELETE FROM tblUserRoles WHERE userID = ? AND roleID = ?', 'ii', [$v17, RO_A]); // the role taken off V17
+    $without = $seesE50('V17');
+    run($db, 'INSERT INTO tblUserRoles (userID, roleID, siteID) VALUES (?, ?, ?)', 'iii', [$v17, RO_A, ORG_A]);
+    check('R3 a role taken off a person: V17 sees E50, then on the very next call does not, then does again once it is given back',
+        $before === true && $without === false && $seesE50('V17') === true, json_encode([$before, $without]));
+    $before = $seesE50('V19');
+    run($db, 'UPDATE tblGroups SET isActive = 0 WHERE groupID = ?', 'i', [UG_A]); // the user group retired
+    $retired = $seesE50('V19');
+    run($db, 'UPDATE tblGroups SET isActive = 1 WHERE groupID = ?', 'i', [UG_A]);
+    check('R3 a user group retired: V19 sees E50, then on the very next call does not, then does again once it is reinstated',
+        $before === true && $retired === false && $seesE50('V19') === true, json_encode([$before, $retired]));
+    $before = $seesE50('V20');
+    run($db, 'UPDATE tblDepts SET isActive = 1 WHERE deptID = ?', 'i', [DP_A]); // the department switched ON
+    $switchedOn = $seesE50('V20');
+    $stillOut = [$seesE50('V21'), $seesE50('V22')];
+    check('R3 a department switched on: V20 does not see E50, then on the very next call does — while V21 (former member) and V22 (switched-off account), who are in that department too, still do not',
+        $before === false && $switchedOn === true && $stillOut === [false, false], json_encode([$before, $switchedOn, $stillOut]));
+    run($db, 'UPDATE tblUserSites SET isActive = 0 WHERE userID = ? AND siteID = ?', 'ii', [$viewers['V20'], ORG_A]); // V20's membership of A ended
+    $ended = $seesE50('V20');
+    run($db, 'UPDATE tblUserSites SET isActive = 1 WHERE userID = ? AND siteID = ?', 'ii', [$viewers['V20'], ORG_A]);
+    check('R3 …then V20\'s membership of A switched off: refused again on the very next call (and let back in when it is switched on)',
+        $ended === false && $seesE50('V20') === true, json_encode([$ended]));
+    run($db, 'UPDATE tblDepts SET isActive = NULL WHERE deptID = ?', 'i', [DP_A]); // an EMPTY flag, which the column allows
+    $emptyFlag = $seesE50('V20');
+    run($db, 'UPDATE tblDepts SET isActive = 0 WHERE deptID = ?', 'i', [DP_A]); // back to how the fixture began
+    check('R3 a department whose on/off flag is EMPTY counts as switched off: V20 does not see E50', $emptyFlag === false);
+    $got = $whoSees('E50', EventVisibility::MODE_SESSION);
+    check('R3 with every row put back, E50 is seen by exactly the R1 set again', $got === $e50Session, 'got ' . setText($got));
+
+    // ---- R4: the viewer bound as a number, and the viewer taken from a column ----
+    // The three new tests each hold the viewer once. With a bound viewer
+    // that is one more value each; with a column viewer, none. A letter too
+    // few or too many is refused outright (the planted faults in the next
+    // section); here the two forms are run for real and must agree.
+    $columnWho = static function (string $event, string $mode) use ($visibleByColumn, $viewers): array {
+        $who = [];
+        foreach ($viewers as $name => $id) {
+            if (in_array($event, $visibleByColumn($mode, $id), true) === true) {
+                $who[] = $name;
+            }
+        }
+
+        return $who;
+    };
+    check('R4 the column form (viewer from r.userID) lets in exactly the same people as the bound form: E50 for V17 and V19, E52 for V18, V23 and V24 (token mode), and nobody but administrators for E35 (session mode)',
+        $columnWho('E50', EventVisibility::MODE_TOKEN) === ['V17', 'V19'] && $columnWho('E52', EventVisibility::MODE_TOKEN) === $crossOrg
+        && $columnWho('E35', EventVisibility::MODE_SESSION) === ['V6', 'V8', 'V31'],
+        json_encode([$columnWho('E50', EventVisibility::MODE_TOKEN), $columnWho('E52', EventVisibility::MODE_TOKEN), $columnWho('E35', EventVisibility::MODE_SESSION)]));
+    $fullByColumn = static function (string $mode, int $viewerId, int $eventId) use ($db, $today): int {
+        $f = EventVisibility::fullDetailSelectForColumn('e', 'r.userID', $mode, $today);
+        $rows = run($db, 'SELECT e.eventID, ' . $f['sql'] . ' FROM tblEvents e JOIN (SELECT ? AS userID) r WHERE e.eventID = ?', $f['types'] . 'ii', array_merge($f['params'], [$viewerId, $eventId]));
+
+        return (int) ($rows[0]['canSeeFull'] ?? -1);
+    };
+    $gotFull = [];
+    foreach (['V17', 'V19', 'V20', 'V18', 'V1'] as $name) {
+        $gotFull[$name] = $fullByColumn(EventVisibility::MODE_TOKEN, $viewers[$name], $events['E51']);
+    }
+    check('R4 the column form of the detail answer agrees too: E51 is 1 for V17 and V19, 0 for V20, V18 and V1 (token mode)',
+        $gotFull === ['V17' => 1, 'V19' => 1, 'V20' => 0, 'V18' => 0, 'V1' => 0], json_encode($gotFull));
+    $bound  = EventVisibility::where('e', EventVisibility::MODE_TOKEN, 1, $today);
+    $column = EventVisibility::whereForColumn('e', 'r.userID', EventVisibility::MODE_TOKEN, $today);
+    check('R4 in token mode a bound viewer binds 9 whole numbers and 2 dates (three member tests, and the viewer once in each of the list\'s six kinds); a column viewer binds the 2 dates only',
+        $bound['types'] === 'iiiiiissiii' && $column['types'] === 'ss' && count($bound['params']) === 11 && $column['params'] === [$today, $today],
+        $bound['types'] . ' / ' . $column['types']);
+
+    // -------------------------------------------------------------------------
+    echo "\n=== one number, six kinds: a list row of one kind is never read as another (check R9) ===\n";
+    // WHY THIS SECTION EXISTS. Part P10's independent check (13 October 2026)
+    // took `am.kind = 'role'` out of the rule, so that a list row of ANY kind
+    // was read as a role number, and this whole test still passed. It also
+    // made the rule read a department row as a user group number: passed
+    // again. Nothing was wrong in the rule; the fixture simply could not
+    // tell, because no two things in it shared a number. On a real
+    // installation they do: six tables count their rows separately.
+    //
+    // So six things of organisation A now carry ONE number (SAME_NUMBER), each
+    // with one person of its own, and six events are each listed for ONE of
+    // them. Each event must be seen by its own person and by none of the
+    // other five. That covers every pair of kinds, both ways round — the two
+    // easiest to confuse included, because they share a column name: a role
+    // and a leadership role ("roleID"), a user group and a small group
+    // ("groupID"). Every expected answer is written out by hand.
+    $oneKind = [
+        'E60' => ['a PERSON', 'V40', 'whose account number it is'],
+        'E61' => ['a ROLE', 'V41', 'who holds that role; the row also carries V1\'s number in its userID column, which must count for nothing'],
+        'E62' => ['a USER GROUP', 'V42', 'who is in that user group'],
+        'E63' => ['a DEPARTMENT', 'V43', 'who is in that department'],
+        'E64' => ['a SMALL GROUP', 'V44', 'who is in that small group'],
+        'E65' => ['a LEADERSHIP ROLE', 'V45', 'who holds that leadership role'],
+    ];
+    // The set-up is checked, not assumed: a fixture in which the six did NOT
+    // share the number, or one of them was switched off or empty, would make
+    // every check below pass for the wrong reason.
+    $sameNumber = SAME_NUMBER;
+    $usersOf = static fn (string $sql, string $types, array $params): array => array_map(
+        static fn (array $r): int => (int) $r['userID'], run($db, $sql, $types, $params)
+    );
+    $sharing = [
+        'role'            => $usersOf('SELECT ur.userID FROM tblUserRoles ur JOIN tblRoles r ON r.roleID = ur.roleID AND r.siteID = ur.siteID WHERE ur.roleID = ? AND ur.siteID = ?', 'ii', [$sameNumber, ORG_A]),
+        'user group'      => $usersOf('SELECT tblUserGroups.userID FROM tblGroups g JOIN tblUserGroups ON tblUserGroups.groupID = g.groupID AND tblUserGroups.siteID = g.siteID WHERE g.groupID = ? AND g.siteID = ? AND g.isActive = 1', 'ii', [$sameNumber, ORG_A]),
+        'department'      => $usersOf('SELECT ud.userID FROM tblDepts d JOIN tblUserDepts ud ON ud.deptID = d.deptID AND ud.siteID = d.siteID WHERE d.deptID = ? AND d.siteID = ? AND d.isActive = 1', 'ii', [$sameNumber, ORG_A]),
+        'small group'     => $usersOf("SELECT tblSmallGroupMembers.userID FROM tblSmallGroupMembers JOIN tblSmallGroups sg ON sg.groupID = tblSmallGroupMembers.groupID AND sg.siteID = tblSmallGroupMembers.siteID AND sg.isActive = 1 WHERE tblSmallGroupMembers.groupID = ? AND tblSmallGroupMembers.siteID = ? AND tblSmallGroupMembers.status = 'active'", 'ii', [$sameNumber, ORG_A]),
+        'leadership role' => $usersOf('SELECT la.userID FROM tblLeadershipAssignments la JOIN tblLeadershipRoles lr ON lr.roleID = la.roleID AND lr.siteID = la.siteID AND lr.isActive = 1 WHERE la.roleID = ? AND la.siteID = ? AND la.isActive = 1', 'ii', [$sameNumber, ORG_A]),
+        'account'         => $usersOf('SELECT u.userID FROM tblUsers u JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 WHERE u.userID = ? AND u.isActive = 1', 'ii', [ORG_A, $sameNumber]),
+    ];
+    check('R9 set-up: in organisation A a role, a user group, a department, a small group, a leadership role and an account ALL carry the number ' . $sameNumber . ', each is switched on, and each has one person of its own (V41, V42, V43, V44, V45; the account is V40)',
+        $sharing === [
+            'role' => [$viewers['V41']], 'user group' => [$viewers['V42']], 'department' => [$viewers['V43']],
+            'small group' => [$viewers['V44']], 'leadership role' => [$viewers['V45']], 'account' => [$viewers['V40']],
+        ], json_encode($sharing));
+    foreach ($oneKind as $event => [$kindWords, $person, $because]) {
+        $token   = $whoSees($event, EventVisibility::MODE_TOKEN);
+        $session = array_values(array_diff($whoSees($event, EventVisibility::MODE_SESSION), $admins));
+        $column  = $columnWho($event, EventVisibility::MODE_TOKEN);
+        check("R9 {$event}, listed only for {$kindWords} numbered {$sameNumber}: {$person} ({$because}) sees it, and none of the five others whose own thing carries the same number — in token mode, signed in, and with the viewer taken from a column",
+            $token === [$person] && $session === [$person] && $column === [$person],
+            'token ' . setText($token) . ' session, administrators aside, ' . setText($session) . ' column ' . setText($column));
+    }
+
+    // -------------------------------------------------------------------------
     echo "\n=== the placeholder count is enforced (a fault planted through reflection) ===\n";
     $add = new ReflectionMethod(EventVisibility::class, 'add');
     foreach ([['a = ?', '', []], ['a = ?', 'i', []], ['a = ?', 'ii', [1, 2]], ['a = 1', 'i', [1]]] as [$piece, $types, $values]) {
@@ -849,7 +1296,11 @@ try {
     $plants = [
         'the administrator piece given one viewer letter too many' => static function (array $p): array { $p['admin']['binds'] = 'VVV'; return $p; },
         'the membership piece given an extra ? in its SQL'          => static function (array $p): array { $p['member']['sql'] .= ' AND 1 = ?'; return $p; },
-        'the audience piece missing one of its two date letters'     => static function (array $p): array { $p['audience']['binds'] = 'VVVT'; return $p; },
+        // The audience piece's true letters are 'VVVTTVVV' since part P10.
+        'the audience piece missing one of its two date letters'     => static function (array $p): array { $p['audience']['binds'] = 'VVVTVVV'; return $p; },
+        'the audience piece with one viewer letter too FEW for the role, user group and department tests (part P10, check R4)'  => static function (array $p): array { $p['audience']['binds'] = 'VVVTTVV'; return $p; },
+        'the audience piece with one viewer letter too MANY (part P10, check R4)' => static function (array $p): array { $p['audience']['binds'] = 'VVVTTVVVV'; return $p; },
+        'the audience piece still carrying the letters it had before part P10' => static function (array $p): array { $p['audience']['binds'] = 'VVVTT'; return $p; },
     ];
     foreach ($plants as $label => $plant) {
         $piecesProp->setValue(null, $plant($original));

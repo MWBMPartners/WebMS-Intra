@@ -3274,13 +3274,19 @@ final class FeedAdmin
      * MATCHED HERE, and the self-test will say so if it is not — as long as
      * its made-up world holds the kind of person the change is about.
      *
-     * PART 10 MUST EXTEND THAT WORLD. The `role`, `user_group` and
-     * `department` kinds match nobody today (below). When part 10 makes them
-     * match people, it must change this copy AND add to the self-test's
-     * made-up world (`pa_resetWorld()`) a current holder, a former one and
-     * one in a switched-off grouping of each new kind — without them the
-     * oracle cannot see a copy that ignores those kinds, exactly as the old
-     * seven-viewer panel could not see role holders.
+     * PART 10 EXTENDED THAT WORLD (13 October 2026). Until part 10 of #514
+     * the `role`, `user_group` and `department` kinds matched nobody, in the
+     * rule and here. Part 10 made them match people in both, in the same
+     * change, and added to the self-test's made-up world (`pa_resetWorld()`)
+     * a current holder of each, a former member who still holds all three,
+     * a switched-off account that does, a member of a retired user group
+     * and of a switched-off department, one in a department whose on/off
+     * flag is empty, and a member of both organisations who holds only the
+     * OTHER organisation's three. Without them the oracle could not see a
+     * copy that ignored those kinds, exactly as the old seven-viewer panel
+     * could not see role holders. A SEVENTH KIND WOULD NEED THE SAME: the
+     * rule, this copy, `ExternalAudience`, the picker, and people of that
+     * kind in the world.
      *
      * THE OWNER'S TWO DECISIONS: 25 September 2026 — keep the "changed who
      * can see it" sentence, done properly; 27 September 2026 — do it with
@@ -3302,58 +3308,88 @@ final class FeedAdmin
      *   4. Asking the real rule about every account (fix round 4, part B as
      *      first decided). Exact, but far too slow — the numbers above.
      *
-     * THE RULE IT COPIES — `EventVisibility.php` as of fix round 4, line
-     * numbers given so the two can be read side by side:
+     * THE RULE IT COPIES — `EventVisibility.php`, each part named by the
+     * piece or branch of that file it copies, so the two can be read side
+     * by side. (Until part 10 of #514 this list gave LINE NUMBERS instead.
+     * They were right when written and went stale the moment anything was
+     * added higher up that file — which part 10 did. Names do not move.)
      *   - The calendar must exist, belong to this organisation and be
      *     switched on, or NOBODY sees the event, administrators included
-     *     (line 619, inside every branch). Signature: "nobody".
-     *   - Past `importRecheckAt` (line 564), or a level other than public,
-     *     members or groups: only administrators (the general branch, lines
-     *     589-600; the other modes, 566-588, test the level and freshness
-     *     too). Signature: "admins".
-     *   - "public": everyone signed in or out (line 596); the public website
-     *     only with `importWebsite = 1` (566-572); API keys only with the
-     *     event's `importApiOptOut = 0` (573-584) AND the calendar's own
-     *     `apiOptOut = 0` (616, tested live). Signature: the level, the
-     *     website box, and whether keys receive it.
-     *   - "members": active members of this organisation (597, the member
-     *     test 235-238) and the newsletter list (585-588); never the website
-     *     or keys, so neither box counts. Signature: the level alone.
-     *   - "groups": the members the list lets in (598, the audience piece
-     *     254-270). The list is read by `importAudienceType` /
-     *     `importAudienceID` AND the organisation (256), never by calendar.
+     *     (buildWhere()'s `xf` calendar test, inside every branch).
+     *     Signature: "nobody".
+     *   - Past `importRecheckAt` (buildWhere()'s `$fresh`), or a level other
+     *     than public, members or groups: only administrators (the general
+     *     branch of buildWhere(); the website, key and bulkMembers branches
+     *     test the level and freshness too). Signature: "admins".
+     *   - "public": everyone signed in or out (the general branch's public
+     *     line); the public website only with `importWebsite = 1` (the
+     *     website branch); API keys only with the event's
+     *     `importApiOptOut = 0` (the key branch) AND the calendar's own
+     *     `apiOptOut = 0` (`$apiTest`, tested live). Signature: the level,
+     *     the website box, and whether keys receive it.
+     *   - "members": active members of this organisation (the general
+     *     branch's members line; the `member` piece) and the newsletter list
+     *     (the bulkMembers branch); never the website or keys, so neither
+     *     box counts. Signature: the level alone.
+     *   - "groups": the members the list lets in (the general branch's
+     *     groups line; the `audience` piece). The list is read by
+     *     `importAudienceType` / `importAudienceID` AND the organisation
+     *     (the audience piece's first line), never by calendar.
      *     Signature: the sorted ACCOUNT NUMBERS it lets in, worked out with
      *     the rule's own conditions — an ACTIVE account with an ACTIVE
-     *     membership row here (235-238) who is named on the list (257), or
-     *     an 'active' member of an ACTIVE small group of this organisation
-     *     (258-261), or the holder of an active term — started on or before
-     *     `$today`, not ended before it — of an ACTIVE leadership role of
-     *     this organisation (262-265). The `role`, `user_group` and
-     *     `department` kinds match nobody (266-268), so they add nobody here.
+     *     membership row here (the `member` piece) who is, in the audience
+     *     piece's order:
+     *       1. named on the list; or
+     *       2. an 'active' member of an ACTIVE small group of this
+     *          organisation; or
+     *       3. the holder of an active term — started on or before
+     *          `$today`, not ended before it — of an ACTIVE leadership role
+     *          of this organisation; or
+     *       4. (part 10) the holder of a listed ROLE of this organisation,
+     *          with an active membership row here (roles have no on/off
+     *          switch); or
+     *       5. (part 10) in a listed USER GROUP of this organisation that is
+     *          in use, with an active membership row here; or
+     *       6. (part 10) in a listed DEPARTMENT of this organisation that is
+     *          switched on (an empty flag reads as off), with an active
+     *          membership row here.
+     *     Kinds 4 to 6 are NOT written out a second time here: the statement
+     *     below uses the very same pieces of SQL the rule uses —
+     *     `Roles::holdsSql()`, `UserGroups::memberSql()` and
+     *     `Departments::memberSql()` — so what "holds a role" means cannot
+     *     differ between the rule and this copy. What CAN still differ, and
+     *     what the oracle is there to catch, is everything around them:
+     *     which list rows are read, whose organisation is handed to the
+     *     piece, and whether a branch is there at all. In all three the
+     *     organisation is the LIST ROW'S own (`am.siteID`, which the WHERE
+     *     pins to this calendar's organisation), so another organisation's
+     *     role, user group or department on a list lets nobody in.
      *     A list that lets NOBODY in reads "admins": at "groups" with nobody
      *     on it, only administrators see the event in session and invite
      *     mode and nobody in any other — exactly the "admins" answer, so
      *     hiding such an event, or giving a hidden one such a list, is not a
      *     change (the self-test has a case for it).
-     *   - ADMINISTRATORS (222-227) see every live event of a switched-on
-     *     calendar in session and invite mode, whatever its level, so they
-     *     never change a signature. In token mode the administrator branch
-     *     is off (the admin() helper, line 716 on) and they are treated like
-     *     anyone else — which the people set already covers.
+     *   - ADMINISTRATORS (the `admin` piece) see every live event of a
+     *     switched-on calendar in session and invite mode, whatever its
+     *     level, so they never change a signature. In token mode the
+     *     administrator branch is off (the admin() helper) and they are
+     *     treated like anyone else — which the people set already covers.
      *   - OUTSIDERS need no entry of their own. An account that is not an
      *     active global administrator and has no active membership row here
      *     gets EXACTLY the "nobody signed in" answer in every mode: the
-     *     member test (235-238) and the site-administrator test (225) both
-     *     need an active membership row of this organisation, and the list
-     *     is only consulted together with the member test (598). So an
+     *     `member` piece and the site-administrator half of the `admin`
+     *     piece both need an active membership row of this organisation,
+     *     and the list is only consulted together with the member test (the
+     *     general branch's groups line). So an
      *     outsider's answer changes exactly when the signed-out visitor's
      *     does, which the level and the boxes already show.
      * NOT part of "who can see it": how much detail is shown (title only or
      * full), the category, the private mark (which only affects detail),
      * and the waiting/declined bookkeeping.
      *
-     * WHAT IT CANNOT SEE: something ELSE changing a membership, a group or a
-     * role term in the same fraction of a second as the save. Both readings
+     * WHAT IT CANNOT SEE: something ELSE changing a membership, a group, a
+     * role holding or a role term in the same fraction of a second as the
+     * save. Both readings
      * run inside one transaction; under MySQL's default isolation
      * (REPEATABLE READ) they see the same memberships, so only this save's
      * own writes can differ between them. Under READ COMMITTED such a
@@ -3413,16 +3449,31 @@ final class FeedAdmin
      *     developer's Mac, not the shared host): 0.03 to 0.11 seconds at
      *     1,000 events x 2,000 accounts, 0.02 to 0.06 at 300 x 500; check
      *     round 5 measured 0.03 to 0.22 seconds on a busier machine.
-     * The people statement binds 6 values per list in use, so a calendar
-     * would need over 10,000 Selected-groups lists in use to reach MySQL's
-     * limit of 65,535.
+     * The people statement binds 12 values per list in use — two for each
+     * of the six kinds; it was 6 before part 10 added three kinds — so a
+     * calendar would need over 5,000 Selected-groups lists in use to reach
+     * MySQL's limit of 65,535. The figures above were all measured BEFORE
+     * part 10. Its three new branches each look at every active member of
+     * the organisation once for every role, user group or department row
+     * on a list in use, which costs more than the three older branches do.
+     * Measured for part 10 on 13 October 2026 (MySQL 8.0.36 and 8.4.11 on
+     * a developer's Mac, not the shared host): ONE reading of 1,000 events
+     * x 2,000 accounts, all on one list of the largest size allowed (50
+     * entries) that lets all 2,000 accounts in, took about 0.013 to 0.015
+     * seconds with small groups only, and about 0.042 to 0.044 seconds
+     * with 20 roles, 20 user groups and 10 departments. So about three
+     * times as long for a reading, and still well under a tenth of a
+     * second; a save makes two readings. What was NOT measured: a whole
+     * save, many lists in use at once, or the shared host. A calendar with
+     * no such rows on its lists pays nothing for them beyond three branches
+     * that find no rows.
      *
      * @return array<int,string> eventID => signature
      */
     private static function whoCanSee(\mysqli $db, int $feedId, int $siteId, string $today): array
     {
-        // 1️⃣ Every live event of the calendar, with its calendar (the
-        //    calendar test, EventVisibility.php 619; freshness, 564).
+        // 1️⃣ Every live event of the calendar, with its calendar (the rule's
+        //    `xf` calendar test, and its `$fresh` test, in buildWhere()).
         $stmt = $db->prepare(
             'SELECT e.eventID, e.importLevel, e.importWebsite, e.importApiOptOut, e.importAudienceType, e.importAudienceID, '
             . '(e.importRecheckAt IS NULL OR e.importRecheckAt > UTC_TIMESTAMP()) AS inDate, '
@@ -3446,15 +3497,40 @@ final class FeedAdmin
         }
 
         // 3️⃣ The PEOPLE each of those lists lets in — one statement for all
-        //    of them. Three ways onto a list (EventVisibility.php 257-265),
-        //    joined into one set per list (UNION also drops a person reached
-        //    two ways), then each person must be an active account with an
-        //    active membership row HERE (the member test, 235-238).
+        //    of them. SIX ways onto a list (the rule's `audience` piece:
+        //    named, small group, leadership role, and since part 10 of #514
+        //    role, user group and department), joined into one set per list
+        //    (UNION also drops a person reached two ways), then each person
+        //    must be an active account with an active membership row HERE
+        //    (the rule's `member` piece).
         //    tblSmallGroupMembers is written out in full, with no short name,
         //    for the same reason as in EventVisibility (the "Group" inside its
         //    name trips tools/audit-checks/check_sql_columns.py).
+        //
+        //    🏷️ THE THREE PART-10 BRANCHES are one shape. Each starts from
+        //    the list rows of its kind and every ACTIVE member (`mb`) of the
+        //    list row's own organisation, and keeps the members the piece of
+        //    SQL from Roles, UserGroups or Departments says yes to. Those
+        //    are the SAME three pieces the rule itself uses, handed columns
+        //    in place of the rule's bound viewer — so they add no `?` of
+        //    their own, and each branch binds exactly what the three older
+        //    ones do: the organisation, then the owners.
+        //    The organisation handed to each piece is `am.siteID`: the list
+        //    row's, which the WHERE has just pinned to this calendar's.
+        //    Never the piece's own inner column (`ur16.siteID`, say): that
+        //    would compare a column with itself, and a member of two
+        //    organisations who holds the OTHER one's role would be let in
+        //    by it (the self-test's XB is that person).
+        //    `mb` is a name of this statement's own, chosen to clash with
+        //    none inside the pieces (ur16, us16, g17, ug17, us17, d17, ud17)
+        //    and not to be mistaken for the outer `us` below, which is the
+        //    member test for everybody.
         $people = [];
         if ($owners !== []) {
+            $holdsRole   = Roles::holdsSql('mb.userID', 'am.refID', 'am.siteID');
+            $inUserGroup = UserGroups::memberSql('mb.userID', 'am.refID', 'am.siteID');
+            $inDept      = Departments::memberSql('mb.userID', 'am.refID', 'am.siteID');
+            $members     = 'FROM tblExternalAudienceMembers am JOIN tblUserSites mb ON mb.siteID = am.siteID AND mb.isActive = 1 ';
             $tests       = implode(' OR ', array_fill(0, count($owners), '(am.ownerType = ? AND am.ownerID = ?)'));
             $ownerTypes  = '';
             $ownerParams = [];
@@ -3477,13 +3553,36 @@ final class FeedAdmin
                 . 'AND (la.startDate IS NULL OR la.startDate <= ?) AND (la.endDate IS NULL OR la.endDate >= ?) '
                 . 'JOIN tblLeadershipRoles lr ON lr.roleID = la.roleID AND lr.siteID = am.siteID AND lr.isActive = 1 '
                 . "WHERE am.siteID = ? AND am.kind = 'leadership_role' AND ($tests)"
+                . ' UNION '
+                . 'SELECT am.ownerType, am.ownerID, mb.userID ' . $members
+                . "WHERE am.siteID = ? AND am.kind = 'role' AND ($tests) AND " . $holdsRole
+                . ' UNION '
+                . 'SELECT am.ownerType, am.ownerID, mb.userID ' . $members
+                . "WHERE am.siteID = ? AND am.kind = 'user_group' AND ($tests) AND " . $inUserGroup
+                . ' UNION '
+                . 'SELECT am.ownerType, am.ownerID, mb.userID ' . $members
+                . "WHERE am.siteID = ? AND am.kind = 'department' AND ($tests) AND " . $inDept
                 . ') x '
                 . 'JOIN tblUsers u ON u.userID = x.userID AND u.isActive = 1 '
                 . 'JOIN tblUserSites us ON us.userID = x.userID AND us.siteID = ? AND us.isActive = 1 '
                 . 'ORDER BY x.ownerType, x.ownerID, x.userID'
             );
-            $types  = 'i' . $ownerTypes . 'i' . $ownerTypes . 'ssi' . $ownerTypes . 'i';
-            $params = array_merge([$siteId], $ownerParams, [$siteId], $ownerParams, [$today, $today, $siteId], $ownerParams, [$siteId]);
+            // The values, in the order their `?` marks are written: one
+            // organisation and the owners for each of the six branches (the
+            // leadership-role branch's two dates sit in its JOIN, so they
+            // come before its organisation), then the organisation once more
+            // for the member test at the end.
+            $branch = 'i' . $ownerTypes;
+            $types  = $branch . $branch . 'ss' . $branch . $branch . $branch . $branch . 'i';
+            $params = array_merge(
+                [$siteId], $ownerParams,
+                [$siteId], $ownerParams,
+                [$today, $today, $siteId], $ownerParams,
+                [$siteId], $ownerParams,
+                [$siteId], $ownerParams,
+                [$siteId], $ownerParams,
+                [$siteId]
+            );
             $stmt->bind_param($types, ...$params);
             $stmt->execute();
             $result = $stmt->get_result();

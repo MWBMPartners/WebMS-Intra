@@ -48,6 +48,39 @@
  * checks the one other page the #534 sweep found naming an internal event
  * to outsiders: the read-only card of a venue booking.
  *
+ * PART 10 OF #514: ROLES, USER GROUPS AND DEPARTMENTS (13 October 2026)
+ * -------------------------------------------------------------------
+ * Part 10 lets a "who may see it" list name a role (#516), a user group or
+ * a department (#517). That changed the rule (`EventVisibility`), its fast
+ * copy (`FeedAdmin::whoCanSee()`), the list class and the picker, and this
+ * file with them:
+ *   - the made-up world gained eight accounts (RH, UH, DH, XF, XO, DN, XB
+ *     and XI), two roles, three user groups and four departments — see the
+ *     constants for what each is for;
+ *   - after part 10's independent check it gained six more (KP, KR, KU, KD,
+ *     KS and KL) and ONE NUMBER SHARED BY SIX KINDS: a role, a user group, a
+ *     department, a small group and a leadership role of organisation A all
+ *     carry the number SN, which is also KP's account number. The check had
+ *     shown that with every number different, a rule or a copy that read a
+ *     row of one kind as another kind's number passed every check here;
+ *   - R5, the oracle (D17): the copy's answer equals the real rule's for
+ *     every account, before and after each save, with the three kinds on
+ *     lists — and in several places the answer is also WRITTEN OUT BY HAND,
+ *     because a mistake made the same way in the rule and in the copy would
+ *     agree with itself. Those places: the part 10 control; all three kinds
+ *     at once; another organisation's three on a list; rows of the new kinds
+ *     FILED UNDER another organisation; and R9, a date listed for each of the
+ *     six kinds in turn, all naming the shared number;
+ *   - R6, what may be saved (D3, D7): each kind for this organisation;
+ *     another organisation's refused with the one sentence; a retired user
+ *     group or switched-off department not freshly added, but kept;
+ *   - R7 (D15): every kind the database can hold is one the forms offer;
+ *   - R8 (D1, D8, W60): the real forms offer this organisation's and none of
+ *     another's, a number of another's posted by hand saves nothing, and on
+ *     the real calendar page the holder of a role is shown the event while a
+ *     member who holds only ANOTHER organisation's role is not.
+ * What these cannot show is said under "WHAT THIS CANNOT PROVE" below.
+ *
  * `SELFTEST_ONLY=S`, `=D` or `=W` runs one part only, which is handy while
  * working on it. Such a run can NEVER pass: it always ends with exit 1 and
  * says so, because the parts it skipped proved nothing.
@@ -114,14 +147,15 @@
  *   - every refusal is checked by its EXACT sentence, not just "it said
  *     no";
  *   - `pa_finish()` fails unless every heading was reached (S1-S4, D1 to
- *     D39, and W0 to W59 — there is no W17: the plan's list goes from W16
+ *     D39, and W0 to W60 — there is no W17: the plan's list goes from W16
  *     to W18, with "W8 also" folded into W8; D33 and W20 are the "Partly
  *     read" flag, added by chunk P8-2's follow-up; S2 and W21-W25 came with
  *     fix round 1; S3, S4, D34 and W26-W38 with chunk P8-3; D35, D36, W39
  *     and W40 with chunk P8-3's fix round 1; D37 and W41 with its fix round
  *     2; D38 and W42 with fix round 3; W43 with fix round 4; D39 and
  *     W44-W52 with chunk P8-4; W53 and W54 with its fix round 1; W55 and W56 after the final whole-part check; W57 and W58 after its last narrow check;
- *     W59, the #534 table, with roll-out package B) AND exactly
+ *     W59, the #534 table, with roll-out package B; W60, roles, user groups
+ *     and departments on the real form, with #514 part 10) AND exactly
  *     `EXPECTED_CHECKS`
  *     checks ran — fewer means something was skipped, more means something
  *     ran twice or was added without the number being updated. Either way
@@ -219,6 +253,16 @@
  *   address jumps to the "#imports" or "#waiting" section. The checks read
  *   the message's words; they cannot see whether a person looking at a
  *   small screen notices it.
+ * - Part 10's page check (W60) signs in ONE holder of a role and one member
+ *   who holds only another organisation's role, user group and department.
+ *   A user group's and a department's own members are not signed in: for
+ *   them, "who is shown the event" rests on part D's oracle and on
+ *   `tools/event-visibility-selftest.php`, which ask the rule directly.
+ *   W60 reads the picker's HTML; it does not show how the six groups of
+ *   boxes look on a phone, or that the new-tab links behave in a browser.
+ * - How long `FeedAdmin::whoCanSee()` takes with roles, user groups and
+ *   departments on a list. Nothing here times it (its docblock quotes one
+ *   measurement made by hand when part 10 was built).
  * - Real Google or Microsoft 365 calendars (NOT PROVEN anywhere in #514 —
  *   the owner's decision of 21 September 2026).
  * - MariaDB is not tested. MySQL 8.0.36 and 8.4.11 have been used.
@@ -281,9 +325,15 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 // SafeFetch, ApiKey, EventVisibility, FeedResolver, FeedImporter (not
 // called directly by FeedAdmin, but part P8-2 will change it, and loading
 // it here now costs nothing), ExternalAudience, FeedAdmin.
+// Part 10 of #514 adds Roles, UserGroups and Departments: ExternalAudience
+// and FeedAdmin::whoCanSee() now ask them who holds a role and who is in a
+// user group or department. (EventVisibility loads the three itself when
+// nothing else has — two other self-tests load it from a list like this one
+// that does not name them — but ExternalAudience and FeedAdmin do not, so
+// they are named here.) None of the three runs anything when loaded.
 $coreDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR;
-foreach (['App.php', 'Site.php', 'ErrorMonitor.php', 'Logger.php', 'SafeFetch.php', 'ApiKey.php', 'EventVisibility.php',
-    'FeedResolver.php', 'FeedImporter.php', 'ExternalAudience.php', 'FeedAdmin.php'] as $classFile) {
+foreach (['App.php', 'Site.php', 'ErrorMonitor.php', 'Logger.php', 'SafeFetch.php', 'ApiKey.php', 'Roles.php', 'UserGroups.php', 'Departments.php',
+    'EventVisibility.php', 'FeedResolver.php', 'FeedImporter.php', 'ExternalAudience.php', 'FeedAdmin.php'] as $classFile) {
     require_once $coreDir . $classFile;
 }
 
@@ -338,8 +388,8 @@ if (($argv[1] ?? '') === '--hold-lock') {
 //    running" in the header). Change them only together with a check.
 // =============================================================================
 const EXPECTED_S      = 11;   // part S: S1 pages never write around the service layer (4); S2 the importer's UTC writes (2, fix round 1); S3 the server filter (1, chunk P8-3, + its call site 2, P8-3 fix round 1) and S4 message boxes (2, chunk P8-3)
-const EXPECTED_D      = 526;  // part D: 500 from chunk P8-1, + D25's R13-L1 case and D33's three (chunk P8-2), + D34 (chunk P8-3), + D35 (2) and D36 (2) (P8-3 fix round 1), + D37 (3) (fix round 2), + D38 (fix round 3), + D39 (6, chunk P8-4; + 2 in its fix round 1; + 1 in fix round 2; + 1 after the final fault run, m-X05; + 3 after the final whole-part check, F1 and F3)
-const EXPECTED_W      = 303;  // part W: 81 for chunk P8-2's pages (W0-W16, W18-W25); chunk P8-3 grows W21 by 6 and adds W26-W38 (82); its fix round 1 adds a W31 check, W39 (4) and W40 (4); fix round 2 adds W41 (5); fix round 3 adds W42 (3); fix round 4 grows W21 by 2 and adds W43 (1); chunk P8-4 grows W21 by 5 and adds W44 (5), W45 (6), W46 (5), W47 (2), W48 (5), W49 (5), W50 (4), W51 (2) and W52 (5); its fix round 1 adds 2 to W45, 3 to W46, 3 to W48, 1 to W49, 1 to W50, 1 to W52, and W53 (2) and W54 (1); fix round 2 adds 2 to W45, 1 to W48 and 1 to W53; fix round 3 adds 1 to W45; the final whole-part check's fixes add 1 to W50, and W55 (2) and W56 (1); the last narrow check's fixes add 1 to W55, and W57 (4) and W58 (1); W59, the #534 table (roll-out package B, 11 October 2026), adds 32: its set-up (1), six viewers by four addresses (24), its own control (2), an API key answered as before (2, added after the independent check) and the venue booking card (3); roll-out package B2a (12 October 2026) adds a seventh W59 viewer, on a crew (4), and changes the Team Hub and venue card rows it made stricter; roll-out package F2 adds 5 "W59 at the door" checks (the members-only gate put back)
+const EXPECTED_D      = 609;  // part D: 500 from chunk P8-1, + D25's R13-L1 case and D33's three (chunk P8-2), + D34 (chunk P8-3), + D35 (2) and D36 (2) (P8-3 fix round 1), + D37 (3) (fix round 2), + D38 (fix round 3), + D39 (6, chunk P8-4; + 2 in its fix round 1; + 1 in fix round 2; + 1 after the final fault run, m-X05; + 3 after the final whole-part check, F1 and F3); #514 part 10 (roles, user groups and departments, 13 October 2026) adds 71: D1 (1), D3 (3), D7 (16), D8 (5), D15 (1) and D17 (45: its second control, and the R5 oracle cases); the fixes after part 10's independent check add 12 more to D17: six for rows of the new kinds filed under another organisation, and six for "one number, six kinds" (R9)
+const EXPECTED_W      = 312;  // part W: 81 for chunk P8-2's pages (W0-W16, W18-W25); chunk P8-3 grows W21 by 6 and adds W26-W38 (82); its fix round 1 adds a W31 check, W39 (4) and W40 (4); fix round 2 adds W41 (5); fix round 3 adds W42 (3); fix round 4 grows W21 by 2 and adds W43 (1); chunk P8-4 grows W21 by 5 and adds W44 (5), W45 (6), W46 (5), W47 (2), W48 (5), W49 (5), W50 (4), W51 (2) and W52 (5); its fix round 1 adds 2 to W45, 3 to W46, 3 to W48, 1 to W49, 1 to W50, 1 to W52, and W53 (2) and W54 (1); fix round 2 adds 2 to W45, 1 to W48 and 1 to W53; fix round 3 adds 1 to W45; the final whole-part check's fixes add 1 to W50, and W55 (2) and W56 (1); the last narrow check's fixes add 1 to W55, and W57 (4) and W58 (1); W59, the #534 table (roll-out package B, 11 October 2026), adds 32: its set-up (1), six viewers by four addresses (24), its own control (2), an API key answered as before (2, added after the independent check) and the venue booking card (3); roll-out package B2a (12 October 2026) adds a seventh W59 viewer, on a crew (4), and changes the Team Hub and venue card rows it made stricter; roll-out package F2 adds 5 "W59 at the door" checks (the members-only gate put back); #514 part 10 adds W60 (9)
 const EXPECTED_CHECKS = EXPECTED_S + EXPECTED_D + EXPECTED_W;
 
 // 🧩 One part only (SELFTEST_ONLY=S, D or W), or all of them. A one-part run
@@ -402,6 +452,47 @@ const LD_ID = 910032; // a member of A who is the LEADER of SG5 — SG5's only r
 const CL_ID = 910033; // a member of A who is the CO-LEADER of SG6 — SG6's only row
 const LO_ID = 910034; // a member of A who is the LEADER of the switched-off group SG2 (and in no other group)
 const CO_ID = 910035; // a member of A who is a CO-LEADER of the switched-off group SG2 (and in no other group) — fix round 7, check round 7 L3
+// 👥 Part 10 of #514 (13 October 2026): a list can now name a ROLE (#516), a
+//    USER GROUP or a DEPARTMENT (#517). Each kind of person the rule treats
+//    differently through those three must exist here, or D17's oracle is
+//    blind to it — exactly the lesson of fix round 4 above. Nobody below is
+//    in any small group or holds any leadership role, so each moves only
+//    when a list names one of the three new kinds.
+const RH_ID = 910036; // a member of A who holds role RO1
+const UH_ID = 910037; // a member of A in user group UG1 (in use)
+const DH_ID = 910038; // a member of A in department DP1 (switched on)
+const XF_ID = 910039; // a FORMER member of A (membership row switched off) who still holds RO1 and is still in UG1 and DP1 — never tidied away
+const XO_ID = 910040; // a member of A in the RETIRED user group UG2 and the SWITCHED-OFF department DP2, and nothing else
+const DN_ID = 910041; // a member of A in department DP3 only, whose on/off flag is EMPTY (the column allows it; it reads as switched off)
+const XB_ID = 910042; // an active member of BOTH A and B who holds B's role ROB and is in B's user group UGB and department DPB — and nothing of A's
+const XI_ID = 910043; // a SWITCHED-OFF account (tblUsers.isActive = 0) with an active membership of A, still holding RO1 and in UG1 and DP1
+const RO1 = 910131;   // role of A (roles have no on/off switch)
+const ROB = 910132;   // role of B
+const UG1 = 910141;   // user group of A, in use
+const UG2 = 910142;   // user group of A, RETIRED (isActive = 0)
+const UGB = 910143;   // user group of B, in use
+const DP1 = 910151;   // department of A, switched on
+const DP2 = 910152;   // department of A, switched OFF
+const DP3 = 910153;   // department of A whose on/off flag is EMPTY
+const DPB = 910154;   // department of B, switched on
+// 🔢 ONE NUMBER, SIX KINDS (added after part 10's independent check, 13
+//    October 2026). A list row names something in TWO parts, a kind and a
+//    number, and six tables count their rows separately: on a real
+//    installation the same number is a role, a user group, a department, a
+//    small group, a leadership role AND somebody's account all at once (a
+//    fresh install already holds roles 1 to 14). Until this was added every
+//    number in this world was different, so a rule or a copy that read a row
+//    of one kind as another kind's number passed all 920 checks — the check
+//    planted exactly that, three ways, and it did. So organisation A now has
+//    one of EACH carrying the number SN, each with one person of its own who
+//    is in nothing else, and D17 lists an event for each kind in turn.
+const SN    = 910044; // THE SHARED NUMBER. It is KP's account number, and the number of a role, a user group, a department, a small group and a leadership role of A
+const KP_ID = 910044; // a member of A whose own ACCOUNT NUMBER is the shared number; in no group, holds nothing
+const KR_ID = 910045; // a member of A who holds the ROLE numbered SN, and nothing else
+const KU_ID = 910046; // a member of A in the USER GROUP numbered SN only
+const KD_ID = 910047; // a member of A in the DEPARTMENT numbered SN only
+const KS_ID = 910048; // a member of A in the SMALL GROUP numbered SN only
+const KL_ID = 910049; // a member of A who holds the LEADERSHIP ROLE numbered SN (no dates, so it is current), and nothing else
 const SG1 = 910101;   // small group of A, switched on
 const SG2 = 910102;   // small group of A, switched OFF
 const SGB = 910103;   // small group of B
@@ -549,7 +640,9 @@ function pa_requiredHeadings(): array
         foreach ([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
             44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58,
             // W59 is the #534 table (roll-out package B, 11 October 2026), not a part 8 check: see its heading.
-            59] as $w) {
+            59,
+            // W60 is #514 part 10: roles, user groups and departments on the real form (13 October 2026).
+            60] as $w) {
             $want[] = 'W' . $w;
         }
     }
@@ -630,7 +723,7 @@ function pa_finish(): never
     if ($bad === true) {
         exit(1);
     }
-    echo 'PASS — all ' . $GLOBALS['pa_pass'] . " checks passed; every heading (S1-S4, D1-D39, W0-W59) ran.\n";
+    echo 'PASS — all ' . $GLOBALS['pa_pass'] . " checks passed; every heading (S1-S4, D1-D39, W0-W60) ran.\n";
     exit(0);
 }
 
@@ -736,6 +829,17 @@ function pa_removeWorld(): void
     // …and any line of the two made-up organisations that names nobody (the
     // part 8 pages wrote such lines until chunk P8-4's fix round 1).
     pa_q('DELETE FROM tblActivityLogs WHERE userID BETWEEN 910000 AND 910099 OR siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    // Part 10 of #514: who holds a role or is in a user group or department,
+    // then the roles, user groups and departments themselves. The holdings
+    // would go with the membership rows below; the DEPARTMENTS would not go
+    // with their organisation (that link has no "delete with it"), and one
+    // left behind would stop the organisation being removed at all.
+    pa_q('DELETE FROM tblUserRoles WHERE siteID IN (?, ?) OR userID BETWEEN 910000 AND 910099', 'ii', [ORG_A, ORG_B]);
+    pa_q('DELETE FROM tblUserGroups WHERE siteID IN (?, ?) OR userID BETWEEN 910000 AND 910099', 'ii', [ORG_A, ORG_B]);
+    pa_q('DELETE FROM tblUserDepts WHERE siteID IN (?, ?) OR userID BETWEEN 910000 AND 910099', 'ii', [ORG_A, ORG_B]);
+    pa_q('DELETE FROM tblRoles WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    pa_q('DELETE FROM tblGroups WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    pa_q('DELETE FROM tblDepts WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     pa_q('DELETE FROM tblUserSites WHERE siteID IN (?, ?) OR userID BETWEEN 910000 AND 910099', 'ii', [ORG_A, ORG_B]);
     pa_q('DELETE FROM tblUsers WHERE userID BETWEEN 910000 AND 910099');
     // Every setting of the two made-up organisations (part W's
@@ -745,8 +849,10 @@ function pa_removeWorld(): void
 }
 
 /**
- * A fresh world: two organisations, twenty-five accounts, seven small groups,
- * seven leadership roles (with eleven terms), three categories, three
+ * A fresh world: two organisations, thirty-nine accounts, eight small groups,
+ * eight leadership roles (with twelve terms), three roles, four user groups,
+ * five departments (part 10 of #514; one of each kind shares one number, see
+ * the constant SN), three categories, three
  * calendars (no events, choices,
  * rules or approvals yet — each check adds its own). Called at the START
  * of EVERY D check, so no check depends on another's leftovers or on the
@@ -920,6 +1026,88 @@ function pa_resetWorld(): void
         . "(?, ?, ?, 'leader', 'active'), (?, ?, ?, 'co-leader', 'active'), (?, ?, ?, 'leader', 'active'), (?, ?, ?, 'co-leader', 'active')",
         'iiiiiiiiiiii', [ORG_A, SG5, LD_ID, ORG_A, SG6, CL_ID, ORG_A, SG2, LO_ID, ORG_A, SG2, CO_ID]
     );
+
+    // 👥 Part 10 of #514 — roles, user groups and departments, and the
+    //    people who hold them (see the constants). ORDER MATTERS: an
+    //    account, its membership row, and the role, group or department
+    //    must all exist BEFORE the holding, because every holding is tied to
+    //    its membership row AND to the thing held by two-column links (a
+    //    holding of B's role filed under A cannot be written at all — which
+    //    is part of what keeps another organisation's role from counting).
+    //    Everything B owns carries B_MARK. XB is NOT marked: XB is a member
+    //    of A as well, so XB's own name may rightly appear on A's pages.
+    pa_q(
+        'INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES '
+        . "(?, 'Selftest RH', 'rh.p8@selftest.invalid', 1, 0, 0), (?, 'Selftest UH', 'uh.p8@selftest.invalid', 1, 0, 0), "
+        . "(?, 'Selftest DH', 'dh.p8@selftest.invalid', 1, 0, 0), (?, 'Selftest XF', 'xf.p8@selftest.invalid', 1, 0, 0), "
+        . "(?, 'Selftest XO', 'xo.p8@selftest.invalid', 1, 0, 0), (?, 'Selftest DN', 'dn.p8@selftest.invalid', 1, 0, 0), "
+        . "(?, 'Selftest XB', 'xb.p8@selftest.invalid', 1, 0, 0), (?, 'Selftest XI', 'xi.p8@selftest.invalid', 0, 0, 0)",
+        'iiiiiiii', [RH_ID, UH_ID, DH_ID, XF_ID, XO_ID, DN_ID, XB_ID, XI_ID]
+    );
+    // XF's row in A is switched OFF (a former member); XB has a row in each organisation.
+    pa_q(
+        'INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES '
+        . '(?, ?, 1, 0, 0), (?, ?, 1, 0, 0), (?, ?, 1, 0, 0), (?, ?, 0, 0, 0), (?, ?, 1, 0, 0), (?, ?, 1, 0, 0), '
+        . '(?, ?, 1, 0, 0), (?, ?, 1, 0, 0), (?, ?, 1, 0, 0)',
+        'iiiiiiiiiiiiiiiiii',
+        [RH_ID, ORG_A, UH_ID, ORG_A, DH_ID, ORG_A, XF_ID, ORG_A, XO_ID, ORG_A, DN_ID, ORG_A, XB_ID, ORG_A, XB_ID, ORG_B, XI_ID, ORG_A]
+    );
+    pa_q(
+        "INSERT INTO tblRoles (roleID, siteID, roleKey, roleName, isStandard) VALUES (?, ?, 'selftest_p8_ro1', 'Selftest RO1', 0), (?, ?, 'selftest_p8_rob', 'Selftest ROB BONLY', 0)",
+        'iiii', [RO1, ORG_A, ROB, ORG_B]
+    );
+    pa_q(
+        "INSERT INTO tblGroups (groupID, siteID, groupName, isActive) VALUES (?, ?, 'Selftest UG1', 1), (?, ?, 'Selftest UG2', 0), (?, ?, 'Selftest UGB BONLY', 1)",
+        'iiiiii', [UG1, ORG_A, UG2, ORG_A, UGB, ORG_B]
+    );
+    pa_q(
+        "INSERT INTO tblDepts (deptID, siteID, deptName, isActive) VALUES (?, ?, 'Selftest DP1', 1), (?, ?, 'Selftest DP2', 0), (?, ?, 'Selftest DP3', NULL), (?, ?, 'Selftest DPB BONLY', 1)",
+        'iiiiiiii', [DP1, ORG_A, DP2, ORG_A, DP3, ORG_A, DPB, ORG_B]
+    );
+    pa_q(
+        'INSERT INTO tblUserRoles (userID, roleID, siteID) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?)',
+        'iiiiiiiiiiii', [RH_ID, RO1, ORG_A, XF_ID, RO1, ORG_A, XI_ID, RO1, ORG_A, XB_ID, ROB, ORG_B]
+    );
+    pa_q(
+        'INSERT INTO tblUserGroups (userID, groupID, siteID) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?)',
+        'iiiiiiiiiiiiiii', [UH_ID, UG1, ORG_A, XF_ID, UG1, ORG_A, XI_ID, UG1, ORG_A, XO_ID, UG2, ORG_A, XB_ID, UGB, ORG_B]
+    );
+    pa_q(
+        'INSERT INTO tblUserDepts (userID, deptID, siteID) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?)',
+        'iiiiiiiiiiiiiiiiii', [DH_ID, DP1, ORG_A, XF_ID, DP1, ORG_A, XI_ID, DP1, ORG_A, XO_ID, DP2, ORG_A, DN_ID, DP3, ORG_A, XB_ID, DPB, ORG_B]
+    );
+
+    // 🔢 One number, six kinds (see the constant SN). A role, a user group, a
+    //    department, a small group and a leadership role of A, ALL numbered
+    //    SN, all switched on, each with exactly one person — and SN is also
+    //    KP's own account number. The ONLY thing that keeps, say, KR (who
+    //    holds role SN) away from an event listed for "department SN" is the
+    //    rule, and the copy, reading the row's KIND. The names sort after
+    //    the others of their kind where that keeps older expectations simple;
+    //    D1 writes the order out.
+    pa_q(
+        'INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES '
+        . "(?, 'Selftest KP', 'kp.p8@selftest.invalid', 1, 0, 0), (?, 'Selftest KR', 'kr.p8@selftest.invalid', 1, 0, 0), "
+        . "(?, 'Selftest KU', 'ku.p8@selftest.invalid', 1, 0, 0), (?, 'Selftest KD', 'kd.p8@selftest.invalid', 1, 0, 0), "
+        . "(?, 'Selftest KS', 'ks.p8@selftest.invalid', 1, 0, 0), (?, 'Selftest KL', 'kl.p8@selftest.invalid', 1, 0, 0)",
+        'iiiiii', [KP_ID, KR_ID, KU_ID, KD_ID, KS_ID, KL_ID]
+    );
+    pa_q(
+        'INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES '
+        . '(?, ?, 1, 0, 0), (?, ?, 1, 0, 0), (?, ?, 1, 0, 0), (?, ?, 1, 0, 0), (?, ?, 1, 0, 0), (?, ?, 1, 0, 0)',
+        'iiiiiiiiiiii', [KP_ID, ORG_A, KR_ID, ORG_A, KU_ID, ORG_A, KD_ID, ORG_A, KS_ID, ORG_A, KL_ID, ORG_A]
+    );
+    pa_q("INSERT INTO tblRoles (roleID, siteID, roleKey, roleName, isStandard) VALUES (?, ?, 'selftest_p8_sn', 'Selftest SN role', 0)", 'ii', [SN, ORG_A]);
+    pa_q("INSERT INTO tblGroups (groupID, siteID, groupName, isActive) VALUES (?, ?, 'Selftest SN user group', 1)", 'ii', [SN, ORG_A]);
+    pa_q("INSERT INTO tblDepts (deptID, siteID, deptName, isActive) VALUES (?, ?, 'Selftest SN department', 1)", 'ii', [SN, ORG_A]);
+    pa_q("INSERT INTO tblSmallGroups (groupID, siteID, groupName, groupSlug, isActive) VALUES (?, ?, 'Selftest SN small group', 'selftest-p8-sn', 1)", 'ii', [SN, ORG_A]);
+    pa_q("INSERT INTO tblLeadershipRoles (roleID, siteID, roleName, roleSlug, isActive) VALUES (?, ?, 'Selftest SN leadership role', 'selftest-p8-sn', 1)", 'ii', [SN, ORG_A]);
+    pa_q('INSERT INTO tblUserRoles (userID, roleID, siteID) VALUES (?, ?, ?)', 'iii', [KR_ID, SN, ORG_A]);
+    pa_q('INSERT INTO tblUserGroups (userID, groupID, siteID) VALUES (?, ?, ?)', 'iii', [KU_ID, SN, ORG_A]);
+    pa_q('INSERT INTO tblUserDepts (userID, deptID, siteID) VALUES (?, ?, ?)', 'iii', [KD_ID, SN, ORG_A]);
+    pa_q("INSERT INTO tblSmallGroupMembers (siteID, groupID, userID, status) VALUES (?, ?, ?, 'active')", 'iii', [ORG_A, SN, KS_ID]);
+    pa_q('INSERT INTO tblLeadershipAssignments (siteID, roleID, userID, startDate, endDate, isActive) VALUES (?, ?, ?, NULL, NULL, 1)', 'iii', [ORG_A, SN, KL_ID]);
+
     pa_q(
         "INSERT INTO tblEventCategories (categoryID, siteID, categoryName, categorySlug, isActive) VALUES "
         . "(?, ?, 'Selftest CA1', 'selftest-p8-ca1', 1), (?, ?, 'Selftest CA2', 'selftest-p8-ca2', 1), (?, ?, 'Selftest CB1 BONLY', 'selftest-p8-cb1', 1)",
@@ -2487,7 +2675,10 @@ ROUTER;
     // PB (a member of organisation B ONLY, and nothing else) signs in for W59,
     // the #534 table: "a member of another organisation" must be exactly that,
     // not also an administrator somewhere, as SB is.
-    foreach (['sa' => SA, 'm' => M, 'la' => LA, 'ga' => GA, 'sgm' => SGM, 'p' => P_ID, 'sb' => SB, 'pb' => PB] as $who => $userId) {
+    // RH (holds A's role RO1) and XB (a member of A who holds only B's role,
+    // user group and department) sign in for W60, part 10 of #514: who is
+    // shown an event through a role, on the real calendar page.
+    foreach (['sa' => SA, 'm' => M, 'la' => LA, 'ga' => GA, 'sgm' => SGM, 'p' => P_ID, 'sb' => SB, 'pb' => PB, 'rh' => RH_ID, 'xb' => XB_ID] as $who => $userId) {
         pa_q('INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified) VALUES (?, ?, ?, 1)', 'iss', [$userId, 'p8w-' . $who, $hash]);
     }
 
@@ -4242,12 +4433,21 @@ function pw_run(): void
         // list here holds: SG3 (switched on), SG2 (switched off), PB (a
         // member of B only, so "someone no longer in this organisation" —
         // the shape left when an administrator takes a person off) and I
-        // (an account that is switched off: "no longer a member"), and a
-        // role — a kind this version does not use ("a role #5 (not used by
-        // this version)"). The FOUR the form would refuse to add (SG2, PB,
-        // I and the role) are written in by hand, as a list left from
-        // earlier days would hold them. (Fix round 4 said "the two"; it
-        // wrote three — corrected in chunk P8-4's step 0, R5-2.)
+        // (an account that is switched off: "no longer a member"), a role
+        // number that names no role of this organisation ("a role that no
+        // longer exists", with nothing added), and the retired user group
+        // UG2 ("(switched off)"). The FIVE the form would refuse to add
+        // (SG2, PB, I, the role and UG2) are written in by hand, as a list
+        // left from earlier days would hold them. (Fix round 4 said "the
+        // two"; it wrote three — corrected in chunk P8-4's step 0, R5-2.)
+        // UNTIL PART 10 OF #514 the role row read "a role #5 (not used by
+        // this version)": roles were a kind no form offered. They are
+        // offered now, so that row is simply one that no longer exists
+        // here, and UG2 was added to show a part-10 kind's own state word.
+        // The words "(not used by this version)" are still on these pages
+        // for a kind the database knows and the code does not; no such row
+        // can be made today, so no page check can show them (D8 checks the
+        // label itself).
         // The WHOLE "Chosen: …" sentence is compared exactly, in the order
         // the rows were saved (chunk P8-4's step 0, check finding R5-1):
         // looking only for pieces let a switched-on group read "(switched
@@ -4258,7 +4458,7 @@ function pw_run(): void
         $set43  = $resolve($c43);
         $all43  = FeedAdmin::saveChoice($mysqli, $t1, 'series', ORG_A, SA, ['audienceLevel' => 'groups', 'audience' => ['small_group' => [SG3]]]);
         $id43   = (int) ($all43['choiceId'] ?? 0);
-        pa_list($c43, 'choice', $id43, [['small_group', SG2], ['person', PB], ['person', I_ID], ['role', 5]]);
+        pa_list($c43, 'choice', $id43, [['small_group', SG2], ['person', PB], ['person', I_ID], ['role', 5], ['user_group', UG2]]);
         pa_q('UPDATE tblEvents SET isDeleted = 1 WHERE eventID IN (?, ?)', 'ii', [$t1, $t2]);
         $one43  = pa_event($c43, 'w43@p8', 'W43 club', ['day' => 141]);
         $set43b = $resolve($c43);
@@ -4267,7 +4467,7 @@ function pw_run(): void
             'every-date page' => $boxOf(pw_req($sa, 'GET', $choice . '?event=' . $one43 . '&scope=series')['body']),
         ];
         $sg2Name = (string) pa_one('SELECT groupName FROM tblSmallGroups WHERE groupID = ?', 'i', [SG2])['groupName'];
-        $chosen43 = 'Chosen: Selftest SG3, ' . $sg2Name . ' (switched off), someone no longer in this organisation, Selftest I (no longer a member), a role #5 (not used by this version).';
+        $chosen43 = 'Chosen: Selftest SG3, ' . $sg2Name . ' (switched off), someone no longer in this organisation, Selftest I (no longer a member), a role that no longer exists, Selftest UG2 (switched off).';
         $bad43   = [];
         foreach ($boxes43 as $where => $box) {
             foreach ([
@@ -4284,7 +4484,7 @@ function pw_run(): void
             }
         }
         pa_ok(
-            'W43 on both pages the box\'s "Chosen:" sentence is exactly right — a switched-on group by name alone, a switched-off group "(switched off)", a person no longer in the organisation by that label alone, a person who left "(no longer a member)", an unused kind "(not used by this version)" — never "…when you save", with no brackets inside brackets',
+            'W43 on both pages the box\'s "Chosen:" sentence is exactly right — a switched-on group by name alone, a switched-off group "(switched off)", a person no longer in the organisation by that label alone, a person who left "(no longer a member)", a role that names nothing here by its label alone, a retired user group "(switched off)" — never "…when you save", with no brackets inside brackets',
             $set43 === true && $all43['ok'] === true && $id43 > 0 && $set43b === true && $bad43 === [],
             implode(' | ', $bad43) . ($bad43 === [] ? '' : ' || the date page\'s box: ' . mb_substr($boxes43['date page'], 0, 600))
         );
@@ -5618,6 +5818,207 @@ function pw_run(): void
         );
 
         // ---------------------------------------------------------------------
+        pa_heading('W60 — roles, user groups and departments on the real form: offered for this organisation only, another\'s refused, and shown to the right people (#514 part 10, check R8)');
+        // Part 10 of #514 lets a list name a role, a user group or a
+        // department. Three things are asked of the REAL pages here:
+        //   1. the form offers this organisation's — by name, escaped — and
+        //      nothing of organisation B's, nothing retired or switched off;
+        //   2. a number of B's posted by hand is refused with the one
+        //      sentence, and nothing at all is saved;
+        //   3. once saved, the calendar's event is on the organisation's
+        //      calendar page for RH (who holds the role) and NOT for XB — a
+        //      member of this organisation who holds a role, a user group
+        //      and a department of ORGANISATION B — nor for M.
+        // The names carry hostile text (601 to 603), so a missing escape in
+        // the picker for one of the new kinds shows here.
+        $hostile60 = static fn (int $n): string => 'W60 <script>alert(' . $n . ')</script>"><img src=x onerror=alert(' . $n . ')>';
+        pa_q('UPDATE tblRoles SET roleName = ? WHERE roleID = ?', 'si', [$hostile60(601), RO1]);
+        pa_q('UPDATE tblGroups SET groupName = ? WHERE groupID = ?', 'si', [$hostile60(602), UG1]);
+        pa_q('UPDATE tblDepts SET deptName = ? WHERE deptID = ?', 'si', [$hostile60(603), DP1]);
+        $c60    = pa_newFeed(ORG_A, 'members', ['name' => 'W60 calendar']);
+        $title60 = 'W60 title Kq9 roles';
+        // 📅 The event gets a day of its OWN (200 days ahead; no other check
+        //    uses that day), and the checks below first make sure it really
+        //    is alone there. The month page shows at most three events on a
+        //    day and then "+ N more", and events that start at the same
+        //    time come back in no promised order. The first version of this
+        //    check used the default day, which a dozen other checks share:
+        //    it passed every ordinary run and then, in one run with a fault
+        //    planted elsewhere, showed the title to NOBODY — the title was
+        //    simply not among the three drawn. A page check that depends on
+        //    luck is worse than none, so the day is checked, not assumed.
+        $e60    = pa_event($c60, 'w60@p8', $title60, ['day' => 200]);
+        $set60  = $resolve($c60);
+        $form60 = $edit . '?id=' . $c60;
+        $page60 = pw_req($sa, 'GET', $form60);
+        // The picker's own block: from its opening element to the script that follows it.
+        $picker60 = (preg_match('/<div[^>]*id="feed-picker".*?<script\b/s', $page60['body'], $mp60) === 1) ? $mp60[0] : '';
+        $box60    = static fn (string $kind, int $id): bool => preg_match(
+            '/<input[^>]*id="feed-' . $kind . '-' . $id . '"[^>]*name="audience\[' . $kind . '\]\[\]"[^>]*value="' . $id . '"/s', $picker60
+        ) === 1;
+        $offered60 = [];
+        foreach ([['role', RO1], ['user_group', UG1], ['department', DP1], ['role', SN], ['user_group', SN], ['department', SN],
+            ['role', ROB], ['user_group', UGB], ['department', DPB],
+            ['user_group', UG2], ['department', DP2], ['department', DP3]] as [$kind60, $id60]) {
+            $offered60[$kind60 . ':' . $id60] = $box60($kind60, $id60);
+        }
+        pa_ok(
+            'W60 the form offers A\'s roles, user groups and departments — RO1, UG1, DP1 and the three that share the number SN, so two boxes of each kind and no more — and not B\'s three, the retired UG2, the switched-off DP2 or DP3 (empty flag); nothing of B\'s is named anywhere in the picker',
+            $set60 === true && $page60['status'] === 200 && $picker60 !== ''
+            && $offered60 === [
+                'role:' . RO1 => true, 'user_group:' . UG1 => true, 'department:' . DP1 => true,
+                'role:' . SN => true, 'user_group:' . SN => true, 'department:' . SN => true,
+                'role:' . ROB => false, 'user_group:' . UGB => false, 'department:' . DPB => false,
+                'user_group:' . UG2 => false, 'department:' . DP2 => false, 'department:' . DP3 => false,
+            ]
+            && substr_count($picker60, 'name="audience[role][]"') === 2 && substr_count($picker60, 'name="audience[user_group][]"') === 2
+            && substr_count($picker60, 'name="audience[department][]"') === 2 && str_contains($picker60, B_MARK) === false,
+            'HTTP ' . $page60['status'] . ' ' . pa_show($offered60)
+        );
+        $at60 = [];
+        foreach (['Small groups', 'Leadership roles', 'Roles', 'User groups', 'Departments', 'Named people'] as $legend60) {
+            $at60[] = strpos($picker60, '>' . $legend60 . '</legend>');
+        }
+        $sorted60 = $at60;
+        sort($sorted60);
+        pa_ok(
+            'W60 six groups of boxes, in this order: Small groups, Leadership roles, Roles, User groups, Departments, Named people',
+            in_array(false, $at60, true) === false && $at60 === $sorted60 && substr_count($picker60, '</legend>') === 6,
+            pa_show($at60)
+        );
+        // Each new kind's plain line: what it is, and a link to where it is
+        // managed — an address that keeps the organisation's own prefix,
+        // opens in a new tab (the form's ticks are not lost), says so, and
+        // really answers for this administrator.
+        $lines60 = [];
+        foreach (['role' => ['admin/roles', 'Admin → Roles', 'It is not a leadership role.'], 'user_group' => ['admin/groups', 'Admin → Groups', 'It is not a small group.'],
+            'department' => ['admin/departments', 'Admin → Departments', 'whatever part they play in it.']] as $kind60 => [$route60, $text60, $says60]) {
+            $href60 = PW_A . '/' . $route60;
+            $lines60[$kind60] = [
+                'fieldset points at the line' => str_contains($picker60, 'aria-describedby="feed-' . $kind60 . '-about"') === true,
+                'the line and its link' => preg_match(
+                    '/<p[^>]*id="feed-' . $kind60 . '-about"[^>]*>[^<]*' . preg_quote(pw_esc($says60), '/') . '\s+Managed under\s+<a href="' . preg_quote($href60, '/')
+                    . '" target="_blank" rel="noopener">' . preg_quote(pw_esc($text60), '/') . '<\/a>\s+\(opens in a new tab\)\.\s*<\/p>/s', $picker60
+                ) === 1,
+                'the link answers' => pw_req($sa, 'GET', $href60)['status'],
+            ];
+        }
+        $line60 = ['fieldset points at the line' => true, 'the line and its link' => true, 'the link answers' => 200];
+        pa_ok(
+            'W60 under Roles, User groups and Departments: one plain line saying what it is, and a link to Admin → Roles, Groups or Departments with this organisation\'s prefix, opening in a new tab and saying so — and each link answers 200 for SA',
+            $lines60 === ['role' => $line60, 'user_group' => $line60, 'department' => $line60],
+            pa_show($lines60)
+        );
+        $raw60 = [];
+        foreach ([601, 602, 603] as $n60) {
+            if (str_contains($picker60, pw_esc($hostile60($n60))) === false) {
+                $raw60[] = $n60 . ' is not shown in its escaped form';
+            }
+            foreach (['<script>alert(' . $n60 . ')', 'onerror=alert(' . $n60 . ')>'] as $bad60) {
+                if (str_contains($page60['body'], $bad60) === true) {
+                    $raw60[] = $n60 . ' appears raw: ' . $bad60;
+                }
+            }
+        }
+        pa_ok('W60 the role\'s, user group\'s and department\'s names (hostile text 601 to 603) are shown only in their escaped form', $raw60 === [], implode(' | ', $raw60));
+        // The choice form and the rule form draw the SAME partial under
+        // their own prefixes ("choice", "rule"). Each must offer the same
+        // three boxes, and nothing of B's.
+        $others60 = [];
+        foreach (['choice' => $choice . '?event=' . $e60 . '&scope=date', 'rule' => $ruleP . '?feed=' . $c60] as $prefix60 => $url60) {
+            $got60   = pw_req($sa, 'GET', $url60);
+            $block60 = (preg_match('/<div[^>]*id="' . $prefix60 . '-picker".*?<script\b/s', $got60['body'], $mo60) === 1) ? $mo60[0] : '';
+            $others60[$prefix60] = [
+                'status' => $got60['status'],
+                'A\'s three boxes' => str_contains($block60, 'id="' . $prefix60 . '-role-' . RO1 . '"') === true
+                    && str_contains($block60, 'id="' . $prefix60 . '-user_group-' . UG1 . '"') === true
+                    && str_contains($block60, 'id="' . $prefix60 . '-department-' . DP1 . '"') === true,
+                'nothing of B\'s, retired or switched off' => $block60 !== '' && str_contains($block60, B_MARK) === false
+                    && str_contains($block60, '-role-' . ROB . '"') === false && str_contains($block60, '-user_group-' . UGB . '"') === false
+                    && str_contains($block60, '-department-' . DPB . '"') === false && str_contains($block60, '-user_group-' . UG2 . '"') === false
+                    && str_contains($block60, '-department-' . DP2 . '"') === false && str_contains($block60, '-department-' . DP3 . '"') === false,
+                'six groups' => substr_count($block60, '</legend>'),
+            ];
+        }
+        $other60 = ['status' => 200, 'A\'s three boxes' => true, 'nothing of B\'s, retired or switched off' => true, 'six groups' => 6];
+        pa_ok(
+            'W60 the choice form and the rule form offer the same: A\'s role, user group and department, six groups of boxes, and nothing of B\'s, retired or switched off',
+            $others60 === ['choice' => $other60, 'rule' => $other60],
+            pa_show($others60)
+        );
+
+        // 2. A number of organisation B's, posted by hand, one kind at a
+        //    time, together with one of A's own that would be accepted.
+        $fp60      = pa_fp();
+        $refused60 = [];
+        foreach (['role' => [RO1, ROB], 'user_group' => [UG1, UGB], 'department' => [DP1, DPB]] as $kind60 => $ids60) {
+            $r60 = pw_req($sa, 'POST', $form60, pa_calPost($c60, [
+                'csrf_token' => pw_freshToken($sa, $form60), 'action' => 'save', 'audienceLevel' => 'groups', 'audience' => [$kind60 => $ids60],
+            ]));
+            $refused60[$kind60] = $r60['status'] . ':' . (str_contains($r60['body'], 'role="alert">' . pw_esc(ExternalAudience::REFUSED_MESSAGE)) === true ? 'the one sentence' : 'NOT the sentence')
+                . ':' . (str_contains($r60['body'], B_MARK) === true ? 'names B' : 'names nothing of B');
+        }
+        $rows60 = (int) pa_one("SELECT COUNT(*) AS n FROM tblExternalAudienceMembers WHERE feedID = ?", 'i', [$c60])['n'];
+        $want60 = '200:the one sentence:names nothing of B';
+        pa_ok(
+            'W60 B\'s role, user group and department, each posted by hand beside one of A\'s own: the form is drawn again with "' . ExternalAudience::REFUSED_MESSAGE . '", B is named nowhere, and NOTHING is saved (no list row, the calendar still Members)',
+            $refused60 === ['role' => $want60, 'user_group' => $want60, 'department' => $want60] && $rows60 === 0 && pa_fp() === $fp60
+            && pa_one('SELECT audienceLevel FROM tblExternalFeeds WHERE feedID = ?', 'i', [$c60])['audienceLevel'] === 'members',
+            pa_show([$refused60, 'list rows' => $rows60])
+        );
+
+        // 3. A's own three, saved through the form; then who is shown the event.
+        $rh60 = pw_signIn('rh');
+        $xb60 = pw_signIn('xb');
+        $start60 = (string) pa_one('SELECT startDateTime FROM tblEvents WHERE eventID = ?', 'i', [$e60])['startDateTime'];
+        $cal60   = PW_A . '/calendar?view=month&date=' . substr($start60, 0, 7);
+        // How many events of this organisation (deleted ones aside) start on
+        // that day: it must be this one alone — see where the event is made.
+        $sameDay60 = (int) pa_one('SELECT COUNT(*) AS n FROM tblEvents WHERE siteID = ? AND isDeleted = 0 AND startDateTime >= ? AND startDateTime <= ?', 'iss', [ORG_A, substr($start60, 0, 10) . ' 00:00:00', substr($start60, 0, 10) . ' 23:59:59'])['n'];
+        // While the calendar is still at Members, every member of A is shown
+        // it — XB and M included. That is the control: it proves the title
+        // would be found if it were there, so "not shown" below means refused.
+        $before60 = [str_contains(pw_req($rh60, 'GET', $cal60)['body'], $title60), str_contains(pw_req($xb60, 'GET', $cal60)['body'], $title60), str_contains(pw_req($m, 'GET', $cal60)['body'], $title60)];
+        $s60 = pw_req($sa, 'POST', $form60, pa_calPost($c60, [
+            'csrf_token' => pw_freshToken($sa, $form60), 'action' => 'save', 'audienceLevel' => 'groups',
+            'audience' => ['role' => [RO1], 'user_group' => [UG1], 'department' => [DP1]],
+        ]));
+        $saved60 = array_map(
+            static fn (array $r): string => $r['kind'] . ':' . $r['refID'],
+            pa_q("SELECT kind, refID FROM tblExternalAudienceMembers WHERE feedID = ? AND ownerType = 'feed' AND ownerID = ? ORDER BY audienceMemberID", 'ii', [$c60, $c60])
+        );
+        pa_ok(
+            'W60 SA saves the calendar as Selected groups {RO1, UG1, DP1} through the form: 302 to its page, the three rows stored, and the list reads "Selected groups: 1 role, 1 user group, 1 department"',
+            $s60['status'] === 302 && $s60['location'] === $view . '?id=' . $c60 && $saved60 === ['role:' . RO1, 'user_group:' . UG1, 'department:' . DP1]
+            && pa_ls($e60) === 'groups/calendar'
+            && str_contains(pw_req($sa, 'GET', $list)['body'], pw_esc('Selected groups: 1 role, 1 user group, 1 department')) === true,
+            'HTTP ' . $s60['status'] . ' ' . $s60['location'] . ' ' . pa_show([$saved60, pa_ls($e60)])
+        );
+        // 🔒 Organisation B's role, user group and department are now written
+        //    onto this calendar's list BY HAND (the form has just refused
+        //    them, above). XB holds exactly those three, in B, and is a
+        //    member here. THIS is what makes "XB is not shown the event" a
+        //    real proof: the first version of this check left the list at
+        //    A's three, and a planted fault in the rule that judged a role
+        //    by the HOLDING'S organisation instead of the event's passed it
+        //    unnoticed — XB holds nothing of A's, so with only A's three on
+        //    the list nothing could let XB in whatever the rule did. Found by
+        //    that planted fault on 13 October 2026, before this was committed.
+        pa_list($c60, 'feed', $c60, [['role', ROB], ['user_group', UGB], ['department', DPB]]);
+        $listed60 = (int) pa_one("SELECT COUNT(*) AS n FROM tblExternalAudienceMembers WHERE feedID = ? AND ownerType = 'feed' AND ownerID = ?", 'ii', [$c60, $c60])['n'];
+        $after60 = [str_contains(pw_req($rh60, 'GET', $cal60)['body'], $title60), str_contains(pw_req($xb60, 'GET', $cal60)['body'], $title60), str_contains(pw_req($m, 'GET', $cal60)['body'], $title60)];
+        pa_ok(
+            'W60 on the organisation\'s calendar page: at Members RH, XB and M were all shown the event; listed for A\'s role, user group and department AND (by hand) organisation B\'s three, RH (who holds A\'s role) still is — XB (a member here who holds exactly B\'s three) and M are not',
+            $sameDay60 === 1 && $before60 === [true, true, true] && $listed60 === 6 && $after60 === [true, false, false],
+            pa_show(['events of A that day (must be 1)' => $sameDay60, 'at Members' => $before60, 'rows on the list' => $listed60, 'at Selected groups' => $after60])
+        );
+        // …and taking the role off RH takes the event off RH's page at once.
+        pa_q('DELETE FROM tblUserRoles WHERE userID = ? AND roleID = ?', 'ii', [RH_ID, RO1]);
+        $without60 = str_contains(pw_req($rh60, 'GET', $cal60)['body'], $title60);
+        pa_q('INSERT INTO tblUserRoles (userID, roleID, siteID) VALUES (?, ?, ?)', 'iii', [RH_ID, RO1, ORG_A]);
+        pa_ok('W60 the role taken off RH: the very next time RH opens the calendar page the event is not there (and it is back once the role is)', $without60 === false && str_contains(pw_req($rh60, 'GET', $cal60)['body'], $title60) === true);
+
+        // ---------------------------------------------------------------------
         pa_heading('W59 — #534: who is shown ONE event, on the four addresses that show one (seven viewers by five events)');
         // NOT a part 8 check. #534 asked for a table of who may open a single
         // event, proved on the real pages; this file holds the portal's only
@@ -6228,13 +6629,34 @@ $peopleA = array_column($optsA['person'], 'userID');
 sort($peopleA);
 // Every current member of A — the former member E is not one (fix round 4
 // added L, X, Q, O and F to the world, and E, whose membership ended).
-$wantPeople = [M, SA, LA, P_ID, SGM, L_ID, X_ID, Q_ID, O_ID, F_ID, H_ID, R_ID, TS_ID, TY_ID, TE_ID, TT_ID, LD_ID, CL_ID, LO_ID, CO_ID]; // + fix round 5's six, fix round 6's three and fix round 7's one
+$wantPeople = [M, SA, LA, P_ID, SGM, L_ID, X_ID, Q_ID, O_ID, F_ID, H_ID, R_ID, TS_ID, TY_ID, TE_ID, TT_ID, LD_ID, CL_ID, LO_ID, CO_ID, // + fix round 5's six, fix round 6's three and fix round 7's one
+    RH_ID, UH_ID, DH_ID, XO_ID, DN_ID, XB_ID, // + part 10's six current members of A (XF is a former member, XI a switched-off account)
+    KP_ID, KR_ID, KU_ID, KD_ID, KS_ID, KL_ID]; // + the six "one number, six kinds" members (see the constant SN)
 sort($wantPeople);
 pa_ok(
-    'D1 options(A): A\'s switched-on groups, roles and members only — nothing of B\'s, not the switched-off SG2 or RA3, not the former member E, not the switched-off account I',
-    array_column($optsA['small_group'], 'groupID') === [SG1, SG3, SG4, SG5, SG6] && array_column($optsA['leadership_role'], 'roleID') === [RA1, RA2, RA4, RA5, RA6]
+    'D1 options(A): A\'s switched-on groups, roles and members only — nothing of B\'s, not the switched-off SG2 or RA3, not the former members E and XF, not the switched-off accounts I and XI',
+    // SN last in each: the small group and the leadership role that carry the
+    // shared number are named "Selftest SN …", which sorts after the others.
+    array_column($optsA['small_group'], 'groupID') === [SG1, SG3, SG4, SG5, SG6, SN] && array_column($optsA['leadership_role'], 'roleID') === [RA1, RA2, RA4, RA5, RA6, SN]
     && $peopleA === $wantPeople && pa_has($optsA, B_MARK) === false,
     pa_show([$peopleA, array_column($optsA['small_group'], 'groupID'), array_column($optsA['leadership_role'], 'roleID')])
+);
+// Part 10 of #514 (check R8's data): the three new kinds are offered, for
+// THIS organisation only, and only what could be freshly added today — the
+// retired user group UG2, the switched-off department DP2 and the department
+// with an empty flag DP3 are left out, and so is everything of B's. Asked as
+// B, the answer is B's three and none of A's. The keys come in the order the
+// picker draws them.
+$optsB = ExternalAudience::options($mysqli, ORG_B);
+pa_ok(
+    'D1 options(A), part 10: exactly A\'s two roles (RO1 and the one with the shared number), its two user groups in use and its two switched-on departments, by name and in name order — not UG2 (retired), DP2 (switched off), DP3 (empty flag) or anything of B\'s; as B, exactly ROB, UGB and DPB; six kinds in the picker\'s order',
+    $optsA['role'] === [['roleID' => RO1, 'roleName' => 'Selftest RO1'], ['roleID' => SN, 'roleName' => 'Selftest SN role']]
+    && $optsA['user_group'] === [['groupID' => SN, 'groupName' => 'Selftest SN user group'], ['groupID' => UG1, 'groupName' => 'Selftest UG1']]
+    && $optsA['department'] === [['deptID' => DP1, 'deptName' => 'Selftest DP1'], ['deptID' => SN, 'deptName' => 'Selftest SN department']]
+    && array_column($optsB['role'], 'roleID') === [ROB] && array_column($optsB['user_group'], 'groupID') === [UGB] && array_column($optsB['department'], 'deptID') === [DPB]
+    && array_keys($optsA) === ['small_group', 'leadership_role', 'role', 'user_group', 'department', 'person']
+    && array_keys($optsA) === ExternalAudience::OFFERED_KINDS,
+    pa_show([$optsA['role'], $optsA['user_group'], $optsA['department'], array_keys($optsA)])
 );
 $bKey = ExternalAudience::ownerKey($fbGroups, 'feed', $fbGroups);
 pa_ok(
@@ -6462,6 +6884,11 @@ $cases3 = [
     'Selected groups with nobody chosen'   => [['audienceLevel' => 'groups'] + $ok3, 'Choose at least one group or person.'],
     'the level "hidden"'                   => [['audienceLevel' => 'hidden'] + $ok3, 'Choose who can see its events.'],
     'B\'s small group on the list'         => [['audienceLevel' => 'groups', 'audience' => ['small_group' => [SGB]]] + $ok3, ExternalAudience::REFUSED_MESSAGE],
+    // Part 10 of #514: the three new kinds reach the same refusal through a
+    // real save, each posted beside one of A's own that would be accepted.
+    'B\'s role on the list (part 10)'        => [['audienceLevel' => 'groups', 'audience' => ['role' => [RO1, ROB]]] + $ok3, ExternalAudience::REFUSED_MESSAGE],
+    'B\'s user group on the list (part 10)'  => [['audienceLevel' => 'groups', 'audience' => ['user_group' => [UG1, UGB]]] + $ok3, ExternalAudience::REFUSED_MESSAGE],
+    'B\'s department on the list (part 10)'  => [['audienceLevel' => 'groups', 'audience' => ['department' => [DP1, DPB]]] + $ok3, ExternalAudience::REFUSED_MESSAGE],
 ];
 foreach ($cases3 as $label => [$post3, $want3]) {
     $r3 = FeedAdmin::addCalendar($mysqli, ORG_A, SA, $post3);
@@ -6675,15 +7102,39 @@ $cases7 = [
     'PB (a member of another organisation only)'   => [['audience' => ['person' => [PB]]], []],
     'an account with no membership at all'          => [['audience' => ['person' => [999999]]], []],
     'a NEW switched-off group SG2'                  => [['audience' => ['small_group' => [SG2]]], []],
-    'the kind "role" (not offered)'                 => [['audience' => ['role' => [1]]], []],
+    // Until part 10 of #514 this case posted the kind "role", which no form
+    // offered. Roles are offered now, so the case posts a kind that exists
+    // nowhere — and the role cases are below.
+    'a kind that does not exist ("household")'      => [['audience' => ['household' => [1]]], []],
     'a value that is not a whole number'            => [['audience' => ['person' => ['12abc']]], []],
+    // Part 10 of #514, check R6: the three new kinds are held to the same
+    // rules as the old ones. Another organisation's is refused, a number
+    // that names nothing is refused, and one that is retired or switched off
+    // (or whose on/off flag is empty) cannot be freshly ADDED.
+    'ROB (another organisation\'s role)'            => [['audience' => ['role' => [ROB]]], []],
+    'UGB (another organisation\'s user group)'      => [['audience' => ['user_group' => [UGB]]], []],
+    'DPB (another organisation\'s department)'      => [['audience' => ['department' => [DPB]]], []],
+    'a role number that names nothing'              => [['audience' => ['role' => [999999]]], []],
+    'a role of A posted together with a role of B'  => [['audience' => ['role' => [RO1, ROB]]], []],
+    'a NEW retired user group UG2'                  => [['audience' => ['user_group' => [UG2]]], []],
+    'a NEW switched-off department DP2'             => [['audience' => ['department' => [DP2]]], []],
+    'a NEW department whose on/off flag is empty, DP3' => [['audience' => ['department' => [DP3]]], []],
+    'a small group\'s number posted as a user group' => [['audience' => ['user_group' => [SG1]]], []],
+    'a leadership role\'s number posted as a role'   => [['audience' => ['role' => [RA1]]], []],
     'a GONE person already on the list, posted back' => [['audience' => ['person' => [SGM]]], [['kind' => 'person', 'refID' => SGM, 'label' => 'someone no longer in this organisation', 'state' => 'gone']]],
     // Fix round 2, checker round 2 LOW 1: the same for a GROUP and a ROLE
     // of another organisation that are already on the list (a hand edit,
     // or an import) — kept, their members would start seeing A's events.
     'another organisation\'s group already on the list, posted back' => [['audience' => ['small_group' => [SGB]]], [['kind' => 'small_group', 'refID' => SGB, 'label' => 'a small group that no longer exists', 'state' => 'gone']]],
     'another organisation\'s role already on the list, posted back' => [['audience' => ['leadership_role' => [RB1]]], [['kind' => 'leadership_role', 'refID' => RB1, 'label' => 'a leadership role that no longer exists', 'state' => 'gone']]],
-    'a not_offered row already on the list, posted back' => [['audience' => ['department' => [1]]], [['kind' => 'department', 'refID' => 1, 'label' => 'a department #1', 'state' => 'not_offered']]],
+    // Until part 10 this case was "a not_offered row already on the list,
+    // posted back" (a department, number 1). A department is offered now;
+    // one that is not this organisation's is "gone", and posting it back is
+    // still refused — for each of the three new kinds.
+    'another organisation\'s role already on the list, posted back (part 10)' => [['audience' => ['role' => [ROB]]], [['kind' => 'role', 'refID' => ROB, 'label' => 'a role that no longer exists', 'state' => 'gone']]],
+    'another organisation\'s user group already on the list, posted back (part 10)' => [['audience' => ['user_group' => [UGB]]], [['kind' => 'user_group', 'refID' => UGB, 'label' => 'a user group that no longer exists', 'state' => 'gone']]],
+    'another organisation\'s department already on the list, posted back (part 10)' => [['audience' => ['department' => [DPB]]], [['kind' => 'department', 'refID' => DPB, 'label' => 'a department that no longer exists', 'state' => 'gone']]],
+    'a row of a kind the forms do not offer, already on the list, posted back' => [['audience' => ['household' => [1]]], [['kind' => 'household', 'refID' => 1, 'label' => 'an entry #1', 'state' => 'not_offered']]],
 ];
 foreach ($cases7 as $label => [$post7, $current7]) {
     $r7 = ExternalAudience::fromPost($mysqli, ORG_A, $post7, $current7);
@@ -6695,6 +7146,32 @@ pa_q('UPDATE tblUserSites SET isActive = 0 WHERE userID = ? AND siteID = ?', 'ii
 $r7b = ExternalAudience::fromPost($mysqli, ORG_A, ['audience' => ['person' => [P_ID]]], [['kind' => 'person', 'refID' => P_ID, 'label' => 'x', 'state' => 'left']]);
 pa_ok('D7 kept: P already on the list after their membership was switched off', $r7b['ok'] === true && $r7b['members'] === [['kind' => 'person', 'refID' => P_ID]], pa_show($r7b));
 pa_q('UPDATE tblUserSites SET isActive = 1 WHERE userID = ? AND siteID = ?', 'ii', [P_ID, ORG_A]);
+// Part 10 of #514, check R6 — what IS accepted. Each new kind for this
+// organisation; and a retired user group, a switched-off department and one
+// with an empty flag when they are ALREADY on the list (they stay until an
+// administrator takes them off, exactly as SG2 does above).
+$r7p = ExternalAudience::fromPost($mysqli, ORG_A, ['audience' => ['role' => [RO1], 'user_group' => [UG1], 'department' => [DP1]]], []);
+pa_ok(
+    'D7 accepted (part 10): A\'s role RO1, user group UG1 and department DP1, each freshly added',
+    $r7p['ok'] === true && $r7p['message'] === ''
+    && $r7p['members'] === [['kind' => 'role', 'refID' => RO1], ['kind' => 'user_group', 'refID' => UG1], ['kind' => 'department', 'refID' => DP1]],
+    pa_show($r7p)
+);
+$r7q = ExternalAudience::fromPost($mysqli, ORG_A, ['audience' => ['user_group' => [UG2], 'department' => [DP2, DP3]]], [
+    ['kind' => 'user_group', 'refID' => UG2, 'label' => 'x', 'state' => 'switched_off'],
+    ['kind' => 'department', 'refID' => DP2, 'label' => 'x', 'state' => 'switched_off'],
+    ['kind' => 'department', 'refID' => DP3, 'label' => 'x', 'state' => 'switched_off'],
+]);
+pa_ok(
+    'D7 kept (part 10): the retired UG2, the switched-off DP2 and DP3 (empty flag), each already on the list',
+    $r7q['ok'] === true
+    && $r7q['members'] === [['kind' => 'user_group', 'refID' => UG2], ['kind' => 'department', 'refID' => DP2], ['kind' => 'department', 'refID' => DP3]],
+    pa_show($r7q)
+);
+// …and "already on the list" is judged kind by kind: UG2 on the list as a
+// USER GROUP does not let the same number through as a department.
+$r7r = ExternalAudience::fromPost($mysqli, ORG_A, ['audience' => ['department' => [UG2]]], [['kind' => 'user_group', 'refID' => UG2, 'label' => 'x', 'state' => 'switched_off']]);
+pa_ok('D7 refused (part 10): a number that is on the list as a user group, posted as a department', $r7r['ok'] === false && $r7r['message'] === ExternalAudience::REFUSED_MESSAGE && $r7r['members'] === [], pa_show($r7r));
 $many7 = [];
 for ($i = 0; $i < 51; $i++) {
     $gid = 910900 + $i;
@@ -6724,7 +7201,7 @@ ExternalAudience::save($mysqli, ORG_A, FA1, 'feed', FA1, [
     ['kind' => 'leadership_role', 'refID' => RA1], ['kind' => 'person', 'refID' => P_ID],
     ['kind' => 'person', 'refID' => LA], ['kind' => 'person', 'refID' => SGM],
 ], SA);
-pa_list(FA1, 'feed', FA1, [['small_group', 910199], ['department', 1]]); // a group that never existed; a part-10 kind
+pa_list(FA1, 'feed', FA1, [['small_group', 910199], ['department', 1]]); // a group that never existed; a department number that names nothing in A
 pa_q('UPDATE tblUserSites SET isActive = 0 WHERE userID = ? AND siteID = ?', 'ii', [P_ID, ORG_A]);   // P's membership here switched off
 pa_q('UPDATE tblUsers SET isActive = 0 WHERE userID = ?', 'i', [LA]);                                  // LA's ACCOUNT switched off
 pa_q('UPDATE tblUserSites SET siteID = ? WHERE userID = ? AND siteID = ?', 'iii', [ORG_B, SGM, ORG_A]); // SGM now only in B
@@ -6749,12 +7226,22 @@ pa_ok(
     && ($list8['person:' . SGM] ?? '') === 'gone|someone no longer in this organisation',
     pa_show($list8)
 );
+// Until part 10 of #514 the department row above read "not_offered": no form
+// offered departments. They are offered now, so a department number that
+// names nothing in this organisation is "gone", like the made-up small group
+// beside it, and both are removed by the save further down. "not_offered" is
+// kept for a kind the DATABASE knows and the code does not. No such kind
+// exists today (D15 checks the two lists are equal), so the label is asked
+// for directly, with a made-up kind, through the private method that decides
+// every label — reached by reflection, which reads it and changes nothing.
+$label8 = (new ReflectionMethod(ExternalAudience::class, 'labelled'))->invoke(null, ['kind' => 'household', 'refID' => 7]);
 pa_ok(
-    'D8 not_offered: a part-10 kind is shown, with the words saying it will be removed on save (checker LOW 5)',
-    ($list8['department:1'] ?? '') === 'not_offered|a department #1'
+    'D8 a department number that names nothing here is "gone" (it was "not_offered" before part 10); a kind the forms do not offer is still shown as "an entry #7", "not_offered", with the words saying it will be removed on save (checker LOW 5)',
+    ($list8['department:1'] ?? '') === 'gone|a department that no longer exists'
+    && $label8 === ['kind' => 'household', 'refID' => 7, 'label' => 'an entry #7', 'state' => 'not_offered']
     && ExternalAudience::stateLabel('not_offered') === '(not used by this version, so it will be removed when you save)'
     && ExternalAudience::stateLabel('gone') === '(will be removed when you save)',
-    pa_show($list8)
+    pa_show([$list8, $label8])
 );
 $ruleOwner8 = pa_q("INSERT INTO tblExternalAudienceMembers (siteID, feedID, ownerType, ownerID, kind, refID, createdAt) VALUES (?, ?, 'rule', 910601, 'small_group', ?, UTC_TIMESTAMP())", 'iii', [ORG_A, FA1, SG1]);
 $many8 = ExternalAudience::currentMany($mysqli, ORG_A, [
@@ -6774,18 +7261,97 @@ pa_ok(
 // Saving the list (the picker posts the live and kept entries, never a
 // gone or not_offered one) REMOVES the gone and not_offered rows — the
 // decided behaviour (checker LOW 5), announced beforehand by the labels
-// above.
+// above. (Since part 10 both rows removed here are "gone": the made-up
+// small group and the department number that names nothing.)
 $r8 = FeedAdmin::saveCalendar($mysqli, FA1, ORG_A, SA, pa_calPost(FA1, ['audience' => [
     'small_group' => [SG1, SG2], 'leadership_role' => [RA1], 'person' => [P_ID, LA],
 ]]));
 $after8 = array_map(static fn (array $m): string => $m['kind'] . ':' . $m['refID'] . ':' . $m['state'], ExternalAudience::current($mysqli, ORG_A, FA1, 'feed', FA1));
 pa_ok(
-    'D8 saving the list removes the gone and not_offered rows and keeps the rest',
+    'D8 saving the list removes the gone rows (the made-up small group and the department that names nothing) and keeps the rest',
     $r8['ok'] === true && $after8 === [
         'small_group:' . SG1 . ':ok', 'small_group:' . SG2 . ':switched_off', 'leadership_role:' . RA1 . ':ok',
         'person:' . P_ID . ':left', 'person:' . LA . ':left',
     ],
     pa_show([$r8, $after8])
+);
+
+// ---- Part 10 of #514: the same states for a role, a user group and a department ----
+// One list holding every state the three new kinds can be in: A's own (ok);
+// a retired user group, a switched-off department and one whose on/off flag
+// is empty (switched_off, all three kept on save); organisation B's role,
+// user group and department and a role number that never existed (gone —
+// and the four must read EXACTLY alike, with none of B's names); and a user
+// group and a department that have no name (shown by their number, never as
+// a tick box with nothing beside it). B's three and the made-up role are
+// written in by hand: the form refuses them (D7).
+pa_resetWorld();
+pa_q("UPDATE tblExternalFeeds SET audienceLevel = 'groups' WHERE feedID = ?", 'i', [FA1]);
+pa_q('INSERT INTO tblGroups (groupID, siteID, groupName, isActive) VALUES (910149, ?, NULL, 1)', 'i', [ORG_A]);   // no name at all
+pa_q("INSERT INTO tblDepts (deptID, siteID, deptName, isActive) VALUES (910159, ?, '   ', 1)", 'i', [ORG_A]);    // a name of spaces only
+ExternalAudience::save($mysqli, ORG_A, FA1, 'feed', FA1, [
+    ['kind' => 'role', 'refID' => RO1], ['kind' => 'user_group', 'refID' => UG1], ['kind' => 'user_group', 'refID' => UG2],
+    ['kind' => 'department', 'refID' => DP1], ['kind' => 'department', 'refID' => DP2], ['kind' => 'department', 'refID' => DP3],
+    ['kind' => 'user_group', 'refID' => 910149], ['kind' => 'department', 'refID' => 910159],
+], SA);
+pa_list(FA1, 'feed', FA1, [['role', ROB], ['user_group', UGB], ['department', DPB], ['role', 919998]]);
+$states8p = static function () use ($mysqli): array {
+    $out = [];
+    foreach (ExternalAudience::current($mysqli, ORG_A, FA1, 'feed', FA1) as $m) {
+        $out[$m['kind'] . ':' . $m['refID']] = $m['state'] . '|' . $m['label'];
+    }
+
+    return $out;
+};
+$list8p = $states8p();
+pa_ok(
+    'D8 part 10, ok and switched_off: A\'s role, user group and department by their own names; the retired UG2, the switched-off DP2 and DP3 (empty flag) "switched_off" with theirs',
+    ($list8p['role:' . RO1] ?? '') === 'ok|Selftest RO1' && ($list8p['user_group:' . UG1] ?? '') === 'ok|Selftest UG1'
+    && ($list8p['department:' . DP1] ?? '') === 'ok|Selftest DP1' && ($list8p['user_group:' . UG2] ?? '') === 'switched_off|Selftest UG2'
+    && ($list8p['department:' . DP2] ?? '') === 'switched_off|Selftest DP2' && ($list8p['department:' . DP3] ?? '') === 'switched_off|Selftest DP3',
+    pa_show($list8p)
+);
+pa_ok(
+    'D8 part 10, gone: organisation B\'s role, user group and department read exactly like a number that never existed — "a role that no longer exists" and so on — and B\'s names appear nowhere',
+    ($list8p['role:' . ROB] ?? '') === 'gone|a role that no longer exists' && ($list8p['role:919998'] ?? '') === 'gone|a role that no longer exists'
+    && ($list8p['user_group:' . UGB] ?? '') === 'gone|a user group that no longer exists'
+    && ($list8p['department:' . DPB] ?? '') === 'gone|a department that no longer exists' && pa_has($list8p, B_MARK) === false,
+    pa_show($list8p)
+);
+$opts8p = ExternalAudience::options($mysqli, ORG_A);
+pa_ok(
+    'D8 part 10, no name: a user group with no name and a department named with spaces only are shown as "User group #910149" and "Department #910159", on the saved list and among the options',
+    ($list8p['user_group:910149'] ?? '') === 'ok|User group #910149' && ($list8p['department:910159'] ?? '') === 'ok|Department #910159'
+    && in_array(['groupID' => 910149, 'groupName' => 'User group #910149'], $opts8p['user_group'], true) === true
+    && in_array(['deptID' => 910159, 'deptName' => 'Department #910159'], $opts8p['department'], true) === true,
+    pa_show([$list8p, $opts8p['user_group'], $opts8p['department']])
+);
+// The picker would post the live and the kept entries, never a gone one.
+$r8p = FeedAdmin::saveCalendar($mysqli, FA1, ORG_A, SA, pa_calPost(FA1, ['audience' => [
+    'role' => [RO1], 'user_group' => [UG1, UG2, 910149], 'department' => [DP1, DP2, DP3, 910159],
+]]));
+$after8p = array_map(static fn (array $m): string => $m['kind'] . ':' . $m['refID'] . ':' . $m['state'], ExternalAudience::current($mysqli, ORG_A, FA1, 'feed', FA1));
+pa_ok(
+    'D8 part 10: saving the list removes B\'s three and the made-up role, and keeps A\'s — the retired and switched-off ones included',
+    $r8p['ok'] === true && $after8p === [
+        'role:' . RO1 . ':ok', 'user_group:' . UG1 . ':ok', 'user_group:' . UG2 . ':switched_off', 'user_group:910149:ok',
+        'department:' . DP1 . ':ok', 'department:' . DP2 . ':switched_off', 'department:' . DP3 . ':switched_off', 'department:910159:ok',
+    ],
+    pa_show([$r8p, $after8p])
+);
+// A role, user group or department DELETED while it is on a list (each of
+// their own pages can do that once nobody holds it; here the rows are simply
+// removed, and the holdings go with them): the entry stays on the list,
+// reads "no longer exists", and — D17 — lets nobody in.
+pa_q('DELETE FROM tblRoles WHERE roleID = ?', 'i', [RO1]);
+pa_q('DELETE FROM tblGroups WHERE groupID = ?', 'i', [UG1]);
+pa_q('DELETE FROM tblDepts WHERE deptID = ?', 'i', [DP1]);
+$gone8p = $states8p();
+pa_ok(
+    'D8 part 10: a role, user group and department deleted while on the list each read "… that no longer exists" (gone), with no name',
+    ($gone8p['role:' . RO1] ?? '') === 'gone|a role that no longer exists' && ($gone8p['user_group:' . UG1] ?? '') === 'gone|a user group that no longer exists'
+    && ($gone8p['department:' . DP1] ?? '') === 'gone|a department that no longer exists',
+    pa_show($gone8p)
 );
 
 // Fix round 2, checker round 2 M1: a CHOICE and a RULE with the SAME number
@@ -7357,6 +7923,28 @@ $sourceEnum = pa_enumValues('tblEvents', 'importSource');
 $reasonEnum = pa_enumValues('tblExternalEventApprovals', 'reason');
 pa_ok('D15 SOURCE_LABELS keys = the tblEvents.importSource ENUM', $sourceEnum !== [] && array_diff($sourceEnum, array_keys(FeedAdmin::SOURCE_LABELS)) === [] && array_diff(array_keys(FeedAdmin::SOURCE_LABELS), $sourceEnum) === [], pa_show($sourceEnum));
 pa_ok('D15 REASON_LABELS keys = the tblExternalEventApprovals.reason ENUM', $reasonEnum !== [] && array_diff($reasonEnum, array_keys(FeedAdmin::REASON_LABELS)) === [] && array_diff(array_keys(FeedAdmin::REASON_LABELS), $reasonEnum) === [], pa_show($reasonEnum));
+// Part 10 of #514, check R7: EVERY kind of list entry the database can hold
+// is one the forms offer — and the other way round. Read twice: from the
+// database this run was given (what really enforces it), and from the text
+// of web/_sql/full_schema.sql (what a new installation will be built from),
+// so a kind added to either, with ExternalAudience forgotten, fails here
+// instead of being quietly "not used by this version" for ever. The rule
+// and its fast copy must learn a new kind too; D17's oracle is what notices
+// when only one of them has.
+$kindEnum   = pa_enumValues('tblExternalAudienceMembers', 'kind');
+$schemaText = (string) file_get_contents(dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_sql' . DIRECTORY_SEPARATOR . 'full_schema.sql');
+$schemaKinds = [];
+if (preg_match('/CREATE TABLE IF NOT EXISTS `tblExternalAudienceMembers` \(.*?`kind`\s+ENUM\(([^)]*)\)/s', $schemaText, $mKind) === 1) {
+    preg_match_all("/'([^']*)'/", $mKind[1], $mKinds);
+    $schemaKinds = $mKinds[1];
+}
+$sameKinds = static fn (array $have): bool => $have !== [] && array_diff($have, ExternalAudience::OFFERED_KINDS) === [] && array_diff(ExternalAudience::OFFERED_KINDS, $have) === [];
+pa_ok(
+    'D15 ExternalAudience::OFFERED_KINDS = the tblExternalAudienceMembers.kind ENUM, in this database AND in full_schema.sql (six kinds, none twice)',
+    $sameKinds($kindEnum) === true && $sameKinds($schemaKinds) === true
+    && count(ExternalAudience::OFFERED_KINDS) === 6 && count(array_unique(ExternalAudience::OFFERED_KINDS)) === 6,
+    pa_show(['database' => $kindEnum, 'full_schema.sql' => $schemaKinds, 'offered' => ExternalAudience::OFFERED_KINDS])
+);
 pa_ok(
     'D15 the two C10 item 9 wordings, exactly',
     FeedAdmin::OUTCOME_LABELS['duplicate_not_applied'] === 'Listed twice in the outside calendar; rules are not applied to it'
@@ -7442,9 +8030,11 @@ pa_ok('D17 after one is decided, waiting drops to 1', $d17['decided'] === 1 && (
 // Asking every account closes that — but ONLY while the world holds every
 // kind of person the rule treats differently. That is why pa_resetWorld()
 // adds L, X, E, Q, O and F, and why D17 first checks they are there and
-// that the real rule tells them apart. WHEN PART 10 makes the role,
-// user-group and department kinds match people, holders of those kinds
-// must be added to the world as well (FeedAdmin::whoCanSee() says the same).
+// that the real rule tells them apart. PART 10 OF #514 (13 October 2026)
+// made the role, user-group and department kinds match people, and added
+// holders of those kinds to the world for exactly this reason: RH, UH, DH,
+// XF, XO, DN, XB and XI (see the constants, and the "R5" cases further
+// down). A SEVENTH kind would need the same — FeedAdmin::whoCanSee() says so.
 //
 // Fix round 5 (check round 5, M1): comparing CHANGE COUNTS is not enough.
 // One person counted wrongly hides whenever somebody else on the same event
@@ -7795,10 +8385,31 @@ $kinds17  = [
     'CL co-leads SG6 (on), its only row' => pa_one("SELECT 1 AS x FROM tblSmallGroups sg WHERE sg.groupID = ? AND sg.isActive = 1 AND (SELECT GROUP_CONCAT(CONCAT(userID, ':', memberRole, ':', status)) FROM tblSmallGroupMembers WHERE groupID = sg.groupID) = ?", 'is', [SG6, CL_ID . ':co-leader:active']),
     'LO leads SG2, which is switched off, and is in no other group' => pa_one("SELECT 1 AS x FROM tblSmallGroupMembers JOIN tblSmallGroups sg ON sg.groupID = tblSmallGroupMembers.groupID AND sg.isActive = 0 WHERE tblSmallGroupMembers.userID = ? AND tblSmallGroupMembers.groupID = ? AND tblSmallGroupMembers.memberRole = 'leader' AND tblSmallGroupMembers.status = 'active' AND (SELECT COUNT(*) FROM tblSmallGroupMembers WHERE userID = ?) = 1", 'iii', [LO_ID, SG2, LO_ID]),
     'CO co-leads SG2, which is switched off, and is in no other group' => pa_one("SELECT 1 AS x FROM tblSmallGroupMembers JOIN tblSmallGroups sg ON sg.groupID = tblSmallGroupMembers.groupID AND sg.isActive = 0 WHERE tblSmallGroupMembers.userID = ? AND tblSmallGroupMembers.groupID = ? AND tblSmallGroupMembers.memberRole = 'co-leader' AND tblSmallGroupMembers.status = 'active' AND (SELECT COUNT(*) FROM tblSmallGroupMembers WHERE userID = ?) = 1", 'iii', [CO_ID, SG2, CO_ID]),
+    // Part 10 of #514 — roles, user groups and departments. Each statement
+    // starts from the table that holds the HOLDING (and names tblUserGroups
+    // with no short name: the column checker's trap, see UserGroups.php).
+    'RH is an active member of A and holds RO1' => pa_one('SELECT 1 AS x FROM tblUserRoles ur JOIN tblUserSites us ON us.userID = ur.userID AND us.siteID = ur.siteID AND us.isActive = 1 JOIN tblUsers u ON u.userID = ur.userID AND u.isActive = 1 WHERE ur.userID = ? AND ur.roleID = ? AND ur.siteID = ?', 'iii', [RH_ID, RO1, ORG_A]),
+    'UH is an active member of A in UG1, which is in use' => pa_one('SELECT 1 AS x FROM tblGroups g JOIN tblUserGroups ON tblUserGroups.groupID = g.groupID AND tblUserGroups.siteID = g.siteID JOIN tblUserSites us ON us.userID = tblUserGroups.userID AND us.siteID = g.siteID AND us.isActive = 1 WHERE tblUserGroups.userID = ? AND g.groupID = ? AND g.siteID = ? AND g.isActive = 1', 'iii', [UH_ID, UG1, ORG_A]),
+    'DH is an active member of A in DP1, which is switched on' => pa_one('SELECT 1 AS x FROM tblDepts d JOIN tblUserDepts ud ON ud.deptID = d.deptID AND ud.siteID = d.siteID JOIN tblUserSites us ON us.userID = ud.userID AND us.siteID = d.siteID AND us.isActive = 1 WHERE ud.userID = ? AND d.deptID = ? AND d.siteID = ? AND d.isActive = 1', 'iii', [DH_ID, DP1, ORG_A]),
+    'XF left A (membership row switched off) but still holds RO1 and is still in UG1 and DP1' => pa_one('SELECT 1 AS x FROM tblUserSites us JOIN tblUserRoles ur ON ur.userID = us.userID AND ur.roleID = ? JOIN tblUserGroups ON tblUserGroups.userID = us.userID AND tblUserGroups.groupID = ? JOIN tblUserDepts ud ON ud.userID = us.userID AND ud.deptID = ? WHERE us.userID = ? AND us.siteID = ? AND us.isActive = 0', 'iiiii', [RO1, UG1, DP1, XF_ID, ORG_A]),
+    'XI is switched off, yet an active member of A holding RO1 and in UG1 and DP1' => pa_one('SELECT 1 AS x FROM tblUsers u JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 JOIN tblUserRoles ur ON ur.userID = u.userID AND ur.roleID = ? JOIN tblUserGroups ON tblUserGroups.userID = u.userID AND tblUserGroups.groupID = ? JOIN tblUserDepts ud ON ud.userID = u.userID AND ud.deptID = ? WHERE u.userID = ? AND u.isActive = 0', 'iiiii', [ORG_A, RO1, UG1, DP1, XI_ID]),
+    'XO is an active member of A in UG2 (retired) and DP2 (switched off), and holds no role' => pa_one('SELECT 1 AS x FROM tblGroups g JOIN tblUserGroups ON tblUserGroups.groupID = g.groupID JOIN tblUserDepts ud ON ud.userID = tblUserGroups.userID JOIN tblDepts d ON d.deptID = ud.deptID AND d.isActive = 0 WHERE tblUserGroups.userID = ? AND g.groupID = ? AND g.isActive = 0 AND d.deptID = ? AND (SELECT COUNT(*) FROM tblUserRoles WHERE userID = ?) = 0', 'iiii', [XO_ID, UG2, DP2, XO_ID]),
+    'DN is an active member of A in DP3 only, whose on/off flag is empty' => pa_one('SELECT 1 AS x FROM tblDepts d JOIN tblUserDepts ud ON ud.deptID = d.deptID WHERE ud.userID = ? AND d.deptID = ? AND d.isActive IS NULL AND (SELECT COUNT(*) FROM tblUserDepts WHERE userID = ?) = 1', 'iii', [DN_ID, DP3, DN_ID]),
+    'XB is an active member of BOTH A and B' => pa_one('SELECT 1 AS x FROM tblUserSites a JOIN tblUserSites b ON b.userID = a.userID AND b.siteID = ? AND b.isActive = 1 WHERE a.userID = ? AND a.siteID = ? AND a.isActive = 1', 'iii', [ORG_B, XB_ID, ORG_A]),
+    'XB holds B\'s role ROB and is in B\'s UGB and DPB — and holds nothing of A\'s' => pa_one('SELECT 1 AS x FROM tblUserRoles ur JOIN tblUserGroups ON tblUserGroups.userID = ur.userID AND tblUserGroups.groupID = ? AND tblUserGroups.siteID = ? JOIN tblUserDepts ud ON ud.userID = ur.userID AND ud.deptID = ? AND ud.siteID = ? WHERE ur.userID = ? AND ur.roleID = ? AND ur.siteID = ? AND (SELECT COUNT(*) FROM tblUserRoles WHERE userID = ? AND siteID = ?) = 0 AND (SELECT COUNT(*) FROM tblUserGroups WHERE userID = ? AND siteID = ?) = 0 AND (SELECT COUNT(*) FROM tblUserDepts WHERE userID = ? AND siteID = ?) = 0', 'iiiiiiiiiiiii', [UGB, ORG_B, DPB, ORG_B, XB_ID, ROB, ORG_B, XB_ID, ORG_A, XB_ID, ORG_A, XB_ID, ORG_A]),
+    // One number, six kinds (added after part 10's independent check). The
+    // six tables each hold a row numbered SN for organisation A, switched on,
+    // with exactly the one person named — checked, not assumed: a world in
+    // which they did NOT share the number would let a rule or a copy that
+    // mixes the kinds up pass every case below.
+    'a role, a user group, a department, a small group and a leadership role of A are ALL numbered SN and switched on, and SN is KP\'s account number' => pa_one('SELECT 1 AS x FROM tblRoles r JOIN tblGroups g ON g.groupID = r.roleID AND g.siteID = r.siteID AND g.isActive = 1 JOIN tblDepts d ON d.deptID = r.roleID AND d.siteID = r.siteID AND d.isActive = 1 JOIN tblSmallGroups sg ON sg.groupID = r.roleID AND sg.siteID = r.siteID AND sg.isActive = 1 JOIN tblLeadershipRoles lr ON lr.roleID = r.roleID AND lr.siteID = r.siteID AND lr.isActive = 1 JOIN tblUserSites us ON us.userID = r.roleID AND us.siteID = r.siteID AND us.isActive = 1 WHERE r.roleID = ? AND r.siteID = ?', 'ii', [SN, ORG_A]),
+    'role SN is held by KR alone; user group SN holds KU alone; department SN holds KD alone' => pa_one('SELECT 1 AS x FROM tblUserRoles ur JOIN tblUserGroups ON tblUserGroups.groupID = ur.roleID JOIN tblUserDepts ud ON ud.deptID = ur.roleID WHERE ur.roleID = ? AND ur.userID = ? AND tblUserGroups.userID = ? AND ud.userID = ? AND (SELECT COUNT(*) FROM tblUserRoles WHERE roleID = ?) = 1 AND (SELECT COUNT(*) FROM tblUserGroups WHERE groupID = ?) = 1 AND (SELECT COUNT(*) FROM tblUserDepts WHERE deptID = ?) = 1', 'iiiiiii', [SN, KR_ID, KU_ID, KD_ID, SN, SN, SN]),
+    'small group SN holds KS alone; leadership role SN is held by KL alone, with no dates' => pa_one("SELECT 1 AS x FROM tblSmallGroupMembers JOIN tblLeadershipAssignments la ON la.roleID = tblSmallGroupMembers.groupID AND la.userID = ? AND la.isActive = 1 AND la.startDate IS NULL AND la.endDate IS NULL WHERE tblSmallGroupMembers.groupID = ? AND tblSmallGroupMembers.userID = ? AND tblSmallGroupMembers.status = 'active' AND (SELECT COUNT(*) FROM tblSmallGroupMembers WHERE groupID = ?) = 1 AND (SELECT COUNT(*) FROM tblLeadershipAssignments WHERE roleID = ?) = 1", 'iiiii', [KL_ID, SN, KS_ID, SN, SN]),
+    'KP, KR, KU, KD, KS and KL each hold or belong to exactly ONE thing (KP to none)' => pa_one('SELECT 1 AS x FROM (SELECT (SELECT COUNT(*) FROM tblUserRoles WHERE userID BETWEEN ? AND ?) + (SELECT COUNT(*) FROM tblUserGroups WHERE userID BETWEEN ? AND ?) + (SELECT COUNT(*) FROM tblUserDepts WHERE userID BETWEEN ? AND ?) + (SELECT COUNT(*) FROM tblSmallGroupMembers WHERE userID BETWEEN ? AND ?) + (SELECT COUNT(*) FROM tblLeadershipAssignments WHERE userID BETWEEN ? AND ?) AS n) t WHERE t.n = 5', 'iiiiiiiiii', [KP_ID, KL_ID, KP_ID, KL_ID, KP_ID, KL_ID, KP_ID, KL_ID, KP_ID, KL_ID]),
 ];
 pa_ok(
-    'D17 the oracle asks about all 25 accounts and nobody-signed-in in session, token and invite, plus the website, signed out, an API key and the bulk list (82 views) — and the world holds each of the ' . count($kinds17) . ' kinds of viewer listed here',
-    count($views17) === 82 && in_array(null, $kinds17, true) === false,
+    'D17 the oracle asks about all 39 accounts and nobody-signed-in in session, token and invite, plus the website, signed out, an API key and the bulk list (124 views) — and the world holds each of the ' . count($kinds17) . ' kinds of viewer listed here',
+    count($views17) === 124 && in_array(null, $kinds17, true) === false,
     pa_show(['views' => count($views17), 'missing' => array_keys(array_filter($kinds17, static fn (?array $v): bool => $v === null))])
 );
 // A control that the kinds are DIFFERENT to the real rule, not just present:
@@ -7831,6 +8442,36 @@ pa_ok(
     'D17 control: signed in, exactly SA, GA, SGM, X, L, TS, TE, LD and CL see an event listed for every group and role of A (SG2 and RA3 switched off since) — not M, E, Q, O, F, I, H, R, TY, TT, LO or CO',
     ($ctlSave17['ok'] ?? false) === true && $seen17 === $want17,
     pa_show([$ctlSave17['message'] ?? null, $seen17])
+);
+// The same control for part 10 of #514: one event on a list naming A's role,
+// both its user groups and all three of its departments — and, written in by
+// hand afterwards (the form refuses them, D7), organisation B's role, user
+// group and department. Signed in, RH (holds the role), UH (in the user group
+// in use) and DH (in the switched-on department) see it, with the
+// administrators SA and GA. NOT: XF (a former member who still holds all
+// three), XI (a switched-off account that does), XO (in the retired group
+// and the switched-off department), DN (in the department whose flag is
+// empty), XB (a member of A who holds all three IN B), or M. UG2, DP2 and DP3
+// are switched on for the save and put back straight after, as SG2 and RA3
+// are above. The expected names are written out by hand, so this does not
+// depend on the copy and the rule merely agreeing with each other.
+$ctl17p = pa_event(FA1, 'd17-ctlp@p8', 'D17 part 10 control event');
+pa_q('UPDATE tblGroups SET isActive = 1 WHERE groupID = ?', 'i', [UG2]);
+pa_q('UPDATE tblDepts SET isActive = 1 WHERE deptID IN (?, ?)', 'ii', [DP2, DP3]);
+$ctlSave17p = FeedAdmin::saveChoice($mysqli, $ctl17p, 'date', ORG_A, SA, ['audienceLevel' => 'groups', 'audience' => ['role' => [RO1], 'user_group' => [UG1, UG2], 'department' => [DP1, DP2, DP3]]]);
+pa_q('UPDATE tblGroups SET isActive = 0 WHERE groupID = ?', 'i', [UG2]);
+pa_q('UPDATE tblDepts SET isActive = 0 WHERE deptID = ?', 'i', [DP2]);
+pa_q('UPDATE tblDepts SET isActive = NULL WHERE deptID = ?', 'i', [DP3]);
+pa_list(FA1, 'choice', (int) ($ctlSave17p['choiceId'] ?? 0), [['role', ROB], ['user_group', UGB], ['department', DPB]]);
+$seen17p = array_values(array_filter(pa_full(FA1)[$ctl17p] ?? [], static fn (string $n): bool => str_starts_with($n, EventVisibility::MODE_SESSION . ':')));
+$want17p = array_map(static fn (int $u): string => EventVisibility::MODE_SESSION . ':' . $u, [SA, GA, RH_ID, UH_ID, DH_ID]);
+sort($seen17p);
+sort($want17p);
+pa_ok(
+    'D17 control, part 10: signed in, exactly SA, GA, RH, UH and DH see an event listed for A\'s role, user groups and departments (UG2, DP2 and DP3 switched off since) and, by hand, B\'s three — not M, XF, XI, XO, DN or XB; and the copy says exactly "groups|RH,UH,DH"',
+    ($ctlSave17p['ok'] ?? false) === true && (int) ($ctlSave17p['choiceId'] ?? 0) > 0 && $seen17p === $want17p
+    && (pa_copySig(FA1)[$ctl17p] ?? '') === 'groups|' . implode(',', [RH_ID, UH_ID, DH_ID]),
+    pa_show([$ctlSave17p['message'] ?? null, $seen17p, pa_copySig(FA1)[$ctl17p] ?? null])
 );
 
 // ---- Check round 2's scenario and the calendar-wide waiting sentence ----
@@ -8114,6 +8755,193 @@ pa_q('UPDATE tblSmallGroups SET isActive = 1 WHERE groupID = ?', 'i', [SG2]);
 $s10 = pa_oracle('D17 set-up for S10: a Selected-groups rule [SG1, SG2] narrowing a Members event (O and LO let in while SG2 is on): count 1', FA1, static fn (): array => FeedAdmin::saveRule($mysqli, FA1, 0, ORG_A, SA, $rule17('D17s10', 'groups', 'D17s10', ['audience' => ['small_group' => [SG1, SG2]]])), 1, $one17);
 pa_q('UPDATE tblSmallGroups SET isActive = 0 WHERE groupID = ?', 'i', [SG2]);
 pa_oracle('D17 S10 SG2 switched off since; the list tidied, [SG1, SG2] -> [SG1] — its leader LO was let in by nothing: count 0, "Saved."', FA1, $edit17($s10, 'D17s10', ['small_group' => [SG1]]), 0, 'Saved.');
+
+// ---- Part 10 of #514, check R5: roles, user groups and departments ----
+// Until part 10 the rule and the copy both answered "nobody" for these three
+// kinds. Both now let people in, and the two must agree for EVERY account,
+// before and after every save — that is what each pa_oracle() call checks.
+// The copy uses the very same pieces of SQL as the rule for "holds this
+// role" and "is in this group", so the mistakes left for it to make are: a
+// kind left out, the wrong organisation handed to a piece, or the wrong
+// list rows read. Each case below is built so one of those shows.
+//
+// Agreement alone is not enough: a mistake made the same way in both would
+// agree perfectly. So two cases also compare the answer with the account
+// numbers WRITTEN OUT BY HAND (P10d and P10i), as the control above does.
+//
+// First, each new kind of person is the ONLY one who moves.
+pa_quietWorld(1, 'D17P10a');
+$p10a = $sg1('D17P10a');
+pa_oracle('D17 R5 a role added, [SG1] -> [SG1, RO1]: RH gains it — not XF (a former member) or XI (a switched-off account), who hold RO1 too — count 1', FA1, $edit17($p10a, 'D17P10a', ['small_group' => [SG1], 'role' => [RO1]]), 1, $one17);
+pa_oracle('D17 R5 …and the role taken off again, [SG1, RO1] -> [SG1]: RH loses it — count 1', FA1, $edit17($p10a, 'D17P10a', ['small_group' => [SG1]]), 1, $one17);
+pa_quietWorld(1, 'D17P10b');
+$p10b = $sg1('D17P10b');
+pa_oracle('D17 R5 a user group added, [SG1] -> [SG1, UG1]: UH gains it — count 1', FA1, $edit17($p10b, 'D17P10b', ['small_group' => [SG1], 'user_group' => [UG1]]), 1, $one17);
+pa_quietWorld(1, 'D17P10c');
+$p10c = $sg1('D17P10c');
+pa_oracle('D17 R5 a department added, [SG1] -> [SG1, DP1]: DH gains it — count 1', FA1, $edit17($p10c, 'D17P10c', ['small_group' => [SG1], 'department' => [DP1]]), 1, $one17);
+// All three at once, and the answer written out by hand: SGM (in SG1), RH,
+// UH and DH — nobody else. A copy and a rule that BOTH let XF, XI, XO, DN or
+// XB in would agree with each other and still fail here.
+$e10d = pa_quietWorld(1, 'D17P10d');
+$p10d = $sg1('D17P10d');
+pa_oracle('D17 R5 all three kinds added at once, [SG1] -> [SG1, RO1, UG1, DP1]: one event — count 1', FA1, $edit17($p10d, 'D17P10d', ['small_group' => [SG1], 'role' => [RO1], 'user_group' => [UG1], 'department' => [DP1]]), 1, $one17);
+$byHand10d = 'groups|' . implode(',', [SGM, RH_ID, UH_ID, DH_ID]);
+pa_ok(
+    'D17 R5 …and for that event both the copy and the real rule say exactly "groups|SGM,RH,UH,DH", as written out by hand',
+    (pa_copySig(FA1)[$e10d[0]] ?? '') === $byHand10d && (pa_realSigs(pa_full(FA1))[$e10d[0]] ?? '') === $byHand10d,
+    pa_show([pa_copySig(FA1), pa_realSigs(pa_full(FA1)), $byHand10d])
+);
+
+// A user group RETIRED since it was listed (Admin, Groups can do that) lets
+// nobody in: tidying it off the list changes nobody's view. A copy that
+// forgot the on/off test would say UH could see the event before, and count
+// 1 — and its answer before the save would differ from the real rule's.
+pa_quietWorld(1, 'D17P10e');
+$p10e = pa_oracle('D17 set-up for R5 "retired": a Selected-groups rule [SG1, UG1] narrowing a Members event: count 1', FA1, static fn (): array => FeedAdmin::saveRule($mysqli, FA1, 0, ORG_A, SA, $rule17('D17P10e', 'groups', 'D17P10e', ['audience' => ['small_group' => [SG1], 'user_group' => [UG1]]])), 1, $one17);
+pa_q('UPDATE tblGroups SET isActive = 0 WHERE groupID = ?', 'i', [UG1]);
+pa_oracle('D17 R5 UG1 retired since; the list tidied, [SG1, UG1] -> [SG1] — UH was let in by nothing: count 0, "Saved."', FA1, $edit17($p10e, 'D17P10e', ['small_group' => [SG1]]), 0, 'Saved.');
+// The same for a department SWITCHED OFF since…
+pa_quietWorld(1, 'D17P10f');
+$p10f = pa_oracle('D17 set-up for R5 "switched off": a Selected-groups rule [SG1, DP1] narrowing a Members event: count 1', FA1, static fn (): array => FeedAdmin::saveRule($mysqli, FA1, 0, ORG_A, SA, $rule17('D17P10f', 'groups', 'D17P10f', ['audience' => ['small_group' => [SG1], 'department' => [DP1]]])), 1, $one17);
+pa_q('UPDATE tblDepts SET isActive = 0 WHERE deptID = ?', 'i', [DP1]);
+pa_oracle('D17 R5 DP1 switched off since; the list tidied, [SG1, DP1] -> [SG1] — DH was let in by nothing: count 0, "Saved."', FA1, $edit17($p10f, 'D17P10f', ['small_group' => [SG1]]), 0, 'Saved.');
+// …and for a department whose on/off flag was EMPTIED since (the column
+// allows it): empty reads as switched off, in the rule and in the copy.
+pa_quietWorld(1, 'D17P10g');
+$p10g = pa_oracle('D17 set-up for R5 "empty flag": a Selected-groups rule [SG1, DP1] narrowing a Members event: count 1', FA1, static fn (): array => FeedAdmin::saveRule($mysqli, FA1, 0, ORG_A, SA, $rule17('D17P10g', 'groups', 'D17P10g', ['audience' => ['small_group' => [SG1], 'department' => [DP1]]])), 1, $one17);
+pa_q('UPDATE tblDepts SET isActive = NULL WHERE deptID = ?', 'i', [DP1]);
+pa_oracle('D17 R5 DP1\'s on/off flag emptied since; the list tidied, [SG1, DP1] -> [SG1] — an empty flag lets nobody in: count 0, "Saved."', FA1, $edit17($p10g, 'D17P10g', ['small_group' => [SG1]]), 0, 'Saved.');
+// A list whose ONLY entry is a retired user group reads like hidden: setting
+// the rule to Hidden changes nobody's view (the twin of S1b above).
+pa_quietWorld(1, 'D17P10h');
+$p10h = pa_oracle('D17 set-up for R5 "only a retired group": a Selected-groups rule [UG1] narrowing a Members event: count 1', FA1, static fn (): array => FeedAdmin::saveRule($mysqli, FA1, 0, ORG_A, SA, $rule17('D17P10h', 'groups', 'D17P10h', ['audience' => ['user_group' => [UG1]]])), 1, $one17);
+pa_q('UPDATE tblGroups SET isActive = 0 WHERE groupID = ?', 'i', [UG1]);
+pa_oracle('D17 R5 that rule set to Hidden while UG1 is retired: only administrators saw it before and after — count 0, "Saved."', FA1, static fn (): array => FeedAdmin::saveRule($mysqli, FA1, (int) ($p10h['ruleId'] ?? 0), ORG_A, SA, $rule17('D17P10h', 'hidden', 'D17P10h')), 0, 'Saved.');
+
+// ANOTHER ORGANISATION'S role, user group and department, written onto the
+// list by hand (the form refuses them, D7). XB is an active member of A who
+// holds all three IN B. Neither the rule nor the copy may let XB in. The
+// answer before the save is written out by hand — exactly SGM, through SG1 —
+// and the save then tidies the three rows away, changing nobody's view. A
+// copy (or a rule) that judged a holding by the HOLDER'S organisation, or
+// by the holding's own, would name XB before the save.
+$e10i = pa_quietWorld(1, 'D17P10i');
+$p10i = $sg1('D17P10i');
+pa_list(FA1, 'rule', (int) ($p10i['ruleId'] ?? 0), [['role', ROB], ['user_group', UGB], ['department', DPB]]);
+$byHand10i = 'groups|' . SGM;
+pa_ok(
+    'D17 R5 organisation B\'s role, user group and department on A\'s list: XB, a member of A who holds all three in B, is let in by none — the copy and the real rule both say exactly "groups|SGM", as written out by hand',
+    (int) ($p10i['ruleId'] ?? 0) > 0 && count(ExternalAudience::current($mysqli, ORG_A, FA1, 'rule', (int) ($p10i['ruleId'] ?? 0))) === 4
+    && (pa_copySig(FA1)[$e10i[0]] ?? '') === $byHand10i && (pa_realSigs(pa_full(FA1))[$e10i[0]] ?? '') === $byHand10i,
+    pa_show([pa_copySig(FA1), pa_realSigs(pa_full(FA1)), $byHand10i])
+);
+pa_oracle('D17 R5 …and the save that tidies those three rows away changes nobody\'s view: count 0, "Saved."', FA1, $edit17($p10i, 'D17P10i', ['small_group' => [SG1]]), 0, 'Saved.');
+
+// A role DELETED while it is on a list (its holdings go with it): the entry
+// stays, lets nobody in, and tidying it away changes nobody's view.
+pa_quietWorld(1, 'D17P10j');
+$p10j = pa_oracle('D17 set-up for R5 "deleted": a Selected-groups rule [SG1, RO1] narrowing a Members event: count 1', FA1, static fn (): array => FeedAdmin::saveRule($mysqli, FA1, 0, ORG_A, SA, $rule17('D17P10j', 'groups', 'D17P10j', ['audience' => ['small_group' => [SG1], 'role' => [RO1]]])), 1, $one17);
+pa_q('DELETE FROM tblRoles WHERE roleID = ?', 'i', [RO1]);
+pa_oracle('D17 R5 RO1 deleted since; the list tidied, [SG1, RO1] -> [SG1] — a role that no longer exists lets nobody in: count 0, "Saved."', FA1, $edit17($p10j, 'D17P10j', ['small_group' => [SG1]]), 0, 'Saved.');
+
+// ---- A row of a new kind filed under ANOTHER organisation, on a list in use (added after part 10's independent check) ----
+// The copy's docblock says the oracle is there to catch "which list rows are
+// read". For the three new kinds it could not: the check made the copy's
+// role branch read list rows filed under ANY organisation (`am.siteID = ?`
+// turned into a test that is always true) and all 920 checks still passed,
+// because no list in this world held such a row. Here one does: three rows
+// written by hand onto the list of a rule of organisation A, but FILED UNDER
+// ORGANISATION B (their own `siteID` says B), naming B's role, user group and
+// department. XB holds exactly those three in B and is an active member of
+// A. The real rule refuses the rows (it reads a list row only when the row's
+// organisation is the event's), so the copy must too. The answer is written
+// out by hand: SGM alone, through SG1.
+//   No form can file a row under another organisation; these stand for a
+//   hand edit or a faulty restore. A save never removes them either — it
+//   only ever replaces rows of its OWN organisation — so they are still
+//   there afterwards, still letting nobody in. That is checked as well.
+$e10k    = pa_quietWorld(1, 'D17P10k');
+$p10k    = $sg1('D17P10k');
+$rule10k = (int) ($p10k['ruleId'] ?? 0);
+pa_q(
+    'INSERT INTO tblExternalAudienceMembers (siteID, feedID, ownerType, ownerID, kind, refID, userID, createdAt) VALUES '
+    . "(?, ?, 'rule', ?, 'role', ?, NULL, UTC_TIMESTAMP()), (?, ?, 'rule', ?, 'user_group', ?, NULL, UTC_TIMESTAMP()), (?, ?, 'rule', ?, 'department', ?, NULL, UTC_TIMESTAMP())",
+    'iiiiiiiiiiii', [ORG_B, FA1, $rule10k, ROB, ORG_B, FA1, $rule10k, UGB, ORG_B, FA1, $rule10k, DPB]
+);
+$filed10k = static fn (): array => array_map(
+    static fn (array $r): string => $r['kind'] . ':' . $r['refID'],
+    pa_q("SELECT kind, refID FROM tblExternalAudienceMembers WHERE feedID = ? AND ownerType = 'rule' AND ownerID = ? AND siteID = ? ORDER BY audienceMemberID", 'iii', [FA1, $rule10k, ORG_B])
+);
+$byHand10k = 'groups|' . SGM;
+$want10k   = ['role:' . ROB, 'user_group:' . UGB, 'department:' . DPB];
+pa_ok(
+    'D17 a role, a user group and a department row FILED UNDER organisation B on a list of A\'s rule: XB, a member of A who holds all three in B, is let in by none — the copy and the real rule both say exactly "groups|SGM", as written out by hand',
+    $rule10k > 0 && $filed10k() === $want10k
+    && (pa_copySig(FA1)[$e10k[0]] ?? '') === $byHand10k && (pa_realSigs(pa_full(FA1))[$e10k[0]] ?? '') === $byHand10k,
+    pa_show([$filed10k(), pa_copySig(FA1), pa_realSigs(pa_full(FA1)), $byHand10k])
+);
+pa_oracle('D17 …and a save of that rule\'s list changes nobody\'s view: count 0, "Saved."', FA1, $edit17($p10k, 'D17P10k', ['small_group' => [SG1]]), 0, 'Saved.');
+pa_ok(
+    'D17 …and after that save the three rows are still filed under B (a save only replaces rows of its own organisation), and the copy and the real rule still say exactly "groups|SGM"',
+    $filed10k() === $want10k && (pa_copySig(FA1)[$e10k[0]] ?? '') === $byHand10k && (pa_realSigs(pa_full(FA1))[$e10k[0]] ?? '') === $byHand10k,
+    pa_show([$filed10k(), pa_copySig(FA1), pa_realSigs(pa_full(FA1))])
+);
+
+// ---- One number, six kinds: a list row of one kind is never read as another (check R9; added after part 10's independent check) ----
+// The check took `am.kind = 'role'` out of the real rule, so that a list row
+// of ANY kind was read as a role number, and all 920 checks here passed. It
+// did the same to the copy alone: passed. And it made the rule AND the copy
+// both read a department row as a user group number: passed again, the two
+// agreeing with each other. Nothing was wrong in the code. This world simply
+// could not tell: no two things in it shared a number, so "role 910131" and
+// "department 910131" were never both real. On a real installation they are
+// (six tables count their rows separately; a fresh install already holds
+// roles 1 to 14).
+//
+// So a role, a user group, a department, a small group and a leadership role
+// of A now all carry ONE number, SN, which is also KP's account number; each
+// has one person of its own (see the constants, and the four lines D17 checks
+// at its top). Six dates are each listed, through the real save, for ONE of
+// those kinds and nothing else. For each, the copy and the real rule must
+// both name exactly that kind's own person — WRITTEN OUT BY HAND, because a
+// mistake made the same way in the rule and the copy agrees with itself.
+// Every pair of kinds is covered, both ways round, including the two pairs
+// that share a column name and so are the easiest to mix up: a role and a
+// leadership role ("roleID"), a user group and a small group ("groupID").
+$k17     = pa_quietWorld(6, 'D17K');
+$oneKind17 = [
+    ['person', KP_ID, 'a PERSON', 'KP, whose account number it is'],
+    ['role', KR_ID, 'a ROLE', 'KR, who holds that role'],
+    ['user_group', KU_ID, 'a USER GROUP', 'KU, who is in that user group'],
+    ['department', KD_ID, 'a DEPARTMENT', 'KD, who is in that department'],
+    ['small_group', KS_ID, 'a SMALL GROUP', 'KS, who is in that small group'],
+    ['leadership_role', KL_ID, 'a LEADERSHIP ROLE', 'KL, who holds that leadership role'],
+];
+$saved17k = [];
+foreach ($oneKind17 as $i17 => [$kind17k, $unusedPerson, $unusedWords, $unusedWho]) {
+    $saved17k[$kind17k] = FeedAdmin::saveChoice($mysqli, $k17[$i17], 'date', ORG_A, SA, ['audienceLevel' => 'groups', 'audience' => [$kind17k => [SN]]]);
+}
+// The PERSON branch is held a little differently. It reads the row's
+// `userID` column, which the portal fills for a person's row only, so on the
+// portal's own rows dropping that branch's kind test changes no answer. The
+// ROLE row just saved is therefore given M's number in that column, by hand
+// (M is a member of A on no list): with the person branch's kind test
+// dropped, in the rule or in the copy, M would be let in as if named.
+$roleChoice17k = (int) ($saved17k['role']['choiceId'] ?? 0);
+pa_q("UPDATE tblExternalAudienceMembers SET userID = ? WHERE feedID = ? AND ownerType = 'choice' AND ownerID = ? AND kind = 'role' AND refID = ?", 'iiii', [M, FA1, $roleChoice17k, SN]);
+$marked17k = (int) pa_one("SELECT COUNT(*) AS n FROM tblExternalAudienceMembers WHERE feedID = ? AND ownerType = 'choice' AND ownerID = ? AND kind = 'role' AND userID = ?", 'iii', [FA1, $roleChoice17k, M])['n'];
+$copy17k = pa_copySig(FA1);
+$real17k = pa_realSigs(pa_full(FA1));
+foreach ($oneKind17 as $i17 => [$kind17k, $person17k, $words17k, $who17k]) {
+    $want17k = 'groups|' . $person17k;
+    pa_ok(
+        'D17 R9 a date listed only for ' . $words17k . ' numbered SN: exactly ' . $who17k . ' — the copy and the real rule both say "groups|' . $person17k . '", as written out by hand, naming none of the five others whose own thing carries the same number'
+            . ($kind17k === 'role' ? ' (nor M, whose number that role row carries in its userID column, where it must count for nothing)' : ''),
+        ($saved17k[$kind17k]['ok'] ?? false) === true && $marked17k === 1 && ($copy17k[$k17[$i17]] ?? '') === $want17k && ($real17k[$k17[$i17]] ?? '') === $want17k,
+        pa_show(['saved' => $saved17k[$kind17k]['message'] ?? null, 'role rows carrying M (must be 1)' => $marked17k, 'the copy' => $copy17k[$k17[$i17]] ?? null, 'the real rule' => $real17k[$k17[$i17]] ?? null, 'by hand' => $want17k])
+    );
+}
 
 // ---- The copy's "today", with the database clock PINNED (fix round 5, K12-K14; fix round 6, M1) ----
 // FeedAdmin::ruleToday() must give the ORGANISATION's date (Europe/London

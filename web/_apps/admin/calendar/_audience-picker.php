@@ -6,8 +6,9 @@
  * -----------------------------------------------------------------------------
  * When an administrator chooses "Selected groups and people" for an outside
  * calendar (and, from chunk P8-3 of #514 part 8, for a choice or a rule),
- * they tick WHICH small groups, leadership roles and named people may see
- * its events. This file draws those ticks. It is a PARTIAL: it has no web
+ * they tick WHICH small groups, leadership roles, roles, user groups,
+ * departments and named people may see its events (the middle three since
+ * part 10 of #514). This file draws those ticks. It is a PARTIAL: it has no web
  * address of its own (its name starts with an underscore and no route points
  * at it), so nothing can reach it directly — a page includes it and calls
  * `portal_feed_audience_picker()`.
@@ -15,20 +16,30 @@
  * WHAT IT DRAWS
  * -------------
  * - "No longer in effect": entries already on the saved list that are not
- *   fully live any more — a small group or leadership role that has been
- *   switched off, a person whose membership here has ended, an entry whose
- *   group, role or person no longer exists in this organisation, and a kind
- *   this version does not offer. Each carries the plain-English state label
- *   `ExternalAudience::stateLabel()` gives. A switched-off group or role, and
- *   a person who has left, can be KEPT (their box starts ticked, and untick
- *   it to remove them) — a person who rejoins then sees the events again,
- *   which the #514 plan settled (D18). An entry that is gone, or of a kind
- *   this version does not offer, CANNOT be kept: it has no box, and the page
- *   says it will be removed when the form is saved, BEFORE the save (the
- *   #514 part 8 decision of 25 September 2026, item 4).
- * - Three groups of boxes, each a `<fieldset>` with a `<legend>`: "Small
- *   groups", "Leadership roles" and "Named people" — every one that is
- *   switched on in THIS organisation today (`ExternalAudience::options()`).
+ *   fully live any more — a small group, leadership role, user group or
+ *   department that has been switched off or retired, a person whose
+ *   membership here has ended, an entry whose group, role, department or
+ *   person no longer exists in this organisation, and a kind this version
+ *   does not offer. Each carries the plain-English state label
+ *   `ExternalAudience::stateLabel()` gives. A switched-off group, role or
+ *   department, and a person who has left, can be KEPT (their box starts
+ *   ticked, and untick it to remove them) — a person who rejoins then sees
+ *   the events again, which the #514 plan settled (D18). An entry that is
+ *   gone, or of a kind this version does not offer, CANNOT be kept: it has
+ *   no box, and the page says it will be removed when the form is saved,
+ *   BEFORE the save (the #514 part 8 decision of 25 September 2026, item 4).
+ * - Six groups of boxes, each a `<fieldset>` with a `<legend>`, in this
+ *   order: "Small groups", "Leadership roles", "Roles", "User groups",
+ *   "Departments" and "Named people" — every one this organisation could
+ *   pick today (`ExternalAudience::options()`).
+ * - Under "Roles", "User groups" and "Departments" (part 10 of #514), one
+ *   plain line saying what the thing is and where it is managed. Two pairs
+ *   are easy to confuse — roles with leadership roles, and user groups
+ *   with small groups — and a tick in the wrong one shows a calendar to the
+ *   wrong people. Each line's link opens in a NEW TAB, and says so: this
+ *   is a form, and following a link in the same tab would throw away every
+ *   tick not yet saved. The addresses come from `Site::url()`, so they
+ *   keep the organisation's own part of the address (#536).
  * - A "Find a person" box above the people, which only HIDES rows that do
  *   not match (it never unticks anything, and a hidden ticked box is still
  *   sent), with a polite live region saying how many are shown.
@@ -73,6 +84,7 @@ if (defined('PORTAL_ROOT') === false) {
 
 use Portal\Core\App;
 use Portal\Core\ExternalAudience;
+use Portal\Core\Site;
 
 if (function_exists('portal_feed_audience_picker') === false) {
     /**
@@ -82,6 +94,9 @@ if (function_exists('portal_feed_audience_picker') === false) {
      *     prefix: string,
      *     options: array{small_group: list<array{groupID:int, groupName:string}>,
      *                    leadership_role: list<array{roleID:int, roleName:string}>,
+     *                    role: list<array{roleID:int, roleName:string}>,
+     *                    user_group: list<array{groupID:int, groupName:string}>,
+     *                    department: list<array{deptID:int, deptName:string}>,
      *                    person: list<array{userID:int, fullName:string}>},
      *     current: list<array{kind:string, refID:int, label:string, state:string}>,
      *     ticked: array<string, bool>
@@ -117,9 +132,37 @@ if (function_exists('portal_feed_audience_picker') === false) {
             }
         }
 
+        // 🗂️ The six kinds, in the order they are drawn. The order is the
+        //    #514 part 10 plan's: the two kinds people already knew, then
+        //    the three new ones, then named people last (it is the longest
+        //    list, and has the search box).
+        //    `about` and `manage` are set only for the three kinds part 10
+        //    added: one plain sentence saying what the thing is, and the
+        //    page where it is managed. `manage` is a ROUTE, turned into an
+        //    address by Site::url() below — never a bare "/admin/…", which
+        //    would lose the organisation's part of the address (#536).
+        //    The three pages are open to every administrator who can reach
+        //    this form (they ask App::isAdmin(); this form's pages ask for
+        //    an administrator of the organisation, which is narrower), so
+        //    the link never leads to a refusal.
         $kinds = [
             'small_group'     => ['legend' => 'Small groups',     'id' => 'groupID', 'name' => 'groupName', 'none' => 'This organisation has no small groups switched on.'],
             'leadership_role' => ['legend' => 'Leadership roles', 'id' => 'roleID',  'name' => 'roleName',  'none' => 'This organisation has no leadership roles switched on.'],
+            'role'            => [
+                'legend' => 'Roles', 'id' => 'roleID', 'name' => 'roleName', 'none' => 'This organisation has no roles.',
+                'about'  => 'A role says what a person may do in the portal, such as Treasurer or Expense Approver. It is not a leadership role.',
+                'manage' => 'admin/roles', 'manageText' => 'Admin → Roles',
+            ],
+            'user_group'      => [
+                'legend' => 'User groups', 'id' => 'groupID', 'name' => 'groupName', 'none' => 'This organisation has no user groups in use.',
+                'about'  => 'A user group is a committee or working group, such as a finance committee. It is not a small group.',
+                'manage' => 'admin/groups', 'manageText' => 'Admin → Groups',
+            ],
+            'department'      => [
+                'legend' => 'Departments', 'id' => 'deptID', 'name' => 'deptName', 'none' => 'This organisation has no departments in use.',
+                'about'  => 'A department is what expense claims are charged to. Everyone in the department is included, whatever part they play in it.',
+                'manage' => 'admin/departments', 'manageText' => 'Admin → Departments',
+            ],
             'person'          => ['legend' => 'Named people',     'id' => 'userID',  'name' => 'fullName',  'none' => 'This organisation has no active members.'],
         ];
         ?>
@@ -127,7 +170,7 @@ if (function_exists('portal_feed_audience_picker') === false) {
               // column instead of spilling into the next one (fix round 1, M1). ?>
         <div class="border rounded p-2 p-md-3 text-break" id="<?php echo $esc($prefix); ?>-picker" data-audience-picker="<?php echo $esc($prefix); ?>">
             <p class="small text-muted mb-2" id="<?php echo $esc($prefix); ?>-picker-help">
-                Tick the small groups, leadership roles and people who may see these events.
+                Tick the small groups, leadership roles, roles, user groups, departments and people who may see these events.
                 Only members of this organisation can be chosen, and a list can name at most
                 <?php echo (int) ExternalAudience::MAX_MEMBERS; ?> groups and people.
                 A person who leaves the organisation stops seeing the events at once, and sees them again if they rejoin.
@@ -167,9 +210,28 @@ if (function_exists('portal_feed_audience_picker') === false) {
             <?php endif; ?>
 
             <?php foreach ($kinds as $kind => $meta): ?>
-                <?php $list = (array) ($options[$kind] ?? []); ?>
-                <fieldset class="mb-3">
+                <?php
+                $list    = (array) ($options[$kind] ?? []);
+                // The id of this kind's plain line, when it has one. The
+                // fieldset points at it (aria-describedby), so a screen
+                // reader reads the line with the group's name.
+                $aboutId = (isset($meta['about']) === true) ? ($prefix . '-' . $kind . '-about') : '';
+                ?>
+                <fieldset class="mb-3" <?php echo $aboutId !== '' ? 'aria-describedby="' . $esc($aboutId) . '"' : ''; ?>>
                     <legend class="h6 mb-1"><?php echo $esc($meta['legend']); ?></legend>
+                    <?php if ($aboutId !== ''): ?>
+                        <?php // 📎 target="_blank": following the link in this tab would
+                              //    lose every tick not yet saved, so it opens beside
+                              //    the form — and the words say so, for everybody,
+                              //    not only in a tooltip. rel="noopener" stops the
+                              //    new tab reaching back into this one. ?>
+                        <p class="small text-muted mb-1" id="<?php echo $esc($aboutId); ?>">
+                            <?php echo $esc($meta['about']); ?>
+                            Managed under
+                            <a href="<?php echo $esc(Site::url((string) $meta['manage'])); ?>" target="_blank" rel="noopener"><?php echo $esc($meta['manageText']); ?></a>
+                            (opens in a new tab).
+                        </p>
+                    <?php endif; ?>
                     <?php if ($list === []): ?>
                         <p class="small text-muted mb-0"><?php echo $esc($meta['none']); ?></p>
                     <?php else: ?>

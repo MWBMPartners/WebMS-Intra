@@ -2,6 +2,26 @@
 
 
 ## [Unreleased] (alpha)
+- **Added — outside calendars: three more kinds of "who may see it" (#514, part 10)**
+  - A calendar, a choice or a rule set to "Selected groups and people" can now name a **role** (Admin → Roles, #516), a
+    **user group** (Admin → Groups, #517) or a **department** (Admin → Departments, #517), as well as a small group, a
+    leadership role or a named person. The form shows each kind as its own group of tick boxes, with one line under
+    Roles, User groups and Departments saying what it is and where it is managed, because "roles" and "leadership
+    roles", and "user groups" and "small groups", are easy to confuse.
+  - A person is let in through one of these only with an active membership of the event's own organisation, and only
+    while the user group is in use or the department is switched on. **Another organisation's role, user group or
+    department on a list lets nobody in**, even a person who belongs to both organisations.
+  - A retired user group or a switched-off department cannot be freshly added. One already on a list stays there, lets
+    nobody in, and is shown under "No longer in effect" until an administrator unticks it.
+  - No database change. Nothing has to be done after upgrading.
+  - **How it was checked.** One independent check by a fresh Claude agent standing in for Codex. It built a world of
+    its own (3 organisations, 170 accounts, 81 events), worked out by hand who should see each event, and found the
+    rule and its faster copy right for every account, on every real page it tried. It found no wrong behaviour. It
+    did find that both tests would have passed on a rule that mixed up the kinds, because no two things shared a
+    number in the test data; the tests now hold one shared number across all six kinds. Those test fixes were not
+    independently checked. Tests: `tools/event-visibility-selftest.php` (192 checks) and
+    `tools/feed-admin-selftest.php` (932), on MySQL 8.0.36 and 8.4.11. **Not proved:** a browser, MariaDB, Apache, a
+    real Google or Microsoft 365 calendar. Codex has not reviewed this.
 - **Fixed — one answer to "which time zone?", for an event and for an organisation (#604)**
   - **What an administrator should look at after upgrading** (the organisations page is "Sites" in the Admin menu)
     1. **Admin, Sites: is the time zone listed for each organisation the one you want?** The upgrade wrote there the zone the portal's pages were really showing. If somebody had chosen a different zone on this page before, it has been replaced by that one. Change it with Edit if it is not what you want; from now on this page is the only place it is set.

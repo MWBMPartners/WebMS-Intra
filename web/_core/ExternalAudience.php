@@ -7,7 +7,8 @@
  * When an administrator picks "Selected groups and people" for a calendar,
  * a single-date or series choice, or a rule, the actual list of who is
  * meant lives in `tblExternalAudienceMembers` — one row per small group,
- * leadership role or named person. `Portal\Core\EventVisibility` reads that
+ * leadership role, role, user group, department or named person.
+ * `Portal\Core\EventVisibility` reads that
  * table live, at the moment somebody looks at the calendar, so a person
  * taken off a small group or removed from the organisation stops seeing the
  * event at once, with nothing to "resolve" or refresh.
@@ -19,25 +20,42 @@
  *
  * WHAT "OFFERED" MEANS, AND WHY IT MATTERS FOR "DELETE MY DATA"
  * ---------------------------------------------------------------------------
- * `OFFERED_KINDS` is the list of member kinds part P8's forms can actually
- * pick from today: small groups, leadership roles and named people. Part
- * P10 (a later part of #514) is expected to add `role`, `user_group` and
- * `department` — the ENUM on the table already has room for them
- * (migration 204), so a hand-made row of one of those kinds can already
- * exist. `current()` shows such a row, labelled `not_offered`, rather than
- * pretending it is not there — and says it WILL BE REMOVED when the list is
- * next saved, exactly as it says for a `gone` entry. It cannot be kept:
- * posting it back is refused with `REFUSED_MESSAGE`, like any kind the
- * forms do not offer.
+ * `OFFERED_KINDS` is the list of member kinds the forms can pick from. Part
+ * P8 offered three: small groups, leadership roles and named people. Part
+ * P10 of #514 added the other three the table's ENUM always had room for
+ * (migration 204): `role` (#516), `user_group` and `department` (#517). So
+ * today every kind the database knows is offered, and
+ * `tools/feed-admin-selftest.php` fails if the two lists ever differ.
+ *
+ * THE KINDS LIVE IN FOUR PLACES, and a new one must be added to all four in
+ * the same change: the rule (`EventVisibility`'s audience piece), its fast
+ * copy (`FeedAdmin::whoCanSee()`), this class (the list, its labels and what
+ * may be saved), and the picker (`admin/calendar/_audience-picker.php`).
+ *
+ * `not_offered` is what is left for a kind the DATABASE knows and this
+ * code does not — which cannot happen today, and is kept as the guard for
+ * the day somebody adds a kind to the ENUM and forgets this class.
+ * `current()` shows such a row rather than pretending it is not there — and
+ * says it WILL BE REMOVED when the list is next saved, exactly as it says
+ * for a `gone` entry. It cannot be kept: posting it back is refused with
+ * `REFUSED_MESSAGE`, like any kind the forms do not offer.
  *   Why removed, not kept (decided by the commissioning session, fix round
- *   1, checker LOW 5; the first version of this header said "never
- *   dropped", while the code dropped it anyway, silently): such a row
- *   matches NOBODY today (`EventVisibility` answers `0 = 1` for those
- *   kinds), so removing it changes nobody's access now. Kept, it would
- *   silently START matching people the day part P10 teaches
- *   `EventVisibility` those kinds — a widening nobody chose through a form.
- *   Saying so on the page, before the save, is what makes the removal
- *   announced rather than quiet.
+ *   1 of part P8, checker LOW 5; the first version of this header said
+ *   "never dropped", while the code dropped it anyway, silently): a row of
+ *   a kind the rule does not know
+ *   matches NOBODY, so removing it changes nobody's access. Kept, it would
+ *   silently START matching people the day the rule learns that kind — a
+ *   widening nobody chose through a form. Saying so on the page, before
+ *   the save, is what makes the removal announced rather than quiet.
+ *   (That is exactly what part P10 would otherwise have done to any
+ *   hand-made role, user group or department row.)
+ *
+ * A ROLE, USER GROUP OR DEPARTMENT OF ANOTHER ORGANISATION is never a
+ * `not_offered` row. It is `gone`: its number names nothing in THIS
+ * organisation, so its real name is never read, it cannot be kept, and it
+ * is removed on the next save — the same as another organisation's small
+ * group or leadership role. `EventVisibility` lets nobody in through it
+ * while it is still there.
  *
  * `audienceLabel()` in `Portal\Core\FeedAdmin` (part P8) shows COUNTS only,
  * never names, for the same reason `FeedResolver::audienceSummary()` does:
@@ -70,7 +88,11 @@
  * after `FROM tblSmallGroups` — every statement here that reads that table
  * as its FROM target writes the column names out in full instead. A
  * `tblSmallGroups` reached through a `JOIN` (with an alias) is not the
- * trap and is written normally.
+ * trap and is written normally. The user-group table, `tblGroups`, is
+ * reached here ONLY through a `JOIN` (in `currentMany()`), for the same
+ * reason; everything else about user groups, roles and departments is
+ * asked of `UserGroups`, `Roles` and `Departments`, so this class holds no
+ * second copy of their statements.
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -88,15 +110,16 @@ namespace Portal\Core;
 final class ExternalAudience
 {
     /**
-     * The kinds part P8's forms can actually offer today. `role`,
-     * `user_group` and `department` exist on the database ENUM
-     * (migration 204) for a later part of #514 (P10) to use; a row of one
-     * of those kinds is read here as `not_offered`, and is removed — openly,
-     * see the class header — when its list is next saved.
+     * The kinds the forms offer: every kind the database's ENUM holds
+     * (migration 204), in the order the picker draws them. `role`,
+     * `user_group` and `department` joined in part P10 of #514. A row of any
+     * OTHER kind — one the database learns before this class does — is read
+     * here as `not_offered`, and is removed, openly, when its list is next
+     * saved (see the class header).
      *
      * @var list<string>
      */
-    public const OFFERED_KINDS = ['small_group', 'leadership_role', 'person'];
+    public const OFFERED_KINDS = ['small_group', 'leadership_role', 'role', 'user_group', 'department', 'person'];
 
     /** The most groups and people one list may name (plan section 1.5). */
     public const MAX_MEMBERS = 50;
@@ -125,13 +148,25 @@ final class ExternalAudience
     // =========================================================================
 
     /**
-     * Every small group, leadership role and member this organisation could
-     * pick for a list today: active groups, active roles, and an ACTIVE
-     * account with an ACTIVE membership row of this organisation (the
-     * strict "member" meaning the #514 plan settled on).
+     * Everything this organisation could pick for a list today: its
+     * switched-on small groups and leadership roles, EVERY role it has
+     * (roles have no on/off switch), its user groups and departments that
+     * are in use, and each ACTIVE account with an ACTIVE membership row of
+     * this organisation (the strict "member" meaning the #514 plan settled
+     * on). The keys come back in the order the picker draws them.
+     *
+     * The three kinds part P10 added are read through `Roles::forSite()`,
+     * `UserGroups::forSite()` and `Departments::forSite()` — each already
+     * asks for ONE organisation by its number — and only the number and the
+     * name are passed on. A user group or department can be saved with no
+     * name at all (the column allows it); it is then shown as "User group
+     * #12" rather than as a tick box with nothing beside it.
      *
      * @return array{small_group: list<array{groupID:int, groupName:string}>,
      *               leadership_role: list<array{roleID:int, roleName:string}>,
+     *               role: list<array{roleID:int, roleName:string}>,
+     *               user_group: list<array{groupID:int, groupName:string}>,
+     *               department: list<array{deptID:int, deptName:string}>,
      *               person: list<array{userID:int, fullName:string}>}
      */
     public static function options(\mysqli $db, int $siteId): array
@@ -177,7 +212,27 @@ final class ExternalAudience
         }
         $stmt->close();
 
-        return ['small_group' => $groups, 'leadership_role' => $roles, 'person' => $people];
+        // 🏷️ Part P10: roles (#516), user groups and departments (#517).
+        //    `true` asks for those in use only: a retired group or
+        //    department cannot be freshly added (it matches nobody).
+        $accessRoles = [];
+        foreach (Roles::forSite($db, $siteId) as $role) {
+            $accessRoles[] = ['roleID' => $role['roleID'], 'roleName' => self::nameOr($role['roleName'], 'Role', $role['roleID'])];
+        }
+        $userGroups = [];
+        foreach (UserGroups::forSite($db, $siteId, true) as $group) {
+            $userGroups[] = ['groupID' => $group['groupID'], 'groupName' => self::nameOr($group['groupName'], 'User group', $group['groupID'])];
+        }
+        $departments = [];
+        foreach (Departments::forSite($db, $siteId, true) as $dept) {
+            $departments[] = ['deptID' => $dept['deptID'], 'deptName' => self::nameOr($dept['deptName'], 'Department', $dept['deptID'])];
+        }
+
+        return [
+            'small_group' => $groups, 'leadership_role' => $roles,
+            'role' => $accessRoles, 'user_group' => $userGroups, 'department' => $departments,
+            'person' => $people,
+        ];
     }
 
     // =========================================================================
@@ -187,11 +242,13 @@ final class ExternalAudience
     /**
      * The saved list for one owner (a calendar, a choice or a rule), each
      * row with a live label and a state: `ok` (still exactly what it looks
-     * like); `switched_off` (the group or role exists here but is
-     * inactive); `left` (the person's membership here is inactive, or
-     * their account is); `gone` (nothing of theirs exists in this
-     * organisation any more); `not_offered` (a kind this version's forms do
-     * not offer — see the class header; removed when the list is saved).
+     * like); `switched_off` (the small group, leadership role, user group
+     * or department exists here but is switched off or retired — a role
+     * has no switch, so it is never this); `left` (the person's membership
+     * here is inactive, or their account is); `gone` (nothing by that
+     * number exists in this organisation — deleted, or another
+     * organisation's); `not_offered` (a kind this version's forms do not
+     * offer — see the class header; removed when the list is saved).
      *
      * One owner's list through `currentMany()`, so a single list and a page
      * of lists can never be labelled two different ways.
@@ -228,18 +285,28 @@ final class ExternalAudience
      *
      * HOW EVERY NAME STAYS INSIDE THIS ORGANISATION (challenge L16): each
      * label comes through a join that names THIS organisation's `siteID`
-     * explicitly, as a bound value — a group or role by its number AND
-     * `siteID = ?`; a person only through their `tblUserSites` row for
+     * explicitly, as a bound value — a small group, leadership role, role,
+     * user group or department by its number AND `siteID = ?`; a person
+     * only through their `tblUserSites` row for
      * `siteID = ?` (active or not). A row whose join finds nothing is
      * `gone`, and a gone PERSON is "someone no longer in this
      * organisation", never a name read from `tblUsers` on its own — that
      * name could belong to somebody now in a different organisation. The
+     * same holds for a role, user group or department: another
+     * organisation's is "a role that no longer exists" here, and its name is
+     * never read. The
      * list rows themselves are read with `siteID = ?` too, so another
      * organisation's owner of the same number is simply not there.
      *
      * (The "Group" table-name trap, see the class header: `tblSmallGroups`
-     * is reached through a `LEFT JOIN` with a short name, which is not the
-     * trap; the statement's `FROM` table is `tblExternalAudienceMembers`.)
+     * and `tblGroups` are reached through a `LEFT JOIN` with a short name,
+     * which is not the trap; the statement's `FROM` table is
+     * `tblExternalAudienceMembers`.)
+     *
+     * The statement binds the organisation SEVEN times — once for each of
+     * the six joins that carry it and once for the list rows — and then
+     * three values for each owner asked about. The type letters are built
+     * beside the values, so the two cannot fall out of step.
      *
      * @param list<array{feedID:int, ownerType:string, ownerID:int}> $owners
      *
@@ -266,17 +333,28 @@ final class ExternalAudience
             . 'g.groupID AS foundGroup, g.groupName, g.isActive AS groupActive, '
             . 'r.roleID AS foundRole, r.roleName, r.isActive AS roleActive, '
             . 'us.userID AS foundMember, us.isActive AS memberActive, u.userID AS foundAccount, u.fullName, '
-            . 'u.isActive AS acctActive '
+            . 'u.isActive AS acctActive, '
+            // Part P10: a role (no on/off column), a user group and a
+            // department, each found only when it is THIS organisation's.
+            . 'ro.roleID AS foundAccessRole, ro.roleName AS accessRoleName, '
+            . 'gp.groupID AS foundUserGroup, gp.groupName AS userGroupName, gp.isActive AS userGroupActive, '
+            . 'dp.deptID AS foundDept, dp.deptName, dp.isActive AS deptActive '
             . 'FROM tblExternalAudienceMembers m '
             . "LEFT JOIN tblSmallGroups g ON m.kind = 'small_group' AND g.groupID = m.refID AND g.siteID = ? "
             . "LEFT JOIN tblLeadershipRoles r ON m.kind = 'leadership_role' AND r.roleID = m.refID AND r.siteID = ? "
             . "LEFT JOIN tblUserSites us ON m.kind = 'person' AND us.userID = m.refID AND us.siteID = ? "
             . 'LEFT JOIN tblUsers u ON u.userID = us.userID '
+            . "LEFT JOIN tblRoles ro ON m.kind = 'role' AND ro.roleID = m.refID AND ro.siteID = ? "
+            . "LEFT JOIN tblGroups gp ON m.kind = 'user_group' AND gp.groupID = m.refID AND gp.siteID = ? "
+            . "LEFT JOIN tblDepts dp ON m.kind = 'department' AND dp.deptID = m.refID AND dp.siteID = ? "
             . "WHERE m.siteID = ? AND ($ownerTests) "
             . 'ORDER BY m.audienceMemberID'
         );
-        $types  = 'iiii';
-        $params = [$siteId, $siteId, $siteId, $siteId];
+        // One organisation number for each `siteID = ?` above, in the order
+        // they are written: small groups, leadership roles, memberships,
+        // roles, user groups, departments, then the list rows themselves.
+        $types  = 'iiiiiii';
+        $params = [$siteId, $siteId, $siteId, $siteId, $siteId, $siteId, $siteId];
         foreach ($wanted as [$fid, $type, $oid]) {
             $types   .= 'isi';
             $params[] = $fid;
@@ -312,7 +390,10 @@ final class ExternalAudience
         $refId = (int) $row['refID'];
 
         if (in_array($kind, self::OFFERED_KINDS, true) === false) {
-            return ['kind' => $kind, 'refID' => $refId, 'label' => self::kindWord($kind) . ' #' . $refId, 'state' => 'not_offered'];
+            // A kind the database knows and this class does not (see the
+            // class header). It has no name this class can read, so it is
+            // shown by its number alone.
+            return ['kind' => $kind, 'refID' => $refId, 'label' => 'an entry #' . $refId, 'state' => 'not_offered'];
         }
         if ($kind === 'small_group') {
             if ($row['foundGroup'] === null) {
@@ -332,6 +413,45 @@ final class ExternalAudience
             return [
                 'kind' => $kind, 'refID' => $refId, 'label' => (string) $row['roleName'],
                 'state' => ((int) $row['roleActive'] === 1) ? 'ok' : 'switched_off',
+            ];
+        }
+        // 🏷️ Part P10 — a role (#516). It has no on/off switch, so it is
+        //    either this organisation's ("ok") or it is not here at all.
+        //    "Not here" covers a deleted role AND another organisation's:
+        //    the two read the same on purpose, and no name is shown.
+        if ($kind === 'role') {
+            if ($row['foundAccessRole'] === null) {
+                return ['kind' => $kind, 'refID' => $refId, 'label' => 'a role that no longer exists', 'state' => 'gone'];
+            }
+
+            return ['kind' => $kind, 'refID' => $refId, 'label' => self::nameOr($row['accessRoleName'], 'Role', $refId), 'state' => 'ok'];
+        }
+        // 👥 Part P10 — a user group (#517): in use, retired ("switched
+        //    off": it then lets nobody in, but stays on the list until an
+        //    administrator takes it off, like a switched-off small group),
+        //    or not here at all.
+        if ($kind === 'user_group') {
+            if ($row['foundUserGroup'] === null) {
+                return ['kind' => $kind, 'refID' => $refId, 'label' => 'a user group that no longer exists', 'state' => 'gone'];
+            }
+
+            return [
+                'kind' => $kind, 'refID' => $refId, 'label' => self::nameOr($row['userGroupName'], 'User group', $refId),
+                'state' => ((int) $row['userGroupActive'] === 1) ? 'ok' : 'switched_off',
+            ];
+        }
+        // 🏢 Part P10 — a department (#517). Its on/off column may be EMPTY
+        //    (the column allows it); empty reads as switched off here, as it
+        //    does in `Departments::memberSql()`, so the label and the rule
+        //    agree: `(int) null` is 0.
+        if ($kind === 'department') {
+            if ($row['foundDept'] === null) {
+                return ['kind' => $kind, 'refID' => $refId, 'label' => 'a department that no longer exists', 'state' => 'gone'];
+            }
+
+            return [
+                'kind' => $kind, 'refID' => $refId, 'label' => self::nameOr($row['deptName'], 'Department', $refId),
+                'state' => ((int) $row['deptActive'] === 1) ? 'ok' : 'switched_off',
             ];
         }
 
@@ -372,6 +492,12 @@ final class ExternalAudience
      * save, openly (see the class header, fix round 1 checker LOW 5). A
      * `gone` entry posted back is refused too — it no longer belongs to this
      * organisation.
+     *
+     * The same holds for the three kinds part P10 added: another
+     * organisation's role, user group or department is refused (whether or
+     * not it is already on the list), and a retired user group or a
+     * switched-off department cannot be freshly added but may stay. A role
+     * has no switch, so a role of this organisation can always be added.
      *
      * @param array<string,mixed>                                       $post
      * @param list<array{kind:string, refID:int, label:string, state:string}> $current
@@ -502,9 +628,51 @@ final class ExternalAudience
      * is true only for a NEW entry (D7): a group, role or membership already
      * on the list may stay even though it has since been switched off or the
      * person has left — only a fresh addition must be live today.
+     *
+     * 🔒 THIS IS THE ONE GATE between a posted number and a saved list row.
+     *    Every branch asks for the number AND this organisation together,
+     *    so another organisation's number finds nothing — exactly as a
+     *    made-up number does, which is why the caller can answer both with
+     *    the same one sentence. Never add a branch that looks a number up
+     *    on its own.
+     *
+     * The role, user group and department branches (part P10) ask `Roles`,
+     * `UserGroups` and `Departments` instead of holding statements of their
+     * own, so each of those tables is read in one class only. A role is
+     * looked for in `Roles::forSite()`'s list because that class has no
+     * "one role by number" reader; that is one statement per posted role,
+     * and a list holds at most `MAX_MEMBERS` entries. A role has no on/off
+     * switch, so `$requireActive` changes nothing for it.
+     *
+     * A kind this method does not know answers NO. It used to fall through
+     * to the "person" branch at the bottom; that was safe only because
+     * `fromPost()` refuses an unknown kind first, and "safe because of the
+     * caller" is not a property worth keeping on a gate.
      */
     private static function belongsToOrganisation(\mysqli $db, int $siteId, string $kind, int $refId, bool $requireActive): bool
     {
+        if ($kind === 'role') {
+            foreach (Roles::forSite($db, $siteId) as $role) {
+                if ($role['roleID'] === $refId) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        if ($kind === 'user_group') {
+            $group = UserGroups::get($db, $refId, $siteId);
+
+            return $group !== null && ($requireActive === false || $group['isActive'] === true);
+        }
+        if ($kind === 'department') {
+            $dept = Departments::get($db, $refId, $siteId);
+
+            return $dept !== null && ($requireActive === false || $dept['isActive'] === true);
+        }
+        if ($kind !== 'small_group' && $kind !== 'leadership_role' && $kind !== 'person') {
+            return false;
+        }
         if ($kind === 'small_group') {
             $sql = $requireActive === true
                 ? 'SELECT 1 FROM tblSmallGroups WHERE groupID = ? AND siteID = ? AND isActive = 1 LIMIT 1'
@@ -528,14 +696,20 @@ final class ExternalAudience
         return self::oneRow($db, $sql, 'ii', [$refId, $siteId]) !== null;
     }
 
-    /** The plain-English word for a kind, used only for a `not_offered` label. */
-    private static function kindWord(string $kind): string
+    /**
+     * A name to show, or "<kind> #<number>" when there is none. A user
+     * group's and a department's name column may be empty (the tables allow
+     * it), and a tick box with nothing beside it tells nobody anything.
+     *
+     * (Until part P10 a `kindWord()` helper sat here, giving the words "a
+     * role", "a user group" and "a department" to rows of kinds the forms
+     * did not offer. Those kinds are offered now and have real names, so it
+     * was removed rather than left with nothing to do.)
+     */
+    private static function nameOr(mixed $name, string $kindWord, int $refId): string
     {
-        return match ($kind) {
-            'role'        => 'a role',
-            'user_group'  => 'a user group',
-            'department'  => 'a department',
-            default       => 'an entry',
-        };
+        $name = trim((string) ($name ?? ''));
+
+        return ($name === '') ? ($kindWord . ' #' . $refId) : $name;
     }
 }
