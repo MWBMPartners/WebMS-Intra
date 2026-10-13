@@ -33,7 +33,7 @@ use Portal\Core\Logger;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/integrations/webhooks', true, 302);
+    header('Location: ' . Site::url('admin/integrations/webhooks'), true, 302);
     exit();
 }
 
@@ -111,7 +111,7 @@ if ($webhookId > 0) {
     if ($error !== '') {
         $_SESSION['flash_msg']  = $error;
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/integrations/webhooks', true, 302);
+        header('Location: ' . Site::url('admin/integrations/webhooks'), true, 302);
         exit();
     }
 
@@ -123,7 +123,7 @@ if ($webhookId > 0) {
         Logger::errorPlatform('MySQL', 'Error', 'WEBHOOK_SAVE', $mysqli->error, '');
         $_SESSION['flash_msg']  = 'Could not update webhook — database error.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/integrations/webhooks', true, 302);
+        header('Location: ' . Site::url('admin/integrations/webhooks'), true, 302);
         exit();
     }
     $stmt->bind_param('sssiii', $name, $eventTypes, $targetUrl, $isActive, $webhookId, $siteId);
@@ -133,7 +133,7 @@ if ($webhookId > 0) {
         $stmt->close();
         $_SESSION['flash_msg']  = 'Could not update webhook — database error.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/integrations/webhooks', true, 302);
+        header('Location: ' . Site::url('admin/integrations/webhooks'), true, 302);
         exit();
     }
     $stmt->close();
@@ -142,7 +142,7 @@ if ($webhookId > 0) {
 
     $_SESSION['flash_msg']  = 'Webhook updated.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /admin/integrations/webhooks', true, 302);
+    header('Location: ' . Site::url('admin/integrations/webhooks'), true, 302);
     exit();
 }
 
@@ -161,7 +161,7 @@ $error = $validateFields($name, $targetUrl);
 if ($error !== '') {
     $_SESSION['flash_msg']  = $error;
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/integrations/webhooks', true, 302);
+    header('Location: ' . Site::url('admin/integrations/webhooks'), true, 302);
     exit();
 }
 
@@ -177,7 +177,7 @@ if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'WEBHOOK_SAVE', $mysqli->error, '');
     $_SESSION['flash_msg']  = 'Could not create webhook — database error.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/integrations/webhooks', true, 302);
+    header('Location: ' . Site::url('admin/integrations/webhooks'), true, 302);
     exit();
 }
 $stmt->bind_param('issssii', $siteId, $name, $eventTypes, $targetUrl, $signingSecret, $isActive, $userId);
@@ -187,7 +187,7 @@ if ($ok === false) {
     $stmt->close();
     $_SESSION['flash_msg']  = 'Could not create webhook — database error.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/integrations/webhooks', true, 302);
+    header('Location: ' . Site::url('admin/integrations/webhooks'), true, 302);
     exit();
 }
 $newId = (int) $mysqli->insert_id;
@@ -202,5 +202,5 @@ $_SESSION['webhook_secret_minted'] = [
 ];
 $_SESSION['flash_msg']  = 'Webhook created.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /admin/integrations/webhooks', true, 302);
+header('Location: ' . Site::url('admin/integrations/webhooks'), true, 302);
 exit();

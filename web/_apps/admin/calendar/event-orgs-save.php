@@ -18,7 +18,7 @@ use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /calendar', true, 302); exit(); }
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . Site::url('calendar'), true, 302); exit(); }
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -40,7 +40,7 @@ $ok = (bool) $stmt->get_result()->fetch_assoc();
 $stmt->close();
 if ($ok === false) { http_response_code(404); exit('Event not found'); }
 
-$redirect = '/admin/calendar/event-orgs?eventID=' . $eventId;
+$redirect = Site::url('admin/calendar/event-orgs') . '?eventID=' . $eventId;
 
 if ($action === 'add') {
     $orgName   = mb_substr(trim((string) ($_POST['orgName'] ?? '')), 0, 255);

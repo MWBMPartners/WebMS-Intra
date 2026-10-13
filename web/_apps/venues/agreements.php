@@ -139,7 +139,7 @@ $statusOptions = ['draft', 'active', 'expired', 'terminated']; // superseded is 
 
 $pageTitle   = 'Hire Agreements';
 $pageSection = 'venues';
-$breadcrumbs = ['Dashboard' => '/', 'Venue Bookings' => '/venues', 'Agreements' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Venue Bookings' => Site::url('venues'), 'Agreements' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -154,7 +154,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="card mb-3">
     <div class="card-body">
-        <form method="get" action="/venues/agreements" class="row g-2 align-items-end">
+        <form method="get" action="<?php echo htmlspecialchars(Site::url('venues/agreements'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
             <div class="col-md-4">
                 <label class="form-label small" for="venue">Venue</label>
                 <select class="form-select form-select-sm" id="venue" name="venue" onchange="this.form.submit()">
@@ -178,7 +178,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </select>
             </div>
             <div class="col-md-4 text-end">
-                <a href="/venues/agreements?edit=0" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>New agreement</a>
+                <a href="<?php echo htmlspecialchars(Site::url('venues/agreements'), ENT_QUOTES, 'UTF-8'); ?>?edit=0" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>New agreement</a>
             </div>
         </form>
     </div>
@@ -230,7 +230,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="col-1 small"><?php echo (int) ($fileCounts[(int) $a['agreementID']] ?? 0); ?></div>
                 <div class="col-1 text-end">
-                    <a href="/venues/agreements?edit=<?php echo (int) $a['agreementID']; ?>" class="btn btn-sm btn-outline-secondary" title="Edit">
+                    <a href="<?php echo htmlspecialchars(Site::url('venues/agreements'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo (int) $a['agreementID']; ?>" class="btn btn-sm btn-outline-secondary" title="Edit">
                         <i class="fa-solid fa-pen"></i>
                     </a>
                 </div>
@@ -257,7 +257,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php if ($isSupersede): ?>
                 <p class="text-muted small">The previous agreement will be marked <strong>superseded</strong> once this renewal is saved.</p>
             <?php endif; ?>
-            <form method="post" action="/venues/agreement-save" class="row g-2">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/agreement-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="<?php echo htmlspecialchars($formAction, ENT_QUOTES, 'UTF-8'); ?>">
                 <?php if ($isEdit): ?>
@@ -369,7 +369,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <button type="submit" class="btn btn-primary btn-sm">
                         <i class="fa-solid fa-check me-1"></i><?php echo $isSupersede ? 'Create renewal' : 'Save agreement'; ?>
                     </button>
-                    <a href="/venues/agreements" class="btn btn-outline-secondary btn-sm">Cancel</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('venues/agreements'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Cancel</a>
                 </div>
             </form>
 
@@ -379,7 +379,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <span class="text-muted small me-2">Quick actions:</span>
                     <?php foreach (['active' => 'Activate', 'expired' => 'Mark expired', 'terminated' => 'Terminate'] as $sVal => $sLabel): ?>
                         <?php if ((string) $editAgreement['status'] !== $sVal && (string) $editAgreement['status'] !== 'superseded'): ?>
-                            <form method="post" action="/venues/agreement-save" class="d-inline"
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/agreement-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                                   data-confirm="<?php echo htmlspecialchars($sLabel . ' this agreement?', ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="action" value="set-status">
@@ -390,7 +390,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php endif; ?>
                     <?php endforeach; ?>
                     <?php if ((string) $editAgreement['status'] !== 'superseded'): ?>
-                        <a href="/venues/agreements?edit=0&amp;supersede=<?php echo (int) $editAgreement['agreementID']; ?>" class="btn btn-sm btn-outline-primary">
+                        <a href="<?php echo htmlspecialchars(Site::url('venues/agreements'), ENT_QUOTES, 'UTF-8'); ?>?edit=0&amp;supersede=<?php echo (int) $editAgreement['agreementID']; ?>" class="btn btn-sm btn-outline-primary">
                             <i class="fa-solid fa-rotate me-1"></i>Renew / supersede
                         </a>
                     <?php endif; ?>
@@ -413,10 +413,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <div class="col-3 small text-muted"><?php echo htmlspecialchars((string) $file['fileName'], ENT_QUOTES, 'UTF-8'); ?></div>
                                 <div class="col-2 small text-muted"><?php echo $file['fileSize'] !== null ? number_format(((int) $file['fileSize']) / 1024, 1) . ' KB' : '—'; ?></div>
                                 <div class="col-3 text-end">
-                                    <a href="/venues/agreement-download?id=<?php echo (int) $file['fileID']; ?>" class="btn btn-sm btn-outline-secondary" title="Download">
+                                    <a href="<?php echo htmlspecialchars(Site::url('venues/agreement-download'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $file['fileID']; ?>" class="btn btn-sm btn-outline-secondary" title="Download">
                                         <i class="fa-solid fa-download"></i>
                                     </a>
-                                    <form method="post" action="/venues/agreement-files" class="d-inline" data-confirm="Delete this file?" data-confirm-destructive="true">
+                                    <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/agreement-files'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline" data-confirm="Delete this file?" data-confirm-destructive="true">
                                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                         <input type="hidden" name="action" value="delete">
                                         <input type="hidden" name="agreementID" value="<?php echo (int) $editAgreement['agreementID']; ?>">
@@ -429,7 +429,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                 <?php endif; ?>
 
-                <form method="post" action="/venues/agreement-files" enctype="multipart/form-data" class="row g-2 align-items-end">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/agreement-files'), ENT_QUOTES, 'UTF-8'); ?>" enctype="multipart/form-data" class="row g-2 align-items-end">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="action" value="upload">
                     <input type="hidden" name="agreementID" value="<?php echo (int) $editAgreement['agreementID']; ?>">
@@ -450,6 +450,6 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endif; ?>
 
-<a href="/venues" class="btn btn-outline-secondary mt-3"><i class="fa-solid fa-arrow-left me-1"></i>Back to schedule</a>
+<a href="<?php echo htmlspecialchars(Site::url('venues'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary mt-3"><i class="fa-solid fa-arrow-left me-1"></i>Back to schedule</a>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

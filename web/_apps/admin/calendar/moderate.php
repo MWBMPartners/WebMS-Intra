@@ -25,7 +25,7 @@ use Portal\Core\Logger;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/calendar/moderation', true, 302);
+    header('Location: ' . Site::url('admin/calendar/moderation'), true, 302);
     exit();
 }
 
@@ -38,7 +38,7 @@ if (App::isAdmin() === false) {
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     Logger::activity('EventModerateRejected', 'Invalid CSRF on /admin/calendar/moderate');
-    header('Location: /admin/calendar/moderation', true, 302);
+    header('Location: ' . Site::url('admin/calendar/moderation'), true, 302);
     exit();
 }
 
@@ -48,7 +48,7 @@ $modId   = (int) ($_SESSION['user_id'] ?? 0);
 $siteId  = Site::id();
 
 if ($eventId <= 0 || in_array($action, ['approve', 'reject'], true) === false) {
-    header('Location: /admin/calendar/moderation', true, 302);
+    header('Location: ' . Site::url('admin/calendar/moderation'), true, 302);
     exit();
 }
 
@@ -85,5 +85,5 @@ if ($stmt !== false) {
     }
 }
 
-header('Location: /admin/calendar/moderation?status=pending', true, 302);
+header('Location: ' . Site::url('admin/calendar/moderation') . '?status=pending', true, 302);
 exit();

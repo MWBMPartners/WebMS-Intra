@@ -63,7 +63,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Zoom Integration';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Integrations' => '/admin/integrations', 'Zoom' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Integrations' => Site::url('admin/integrations'), 'Zoom' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -77,7 +77,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-4">
     <div class="card-header"><strong>OAuth credentials</strong></div>
     <div class="card-body">
-        <form method="post" action="/admin/integrations/zoom/save" class="row g-3">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/zoom/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="col-md-6">
                 <label class="form-label">Client ID</label>
@@ -121,7 +121,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 Connected: <strong><?php echo htmlspecialchars((string) ($orgAccount['zoomAccountEmail'] ?? $orgAccount['zoomUserId']), ENT_QUOTES, 'UTF-8'); ?></strong>
                 <span class="small text-muted ms-2">last refresh: <?php echo htmlspecialchars((string) $orgAccount['updatedAt'], ENT_QUOTES, 'UTF-8'); ?></span>
             </p>
-            <form method="post" action="/admin/integrations/zoom/disconnect" class="d-inline">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/zoom/disconnect'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="accountID" value="<?php echo (int) $orgAccount['accountID']; ?>">
                 <button type="submit" class="btn btn-outline-danger btn-sm" data-confirm="Disconnect the org Zoom account?">Disconnect</button>
@@ -129,7 +129,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php elseif ($clientId === '' || $hasSecret === false): ?>
             <p class="text-muted mb-0">Configure Client ID + Secret above before connecting.</p>
         <?php else: ?>
-            <a href="/admin/integrations/zoom/connect" class="btn btn-primary"><i class="fa-solid fa-link me-1"></i>Connect Zoom account</a>
+            <a href="<?php echo htmlspecialchars(Site::url('admin/integrations/zoom/connect'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary"><i class="fa-solid fa-link me-1"></i>Connect Zoom account</a>
         <?php endif; ?>
     </div>
 </div>

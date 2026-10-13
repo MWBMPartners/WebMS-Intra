@@ -12,18 +12,19 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
 
 $pageTitle   = 'Help — Disaster Recovery';
 $pageSection = 'help';
-$breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'Disaster Recovery' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Help' => Site::url('help'), 'Disaster Recovery' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
 if (App::isAdmin() === false): ?>
     <div class="alert alert-info">
-        Disaster recovery is admin-only. The <a href="/help/getting-started">Getting Started guide</a> is the right page for general users.
+        Disaster recovery is admin-only. The <a href="<?php echo htmlspecialchars(Site::url('help/getting-started'), ENT_QUOTES, 'UTF-8'); ?>">Getting Started guide</a> is the right page for general users.
     </div>
 <?php
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
@@ -39,7 +40,7 @@ must-know shortcuts.</p>
 
 <div class="alert alert-warning">
     <strong>If you're not sure where to start:</strong> open
-    <a href="/admin/maintenance/health">/admin/maintenance/health</a> first
+    <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/health'), ENT_QUOTES, 'UTF-8'); ?>">/admin/maintenance/health</a> first
     and read which probe is red.
 </div>
 
@@ -47,7 +48,7 @@ must-know shortcuts.</p>
     <div class="col-md-4"><div class="card h-100"><div class="card-body">
         <h5><i class="fa-solid fa-1 me-1"></i>Stop the bleeding</h5>
         <p class="small">Toggle maintenance mode immediately to show a friendly "we'll be back" page.</p>
-        <a class="btn btn-warning btn-sm" href="/admin/maintenance/health">Maintenance mode</a>
+        <a class="btn btn-warning btn-sm" href="<?php echo htmlspecialchars(Site::url('admin/maintenance/health'), ENT_QUOTES, 'UTF-8'); ?>">Maintenance mode</a>
     </div></div></div>
     <div class="col-md-4"><div class="card h-100 border-info"><div class="card-body">
         <h5><i class="fa-solid fa-key me-1"></i>You can still get back in</h5>
@@ -68,25 +69,25 @@ must-know shortcuts.</p>
     <div class="col-md-4"><div class="card h-100"><div class="card-body">
         <h5><i class="fa-solid fa-2 me-1"></i>Diagnose</h5>
         <p class="small">Check probes, error log, and activity.</p>
-        <a class="btn btn-outline-primary btn-sm" href="/admin/maintenance/health">Health</a>
-        <a class="btn btn-outline-primary btn-sm" href="/admin/errors">Errors</a>
-        <a class="btn btn-outline-primary btn-sm" href="/admin/activity">Activity</a>
+        <a class="btn btn-outline-primary btn-sm" href="<?php echo htmlspecialchars(Site::url('admin/maintenance/health'), ENT_QUOTES, 'UTF-8'); ?>">Health</a>
+        <a class="btn btn-outline-primary btn-sm" href="<?php echo htmlspecialchars(Site::url('admin/errors'), ENT_QUOTES, 'UTF-8'); ?>">Errors</a>
+        <a class="btn btn-outline-primary btn-sm" href="<?php echo htmlspecialchars(Site::url('admin/activity'), ENT_QUOTES, 'UTF-8'); ?>">Activity</a>
     </div></div></div>
     <div class="col-md-4"><div class="card h-100"><div class="card-body">
         <h5><i class="fa-solid fa-3 me-1"></i>Restore</h5>
         <p class="small">Roll back to the latest snapshot. Use the off-site copy if local backups are gone.</p>
-        <a class="btn btn-outline-success btn-sm" href="/admin/maintenance/backup">Backups</a>
-        <a class="btn btn-outline-success btn-sm" href="/admin/maintenance/offsite-backup">Off-site</a>
+        <a class="btn btn-outline-success btn-sm" href="<?php echo htmlspecialchars(Site::url('admin/maintenance/backup'), ENT_QUOTES, 'UTF-8'); ?>">Backups</a>
+        <a class="btn btn-outline-success btn-sm" href="<?php echo htmlspecialchars(Site::url('admin/maintenance/offsite-backup'), ENT_QUOTES, 'UTF-8'); ?>">Off-site</a>
     </div></div></div>
 </div>
 
 <div class="card mb-3"><div class="card-body">
     <h5>Common failure modes</h5>
     <ul>
-        <li><strong>White page / 500</strong> — Tail the PHP error log; check <a href="/admin/errors">/admin/errors</a>.</li>
+        <li><strong>White page / 500</strong> — Tail the PHP error log; check <a href="<?php echo htmlspecialchars(Site::url('admin/errors'), ENT_QUOTES, 'UTF-8'); ?>">/admin/errors</a>.</li>
         <li><strong>DB connection lost</strong> — Try <code>mysql … -e "SELECT NOW();"</code>; check DreamHost status.</li>
         <li><strong>Disk full</strong> — Prune <code>_backups/</code> older than 4 most recent; prune <code>_uploads/photos/queue/</code> older than 30 days.</li>
-        <li><strong>Bad migration</strong> — Full-restore the latest snapshot via <a href="/admin/maintenance/backup">Backups</a>.</li>
+        <li><strong>Bad migration</strong> — Full-restore the latest snapshot via <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/backup'), ENT_QUOTES, 'UTF-8'); ?>">Backups</a>.</li>
         <li><strong>Stolen credentials</strong> — clear every session, force password reset, rotate <code>enc.key</code>, rotate every encrypted integration credential. Exact SQL in <a href="https://github.com/MWBMPartners/WebMS-Intra/blob/main/docs/disaster-recovery-runbook.md#44-stolen-credentials" target="_blank" rel="noopener">runbook section 4.4</a>.</li>
         <li><strong>Compromised account</strong> — Disable user + revoke sessions, then run the offboarding flow.</li>
     </ul>

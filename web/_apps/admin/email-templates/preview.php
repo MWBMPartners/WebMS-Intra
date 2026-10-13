@@ -33,9 +33,10 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/email-templates', true, 302);
+    header('Location: ' . Site::url('admin/email-templates'), true, 302);
     exit();
 }
 Auth::ensureSession();

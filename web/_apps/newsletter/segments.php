@@ -44,7 +44,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Newsletter Segments';
 $pageSection = 'newsletter';
-$breadcrumbs = ['Dashboard' => '/', 'Newsletter' => '/newsletter', 'Segments' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Newsletter' => Site::url('newsletter'), 'Segments' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -58,7 +58,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-4">
     <div class="card-header"><strong>Add a segment</strong></div>
     <div class="card-body">
-        <form method="post" action="/newsletter/segments/save" class="row g-2 align-items-end">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('newsletter/segments/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="add">
             <div class="col-md-4">
@@ -90,7 +90,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="col-md-4"><strong><?php echo htmlspecialchars((string) $s['name'], ENT_QUOTES, 'UTF-8'); ?></strong></div>
                     <div class="col-md-6 small text-muted"><?php echo htmlspecialchars($roles, ENT_QUOTES, 'UTF-8'); ?></div>
                     <div class="col-md-2 text-end">
-                        <form method="post" action="/newsletter/segments/save" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('newsletter/segments/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="action" value="delete">
                             <input type="hidden" name="segmentID" value="<?php echo (int) $s['segmentID']; ?>">

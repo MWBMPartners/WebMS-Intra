@@ -38,7 +38,7 @@ if (App::isAdmin() === false) {
 if (Auth::verifyCsrf($_GET['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/activity');
+    header('Location: ' . Site::url('admin/activity'));
     exit();
 }
 
@@ -84,7 +84,7 @@ $stmt = $mysqli->prepare($sql);
 if ($stmt === false) {
     $_SESSION['flash_msg']  = t('error.db_export_activity');
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/activity');
+    header('Location: ' . Site::url('admin/activity'));
     exit();
 }
 $stmt->bind_param('i', $siteId);

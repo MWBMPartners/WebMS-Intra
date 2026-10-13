@@ -348,7 +348,7 @@ function reconcile_parse_csv(string $raw, array $mapping, string $mode, string $
 /** Redirect back to the import page, optionally forcing the mapping view. */
 function reconcileRedirect(bool $adjust = false): void
 {
-    header('Location: /giving/reconcile/import' . ($adjust === true ? '?adjust=1' : ''));
+    header('Location: ' . Site::url('giving/reconcile/import') . ($adjust === true ? '?adjust=1' : ''));
     exit();
 }
 
@@ -617,7 +617,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         unset($_SESSION[RECONCILE_SESSION_KEY]);
         $_SESSION['flash_msg']  = 'Imported ' . $rowCount . ' credit line' . ($rowCount === 1 ? '' : 's') . '; ' . $matchedCount . ' matched automatically.';
         $_SESSION['flash_type'] = 'success';
-        header('Location: /giving/reconcile/view?id=' . $importId);
+        header('Location: ' . Site::url('giving/reconcile/view') . '?id=' . $importId);
         exit();
     }
 
@@ -626,7 +626,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // -------------------------------------------------------------------
     if ($action === 'cancel') {
         unset($_SESSION[RECONCILE_SESSION_KEY]);
-        header('Location: /giving/reconcile');
+        header('Location: ' . Site::url('giving/reconcile'));
         exit();
     }
 
@@ -685,7 +685,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $pageTitle   = 'Import Bank Statement';
 $pageSection = 'giving';
-$breadcrumbs = ['Dashboard' => '/', 'Giving' => '/giving', 'Reconcile' => '/giving/reconcile', 'Import' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Giving' => Site::url('giving'), 'Reconcile' => Site::url('giving/reconcile'), 'Import' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -698,7 +698,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-file-csv me-2"></i>Import Bank Statement</h1>
         <p class="text-secondary mb-0">Upload a bank statement CSV to reconcile against the gift log.</p>
     </div>
-    <a href="/giving/reconcile" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Reconcile</a>
+    <a href="<?php echo htmlspecialchars(Site::url('giving/reconcile'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Reconcile</a>
 </div>
 
 <?php if ($state === 'upload'): ?>
@@ -714,7 +714,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
     <div class="card">
         <div class="card-body">
-            <form method="post" action="/giving/reconcile/import" enctype="multipart/form-data">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/reconcile/import'), ENT_QUOTES, 'UTF-8'); ?>" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="upload">
                 <div class="mb-3">
@@ -735,7 +735,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card">
         <div class="card-header"><strong><?php echo htmlspecialchars((string) $upload['filename'], ENT_QUOTES, 'UTF-8'); ?></strong></div>
         <div class="card-body">
-            <form method="post" action="/giving/reconcile/import" class="row g-3">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/reconcile/import'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="map">
                 <div class="col-md-3">
@@ -814,7 +814,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </form>
         </div>
     </div>
-    <form method="post" action="/giving/reconcile/import" class="mt-2">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/reconcile/import'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-2">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="action" value="cancel">
         <button type="submit" class="btn btn-outline-secondary btn-sm">Cancel</button>
@@ -843,8 +843,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php endif; ?>
         </div>
     </div>
-    <a href="/giving/reconcile/import?adjust=1" class="btn btn-outline-primary btn-sm">Adjust mapping</a>
-    <form method="post" action="/giving/reconcile/import" class="d-inline">
+    <a href="<?php echo htmlspecialchars(Site::url('giving/reconcile/import'), ENT_QUOTES, 'UTF-8'); ?>?adjust=1" class="btn btn-outline-primary btn-sm">Adjust mapping</a>
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/reconcile/import'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="action" value="cancel">
         <button type="submit" class="btn btn-outline-secondary btn-sm">Cancel</button>
@@ -865,14 +865,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="col-md-3"><strong><?php echo count($rows); ?></strong> credits, <?php echo htmlspecialchars(Giving::formatAmount($total, (string) $upload['currency']), ENT_QUOTES, 'UTF-8'); ?></div>
                 <div class="col-md-2"><span class="text-muted"><?php echo (int) ($upload['skipped'] ?? 0); ?> skipped</span></div>
             </div>
-            <a href="/giving/reconcile/import?adjust=1" class="small">Adjust mapping</a>
+            <a href="<?php echo htmlspecialchars(Site::url('giving/reconcile/import'), ENT_QUOTES, 'UTF-8'); ?>?adjust=1" class="small">Adjust mapping</a>
         </div>
     </div>
 
     <?php if ($dupImportId !== null): ?>
         <div class="alert alert-danger">
             This exact file was already imported as
-            <a href="/giving/reconcile/view?id=<?php echo $dupImportId; ?>" class="alert-link">import #<?php echo $dupImportId; ?></a>
+            <a href="<?php echo htmlspecialchars(Site::url('giving/reconcile/view'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $dupImportId; ?>" class="alert-link">import #<?php echo $dupImportId; ?></a>
             on <?php echo htmlspecialchars(date('d/m/Y H:i', (int) strtotime((string) $dupImportedAt)), ENT_QUOTES, 'UTF-8'); ?>. Re-importing the same file is blocked.
         </div>
     <?php endif; ?>
@@ -906,13 +906,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php endif; ?>
 
     <?php if ($dupImportId === null): ?>
-        <form method="post" action="/giving/reconcile/import" class="d-inline">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/reconcile/import'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="confirm">
             <button type="submit" class="btn btn-success" <?php echo count($rows) === 0 ? 'disabled' : ''; ?>><i class="fa-solid fa-check me-1"></i>Confirm &amp; import</button>
         </form>
     <?php endif; ?>
-    <form method="post" action="/giving/reconcile/import" class="d-inline">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/reconcile/import'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="action" value="cancel">
         <button type="submit" class="btn btn-outline-secondary">Cancel</button>

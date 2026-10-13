@@ -162,7 +162,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $pageTitle   = 'Label Designer';
 $pageSection = 'assets';
-$breadcrumbs = ['Dashboard' => '/', 'Assets' => '/assets', 'Label Designer' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Assets' => Site::url('assets'), 'Label Designer' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -182,7 +182,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="row g-4">
     <!-- 🔧 Left column — picker + options (self-submitting GET form). -->
     <div class="col-12 col-lg-6">
-        <form method="get" action="/assets/labels">
+        <form method="get" action="<?php echo htmlspecialchars(Site::url('assets/labels'), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="submitted" value="1">
             <!-- 🧷 Carry forward selections hidden by the CURRENT filter —
                  see the $carriedAssetIds PHP setup above for why this
@@ -344,7 +344,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php endif; ?>.
                     </p>
 
-                    <form method="post" action="/assets/labels-pdf" class="mb-3">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/labels-pdf'), ENT_QUOTES, 'UTF-8'); ?>" class="mb-3">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                         <?php foreach ($selectedAssetIds as $sid): ?>
                             <input type="hidden" name="assetIds[]" value="<?php echo (int) $sid; ?>">
@@ -376,6 +376,6 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<p class="mt-3"><a href="/assets" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a></p>
+<p class="mt-3"><a href="<?php echo htmlspecialchars(Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a></p>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

@@ -44,7 +44,7 @@ if ($rs !== false) {
 
 $pageTitle   = 'Care Register';
 $pageSection = 'care';
-$breadcrumbs = ['Dashboard' => '/', 'Care Register' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Care Register' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -65,7 +65,7 @@ $csrf = Auth::csrfToken();
     <div class="card">
         <div class="card-body">
             <h2 class="h6">Open new case</h2>
-            <form method="post" action="/care/case-save" class="row g-2">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('care/case-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <div class="col-md-4">
                     <label class="form-label small">Person (name, if not a portal user)</label>
@@ -110,7 +110,7 @@ $csrf = Auth::csrfToken();
                     };
                 ?>
                     <div class="row py-2 border-bottom align-items-center">
-                        <div class="col-md-3"><a href="/care/case?id=<?php echo (int) $c['caseID']; ?>"><strong><?php echo htmlspecialchars((string) $c['personName'], ENT_QUOTES, 'UTF-8'); ?></strong></a></div>
+                        <div class="col-md-3"><a href="<?php echo htmlspecialchars(Site::url('care/case'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $c['caseID']; ?>"><strong><?php echo htmlspecialchars((string) $c['personName'], ENT_QUOTES, 'UTF-8'); ?></strong></a></div>
                         <div class="col-md-2"><span class="badge bg-<?php echo $statusClass; ?>"><?php echo htmlspecialchars((string) $c['status'], ENT_QUOTES, 'UTF-8'); ?></span></div>
                         <div class="col-md-2"><span class="text-muted small"><?php echo htmlspecialchars((string) $c['category'], ENT_QUOTES, 'UTF-8'); ?></span></div>
                         <div class="col-md-3 small"><?php echo htmlspecialchars((string) $c['summary'], ENT_QUOTES, 'UTF-8'); ?></div>

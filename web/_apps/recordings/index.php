@@ -77,7 +77,7 @@ $displayName = (string) (App::settings()['recordings']['displayName'] ?? 'Record
 
 $pageTitle   = $displayName;
 $pageSection = 'recordings';
-$breadcrumbs = ['Dashboard' => '/', $displayName => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), $displayName => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -87,10 +87,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <p class="text-secondary mb-0">Audio + video archive — searchable and podcast-ready.</p>
     </div>
     <div class="d-flex gap-2">
-        <a href="/recordings.rss" class="btn btn-outline-warning btn-sm" target="_blank"><i class="fa-solid fa-rss me-1"></i>RSS</a>
+        <a href="<?php echo htmlspecialchars(Site::url('recordings.rss'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-warning btn-sm" target="_blank"><i class="fa-solid fa-rss me-1"></i>RSS</a>
         <?php if (App::isAdmin() === true): ?>
-            <a href="/recordings/manage" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-gear me-1"></i>Manage</a>
-            <a href="/recordings/upload" class="btn btn-primary btn-sm"><i class="fa-solid fa-upload me-1"></i>Upload</a>
+            <a href="<?php echo htmlspecialchars(Site::url('recordings/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-gear me-1"></i>Manage</a>
+            <a href="<?php echo htmlspecialchars(Site::url('recordings/upload'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-upload me-1"></i>Upload</a>
         <?php endif; ?>
     </div>
 </div>
@@ -119,13 +119,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="mb-4 small">
         <span class="text-muted me-2">Popular tags:</span>
         <?php foreach ($topics as $t): ?>
-            <a href="/recordings?topic=<?php echo urlencode((string) $t['topic']); ?>" class="badge bg-secondary text-decoration-none me-1"><?php echo htmlspecialchars((string) $t['topic'], ENT_QUOTES, 'UTF-8'); ?> · <?php echo (int) $t['useCount']; ?></a>
+            <a href="<?php echo htmlspecialchars(Site::url('recordings'), ENT_QUOTES, 'UTF-8'); ?>?topic=<?php echo urlencode((string) $t['topic']); ?>" class="badge bg-secondary text-decoration-none me-1"><?php echo htmlspecialchars((string) $t['topic'], ENT_QUOTES, 'UTF-8'); ?> · <?php echo (int) $t['useCount']; ?></a>
         <?php endforeach; ?>
     </div>
 <?php endif; ?>
 
 <?php if (count($recordings) === 0): ?>
-    <div class="alert alert-info">No recordings match. <?php if (App::isAdmin() === true): ?><a href="/recordings/upload">Upload the first →</a><?php endif; ?></div>
+    <div class="alert alert-info">No recordings match. <?php if (App::isAdmin() === true): ?><a href="<?php echo htmlspecialchars(Site::url('recordings/upload'), ENT_QUOTES, 'UTF-8'); ?>">Upload the first →</a><?php endif; ?></div>
 <?php else: ?>
     <div class="card">
         <div class="card-body">
@@ -144,7 +144,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <i class="fa-solid <?php echo $icon; ?>"></i>
                         </div>
                         <div class="col-md-7">
-                            <a href="/recordings/view?id=<?php echo (int) $r['recordingID']; ?>" class="text-decoration-none">
+                            <a href="<?php echo htmlspecialchars(Site::url('recordings/view'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $r['recordingID']; ?>" class="text-decoration-none">
                                 <strong><?php echo htmlspecialchars((string) $r['title'], ENT_QUOTES, 'UTF-8'); ?></strong>
                             </a>
                             <div class="small text-muted">

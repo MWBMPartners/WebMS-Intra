@@ -50,7 +50,7 @@ $action     = (string) ($_POST['action'] ?? 'save');
 if ($campaignId <= 0) {
     $_SESSION['flash_msg']  = 'Choose a campaign to pledge to.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /giving/campaigns');
+    header('Location: ' . Site::url('giving/campaigns'));
     exit();
 }
 
@@ -70,7 +70,7 @@ if ($action === 'cancel') {
     Logger::activity('GivingPledgeCancelled', 'Cancelled pledge to campaign #' . $campaignId, $userId);
     $_SESSION['flash_msg']  = 'Your pledge has been cancelled.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /giving/campaign?id=' . $campaignId);
+    header('Location: ' . Site::url('giving/campaign') . '?id=' . $campaignId);
     exit();
 }
 
@@ -86,7 +86,7 @@ if (in_array($schedule, ['one-off', 'weekly', 'monthly'], true) === false) {
 if ($amount <= 0) {
     $_SESSION['flash_msg']  = 'Enter a pledge amount greater than zero.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /giving/campaign?id=' . $campaignId);
+    header('Location: ' . Site::url('giving/campaign') . '?id=' . $campaignId);
     exit();
 }
 
@@ -110,7 +110,7 @@ if ($stmt !== false) {
 if ($campaign === null) {
     $_SESSION['flash_msg']  = 'This campaign is not currently accepting pledges.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /giving/campaign?id=' . $campaignId);
+    header('Location: ' . Site::url('giving/campaign') . '?id=' . $campaignId);
     exit();
 }
 
@@ -136,5 +136,5 @@ Logger::activity(
 );
 $_SESSION['flash_msg']  = 'Your pledge has been saved. Thank you!';
 $_SESSION['flash_type'] = 'success';
-header('Location: /giving/campaign?id=' . $campaignId);
+header('Location: ' . Site::url('giving/campaign') . '?id=' . $campaignId);
 exit();

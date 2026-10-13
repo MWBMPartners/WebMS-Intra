@@ -33,10 +33,11 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 $pageTitle   = 'Release Notes';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Release Notes' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Release Notes' => ''];
 
 Auth::ensureSession();
 if (App::isAdmin() === false) {
@@ -217,7 +218,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-clipboard-list me-2"></i>Release Notes</h1>
         <p class="text-secondary mb-0">Rendered from <code>CHANGELOG.md</code>.</p>
     </div>
-    <a href="/admin" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back to Admin
     </a>
 </div>

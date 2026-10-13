@@ -43,7 +43,7 @@ use Portal\Core\Site;
             $startTs = strtotime((string) $event['startDateTime']);
             ?>
             <div class="col-md-6 col-lg-4">
-                <a href="/calendar/event?slug=<?php echo htmlspecialchars((string) $event['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>"
+                <a href="<?php echo htmlspecialchars(Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo htmlspecialchars((string) $event['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>"
                    class="text-decoration-none text-reset d-block">
                     <div class="card h-100 shadow-sm overflow-hidden">
                         <div style="aspect-ratio: 16/9; background: linear-gradient(135deg,#5e6ad2,#7a85e8); display:flex; align-items:center; justify-content:center;">

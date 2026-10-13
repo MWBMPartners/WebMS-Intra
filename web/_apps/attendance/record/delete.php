@@ -50,14 +50,14 @@ if (App::isAdmin() === false
 
 // 🛡️ Only accept POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /attendance');
+    header('Location: ' . Site::url('attendance'));
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /attendance');
+    header('Location: ' . Site::url('attendance'));
     exit();
 }
 
@@ -70,7 +70,7 @@ $siteId = Site::id();
 if ($sessionID <= 0) {
     $_SESSION['flash_msg']  = 'Invalid session ID.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /attendance');
+    header('Location: ' . Site::url('attendance'));
     exit();
 }
 
@@ -86,5 +86,5 @@ Logger::activity('AttendanceDeleted', 'Soft-deleted attendance session #' . $ses
 
 $_SESSION['flash_msg']  = 'Attendance record deleted.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /attendance');
+header('Location: ' . Site::url('attendance'));
 exit();

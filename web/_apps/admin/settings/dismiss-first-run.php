@@ -44,6 +44,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -53,7 +54,7 @@ if (App::isAdmin() === false) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /');
+    header('Location: ' . Site::url(''));
     exit();
 }
 
@@ -75,7 +76,7 @@ if (App::isRootAdmin() === false) {
     http_response_code(403);
     $pageTitle   = 'Only a global administrator can dismiss this';
     $pageSection = 'admin';
-    $breadcrumbs = ['Dashboard' => '/', 'Set-up checklist' => ''];
+    $breadcrumbs = ['Dashboard' => Site::url(''), 'Set-up checklist' => ''];
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
     ?>
     <!-- 👀 Worded refusal. Nothing below this point has run: nothing was saved. -->
@@ -86,7 +87,7 @@ if (App::isRootAdmin() === false) {
         yours. Only a global administrator can change that. Nothing has been
         changed.
     </div>
-    <a href="/" class="btn btn-primary">Back to the dashboard</a>
+    <a href="<?php echo htmlspecialchars(Site::url(''), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary">Back to the dashboard</a>
     <?php
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     exit();
@@ -107,5 +108,5 @@ try {
     // 🛡️ Non-fatal — admin can dismiss again.
 }
 
-header('Location: /');
+header('Location: ' . Site::url(''));
 exit();

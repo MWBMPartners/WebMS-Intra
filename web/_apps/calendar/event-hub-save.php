@@ -48,7 +48,7 @@ use Portal\Core\Site;
 use Portal\Core\VideoEmbed;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /calendar', true, 302);
+    header('Location: ' . Site::url('calendar'), true, 302);
     exit();
 }
 
@@ -81,7 +81,7 @@ if ($ok === false) {
     exit('Event not found');
 }
 
-$redirect = '/calendar/event/hub?eventID=' . $eventId;
+$redirect = Site::url('calendar/event/hub') . '?eventID=' . $eventId;
 
 /**
  * 🚩 Flash an error and redirect back to the hub, without mutating anything.

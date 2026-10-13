@@ -27,7 +27,7 @@ use Portal\Core\Site;
 
 $pageTitle   = 'Manage Forms';
 $pageSection = 'forms';
-$breadcrumbs = ['Dashboard' => '/', 'Forms' => '/forms', 'Manage' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Forms' => Site::url('forms'), 'Manage' => ''];
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -38,7 +38,7 @@ if (App::isAdmin() === false) {
     echo '<div class="alert alert-danger"><i class="fa-solid fa-lock me-1"></i>'
         . htmlspecialchars(t('error.moderator_only'), ENT_QUOTES, 'UTF-8')
         . '</div>';
-    echo '<a href="/forms" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>';
+    echo '<a href="' . htmlspecialchars(Site::url('forms'), ENT_QUOTES, 'UTF-8') . '" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     exit();
 }
@@ -77,8 +77,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <p class="text-secondary mb-0">Build, publish, and review responses for your site's forms.</p>
     </div>
     <div class="d-flex gap-2">
-        <a href="/forms" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>
-        <a href="/forms/edit" class="btn btn-primary"><i class="fa-solid fa-plus me-1"></i> New form</a>
+        <a href="<?php echo htmlspecialchars(Site::url('forms'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>
+        <a href="<?php echo htmlspecialchars(Site::url('forms/edit'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary"><i class="fa-solid fa-plus me-1"></i> New form</a>
     </div>
 </div>
 
@@ -86,7 +86,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="alert alert-light border small mb-3">
         <i class="fa-solid fa-circle-info me-1"></i>
         Public sharing is currently OFF for this site. Forms can still be filled in internally.
-        <a href="/settings">Enable public forms in Settings</a>.
+        <a href="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>">Enable public forms in Settings</a>.
     </div>
 <?php endif; ?>
 
@@ -123,7 +123,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         ?>
             <div class="portal-data-row flex-wrap">
                 <div class="col-12 col-md-3">
-                    <strong><a href="/forms/edit?id=<?php echo $formId; ?>"><?php echo $titleSafe; ?></a></strong>
+                    <strong><a href="<?php echo htmlspecialchars(Site::url('forms/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $formId; ?>"><?php echo $titleSafe; ?></a></strong>
                 </div>
                 <div class="col-6 col-md-2">
                     <span class="badge <?php echo $statusBadge; ?>"><?php echo htmlspecialchars(ucfirst($status), ENT_QUOTES, 'UTF-8'); ?></span>
@@ -135,21 +135,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="col-12 col-md-2 text-md-end">
                     <div class="btn-group btn-group-sm" role="group">
-                        <a href="/forms/edit?id=<?php echo $formId; ?>" class="btn btn-outline-secondary" title="Edit">
+                        <a href="<?php echo htmlspecialchars(Site::url('forms/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $formId; ?>" class="btn btn-outline-secondary" title="Edit">
                             <i class="fa-solid fa-pen"></i>
                         </a>
-                        <a href="/forms/responses?id=<?php echo $formId; ?>" class="btn btn-outline-secondary" title="Responses">
+                        <a href="<?php echo htmlspecialchars(Site::url('forms/responses'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $formId; ?>" class="btn btn-outline-secondary" title="Responses">
                             <i class="fa-solid fa-inbox"></i>
                         </a>
                         <?php if ($status !== 'published'): ?>
-                            <form method="post" action="/forms/publish" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/publish'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="formID" value="<?php echo $formId; ?>">
                                 <input type="hidden" name="action" value="publish">
                                 <button type="submit" class="btn btn-outline-success" title="Publish"><i class="fa-solid fa-check"></i></button>
                             </form>
                         <?php else: ?>
-                            <form method="post" action="/forms/publish" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/publish'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="formID" value="<?php echo $formId; ?>">
                                 <input type="hidden" name="action" value="unpublish">
@@ -157,7 +157,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             </form>
                         <?php endif; ?>
                         <?php if ($status !== 'closed'): ?>
-                            <form method="post" action="/forms/publish" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/publish'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="formID" value="<?php echo $formId; ?>">
                                 <input type="hidden" name="action" value="close">
@@ -177,7 +177,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                   // (.htaccess), so this picture was broken on every installation (found 12 October 2026, #500). ?>
                             <img src="<?php echo htmlspecialchars(Site::url('qr'), ENT_QUOTES, 'UTF-8'); ?>?content=<?php echo urlencode($publicUrl); ?>&amp;size=64" width="64" height="64" alt="QR code for the public form link" class="border rounded">
                             <input type="text" class="form-control form-control-sm" style="max-width:360px;" readonly value="<?php echo htmlspecialchars($publicUrl, ENT_QUOTES, 'UTF-8'); ?>" onclick="this.select();">
-                            <form method="post" action="/forms/publish" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/publish'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="formID" value="<?php echo $formId; ?>">
                                 <input type="hidden" name="action" value="rotate">

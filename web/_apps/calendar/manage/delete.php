@@ -29,14 +29,14 @@ if (App::isAdmin() === false) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /calendar/manage');
+    header('Location: ' . Site::url('calendar/manage'));
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /calendar/manage');
+    header('Location: ' . Site::url('calendar/manage'));
     exit();
 }
 
@@ -64,5 +64,5 @@ if ($eventID > 0) {
     $_SESSION['flash_type'] = 'danger';
 }
 
-header('Location: /calendar/manage');
+header('Location: ' . Site::url('calendar/manage'));
 exit();

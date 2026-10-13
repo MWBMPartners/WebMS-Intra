@@ -60,7 +60,7 @@ $paymentsEnabled = (string) (App::settings()['payments']['enabled'] ?? '0') === 
 
 $pageTitle   = 'My Giving';
 $pageSection = 'giving';
-$breadcrumbs = ['Dashboard' => '/', 'Giving' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Giving' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -71,16 +71,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
     <div class="d-flex gap-2 flex-wrap">
         <?php if ($paymentsEnabled === true): ?>
-            <a href="/giving/give" class="btn btn-success btn-sm"><i class="fa-solid fa-heart me-1"></i>Give online</a>
+            <a href="<?php echo htmlspecialchars(Site::url('giving/give'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-success btn-sm"><i class="fa-solid fa-heart me-1"></i>Give online</a>
         <?php endif; ?>
-        <a href="/giving/campaigns" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-bullseye me-1"></i>Campaigns</a>
-        <a href="/giving/my-statement" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-file-pdf me-1"></i>Year-end statement</a>
-        <a href="/giving/gift-aid" class="btn btn-outline-<?php echo $hasDeclaration === true ? 'success' : 'warning'; ?> btn-sm">
+        <a href="<?php echo htmlspecialchars(Site::url('giving/campaigns'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-bullseye me-1"></i>Campaigns</a>
+        <a href="<?php echo htmlspecialchars(Site::url('giving/my-statement'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-file-pdf me-1"></i>Year-end statement</a>
+        <a href="<?php echo htmlspecialchars(Site::url('giving/gift-aid'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-<?php echo $hasDeclaration === true ? 'success' : 'warning'; ?> btn-sm">
             <i class="fa-solid fa-file-signature me-1"></i>Gift Aid
             <?php if ($hasDeclaration === false): ?>(needed)<?php endif; ?>
         </a>
         <?php if (Giving::canManage() === true): ?>
-            <a href="/giving/manage" class="btn btn-primary btn-sm"><i class="fa-solid fa-gear me-1"></i>Manage</a>
+            <a href="<?php echo htmlspecialchars(Site::url('giving/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-gear me-1"></i>Manage</a>
         <?php endif; ?>
     </div>
 </div>

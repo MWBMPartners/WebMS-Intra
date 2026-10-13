@@ -80,7 +80,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                 </div>
                 <div class="portal-data-row-aside">
-                    <form method="post" action="/admin/decision-cards/act" class="d-flex gap-1">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/decision-cards/act'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex gap-1">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="cardID" value="<?php echo (int) $r['cardID']; ?>">
                         <button name="action" value="contacted" class="btn btn-sm btn-outline-warning" title="Mark contacted"><i class="fa-solid fa-phone"></i></button>
@@ -89,7 +89,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </form>
                     <!-- 🙋 Assign-to picker (#gap-fix D5 — assignedToID/status='assigned'
                          existed in schema + the filter tab but had no UI to set them). -->
-                    <form method="post" action="/admin/decision-cards/act" class="d-flex gap-1 mt-1">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/decision-cards/act'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex gap-1 mt-1">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="cardID" value="<?php echo (int) $r['cardID']; ?>">
                         <input type="hidden" name="action" value="assign">
@@ -105,7 +105,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <button type="submit" class="btn btn-sm btn-outline-primary" title="Assign"><i class="fa-solid fa-user-check"></i></button>
                     </form>
                     <!-- 📝 Editable follow-up notes (#gap-fix D5). -->
-                    <form method="post" action="/admin/decision-cards/act" class="d-flex gap-1 mt-1">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/decision-cards/act'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex gap-1 mt-1">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="cardID" value="<?php echo (int) $r['cardID']; ?>">
                         <input type="hidden" name="action" value="notes">

@@ -28,7 +28,7 @@ use Portal\Core\Site;
 // 📌 Page metadata
 $pageTitle   = 'Manage Service Types';
 $pageSection = 'attendance';
-$breadcrumbs = ['Dashboard' => '/', 'Attendance' => '/attendance', 'Manage Types' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Attendance' => Site::url('attendance'), 'Manage Types' => ''];
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -90,7 +90,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-gear me-2"></i>Manage Service Types</h1>
     <div class="d-flex gap-2">
-        <a href="/attendance" class="btn btn-outline-secondary">
+        <a href="<?php echo htmlspecialchars(Site::url('attendance'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
             <i class="fa-solid fa-arrow-left me-1"></i> Back
         </a>
         <button class="btn btn-success" data-bs-toggle="collapse" data-bs-target="#createTypeForm">
@@ -104,7 +104,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card">
         <div class="card-header"><h5 class="mb-0">Add New Service Type</h5></div>
         <div class="card-body">
-            <form method="post" action="/attendance/manage/save">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('attendance/manage/save'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="create">
 
@@ -198,7 +198,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php endif; ?>
             </div>
             <div class="col-12 col-md-2 text-md-end mt-2 mt-md-0">
-                <form method="post" action="/attendance/manage/save" class="d-inline">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('attendance/manage/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="action" value="toggle">
                     <input type="hidden" name="serviceTypeID" value="<?php echo (int) $parent['serviceTypeID']; ?>">
@@ -244,7 +244,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php endif; ?>
                 </div>
                 <div class="col-12 col-md-2 text-md-end mt-2 mt-md-0">
-                    <form method="post" action="/attendance/manage/save" class="d-inline">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('attendance/manage/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="action" value="toggle">
                         <input type="hidden" name="serviceTypeID" value="<?php echo (int) $child['serviceTypeID']; ?>">

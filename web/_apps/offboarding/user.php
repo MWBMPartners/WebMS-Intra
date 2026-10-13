@@ -19,6 +19,7 @@ declare(strict_types=1);
 use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -30,7 +31,7 @@ if (App::isAdmin() === false) {
 $db     = App::db();
 $userId = (int) ($_GET['id'] ?? 0);
 if ($userId <= 0) {
-    header('Location: /admin/users');
+    header('Location: ' . Site::url('admin/users'));
     exit();
 }
 
@@ -63,7 +64,7 @@ $canOffboard = (AccountGuard::verdict($userId, AccountGuard::REACH_ACCOUNT) === 
 
 $pageTitle   = 'Offboard ' . $u['fullName'];
 $pageSection = 'offboarding';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Users' => '/admin/users', 'Offboard' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Users' => Site::url('admin/users'), 'Offboard' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -82,10 +83,10 @@ $csrf = Auth::csrfToken();
         <li>Remove role assignments</li>
         <li>Audit-log the action to <code>tblOffboarding</code> with per-step success/failure</li>
     </ul>
-    <p class="mt-2 mb-0">Within the configured undo window, an admin can rehire the user from <a href="/offboarding">/offboarding</a> — the account is reactivated but credentials are NOT restored; the user must reset password and re-enrol passkeys.</p>
+    <p class="mt-2 mb-0">Within the configured undo window, an admin can rehire the user from <a href="<?php echo htmlspecialchars(Site::url('offboarding'), ENT_QUOTES, 'UTF-8'); ?>">/offboarding</a> — the account is reactivated but credentials are NOT restored; the user must reset password and re-enrol passkeys.</p>
 </div>
 
-<form method="post" action="/offboarding/do">
+<form method="post" action="<?php echo htmlspecialchars(Site::url('offboarding/do'), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="userID" value="<?php echo (int) $u['userID']; ?>">
     <div class="card">
@@ -112,7 +113,7 @@ $csrf = Auth::csrfToken();
                     data-confirm-confirm-label="Offboard">
                 Offboard user
             </button>
-            <a href="/admin/users" class="btn btn-outline-secondary">Cancel</a>
+            <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
         </div>
     </div>
 </form>
@@ -122,7 +123,7 @@ $csrf = Auth::csrfToken();
      to another organisation too. No form is drawn at all. -->
 <div class="alert alert-info">
     <?php echo htmlspecialchars(AccountGuard::message(AccountGuard::GLOBAL_ONLY, AccountGuard::REACH_ACCOUNT), ENT_QUOTES, 'UTF-8'); ?>
-    <a href="/offboarding">Back to offboarding</a>
+    <a href="<?php echo htmlspecialchars(Site::url('offboarding'), ENT_QUOTES, 'UTF-8'); ?>">Back to offboarding</a>
 </div>
 <?php endif; ?>
 

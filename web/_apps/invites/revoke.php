@@ -41,5 +41,5 @@ if ($id > 0) {
     }
 }
 
-header('Location: /invites');
+header('Location: ' . Site::url('invites'));
 exit();

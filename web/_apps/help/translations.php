@@ -20,7 +20,7 @@ declare(strict_types=1);
 
 $pageTitle   = 'Help - Translations & Languages';
 $pageSection = 'help';
-$breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'Translations' => ''];
+$breadcrumbs = ['Dashboard' => \Portal\Core\Site::url(''), 'Help' => \Portal\Core\Site::url('help'), 'Translations' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -31,7 +31,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-globe me-2"></i>Translations &amp; Languages</h1>
         <p class="text-secondary mb-0">How to change your language, contribute translations, and manage the portal's multilingual support.</p>
     </div>
-    <a href="/help" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
         <i class="fa-solid fa-arrow-left me-1" aria-hidden="true"></i>Back to Help Centre
     </a>
 </div>

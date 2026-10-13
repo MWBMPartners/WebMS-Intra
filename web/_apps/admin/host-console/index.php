@@ -82,14 +82,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php if (count($events) === 0): ?>
         <div class="alert alert-info small">
             No events with livestream activity or scheduled to start today.
-            <a href="/admin/livestream">Livestream analytics</a> shows all sessions.
+            <a href="<?php echo htmlspecialchars(Site::url('admin/livestream'), ENT_QUOTES, 'UTF-8'); ?>">Livestream analytics</a> shows all sessions.
         </div>
     <?php else: ?>
         <div class="portal-data-list">
         <?php foreach ($events as $e): ?>
             <div class="portal-data-row">
                 <div class="portal-data-row-main">
-                    <a href="/admin/host-console/event?id=<?php echo (int) $e['eventID']; ?>" class="text-decoration-none fw-semibold h6 mb-1">
+                    <a href="<?php echo htmlspecialchars(Site::url('admin/host-console/event'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $e['eventID']; ?>" class="text-decoration-none fw-semibold h6 mb-1">
                         <?php echo htmlspecialchars((string) $e['eventName'], ENT_QUOTES, 'UTF-8'); ?>
                     </a>
                     <?php if ((int) $e['liveNow'] > 0): ?>
@@ -103,7 +103,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                 </div>
                 <div class="portal-data-row-aside">
-                    <a href="/admin/host-console/event?id=<?php echo (int) $e['eventID']; ?>" class="btn btn-sm btn-outline-primary">
+                    <a href="<?php echo htmlspecialchars(Site::url('admin/host-console/event'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $e['eventID']; ?>" class="btn btn-sm btn-outline-primary">
                         Open <i class="fa-solid fa-arrow-right ms-1"></i>
                     </a>
                 </div>

@@ -71,13 +71,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="container py-4">
     <h1 class="h4 mb-1"><i class="fa-solid fa-file-lines me-2 text-primary"></i>Sermon Notes</h1>
     <p class="text-muted">
-        <a href="/recordings/view?id=<?php echo $recordingId; ?>"><?php echo htmlspecialchars((string) $recording['title'], ENT_QUOTES, 'UTF-8'); ?></a>
+        <a href="<?php echo htmlspecialchars(Site::url('recordings/view'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $recordingId; ?>"><?php echo htmlspecialchars((string) $recording['title'], ENT_QUOTES, 'UTF-8'); ?></a>
         <?php if ($recording['scripture'] !== null && $recording['scripture'] !== ''): ?>
             &middot; <em><?php echo htmlspecialchars((string) $recording['scripture'], ENT_QUOTES, 'UTF-8'); ?></em>
         <?php endif; ?>
     </p>
 
-    <form method="post" action="/recordings/notes-save">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('recordings/notes-save'), ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
         <input type="hidden" name="recordingID" value="<?php echo $recordingId; ?>">
         <?php if ($note !== null): ?>
@@ -104,7 +104,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
 
         <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save me-1"></i> Save notes</button>
-        <a href="/recordings/view?id=<?php echo $recordingId; ?>" class="btn btn-outline-secondary">Cancel</a>
+        <a href="<?php echo htmlspecialchars(Site::url('recordings/view'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $recordingId; ?>" class="btn btn-outline-secondary">Cancel</a>
     </form>
 </div>
 

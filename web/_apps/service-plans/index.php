@@ -41,7 +41,7 @@ if ($stmt !== false) {
 
 $pageTitle   = 'Service Plans';
 $pageSection = 'service-plans';
-$breadcrumbs = ['Dashboard' => '/', 'Service Plans' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Service Plans' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -50,11 +50,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-list-ol me-2"></i>Service Plans</h1>
         <p class="text-secondary mb-0">Run-sheet per service: preacher, scripture, hymns, AV, welcome team.</p>
     </div>
-    <a href="/service-plans/new" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>New plan</a>
+    <a href="<?php echo htmlspecialchars(Site::url('service-plans/new'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>New plan</a>
 </div>
 
 <?php if (count($plans) === 0): ?>
-    <div class="alert alert-info">No service plans yet. <a href="/service-plans/new">Create the first →</a></div>
+    <div class="alert alert-info">No service plans yet. <a href="<?php echo htmlspecialchars(Site::url('service-plans/new'), ENT_QUOTES, 'UTF-8'); ?>">Create the first →</a></div>
 <?php else: ?>
     <div class="card">
         <div class="card-body">
@@ -68,7 +68,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 ?>
                     <div class="row py-2 border-bottom align-items-center">
                         <div class="col-md-3">
-                            <a href="/service-plans/edit?id=<?php echo (int) $p['planID']; ?>" class="text-decoration-none">
+                            <a href="<?php echo htmlspecialchars(Site::url('service-plans/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $p['planID']; ?>" class="text-decoration-none">
                                 <strong><?php echo htmlspecialchars((string) $p['title'], ENT_QUOTES, 'UTF-8'); ?></strong>
                             </a>
                         </div>
@@ -78,8 +78,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="col-md-2"><span class="badge bg-<?php echo $statusCls; ?>"><?php echo htmlspecialchars((string) $p['status'], ENT_QUOTES, 'UTF-8'); ?></span></div>
                         <div class="col-md-2 small text-muted"><?php echo (int) $p['itemCount']; ?> items</div>
                         <div class="col-md-3 text-end">
-                            <a href="/service-plans/edit?id=<?php echo (int) $p['planID']; ?>" class="btn btn-outline-primary btn-sm">Edit</a>
-                            <a href="/service-plans/print?id=<?php echo (int) $p['planID']; ?>" class="btn btn-outline-secondary btn-sm" target="_blank">Print</a>
+                            <a href="<?php echo htmlspecialchars(Site::url('service-plans/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $p['planID']; ?>" class="btn btn-outline-primary btn-sm">Edit</a>
+                            <a href="<?php echo htmlspecialchars(Site::url('service-plans/print'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $p['planID']; ?>" class="btn btn-outline-secondary btn-sm" target="_blank">Print</a>
                         </div>
                     </div>
                 <?php endforeach; ?>

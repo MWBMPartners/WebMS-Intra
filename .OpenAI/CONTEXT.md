@@ -418,14 +418,23 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
 
     **Every address a page writes is built by `Site::url()`** (#536): never a
     bare `/page`. In a script printed by PHP use `Router::urlForScript()`; in a
-    script file, `Portal.url()`. `tools/audit-
-    checks/check_site_aware_addresses.py` fails on a bare address anywhere
-    outside `site_aware_addresses_pending.txt`, which only shrinks; `tools/site-
-    addresses-selftest.php` reads the real pages. `Site::FIRST_PART_MODE_READY`
-    stays `false` until that list is empty AND the matters written up beside
-    #536 are settled (the service worker, the installable app, the chat box on
-    `/live`, the return address of a Microsoft or Google sign-in): an empty list
-    alone is not enough.
+    script file, `Portal.url()`.
+    `tools/audit-checks/check_site_aware_addresses.py` fails on a bare
+    address anywhere it reads: the list of places still to sweep,
+    `site_aware_addresses_pending.txt`, has been EMPTY since 13 October 2026
+    and nothing may be added to it (`--strict` fails if a line appears).
+    `tools/site-addresses-selftest.php` reads the real pages. Three things
+    the sweep taught: never join two built addresses (`Site::url('a') .
+    Site::url('b')` prints the organisation's part twice); a page that
+    ACCEPTS a come-back address by a pattern must accept it with the
+    organisation's part too, and still refuse one that leaves the portal;
+    and a class used by its short name needs its `use` line in THAT file,
+    which only fails when the line runs. `Site::FIRST_PART_MODE_READY` STAYS
+    `false`: the empty list is not enough. Still to settle, written up
+    beside #536: the service worker, the installable app, the chat box on
+    `/live`, the return address of a Microsoft or Google sign-in, and links
+    in a push or e-mail made by a scheduled job (a job has no organisation's
+    part; those belong to `PortalAddress`).
 
     **Secret settings (#597, #497).** Secret settings:
     `Portal\Core\SecretSettings` is the ONE place that decides what a stored

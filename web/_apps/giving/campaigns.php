@@ -103,7 +103,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Pledge Campaigns';
 $pageSection = 'giving';
-$breadcrumbs = ['Dashboard' => '/', 'Giving' => '/giving', 'Campaigns' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Giving' => Site::url('giving'), 'Campaigns' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -122,7 +122,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <i class="fa-solid fa-plus me-1"></i>New campaign
             </button>
         <?php endif; ?>
-        <a href="/giving/manage" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Giving</a>
+        <a href="<?php echo htmlspecialchars(Site::url('giving/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Giving</a>
     </div>
 </div>
 
@@ -131,7 +131,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card">
             <div class="card-header"><strong>New campaign</strong></div>
             <div class="card-body">
-                <form method="post" action="/giving/campaign-save" class="row g-2 align-items-end">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/campaign-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="campaignID" value="0">
                     <div class="col-md-4">
@@ -214,9 +214,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 You pledged <?php echo htmlspecialchars(Giving::formatAmount((int) $mine['amountPence'], $cur), ENT_QUOTES, 'UTF-8'); ?>
                                 <?php echo htmlspecialchars((string) $mine['paymentSchedule'], ENT_QUOTES, 'UTF-8'); ?>
                             </span>
-                            <a href="/giving/campaign?id=<?php echo $campaignId; ?>" class="btn btn-outline-secondary btn-sm ms-2">Manage pledge</a>
+                            <a href="<?php echo htmlspecialchars(Site::url('giving/campaign'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $campaignId; ?>" class="btn btn-outline-secondary btn-sm ms-2">Manage pledge</a>
                         <?php else: ?>
-                            <a href="/giving/campaign?id=<?php echo $campaignId; ?>" class="btn btn-primary btn-sm">Make a pledge</a>
+                            <a href="<?php echo htmlspecialchars(Site::url('giving/campaign'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $campaignId; ?>" class="btn btn-primary btn-sm">Make a pledge</a>
                         <?php endif; ?>
                     </div>
                 </div>

@@ -32,7 +32,7 @@ $canLink = PortalAddress::absolute('auth/invite') !== '';
 
 $pageTitle   = 'New invitation';
 $pageSection = 'invites';
-$breadcrumbs = ['Dashboard' => '/', 'Invitations' => '/invites', 'New' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Invitations' => Site::url('invites'), 'New' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -51,7 +51,7 @@ $csrf = Auth::csrfToken();
 
 <div class="card">
     <div class="card-body">
-        <form method="post" action="/invites/save">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('invites/save'), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="row g-2">
                 <div class="col-12">
@@ -86,7 +86,7 @@ $csrf = Auth::csrfToken();
             </div>
             <div class="mt-3">
                 <button type="submit" class="btn btn-primary"<?php echo $canLink === false ? ' disabled' : ''; ?>>Generate invitations</button>
-                <a href="/invites" class="btn btn-outline-secondary">Cancel</a>
+                <a href="<?php echo htmlspecialchars(Site::url('invites'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
             </div>
         </form>
     </div>

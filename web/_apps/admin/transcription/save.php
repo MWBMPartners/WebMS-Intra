@@ -32,6 +32,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -66,7 +67,7 @@ if (App::isRootAdmin() === false) {
         . 'administrator can change them. Your own organisation\'s settings '
         . 'are on the main Settings page and are unaffected.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/transcription');
+    header('Location: ' . Site::url('admin/transcription'));
     exit();
 }
 
@@ -124,5 +125,5 @@ if ($aa !== '') {
 
 $_SESSION['flash_msg']  = 'Transcription settings saved.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /admin/transcription');
+header('Location: ' . Site::url('admin/transcription'));
 exit();

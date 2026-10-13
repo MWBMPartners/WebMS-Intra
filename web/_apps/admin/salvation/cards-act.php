@@ -7,7 +7,7 @@ use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /admin/decision-cards', true, 302); exit(); }
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . Site::url('admin/decision-cards'), true, 302); exit(); }
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -26,7 +26,7 @@ if (in_array($returnStatus, ['new', 'assigned', 'contacted', 'complete', 'archiv
 }
 
 if ($cardId <= 0) {
-    header('Location: /admin/decision-cards', true, 302); exit();
+    header('Location: ' . Site::url('admin/decision-cards'), true, 302); exit();
 }
 
 // 🙋 Assign / unassign (#gap-fix D5) — sets assignedToID + status='assigned'
@@ -52,7 +52,7 @@ if ($action === 'assign') {
         'Card #' . $cardId . ' → ' . ($assignedToID > 0 ? 'assigned to user #' . $assignedToID : 'unassigned')
     );
 
-    header('Location: /admin/decision-cards?status=' . ($assignedToID > 0 ? 'assigned' : $returnStatus), true, 302);
+    header('Location: ' . Site::url('admin/decision-cards') . '?status=' . ($assignedToID > 0 ? 'assigned' : $returnStatus), true, 302);
     exit();
 }
 
@@ -72,13 +72,13 @@ if ($action === 'notes') {
 
     Logger::activity('SalvationCardNotes', 'Card #' . $cardId . ' notes updated');
 
-    header('Location: /admin/decision-cards?status=' . $returnStatus, true, 302);
+    header('Location: ' . Site::url('admin/decision-cards') . '?status=' . $returnStatus, true, 302);
     exit();
 }
 
 $map = ['contacted' => 'contacted', 'complete' => 'complete', 'archive' => 'archived'];
 if (isset($map[$action]) === false) {
-    header('Location: /admin/decision-cards', true, 302); exit();
+    header('Location: ' . Site::url('admin/decision-cards'), true, 302); exit();
 }
 $newStatus = $map[$action];
 
@@ -89,5 +89,5 @@ $stmt->close();
 
 Logger::activity('SalvationCardStatus', 'Card #' . $cardId . ' → ' . $newStatus);
 
-header('Location: /admin/decision-cards?status=' . ($newStatus === 'archived' ? 'archived' : 'new'), true, 302);
+header('Location: ' . Site::url('admin/decision-cards') . '?status=' . ($newStatus === 'archived' ? 'archived' : 'new'), true, 302);
 exit();

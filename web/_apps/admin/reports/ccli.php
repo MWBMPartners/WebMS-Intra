@@ -73,7 +73,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php if ($ccliAcct !== ''): ?>
         <p class="text-muted small">Reported under CCLI account <strong><?php echo htmlspecialchars($ccliAcct, ENT_QUOTES, 'UTF-8'); ?></strong>.</p>
     <?php else: ?>
-        <p class="text-muted small">Set <code>worship.ccli_account_number</code> in <a href="/admin/settings">Settings</a> to display your account on the report.</p>
+        <p class="text-muted small">Set <code>worship.ccli_account_number</code> in <a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>">Settings</a> to display your account on the report.</p>
     <?php endif; ?>
 
     <form method="get" class="row g-2 align-items-end mb-4">

@@ -73,7 +73,7 @@ if (isset($SETTINGS['expenses']['enabled']) === true && $SETTINGS['expenses']['e
                 'value' => $cnt,
                 'icon'  => 'fa-solid fa-file-invoice-dollar',
                 'color' => $cnt > 0 ? 'warning' : 'success',
-                'url'   => '/expenses/approve',
+                'url'   => Site::url('expenses/approve'),
             ];
         }
     } else {
@@ -94,7 +94,7 @@ if (isset($SETTINGS['expenses']['enabled']) === true && $SETTINGS['expenses']['e
                     // There is no /expenses page — this used to lead to
                     // "page not found". Submit is where a claimant sees
                     // and raises their own claims.
-                    'url'   => '/expenses/submit',
+                    'url'   => Site::url('expenses/submit'),
                 ];
             }
         }
@@ -134,7 +134,7 @@ if (isset($SETTINGS['calendar']['enabled']) === true && $SETTINGS['calendar']['e
             'value' => $cnt,
             'icon'  => 'fa-solid fa-calendar-week',
             'color' => 'primary',
-            'url'   => '/calendar',
+            'url'   => Site::url('calendar'),
         ];
     }
 }
@@ -178,7 +178,7 @@ if (isset($SETTINGS['assets']['enabled']) === true && $SETTINGS['assets']['enabl
             'value' => $myAssetCount,
             'icon'  => 'fa-solid fa-box',
             'color' => 'primary',
-            'url'   => '/assets/my',
+            'url'   => Site::url('assets/my'),
         ];
     }
     // 🚨 Only surfaced when non-zero — mirrors the non-admin "My Pending
@@ -193,7 +193,7 @@ if (isset($SETTINGS['assets']['enabled']) === true && $SETTINGS['assets']['enabl
             'value' => $myOverdueLoanCount,
             'icon'  => 'fa-solid fa-triangle-exclamation',
             'color' => 'danger',
-            'url'   => '/assets/my',
+            'url'   => Site::url('assets/my'),
         ];
     }
 }
@@ -215,7 +215,7 @@ if ($isAdmin === true) {
             'value' => $cnt,
             'icon'  => 'fa-solid fa-users',
             'color' => 'info',
-            'url'   => '/admin/users',
+            'url'   => Site::url('admin/users'),
         ];
     }
 }
@@ -251,7 +251,7 @@ if ($isAdmin === true) {
             'value' => $cnt,
             'icon'  => 'fa-solid fa-chart-line',
             'color' => 'secondary',
-            'url'   => '/admin/activity',
+            'url'   => Site::url('admin/activity'),
         ];
     }
 }
@@ -398,14 +398,14 @@ if (\Portal\Core\App::isAdmin() === true) {
 $firstRunSteps = [
     'site_branding' => [
         'label' => 'Configure site name + branding',
-        'href'  => '/admin/settings',
+        'href'  => Site::url('admin/settings'),
         'done'  => (string) ($SETTINGS['portal']['first_run']['steps']['site_branding'] ?? '0') === '1'
                 || (string) ($SETTINGS['site']['name'] ?? '') !== ''
                 && (string) ($SETTINGS['site']['name'] ?? '') !== 'WebMS Intra',
     ],
     'email_delivery' => [
         'label' => 'Set up e-mail (Microsoft 365, Google or an SMTP mailbox)',
-        'href'  => '/admin/integrations/email',
+        'href'  => Site::url('admin/integrations/email'),
         // Done ONLY when a route is really set up. The stored "done" mark the
         // other steps accept is not read for this one: with it set, the step
         // was ticked while password-reset e-mails went nowhere.
@@ -415,22 +415,22 @@ $firstRunSteps = [
     ],
     'test_backup' => [
         'label' => 'Run a test backup',
-        'href'  => '/admin/maintenance/backup',
+        'href'  => Site::url('admin/maintenance/backup'),
         'done'  => (string) ($SETTINGS['portal']['first_run']['steps']['test_backup'] ?? '0') === '1',
     ],
     'retention_cron' => [
         'label' => 'Configure retention cron',
-        'href'  => '/admin/maintenance/retention',
+        'href'  => Site::url('admin/maintenance/retention'),
         'done'  => (string) ($SETTINGS['portal']['first_run']['steps']['retention_cron'] ?? '0') === '1',
     ],
     'invite_users' => [
         'label' => 'Invite your first volunteers',
-        'href'  => '/admin/users',
+        'href'  => Site::url('admin/users'),
         'done'  => (string) ($SETTINGS['portal']['first_run']['steps']['invite_users'] ?? '0') === '1',
     ],
     'first_announcement' => [
         'label' => 'Post your first announcement',
-        'href'  => '/announcements',
+        'href'  => Site::url('announcements'),
         'done'  => (string) ($SETTINGS['portal']['first_run']['steps']['first_announcement'] ?? '0') === '1'
                 || count($pinnedAnnouncements) > 0,
     ],
@@ -444,7 +444,7 @@ $firstRunSteps = [
                 <h2 class="h5 mb-1"><i class="fa-solid fa-wand-magic-sparkles me-1 text-primary"></i> Welcome to <?php echo htmlspecialchars((string) ($SETTINGS['site']['name'] ?? 'your portal'), ENT_QUOTES, 'UTF-8'); ?></h2>
                 <p class="text-muted small mb-0">A short setup checklist — work through these to make your portal ready for users.</p>
             </div>
-            <form method="post" action="/admin/settings/dismiss-first-run" class="d-inline">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/settings/dismiss-first-run'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(\Portal\Core\Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <button type="submit" class="btn btn-sm btn-link text-muted">Dismiss</button>
             </form>
@@ -501,7 +501,7 @@ $firstRunSteps = [
             <i class="fa-solid fa-thumbtack me-2 mt-1"></i>
             <div>
                 <strong>
-                    <a href="/announcements/view?slug=<?php echo htmlspecialchars(urlencode($pAnn['slug']), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link text-decoration-none">
+                    <a href="<?php echo htmlspecialchars(Site::url('announcements/view'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo htmlspecialchars(urlencode($pAnn['slug']), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link text-decoration-none">
                         <?php echo htmlspecialchars($pAnn['title'], ENT_QUOTES, 'UTF-8'); ?>
                     </a>
                 </strong>

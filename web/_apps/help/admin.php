@@ -21,7 +21,7 @@ use Portal\Core\Site;
 
 $pageTitle   = 'Help - Admin Guide';
 $pageSection = 'help';
-$breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'Admin Guide' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Help' => Site::url('help'), 'Admin Guide' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -32,7 +32,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-gear me-2"></i>Admin Guide</h1>
         <p class="text-secondary mb-0">For administrators: managing settings, users, access control, and logs.</p>
     </div>
-    <a href="/help" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
+    <a href="<?php echo htmlspecialchars(Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Help Centre
     </a>
 </div>
@@ -213,7 +213,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="portal-card p-4 mb-4" id="site-branding">
     <h2 class="h4 mb-3"><i class="fa-solid fa-palette me-2 text-primary"></i>Site Branding</h2>
 
-    <p>Each site in this install can have its own visual identity. Branding values are configured at <a href="/admin/sites">/admin/sites/</a> by umbrella admins.</p>
+    <p>Each site in this install can have its own visual identity. Branding values are configured at <a href="<?php echo htmlspecialchars(Site::url('admin/sites'), ENT_QUOTES, 'UTF-8'); ?>">/admin/sites/</a> by umbrella admins.</p>
 
     <h5 class="mt-3 mb-3">What you can customise per site</h5>
 
@@ -263,7 +263,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <h6 class="mt-3 mb-2">Hiding the attribution</h6>
 
-    <p>To hide the "Powered by" attribution across all sites in this install, set the global setting <code>branding.hidePoweredBy</code> to <code>true</code> at <a href="/settings">/settings/</a>. Default is <code>false</code> (show attribution on custom-branded sites).</p>
+    <p>To hide the "Powered by" attribution across all sites in this install, set the global setting <code>branding.hidePoweredBy</code> to <code>true</code> at <a href="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>">/settings/</a>. Default is <code>false</code> (show attribution on custom-branded sites).</p>
 
     <div class="alert alert-info d-flex gap-2 mt-3" role="alert">
         <i class="fa-solid fa-circle-info mt-1"></i>
@@ -279,7 +279,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <p>
         The portal supports three captcha providers, configured at
-        <a href="/admin/captcha">/admin/captcha</a>:
+        <a href="<?php echo htmlspecialchars(Site::url('admin/captcha'), ENT_QUOTES, 'UTF-8'); ?>">/admin/captcha</a>:
     </p>
     <ul>
         <li><strong>Cloudflare Turnstile</strong> — privacy-friendly default, no challenge for most users.</li>
@@ -319,13 +319,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             way; nothing is said about keys.
         </li>
         <li>
-            The portal tells you on <a href="/admin/captcha">/admin/captcha</a>, on the health page, on the Settings page and in the
+            The portal tells you on <a href="<?php echo htmlspecialchars(Site::url('admin/captcha'), ENT_QUOTES, 'UTF-8'); ?>">/admin/captcha</a>, on the health page, on the Settings page and in the
             error log (which sends the alert e-mail, where one is set up).
         </li>
     </ul>
     <p>
         To put it right, restore the key file from your backup, or type the provider's two keys in again at
-        <a href="/admin/captcha">/admin/captcha</a>. A key left under a provider that is not the one in use affects nothing.
+        <a href="<?php echo htmlspecialchars(Site::url('admin/captcha'), ENT_QUOTES, 'UTF-8'); ?>">/admin/captcha</a>. A key left under a provider that is not the one in use affects nothing.
     </p>
     <p>
         <strong>Saving that page with the boxes empty changes nothing.</strong> The boxes of a provider whose keys cannot be read
@@ -350,7 +350,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h2 class="h4 mb-3"><i class="fa-solid fa-shield-halved me-2 text-primary"></i>Password Policy</h2>
 
     <p>
-        Configurable via <a href="/settings">Settings</a> under the <code>auth.password.*</code> prefix.
+        Configurable via <a href="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>">Settings</a> under the <code>auth.password.*</code> prefix.
         Defaults follow OWASP ASVS L1.
     </p>
 
@@ -371,7 +371,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             tell a leftover from a deliberate choice.
             <br><br>
             Look at <code>auth.password.minLength</code> in
-            <a href="/settings">Settings</a>. If it says 8 and you did not
+            <a href="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>">Settings</a>. If it says 8 and you did not
             choose that, change it to 12.
         </div>
     </div>
@@ -802,7 +802,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <h3 class="h5 mt-4 mb-3">Setting it</h3>
     <ol class="mb-3">
-        <li class="mb-2">Go to <a href="/admin/settings/organisation">Admin, Settings, Organisation</a> and find <strong>Web addresses</strong>. Only a global administrator can save it.</li>
+        <li class="mb-2">Go to <a href="<?php echo htmlspecialchars(Site::url('admin/settings/organisation'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Settings, Organisation</a> and find <strong>Web addresses</strong>. Only a global administrator can save it.</li>
         <li class="mb-2">Type the address with nothing after the name: no folder and no page. The card shows the address you are using right now, which is usually the one to type.</li>
         <li class="mb-2">The same card holds the <strong>support e-mail address</strong> shown on the Help page &ldquo;Getting Support&rdquo; and at the foot of e-mails. Leave it empty to show none.</li>
     </ol>
@@ -866,7 +866,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <h3 class="h5 mt-4 mb-3">Setting it up</h3>
     <ol class="mb-3">
-        <li class="mb-2">Go to <a href="/admin/integrations/email">Admin, Integrations, Email</a> and find <strong>SMTP mailbox</strong>.</li>
+        <li class="mb-2">Go to <a href="<?php echo htmlspecialchars(Site::url('admin/integrations/email'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Integrations, Email</a> and find <strong>SMTP mailbox</strong>.</li>
         <li class="mb-2">Type in what your mail provider gives you: the mail server&rsquo;s name, the port, the kind of encryption, the mailbox&rsquo;s user name and its password. Add the address the mail should come from, and save.</li>
         <li class="mb-2">Use <strong>Send test</strong> and choose to send through the SMTP mailbox. This tests the mailbox <em>without</em> switching the portal over to it. The page shows how far it got (reached the server, encryption on and the certificate checked, signed in, message accepted) and the mail server&rsquo;s own last line.</li>
         <li class="mb-2">When the test is accepted and the message has arrived, choose <strong>An SMTP mailbox</strong> under <strong>Route in use</strong>.</li>
@@ -934,7 +934,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="portal-card p-4 mb-4" id="ms365-shared-mailbox">
     <h2 class="h4 mb-3"><i class="fa-solid fa-users-rectangle me-2 text-primary"></i>Sending Email via a Microsoft 365 Shared Mailbox</h2>
 
-    <p>Unless another route is chosen at <a href="/admin/integrations/email">Admin, Integrations, Email</a>, the portal sends every email through Microsoft Graph as <code>mail.defaultFromAddress</code>. An admin can instead route sending through a dedicated <strong>shared mailbox</strong> — e.g. <code>office@yourchurch.org</code> — so mail arrives with that identity and, optionally, keeps a copy in the shared mailbox's own Sent Items.</p>
+    <p>Unless another route is chosen at <a href="<?php echo htmlspecialchars(Site::url('admin/integrations/email'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Integrations, Email</a>, the portal sends every email through Microsoft Graph as <code>mail.defaultFromAddress</code>. An admin can instead route sending through a dedicated <strong>shared mailbox</strong> — e.g. <code>office@yourchurch.org</code> — so mail arrives with that identity and, optionally, keeps a copy in the shared mailbox's own Sent Items.</p>
 
     <div class="alert alert-info d-flex gap-2" role="alert">
         <i class="fa-solid fa-circle-info mt-1"></i>
@@ -971,7 +971,7 @@ Test-ApplicationAccessPolicy -AppId &lt;clientID&gt; -Identity office@yourchurch
         </li>
         <li class="mb-2">
             <strong>Configure the portal</strong> — go to
-            <a href="/admin/integrations">Admin → Integrations</a>, find the
+            <a href="<?php echo htmlspecialchars(Site::url('admin/integrations'), ENT_QUOTES, 'UTF-8'); ?>">Admin → Integrations</a>, find the
             <strong>Shared-Mailbox Sending</strong> section inside the MS365 Graph API card, and set the
             shared mailbox address + display name. Optionally leave "Keep a copy in Sent Items" checked
             (the default) and leave the fallback provider blank (recommended — see below). Save, then use
@@ -986,7 +986,7 @@ Test-ApplicationAccessPolicy -AppId &lt;clientID&gt; -Identity office@yourchurch
     </ol>
 
     <h5 class="mt-4 mb-3">Deliverability note</h5>
-    <p>Mail sent this way leaves Microsoft's own infrastructure, so the organisation's standard Microsoft 365 SPF (<code>include:spf.protection.outlook.com</code>), DKIM (selector1/selector2 CNAMEs enabled in the Defender portal), and DMARC records are what make it align — the web server's own IP reputation is not involved. The <a href="/admin/integrations/email">Email Deliverability</a> page's DNS probe checks these records against the effective sender's domain.</p>
+    <p>Mail sent this way leaves Microsoft's own infrastructure, so the organisation's standard Microsoft 365 SPF (<code>include:spf.protection.outlook.com</code>), DKIM (selector1/selector2 CNAMEs enabled in the Defender portal), and DMARC records are what make it align — the web server's own IP reputation is not involved. The <a href="<?php echo htmlspecialchars(Site::url('admin/integrations/email'), ENT_QUOTES, 'UTF-8'); ?>">Email Deliverability</a> page's DNS probe checks these records against the effective sender's domain.</p>
 
     <h5 class="mt-4 mb-3">Error handling and fallback</h5>
     <ul class="list-group list-group-flush mb-3">
@@ -1008,7 +1008,7 @@ Test-ApplicationAccessPolicy -AppId &lt;clientID&gt; -Identity office@yourchurch
         </li>
     </ul>
 
-    <p>Every send attempt — successful or failed, whichever route it went by — is recorded to a send log visible on the <a href="/admin/integrations/email">Email Deliverability</a> page's "Recent sends" list, kept for 90 days by default.</p>
+    <p>Every send attempt — successful or failed, whichever route it went by — is recorded to a send log visible on the <a href="<?php echo htmlspecialchars(Site::url('admin/integrations/email'), ENT_QUOTES, 'UTF-8'); ?>">Email Deliverability</a> page's "Recent sends" list, kept for 90 days by default.</p>
 </div>
 
 <!-- Section 6: Developer Tools -->
@@ -1017,7 +1017,7 @@ Test-ApplicationAccessPolicy -AppId &lt;clientID&gt; -Identity office@yourchurch
     <h2 class="h4 mb-3"><i class="fa-solid fa-server me-2 text-primary"></i>Server Information</h2>
 
     <p>
-        <a href="/admin/system-info">/admin/system-info</a> answers one question:
+        <a href="<?php echo htmlspecialchars(Site::url('admin/system-info'), ENT_QUOTES, 'UTF-8'); ?>">/admin/system-info</a> answers one question:
         what is this portal actually running on? It is the page to open when a
         hosting company asks you which version of something you are using, or
         when you are trying to work out why an upload will not go through.
@@ -1142,10 +1142,10 @@ Test-ApplicationAccessPolicy -AppId &lt;clientID&gt; -Identity office@yourchurch
 
 <!-- Navigation -->
 <div class="d-flex justify-content-between">
-    <a href="/help/treasury" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('help/treasury'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i>Treasury Guide
     </a>
-    <a href="/help/faq" class="btn btn-primary">
+    <a href="<?php echo htmlspecialchars(Site::url('help/faq'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary">
         FAQ<i class="fa-solid fa-arrow-right ms-1"></i>
     </a>
 </div>

@@ -103,7 +103,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Manage Giving';
 $pageSection = 'giving';
-$breadcrumbs = ['Dashboard' => '/', 'Giving' => '/giving', 'Manage' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Giving' => Site::url('giving'), 'Manage' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -114,20 +114,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-hand-holding-dollar me-2"></i>Manage Giving</h1>
     <div class="d-flex gap-2">
-        <a href="/giving/campaigns" class="btn btn-outline-secondary btn-sm">Campaigns</a>
-        <a href="/giving/count" class="btn btn-outline-secondary btn-sm">Count</a>
-        <a href="/giving/reconcile" class="btn btn-outline-secondary btn-sm">Reconcile</a>
-        <a href="/giving/categories" class="btn btn-outline-secondary btn-sm">Categories</a>
-        <a href="/giving/reports" class="btn btn-outline-secondary btn-sm">Reports</a>
-        <a href="/giving/hmrc-export?from=<?php echo urlencode($from); ?>&to=<?php echo urlencode($to); ?>" class="btn btn-outline-warning btn-sm"><i class="fa-solid fa-file-csv me-1"></i>HMRC CSV</a>
-        <a href="/giving/statements" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-file-invoice me-1"></i>Statements</a>
+        <a href="<?php echo htmlspecialchars(Site::url('giving/campaigns'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Campaigns</a>
+        <a href="<?php echo htmlspecialchars(Site::url('giving/count'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Count</a>
+        <a href="<?php echo htmlspecialchars(Site::url('giving/reconcile'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Reconcile</a>
+        <a href="<?php echo htmlspecialchars(Site::url('giving/categories'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Categories</a>
+        <a href="<?php echo htmlspecialchars(Site::url('giving/reports'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Reports</a>
+        <a href="<?php echo htmlspecialchars(Site::url('giving/hmrc-export'), ENT_QUOTES, 'UTF-8'); ?>?from=<?php echo urlencode($from); ?>&to=<?php echo urlencode($to); ?>" class="btn btn-outline-warning btn-sm"><i class="fa-solid fa-file-csv me-1"></i>HMRC CSV</a>
+        <a href="<?php echo htmlspecialchars(Site::url('giving/statements'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-file-invoice me-1"></i>Statements</a>
     </div>
 </div>
 
 <div class="card mb-3">
     <div class="card-header"><strong>Record an entry</strong></div>
     <div class="card-body">
-        <form method="post" action="/giving/entry-save" class="row g-2 align-items-end">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/entry-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="col-md-3">
                 <label class="form-label small">Donor (search by name)</label>
@@ -261,7 +261,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="col-md-2 text-muted"><?php echo htmlspecialchars((string) ($e['reference'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
                     <div class="col-md-1 text-end"><strong><?php echo htmlspecialchars(Giving::formatAmount((int) $e['amountPence'], (string) ($e['currency'] ?? $currency)), ENT_QUOTES, 'UTF-8'); ?></strong></div>
                     <div class="col-md-1 text-end">
-                        <form method="post" action="/giving/entry-delete" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/entry-delete'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="entryID" value="<?php echo (int) $e['entryID']; ?>">
                             <button type="submit" class="btn btn-link btn-sm text-danger p-0" data-confirm="Delete this entry?">

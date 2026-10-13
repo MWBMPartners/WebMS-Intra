@@ -53,10 +53,11 @@ use Portal\Core\Captcha;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\SecretSettings;
+use Portal\Core\Site;
 
 // 🛡️ Only POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/captcha', true, 302);
+    header('Location: ' . Site::url('admin/captcha'), true, 302);
     exit();
 }
 
@@ -70,7 +71,7 @@ if (App::isAdmin() === false) {
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/captcha', true, 302);
+    header('Location: ' . Site::url('admin/captcha'), true, 302);
     exit();
 }
 
@@ -96,7 +97,7 @@ if (App::isRootAdmin() === false) {
         . 'administrator can change them. Your own organisation\'s settings '
         . 'are on the main Settings page and are unaffected.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/captcha', true, 302);
+    header('Location: ' . Site::url('admin/captcha'), true, 302);
     exit();
 }
 
@@ -184,7 +185,7 @@ if ($action === 'priority') {
         $_SESSION['flash_type'] = 'danger';
     }
 
-    header('Location: /admin/captcha', true, 302);
+    header('Location: ' . Site::url('admin/captcha'), true, 302);
     exit();
 }
 
@@ -307,7 +308,7 @@ if ($action === 'keys') {
         $_SESSION['flash_msg']  = 'Nothing was saved. The keys are secrets, and the portal could not encrypt them: its key file '
             . '(enc.key, in the _auth_keys folder) is missing, is empty or cannot be read. Put that file back and save again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/captcha', true, 302);
+        header('Location: ' . Site::url('admin/captcha'), true, 302);
         exit();
     }
 
@@ -338,10 +339,10 @@ if ($action === 'keys') {
         $_SESSION['flash_type'] = 'danger';
     }
 
-    header('Location: /admin/captcha', true, 302);
+    header('Location: ' . Site::url('admin/captcha'), true, 302);
     exit();
 }
 
 // 🚫 Unknown action — bounce back
-header('Location: /admin/captcha', true, 302);
+header('Location: ' . Site::url('admin/captcha'), true, 302);
 exit();

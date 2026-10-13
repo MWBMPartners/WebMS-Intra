@@ -24,6 +24,8 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Avatar;
+use Portal\Core\Router;
+use Portal\Core\Site;
 use Portal\Core\WebAuthn;
 
 /**
@@ -223,7 +225,7 @@ if (isset($_GET['error']) === true) {
 
 $pageTitle   = 'My Account';
 $pageSection = 'account';
-$breadcrumbs = ['Dashboard' => '/', 'My Account' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'My Account' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -270,7 +272,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     ?>
                 </div>
 
-                <form method="post" action="/account/save" novalidate>
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('account/save'), ENT_QUOTES, 'UTF-8'); ?>" novalidate>
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
 
                     <div class="mb-3">
@@ -312,7 +314,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </h5>
             </div>
             <div class="card-body">
-                <form method="post" action="/account/change-password" novalidate>
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('account/change-password'), ENT_QUOTES, 'UTF-8'); ?>" novalidate>
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
 
                     <div class="mb-3">
@@ -380,7 +382,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </p>
 
                     <!-- 🔓 Disable — requires password re-confirmation (#B5b) -->
-                    <form method="post" action="/auth/2fa/disable"
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('auth/2fa/disable'), ENT_QUOTES, 'UTF-8'); ?>"
                           data-confirm="Disable two-factor authentication? This removes an important layer of protection from your account."
                           data-confirm-destructive="true">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
@@ -398,7 +400,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         Two-factor authentication adds a second step at sign-in — a 6-digit code from an
                         authenticator app — so a leaked password alone isn't enough to sign in as you.
                     </p>
-                    <a href="/auth/2fa/setup" class="btn btn-sm btn-outline-primary">
+                    <a href="<?php echo htmlspecialchars(Site::url('auth/2fa/setup'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary">
                         <i class="fa-solid fa-plus me-1"></i> Set Up Two-Factor Authentication
                     </a>
                 <?php endif; ?>
@@ -520,7 +522,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 </div>
                                 <div class="col-auto">
                                     <?php if ($loginMethodCount > 1): ?>
-                                        <form method="post" action="/account/unlink" class="d-inline"
+                                        <form method="post" action="<?php echo htmlspecialchars(Site::url('account/unlink'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                                               data-confirm="Unlink this <?php echo htmlspecialchars(providerLabel($la['provider']), ENT_QUOTES, 'UTF-8'); ?> account?"
                                               data-confirm-destructive="true">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
@@ -545,12 +547,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     $linkedProviders = array_column($linkedAccounts, 'provider');
                     ?>
                     <?php if (Auth::isGoogleConfigured() === true && in_array('google', $linkedProviders, true) === false): ?>
-                        <a href="/login/google" class="btn btn-sm btn-outline-danger me-1">
+                        <a href="<?php echo htmlspecialchars(Site::url('login/google'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-danger me-1">
                             <i class="fa-brands fa-google me-1"></i> Link Google
                         </a>
                     <?php endif; ?>
                     <?php if (Auth::isMS365Configured() === true && in_array('ms365', $linkedProviders, true) === false): ?>
-                        <a href="/login/ms365" class="btn btn-sm btn-outline-primary me-1">
+                        <a href="<?php echo htmlspecialchars(Site::url('login/ms365'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary me-1">
                             <i class="fa-brands fa-microsoft me-1"></i> Link Microsoft 365
                         </a>
                     <?php endif; ?>
@@ -588,7 +590,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 </div>
                                 <div class="col-auto">
                                     <?php if ($loginMethodCount > 1): ?>
-                                        <form method="post" action="/account/webauthn/delete" class="d-inline"
+                                        <form method="post" action="<?php echo htmlspecialchars(Site::url('account/webauthn/delete'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                                               data-confirm="Remove this passkey?"
                                               data-confirm-destructive="true">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
@@ -674,7 +676,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
         try {
             // 📋 Step 1: Get registration options from server
-            const optResp = await fetch('/account/webauthn', {
+            const optResp = await fetch('<?php echo Router::urlForScript('account/webauthn'); ?>', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                 body: 'action=register_options&csrf_token=' + encodeURIComponent(document.querySelector('[name=csrf_token]').value)
@@ -718,7 +720,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 attestation.transports = credential.response.getTransports();
             }
 
-            const verifyResp = await fetch('/account/webauthn', {
+            const verifyResp = await fetch('<?php echo Router::urlForScript('account/webauthn'); ?>', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
@@ -732,7 +734,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
             if (verifyData.success) {
                 modal.hide();
-                window.location.href = '/account?wa_registered=1';
+                window.location.href = '<?php echo Router::urlForScript('account'); ?>?wa_registered=1';
             } else {
                 throw new Error(verifyData.error || 'Verification failed');
             }
@@ -780,7 +782,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h5 class="mb-0"><i class="fa-solid fa-bell me-2" aria-hidden="true"></i>Notification Preferences</h5>
     </div>
     <div class="card-body">
-        <form method="post" action="/account/save">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('account/save'), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="update_notifications">
 
@@ -833,17 +835,17 @@ $accAllowDelete = (\Portal\Core\App::settings('privacy.allowAccountDelete') ?? '
                     Download a copy of everything we hold about you, read the privacy policy, or close your account.
                 </p>
                 <div class="d-flex flex-wrap gap-2">
-                    <a href="/account/notifications" class="btn btn-sm btn-outline-primary">
+                    <a href="<?php echo htmlspecialchars(Site::url('account/notifications'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary">
                         <i class="fa-solid fa-bell me-1"></i> Notification preferences
                     </a>
-                    <a href="/account/data-export" class="btn btn-sm btn-outline-primary">
+                    <a href="<?php echo htmlspecialchars(Site::url('account/data-export'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary">
                         <i class="fa-solid fa-download me-1"></i> Download my data (JSON)
                     </a>
-                    <a href="/privacy" class="btn btn-sm btn-outline-secondary">
+                    <a href="<?php echo htmlspecialchars(Site::url('privacy'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-secondary">
                         <i class="fa-solid fa-file-shield me-1"></i> Privacy policy
                     </a>
                     <?php if ($accAllowDelete === true): ?>
-                        <a href="/account/delete" class="btn btn-sm btn-outline-danger">
+                        <a href="<?php echo htmlspecialchars(Site::url('account/delete'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-danger">
                             <i class="fa-solid fa-trash me-1"></i> Delete my account
                         </a>
                     <?php endif; ?>

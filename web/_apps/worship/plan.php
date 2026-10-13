@@ -29,6 +29,7 @@ use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\Asset;
 use Portal\Core\Auth;
+use Portal\Core\Router;
 use Portal\Core\ServicePlanLink;
 use Portal\Core\Site;
 
@@ -152,7 +153,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php endif; ?>
 
     <?php if ($canWrite === true): ?>
-        <form method="post" action="/worship/plan/save" class="mb-4">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('worship/plan/save'), ENT_QUOTES, 'UTF-8'); ?>" class="mb-4">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <input type="hidden" name="planID" value="<?php echo (int) $plan['planID']; ?>">
             <input type="hidden" name="action" value="save-metadata">
@@ -177,7 +178,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="col-12">
                     <button class="btn btn-primary btn-sm"><i class="fa-solid fa-save me-1"></i>Save plan</button>
-                    <a href="/worship/plans" class="btn btn-link btn-sm">Back to list</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('worship/plans'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-link btn-sm">Back to list</a>
                 </div>
             </div>
         </form>
@@ -192,7 +193,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="portal-data-list">
                     <div class="portal-data-row">
                         <div class="portal-data-row-main">
-                            <a href="/service-plans/edit?id=<?php echo (int) $runSheetLink['planID']; ?>" class="text-decoration-none fw-semibold">
+                            <a href="<?php echo htmlspecialchars(Site::url('service-plans/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $runSheetLink['planID']; ?>" class="text-decoration-none fw-semibold">
                                 <?php echo htmlspecialchars((string) $runSheetLink['title'], ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                             <span class="badge bg-secondary ms-1"><?php echo htmlspecialchars((string) $runSheetLink['status'], ENT_QUOTES, 'UTF-8'); ?></span>
@@ -205,10 +206,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             </div>
                         </div>
                         <div class="portal-data-row-aside">
-                            <a href="/service-plans/edit?id=<?php echo (int) $runSheetLink['planID']; ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-pen me-1"></i>Open</a>
-                            <a href="/service-plans/print?id=<?php echo (int) $runSheetLink['planID']; ?>" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="fa-solid fa-print me-1"></i>Print</a>
+                            <a href="<?php echo htmlspecialchars(Site::url('service-plans/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $runSheetLink['planID']; ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-pen me-1"></i>Open</a>
+                            <a href="<?php echo htmlspecialchars(Site::url('service-plans/print'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $runSheetLink['planID']; ?>" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="fa-solid fa-print me-1"></i>Print</a>
                             <?php if ($canWrite === true): ?>
-                                <form method="post" action="/worship/plan/link" class="d-inline">
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('worship/plan/link'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                     <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                     <input type="hidden" name="worshipPlanID" value="<?php echo (int) $plan['planID']; ?>">
                                     <input type="hidden" name="action" value="unpair">
@@ -221,7 +222,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
             <?php elseif ($canWrite === true): ?>
                 <?php if (count($runSheetCandidates) > 0): ?>
-                    <form method="post" action="/worship/plan/link" class="row g-2 align-items-end">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('worship/plan/link'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="worshipPlanID" value="<?php echo (int) $plan['planID']; ?>">
                         <input type="hidden" name="action" value="pair">
@@ -286,21 +287,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <?php if ($canWrite === true): ?>
                         <div class="portal-data-row-aside">
-                            <form method="post" action="/worship/plan/save" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('worship/plan/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                 <input type="hidden" name="planID" value="<?php echo (int) $plan['planID']; ?>">
                                 <input type="hidden" name="action" value="move-up">
                                 <input type="hidden" name="itemID" value="<?php echo (int) $i['itemID']; ?>">
                                 <button class="btn btn-sm btn-outline-secondary" title="Move up"><i class="fa-solid fa-arrow-up"></i></button>
                             </form>
-                            <form method="post" action="/worship/plan/save" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('worship/plan/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                 <input type="hidden" name="planID" value="<?php echo (int) $plan['planID']; ?>">
                                 <input type="hidden" name="action" value="move-down">
                                 <input type="hidden" name="itemID" value="<?php echo (int) $i['itemID']; ?>">
                                 <button class="btn btn-sm btn-outline-secondary" title="Move down"><i class="fa-solid fa-arrow-down"></i></button>
                             </form>
-                            <form method="post" action="/worship/plan/save" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('worship/plan/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                 <input type="hidden" name="planID" value="<?php echo (int) $plan['planID']; ?>">
                                 <input type="hidden" name="action" value="remove-item">
@@ -321,7 +322,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="card h-100">
                         <div class="card-body">
                             <h3 class="h6"><i class="fa-solid fa-music me-1"></i>Song</h3>
-                            <form method="post" action="/worship/plan/save">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('worship/plan/save'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                 <input type="hidden" name="planID" value="<?php echo (int) $plan['planID']; ?>">
                                 <input type="hidden" name="action" value="add-song">
@@ -340,7 +341,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="card h-100">
                         <div class="card-body">
                             <h3 class="h6"><i class="fa-solid fa-align-left me-1"></i>Text slide</h3>
-                            <form method="post" action="/worship/plan/save">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('worship/plan/save'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                 <input type="hidden" name="planID" value="<?php echo (int) $plan['planID']; ?>">
                                 <input type="hidden" name="action" value="add-text">
@@ -355,7 +356,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="card h-100">
                         <div class="card-body">
                             <h3 class="h6"><i class="fa-solid fa-book-bible me-1"></i>Verse</h3>
-                            <form method="post" action="/worship/plan/save">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('worship/plan/save'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                 <input type="hidden" name="planID" value="<?php echo (int) $plan['planID']; ?>">
                                 <input type="hidden" name="action" value="add-verse">
@@ -399,7 +400,7 @@ if ($isNew !== true && $canWrite === true && count($items) > 1) {
             body.append('planID', planID);
             rows.forEach(r => body.append('items[]', r.dataset.itemId));
             try {
-                const res = await fetch('/worship/plan/reorder', { method: 'POST', body: body });
+                const res = await fetch('<?php echo Router::urlForScript('worship/plan/reorder'); ?>', { method: 'POST', body: body });
                 const j = await res.json();
                 if (!j || !j.ok) console.warn('Reorder rejected:', j);
                 // Update visible sort numbers without a full reload.

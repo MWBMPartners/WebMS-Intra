@@ -48,7 +48,7 @@ $pageSection = 'admin';
 // comment), but the fix belongs here: the trail should be right in the
 // first place. Bare '/admin', not prefixed for path mode — that is #512
 // item 4's separate, portal-wide problem, matching every other admin page.
-$breadcrumbs = ['Admin' => '/admin', 'Users' => '/admin/users', 'Import' => ''];
+$breadcrumbs = ['Admin' => Site::url('admin'), 'Users' => Site::url('admin/users'), 'Import' => ''];
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -71,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/users/import');
+        header('Location: ' . Site::url('admin/users/import'));
         exit();
     }
 
@@ -332,7 +332,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="h3 mb-0">Import Users</h1>
-    <a href="/admin/users" class="btn btn-outline-secondary btn-sm">
+    <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">
         <i class="fa-solid fa-arrow-left me-1" aria-hidden="true"></i>Back to Users
     </a>
 </div>
@@ -442,7 +442,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <button type="submit" class="btn btn-primary">
                 <i class="fa-solid fa-upload me-1" aria-hidden="true"></i>Import <?php echo $validCount; ?> User(s)
             </button>
-            <a href="/admin/users/import" class="btn btn-outline-secondary ms-2">Cancel</a>
+            <a href="<?php echo htmlspecialchars(Site::url('admin/users/import'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary ms-2">Cancel</a>
         </form>
     <?php endif; ?>
 

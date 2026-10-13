@@ -68,7 +68,7 @@ if ($venueId > 0) {
 if ($venue === null) {
     $_SESSION['flash_msg']  = 'Choose a venue before printing its schedule.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /venues');
+    header('Location: ' . Site::url('venues'));
     exit();
 }
 
@@ -208,7 +208,7 @@ if ($generated !== false) {
 <body>
 <div class="print-controls">
     <button onclick="window.print()" style="padding:0.5rem 1rem; background:#198754; color:#fff; border:none; border-radius:0.375rem; cursor:pointer;">Print</button>
-    <a href="/venues?venue=<?php echo (int) $venueId; ?>" style="margin-left:0.5rem;">Back to schedule</a>
+    <a href="<?php echo htmlspecialchars(Site::url('venues'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venueId; ?>" style="margin-left:0.5rem;">Back to schedule</a>
     <p style="max-width:220px; font-size:0.8rem; color:#555;">A PDF library isn't installed on this server — use your browser's print dialog (landscape, minimal margins) instead.</p>
 </div>
 <?php echo $bodyHtml; ?>

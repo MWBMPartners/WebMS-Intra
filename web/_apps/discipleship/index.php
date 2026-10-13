@@ -38,7 +38,7 @@ Auth::requireLogin();
 if (Discipleship::isEnabled() === false) {
     $_SESSION['flash_msg']  = 'Discipleship is not enabled on this site.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /dashboard', true, 302);
+    header('Location: ' . Site::url('dashboard'), true, 302);
     exit();
 }
 
@@ -93,7 +93,7 @@ unset($en);
 
 $pageTitle   = 'Discipleship';
 $pageSection = 'discipleship';
-$breadcrumbs = ['Dashboard' => '/', 'Discipleship' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Discipleship' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -128,7 +128,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 ?>
                 <div class="portal-data-row">
                     <div class="portal-data-row-main">
-                        <a href="/discipleship/view?id=<?php echo (int) $en['pathwayID']; ?>" class="text-decoration-none">
+                        <a href="<?php echo htmlspecialchars(Site::url('discipleship/view'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $en['pathwayID']; ?>" class="text-decoration-none">
                             <strong><?php echo htmlspecialchars((string) $en['name'], ENT_QUOTES, 'UTF-8'); ?></strong>
                         </a>
                         <span class="badge bg-<?php echo $sColor; ?> ms-1">
@@ -148,7 +148,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </div>
                     </div>
                     <div class="portal-data-row-aside">
-                        <a href="/discipleship/view?id=<?php echo (int) $en['pathwayID']; ?>" class="btn btn-sm btn-outline-primary">
+                        <a href="<?php echo htmlspecialchars(Site::url('discipleship/view'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $en['pathwayID']; ?>" class="btn btn-sm btn-outline-primary">
                             <i class="fa-solid fa-arrow-right me-1"></i>View
                         </a>
                     </div>

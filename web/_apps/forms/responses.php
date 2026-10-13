@@ -38,7 +38,7 @@ if (App::isAdmin() === false) {
     echo '<div class="alert alert-danger"><i class="fa-solid fa-lock me-1"></i>'
         . htmlspecialchars(t('error.moderator_only'), ENT_QUOTES, 'UTF-8')
         . '</div>';
-    echo '<a href="/forms" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>';
+    echo '<a href="' . htmlspecialchars(Site::url('forms'), ENT_QUOTES, 'UTF-8') . '" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     exit();
 }
@@ -50,7 +50,7 @@ $form   = FormEngine::getForm($formId, $siteId);
 if ($form === null) {
     $_SESSION['flash_msg']  = 'Form not found.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /forms/manage', true, 302);
+    header('Location: ' . Site::url('forms/manage'), true, 302);
     exit();
 }
 
@@ -95,7 +95,7 @@ $exportCsrf = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
 $titleSafe = htmlspecialchars((string) $form['title'], ENT_QUOTES, 'UTF-8');
 
 $pageTitle   = 'Responses — ' . (string) $form['title'];
-$breadcrumbs = ['Dashboard' => '/', 'Forms' => '/forms', 'Manage' => '/forms/manage', 'Responses' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Forms' => Site::url('forms'), 'Manage' => Site::url('forms/manage'), 'Responses' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -103,8 +103,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-inbox me-2"></i>Responses — <?php echo $titleSafe; ?></h1>
     <div class="d-flex gap-2">
-        <a href="/forms/manage" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back to manage</a>
-        <a href="/forms/export?id=<?php echo $formId; ?>&csrf_token=<?php echo $exportCsrf; ?>" class="btn btn-outline-primary">
+        <a href="<?php echo htmlspecialchars(Site::url('forms/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back to manage</a>
+        <a href="<?php echo htmlspecialchars(Site::url('forms/export'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $formId; ?>&csrf_token=<?php echo $exportCsrf; ?>" class="btn btn-outline-primary">
             <i class="fa-solid fa-file-csv me-1"></i> Export CSV
         </a>
     </div>
@@ -114,7 +114,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php foreach (['new' => 'New', 'reviewed' => 'Reviewed'] as $key => $label): ?>
         <li class="nav-item">
             <a class="nav-link<?php echo $filterStatus === $key ? ' active' : ''; ?>"
-               href="/forms/responses?id=<?php echo $formId; ?>&status=<?php echo htmlspecialchars($key, ENT_QUOTES, 'UTF-8'); ?>">
+               href="<?php echo htmlspecialchars(Site::url('forms/responses'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $formId; ?>&status=<?php echo htmlspecialchars($key, ENT_QUOTES, 'UTF-8'); ?>">
                 <?php echo htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?>
                 <span class="badge bg-secondary ms-1"><?php echo (int) $counts[$key]; ?></span>
             </a>
@@ -159,7 +159,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="col-12 col-md-3 text-md-end">
                     <div class="btn-group btn-group-sm" role="group">
                         <?php if ((string) $resp['status'] === 'new'): ?>
-                            <form method="post" action="/forms/response-act" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/response-act'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="responseID" value="<?php echo $responseId; ?>">
                                 <input type="hidden" name="formID" value="<?php echo $formId; ?>">
@@ -167,7 +167,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <button type="submit" class="btn btn-outline-success" title="Mark reviewed"><i class="fa-solid fa-check"></i></button>
                             </form>
                         <?php else: ?>
-                            <form method="post" action="/forms/response-act" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/response-act'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="responseID" value="<?php echo $responseId; ?>">
                                 <input type="hidden" name="formID" value="<?php echo $formId; ?>">
@@ -175,7 +175,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <button type="submit" class="btn btn-outline-secondary" title="Mark new"><i class="fa-solid fa-rotate-left"></i></button>
                             </form>
                         <?php endif; ?>
-                        <form method="post" action="/forms/response-act" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/response-act'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="responseID" value="<?php echo $responseId; ?>">
                             <input type="hidden" name="formID" value="<?php echo $formId; ?>">

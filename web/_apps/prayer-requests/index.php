@@ -26,7 +26,7 @@ use Portal\Core\Site;
 // 📌 Page metadata
 $pageTitle   = 'Prayer Requests';
 $pageSection = 'prayer-requests';
-$breadcrumbs = ['Dashboard' => '/', 'Prayer Requests' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Prayer Requests' => ''];
 
 // 🛡️ Require an authenticated session
 Auth::ensureSession();
@@ -138,12 +138,12 @@ $renderStatusBadge = static function (string $status): string {
     <h1 class="mb-0"><i class="fa-solid fa-hands-praying me-2"></i>Prayer Requests</h1>
     <div class="d-flex gap-2 flex-wrap">
         <?php if ($featureEnabled === true): ?>
-            <a href="/prayer-requests/submit" class="btn btn-success">
+            <a href="<?php echo htmlspecialchars(Site::url('prayer-requests/submit'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-success">
                 <i class="fa-solid fa-plus me-1"></i> Submit a Request
             </a>
         <?php endif; ?>
         <?php if ($isMod === true): ?>
-            <a href="/prayer-requests/manage" class="btn btn-outline-primary">
+            <a href="<?php echo htmlspecialchars(Site::url('prayer-requests/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary">
                 <i class="fa-solid fa-gauge-high me-1"></i> Moderate
                 <?php if ($pendingCount > 0): ?>
                     <span class="badge bg-warning text-dark ms-1"><?php echo $pendingCount; ?></span>
@@ -158,7 +158,7 @@ $renderStatusBadge = static function (string $status): string {
         <i class="fa-solid fa-triangle-exclamation me-1"></i>
         Prayer Requests are disabled for this site.
         <?php if ($isMod === true): ?>
-            Visit <a href="/settings" class="alert-link">Site Settings</a> to re-enable.
+            Visit <a href="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">Site Settings</a> to re-enable.
         <?php endif; ?>
     </div>
 <?php else: ?>
@@ -167,7 +167,7 @@ $renderStatusBadge = static function (string $status): string {
         <div class="alert alert-info small">
             <i class="fa-solid fa-circle-info me-1"></i>
             Visitors without an account can submit anonymously at
-            <a href="/prayer-requests/anonymous" class="alert-link">/prayer-requests/anonymous</a>.
+            <a href="<?php echo htmlspecialchars(Site::url('prayer-requests/anonymous'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">/prayer-requests/anonymous</a>.
         </div>
     <?php endif; ?>
 
@@ -178,7 +178,7 @@ $renderStatusBadge = static function (string $status): string {
         <?php if (count($myRequests) === 0): ?>
             <div class="alert alert-light border">
                 You haven't submitted any prayer requests yet.
-                <a href="/prayer-requests/submit" class="alert-link">Submit your first request</a>.
+                <a href="<?php echo htmlspecialchars(Site::url('prayer-requests/submit'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">Submit your first request</a>.
             </div>
         <?php else: ?>
             <div class="portal-data-list">
@@ -215,7 +215,7 @@ $renderStatusBadge = static function (string $status): string {
                             <?php echo htmlspecialchars(date('Y-m-d', strtotime((string) $req['createdAt'])), ENT_QUOTES, 'UTF-8'); ?>
                         </div>
                         <div class="portal-data-cell col-12 col-md-1 text-md-end" data-label="">
-                            <a href="/prayer-requests/view?id=<?php echo (int) $req['requestID']; ?>"
+                            <a href="<?php echo htmlspecialchars(Site::url('prayer-requests/view'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $req['requestID']; ?>"
                                class="btn btn-sm btn-outline-secondary" aria-label="View request">
                                 <i class="fa-solid fa-eye"></i>
                             </a>
@@ -281,7 +281,7 @@ $renderStatusBadge = static function (string $status): string {
                                     <?php endif; ?>
                                 </div>
                                 <div class="card-footer bg-transparent border-0 pt-0">
-                                    <a href="/prayer-requests/view?id=<?php echo (int) $req['requestID']; ?>"
+                                    <a href="<?php echo htmlspecialchars(Site::url('prayer-requests/view'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $req['requestID']; ?>"
                                        class="btn btn-sm btn-outline-secondary w-100">
                                         <i class="fa-solid fa-eye me-1"></i> View
                                     </a>

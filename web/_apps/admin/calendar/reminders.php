@@ -15,6 +15,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Settings;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -63,9 +64,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card mb-4">
         <div class="card-header">Configuration</div>
         <div class="card-body small">
-            <p class="mb-1">Status: <span class="badge <?php echo $enabled === '1' ? 'bg-success' : 'bg-secondary'; ?>"><?php echo $enabled === '1' ? 'Enabled' : 'Disabled'; ?></span> (toggle via <code>reminders.enabled</code> in <a href="/admin/settings">/admin/settings</a>)</p>
+            <p class="mb-1">Status: <span class="badge <?php echo $enabled === '1' ? 'bg-success' : 'bg-secondary'; ?>"><?php echo $enabled === '1' ? 'Enabled' : 'Disabled'; ?></span> (toggle via <code>reminders.enabled</code> in <a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>">/admin/settings</a>)</p>
             <p class="mb-1">Cron URL: <code><?php echo htmlspecialchars($cronUrl, ENT_QUOTES, 'UTF-8'); ?></code></p>
-            <p class="mb-0">Token: <?php echo $token === '' ? '<span class="text-danger">NOT SET — generate one in <a href="/admin/settings">/admin/settings</a> under <code>reminders.cron_token</code></span>' : '<span class="text-success">configured (' . strlen($token) . ' chars)</span>'; ?></p>
+            <p class="mb-0">Token: <?php echo $token === '' ? '<span class="text-danger">NOT SET — generate one in <a href="' . htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8') . '">/admin/settings</a> under <code>reminders.cron_token</code></span>' : '<span class="text-success">configured (' . strlen($token) . ' chars)</span>'; ?></p>
             <hr>
             <p class="text-muted mb-0">Schedule recommendation: every 15 minutes. DreamHost cron tab → <code>0,15,30,45 * * * * curl -s "<?php echo htmlspecialchars($cronUrl, ENT_QUOTES, 'UTF-8'); ?>" &gt; /dev/null</code></p>
         </div>

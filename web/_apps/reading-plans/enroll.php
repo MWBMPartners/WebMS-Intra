@@ -53,5 +53,5 @@ try {
     \Portal\Core\Logger::errorPlatform('ReadingPlans', 'Warning', 'ENROLL', $e->getMessage(), '');
 }
 
-header('Location: /reading-plans/plan?id=' . $planId);
+header('Location: ' . Site::url('reading-plans/plan') . '?id=' . $planId);
 exit();

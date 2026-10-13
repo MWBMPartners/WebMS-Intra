@@ -19,6 +19,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -43,7 +44,7 @@ try {
 
 $pageTitle   = 'Tours';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Tours' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Tours' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 

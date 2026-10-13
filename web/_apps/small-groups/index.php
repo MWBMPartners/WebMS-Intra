@@ -50,7 +50,7 @@ $isManageAll = App::isAdmin() === true || App::hasRole('groups_coordinator') ===
 // managers/coordinators/admins (they always need the full list to work).
 $directoryVisible = (string) Settings::get('small-groups.directory_visible', '1');
 if ($isManageAll === false && ($directoryVisible !== '1' && $directoryVisible !== 'true')) {
-    header('Location: /small-groups/mine');
+    header('Location: ' . Site::url('small-groups/mine'));
     exit();
 }
 
@@ -76,7 +76,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $pageTitle   = 'Small Groups';
 $pageSection = 'small-groups';
-$breadcrumbs = ['Dashboard' => '/', 'Small Groups' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Small Groups' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
@@ -98,9 +98,9 @@ $dayNames = [1 => 'Mon', 2 => 'Tue', 3 => 'Wed', 4 => 'Thu', 5 => 'Fri', 6 => 'S
         <p class="text-secondary mb-0">Groups, classes, and Bible studies — rosters, meeting rolls, and attendance tie-in.</p>
     </div>
     <div class="d-flex flex-wrap gap-2">
-        <a href="/small-groups/mine" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-user-group me-1"></i>My Groups</a>
+        <a href="<?php echo htmlspecialchars(Site::url('small-groups/mine'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-user-group me-1"></i>My Groups</a>
         <?php if ($isManageAll === true): ?>
-            <a href="/small-groups/manage" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>New Group</a>
+            <a href="<?php echo htmlspecialchars(Site::url('small-groups/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>New Group</a>
         <?php endif; ?>
     </div>
 </div>
@@ -110,7 +110,7 @@ $dayNames = [1 => 'Mon', 2 => 'Tue', 3 => 'Wed', 4 => 'Thu', 5 => 'Fri', 6 => 'S
         <i class="fa-solid fa-circle-info me-1"></i>
         No groups yet.
         <?php if ($isManageAll === true): ?>
-            <a href="/small-groups/manage" class="alert-link">Create the first one</a>.
+            <a href="<?php echo htmlspecialchars(Site::url('small-groups/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">Create the first one</a>.
         <?php endif; ?>
     </div>
 <?php else: ?>
@@ -141,7 +141,7 @@ $dayNames = [1 => 'Mon', 2 => 'Tue', 3 => 'Wed', 4 => 'Thu', 5 => 'Fri', 6 => 'S
             ?>
             <div class="portal-data-row">
                 <div class="col-12 col-md-3">
-                    <a href="/small-groups/group?id=<?php echo $gid; ?>" class="fw-semibold text-decoration-none">
+                    <a href="<?php echo htmlspecialchars(Site::url('small-groups/group'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $gid; ?>" class="fw-semibold text-decoration-none">
                         <?php echo $esc($g['groupName']); ?>
                     </a>
                     <br><span class="badge bg-secondary"><?php echo $esc(ucwords(str_replace('-', ' ', (string) $g['groupType']))); ?></span>
@@ -166,16 +166,16 @@ $dayNames = [1 => 'Mon', 2 => 'Tue', 3 => 'Wed', 4 => 'Thu', 5 => 'Fri', 6 => 'S
                     <?php echo (int) $memberCount; ?><?php echo $capacity !== null ? ' / ' . $capacity : ''; ?>
                 </div>
                 <div class="col-12 col-md-2 text-md-end mt-2 mt-md-0">
-                    <a href="/small-groups/group?id=<?php echo $gid; ?>" class="btn btn-sm btn-outline-secondary" title="View">
+                    <a href="<?php echo htmlspecialchars(Site::url('small-groups/group'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $gid; ?>" class="btn btn-sm btn-outline-secondary" title="View">
                         <i class="fa-solid fa-eye"></i>
                     </a>
                     <?php if ($isManageAll === true): ?>
-                        <a href="/small-groups/manage?id=<?php echo $gid; ?>" class="btn btn-sm btn-outline-primary" title="Edit">
+                        <a href="<?php echo htmlspecialchars(Site::url('small-groups/manage'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $gid; ?>" class="btn btn-sm btn-outline-primary" title="Edit">
                             <i class="fa-solid fa-pen"></i>
                         </a>
                     <?php endif; ?>
                     <?php if ($isMemberHere === false && $isPendingHere === false && (int) $g['isOpenEnrolment'] === 1 && $openEnrolmentOn === true): ?>
-                        <form method="post" action="/small-groups/join" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('small-groups/join'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo $esc(Auth::csrfToken()); ?>">
                             <input type="hidden" name="action" value="join">
                             <input type="hidden" name="groupID" value="<?php echo $gid; ?>">

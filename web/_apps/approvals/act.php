@@ -21,11 +21,12 @@
 declare(strict_types=1);
 
 use Portal\Core\Auth;
+use Portal\Core\Site;
 use Portal\Core\Workflow;
 
 // 🛡️ POST only
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /approvals');
+    header('Location: ' . Site::url('approvals'));
     exit();
 }
 
@@ -35,7 +36,7 @@ Auth::requireLogin();
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /approvals');
+    header('Location: ' . Site::url('approvals'));
     exit();
 }
 
@@ -50,7 +51,7 @@ $decision = in_array($rawDecision, ['approve', 'reject', 'comment'], true) ? $ra
 if ($instanceId <= 0 || $stepId <= 0 || $decision === '') {
     $_SESSION['flash_msg']  = 'Invalid request.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /approvals');
+    header('Location: ' . Site::url('approvals'));
     exit();
 }
 
@@ -61,7 +62,7 @@ if (($decision === 'reject' || $decision === 'comment') && $comment === '') {
         ? 'A comment is required when rejecting a request.'
         : 'Enter a comment to add before submitting.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /approvals');
+    header('Location: ' . Site::url('approvals'));
     exit();
 }
 
@@ -92,5 +93,5 @@ if ($result['ok'] === true) {
     $_SESSION['flash_type'] = $result['error'] === 'conflict' ? 'warning' : 'danger';
 }
 
-header('Location: /approvals');
+header('Location: ' . Site::url('approvals'));
 exit();

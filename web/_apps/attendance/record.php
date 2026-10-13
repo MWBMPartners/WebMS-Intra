@@ -30,7 +30,7 @@ use Portal\Core\Site;
 // 📌 Page metadata
 $pageTitle   = 'Record Attendance';
 $pageSection = 'attendance';
-$breadcrumbs = ['Dashboard' => '/', 'Attendance' => '/attendance', 'Record' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Attendance' => Site::url('attendance'), 'Record' => ''];
 
 // 🛡️ Auth check
 Auth::ensureSession();
@@ -97,7 +97,7 @@ if ($editId > 0) {
         }
 
         $pageTitle   = 'Edit Attendance — ' . $editSession['typeName'];
-        $breadcrumbs = ['Dashboard' => '/', 'Attendance' => '/attendance', 'Edit' => ''];
+        $breadcrumbs = ['Dashboard' => Site::url(''), 'Attendance' => Site::url('attendance'), 'Edit' => ''];
     }
 }
 
@@ -246,7 +246,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <i class="fa-solid fa-<?php echo $editSession !== null ? 'pen' : 'plus'; ?> me-2"></i>
         <?php echo $editSession !== null ? 'Edit Attendance' : 'Record Attendance'; ?>
     </h1>
-    <a href="/attendance" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('attendance'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back
     </a>
 </div>
@@ -260,7 +260,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </p>
         <div class="d-flex flex-wrap gap-2">
             <?php foreach ($allServiceTypes as $st): ?>
-                <a href="/attendance/record?copyFrom=last&amp;serviceTypeID=<?php echo (int) $st['serviceTypeID']; ?>"
+                <a href="<?php echo htmlspecialchars(Site::url('attendance/record'), ENT_QUOTES, 'UTF-8'); ?>?copyFrom=last&amp;serviceTypeID=<?php echo (int) $st['serviceTypeID']; ?>"
                    class="btn btn-sm btn-outline-primary<?php echo ($copyServiceType === (int) $st['serviceTypeID']) ? ' active' : ''; ?>">
                     <i class="fa-solid fa-copy me-1"></i>
                     Copy from last <?php echo htmlspecialchars($st['typeName'], ENT_QUOTES, 'UTF-8'); ?>
@@ -270,7 +270,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endif; ?>
 
-<form method="post" action="/attendance/record/save" id="attendanceForm">
+<form method="post" action="<?php echo htmlspecialchars(Site::url('attendance/record/save'), ENT_QUOTES, 'UTF-8'); ?>" id="attendanceForm">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="action" value="<?php echo $editSession !== null ? 'update' : 'create'; ?>">
     <?php if ($editSession !== null): ?>
@@ -457,7 +457,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <i class="fa-solid fa-floppy-disk me-1"></i>
             <?php echo $editSession !== null ? 'Save Changes' : 'Save Attendance'; ?>
         </button>
-        <a href="/attendance" class="btn btn-secondary">Cancel</a>
+        <a href="<?php echo htmlspecialchars(Site::url('attendance'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-secondary">Cancel</a>
     </div>
 </form>
 

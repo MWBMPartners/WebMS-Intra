@@ -64,5 +64,5 @@ try {
     \Portal\Core\Logger::errorPlatform('Rota', 'Warning', 'SLOT_SAVE', $e->getMessage(), '');
 }
 
-header('Location: /rota/manage');
+header('Location: ' . Site::url('rota/manage'));
 exit();

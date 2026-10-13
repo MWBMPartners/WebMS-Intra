@@ -75,7 +75,7 @@ $token = (string) ($_POST['token'] ?? '');
 // POST must never even reach the terminal-resolution logic below.
 // -----------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-    header('Location: /assets/kiosk?token=' . rawurlencode($token), true, 303);
+    header('Location: ' . Site::url('assets/kiosk') . '?token=' . rawurlencode($token), true, 303);
     exit();
 }
 
@@ -86,7 +86,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token
 // -----------------------------------------------------------------------------
 $terminal = AssetRegister::resolveKioskTerminal($token);
 if ($terminal === null) {
-    header('Location: /assets/kiosk?token=' . rawurlencode($token), true, 303);
+    header('Location: ' . Site::url('assets/kiosk') . '?token=' . rawurlencode($token), true, 303);
     exit();
 }
 
@@ -96,13 +96,13 @@ $tokenId = (int) $terminal['tokenID'];
 try {
     Site::forceContext($siteId);
 } catch (\Throwable $e) {
-    header('Location: /assets/kiosk?token=' . rawurlencode($token), true, 303);
+    header('Location: ' . Site::url('assets/kiosk') . '?token=' . rawurlencode($token), true, 303);
     exit();
 }
 
 $kioskEnabled = (string) (App::settingForSite('assets.kiosk_enabled', $siteId) ?? 'false') === 'true';
 if ($kioskEnabled === false) {
-    header('Location: /assets/kiosk?token=' . rawurlencode($token), true, 303);
+    header('Location: ' . Site::url('assets/kiosk') . '?token=' . rawurlencode($token), true, 303);
     exit();
 }
 
@@ -111,7 +111,7 @@ if ($kioskEnabled === false) {
 // further redirect target is hard-coded to THIS SAME validated token.
 // Never a caller-supplied return URL (no open redirect).
 // -----------------------------------------------------------------------------
-$backToKiosk = '/assets/kiosk?token=' . rawurlencode($token);
+$backToKiosk = Site::url('assets/kiosk') . '?token=' . rawurlencode($token);
 
 /**
  * Flash a message and redirect back to THIS terminal, then stop. Local

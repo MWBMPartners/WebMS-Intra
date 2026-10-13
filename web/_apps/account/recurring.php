@@ -42,7 +42,7 @@ if ($stmt !== false) {
 
 $pageTitle   = 'Recurring payments';
 $pageSection = 'account';
-$breadcrumbs = ['Dashboard' => '/', 'My Account' => '/account', 'Recurring' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'My Account' => Site::url('account'), 'Recurring' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 

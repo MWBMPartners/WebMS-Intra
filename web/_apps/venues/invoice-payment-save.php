@@ -39,7 +39,7 @@ if (Venues::canManage() !== true) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /venues/invoices');
+    header('Location: ' . Site::url('venues/invoices'));
     exit();
 }
 
@@ -47,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /venues/invoices');
+    header('Location: ' . Site::url('venues/invoices'));
     exit();
 }
 
@@ -61,7 +61,7 @@ if ($action === 'delete') {
     $ok    = Venues::deletePayment($payId, $siteId, $userId);
     $_SESSION['flash_msg']  = $ok === true ? 'Payment removed.' : 'Payment not found.';
     $_SESSION['flash_type'] = $ok === true ? 'success' : 'danger';
-    header('Location: /venues/invoice?id=' . $invoiceId);
+    header('Location: ' . Site::url('venues/invoice') . '?id=' . $invoiceId);
     exit();
 }
 
@@ -87,7 +87,7 @@ $result = Venues::recordPayment($siteId, $invoiceId, $data, $userId);
 if ($result['payID'] <= 0) {
     $_SESSION['flash_msg']  = count($result['errors']) > 0 ? implode(' ', $result['errors']) : 'Could not record payment.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /venues/invoice?id=' . $invoiceId);
+    header('Location: ' . Site::url('venues/invoice') . '?id=' . $invoiceId);
     exit();
 }
 
@@ -110,5 +110,5 @@ if ($updated !== null) {
     $_SESSION['flash_msg'] = 'Payment recorded.';
 }
 $_SESSION['flash_type'] = 'success';
-header('Location: /venues/invoice?id=' . $invoiceId);
+header('Location: ' . Site::url('venues/invoice') . '?id=' . $invoiceId);
 exit();

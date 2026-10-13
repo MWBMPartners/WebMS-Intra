@@ -47,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /venues/statuses');
+        header('Location: ' . Site::url('venues/statuses'));
         exit();
     }
 
@@ -80,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['flash_type'] = 'success';
     }
 
-    header('Location: /venues/statuses');
+    header('Location: ' . Site::url('venues/statuses'));
     exit();
 }
 
@@ -123,7 +123,7 @@ $categoryBadge = [
 
 $pageTitle   = 'Booking Statuses';
 $pageSection = 'venues';
-$breadcrumbs = ['Dashboard' => '/', 'Venues' => '/venues', 'Statuses' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Venues' => Site::url('venues'), 'Statuses' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -135,7 +135,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-flag me-2"></i>Booking Statuses</h1>
-    <a href="/venues/manage" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to venues</a>
+    <a href="<?php echo htmlspecialchars(Site::url('venues/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to venues</a>
 </div>
 <div class="alert alert-secondary small">
     <i class="fa-solid fa-circle-info me-1"></i><strong>"Counts as confirmed"</strong> is what turns a booking green on the calendar and silences the "is it booked?" warning — only tick it for statuses that mean the hire is actually secured.
@@ -144,7 +144,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-4">
     <div class="card-body">
         <h2 class="h5"><?php echo $editStatus !== null ? 'Edit status' : 'Add status'; ?></h2>
-        <form method="post" action="/venues/statuses" class="row g-2 align-items-end">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/statuses'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="save">
             <input type="hidden" name="statusID" value="<?php echo $editStatus !== null ? (int) $editStatus['statusID'] : 0; ?>">
@@ -193,7 +193,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <i class="fa-solid fa-<?php echo $editStatus !== null ? 'check' : 'plus'; ?> me-1"></i><?php echo $editStatus !== null ? 'Update' : 'Add'; ?>
                 </button>
                 <?php if ($editStatus !== null): ?>
-                    <a href="/venues/statuses" class="btn btn-outline-secondary btn-sm w-100 mt-1">Cancel edit</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('venues/statuses'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm w-100 mt-1">Cancel edit</a>
                 <?php endif; ?>
             </div>
         </form>
@@ -226,8 +226,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="col-1"><span class="badge bg-light text-dark border"><?php echo (int) $status['bookingCount']; ?></span></div>
                 <div class="col-4 text-end">
-                    <a href="/venues/statuses?edit=<?php echo (int) $status['statusID']; ?>" class="btn btn-sm btn-outline-secondary" title="Edit"><i class="fa-solid fa-pen"></i></a>
-                    <form method="post" action="/venues/statuses" class="d-inline">
+                    <a href="<?php echo htmlspecialchars(Site::url('venues/statuses'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo (int) $status['statusID']; ?>" class="btn btn-sm btn-outline-secondary" title="Edit"><i class="fa-solid fa-pen"></i></a>
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/statuses'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="action" value="toggle">
                         <input type="hidden" name="statusID" value="<?php echo (int) $status['statusID']; ?>">
@@ -242,7 +242,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endif; ?>
 
-<form method="post" action="/venues/statuses" class="mt-3" data-confirm="Restore any missing/retired default statuses (Standard Agreement, Pending Leadership Agreement, Proposed to Landlord, Agreed by Landlord, Rejected by Landlord, Rejected &ndash; building already in use)?">
+<form method="post" action="<?php echo htmlspecialchars(Site::url('venues/statuses'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-3" data-confirm="Restore any missing/retired default statuses (Standard Agreement, Pending Leadership Agreement, Proposed to Landlord, Agreed by Landlord, Rejected by Landlord, Rejected &ndash; building already in use)?">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="action" value="restore">
     <button type="submit" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-rotate-left me-1"></i>Restore default statuses</button>

@@ -69,7 +69,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'AI Assist';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'AI Assist' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'AI Assist' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -98,7 +98,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-3">
     <div class="card-header"><strong>Configuration</strong></div>
     <div class="card-body">
-        <form method="post" action="/admin/ai-assist/save" class="row g-3">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/ai-assist/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="col-md-3">
                 <label class="form-label">Provider</label>
@@ -161,7 +161,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="row g-2">
             <?php foreach (AiAssistant::KINDS as $k): ?>
                 <div class="col-md-6">
-                    <a href="/admin/ai-assist/prompt?kind=<?php echo urlencode($k); ?>" class="btn btn-outline-secondary w-100 text-start">
+                    <a href="<?php echo htmlspecialchars(Site::url('admin/ai-assist/prompt'), ENT_QUOTES, 'UTF-8'); ?>?kind=<?php echo urlencode($k); ?>" class="btn btn-outline-secondary w-100 text-start">
                         <i class="fa-solid fa-pen me-1"></i><?php echo htmlspecialchars($k, ENT_QUOTES, 'UTF-8'); ?>
                     </a>
                 </div>

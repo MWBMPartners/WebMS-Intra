@@ -104,7 +104,7 @@ if ($hasVenueOverlay === true) {
             <div class="<?php echo implode(' ', $classes); ?>">
                 <div class="portal-cal-month-cell-head">
                     <a class="portal-cal-month-cell-date"
-                       href="/calendar?view=day&amp;date=<?php echo $esc($k); ?>"
+                       href="<?php echo htmlspecialchars(\Portal\Core\Site::url('calendar'), ENT_QUOTES, 'UTF-8'); ?>?view=day&amp;date=<?php echo $esc($k); ?>"
                        title="View this day">
                         <?php echo $esc($d->format('j')); ?>
                     </a>
@@ -126,7 +126,7 @@ if ($hasVenueOverlay === true) {
                     $isAllDay = (int) ($ev['isAllDay'] ?? 0) === 1;
                     ?>
                     <a class="portal-cal-month-pill"
-                       href="/calendar/event?slug=<?php echo $esc((string) $ev['eventSlug']); ?>"
+                       href="<?php echo htmlspecialchars(\Portal\Core\Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo $esc((string) $ev['eventSlug']); ?>"
                        style="--ev-color: <?php echo $esc($eventColor($ev)); ?>;"
                        title="<?php echo $esc((string) $ev['eventName']); ?>">
                         <?php if ($isAllDay === false): ?>
@@ -140,7 +140,7 @@ if ($hasVenueOverlay === true) {
 
                 <?php if ($count > $maxEvents): ?>
                     <a class="portal-cal-month-more small"
-                       href="/calendar?view=day&amp;date=<?php echo $esc($k); ?>">
+                       href="<?php echo htmlspecialchars(\Portal\Core\Site::url('calendar'), ENT_QUOTES, 'UTF-8'); ?>?view=day&amp;date=<?php echo $esc($k); ?>">
                         + <?php echo (int) ($count - $maxEvents); ?> more
                     </a>
                 <?php endif; ?>

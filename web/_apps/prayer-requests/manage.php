@@ -31,8 +31,8 @@ use Portal\Core\Site;
 $pageTitle   = 'Moderate Prayer Requests';
 $pageSection = 'prayer-requests';
 $breadcrumbs = [
-    'Dashboard'        => '/',
-    'Prayer Requests'  => '/prayer-requests',
+    'Dashboard'        => Site::url(''),
+    'Prayer Requests'  => Site::url('prayer-requests'),
     'Moderate'         => '',
 ];
 
@@ -46,7 +46,7 @@ if (App::isAdmin() === false) {
     echo '<div class="alert alert-danger"><i class="fa-solid fa-lock me-1"></i>'
         . htmlspecialchars(t('error.moderator_only'), ENT_QUOTES, 'UTF-8')
         . '</div>';
-    echo '<a href="/prayer-requests" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>';
+    echo '<a href="' . htmlspecialchars(Site::url('prayer-requests'), ENT_QUOTES, 'UTF-8') . '" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     exit();
 }
@@ -112,7 +112,7 @@ $csrf = Auth::csrfToken();
 
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-gauge-high me-2"></i>Moderate Prayer Requests</h1>
-    <a href="/prayer-requests" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('prayer-requests'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back
     </a>
 </div>
@@ -131,7 +131,7 @@ $csrf = Auth::csrfToken();
     ?>
         <li class="nav-item">
             <a class="nav-link<?php echo $active; ?>"
-               href="/prayer-requests/manage?status=<?php echo htmlspecialchars($key, ENT_QUOTES, 'UTF-8'); ?>">
+               href="<?php echo htmlspecialchars(Site::url('prayer-requests/manage'), ENT_QUOTES, 'UTF-8'); ?>?status=<?php echo htmlspecialchars($key, ENT_QUOTES, 'UTF-8'); ?>">
                 <i class="fa-solid <?php echo $info['icon']; ?> me-1"></i>
                 <?php echo htmlspecialchars($info['label'], ENT_QUOTES, 'UTF-8'); ?>
                 <span class="badge bg-secondary ms-1"><?php echo (int) $counts[$key]; ?></span>
@@ -166,7 +166,7 @@ $csrf = Auth::csrfToken();
             <div class="portal-data-row">
                 <div class="col-12 col-md-4">
                     <strong>
-                        <a href="/prayer-requests/view?id=<?php echo (int) $req['requestID']; ?>">
+                        <a href="<?php echo htmlspecialchars(Site::url('prayer-requests/view'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $req['requestID']; ?>">
                             <?php echo htmlspecialchars((string) $req['subject'], ENT_QUOTES, 'UTF-8'); ?>
                         </a>
                     </strong>
@@ -217,13 +217,13 @@ $csrf = Auth::csrfToken();
                 </div>
                 <div class="col-6 col-md-2 text-end">
                     <div class="btn-group btn-group-sm" role="group">
-                        <a href="/prayer-requests/view?id=<?php echo (int) $req['requestID']; ?>"
+                        <a href="<?php echo htmlspecialchars(Site::url('prayer-requests/view'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $req['requestID']; ?>"
                            class="btn btn-outline-secondary" title="View">
                             <i class="fa-solid fa-eye"></i>
                         </a>
 
                         <?php if ($req['status'] === 'pending'): ?>
-                            <form method="post" action="/prayer-requests/moderate" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('prayer-requests/moderate'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="requestID" value="<?php echo (int) $req['requestID']; ?>">
                                 <input type="hidden" name="action" value="approve">
@@ -236,7 +236,7 @@ $csrf = Auth::csrfToken();
                         <?php endif; ?>
 
                         <?php if ($req['status'] === 'active'): ?>
-                            <form method="post" action="/prayer-requests/moderate" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('prayer-requests/moderate'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="requestID" value="<?php echo (int) $req['requestID']; ?>">
                                 <input type="hidden" name="action" value="answer">
@@ -249,7 +249,7 @@ $csrf = Auth::csrfToken();
                         <?php endif; ?>
 
                         <?php if ($req['status'] !== 'archived'): ?>
-                            <form method="post" action="/prayer-requests/moderate" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('prayer-requests/moderate'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="requestID" value="<?php echo (int) $req['requestID']; ?>">
                                 <input type="hidden" name="action" value="archive">
@@ -269,7 +269,7 @@ $csrf = Auth::csrfToken();
                     <!-- 🙏 Prayer chain (#311) — compact per-row assign control.
                          Open-count is the load-balancing hint. -->
                     <div class="col-12 mt-2">
-                        <form method="post" action="/prayer-requests/moderate" class="d-flex gap-2 align-items-center">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('prayer-requests/moderate'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex gap-2 align-items-center">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="requestID" value="<?php echo (int) $req['requestID']; ?>">
                             <input type="hidden" name="action" value="assign">

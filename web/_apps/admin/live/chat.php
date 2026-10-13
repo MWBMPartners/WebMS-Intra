@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Router;
 use Portal\Core\Settings;
 use Portal\Core\Site;
 
@@ -121,7 +122,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             : '<span class="text-muted"><i class="fa-solid fa-shield"></i> Pre-moderation</span>'; ?>
                     </div>
                     <p class="text-muted mb-0 small">
-                        Toggle in <a href="/admin/settings?key=chat.autoApprove">settings</a>.
+                        Toggle in <a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>?key=chat.autoApprove">settings</a>.
                     </p>
                 </div>
             </div>
@@ -214,7 +215,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             if (messageId <= 0 || action === '') { return; }
 
             btn.disabled = true;
-            fetch('/api/live/chat/moderate', {
+            fetch('<?php echo Router::urlForScript('api/live/chat/moderate'); ?>', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

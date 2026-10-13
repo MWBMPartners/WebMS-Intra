@@ -91,6 +91,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // -----------------------------------------------------------------------------
 // 🧹 The sweep's rules and the delete itself are shared with the scheduled job
@@ -110,7 +111,7 @@ require_once PORTAL_APPS . DIRECTORY_SEPARATOR . 'cron' . DIRECTORY_SEPARATOR . 
 // -----------------------------------------------------------------------------
 $pageTitle   = 'Audit Retention Sweeper';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Maintenance' => '', 'Retention' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => '', 'Retention' => ''];
 
 Auth::ensureSession();
 if (App::isAdmin() === false) {
@@ -219,7 +220,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-broom me-2"></i>Audit Retention Sweeper</h1>
         <p class="text-secondary mb-0">Hard-delete activity logs and error rows older than the configured window.</p>
     </div>
-    <a href="/admin" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back to Admin
     </a>
 </div>
@@ -312,7 +313,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <h2 class="h6"><i class="fa-solid fa-receipt me-1"></i>Giving records that kept an erased donor's name (<code>tblGivingKeptDonors</code>)</h2>
                 <p class="text-muted small mb-2">
                     Each organisation sets how long, at
-                    <a href="/admin/settings/giving-records">Admin, Settings, Giving records</a>.
+                    <a href="<?php echo htmlspecialchars(Site::url('admin/settings/giving-records'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Settings, Giving records</a>.
                     Counted from the end of the financial year of the donor's last kept gift.
                 </p>
                 <p class="mb-1">Erased donors whose name would be removed now: <strong><?php echo number_format($preview['givingIdentityDue']); ?></strong></p>
@@ -334,14 +335,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<form method="post" action="/admin/maintenance/retention"
+<form method="post" action="<?php echo htmlspecialchars(Site::url('admin/maintenance/retention'), ENT_QUOTES, 'UTF-8'); ?>"
       data-confirm="About <?php echo number_format($preview['activity'] + $preview['errors']); ?> log row(s) and <?php echo number_format($preview['registrations']); ?> event registration(s) are currently eligible, including any children's details they hold, and <?php echo number_format($preview['checkinDetail']); ?> anonymous check-in row(s) would have their scrambled sender address emptied out (those rows and their counts are kept). <?php echo number_format($preview['givingIdentityDue']); ?> erased donor(s) would have their name and address removed from giving records whose keep-until date has passed (the gifts and their amounts are kept). The exact numbers may differ slightly, because more records become eligible as time passes. This cannot be undone. Continue?"
       data-confirm-destructive="true">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
     <button type="submit" class="btn btn-warning" <?php echo ($preview['activity'] + $preview['errors'] + $preview['registrations'] + $preview['checkinDetail'] + $preview['givingIdentityDue']) === 0 ? 'disabled' : ''; ?>>
         <i class="fa-solid fa-broom me-1"></i> Run Sweep Now
     </button>
-    <a href="/settings" class="btn btn-outline-secondary">Adjust retention settings</a>
+    <a href="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Adjust retention settings</a>
 </form>
 
 <div class="card mt-4 border-0 bg-body-tertiary">

@@ -21,13 +21,17 @@ declare(strict_types=1);
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\RateLimiter;
+use Portal\Core\Site;
 use Portal\Core\Totp;
 
 Auth::ensureSession();
 
 // 🔍 Must have pending 2FA session
 if (isset($_SESSION['2fa_user_id']) === false) {
-    header('Location: /auth/login');
+    // 'login' is the sign-in page's ADDRESS. This used to say 'auth/login', which is the FOLDER the
+    // page lives in and is not an address: a person sent here got "page not found" (found by the link
+    // sweep's check of every address against the registered ones, 13 October 2026, #536).
+    header('Location: ' . Site::url('login'));
     exit();
 }
 
@@ -38,7 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /auth/2fa/verify');
+        header('Location: ' . Site::url('auth/2fa/verify'));
         exit();
     }
 
@@ -78,7 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         );
         $_SESSION['flash_msg']  = 'Too many attempts. Please try again in ' . (int) ceil($retryAfter / 60) . ' minute(s).';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /auth/2fa/verify');
+        header('Location: ' . Site::url('auth/2fa/verify'));
         exit();
     }
 
@@ -88,7 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($code === '') {
         $_SESSION['flash_msg']  = 'Please enter a code.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /auth/2fa/verify');
+        header('Location: ' . Site::url('auth/2fa/verify'));
         exit();
     }
 
@@ -97,7 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($uStmt === false) {
         $_SESSION['flash_msg']  = t('error.database');
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /auth/2fa/verify');
+        header('Location: ' . Site::url('auth/2fa/verify'));
         exit();
     }
     $uStmt->bind_param('i', $pendingUserId);
@@ -110,7 +114,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         unset($_SESSION['2fa_user_id']);
         $_SESSION['flash_msg']  = 'Two-factor authentication is not configured. Please login again.';
         $_SESSION['flash_type'] = 'warning';
-        header('Location: /auth/login');
+        // 'login' is the address; 'auth/login' was the folder and led to "page not found" (see above).
+        header('Location: ' . Site::url('login'));
         exit();
     }
 
@@ -160,7 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         Logger::activity('TotpVerifyFailed', 'Failed 2FA verification attempt', $pendingUserId);
         $_SESSION['flash_msg']  = 'Invalid code. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /auth/2fa/verify');
+        header('Location: ' . Site::url('auth/2fa/verify'));
         exit();
     }
 
@@ -179,7 +184,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     Logger::activity('TotpVerified', '2FA verification successful' . ($useBackup === true ? ' (backup code)' : ''), $pendingUserId);
 
-    $redirect = $_SESSION['login_redirect'] ?? '/dashboard';
+    $redirect = $_SESSION['login_redirect'] ?? Site::url('dashboard');
     unset($_SESSION['login_redirect']);
     header('Location: ' . $redirect);
     exit();
@@ -233,7 +238,7 @@ $pageTitle = 'Two-Factor Verification';
 
                     <p class="text-muted text-center">Enter the 6-digit code from your authenticator app.</p>
 
-                    <form method="post" action="/auth/2fa/verify">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('auth/2fa/verify'), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <div class="mb-3">
                             <label for="code" class="form-label">Verification code</label>
@@ -263,7 +268,7 @@ $pageTitle = 'Two-Factor Verification';
                     <hr>
 
                     <p class="text-center small text-muted mb-2">Lost your authenticator?</p>
-                    <form method="post" action="/auth/2fa/verify">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('auth/2fa/verify'), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="use_backup" value="1">
                         <div class="mb-2">

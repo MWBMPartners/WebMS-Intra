@@ -86,7 +86,7 @@ $sym = match ($currency) { 'GBP' => '£', 'EUR' => '€', 'USD' => '$', default 
 
 $pageTitle   = 'Payments';
 $pageSection = 'payments';
-$breadcrumbs = ['Dashboard' => '/', 'Payments' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Payments' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -108,7 +108,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-3">
     <div class="card-header"><strong>Provider configuration</strong></div>
     <div class="card-body">
-        <form method="post" action="/payments/save" class="row g-3">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('payments/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="col-md-3">
                 <label class="form-label">Provider</label>
@@ -201,7 +201,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="col-md-2"><span class="badge bg-<?php echo $cls; ?>"><?php echo htmlspecialchars((string) $p['status'], ENT_QUOTES, 'UTF-8'); ?></span></div>
                         <div class="col-md-1 text-end">
                             <?php if ((string) $p['status'] === 'succeeded'): ?>
-                                <form method="post" action="/payments/refund" class="d-inline">
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('payments/refund'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="paymentID" value="<?php echo (int) $p['paymentID']; ?>">
                                     <button type="submit" class="btn btn-link btn-sm text-danger p-0" data-confirm="Refund this payment?">refund</button>

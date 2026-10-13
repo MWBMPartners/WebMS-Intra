@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -38,7 +39,7 @@ if ($stmt !== false) {
 
 $pageTitle   = 'My Bookings';
 $pageSection = 'resources';
-$breadcrumbs = ['Dashboard' => '/', 'Resources' => '/resources', 'My bookings' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Resources' => Site::url('resources'), 'My bookings' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -46,7 +47,7 @@ $csrf = Auth::csrfToken();
 <h1 class="mb-3"><i class="fa-solid fa-calendar-check me-2"></i>My Bookings</h1>
 
 <?php if (count($rows) === 0): ?>
-    <div class="alert alert-info">You have no upcoming bookings. <a href="/resources">Book a resource →</a></div>
+    <div class="alert alert-info">You have no upcoming bookings. <a href="<?php echo htmlspecialchars(Site::url('resources'), ENT_QUOTES, 'UTF-8'); ?>">Book a resource →</a></div>
 <?php else: ?>
     <div class="card">
         <div class="card-body">
@@ -61,7 +62,7 @@ $csrf = Auth::csrfToken();
                 ?>
                     <div class="row py-2 border-bottom align-items-center">
                         <div class="col-md-3">
-                            <a href="/resources/resource?id=<?php echo (int) $r['resourceID']; ?>" class="text-decoration-none">
+                            <a href="<?php echo htmlspecialchars(Site::url('resources/resource'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $r['resourceID']; ?>" class="text-decoration-none">
                                 <strong><?php echo htmlspecialchars((string) $r['resourceName'], ENT_QUOTES, 'UTF-8'); ?></strong>
                             </a>
                         </div>
@@ -72,7 +73,7 @@ $csrf = Auth::csrfToken();
                         <div class="col-md-3 small text-muted"><?php echo htmlspecialchars((string) ($r['purpose'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-1"><span class="badge bg-<?php echo $statusCls; ?>"><?php echo htmlspecialchars((string) $r['status'], ENT_QUOTES, 'UTF-8'); ?></span></div>
                         <div class="col-md-2 text-end">
-                            <form method="post" action="/resources/action" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('resources/action'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="bookingID" value="<?php echo (int) $r['bookingID']; ?>">
                                 <input type="hidden" name="action" value="cancel">

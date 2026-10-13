@@ -38,14 +38,14 @@ if (App::isAdmin() === false) {
 
 // 🛡️ Only accept POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /calendar/manage');
+    header('Location: ' . Site::url('calendar/manage'));
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /calendar/manage');
+    header('Location: ' . Site::url('calendar/manage'));
     exit();
 }
 
@@ -124,7 +124,7 @@ if ($locationW3WRaw !== '') {
     if ($validatedW3W === null) {
         $_SESSION['flash_msg']  = t('location.w3w_invalid');
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /calendar/manage');
+        header('Location: ' . Site::url('calendar/manage'));
         exit();
     }
     $locationW3W = $validatedW3W;
@@ -165,7 +165,7 @@ if ($partnerOrgsStr !== '') {
 if ($eventName === '' || $startDateTime === '') {
     $_SESSION['flash_msg']  = 'Event name and start date/time are required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /calendar/manage');
+    header('Location: ' . Site::url('calendar/manage'));
     exit();
 }
 
@@ -228,7 +228,7 @@ if (
 ) {
     $_SESSION['flash_msg']  = 'The event cannot end before it starts. Please check the dates.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /calendar/manage');
+    header('Location: ' . Site::url('calendar/manage'));
     exit();
 }
 
@@ -542,7 +542,7 @@ if ($action === 'create') {
     if ($stmt === false) {
         $_SESSION['flash_msg']  = t('error.db_with_detail', ['detail' => $mysqli->error]);
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /calendar/manage');
+        header('Location: ' . Site::url('calendar/manage'));
         exit();
     }
 
@@ -556,7 +556,7 @@ if ($action === 'create') {
     $_SESSION['flash_msg']  = 'Event "' . $eventName . '" created successfully.' . ($geoWarning !== null ? ' ' . $geoWarning : '');
     $_SESSION['flash_type'] = 'success';
     $appendVenueCoverageFlash($startDateTime, $endDt, $timezone);
-    header('Location: /calendar/manage');
+    header('Location: ' . Site::url('calendar/manage'));
     exit();
 }
 
@@ -568,7 +568,7 @@ if ($action === 'update') {
     if ($eventID <= 0) {
         $_SESSION['flash_msg']  = 'Invalid event ID.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /calendar/manage');
+        header('Location: ' . Site::url('calendar/manage'));
         exit();
     }
 
@@ -646,12 +646,12 @@ if ($action === 'update') {
     $_SESSION['flash_msg']  = 'Event "' . $eventName . '" updated successfully.' . ($geoWarning !== null ? ' ' . $geoWarning : '');
     $_SESSION['flash_type'] = 'success';
     $appendVenueCoverageFlash($startDateTime, $endDt, $timezone);
-    header('Location: /calendar/manage');
+    header('Location: ' . Site::url('calendar/manage'));
     exit();
 }
 
 // 🚫 Unknown action
 $_SESSION['flash_msg']  = 'Unknown action.';
 $_SESSION['flash_type'] = 'warning';
-header('Location: /calendar/manage');
+header('Location: ' . Site::url('calendar/manage'));
 exit();

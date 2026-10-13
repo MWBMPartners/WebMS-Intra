@@ -54,5 +54,5 @@ if ($action === 'add') {
     }
 }
 
-header('Location: /giving/categories');
+header('Location: ' . Site::url('giving/categories'));
 exit();

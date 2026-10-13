@@ -24,7 +24,7 @@ use Portal\Core\MailQueue;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /calendar', true, 302); exit();
+    header('Location: ' . Site::url('calendar'), true, 302); exit();
 }
 
 Auth::ensureSession();
@@ -46,7 +46,7 @@ if ($eventId <= 0 || (App::isAdmin() === false && Auth::isCoordinatorOf($eventId
 if ($subject === '' || $body === '') {
     $_SESSION['flash_msg']  = 'Subject and message are required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /calendar/event/broadcast?eventID=' . $eventId, true, 302);
+    header('Location: ' . Site::url('calendar/event/broadcast') . '?eventID=' . $eventId, true, 302);
     exit();
 }
 
@@ -99,7 +99,7 @@ if ($segment === 'all-rsvps') {
 
 if ($query === null) {
     $_SESSION['flash_msg']  = 'Invalid segment.'; $_SESSION['flash_type'] = 'danger';
-    header('Location: /calendar/event/broadcast?eventID=' . $eventId, true, 302); exit();
+    header('Location: ' . Site::url('calendar/event/broadcast') . '?eventID=' . $eventId, true, 302); exit();
 }
 
 $recipients = [];

@@ -97,7 +97,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Manage Projects';
 $pageSection = 'projects';
-$breadcrumbs = ['Dashboard' => '/', 'Projects' => '/projects', 'Manage' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Projects' => Site::url('projects'), 'Manage' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -110,7 +110,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-3">
     <div class="card-header"><strong><?php echo $editing !== null ? 'Edit project' : 'Create project'; ?></strong></div>
     <div class="card-body">
-        <form method="post" action="/projects/manage-save" class="row g-3">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('projects/manage-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="projectID" value="<?php echo (int) ($editing['projectID'] ?? 0); ?>">
             <div class="col-md-6">
@@ -154,8 +154,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="col-12">
                 <button class="btn btn-primary" type="submit"><?php echo $editing !== null ? 'Save changes' : 'Create project'; ?></button>
                 <?php if ($editing !== null): ?>
-                    <a href="/projects/manage" class="btn btn-outline-secondary">New project</a>
-                    <a href="/projects/view?slug=<?php echo urlencode((string) $editing['slug']); ?>" class="btn btn-outline-secondary" target="_blank">View public page</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('projects/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">New project</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('projects/view'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo urlencode((string) $editing['slug']); ?>" class="btn btn-outline-secondary" target="_blank">View public page</a>
                 <?php endif; ?>
             </div>
         </form>
@@ -166,7 +166,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card mb-3">
         <div class="card-header"><strong>Post update</strong></div>
         <div class="card-body">
-            <form method="post" action="/projects/update-post">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('projects/update-post'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="slug" value="<?php echo htmlspecialchars((string) $editing['slug'], ENT_QUOTES, 'UTF-8'); ?>">
                 <textarea class="form-control mb-2" name="content" rows="3" required placeholder="Where we are, what's next, how supporters can help…"></textarea>
@@ -191,7 +191,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="col-md-2">£<?php echo number_format(((int) $p['amountPence']) / 100, 2); ?></div>
                         <div class="col-md-2 text-muted"><?php echo htmlspecialchars(date('j M', (int) strtotime((string) $p['pledgedAt'])), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-2 text-end">
-                            <form method="post" action="/projects/fulfil" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('projects/fulfil'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="pledgeID" value="<?php echo (int) $p['pledgeID']; ?>">
                                 <?php if (count($givingCategories) > 0): ?>
@@ -222,7 +222,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 $pct    = min(100, (int) round(((int) $r['raised'] / $target) * 100));
             ?>
                 <div class="row py-2 border-bottom align-items-center small">
-                    <div class="col-md-4"><a href="/projects/manage?slug=<?php echo urlencode((string) $r['slug']); ?>"><strong><?php echo htmlspecialchars((string) $r['title'], ENT_QUOTES, 'UTF-8'); ?></strong></a></div>
+                    <div class="col-md-4"><a href="<?php echo htmlspecialchars(Site::url('projects/manage'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo urlencode((string) $r['slug']); ?>"><strong><?php echo htmlspecialchars((string) $r['title'], ENT_QUOTES, 'UTF-8'); ?></strong></a></div>
                     <div class="col-md-2"><span class="badge bg-secondary"><?php echo htmlspecialchars((string) $r['status'], ENT_QUOTES, 'UTF-8'); ?></span></div>
                     <div class="col-md-3">
                         <div class="progress" style="height:6px;"><div class="progress-bar bg-success" style="width: <?php echo $pct; ?>%;"></div></div>
@@ -230,8 +230,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <div class="col-md-1 text-muted"><?php echo (int) $r['pledgeCount']; ?> pledges</div>
                     <div class="col-md-2 text-end">
-                        <a href="/projects/manage?slug=<?php echo urlencode((string) $r['slug']); ?>" class="btn btn-outline-primary btn-sm">Edit</a>
-                        <a href="/projects/view?slug=<?php echo urlencode((string) $r['slug']); ?>" class="btn btn-outline-secondary btn-sm" target="_blank">View</a>
+                        <a href="<?php echo htmlspecialchars(Site::url('projects/manage'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo urlencode((string) $r['slug']); ?>" class="btn btn-outline-primary btn-sm">Edit</a>
+                        <a href="<?php echo htmlspecialchars(Site::url('projects/view'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo urlencode((string) $r['slug']); ?>" class="btn btn-outline-secondary btn-sm" target="_blank">View</a>
                     </div>
                 </div>
             <?php endforeach; ?>

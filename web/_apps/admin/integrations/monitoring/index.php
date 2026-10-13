@@ -13,6 +13,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\ErrorMonitor;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -34,7 +35,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Error monitoring';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Integrations' => '/admin/integrations', 'Error monitoring' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Integrations' => Site::url('admin/integrations'), 'Error monitoring' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -52,7 +53,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-3">
     <div class="card-header"><strong>Configuration</strong></div>
     <div class="card-body">
-        <form method="post" action="/admin/integrations/monitoring/save" class="row g-3">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/monitoring/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="col-md-9">
                 <label class="form-label">Sentry / GlitchTip DSN <?php echo $hasDsn === true ? '<span class="badge bg-success">set</span>' : ''; ?></label>
@@ -87,7 +88,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                  "Send test event" button was silently attached to the SAVE form
                  instead. Pressing it saved the settings rather than sending a
                  test, and there was nothing on screen to say so. -->
-            <form method="post" action="/admin/integrations/monitoring/test" class="mt-3">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/monitoring/test'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-3">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <button class="btn btn-outline-warning" type="submit">
                     <i class="fa-solid fa-paper-plane me-1"></i>Send test event

@@ -26,7 +26,7 @@ use Portal\Core\Logger;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /calendar/submit', true, 302);
+    header('Location: ' . Site::url('calendar/submit'), true, 302);
     exit();
 }
 
@@ -39,7 +39,7 @@ if ((App::settings('calendar.publicSubmit.enabled') ?? 'true') !== 'true') {
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     Logger::activity('EventSubmitRejected', 'Invalid CSRF on /calendar/submit-save');
-    header('Location: /calendar/submit?err=csrf', true, 302);
+    header('Location: ' . Site::url('calendar/submit') . '?err=csrf', true, 302);
     exit();
 }
 
@@ -48,7 +48,7 @@ $allowAnon  = (App::settings('calendar.publicSubmit.allowAnonymous') ?? 'true') 
 $requireCap = (App::settings('calendar.publicSubmit.requireCaptcha')  ?? 'true') === 'true';
 
 if ($isLoggedIn === false && $allowAnon === false) {
-    header('Location: /auth/login?redirect=' . urlencode('/calendar/submit'), true, 302);
+    header('Location: ' . Site::url('login') . '?redirect=' . urlencode(Site::url('calendar/submit')), true, 302);
     exit();
 }
 
@@ -66,7 +66,7 @@ $captchaUsable = class_exists(Captcha::class) === true && Captcha::isConfigured(
 if ($isLoggedIn === false && $requireCap === true && $captchaUsable === true) {
     if (Captcha::verify($_POST, 'event-submission') === false) {
         Logger::activity('EventSubmitRejected', 'Failed captcha on /calendar/submit-save');
-        header('Location: /calendar/submit?err=captcha', true, 302);
+        header('Location: ' . Site::url('calendar/submit') . '?err=captcha', true, 302);
         exit();
     }
 }
@@ -106,14 +106,14 @@ $submitterName   = trim((string) ($_POST['submitterName']  ?? ''));
 $submitterEmail  = trim((string) ($_POST['submitterEmail'] ?? ''));
 
 if ($eventName === '' || $startRaw === '') {
-    header('Location: /calendar/submit?err=required', true, 302);
+    header('Location: ' . Site::url('calendar/submit') . '?err=required', true, 302);
     exit();
 }
 
 $startDt = strtotime($startRaw);
 $endDt   = $endRaw !== '' ? strtotime($endRaw) : 0;
 if ($startDt === false) {
-    header('Location: /calendar/submit?err=date', true, 302);
+    header('Location: ' . Site::url('calendar/submit') . '?err=date', true, 302);
     exit();
 }
 
@@ -121,11 +121,11 @@ $startUtc = date('Y-m-d H:i:s', (int) $startDt);
 $endUtc   = $endDt > 0 ? date('Y-m-d H:i:s', (int) $endDt) : null;
 
 if ($isLoggedIn === false && ($submitterName === '' || $submitterEmail === '')) {
-    header('Location: /calendar/submit?err=contact', true, 302);
+    header('Location: ' . Site::url('calendar/submit') . '?err=contact', true, 302);
     exit();
 }
 if ($submitterEmail !== '' && filter_var($submitterEmail, FILTER_VALIDATE_EMAIL) === false) {
-    header('Location: /calendar/submit?err=email', true, 302);
+    header('Location: ' . Site::url('calendar/submit') . '?err=email', true, 302);
     exit();
 }
 
@@ -163,7 +163,7 @@ $stmt = $mysqli->prepare(
 );
 if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'EVENT_SUBMIT_PREP', $mysqli->error, '');
-    header('Location: /calendar/submit?err=db', true, 302);
+    header('Location: ' . Site::url('calendar/submit') . '?err=db', true, 302);
     exit();
 }
 $stmt->bind_param('issssssiiiss', $siteId, $eventName, $slug, $descArg, $startUtc, $endUtc, $zoneArg, $locArg, $categoryArg, $submitterId, $nameArg, $emailArg);
@@ -173,7 +173,7 @@ $stmt->close();
 
 if ($ok === false) {
     Logger::errorPlatform('MySQL', 'Error', 'EVENT_SUBMIT_FAIL', $mysqli->error, '');
-    header('Location: /calendar/submit?err=save', true, 302);
+    header('Location: ' . Site::url('calendar/submit') . '?err=save', true, 302);
     exit();
 }
 
@@ -188,5 +188,5 @@ if (class_exists(\Portal\Core\WebhookDispatcher::class) === true) {
     ]);
 }
 
-header('Location: /calendar/submit?submitted=1', true, 302);
+header('Location: ' . Site::url('calendar/submit') . '?submitted=1', true, 302);
 exit();

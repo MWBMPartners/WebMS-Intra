@@ -25,7 +25,7 @@ $expectedSt   = (string) ($_SESSION['zoom_oauth_state'] ?? '');
 $mode         = (string) ($_SESSION['zoom_oauth_mode']  ?? 'org');
 unset($_SESSION['zoom_oauth_state'], $_SESSION['zoom_oauth_mode']);
 
-$returnTo = $mode === 'user' ? '/account/integrations/zoom' : '/admin/integrations/zoom';
+$returnTo = $mode === 'user' ? Site::url('account/integrations/zoom') : Site::url('admin/integrations/zoom');
 
 if ($code === '' || $state === '' || $expectedSt === '' || hash_equals($expectedSt, $state) === false) {
     $_SESSION['flash_msg']  = 'Zoom OAuth: invalid state or missing code.';

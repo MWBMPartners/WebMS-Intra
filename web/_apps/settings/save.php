@@ -61,7 +61,7 @@ if (App::isAdmin() === false) {
 
 // 🛡️ Only accept POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /settings');
+    header('Location: ' . Site::url('settings'));
     exit();
 }
 
@@ -69,7 +69,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /settings');
+    header('Location: ' . Site::url('settings'));
     exit();
 }
 
@@ -88,7 +88,7 @@ $clearValue  = isset($_POST['clearValue']) === true;
 if ($settingKey === '') {
     $_SESSION['flash_msg']  = 'Setting key is required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /settings');
+    header('Location: ' . Site::url('settings'));
     exit();
 }
 
@@ -311,7 +311,7 @@ if ($settingId > 0) {
         $_SESSION['flash_msg']  = 'That setting could not be found, or it does '
             . 'not belong to the organisation you are working in.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /settings');
+        header('Location: ' . Site::url('settings'));
         exit();
     }
 
@@ -335,7 +335,7 @@ if ($settingId > 0) {
         );
         $_SESSION['flash_msg']  = GivingRetention::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /settings');
+        header('Location: ' . Site::url('settings'));
         exit();
     }
 
@@ -426,7 +426,7 @@ if ($settingId > 0) {
         );
         $_SESSION['flash_msg']  = $refusalGlobalRow;
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /settings');
+        header('Location: ' . Site::url('settings'));
         exit();
     }
 
@@ -438,7 +438,7 @@ if ($settingId > 0) {
         );
         $_SESSION['flash_msg']  = $refusalPublicKey;
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /settings');
+        header('Location: ' . Site::url('settings'));
         exit();
     }
 
@@ -453,7 +453,7 @@ if ($settingId > 0) {
         );
         $_SESSION['flash_msg']  = $refusalUnsafeName;
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /settings');
+        header('Location: ' . Site::url('settings'));
         exit();
     }
 
@@ -521,7 +521,7 @@ if ($settingId > 0) {
             . 'the box was empty, so the stored value was kept. Type a new value to replace '
             . 'it, or tick "Remove the stored value" to remove it.';
         $_SESSION['flash_type'] = 'info';
-        header('Location: /settings');
+        header('Location: ' . Site::url('settings'));
         exit();
     } elseif ($rowIsSecret === true) {
         $sealed = SecretSettings::seal($settingVal);
@@ -534,7 +534,7 @@ if ($settingId > 0) {
             );
             $_SESSION['flash_msg']  = $refusalCannotEncrypt($storedKey);
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /settings');
+            header('Location: ' . Site::url('settings'));
             exit();
         }
         $valueToStore = $sealed;
@@ -590,7 +590,7 @@ if ($settingId > 0) {
     if ($stmt === false) {
         $_SESSION['flash_msg']  = t('error.db_update_setting');
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /settings');
+        header('Location: ' . Site::url('settings'));
         exit();
     }
     $stmt->bind_param('siiiii', $valueToStore, $settingId, $markFlag, $siteId, $globalFlag, $globalFlag);
@@ -700,7 +700,7 @@ if ($settingId > 0) {
             . 'numbers, full stops (.), hyphens (-) and underscores (_). Spaces, '
             . 'accented letters and other symbols are not allowed.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /settings');
+        header('Location: ' . Site::url('settings'));
         exit();
     }
 
@@ -718,7 +718,7 @@ if ($settingId > 0) {
         );
         $_SESSION['flash_msg']  = GivingRetention::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /settings');
+        header('Location: ' . Site::url('settings'));
         exit();
     }
 
@@ -800,7 +800,7 @@ if ($settingId > 0) {
         );
         $_SESSION['flash_msg']  = $refusalPublicKey;
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /settings');
+        header('Location: ' . Site::url('settings'));
         exit();
     }
 
@@ -869,7 +869,7 @@ if ($settingId > 0) {
                     . $existingKey . '" instead.';
             }
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /settings');
+            header('Location: ' . Site::url('settings'));
             exit();
         }
     }
@@ -923,7 +923,7 @@ if ($settingId > 0) {
     if ($shapeStmt === false) {
         $_SESSION['flash_msg']  = t('error.db_add_setting');
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /settings');
+        header('Location: ' . Site::url('settings'));
         exit();
     }
     $newKeyLower = strtolower($settingKey);
@@ -951,7 +951,7 @@ if ($settingId > 0) {
             . 'and a group: when the portal loads its settings, one would silently '
             . 'replace the other. Please choose a different name.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /settings');
+        header('Location: ' . Site::url('settings'));
         exit();
     }
 
@@ -968,7 +968,7 @@ if ($settingId > 0) {
             );
             $_SESSION['flash_msg']  = $refusalCannotEncrypt($settingKey);
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /settings');
+            header('Location: ' . Site::url('settings'));
             exit();
         }
         $valueToStore = $sealed;
@@ -980,7 +980,7 @@ if ($settingId > 0) {
     if ($stmt === false) {
         $_SESSION['flash_msg']  = t('error.db_add_setting');
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /settings');
+        header('Location: ' . Site::url('settings'));
         exit();
     }
     $stmt->bind_param('ssii', $settingKey, $valueToStore, $isSensitive, $siteId);
@@ -997,5 +997,5 @@ if ($settingId > 0) {
 }
 
 // 🔄 Redirect back (PRG pattern)
-header('Location: /settings');
+header('Location: ' . Site::url('settings'));
 exit();

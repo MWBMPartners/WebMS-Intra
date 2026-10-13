@@ -2,6 +2,29 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — every link keeps the organisation's part of the address (#536, part 2 of 2)**
+  - **What it is for.** One installation can serve several organisations, told apart by the first part of the address
+    (`/north/calendar`). A link written bare (`/calendar`) leaves the organisation. Part 1 did the shared page
+    furniture and the sign-in flow; this part does every app page: about 2,700 addresses in 503 files, in the
+    administration pages, the calendar, giving, forms, payments, projects, venues, and thirty-seven other folders.
+    The list of places still to sweep is empty.
+  - **Nothing changes for an installation today.** The mode this is for cannot be chosen yet
+    (`Site::FIRST_PART_MODE_READY` stays `false`). With no first part in use, every page comes out as it did before.
+  - **Older faults put right on the way.** The two-step sign-in page, and the calendar's "suggest an event" page
+    and its save handler, sent a person who was not signed in to `/auth/login`, which is not an address ("page not
+    found"). They now go to the sign-in page.
+  - **What an administrator should know after upgrading.** Nothing has to be done. No database change.
+  - **How it was done and checked.** A script rewrote nearly all of it; four builders each read the whole of their
+    share of the change and caught three links the script had glued together wrongly. One independent check by a
+    fresh Claude agent standing in for Codex then rendered 28,338 page requests on the old code and the new, as six
+    kinds of person, with no first part in use: 28,241 came out the same in status, redirect and every byte, 38
+    differ on purpose (the redirects above), and the rest differ only where the old code differs from itself
+    (clocks, random keys). With a first part in use, 6,565 of 6,567 redirects keep it (the other two by design) and
+    none carries it twice. It found five small things (two of the project's own tests had gone out of date, one
+    link without its escape, two untrue sentences), all put right; those fixes were not independently checked.
+    **Measured, and said plainly: 547 of the 2,441 rewritten lines never ran in any test** (most are redirects
+    inside save handlers); those rest on reading and on every file still parsing. **Not proved:** a browser, a
+    passkey sign-in, Apache, PHP 8.4 at run time, MariaDB. Codex has not reviewed this.
 - **Added — administrators are told when imported events wait for approval (#514, part 9)**
   - **What an administrator should know after upgrading**
     1. **Administrators are now told when imported events are waiting for approval.** Three ways: a card on the dashboard

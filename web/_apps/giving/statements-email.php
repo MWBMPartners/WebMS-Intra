@@ -57,7 +57,7 @@ $toTs   = strtotime($to);
 if ($fromTs === false || $toTs === false || $fromTs > $toTs) {
     $_SESSION['flash_msg']  = 'Invalid date range.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /giving/statements');
+    header('Location: ' . Site::url('giving/statements'));
     exit();
 }
 $periodKey = Giving::statementPeriodKey($from, $to);
@@ -184,5 +184,5 @@ $msg .= $remaining > 0
 
 $_SESSION['flash_msg']  = $msg;
 $_SESSION['flash_type'] = $failed > 0 ? 'warning' : 'success';
-header('Location: /giving/statements?from=' . urlencode($from) . '&to=' . urlencode($to));
+header('Location: ' . Site::url('giving/statements') . '?from=' . urlencode($from) . '&to=' . urlencode($to));
 exit();

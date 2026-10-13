@@ -16,6 +16,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -98,5 +99,5 @@ try {
     \Portal\Core\Logger::errorPlatform('ReadingPlans', 'Warning', 'CHECK', $e->getMessage(), '');
 }
 
-header('Location: /reading-plans/plan?id=' . $planId);
+header('Location: ' . Site::url('reading-plans/plan') . '?id=' . $planId);
 exit();

@@ -28,7 +28,7 @@ if (App::isAdmin() === false) {
 
 $pageTitle   = 'Email Templates';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Email Templates' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Email Templates' => ''];
 
 $siteId = Site::id();
 
@@ -61,7 +61,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-envelope me-2"></i>Email Templates</h1>
-    <a href="/admin" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back to Admin
     </a>
 </div>
@@ -105,7 +105,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php endif; ?>
                 <br>
                 <a class="btn btn-sm btn-outline-primary"
-                   href="/admin/email-templates/edit?key=<?php echo urlencode($tpl['templateKey']); ?>">
+                   href="<?php echo htmlspecialchars(Site::url('admin/email-templates/edit'), ENT_QUOTES, 'UTF-8'); ?>?key=<?php echo urlencode($tpl['templateKey']); ?>">
                     <i class="fa-solid fa-pen"></i> Edit
                 </a>
             </div>

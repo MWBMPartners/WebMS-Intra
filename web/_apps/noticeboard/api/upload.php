@@ -195,6 +195,6 @@ if ($ok === false) {
 Logger::activity('NoticeboardUpload', 'Uploaded noticeboard media #' . $newId . ' (' . $storedName . ')');
 
 ApiResponse::success([
-    'url'       => '/noticeboard/media?f=' . rawurlencode($storedName),
+    'url'       => Site::url('noticeboard/media') . '?f=' . rawurlencode($storedName),
     'mediaType' => $mediaType,
 ], 201);

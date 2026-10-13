@@ -78,6 +78,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 use Portal\Core\TimeLimit;
 
 Auth::ensureSession();
@@ -123,7 +124,7 @@ if (App::isRootAdmin() === false) {
     http_response_code(403);
     $pageTitle   = 'Off-site backup';
     $pageSection = 'admin';
-    $breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Maintenance' => '/admin/maintenance', 'Off-site backup' => '/admin/maintenance/offsite-backup', 'Run now' => ''];
+    $breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => Site::url('admin/maintenance'), 'Off-site backup' => Site::url('admin/maintenance/offsite-backup'), 'Run now' => ''];
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
     ?>
     <h1 class="mb-3"><i class="fa-solid fa-cloud-arrow-up me-2"></i>Off-site backup</h1>
@@ -132,7 +133,7 @@ if (App::isRootAdmin() === false) {
         installation, not only yours, to an external destination, so only a
         global administrator can run it. Nothing has been run. You can still
         see the status of the off-site copy on the
-        <a href="/admin/maintenance/offsite-backup">Off-site backup page</a>.
+        <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/offsite-backup'), ENT_QUOTES, 'UTF-8'); ?>">Off-site backup page</a>.
     </div>
     <?php
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
@@ -148,7 +149,7 @@ $script = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_backups' . DIRECTORY_SEPARATOR .
 if (is_file($script) === false || is_executable($script) === false) {
     $_SESSION['flash_msg']  = 'sync-offsite.sh not present or not executable.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/maintenance/offsite-backup');
+    header('Location: ' . Site::url('admin/maintenance/offsite-backup'));
     exit();
 }
 
@@ -193,5 +194,5 @@ if ($exit === 0) {
     $_SESSION['flash_msg']  = 'Off-site sync failed (exit ' . (int) $exit . '). Check the run log.';
     $_SESSION['flash_type'] = 'danger';
 }
-header('Location: /admin/maintenance/offsite-backup');
+header('Location: ' . Site::url('admin/maintenance/offsite-backup'));
 exit();

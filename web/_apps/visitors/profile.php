@@ -22,7 +22,7 @@ $siteId = Site::id();
 $id     = (int) ($_GET['id'] ?? 0);
 
 if ($id <= 0) {
-    header('Location: /visitors');
+    header('Location: ' . Site::url('visitors'));
     exit();
 }
 
@@ -109,7 +109,7 @@ if ($coordRole !== '') {
 
 $pageTitle   = $v['fullName'];
 $pageSection = 'visitors';
-$breadcrumbs = ['Dashboard' => '/', 'Visitors' => '/visitors', $v['fullName'] => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Visitors' => Site::url('visitors'), $v['fullName'] => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -134,7 +134,7 @@ $csrf = Auth::csrfToken();
         <div class="card h-100">
             <div class="card-body">
                 <h2 class="h6">Status &amp; assignment</h2>
-                <form method="post" action="/visitors/save" class="row g-2 align-items-end">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('visitors/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="updateStatus" value="1">
                     <input type="hidden" name="visitorID" value="<?php echo (int) $id; ?>">
@@ -167,7 +167,7 @@ $csrf = Auth::csrfToken();
 <div class="card mb-3">
     <div class="card-body">
         <h2 class="h6">Record contact</h2>
-        <form method="post" action="/visitors/contact-save" class="row g-2">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('visitors/contact-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="visitorID" value="<?php echo (int) $id; ?>">
             <div class="col-md-3">

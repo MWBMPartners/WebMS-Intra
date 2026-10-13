@@ -38,6 +38,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 // 🔐 Staff only. The Router already sends a signed-out visitor to sign in,
 //    because this address is seeded as protected; these checks stay as well so
@@ -69,7 +70,7 @@ $message        = $check['message'];
 
 $pageTitle   = 'Backup Freshness Check';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Maintenance' => '/admin/maintenance', 'Backups' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => Site::url('admin/maintenance'), 'Backups' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
 $badgeClass = match ($state) {
@@ -85,7 +86,7 @@ $badgeClass = match ($state) {
         <h1 class="mb-1"><i class="fa-solid fa-box-archive me-2"></i>Backup Freshness</h1>
         <p class="text-secondary mb-0">Current state of the snapshots kept in <code>web/_backups/</code>.</p>
     </div>
-    <a href="/admin/maintenance" class="btn btn-outline-secondary btn-sm">&larr; Maintenance</a>
+    <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Maintenance</a>
 </div>
 
 <div class="alert alert-<?php echo $badgeClass; ?>">

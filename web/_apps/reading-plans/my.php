@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -39,14 +40,14 @@ if ($stmt !== false) {
 
 $pageTitle   = 'My Reading Plans';
 $pageSection = 'reading-plans';
-$breadcrumbs = ['Dashboard' => '/', 'Reading Plans' => '/reading-plans', 'My plans' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Reading Plans' => Site::url('reading-plans'), 'My plans' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
 <h1 class="mb-3"><i class="fa-solid fa-book-bookmark me-2"></i>My Reading Plans</h1>
 
 <?php if (count($enrollments) === 0): ?>
-    <div class="alert alert-info">You're not enrolled in any plans yet. <a href="/reading-plans">Browse available plans</a>.</div>
+    <div class="alert alert-info">You're not enrolled in any plans yet. <a href="<?php echo htmlspecialchars(Site::url('reading-plans'), ENT_QUOTES, 'UTF-8'); ?>">Browse available plans</a>.</div>
 <?php else: ?>
     <div class="portal-data-list">
         <?php foreach ($enrollments as $e):
@@ -55,7 +56,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         ?>
             <div class="row py-3 border-bottom align-items-center">
                 <div class="col-md-4">
-                    <a href="/reading-plans/plan?id=<?php echo (int) $e['planID']; ?>"><strong><?php echo htmlspecialchars((string) $e['name'], ENT_QUOTES, 'UTF-8'); ?></strong></a>
+                    <a href="<?php echo htmlspecialchars(Site::url('reading-plans/plan'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $e['planID']; ?>"><strong><?php echo htmlspecialchars((string) $e['name'], ENT_QUOTES, 'UTF-8'); ?></strong></a>
                 </div>
                 <div class="col-md-5">
                     <div class="progress" style="height: .5rem;">
@@ -68,7 +69,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php if ($completed === true): ?>
                         <span class="badge bg-success">Completed</span>
                     <?php else: ?>
-                        <a href="/reading-plans/plan?id=<?php echo (int) $e['planID']; ?>" class="btn btn-sm btn-success">Continue</a>
+                        <a href="<?php echo htmlspecialchars(Site::url('reading-plans/plan'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $e['planID']; ?>" class="btn btn-sm btn-success">Continue</a>
                     <?php endif; ?>
                 </div>
             </div>

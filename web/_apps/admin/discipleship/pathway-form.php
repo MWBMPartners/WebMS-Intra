@@ -50,7 +50,7 @@ if (App::isAdmin() === false) {
 
 $enabled = (string) Settings::get('discipleship.enabled', 'false');
 if ($enabled !== '1' && $enabled !== 'true') {
-    header('Location: /admin/discipleship/pathways', true, 302);
+    header('Location: ' . Site::url('admin/discipleship/pathways'), true, 302);
     exit();
 }
 
@@ -218,9 +218,9 @@ function discipleshipRenderAutoRuleFields(array $step, array $eventOptions, arra
 $pageTitle   = $isEdit === true ? 'Edit pathway' : 'New pathway';
 $pageSection = 'admin';
 $breadcrumbs = [
-    'Dashboard'   => '/',
-    'Admin'       => '/admin',
-    'Pathways'    => '/admin/discipleship/pathways',
+    'Dashboard'   => Site::url(''),
+    'Admin'       => Site::url('admin'),
+    'Pathways'    => Site::url('admin/discipleship/pathways'),
     $pageTitle    => '',
 ];
 $csrf = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
@@ -248,7 +248,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <div class="card mb-4">
         <div class="card-body">
-            <form method="post" action="/admin/discipleship/pathways/save">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/discipleship/pathways/save'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                 <input type="hidden" name="pathwayID" value="<?php echo (int) $pathway['pathwayID']; ?>">
 
@@ -280,7 +280,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <i class="fa-solid fa-floppy-disk me-1"></i>
                     <?php echo $isEdit === true ? 'Save changes' : 'Create pathway'; ?>
                 </button>
-                <a href="/admin/discipleship/pathways" class="btn btn-outline-secondary btn-sm">Cancel</a>
+                <a href="<?php echo htmlspecialchars(Site::url('admin/discipleship/pathways'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Cancel</a>
             </form>
         </div>
     </div>
@@ -315,7 +315,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         <span class="badge bg-warning text-dark ms-1" title="The event/category this rule pointed to no longer exists — re-point it below">(missing)</span>
                                     <?php endif; ?>
                                 </summary>
-                                <form method="post" action="/admin/discipleship/pathways/step/save" class="mt-2">
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/discipleship/pathways/step/save'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-2">
                                     <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                     <input type="hidden" name="pathwayID" value="<?php echo (int) $pathwayId; ?>">
                                     <input type="hidden" name="stepID" value="<?php echo (int) $s['stepID']; ?>">
@@ -367,7 +367,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </div>
                         <div class="portal-data-row-aside">
                             <form method="post"
-                                  action="/admin/discipleship/pathways/step/delete"
+                                  action="<?php echo htmlspecialchars(Site::url('admin/discipleship/pathways/step/delete'), ENT_QUOTES, 'UTF-8'); ?>"
                                   class="d-inline"
                                   data-confirm="Delete this step?"
                                   data-confirm-destructive="true">
@@ -387,7 +387,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card">
             <div class="card-body">
                 <h3 class="h6 mb-2"><i class="fa-solid fa-plus me-1"></i>Add a new step</h3>
-                <form method="post" action="/admin/discipleship/pathways/step/save">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/discipleship/pathways/step/save'), ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                     <input type="hidden" name="pathwayID" value="<?php echo (int) $pathwayId; ?>">
                     <input type="hidden" name="stepID" value="0">

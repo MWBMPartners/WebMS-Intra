@@ -74,7 +74,7 @@ if ($stmt !== false) {
 
 $pageTitle   = 'Duty Roster';
 $pageSection = 'rota';
-$breadcrumbs = ['Dashboard' => '/', 'Duty Roster' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Duty Roster' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -84,7 +84,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <p class="text-secondary mb-0">Your upcoming duties + full roster for the next <?php echo $weeks; ?> weeks.</p>
     </div>
     <?php if (App::isAdmin() === true): ?>
-        <a href="/rota/manage" class="btn btn-primary btn-sm"><i class="fa-solid fa-screwdriver-wrench me-1"></i>Manage</a>
+        <a href="<?php echo htmlspecialchars(Site::url('rota/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-screwdriver-wrench me-1"></i>Manage</a>
     <?php endif; ?>
 </div>
 
@@ -113,7 +113,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             ?>
                         </div>
                         <div class="col-md-3 text-end">
-                            <a href="/rota/swap?slot=<?php echo (int) $s['slotID']; ?>" class="btn btn-sm btn-outline-secondary">Request swap</a>
+                            <a href="<?php echo htmlspecialchars(Site::url('rota/swap'), ENT_QUOTES, 'UTF-8'); ?>?slot=<?php echo (int) $s['slotID']; ?>" class="btn btn-sm btn-outline-secondary">Request swap</a>
                         </div>
                     </div>
                 <?php endforeach; ?>
@@ -126,7 +126,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card-body">
         <h2 class="h5"><i class="fa-solid fa-people-group me-1"></i>Full roster</h2>
         <?php if (count($roster) === 0): ?>
-            <p class="text-muted mb-0">No duties scheduled. <?php if (App::isAdmin() === true): ?>Go to <a href="/rota/manage">manage</a> to add some.<?php endif; ?></p>
+            <p class="text-muted mb-0">No duties scheduled. <?php if (App::isAdmin() === true): ?>Go to <a href="<?php echo htmlspecialchars(Site::url('rota/manage'), ENT_QUOTES, 'UTF-8'); ?>">manage</a> to add some.<?php endif; ?></p>
         <?php else: ?>
             <?php foreach ($roster as $date => $slots): ?>
                 <h3 class="h6 mt-3"><?php echo htmlspecialchars(date('l, j F Y', strtotime((string) $date)), ENT_QUOTES, 'UTF-8'); ?></h3>

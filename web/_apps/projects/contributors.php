@@ -55,7 +55,7 @@ if ($stmt !== false) {
 
 $pageTitle   = 'Contributors — ' . $project['title'];
 $pageSection = 'projects';
-$breadcrumbs = ['Dashboard' => '/', 'Projects' => '/projects', (string) $project['title'] => '/projects/view?slug=' . $slug, 'Contributors' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Projects' => Site::url('projects'), (string) $project['title'] => Site::url('projects/view') . '?slug=' . $slug, 'Contributors' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 

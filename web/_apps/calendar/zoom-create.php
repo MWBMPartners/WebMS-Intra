@@ -43,7 +43,7 @@ $mode    = (string) ($settings['mode'] ?? 'org');
 $flash = static function (string $msg, string $type, int $eventId): void {
     $_SESSION['flash_msg']  = $msg;
     $_SESSION['flash_type'] = $type;
-    header('Location: /calendar/event?id=' . $eventId);
+    header('Location: ' . Site::url('calendar/event') . '?id=' . $eventId);
     exit();
 };
 

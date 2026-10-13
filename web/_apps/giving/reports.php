@@ -83,7 +83,7 @@ if ($stmt !== false) {
 
 $pageTitle   = 'Giving Reports';
 $pageSection = 'giving';
-$breadcrumbs = ['Dashboard' => '/', 'Giving' => '/giving', 'Reports' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Giving' => Site::url('giving'), 'Reports' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 

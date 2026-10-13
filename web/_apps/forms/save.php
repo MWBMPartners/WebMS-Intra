@@ -28,7 +28,7 @@ Auth::ensureSession();
 Auth::requireLogin();
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /forms/manage', true, 302);
+    header('Location: ' . Site::url('forms/manage'), true, 302);
     exit();
 }
 
@@ -47,7 +47,7 @@ $userId = (int) (App::user()['userID'] ?? 0);
 $fail = static function (string $msg, int $formIdForRedirect): never {
     $_SESSION['flash_msg']  = $msg;
     $_SESSION['flash_type'] = 'danger';
-    $target = $formIdForRedirect > 0 ? '/forms/edit?id=' . $formIdForRedirect : '/forms/edit';
+    $target = $formIdForRedirect > 0 ? Site::url('forms/edit') . '?id=' . $formIdForRedirect : Site::url('forms/edit');
     header('Location: ' . $target, true, 302);
     exit();
 };
@@ -159,7 +159,7 @@ if ($formId === 0) {
     Logger::activity('FormSaved', 'Created form #' . $newId . ' (' . $title . ')');
     $_SESSION['flash_msg']  = 'Form created — now add some fields.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /forms/edit?id=' . $newId, true, 302);
+    header('Location: ' . Site::url('forms/edit') . '?id=' . $newId, true, 302);
     exit();
 }
 
@@ -195,5 +195,5 @@ if ($ok === false) {
 Logger::activity('FormSaved', 'Updated form #' . $formId . ' (' . $title . ')');
 $_SESSION['flash_msg']  = 'Form saved.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /forms/edit?id=' . $formId, true, 302);
+header('Location: ' . Site::url('forms/edit') . '?id=' . $formId, true, 302);
 exit();

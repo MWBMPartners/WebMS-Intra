@@ -15,13 +15,14 @@
 declare(strict_types=1);
 
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
 
 $pageTitle   = 'Offline queue';
 $pageSection = 'account';
-$breadcrumbs = ['Dashboard' => '/', 'My Account' => '/account', 'Offline queue' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'My Account' => Site::url('account'), 'Offline queue' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 

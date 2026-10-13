@@ -33,13 +33,15 @@ use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\Logger;
 use Portal\Core\RateLimiter;
+use Portal\Core\Router;
+use Portal\Core\Site;
 
 // -----------------------------------------------------------------------------
 // 1. 🔀 If already logged in, redirect to dashboard
 // -----------------------------------------------------------------------------
 
 if (Auth::check() === true) {
-    $target = Auth::safeRedirectUrl($_GET['redirect'] ?? '/');
+    $target = Auth::safeRedirectUrl($_GET['redirect'] ?? Site::url(''));
     header('Location: ' . $target, true, 302);
     exit();
 }
@@ -120,14 +122,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 && Auth::deviceIsTrusted($loggedInUserId) === false
             ) {
                 $_SESSION['2fa_user_id']   = $loggedInUserId;
-                $_SESSION['login_redirect'] = Auth::safeRedirectUrl($_GET['redirect'] ?? '/');
+                $_SESSION['login_redirect'] = Auth::safeRedirectUrl($_GET['redirect'] ?? Site::url(''));
                 unset($_SESSION['user_id'], $_SESSION['2fa_passed']);
-                header('Location: /auth/2fa/verify', true, 302);
+                header('Location: ' . Site::url('auth/2fa/verify'), true, 302);
                 exit();
             }
 
             // ✅ No 2FA required (or device already trusted) — go straight in.
-            $target = Auth::safeRedirectUrl($_GET['redirect'] ?? '/');
+            $target = Auth::safeRedirectUrl($_GET['redirect'] ?? Site::url(''));
             header('Location: ' . $target, true, 302);
             exit();
         }
@@ -279,7 +281,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <!-- 🔗 Forgot password link -->
         <div class="text-end mb-3">
-            <a href="/forgot-password" class="small text-decoration-none"><?php echo htmlspecialchars(t('auth.forgot_password'), ENT_QUOTES, 'UTF-8'); ?></a>
+            <a href="<?php echo htmlspecialchars(Site::url('forgot-password'), ENT_QUOTES, 'UTF-8'); ?>" class="small text-decoration-none"><?php echo htmlspecialchars(t('auth.forgot_password'), ENT_QUOTES, 'UTF-8'); ?></a>
         </div>
 
         <?php echo Captcha::widget(Captcha::FOR_SIGN_IN); ?>
@@ -296,13 +298,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
 
         <?php if (Auth::isMS365Configured() === true): ?>
-            <a href="/login/ms365" class="btn btn-outline-primary w-100 mb-2">
+            <a href="<?php echo htmlspecialchars(Site::url('login/ms365'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary w-100 mb-2">
                 <i class="fa-brands fa-microsoft me-1" aria-hidden="true"></i> <?php echo htmlspecialchars(t('auth.sign_in_with_ms365'), ENT_QUOTES, 'UTF-8'); ?>
             </a>
         <?php endif; ?>
 
         <?php if (Auth::isGoogleConfigured() === true): ?>
-            <a href="/login/google" class="btn btn-outline-danger w-100 mb-2">
+            <a href="<?php echo htmlspecialchars(Site::url('login/google'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-danger w-100 mb-2">
                 <i class="fa-brands fa-google me-1" aria-hidden="true"></i> <?php echo htmlspecialchars(t('auth.sign_in_with_google'), ENT_QUOTES, 'UTF-8'); ?>
             </a>
         <?php endif; ?>
@@ -360,7 +362,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         try {
             // 📋 Step 1: Get authentication options from server
-            var optResp = await fetch('/login/webauthn', {
+            var optResp = await fetch('<?php echo Router::urlForScript('login/webauthn'); ?>', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({action: 'auth_options'})
@@ -385,13 +387,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             statusEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Verifying...';
 
             // 📋 Step 3: Send assertion to server
+<?php
+// 🏢 The two fall-backs below (after "||") used to be a bare slash. Where organisations are told
+//    apart by the first part of the address, that is the DEFAULT organisation's front page, not
+//    this one's. They are now built by Router::urlForScript() (#536): this organisation's own
+//    front page, which with no first part in use is still exactly the same one character.
+//    WHAT THIS DID NOT CHANGE: where anybody lands today. login/webauthn.php already hands the
+//    address it is sent to Auth::safeRedirectUrl(), which refuses a bare slash under a first
+//    part and answers with the organisation's front page, and it always names an address when
+//    the sign-in works. So neither fall-back is trusted, and the second is not reached at all;
+//    they are written this way so the page never names an address outside its organisation.
+//    (A PHP comment whose tags start and end a line prints nothing, so the page is unchanged.)
+?>
             var params = new URLSearchParams(window.location.search);
-            var verifyResp = await fetch('/login/webauthn', {
+            var verifyResp = await fetch('<?php echo Router::urlForScript('login/webauthn'); ?>', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     action: 'auth_verify',
-                    redirect: params.get('redirect') || '/',
+                    redirect: params.get('redirect') || '<?php echo Router::urlForScript(''); ?>',
                     credential: {
                         id:    assertion.id,
                         rawId: bufferToBase64url(assertion.rawId),
@@ -408,7 +422,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             var verifyData = await verifyResp.json();
 
             if (verifyData.success) {
-                window.location.href = verifyData.redirect || '/';
+                window.location.href = verifyData.redirect || '<?php echo Router::urlForScript(''); ?>';
             } else {
                 throw new Error(verifyData.error || 'Authentication failed');
             }

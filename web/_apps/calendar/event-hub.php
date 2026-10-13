@@ -249,9 +249,9 @@ $statusBadge = [
 $pageTitle   = 'Team Hub — ' . (string) $event['eventName'];
 $pageSection = 'calendar';
 $breadcrumbs = [
-    'Dashboard' => '/',
-    'Calendar'  => '/calendar',
-    (string) $event['eventName'] => '/calendar/event?slug=' . rawurlencode((string) $event['eventSlug']),
+    'Dashboard' => Site::url(''),
+    'Calendar'  => Site::url('calendar'),
+    (string) $event['eventName'] => Site::url('calendar/event') . '?slug=' . rawurlencode((string) $event['eventSlug']),
     'Team Hub'  => '',
 ];
 
@@ -273,7 +273,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <i class="fa-solid fa-people-roof me-2 text-primary"></i>Team Hub
             </h1>
             <p class="mb-1">
-                <a href="/calendar/event?slug=<?php echo htmlspecialchars((string) $event['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none fw-semibold">
+                <a href="<?php echo htmlspecialchars(Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo htmlspecialchars((string) $event['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none fw-semibold">
                     <?php echo htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8'); ?>
                 </a>
                 <span class="badge <?php echo $statusBadge[$event['status']] ?? 'bg-secondary'; ?> ms-2">
@@ -307,19 +307,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php if ($canManage === true): ?>
         <div class="card mb-4">
             <div class="card-body d-flex flex-wrap gap-2">
-                <a href="/calendar/event/crews?eventID=<?php echo $eventId; ?>" class="btn btn-outline-secondary btn-sm">
+                <a href="<?php echo htmlspecialchars(Site::url('calendar/event/crews'), ENT_QUOTES, 'UTF-8'); ?>?eventID=<?php echo $eventId; ?>" class="btn btn-outline-secondary btn-sm">
                     <i class="fa-solid fa-people-group me-1"></i>Crews
                 </a>
-                <a href="/calendar/event/jobs?eventID=<?php echo $eventId; ?>" class="btn btn-outline-secondary btn-sm">
+                <a href="<?php echo htmlspecialchars(Site::url('calendar/event/jobs'), ENT_QUOTES, 'UTF-8'); ?>?eventID=<?php echo $eventId; ?>" class="btn btn-outline-secondary btn-sm">
                     <i class="fa-solid fa-briefcase me-1"></i>Jobs
                 </a>
-                <a href="/calendar/event/attendance?eventID=<?php echo $eventId; ?>" class="btn btn-outline-secondary btn-sm">
+                <a href="<?php echo htmlspecialchars(Site::url('calendar/event/attendance'), ENT_QUOTES, 'UTF-8'); ?>?eventID=<?php echo $eventId; ?>" class="btn btn-outline-secondary btn-sm">
                     <i class="fa-solid fa-clipboard-check me-1"></i>Attendance
                 </a>
-                <a href="/calendar/event/broadcast?eventID=<?php echo $eventId; ?>" class="btn btn-outline-secondary btn-sm">
+                <a href="<?php echo htmlspecialchars(Site::url('calendar/event/broadcast'), ENT_QUOTES, 'UTF-8'); ?>?eventID=<?php echo $eventId; ?>" class="btn btn-outline-secondary btn-sm">
                     <i class="fa-solid fa-bullhorn me-1"></i>Broadcast
                 </a>
-                <a href="/admin/calendar/registrations?eventID=<?php echo $eventId; ?>" class="btn btn-outline-secondary btn-sm">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/calendar/registrations'), ENT_QUOTES, 'UTF-8'); ?>?eventID=<?php echo $eventId; ?>" class="btn btn-outline-secondary btn-sm">
                     <i class="fa-solid fa-clipboard-list me-1"></i>Registrations
                 </a>
             </div>
@@ -339,7 +339,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             from <?php echo number_format($anon['checkins']); ?>
                             check-in<?php echo $anon['checkins'] === 1 ? '' : 's'; ?>.
                         </span>
-                        <a href="/calendar/event/attendance?eventID=<?php echo $eventId; ?>"
+                        <a href="<?php echo htmlspecialchars(Site::url('calendar/event/attendance'), ENT_QUOTES, 'UTF-8'); ?>?eventID=<?php echo $eventId; ?>"
                            class="btn btn-outline-info btn-sm">
                             See the breakdown
                         </a>
@@ -382,7 +382,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                             <?php if ($canManage === true): ?>
                                                 <details class="mt-1">
                                                     <summary class="small text-decoration-underline" style="cursor:pointer;">Edit</summary>
-                                                    <form method="post" action="/calendar/event/hub/save" class="row g-2 mt-1 p-2 bg-body-tertiary rounded">
+                                                    <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/hub/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mt-1 p-2 bg-body-tertiary rounded">
                                                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                                         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                                                         <input type="hidden" name="action" value="editResource">
@@ -419,7 +419,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         </div>
                                         <?php if ($canManage === true): ?>
                                             <div class="portal-data-row-aside text-end">
-                                                <form method="post" action="/calendar/event/hub/save" class="d-inline">
+                                                <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/hub/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                                     <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                                     <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                                                     <input type="hidden" name="action" value="reorder">
@@ -428,7 +428,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                                     <button type="submit" name="direction" value="up" class="btn btn-link btn-sm p-0 me-2" title="Move up"><i class="fa-solid fa-arrow-up"></i></button>
                                                     <button type="submit" name="direction" value="down" class="btn btn-link btn-sm p-0 me-2" title="Move down"><i class="fa-solid fa-arrow-down"></i></button>
                                                 </form>
-                                                <form method="post" action="/calendar/event/hub/save" class="d-inline" data-confirm="Remove this resource?">
+                                                <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/hub/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline" data-confirm="Remove this resource?">
                                                     <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                                     <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                                                     <input type="hidden" name="action" value="removeResource">
@@ -448,7 +448,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php if ($canManage === true): ?>
                 <details class="mb-4">
                     <summary class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-plus me-1"></i>Add a resource</summary>
-                    <form method="post" action="/calendar/event/hub/save" class="row g-2 mt-2 p-2 bg-body-tertiary rounded">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/hub/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mt-2 p-2 bg-body-tertiary rounded">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                         <input type="hidden" name="action" value="addResource">
@@ -541,7 +541,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <span class="small fw-semibold"><?php echo htmlspecialchars((string) $video['title'], ENT_QUOTES, 'UTF-8'); ?></span>
                                     <?php if ($canManage === true): ?>
                                         <div>
-                                            <form method="post" action="/calendar/event/hub/save" class="d-inline">
+                                            <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/hub/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                                 <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                                                 <input type="hidden" name="action" value="reorder">
@@ -550,7 +550,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                                 <button type="submit" name="direction" value="up" class="btn btn-link btn-sm p-0 me-2" title="Move up"><i class="fa-solid fa-arrow-up"></i></button>
                                                 <button type="submit" name="direction" value="down" class="btn btn-link btn-sm p-0 me-2" title="Move down"><i class="fa-solid fa-arrow-down"></i></button>
                                             </form>
-                                            <form method="post" action="/calendar/event/hub/save" class="d-inline" data-confirm="Remove this video from the hub?">
+                                            <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/hub/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline" data-confirm="Remove this video from the hub?">
                                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                                 <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                                                 <input type="hidden" name="action" value="removeVideo">
@@ -564,7 +564,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <div class="card-body py-1 border-top">
                                         <details>
                                             <summary class="small text-decoration-underline" style="cursor:pointer;">Stream settings</summary>
-                                            <form method="post" action="/calendar/event/hub/video-settings" class="row g-2 mt-1 p-2 bg-body-tertiary rounded">
+                                            <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/hub/video-settings'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mt-1 p-2 bg-body-tertiary rounded">
                                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                                 <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                                                 <input type="hidden" name="videoID" value="<?php echo (int) $video['videoID']; ?>">
@@ -596,7 +596,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php if ($canManage === true): ?>
                 <details class="mb-4">
                     <summary class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-plus me-1"></i>Add a video</summary>
-                    <form method="post" action="/calendar/event/hub/save" class="row g-2 mt-2 p-2 bg-body-tertiary rounded">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/hub/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mt-2 p-2 bg-body-tertiary rounded">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                         <input type="hidden" name="action" value="addVideo">

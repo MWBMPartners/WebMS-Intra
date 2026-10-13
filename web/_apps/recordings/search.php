@@ -22,7 +22,7 @@ $hits   = $q !== '' ? Transcription::search($siteId, $q) : [];
 
 $pageTitle   = 'Search transcripts';
 $pageSection = 'recordings';
-$breadcrumbs = ['Dashboard' => '/', 'Recordings' => '/recordings', 'Search transcripts' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Recordings' => Site::url('recordings'), 'Search transcripts' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -41,7 +41,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p class="text-secondary"><?php echo count($hits); ?> match<?php echo count($hits) === 1 ? '' : 'es'; ?> for <strong><?php echo htmlspecialchars($q, ENT_QUOTES, 'UTF-8'); ?></strong></p>
     <?php foreach ($hits as $h): ?>
         <div class="card mb-2"><div class="card-body">
-            <h5 class="mb-1"><a href="/recordings/transcript?id=<?php echo (int) $h['recordingID']; ?>" class="text-decoration-none">
+            <h5 class="mb-1"><a href="<?php echo htmlspecialchars(Site::url('recordings/transcript'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $h['recordingID']; ?>" class="text-decoration-none">
                 <?php echo htmlspecialchars((string) $h['title'], ENT_QUOTES, 'UTF-8'); ?>
             </a></h5>
             <?php if ($h['recordedAt'] !== null): ?>

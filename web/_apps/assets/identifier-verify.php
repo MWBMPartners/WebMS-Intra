@@ -39,6 +39,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -48,7 +49,7 @@ Auth::requireLogin();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets');
+    header('Location: ' . Site::url('assets'));
     exit();
 }
 
@@ -73,7 +74,7 @@ $asset = $assetId > 0 ? AssetRegister::get($assetId) : null;
 if ($asset === null || $identifierId <= 0) {
     $_SESSION['flash_msg']  = 'Asset not found.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets');
+    header('Location: ' . Site::url('assets'));
     exit();
 }
 
@@ -84,5 +85,5 @@ $_SESSION['flash_type'] = $result['ok'] === true
     ? ($result['verified'] === true ? 'success' : 'warning')
     : 'danger';
 
-header('Location: /assets/item?id=' . $assetId);
+header('Location: ' . Site::url('assets/item') . '?id=' . $assetId);
 exit();

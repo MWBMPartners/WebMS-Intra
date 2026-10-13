@@ -101,7 +101,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $pageTitle   = ($editMeeting !== null ? 'Edit Meeting' : 'Record Meeting') . ' — ' . $group['groupName'];
 $pageSection = 'small-groups';
-$breadcrumbs = ['Dashboard' => '/', 'Small Groups' => '/small-groups', (string) $group['groupName'] => '/small-groups/group?id=' . $groupId, ($editMeeting !== null ? 'Edit Meeting' : 'Record Meeting') => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Small Groups' => Site::url('small-groups'), (string) $group['groupName'] => Site::url('small-groups/group') . '?id=' . $groupId, ($editMeeting !== null ? 'Edit Meeting' : 'Record Meeting') => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
@@ -117,10 +117,10 @@ $esc = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES,
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-clipboard-check me-2"></i><?php echo $editMeeting !== null ? 'Edit Meeting' : 'Record Meeting'; ?> — <?php echo $esc($group['groupName']); ?></h1>
-    <a href="/small-groups/group?id=<?php echo $groupId; ?>" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
+    <a href="<?php echo htmlspecialchars(Site::url('small-groups/group'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $groupId; ?>" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
 </div>
 
-<form method="post" action="/small-groups/meeting-save">
+<form method="post" action="<?php echo htmlspecialchars(Site::url('small-groups/meeting-save'), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="csrf_token" value="<?php echo $esc(Auth::csrfToken()); ?>">
     <input type="hidden" name="groupID" value="<?php echo $groupId; ?>">
     <?php if ($editMeeting !== null): ?>
@@ -180,7 +180,7 @@ $esc = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES,
         </div>
         <div class="card-body">
             <?php if (count($activeMembers) === 0): ?>
-                <p class="text-muted mb-0">No active members yet — <a href="/small-groups/members?id=<?php echo $groupId; ?>">add some first</a>.</p>
+                <p class="text-muted mb-0">No active members yet — <a href="<?php echo htmlspecialchars(Site::url('small-groups/members'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $groupId; ?>">add some first</a>.</p>
             <?php else: ?>
                 <div class="row g-2">
                     <?php foreach ($activeMembers as $m): ?>
@@ -200,7 +200,7 @@ $esc = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES,
 
     <div class="d-flex gap-2">
         <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk me-1"></i>Save</button>
-        <a href="/small-groups/group?id=<?php echo $groupId; ?>" class="btn btn-secondary">Cancel</a>
+        <a href="<?php echo htmlspecialchars(Site::url('small-groups/group'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $groupId; ?>" class="btn btn-secondary">Cancel</a>
     </div>
 </form>
 

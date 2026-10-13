@@ -113,7 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /venues/generate' . ($venueId > 0 ? '?venue=' . $venueId : ''));
+        header('Location: ' . Site::url('venues/generate') . ($venueId > 0 ? '?venue=' . $venueId : ''));
         exit();
     }
 
@@ -155,7 +155,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['flash_msg']  = 'Created ' . count($result['created']) . ' booking(s)' . $skippedNote . '.';
             $_SESSION['flash_type'] = 'success';
             $yr = $params['dateFrom'] !== '' ? (int) date('Y', (int) strtotime($params['dateFrom'])) : (int) date('Y');
-            header('Location: /venues?venue=' . $venueId . '&year=' . $yr);
+            header('Location: ' . Site::url('venues') . '?venue=' . $venueId . '&year=' . $yr);
             exit();
         }
     } else {
@@ -199,7 +199,7 @@ if ((int) $params['statusID'] <= 0 && count($statuses) > 0) {
 
 $pageTitle   = 'Generate booking series';
 $pageSection = 'venues';
-$breadcrumbs = ['Dashboard' => '/', 'Venue Bookings' => '/venues', 'Generate series' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Venue Bookings' => Site::url('venues'), 'Generate series' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -216,7 +216,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php if ($venueId <= 0): ?>
     <div class="card">
         <div class="card-body">
-            <form method="get" action="/venues/generate">
+            <form method="get" action="<?php echo htmlspecialchars(Site::url('venues/generate'), ENT_QUOTES, 'UTF-8'); ?>">
                 <label class="form-label" for="venue">Venue</label>
                 <select class="form-select" id="venue" name="venue" required onchange="this.form.submit()">
                     <option value="0">— choose —</option>
@@ -229,13 +229,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php else: ?>
 
-    <form method="post" action="/venues/generate">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/generate'), ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
         <input type="hidden" name="venueID" value="<?php echo (int) $venueId; ?>">
         <input type="hidden" name="extendGroupID" value="<?php echo (int) $extendGroupId; ?>">
 
         <div class="card mb-3">
-            <div class="card-header">Venue: <?php echo $esc($venue['venueName']); ?> <a href="/venues/generate" class="small ms-2">(change)</a></div>
+            <div class="card-header">Venue: <?php echo $esc($venue['venueName']); ?> <a href="<?php echo htmlspecialchars(Site::url('venues/generate'), ENT_QUOTES, 'UTF-8'); ?>" class="small ms-2">(change)</a></div>
             <div class="card-body">
                 <div class="row g-3">
                     <div class="col-md-3">
@@ -334,7 +334,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <button type="submit" name="action" value="commit" class="btn btn-primary" data-confirm="Create these bookings now? Preview first if you haven't already.">
                         <i class="fa-solid fa-check me-1"></i>Confirm &amp; create
                     </button>
-                    <a href="/venues?venue=<?php echo (int) $venueId; ?>" class="btn btn-outline-secondary">Cancel</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('venues'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venueId; ?>" class="btn btn-outline-secondary">Cancel</a>
                 </div>
             </div>
         </div>

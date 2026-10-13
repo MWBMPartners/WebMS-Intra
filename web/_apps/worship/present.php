@@ -24,6 +24,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -222,7 +223,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     async function poll() {
         try {
-            const r = await fetch('/api/worship/state?t=' + encodeURIComponent(token), { cache: 'no-store' });
+            const r = await fetch('<?php echo Router::urlForScript('api/worship/state'); ?>?t=' + encodeURIComponent(token), { cache: 'no-store' });
             const s = await r.json();
             if (s && s.ok !== false) renderCurrent(s);
         } catch (e) { /* network blip — keep polling */ }
@@ -232,7 +233,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         const body = new URLSearchParams(Object.assign({
             csrf_token: csrf, planID: planID, action: action,
         }, extra));
-        const r = await fetch('/api/worship/advance', { method: 'POST', body: body });
+        const r = await fetch('<?php echo Router::urlForScript('api/worship/advance'); ?>', { method: 'POST', body: body });
         const s = await r.json();
         if (s && s.ok) renderCurrent(s);
     }

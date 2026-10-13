@@ -40,7 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['flash_msg']  = 'Prompt template saved.';
         $_SESSION['flash_type'] = 'success';
     }
-    header('Location: /admin/ai-assist/prompt?kind=' . urlencode($kind));
+    header('Location: ' . Site::url('admin/ai-assist/prompt') . '?kind=' . urlencode($kind));
     exit();
 }
 
@@ -54,7 +54,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Prompt: ' . $kind;
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'AI Assist' => '/admin/ai-assist', $kind => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'AI Assist' => Site::url('admin/ai-assist'), $kind => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -81,7 +81,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
     <div class="mt-3">
         <button class="btn btn-primary" type="submit">Save template</button>
-        <a href="/admin/ai-assist" class="btn btn-outline-secondary">Cancel</a>
+        <a href="<?php echo htmlspecialchars(Site::url('admin/ai-assist'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
     </div>
 </div></form>
 

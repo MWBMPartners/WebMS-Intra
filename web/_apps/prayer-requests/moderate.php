@@ -35,7 +35,7 @@ use Portal\Core\Site;
 
 // 🛡️ POST only
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /prayer-requests/manage', true, 302);
+    header('Location: ' . Site::url('prayer-requests/manage'), true, 302);
     exit();
 }
 
@@ -50,7 +50,7 @@ if (App::isAdmin() === false) {
 // 🔐 CSRF
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     Logger::activity('PrayerRequestModRejected', 'Invalid CSRF on prayer-requests/moderate');
-    header('Location: /prayer-requests/manage', true, 302);
+    header('Location: ' . Site::url('prayer-requests/manage'), true, 302);
     exit();
 }
 
@@ -65,7 +65,7 @@ $redirect      = (string) ($_POST['redirect'] ?? 'manage');
 $statusFilter  = (string) ($_POST['status_filter'] ?? '');
 
 if ($requestId <= 0 || $action === '') {
-    header('Location: /prayer-requests/manage', true, 302);
+    header('Location: ' . Site::url('prayer-requests/manage'), true, 302);
     exit();
 }
 
@@ -87,7 +87,7 @@ if ($stmt !== false) {
 }
 
 if ($row === null) {
-    header('Location: /prayer-requests/manage', true, 302);
+    header('Location: ' . Site::url('prayer-requests/manage'), true, 302);
     exit();
 }
 
@@ -158,7 +158,7 @@ switch ($action) {
         }
         break;
     default:
-        header('Location: /prayer-requests/manage', true, 302);
+        header('Location: ' . Site::url('prayer-requests/manage'), true, 302);
         exit();
 }
 
@@ -226,7 +226,7 @@ $params[] = $requestId;
 $stmt = $mysqli->prepare($sql);
 if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'PR_MOD_UPDATE_PREP', $mysqli->error, '');
-    header('Location: /prayer-requests/manage', true, 302);
+    header('Location: ' . Site::url('prayer-requests/manage'), true, 302);
     exit();
 }
 $stmt->bind_param($types, ...$params);
@@ -253,9 +253,9 @@ if ($ok === false) {
 
 // 🔀 Redirect back to the right place
 if ($redirect === 'view') {
-    header('Location: /prayer-requests/view?id=' . $requestId, true, 302);
+    header('Location: ' . Site::url('prayer-requests/view') . '?id=' . $requestId, true, 302);
 } else {
     $qs = $statusFilter !== '' ? '?status=' . urlencode($statusFilter) : '';
-    header('Location: /prayer-requests/manage' . $qs, true, 302);
+    header('Location: ' . Site::url('prayer-requests/manage') . $qs, true, 302);
 }
 exit();

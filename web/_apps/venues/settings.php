@@ -170,7 +170,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /venues/settings');
+        header('Location: ' . Site::url('venues/settings'));
         exit();
     }
 
@@ -193,7 +193,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 . 'Only a global administrator can change it. Your own organisation\'s '
                 . 'venue settings on this page are unaffected.';
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /venues/settings');
+            header('Location: ' . Site::url('venues/settings'));
             exit();
         }
 
@@ -206,7 +206,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $_SESSION['flash_msg']  = 'Cron token regenerated. Copy this URL now — it will not be shown again: ' . $cronUrl;
         $_SESSION['flash_type'] = 'warning';
-        header('Location: /venues/settings');
+        header('Location: ' . Site::url('venues/settings'));
         exit();
     }
 
@@ -258,7 +258,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $_SESSION['flash_msg']  = 'Settings saved.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /venues/settings');
+    header('Location: ' . Site::url('venues/settings'));
     exit();
 }
 
@@ -296,7 +296,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Venue Bookings Settings';
 $pageSection = 'venues';
-$breadcrumbs = ['Dashboard' => '/', 'Venues' => '/venues', 'Settings' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Venues' => Site::url('venues'), 'Settings' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -308,12 +308,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-gear me-2"></i>Venue Bookings Settings</h1>
-    <a href="/venues/manage" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to venues</a>
+    <a href="<?php echo htmlspecialchars(Site::url('venues/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to venues</a>
 </div>
 
 <div class="card mb-4">
     <div class="card-body">
-        <form method="post" action="/venues/settings" class="row g-3">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/settings'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="save">
 
@@ -391,7 +391,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="badge <?php echo $tokenSet === true ? 'bg-success' : 'bg-secondary'; ?>"><?php echo $tokenSet === true ? 'Set' : 'Not set'; ?></span>
         </p>
         <?php if ($mayChangePortalWideSettings === true): ?>
-            <form method="post" action="/venues/settings" data-confirm="Regenerate the reminders cron token? Any existing scheduled job using the OLD token will stop working until it is updated.">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/settings'), ENT_QUOTES, 'UTF-8'); ?>" data-confirm="Regenerate the reminders cron token? Any existing scheduled job using the OLD token will stop working until it is updated.">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="regenerate_token">
                 <button type="submit" class="btn btn-outline-warning btn-sm"><i class="fa-solid fa-key me-1"></i>Regenerate token</button>

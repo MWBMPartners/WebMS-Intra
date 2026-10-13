@@ -44,6 +44,7 @@ declare(strict_types=1);
 
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -52,7 +53,7 @@ Auth::requireLogin();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets');
+    header('Location: ' . Site::url('assets'));
     exit();
 }
 
@@ -64,7 +65,7 @@ $action  = (string) ($_POST['action'] ?? '');
 if ($assetId <= 0 || $loanId <= 0) {
     $_SESSION['flash_msg']  = 'Missing loan reference.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets');
+    header('Location: ' . Site::url('assets'));
     exit();
 }
 
@@ -112,7 +113,7 @@ $_SESSION['flash_type'] = $result['ok'] === true ? 'success' : 'danger';
 // redirect back to" — no open-redirect surface, only these two literals
 // are ever recognised).
 $returnTo = (string) ($_POST['returnTo'] ?? 'item');
-$redirect = $returnTo === 'loans' ? '/assets/loans' : ('/assets/item?id=' . $assetId);
+$redirect = $returnTo === 'loans' ? Site::url('assets/loans') : (Site::url('assets/item') . '?id=' . $assetId);
 
 header('Location: ' . $redirect);
 exit();

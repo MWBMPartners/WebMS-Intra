@@ -12,6 +12,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 use Portal\Core\Translation;
 
 Auth::ensureSession();
@@ -50,7 +51,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Translation';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Translation' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Translation' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -82,7 +83,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card">
     <div class="card-header"><strong>Configuration</strong></div>
     <div class="card-body">
-        <form method="post" action="/admin/translation/save" class="row g-3">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/translation/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="col-md-3">
                 <label class="form-label">Provider</label>

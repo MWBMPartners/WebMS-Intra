@@ -31,7 +31,7 @@ Auth::ensureSession();
 Auth::requireLogin();
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /forms', true, 302);
+    header('Location: ' . Site::url('forms'), true, 302);
     exit();
 }
 
@@ -39,7 +39,7 @@ $siteId = Site::id();
 $userId = (int) (App::user()['userID'] ?? 0);
 $formId = (int) ($_POST['formID'] ?? 0);
 
-$backToFill = '/forms/fill?id=' . $formId;
+$backToFill = Site::url('forms/fill') . '?id=' . $formId;
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Security check failed — please try again.';
@@ -52,7 +52,7 @@ $form = FormEngine::getForm($formId, $siteId);
 if ($form === null) {
     $_SESSION['flash_msg']  = 'Form not found.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /forms', true, 302);
+    header('Location: ' . Site::url('forms'), true, 302);
     exit();
 }
 
@@ -62,7 +62,7 @@ $isOpen     = FormEngine::isOpen($form);
 if ($audienceOk === false || $isOpen === false) {
     $_SESSION['flash_msg']  = 'This form is not currently accepting responses.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /forms', true, 302);
+    header('Location: ' . Site::url('forms'), true, 302);
     exit();
 }
 
@@ -80,7 +80,7 @@ if ($allowMultiple === false) {
     if ($alreadySubmitted === true) {
         $_SESSION['flash_msg']  = 'You have already submitted this form.';
         $_SESSION['flash_type'] = 'success';
-        header('Location: /forms', true, 302);
+        header('Location: ' . Site::url('forms'), true, 302);
         exit();
     }
 }
@@ -125,5 +125,5 @@ Logger::activity('FormResponseSubmitted', 'Form #' . $formId . ' response #' . $
 $confirmation = trim((string) ($form['confirmationText'] ?? ''));
 $_SESSION['flash_msg']  = $confirmation !== '' ? $confirmation : 'Thank you — your response has been recorded.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /forms', true, 302);
+header('Location: ' . Site::url('forms'), true, 302);
 exit();

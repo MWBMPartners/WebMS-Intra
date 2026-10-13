@@ -12,6 +12,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -36,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $_SESSION['flash_msg']  = 'Translation preferences saved.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /account/translation');
+    header('Location: ' . Site::url('account/translation'));
     exit();
 }
 
@@ -66,7 +67,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Translation preferences';
 $pageSection = 'account';
-$breadcrumbs = ['Dashboard' => '/', 'My Account' => '/account', 'Translation' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'My Account' => Site::url('account'), 'Translation' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 

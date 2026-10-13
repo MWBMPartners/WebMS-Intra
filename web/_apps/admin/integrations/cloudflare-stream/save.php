@@ -49,6 +49,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -61,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token
     exit('Bad request');
 }
 
-$redirect = '/admin/integrations/cloudflare-stream';
+$redirect = Site::url('admin/integrations/cloudflare-stream');
 
 /**
  * 🚩 Flash an error and redirect back WITHOUT saving anything.

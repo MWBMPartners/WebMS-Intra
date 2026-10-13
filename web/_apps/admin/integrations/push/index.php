@@ -89,7 +89,7 @@ $csrf = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
 
 $pageTitle   = 'Web Push Integration';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Integrations' => '/admin/integrations', 'Web Push' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Integrations' => Site::url('admin/integrations'), 'Web Push' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -144,7 +144,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
         <div class="row g-3">
             <div class="col-md-6">
-                <form method="post" action="/admin/integrations/push/save">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/push/save'), ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                     <input type="hidden" name="action" value="generate">
                     <button type="submit" class="btn btn-primary"
@@ -155,7 +155,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <small class="text-muted d-block mt-1">Simplest path — one click, no OpenSSL needed.</small>
             </div>
             <div class="col-md-6">
-                <form method="post" action="/admin/integrations/push/save">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/push/save'), ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                     <input type="hidden" name="action" value="import">
                     <textarea name="privateKeyPaste" class="form-control font-monospace" rows="3" autocomplete="off"
@@ -176,7 +176,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-4">
     <div class="card-header"><strong>Settings</strong></div>
     <div class="card-body">
-        <form method="post" action="/admin/integrations/push/save" class="row g-3">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/push/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <input type="hidden" name="action" value="save">
 
@@ -230,13 +230,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </form>
 
-        <form method="post" action="/admin/integrations/push/test" class="mt-3 pt-3 border-top">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/push/test'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-3 pt-3 border-top">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <button class="btn btn-outline-secondary" type="submit" <?php echo $isConfigured === false ? 'disabled' : ''; ?>>
                 <i class="fa-solid fa-paper-plane me-1"></i>Send test notification to my devices
             </button>
             <small class="text-muted d-block mt-1">
-                Sends to YOUR OWN active subscriptions only. Enable push at <a href="/account/notifications">/account/notifications</a> first, on the device you want to test.
+                Sends to YOUR OWN active subscriptions only. Enable push at <a href="<?php echo htmlspecialchars(Site::url('account/notifications'), ENT_QUOTES, 'UTF-8'); ?>">/account/notifications</a> first, on the device you want to test.
             </small>
         </form>
     </div>

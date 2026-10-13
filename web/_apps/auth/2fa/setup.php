@@ -35,7 +35,7 @@ $userStmt = $mysqli->prepare('SELECT totpEnabled, emailAddress FROM tblUsers WHE
 if ($userStmt === false) {
     $_SESSION['flash_msg']  = t('error.database');
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /account');
+    header('Location: ' . Site::url('account'));
     exit();
 }
 $userStmt->bind_param('i', $userId);
@@ -46,7 +46,7 @@ $userStmt->close();
 if ((int) ($user['totpEnabled'] ?? 0) === 1) {
     $_SESSION['flash_msg']  = 'Two-factor authentication is already enabled.';
     $_SESSION['flash_type'] = 'info';
-    header('Location: /account');
+    header('Location: ' . Site::url('account'));
     exit();
 }
 
@@ -55,7 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /auth/2fa/setup');
+        header('Location: ' . Site::url('auth/2fa/setup'));
         exit();
     }
 
@@ -65,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($secret === '' || $code === '') {
         $_SESSION['flash_msg']  = 'Please enter the verification code.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /auth/2fa/setup');
+        header('Location: ' . Site::url('auth/2fa/setup'));
         exit();
     }
 
@@ -73,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Totp::verify($secret, $code) === false) {
         $_SESSION['flash_msg']  = 'Invalid code. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /auth/2fa/setup');
+        header('Location: ' . Site::url('auth/2fa/setup'));
         exit();
     }
 
@@ -107,7 +107,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     Logger::activity('TotpEnabled', 'Enabled two-factor authentication', $userId);
     $_SESSION['flash_msg']  = 'Two-factor authentication enabled! Save your backup codes.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /auth/2fa/setup?complete=1');
+    header('Location: ' . Site::url('auth/2fa/setup') . '?complete=1');
     exit();
 }
 
@@ -128,7 +128,7 @@ $backupCodes = $_SESSION['totp_backup_codes'] ?? [];
 // 📌 Page metadata
 $pageTitle   = 'Setup Two-Factor Authentication';
 $pageSection = 'account';
-$breadcrumbs = ['Dashboard' => '/', 'Account' => '/account', '2FA Setup' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Account' => Site::url('account'), '2FA Setup' => ''];
 
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
@@ -159,7 +159,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
 
-    <a href="/account" class="btn btn-primary">
+    <a href="<?php echo htmlspecialchars(Site::url('account'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Account
     </a>
     <?php unset($_SESSION['totp_backup_codes']); ?>
@@ -184,7 +184,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="card-header"><h5 class="mb-0">Step 2: Verify Code</h5></div>
                 <div class="card-body">
                     <p>Enter the 6-digit code from your authenticator app to confirm setup:</p>
-                    <form method="post" action="/auth/2fa/setup">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('auth/2fa/setup'), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <div class="mb-3">
                             <label for="code" class="form-label">Verification Code</label>

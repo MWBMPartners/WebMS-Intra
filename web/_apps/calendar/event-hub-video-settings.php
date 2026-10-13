@@ -37,7 +37,7 @@ use Portal\Core\Logger;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /calendar', true, 302);
+    header('Location: ' . Site::url('calendar'), true, 302);
     exit();
 }
 
@@ -45,7 +45,7 @@ Auth::ensureSession();
 Auth::requireLogin();
 
 $eventId  = (int) ($_POST['eventID'] ?? 0);
-$redirect = '/calendar/event/hub?eventID=' . $eventId;
+$redirect = Site::url('calendar/event/hub') . '?eventID=' . $eventId;
 
 if (Auth::verifyCsrf((string) ($_POST['csrf_token'] ?? '')) === false) {
     http_response_code(400);

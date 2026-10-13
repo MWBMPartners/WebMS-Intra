@@ -37,7 +37,7 @@ Auth::requireLogin();
 if (App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = 'You do not have permission to manage announcements.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /announcements');
+    header('Location: ' . Site::url('announcements'));
     exit();
 }
 
@@ -65,7 +65,7 @@ $pageTitle   = ($editId === 0 || $editId === null) && $editing === null
     ? ($editId === 0 ? 'New Announcement' : 'Manage Announcements')
     : 'Edit Announcement';
 $pageSection = 'announcements';
-$breadcrumbs = ['Dashboard' => '/', 'Announcements' => '/announcements', 'Manage' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Announcements' => Site::url('announcements'), 'Manage' => ''];
 
 // 📋 Fetch all announcements for listing
 $announcements = [];
@@ -114,7 +114,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 📢 Announcement Management -->
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-bullhorn me-2"></i>Manage Announcements</h1>
-    <a href="/announcements/manage?edit=0" class="btn btn-primary">
+    <a href="<?php echo htmlspecialchars(Site::url('announcements/manage'), ENT_QUOTES, 'UTF-8'); ?>?edit=0" class="btn btn-primary">
         <i class="fa-solid fa-plus me-1"></i>New Announcement
     </a>
 </div>
@@ -126,7 +126,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <h5 class="mb-0"><?php echo $editing !== null ? 'Edit' : 'New'; ?> Announcement</h5>
         </div>
         <div class="card-body">
-            <form method="post" action="/announcements/save">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('announcements/save'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="announcementID" value="<?php echo (int) ($editing['announcementID'] ?? 0); ?>">
 
@@ -198,7 +198,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <button type="submit" class="btn btn-primary">
                         <i class="fa-solid fa-floppy-disk me-1"></i><?php echo $editing !== null ? 'Update' : 'Create'; ?>
                     </button>
-                    <a href="/announcements/manage" class="btn btn-outline-secondary">Cancel</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('announcements/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
                 </div>
             </form>
         </div>
@@ -243,7 +243,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <span class="badge bg-secondary">Draft</span>
                     <?php endif; ?>
                     <?php if (isset($pendingInstanceIds[(int) $ann['announcementID']]) === true): ?>
-                        <a href="/approvals" class="badge bg-warning text-dark text-decoration-none" title="Pending workflow approval">
+                        <a href="<?php echo htmlspecialchars(Site::url('approvals'), ENT_QUOTES, 'UTF-8'); ?>" class="badge bg-warning text-dark text-decoration-none" title="Pending workflow approval">
                             <i class="fa-solid fa-hourglass-half me-1"></i>Awaiting approval
                         </a>
                     <?php endif; ?>
@@ -252,10 +252,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php echo htmlspecialchars(I18n::formatDate($ann['createdAt'], 'short'), ENT_QUOTES, 'UTF-8'); ?>
                 </div>
                 <div class="col-1 text-end">
-                    <a href="/announcements/manage?edit=<?php echo (int) $ann['announcementID']; ?>" class="btn btn-sm btn-outline-primary" title="Edit">
+                    <a href="<?php echo htmlspecialchars(Site::url('announcements/manage'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo (int) $ann['announcementID']; ?>" class="btn btn-sm btn-outline-primary" title="Edit">
                         <i class="fa-solid fa-pen"></i>
                     </a>
-                    <form method="post" action="/announcements/delete" class="d-inline" data-confirm="Delete this announcement?" data-confirm-destructive="true">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('announcements/delete'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline" data-confirm="Delete this announcement?" data-confirm-destructive="true">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="announcementID" value="<?php echo (int) $ann['announcementID']; ?>">
                         <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">

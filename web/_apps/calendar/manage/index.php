@@ -30,7 +30,7 @@ use Portal\Core\Venues;
 // 📌 Page metadata
 $pageTitle   = 'Manage Events';
 $pageSection = 'calendar';
-$breadcrumbs = ['Dashboard' => '/', 'Calendar' => '/calendar', 'Manage' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Calendar' => Site::url('calendar'), 'Manage' => ''];
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -77,7 +77,7 @@ if ($editId > 0) {
         }
 
         $pageTitle = 'Edit: ' . $editEvent['eventName'];
-        $breadcrumbs = ['Dashboard' => '/', 'Calendar' => '/calendar', 'Manage' => '/calendar/manage', 'Edit' => ''];
+        $breadcrumbs = ['Dashboard' => Site::url(''), 'Calendar' => Site::url('calendar'), 'Manage' => Site::url('calendar/manage'), 'Edit' => ''];
     }
 }
 
@@ -337,10 +337,10 @@ try {
 <!-- ✏️ Edit Event Form -->
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-pen me-2"></i>Edit Event</h1>
-    <a href="/calendar/manage" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back to List</a>
+    <a href="<?php echo htmlspecialchars(Site::url('calendar/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back to List</a>
 </div>
 
-<form method="post" action="/calendar/manage/save" enctype="multipart/form-data">
+<form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/save'), ENT_QUOTES, 'UTF-8'); ?>" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="action" value="update">
     <input type="hidden" name="eventID" value="<?php echo (int) $editEvent['eventID']; ?>">
@@ -349,7 +349,7 @@ try {
 
     <div class="mt-4 d-flex gap-2">
         <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk me-1"></i>Save Changes</button>
-        <a href="/calendar/manage" class="btn btn-secondary">Cancel</a>
+        <a href="<?php echo htmlspecialchars(Site::url('calendar/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-secondary">Cancel</a>
     </div>
 </form>
 
@@ -358,13 +358,13 @@ try {
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-list-check me-2"></i>Manage Events</h1>
     <div class="d-flex gap-2 flex-wrap">
-        <a href="/calendar/manage/types" class="btn btn-outline-secondary">
+        <a href="<?php echo htmlspecialchars(Site::url('calendar/manage/types'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
             <i class="fa-solid fa-tags me-1"></i> Categories &amp; Types
         </a>
-        <a href="/calendar/manage/month-themes" class="btn btn-outline-secondary">
+        <a href="<?php echo htmlspecialchars(Site::url('calendar/manage/month-themes'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
             <i class="fa-solid fa-quote-left me-1"></i> Month Themes
         </a>
-        <a href="/calendar/manage/import" class="btn btn-outline-secondary">
+        <a href="<?php echo htmlspecialchars(Site::url('calendar/manage/import'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
             <i class="fa-solid fa-file-csv me-1"></i> Bulk Import (CSV)
         </a>
         <button class="btn btn-success" data-bs-toggle="collapse" data-bs-target="#createEventForm">
@@ -386,7 +386,7 @@ try {
     <div class="card">
         <div class="card-header"><h5 class="mb-0">Create New Event</h5></div>
         <div class="card-body">
-            <form method="post" action="/calendar/manage/save" enctype="multipart/form-data">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/save'), ENT_QUOTES, 'UTF-8'); ?>" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="create">
 
@@ -401,7 +401,7 @@ try {
 </div>
 
 <!-- 🔍 Filters -->
-<form method="get" action="/calendar/manage" class="row g-2 mb-4">
+<form method="get" action="<?php echo htmlspecialchars(Site::url('calendar/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mb-4">
     <div class="col-12 col-md-4">
         <select name="status" class="form-select form-select-sm">
             <option value="">All Statuses</option>
@@ -473,15 +473,15 @@ try {
                 <small><?php echo htmlspecialchars($ev['categoryName'] ?? '—', ENT_QUOTES, 'UTF-8'); ?></small>
             </div>
             <div class="col-12 col-md-2 text-md-end mt-2 mt-md-0">
-                <a href="/calendar/event?slug=<?php echo htmlspecialchars($ev['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>"
+                <a href="<?php echo htmlspecialchars(Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo htmlspecialchars($ev['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>"
                    class="btn btn-sm btn-outline-secondary me-1" title="View">
                     <i class="fa-solid fa-eye"></i>
                 </a>
-                <a href="/calendar/manage?edit=<?php echo (int) $ev['eventID']; ?>"
+                <a href="<?php echo htmlspecialchars(Site::url('calendar/manage'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo (int) $ev['eventID']; ?>"
                    class="btn btn-sm btn-outline-primary me-1" title="Edit">
                     <i class="fa-solid fa-pen"></i>
                 </a>
-                <form method="post" action="/calendar/manage/delete" class="d-inline">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/delete'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="eventID" value="<?php echo (int) $ev['eventID']; ?>">
                     <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete"
@@ -499,7 +499,7 @@ try {
     <nav aria-label="Event list pagination" class="mt-4">
         <ul class="pagination justify-content-center">
             <?php
-            $baseUrl = '/calendar/manage?' . http_build_query(array_filter(['status' => $filterStatus ?? '']));
+            $baseUrl = Site::url('calendar/manage') . '?' . http_build_query(array_filter(['status' => $filterStatus ?? '']));
             $sep = '&';
             ?>
             <li class="page-item <?php echo ($page <= 1) ? 'disabled' : ''; ?>">

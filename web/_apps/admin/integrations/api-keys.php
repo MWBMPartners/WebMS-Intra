@@ -113,7 +113,7 @@ if (isset($_SESSION['api_key_minted']) === true) {
 
     <details class="mb-4" <?php echo count($keys) === 0 ? 'open' : ''; ?>>
         <summary class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-plus me-1"></i>Mint a new key</summary>
-        <form method="post" action="/admin/integrations/api-keys/save" class="row g-2 mt-2 p-3 bg-light rounded">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/api-keys/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mt-2 p-3 bg-light rounded">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <div class="col-md-6">
                 <label class="form-label small">Name <span class="text-danger">*</span></label>
@@ -220,7 +220,7 @@ if (isset($_SESSION['api_key_minted']) === true) {
                 </div>
                 <?php if ($isActive === true): ?>
                     <div class="portal-data-row-aside">
-                        <form method="post" action="/admin/integrations/api-keys/rotate" class="d-inline-flex align-items-center gap-1" data-confirm="Rotate this key? A new plaintext is shown ONCE; the existing key follows the selected grace window before it stops working.">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/api-keys/rotate'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline-flex align-items-center gap-1" data-confirm="Rotate this key? A new plaintext is shown ONCE; the existing key follows the selected grace window before it stops working.">
                             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                             <input type="hidden" name="keyID" value="<?php echo (int) $k['keyID']; ?>">
                             <select name="graceHours" class="form-select form-select-sm" style="width:auto;" title="Rotation grace period">
@@ -230,7 +230,7 @@ if (isset($_SESSION['api_key_minted']) === true) {
                             </select>
                             <button class="btn btn-sm btn-outline-warning" title="Rotate"><i class="fa-solid fa-arrows-rotate"></i></button>
                         </form>
-                        <form method="post" action="/admin/integrations/api-keys/revoke" class="d-inline" data-confirm="Revoke this key? Cannot be undone." data-confirm-destructive="true">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/api-keys/revoke'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline" data-confirm="Revoke this key? Cannot be undone." data-confirm-destructive="true">
                             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                             <input type="hidden" name="keyID" value="<?php echo (int) $k['keyID']; ?>">
                             <button class="btn btn-sm btn-outline-danger" title="Revoke"><i class="fa-solid fa-ban"></i></button>

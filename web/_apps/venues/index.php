@@ -116,7 +116,7 @@ $today    = date('Y-m-d');
 
 $pageTitle   = 'Venue Bookings';
 $pageSection = 'venues';
-$breadcrumbs = ['Dashboard' => '/', 'Venue Bookings' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Venue Bookings' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
 $esc = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
@@ -139,28 +139,28 @@ $rowColor = static function (array $row): string {
     </div>
     <div class="d-flex flex-wrap gap-2">
         <?php if ($isMgr === true): ?>
-            <a href="/venues/booking?venue=<?php echo (int) $venueId; ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>Booking</a>
-            <a href="/venues/generate?venue=<?php echo (int) $venueId; ?>" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-repeat me-1"></i>Generate series</a>
-            <a href="/venues/import" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-file-import me-1"></i>Import</a>
-            <a href="/venues/agreements" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-file-signature me-1"></i>Agreements</a>
-            <a href="/venues/invoices" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-file-invoice me-1"></i>Invoices</a>
+            <a href="<?php echo htmlspecialchars(Site::url('venues/booking'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venueId; ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>Booking</a>
+            <a href="<?php echo htmlspecialchars(Site::url('venues/generate'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venueId; ?>" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-repeat me-1"></i>Generate series</a>
+            <a href="<?php echo htmlspecialchars(Site::url('venues/import'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-file-import me-1"></i>Import</a>
+            <a href="<?php echo htmlspecialchars(Site::url('venues/agreements'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-file-signature me-1"></i>Agreements</a>
+            <a href="<?php echo htmlspecialchars(Site::url('venues/invoices'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-file-invoice me-1"></i>Invoices</a>
             <div class="btn-group">
                 <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
                     <i class="fa-solid fa-gear me-1"></i>Config
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end">
-                    <li><a class="dropdown-item" href="/venues/manage">Manage venues</a></li>
-                    <li><a class="dropdown-item" href="/venues/statuses">Statuses</a></li>
-                    <li><a class="dropdown-item" href="/venues/usage-types?venue=<?php echo (int) $venueId; ?>">Usage types</a></li>
-                    <li><a class="dropdown-item" href="/venues/rooms?venue=<?php echo (int) $venueId; ?>">Rooms</a></li>
+                    <li><a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('venues/manage'), ENT_QUOTES, 'UTF-8'); ?>">Manage venues</a></li>
+                    <li><a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('venues/statuses'), ENT_QUOTES, 'UTF-8'); ?>">Statuses</a></li>
+                    <li><a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('venues/usage-types'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venueId; ?>">Usage types</a></li>
+                    <li><a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('venues/rooms'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venueId; ?>">Rooms</a></li>
                     <li><hr class="dropdown-divider"></li>
-                    <li><a class="dropdown-item" href="/venues/settings">Settings</a></li>
+                    <li><a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('venues/settings'), ENT_QUOTES, 'UTF-8'); ?>">Settings</a></li>
                 </ul>
             </div>
         <?php else: ?>
             <?php if ($venueId > 0): ?>
-                <a href="/venues/export?venue=<?php echo (int) $venueId; ?>&amp;year=<?php echo (int) $year; ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-file-csv me-1"></i>CSV</a>
-                <a href="/venues/schedule-pdf?venue=<?php echo (int) $venueId; ?>&amp;year=<?php echo (int) $year; ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-file-pdf me-1"></i>PDF</a>
+                <a href="<?php echo htmlspecialchars(Site::url('venues/export'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venueId; ?>&amp;year=<?php echo (int) $year; ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-file-csv me-1"></i>CSV</a>
+                <a href="<?php echo htmlspecialchars(Site::url('venues/schedule-pdf'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venueId; ?>&amp;year=<?php echo (int) $year; ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-file-pdf me-1"></i>PDF</a>
             <?php endif; ?>
         <?php endif; ?>
     </div>
@@ -170,14 +170,14 @@ $rowColor = static function (array $row): string {
     <div class="alert alert-info">
         No venues configured yet.
         <?php if ($isMgr === true): ?>
-            <a href="/venues/manage">Add one to get started →</a>
+            <a href="<?php echo htmlspecialchars(Site::url('venues/manage'), ENT_QUOTES, 'UTF-8'); ?>">Add one to get started →</a>
         <?php endif; ?>
     </div>
 <?php else: ?>
 
     <div class="card mb-3">
         <div class="card-body">
-            <form method="get" action="/venues" class="row g-2 align-items-end">
+            <form method="get" action="<?php echo htmlspecialchars(Site::url('venues'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                 <div class="col-6 col-md-3">
                     <label class="form-label small" for="venue">Venue</label>
                     <select class="form-select form-select-sm" id="venue" name="venue" onchange="this.form.submit()">
@@ -249,9 +249,9 @@ $rowColor = static function (array $row): string {
         <div class="alert alert-info">
             No bookings for <?php echo (int) $year; ?> yet.
             <?php if ($isMgr === true): ?>
-                <a href="/venues/booking?venue=<?php echo (int) $venueId; ?>">Add the first one →</a>
-                or <a href="/venues/generate?venue=<?php echo (int) $venueId; ?>">generate a series</a>
-                or <a href="/venues/import">import a workbook</a>.
+                <a href="<?php echo htmlspecialchars(Site::url('venues/booking'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venueId; ?>">Add the first one →</a>
+                or <a href="<?php echo htmlspecialchars(Site::url('venues/generate'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venueId; ?>">generate a series</a>
+                or <a href="<?php echo htmlspecialchars(Site::url('venues/import'), ENT_QUOTES, 'UTF-8'); ?>">import a workbook</a>.
             <?php endif; ?>
         </div>
     <?php else: ?>
@@ -316,7 +316,7 @@ $rowColor = static function (array $row): string {
                     <?php if ($isMgr === true): ?>
                         <div class="col-1 text-end small" data-label="Cost">
                             <?php echo $row['costPence'] !== null ? $esc($currency) . ' ' . number_format((int) $row['costPence'] / 100, 2) : '—'; ?>
-                            <br><a href="/venues/booking?id=<?php echo (int) $row['bookingID']; ?>" class="small">Edit</a>
+                            <br><a href="<?php echo htmlspecialchars(Site::url('venues/booking'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $row['bookingID']; ?>" class="small">Edit</a>
                         </div>
                     <?php endif; ?>
                 </div>

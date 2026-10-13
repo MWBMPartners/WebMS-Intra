@@ -35,7 +35,7 @@ Auth::requireLogin();
 
 $pageTitle   = 'My Volunteering';
 $pageSection = 'account';
-$breadcrumbs = ['Account' => '/account', 'My Volunteering' => ''];
+$breadcrumbs = ['Account' => Site::url('account'), 'My Volunteering' => ''];
 
 $userId = (int) ($_SESSION['user_id'] ?? 0);
 $siteId = Site::id();
@@ -120,7 +120,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="card shadow-sm mb-4">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h2 class="h5 mb-0">
-                        <a href="/calendar/event?slug=<?php echo htmlspecialchars((string) $e['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none">
+                        <a href="<?php echo htmlspecialchars(Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo htmlspecialchars((string) $e['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none">
                             <?php echo htmlspecialchars((string) $e['eventName'], ENT_QUOTES, 'UTF-8'); ?>
                         </a>
                     </h2>
@@ -170,7 +170,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <ul class="list-unstyled small mb-0">
                                 <?php foreach ($perEventDocs[$eid] as $d): ?>
                                     <li class="mb-1">
-                                        <a href="/documents/download?id=<?php echo (int) $d['documentID']; ?>" class="text-decoration-none">
+                                        <a href="<?php echo htmlspecialchars(Site::url('documents/download'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $d['documentID']; ?>" class="text-decoration-none">
                                             <i class="fa-solid fa-file-lines me-1"></i>
                                             <?php echo htmlspecialchars((string) $d['title'], ENT_QUOTES, 'UTF-8'); ?>
                                         </a>
@@ -182,11 +182,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                 </div>
                 <div class="card-footer bg-light d-flex gap-2">
-                    <a href="/calendar/event?slug=<?php echo htmlspecialchars((string) $e['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary">
+                    <a href="<?php echo htmlspecialchars(Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo htmlspecialchars((string) $e['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary">
                         <i class="fa-solid fa-circle-info me-1"></i>Event details
                     </a>
                     <?php if ($iCoord === true): ?>
-                        <a href="/calendar/manage?edit=<?php echo $eid; ?>" class="btn btn-sm btn-outline-secondary">
+                        <a href="<?php echo htmlspecialchars(Site::url('calendar/manage'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo $eid; ?>" class="btn btn-sm btn-outline-secondary">
                             <i class="fa-solid fa-pen me-1"></i>Manage event
                         </a>
                     <?php endif; ?>

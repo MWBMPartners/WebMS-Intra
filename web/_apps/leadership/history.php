@@ -27,7 +27,7 @@ use Portal\Core\Site;
 // 📌 Page metadata
 $pageTitle   = 'Leadership History';
 $pageSection = 'leadership';
-$breadcrumbs = ['Dashboard' => '/', 'Leadership' => '/leadership', 'History' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Leadership' => Site::url('leadership'), 'History' => ''];
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -113,7 +113,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 📜 Header -->
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-clock-rotate-left me-2"></i>Leadership History</h1>
-    <a href="/leadership" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('leadership'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back
     </a>
 </div>
@@ -121,7 +121,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 🔍 Filter by role -->
 <div class="card mb-4">
     <div class="card-body py-2">
-        <form method="get" action="/leadership/history" class="row g-2 align-items-end">
+        <form method="get" action="<?php echo htmlspecialchars(Site::url('leadership/history'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
             <div class="col-auto">
                 <label for="filterRole" class="form-label mb-0 small">Filter by role:</label>
             </div>
@@ -139,7 +139,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="col-auto">
                 <button type="submit" class="btn btn-sm btn-primary">Filter</button>
                 <?php if ($filterRoleID > 0): ?>
-                    <a href="/leadership/history" class="btn btn-sm btn-outline-secondary">Clear</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('leadership/history'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-secondary">Clear</a>
                 <?php endif; ?>
             </div>
         </form>
@@ -203,12 +203,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php endif; ?>
                 </div>
                 <div class="col-12 col-md-2 text-md-end mt-2 mt-md-0">
-                    <a href="/leadership/assign?id=<?php echo (int) $assign['assignmentID']; ?>"
+                    <a href="<?php echo htmlspecialchars(Site::url('leadership/assign'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $assign['assignmentID']; ?>"
                        class="btn btn-sm btn-outline-primary me-1" title="Edit">
                         <i class="fa-solid fa-pen"></i>
                     </a>
                     <?php if ((int) $assign['isActive'] === 1): ?>
-                        <form method="post" action="/leadership/delete" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('leadership/delete'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="assignmentID" value="<?php echo (int) $assign['assignmentID']; ?>">
                             <button type="submit" class="btn btn-sm btn-outline-danger"

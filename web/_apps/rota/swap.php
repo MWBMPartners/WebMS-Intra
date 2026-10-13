@@ -22,7 +22,7 @@ $userId = (int) ($_SESSION['user_id'] ?? 0);
 
 $slotId = (int) ($_GET['slot'] ?? 0);
 if ($slotId <= 0) {
-    header('Location: /rota');
+    header('Location: ' . Site::url('rota'));
     exit();
 }
 
@@ -89,7 +89,7 @@ if ($uStmt !== false) {
 
 $pageTitle   = 'Request Swap';
 $pageSection = 'rota';
-$breadcrumbs = ['Dashboard' => '/', 'Duty Roster' => '/rota', 'Request Swap' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Duty Roster' => Site::url('rota'), 'Request Swap' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 $allowOpenSwap = (string) (App::settings()['rota']['allow_open_swap'] ?? '1') === '1';
@@ -122,7 +122,7 @@ $allowOpenSwap = (string) (App::settings()['rota']['allow_open_swap'] ?? '1') ==
                 <textarea name="requestMessage" class="form-control form-control-sm" rows="3" maxlength="500" placeholder="Reason / details…"></textarea>
             </div>
             <button type="submit" class="btn btn-primary btn-sm">Send swap request</button>
-            <a href="/rota" class="btn btn-outline-secondary btn-sm">Cancel</a>
+            <a href="<?php echo htmlspecialchars(Site::url('rota'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Cancel</a>
         </form>
     </div>
 </div>

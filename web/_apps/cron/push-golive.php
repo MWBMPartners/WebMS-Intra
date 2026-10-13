@@ -175,7 +175,7 @@ foreach ($siteIds as $siteId) {
                     [
                         'title' => (string) (App::settingForSite('site.name', $siteId) ?? 'Portal') . ' is live now',
                         'body'  => (string) ($live['name'] ?? 'Livestream'),
-                        'url'   => '/live',
+                        'url'   => Site::url('live'),
                         'tag'   => 'golive',
                     ],
                     $ttl,
@@ -211,7 +211,7 @@ foreach ($siteIds as $siteId) {
                             [
                                 'title' => (string) ($next['name'] ?? 'Service') . ' starts soon',
                                 'body'  => 'Starting at ' . date('H:i', $nextAt),
-                                'url'   => '/live',
+                                'url'   => Site::url('live'),
                                 'tag'   => 'evt' . $channelId,
                             ],
                             $ttl,

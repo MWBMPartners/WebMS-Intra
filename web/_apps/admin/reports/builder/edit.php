@@ -49,14 +49,14 @@ Auth::requireLogin();
 if (App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = t('error.access_denied_inline');
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /dashboard');
+    header('Location: ' . Site::url('dashboard'));
     exit();
 }
 
 if (AppRegistry::isEnabled('reports') === false) {
     $_SESSION['flash_msg']  = 'Reports is disabled for this site.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /admin/apps');
+    header('Location: ' . Site::url('admin/apps'));
     exit();
 }
 
@@ -83,14 +83,14 @@ if ($reportId > 0) {
     if ($existing === null) {
         $_SESSION['flash_msg']  = 'Report not found.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/reports/builder');
+        header('Location: ' . Site::url('admin/reports/builder'));
         exit();
     }
     $isOwner = ((int) ($existing['createdByID'] ?? 0)) === $userId;
     if ($isOwner === false && App::isSiteAdmin() === false) {
         $_SESSION['flash_msg']  = 'You can only edit reports you created.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/reports/builder');
+        header('Location: ' . Site::url('admin/reports/builder'));
         exit();
     }
     $reportName   = (string) $existing['reportName'];
@@ -135,14 +135,14 @@ if ($sourceKey !== '' && isset($availableSources[$sourceKey]) === false) {
 
 $pageTitle   = $reportId > 0 ? 'Edit report' : 'New report';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Reports' => '/admin/reports', 'Builder' => '/admin/reports/builder', $pageTitle => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Reports' => Site::url('admin/reports'), 'Builder' => Site::url('admin/reports/builder'), $pageTitle => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-<?php echo $reportId > 0 ? 'pen' : 'plus'; ?> me-2"></i><?php echo htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8'); ?></h1>
-    <a href="/admin/reports/builder" class="btn btn-outline-secondary btn-sm">
+    <a href="<?php echo htmlspecialchars(Site::url('admin/reports/builder'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to reports
     </a>
 </div>
@@ -166,7 +166,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="row g-3">
                     <?php foreach ($availableSources as $key => $meta): ?>
                         <div class="col-6 col-md-4">
-                            <a class="btn btn-outline-primary w-100 py-3" href="/admin/reports/builder/edit?source=<?php echo urlencode($key); ?><?php echo $reportId > 0 ? '&amp;id=' . $reportId : ''; ?>">
+                            <a class="btn btn-outline-primary w-100 py-3" href="<?php echo htmlspecialchars(Site::url('admin/reports/builder/edit'), ENT_QUOTES, 'UTF-8'); ?>?source=<?php echo urlencode($key); ?><?php echo $reportId > 0 ? '&amp;id=' . $reportId : ''; ?>">
                                 <?php echo htmlspecialchars((string) $meta['label'], ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </div>
@@ -370,7 +370,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <span class="text-muted small">Data source</span>
                     <div class="h5 mb-0"><?php echo $h((string) ($srcMeta['label'] ?? $sourceKey)); ?></div>
                 </div>
-                <a href="/admin/reports/builder/edit?<?php echo $reportId > 0 ? 'id=' . $reportId . '&amp;' : ''; ?>pickSource=1" class="btn btn-sm btn-outline-secondary">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/reports/builder/edit'), ENT_QUOTES, 'UTF-8'); ?>?<?php echo $reportId > 0 ? 'id=' . $reportId . '&amp;' : ''; ?>pickSource=1" class="btn btn-sm btn-outline-secondary">
                     Change source (resets this form)
                 </a>
             </div>
@@ -523,7 +523,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card mb-4">
             <div class="card-header"><h6 class="mb-0">Save report</h6></div>
             <div class="card-body">
-                <form method="post" action="/admin/reports/builder/save" id="reportSaveForm">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/reports/builder/save'), ENT_QUOTES, 'UTF-8'); ?>" id="reportSaveForm">
                     <input type="hidden" name="csrf_token" value="<?php echo $h(Auth::csrfToken()); ?>">
                     <input type="hidden" name="reportID" value="<?php echo $reportId; ?>">
                     <input type="hidden" name="definition" id="definitionField" value="">

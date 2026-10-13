@@ -37,7 +37,7 @@ if ($stmt !== false) {
 if ($project === null || (string) $project['status'] !== 'active') {
     $_SESSION['flash_msg']  = 'Project not accepting pledges.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /projects/view?slug=' . urlencode($slug));
+    header('Location: ' . Site::url('projects/view') . '?slug=' . urlencode($slug));
     exit();
 }
 
@@ -47,7 +47,7 @@ $donorId = Auth::check() === true ? (int) ($_SESSION['user_id'] ?? 0) : null;
 if ($donorId === null && Captcha::verify($_POST, 'pledge') === false) {
     $_SESSION['flash_msg']  = 'Captcha failed — please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /projects/view?slug=' . urlencode($slug));
+    header('Location: ' . Site::url('projects/view') . '?slug=' . urlencode($slug));
     exit();
 }
 
@@ -57,7 +57,7 @@ $amountPence = (int) round(((float) $clean) * 100);
 if ($amountPence < 100) {
     $_SESSION['flash_msg']  = 'Minimum pledge is 1.00.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /projects/view?slug=' . urlencode($slug));
+    header('Location: ' . Site::url('projects/view') . '?slug=' . urlencode($slug));
     exit();
 }
 
@@ -87,5 +87,5 @@ if ($stmt !== false) {
 
 $_SESSION['flash_msg']  = 'Thank you — your pledge has been recorded.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /projects/view?slug=' . urlencode($slug));
+header('Location: ' . Site::url('projects/view') . '?slug=' . urlencode($slug));
 exit();

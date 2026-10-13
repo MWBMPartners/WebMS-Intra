@@ -680,7 +680,7 @@ foreach ($identifiers as $identRow) {
 
 $pageTitle   = (string) $asset['name'];
 $pageSection = 'assets';
-$breadcrumbs = ['Dashboard' => '/', 'Assets' => '/assets', (string) $asset['name'] => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Assets' => Site::url('assets'), (string) $asset['name'] => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
@@ -718,13 +718,13 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                  needs (mirrors the "Public page & lost-and-found" panel's
                  own $canManage-only gate above, since the label encodes
                  that same public token). -->
-            <a href="/assets/labels?assetID=<?php echo $assetId; ?>" class="btn btn-outline-secondary btn-sm">
+            <a href="<?php echo htmlspecialchars(Site::url('assets/labels'), ENT_QUOTES, 'UTF-8'); ?>?assetID=<?php echo $assetId; ?>" class="btn btn-outline-secondary btn-sm">
                 <i class="fa-solid fa-tag me-1"></i>Print label
             </a>
-            <a href="/assets/edit?id=<?php echo $assetId; ?>" class="btn btn-outline-primary btn-sm">
+            <a href="<?php echo htmlspecialchars(Site::url('assets/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $assetId; ?>" class="btn btn-outline-primary btn-sm">
                 <i class="fa-solid fa-pen me-1"></i>Edit
             </a>
-            <form method="post" action="/assets/delete" data-confirm="Delete this asset? This can't be undone from the UI." data-confirm-destructive="true">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/delete'), ENT_QUOTES, 'UTF-8'); ?>" data-confirm="Delete this asset? This can't be undone from the UI." data-confirm-destructive="true">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
                 <button type="submit" class="btn btn-outline-danger btn-sm">
@@ -750,7 +750,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
         <div class="col-md-3"><strong>Asset tag code</strong><br><?php echo $asset['assetTagCode'] !== null ? htmlspecialchars((string) $asset['assetTagCode'], ENT_QUOTES, 'UTF-8') : '<span class="text-muted">—</span>'; ?></div>
         <div class="col-md-3"><strong>Parent asset</strong><br>
             <?php if ($parentAssetName !== null): ?>
-                <a href="/assets/item?id=<?php echo (int) $asset['parentAssetID']; ?>"><?php echo htmlspecialchars($parentAssetName, ENT_QUOTES, 'UTF-8'); ?></a>
+                <a href="<?php echo htmlspecialchars(Site::url('assets/item'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $asset['parentAssetID']; ?>"><?php echo htmlspecialchars($parentAssetName, ENT_QUOTES, 'UTF-8'); ?></a>
                 <br><small class="text-muted">Loaned and returned together with its parent kit.</small>
             <?php else: ?>
                 <span class="text-muted">—</span>
@@ -865,7 +865,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                     <?php $kitChildId = (int) $kitChild['assetID']; ?>
                     <div class="portal-data-row align-items-center">
                         <div class="col-6 col-md-5">
-                            <a href="/assets/item?id=<?php echo $kitChildId; ?>">
+                            <a href="<?php echo htmlspecialchars(Site::url('assets/item'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $kitChildId; ?>">
                                 <?php echo htmlspecialchars((string) $kitChild['name'], ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                             <?php if ($kitChild['assetTagCode'] !== null && (string) $kitChild['assetTagCode'] !== ''): ?>
@@ -879,7 +879,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                         </div>
                         <?php if ($canManage === true): ?>
                         <div class="col-3 col-md-3 text-md-end">
-                            <form method="post" action="/assets/kit-save" class="d-inline"
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/kit-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                                   data-confirm="Detach this component from the kit?" data-confirm-destructive="true">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="action" value="detach">
@@ -900,7 +900,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
 
         <?php if ($canManage === true): ?>
             <?php if (count($kitCandidates) > 0): ?>
-                <form method="post" action="/assets/kit-save" class="row g-2 align-items-end">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/kit-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="action" value="attach">
                     <input type="hidden" name="parentAssetID" value="<?php echo $assetId; ?>">
@@ -956,14 +956,14 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
             <?php else: ?>
                 <span class="badge bg-secondary">Disabled</span>
             <?php endif; ?>
-            <br><small class="text-muted">Change this on the <a href="/assets/edit?id=<?php echo $assetId; ?>">Edit asset</a> page.</small>
+            <br><small class="text-muted">Change this on the <a href="<?php echo htmlspecialchars(Site::url('assets/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $assetId; ?>">Edit asset</a> page.</small>
         </div>
         <div class="col-md-6">
             <strong>Lost-and-found link</strong><br>
             <?php if ((int) $asset['isConfidential'] === 1 || (int) $asset['publicPageEnabled'] !== 1): ?>
                 <span class="text-muted">Not publicly reachable while disabled/confidential.</span>
             <?php else: ?>
-                <a href="/a/<?php echo htmlspecialchars((string) $asset['publicToken'], ENT_QUOTES, 'UTF-8'); ?>"
+                <a href="<?php echo htmlspecialchars(Site::url('a/'), ENT_QUOTES, 'UTF-8'); ?><?php echo htmlspecialchars((string) $asset['publicToken'], ENT_QUOTES, 'UTF-8'); ?>"
                    target="_blank" rel="noopener noreferrer" class="small">
                     /a/<?php echo htmlspecialchars((string) $asset['publicToken'], ENT_QUOTES, 'UTF-8'); ?>
                     <i class="fa-solid fa-arrow-up-right-from-square fa-xs"></i>
@@ -971,7 +971,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
             <?php endif; ?>
         </div>
         <div class="col-12 d-flex flex-wrap align-items-center gap-2">
-            <a href="/assets/found-reports?assetID=<?php echo $assetId; ?>" class="btn btn-outline-secondary btn-sm">
+            <a href="<?php echo htmlspecialchars(Site::url('assets/found-reports'), ENT_QUOTES, 'UTF-8'); ?>?assetID=<?php echo $assetId; ?>" class="btn btn-outline-secondary btn-sm">
                 <i class="fa-solid fa-flag me-1"></i>Found-item reports
                 <?php if ($newFoundReportCount > 0): ?>
                     <span class="badge bg-danger ms-1"><?php echo (int) $newFoundReportCount; ?> new</span>
@@ -984,7 +984,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                  AssetRegister::regeneratePublicToken()'s own doc). Folded
                  into save.php's action= dispatch rather than a new route
                  — see that file's header (#401 scope: no new routes). -->
-            <form method="post" action="/assets/save" class="d-inline"
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                   data-confirm="Regenerate this asset's public token? Any printed labels or QR codes using the CURRENT link will stop working immediately."
                   data-confirm-destructive="true">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
@@ -1081,7 +1081,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                         </div>
                         <div class="col-2 col-md-4 text-end">
                             <?php if ($canManage === true): ?>
-                                <form method="post" action="/assets/license-action" class="d-inline"
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/license-action'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                                       data-confirm="Release this seat?" data-confirm-destructive="true">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="licenseAssetID" value="<?php echo $assetId; ?>">
@@ -1124,7 +1124,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
         <?php if ($canManage === true): ?>
             <hr>
             <h3 class="h6">Link a seat</h3>
-            <form method="post" action="/assets/license-save" class="row g-2">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/license-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="licenseAssetID" value="<?php echo $assetId; ?>">
                 <div class="col-md-3">
@@ -1240,7 +1240,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
     <div class="card-header d-flex justify-content-between align-items-center">
         <h2 class="h5 mb-0">Loans</h2>
         <?php if ($hasOpenLoan === false): ?>
-            <a href="/assets/loan?assetID=<?php echo $assetId; ?>" class="btn btn-outline-primary btn-sm">
+            <a href="<?php echo htmlspecialchars(Site::url('assets/loan'), ENT_QUOTES, 'UTF-8'); ?>?assetID=<?php echo $assetId; ?>" class="btn btn-outline-primary btn-sm">
                 <i class="fa-solid fa-right-left me-1"></i>Lend out / Record borrowing
             </a>
         <?php endif; ?>
@@ -1292,14 +1292,14 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                         </div>
                         <div class="col-12 col-md-4 text-md-end">
                             <?php if ($loanStatus === 'requested' && $canApproveThisLoan === true): ?>
-                                <form method="post" action="/assets/loan-action" class="d-inline">
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/loan-action'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="action" value="approve">
                                     <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
                                     <input type="hidden" name="loanID" value="<?php echo (int) $loan['loanID']; ?>">
                                     <button type="submit" class="btn btn-sm btn-success mb-1"><i class="fa-solid fa-check me-1"></i>Approve</button>
                                 </form>
-                                <form method="post" action="/assets/loan-action" class="d-inline"
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/loan-action'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                                       data-confirm="Decline this loan request?" data-confirm-destructive="true">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="action" value="decline">
@@ -1311,7 +1311,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                             <?php if ($loanStatus === 'approved' && $canApproveThisLoan === true): ?>
                                 <details class="d-inline-block mb-1 text-start">
                                     <summary class="btn btn-sm btn-primary"><i class="fa-solid fa-dolly me-1"></i>Check out</summary>
-                                    <form method="post" action="/assets/loan-action" class="mt-2">
+                                    <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/loan-action'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-2">
                                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                         <input type="hidden" name="action" value="checkout">
                                         <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
@@ -1330,7 +1330,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                             <?php if ($loanStatus === 'active' && ($canApproveThisLoan === true || $loanIsRequester === true)): ?>
                                 <details class="d-inline-block mb-1 text-start">
                                     <summary class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-dolly-flatbed me-1"></i>Check in</summary>
-                                    <form method="post" action="/assets/loan-action" class="mt-2">
+                                    <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/loan-action'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-2">
                                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                         <input type="hidden" name="action" value="checkin">
                                         <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
@@ -1383,7 +1383,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                                 </details>
                             <?php endif; ?>
                             <?php if (in_array($loanStatus, ['requested', 'approved'], true) === true && ($canApproveThisLoan === true || $loanIsRequester === true)): ?>
-                                <form method="post" action="/assets/loan-action" class="d-inline"
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/loan-action'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                                       data-confirm="Cancel this loan?" data-confirm-destructive="true">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="action" value="cancel">
@@ -1443,7 +1443,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
 <div class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
         <h2 class="h5 mb-0">Maintenance</h2>
-        <a href="/assets/maintenance?assetID=<?php echo $assetId; ?>" class="btn btn-outline-secondary btn-sm">
+        <a href="<?php echo htmlspecialchars(Site::url('assets/maintenance'), ENT_QUOTES, 'UTF-8'); ?>?assetID=<?php echo $assetId; ?>" class="btn btn-outline-secondary btn-sm">
             <i class="fa-solid fa-arrow-up-right-from-square me-1"></i>Full page
         </a>
     </div>
@@ -1492,7 +1492,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                         <div class="col-12 col-md-2 text-md-end">
                             <details class="d-inline-block mb-1 text-start">
                                 <summary class="btn btn-sm btn-outline-secondary" title="Edit"><i class="fa-solid fa-pen"></i></summary>
-                                <form method="post" action="/assets/maintenance-save" class="mt-2 row g-1" style="min-width: 260px;">
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/maintenance-save'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-2 row g-1" style="min-width: 260px;">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="action" value="update">
                                     <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
@@ -1551,7 +1551,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                                     </div>
                                 </form>
                             </details>
-                            <form method="post" action="/assets/maintenance-save" class="d-inline"
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/maintenance-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                                   data-confirm="Remove this maintenance entry?" data-confirm-destructive="true">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="action" value="delete">
@@ -1571,7 +1571,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
         <?php if ($canManageMaintenance === true): ?>
             <hr>
             <h3 class="h6">Add a maintenance entry</h3>
-            <form method="post" action="/assets/maintenance-save" class="row g-2">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/maintenance-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="add">
                 <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
@@ -1651,7 +1651,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                 <?php foreach ($eventAssignments as $ea): ?>
                     <div class="portal-data-row align-items-start">
                         <div class="col-6 col-md-5">
-                            <a href="/calendar/event?slug=<?php echo htmlspecialchars((string) ($ea['eventSlug'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+                            <a href="<?php echo htmlspecialchars(Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo htmlspecialchars((string) ($ea['eventSlug'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                                 <?php echo htmlspecialchars((string) $ea['eventName'], ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                             <br><small class="text-muted"><?php echo htmlspecialchars(date('j M Y, H:i', strtotime((string) $ea['startDateTime'])), ENT_QUOTES, 'UTF-8'); ?></small>
@@ -1669,7 +1669,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                         </div>
                         <div class="col-2 col-md-3 text-end">
                             <?php if ($privileged === true): ?>
-                                <form method="post" action="/assets/event-assign" class="d-inline"
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/event-assign'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                                       data-confirm="Remove this asset's assignment to this event?" data-confirm-destructive="true">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="action" value="unassign">
@@ -1693,7 +1693,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
             <?php if (count($eventCandidates) === 0): ?>
                 <p class="text-muted small">No upcoming events found on this site.</p>
             <?php else: ?>
-                <form method="post" action="/assets/event-assign" class="row g-2">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/event-assign'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="action" value="assign">
                     <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
@@ -1751,14 +1751,14 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                                     <i class="fa-solid fa-arrow-up-right-from-square me-1"></i>Open link
                                 </a>
                             <?php else: ?>
-                                <a href="/assets/resource-download?id=<?php echo (int) $res['resourceID']; ?>">
+                                <a href="<?php echo htmlspecialchars(Site::url('assets/resource-download'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $res['resourceID']; ?>">
                                     <i class="fa-solid fa-download me-1"></i><?php echo htmlspecialchars((string) $res['fileName'], ENT_QUOTES, 'UTF-8'); ?>
                                 </a>
                             <?php endif; ?>
                         </div>
                         <div class="col-2 col-md-3 text-end">
                             <?php if ($privileged === true): ?>
-                                <form method="post" action="/assets/resource-save" class="d-inline"
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/resource-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                                       data-confirm="Remove this resource?" data-confirm-destructive="true">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="action" value="delete">
@@ -1778,7 +1778,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
         <?php if ($privileged === true): ?>
             <hr>
             <h3 class="h6">Add a resource</h3>
-            <form method="post" action="/assets/resource-save" enctype="multipart/form-data" class="row g-2">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/resource-save'), ENT_QUOTES, 'UTF-8'); ?>" enctype="multipart/form-data" class="row g-2">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="add">
                 <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
@@ -1846,7 +1846,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                                 $isOn = (int) ($o[$field] ?? 0) === 1;
                                 if ($canManage === true):
                             ?>
-                                <form method="post" action="/assets/owners-save" class="d-inline">
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/owners-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="action" value="toggle-authority">
                                     <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
@@ -1869,7 +1869,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                         </div>
                         <div class="col-2 col-md-3 text-end">
                             <?php if ($canManage === true): ?>
-                                <form method="post" action="/assets/owners-save" class="d-inline"
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/owners-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                                       data-confirm="Remove this owner?" data-confirm-destructive="true">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="action" value="remove">
@@ -1890,7 +1890,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
         <hr>
         <h3 class="h6">Ownership terms</h3>
         <?php if ($canManage === true): ?>
-            <form method="post" action="/assets/owners-save" class="row g-2">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/owners-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="set-terms">
                 <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
@@ -1914,7 +1914,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
             <!-- ➕ Add an owner — party-type selector reveals the matching picker (progressive enhancement — see script below; owners-save.php reads only the field matching the posted partyType regardless of which pickers were visible). -->
             <hr>
             <h3 class="h6">Add an owner / custodian</h3>
-            <form method="post" action="/assets/owners-save" class="row g-2">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/owners-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="add">
                 <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
@@ -1962,7 +1962,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                             <option value="<?php echo (int) $org['orgID']; ?>"><?php echo htmlspecialchars((string) $org['orgName'], ENT_QUOTES, 'UTF-8'); ?></option>
                         <?php endforeach; ?>
                     </select>
-                    <small class="text-muted"><a href="/assets/orgs">Manage organisations</a></small>
+                    <small class="text-muted"><a href="<?php echo htmlspecialchars(Site::url('assets/orgs'), ENT_QUOTES, 'UTF-8'); ?>">Manage organisations</a></small>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small" for="roleKind">Role</label>
@@ -2105,7 +2105,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                                          local GS1 mod-10 check-digit ALWAYS, then an optional
                                          GEPIR lookup when assets.gepir_verify_enabled/
                                          assets.gepir_endpoint are configured (off by default). -->
-                                    <form method="post" action="/assets/identifier-verify" class="d-inline">
+                                    <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/identifier-verify'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                         <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
                                         <input type="hidden" name="identifierID" value="<?php echo (int) $ident['identifierID']; ?>">
@@ -2114,7 +2114,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                                         </button>
                                     </form>
                                     <?php if ((int) $ident['isPrimary'] !== 1): ?>
-                                        <form method="post" action="/assets/identifiers-save" class="d-inline">
+                                        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/identifiers-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                             <input type="hidden" name="action" value="set-primary">
                                             <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
@@ -2124,7 +2124,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                                             </button>
                                         </form>
                                     <?php endif; ?>
-                                    <form method="post" action="/assets/identifiers-save" class="d-inline"
+                                    <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/identifiers-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                                           data-confirm="Remove this identifier?" data-confirm-destructive="true">
                                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                         <input type="hidden" name="action" value="remove">
@@ -2149,7 +2149,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                  159's seed comment) are called out inline as recommended. -->
             <hr>
             <h3 class="h6">Add an identifier</h3>
-            <form method="post" action="/assets/identifiers-save" class="row g-2">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/identifiers-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="add">
                 <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
@@ -2242,13 +2242,13 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                                     <i class="fa-solid fa-arrow-up-right-from-square me-1"></i>Open link
                                 </a>
                             <?php else: ?>
-                                <a href="/assets/resource-download?id=<?php echo (int) $doc['resourceID']; ?>">
+                                <a href="<?php echo htmlspecialchars(Site::url('assets/resource-download'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $doc['resourceID']; ?>">
                                     <i class="fa-solid fa-download me-1"></i><?php echo htmlspecialchars((string) $doc['fileName'], ENT_QUOTES, 'UTF-8'); ?>
                                 </a>
                             <?php endif; ?>
                         </div>
                         <div class="col-2 col-md-3 text-end">
-                            <form method="post" action="/assets/resource-save" class="d-inline"
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/resource-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                                   data-confirm="Remove this confidential document?" data-confirm-destructive="true">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="action" value="delete">
@@ -2266,7 +2266,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
 
         <hr>
         <h3 class="h6">Upload a confidential document</h3>
-        <form method="post" action="/assets/resource-save" enctype="multipart/form-data" class="row g-2">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/resource-save'), ENT_QUOTES, 'UTF-8'); ?>" enctype="multipart/form-data" class="row g-2">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="add">
             <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
@@ -2388,6 +2388,6 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
     </div>
 </div>
 
-<a href="/assets" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
+<a href="<?php echo htmlspecialchars(Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

@@ -32,5 +32,5 @@ if ($code !== null && $code !== '' && Sms::completeVerification($siteId, $userId
     $_SESSION['flash_type'] = 'danger';
 }
 
-header('Location: /account/sms');
+header('Location: ' . Site::url('account/sms'));
 exit();

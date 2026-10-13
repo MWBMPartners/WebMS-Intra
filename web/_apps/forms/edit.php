@@ -42,7 +42,7 @@ if (App::isAdmin() === false) {
     echo '<div class="alert alert-danger"><i class="fa-solid fa-lock me-1"></i>'
         . htmlspecialchars(t('error.moderator_only'), ENT_QUOTES, 'UTF-8')
         . '</div>';
-    echo '<a href="/forms" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>';
+    echo '<a href="' . htmlspecialchars(Site::url('forms'), ENT_QUOTES, 'UTF-8') . '" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     exit();
 }
@@ -57,7 +57,7 @@ if ($formId > 0) {
         // 🛡️ Cross-site id / unknown id — no existence oracle, same flash+redirect either way.
         $_SESSION['flash_msg']  = 'Form not found.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /forms/manage', true, 302);
+        header('Location: ' . Site::url('forms/manage'), true, 302);
         exit();
     }
 }
@@ -81,14 +81,14 @@ $csrf = Auth::csrfToken();
 $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
 
 $pageTitle   = $formId > 0 ? 'Edit — ' . (string) $form['title'] : 'New Form';
-$breadcrumbs = ['Dashboard' => '/', 'Forms' => '/forms', 'Manage' => '/forms/manage', ($formId > 0 ? 'Edit' : 'New') => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Forms' => Site::url('forms'), 'Manage' => Site::url('forms/manage'), ($formId > 0 ? 'Edit' : 'New') => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-clipboard-list me-2"></i><?php echo htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8'); ?></h1>
-    <a href="/forms/manage" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back to manage</a>
+    <a href="<?php echo htmlspecialchars(Site::url('forms/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back to manage</a>
 </div>
 
 <?php if ($flashMsg !== ''): ?>
@@ -101,7 +101,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-4">
     <div class="card-body">
         <h2 class="h5 mb-3"><i class="fa-solid fa-pen me-1 text-primary"></i>Form details</h2>
-        <form method="post" action="/forms/save">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/save'), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="formID" value="<?php echo $formId; ?>">
 
@@ -119,7 +119,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <option value="both" <?php echo $allowPublicSite === false ? 'disabled' : ''; ?> <?php echo (string) ($form['audience'] ?? '') === 'both' ? 'selected' : ''; ?>>Internal + public</option>
                     </select>
                     <?php if ($allowPublicSite === false): ?>
-                        <div class="form-text">Public sharing is off for this site — <a href="/settings">enable it in Settings</a> to unlock public/both.</div>
+                        <div class="form-text">Public sharing is off for this site — <a href="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>">enable it in Settings</a> to unlock public/both.</div>
                         <input type="hidden" name="audience" value="internal">
                     <?php endif; ?>
                 </div>
@@ -185,7 +185,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     'closed'    => 'bg-secondary-subtle text-secondary-emphasis',
                     default     => 'bg-warning-subtle text-warning-emphasis',
                 }; ?>"><?php echo htmlspecialchars(ucfirst((string) $form['status']), ENT_QUOTES, 'UTF-8'); ?></span>
-                — manage publish/unpublish/close from <a href="/forms/manage">Manage forms</a>.
+                — manage publish/unpublish/close from <a href="<?php echo htmlspecialchars(Site::url('forms/manage'), ENT_QUOTES, 'UTF-8'); ?>">Manage forms</a>.
             </p>
             <?php if ($publicUrl !== ''): ?>
                 <div class="input-group input-group-sm mb-2" style="max-width: 480px;">
@@ -197,7 +197,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                       // It was written "/qr.php?…": every address ending in .php answers "page not found" here
                       // (.htaccess), so this picture was broken on every installation (found 12 October 2026, #500). ?>
                 <img src="<?php echo htmlspecialchars(Site::url('qr'), ENT_QUOTES, 'UTF-8'); ?>?content=<?php echo urlencode($publicUrl); ?>&amp;size=128" width="128" height="128" alt="QR code for the public form link" class="mb-2 border rounded d-block">
-                <form method="post" action="/forms/publish">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/publish'), ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="formID" value="<?php echo $formId; ?>">
                     <input type="hidden" name="action" value="rotate">
@@ -246,14 +246,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             </div>
                             <div class="col-12 col-md-6 text-md-end">
                                 <div class="btn-group btn-group-sm" role="group">
-                                    <form method="post" action="/forms/field-move" class="d-inline">
+                                    <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/field-move'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                         <input type="hidden" name="fieldID" value="<?php echo $fieldId; ?>">
                                         <input type="hidden" name="formID" value="<?php echo $formId; ?>">
                                         <input type="hidden" name="direction" value="up">
                                         <button type="submit" class="btn btn-outline-secondary" title="Move up" <?php echo $idx === 0 ? 'disabled' : ''; ?>><i class="fa-solid fa-arrow-up"></i></button>
                                     </form>
-                                    <form method="post" action="/forms/field-move" class="d-inline">
+                                    <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/field-move'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                         <input type="hidden" name="fieldID" value="<?php echo $fieldId; ?>">
                                         <input type="hidden" name="formID" value="<?php echo $formId; ?>">
@@ -263,7 +263,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <button type="button" class="btn btn-outline-secondary" title="Edit" data-bs-toggle="collapse" data-bs-target="#<?php echo $collapseId; ?>">
                                         <i class="fa-solid fa-pen"></i>
                                     </button>
-                                    <form method="post" action="/forms/field-delete" class="d-inline">
+                                    <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/field-delete'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                         <input type="hidden" name="fieldID" value="<?php echo $fieldId; ?>">
                                         <input type="hidden" name="formID" value="<?php echo $formId; ?>">
@@ -274,7 +274,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 </div>
                             </div>
                             <div class="col-12 collapse" id="<?php echo $collapseId; ?>">
-                                <form method="post" action="/forms/field-save" class="border rounded p-3 mt-2 bg-body-tertiary">
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/field-save'), ENT_QUOTES, 'UTF-8'); ?>" class="border rounded p-3 mt-2 bg-body-tertiary">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="formID" value="<?php echo $formId; ?>">
                                     <input type="hidden" name="fieldID" value="<?php echo $fieldId; ?>">
@@ -350,7 +350,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <!-- ═══════════════ Add field ═══════════════ -->
                 <hr>
                 <h3 class="h6"><i class="fa-solid fa-plus me-1"></i>Add a field</h3>
-                <form method="post" action="/forms/field-save">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/field-save'), ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="formID" value="<?php echo $formId; ?>">
                     <input type="hidden" name="fieldID" value="0">

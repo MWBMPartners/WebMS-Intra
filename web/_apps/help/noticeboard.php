@@ -22,7 +22,7 @@ declare(strict_types=1);
 
 $pageTitle   = 'Help - Noticeboard';
 $pageSection = 'help';
-$breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'Noticeboard' => ''];
+$breadcrumbs = ['Dashboard' => \Portal\Core\Site::url(''), 'Help' => \Portal\Core\Site::url('help'), 'Noticeboard' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -32,7 +32,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-thumbtack me-2"></i>Noticeboard Guide</h1>
         <p class="text-secondary mb-0">A visual poster wall for what's on — browse, tap for details, and (if you're an admin) pin up new notices.</p>
     </div>
-    <a href="/help" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Help Centre
     </a>
 </div>
@@ -56,13 +56,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <section id="overview" class="mb-5">
     <h2 class="h4 mb-3"><i class="fa-solid fa-thumbtack me-2"></i>What is the Noticeboard?</h2>
     <p>
-        <a href="/noticeboard">Noticeboard</a> is a visual "pinboard" of what's coming up at your
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('noticeboard'), ENT_QUOTES, 'UTF-8'); ?>">Noticeboard</a> is a visual "pinboard" of what's coming up at your
         site — think of a physical corkboard of posters, but shareable and always up to date.
         Each notice is a poster tile with a title, category, date/time, location, and (optionally)
         an image, video, Canva design, or plain text card.
     </p>
     <p>
-        Unlike <a href="/announcements">Announcements</a> (which are short text notices in a list),
+        Unlike <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('announcements'), ENT_QUOTES, 'UTF-8'); ?>">Announcements</a> (which are short text notices in a list),
         the Noticeboard is designed to look and feel like a wall of real posters — full of colour,
         imagery, and variety.
     </p>

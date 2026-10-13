@@ -71,7 +71,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             data-bs-toggle="collapse" data-bs-target="#editChild<?php echo $childId; ?>">
                         <i class="fa-solid fa-pen me-1"></i>Edit
                     </button>
-                    <form method="post" action="/kids/profiles/save" class="d-inline"
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('kids/profiles/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                           data-confirm="Deactivate <?php echo htmlspecialchars((string) $c['fullName'], ENT_QUOTES, 'UTF-8'); ?>? Their check-in history is kept, but they will no longer appear here or at the check-in terminal."
                           data-confirm-destructive="true">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
@@ -89,7 +89,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                  edit their OWN child regardless of what childID is posted. -->
             <div class="collapse mb-2" id="editChild<?php echo $childId; ?>">
                 <div class="card card-body">
-                    <form method="post" action="/kids/profiles/save" class="row g-2">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('kids/profiles/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="action" value="edit">
                         <input type="hidden" name="childID" value="<?php echo $childId; ?>">
@@ -123,7 +123,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php endif; ?>
 
     <h2 class="h6">Add a child</h2>
-    <form method="post" action="/kids/profiles/save" class="row g-2">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('kids/profiles/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
         <input type="hidden" name="action" value="add">
         <div class="col-md-6"><label class="form-label small">Full name <span class="text-danger">*</span></label><input type="text" name="fullName" required maxlength="120" class="form-control form-control-sm"></div>

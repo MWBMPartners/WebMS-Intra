@@ -42,5 +42,5 @@ if ($pledgeId > 0 && Projects::fulfilPledge($pledgeId, $siteId, $userId, $giving
     $_SESSION['flash_type'] = 'danger';
 }
 
-header('Location: /projects/manage');
+header('Location: ' . Site::url('projects/manage'));
 exit();

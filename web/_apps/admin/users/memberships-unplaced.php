@@ -64,7 +64,7 @@ if (AccountGuard::actorIsGlobal() === false) {
 // 📌 Page metadata
 $pageTitle   = 'Groups and departments awaiting placement';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Users' => Site::url('admin/users'), 'Groups and departments awaiting placement' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Users' => Site::url('admin/users'), 'Groups and departments awaiting placement' => ''];
 
 // -----------------------------------------------------------------------------
 // 📋 The three lists, each capped at 500 — the cap #533 and #516 settled on,

@@ -73,6 +73,7 @@ use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
 use Portal\Core\PortalAddress;
 use Portal\Core\Router;
+use Portal\Core\Site;
 use Portal\Core\What3Words;
 
 Auth::ensureSession();
@@ -86,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token
     exit('Bad request');
 }
 
-$redirect = '/admin/settings/organisation';
+$redirect = Site::url('admin/settings/organisation');
 
 $reject = static function (string $message) use ($redirect): never {
     $_SESSION['flash_msg']  = $message;

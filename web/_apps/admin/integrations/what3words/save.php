@@ -37,6 +37,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -49,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token
     exit('Bad request');
 }
 
-$redirect = '/admin/integrations/what3words';
+$redirect = Site::url('admin/integrations/what3words');
 
 // 🚧 Portal-wide settings are for a global administrator only — see "WHO MAY
 //    SAVE HERE" in the file header. The refusal gives the reason rather than a

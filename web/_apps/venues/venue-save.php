@@ -54,7 +54,7 @@ if (Venues::canManage() !== true) {
 
 // 🔀 POST-only endpoint — a stray GET bounces back to the manage screen.
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /venues/manage');
+    header('Location: ' . Site::url('venues/manage'));
     exit();
 }
 
@@ -62,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /venues/manage');
+    header('Location: ' . Site::url('venues/manage'));
     exit();
 }
 
@@ -90,7 +90,7 @@ if ($action === 'save') {
         if ($newOrgId === 0) {
             $_SESSION['flash_msg']  = 'Landlord name is required.';
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /venues/manage' . ($isCreate ? '' : '?edit=' . $venueId));
+            header('Location: ' . Site::url('venues/manage') . ($isCreate ? '' : '?edit=' . $venueId));
             exit();
         }
         $landlordOrgId = $newOrgId;
@@ -103,7 +103,7 @@ if ($action === 'save') {
     if ($w3wPosted !== '' && GeoLocation::validateW3W($w3wPosted) === null) {
         $_SESSION['flash_msg']  = t('location.w3w_invalid');
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /venues/manage' . ($isCreate ? '' : '?edit=' . $venueId));
+        header('Location: ' . Site::url('venues/manage') . ($isCreate ? '' : '?edit=' . $venueId));
         exit();
     }
 
@@ -129,7 +129,7 @@ if ($action === 'save') {
     if ($savedId === 0) {
         $_SESSION['flash_msg']  = 'Could not save the venue — a venue name is required.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /venues/manage' . ($isCreate ? '' : '?edit=' . $venueId));
+        header('Location: ' . Site::url('venues/manage') . ($isCreate ? '' : '?edit=' . $venueId));
         exit();
     }
 
@@ -138,13 +138,13 @@ if ($action === 'save') {
     if ($isCreate === true) {
         $_SESSION['flash_msg']  = 'Venue created — default usage types have been seeded. Review the time windows below.';
         $_SESSION['flash_type'] = 'success';
-        header('Location: /venues/usage-types?venue=' . $savedId);
+        header('Location: ' . Site::url('venues/usage-types') . '?venue=' . $savedId);
         exit();
     }
 
     $_SESSION['flash_msg']  = 'Venue updated.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /venues/manage');
+    header('Location: ' . Site::url('venues/manage'));
     exit();
 }
 
@@ -165,7 +165,7 @@ if ($action === 'landlord_edit') {
     if ($orgOk === false) {
         $_SESSION['flash_msg']  = 'Landlord organisation not found.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /venues/manage' . ($returnVenueId > 0 ? '?edit=' . $returnVenueId : ''));
+        header('Location: ' . Site::url('venues/manage') . ($returnVenueId > 0 ? '?edit=' . $returnVenueId : ''));
         exit();
     }
 
@@ -179,7 +179,7 @@ if ($action === 'landlord_edit') {
 
     $_SESSION['flash_msg']  = $saved > 0 ? 'Landlord details updated.' : 'Landlord name is required.';
     $_SESSION['flash_type'] = $saved > 0 ? 'success' : 'danger';
-    header('Location: /venues/manage' . ($returnVenueId > 0 ? '?edit=' . $returnVenueId : ''));
+    header('Location: ' . Site::url('venues/manage') . ($returnVenueId > 0 ? '?edit=' . $returnVenueId : ''));
     exit();
 }
 
@@ -188,7 +188,7 @@ if ($action === 'toggle') {
     Venues::toggleVenueActive($venueId, $siteId, $userId);
     $_SESSION['flash_msg']  = 'Venue updated.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /venues/manage');
+    header('Location: ' . Site::url('venues/manage'));
     exit();
 }
 
@@ -203,10 +203,10 @@ if ($action === 'delete') {
     $result  = Venues::deleteVenue($venueId, $siteId, $userId);
     $_SESSION['flash_msg']  = $result['ok'] === true ? 'Venue deleted.' : (string) ($result['error'] ?? 'Could not delete venue.');
     $_SESSION['flash_type'] = $result['ok'] === true ? 'success' : 'danger';
-    header('Location: /venues/manage');
+    header('Location: ' . Site::url('venues/manage'));
     exit();
 }
 
 // 🚫 Unknown action.
-header('Location: /venues/manage');
+header('Location: ' . Site::url('venues/manage'));
 exit();

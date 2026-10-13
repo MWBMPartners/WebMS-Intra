@@ -124,7 +124,7 @@ $saveUrl = $e(Site::url('admin/settings/giving-records/save'));
 
 $pageTitle   = 'Giving records and the right to be forgotten';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => Site::url('admin'), 'Giving records' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Giving records' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 

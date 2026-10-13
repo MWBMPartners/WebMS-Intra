@@ -73,7 +73,7 @@ if (App::isAdmin() !== true && App::hasRole('asset_manager') !== true) {
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets');
+    header('Location: ' . Site::url('assets'));
     exit();
 }
 
@@ -95,7 +95,7 @@ if ((string) ($_POST['action'] ?? '') === 'regenerate-token') {
         : 'Could not regenerate the public token — the asset may no longer exist.';
     $_SESSION['flash_type'] = $newToken !== null ? 'success' : 'danger';
 
-    header('Location: /assets/item?id=' . $assetId);
+    header('Location: ' . Site::url('assets/item') . '?id=' . $assetId);
     exit();
 }
 
@@ -107,7 +107,7 @@ if ((string) ($_POST['action'] ?? '') === 'regenerate-token') {
 $fail = static function (string $msg) use ($assetId): never {
     $_SESSION['flash_msg']  = $msg;
     $_SESSION['flash_type'] = 'danger';
-    header('Location: ' . ($assetId > 0 ? '/assets/edit?id=' . $assetId : '/assets/edit'));
+    header('Location: ' . ($assetId > 0 ? Site::url('assets/edit') . '?id=' . $assetId : Site::url('assets/edit')));
     exit();
 };
 
@@ -319,5 +319,5 @@ if ($assetId > 0) {
 // -----------------------------------------------------------------------------
 AssetRegister::updateOwnershipTerms($assetId, (string) ($_POST['ownershipTerms'] ?? ''), $userId);
 
-header('Location: /assets/item?id=' . $assetId);
+header('Location: ' . Site::url('assets/item') . '?id=' . $assetId);
 exit();

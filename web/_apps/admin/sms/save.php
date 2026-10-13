@@ -33,6 +33,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -67,7 +68,7 @@ if (App::isRootAdmin() === false) {
         . 'administrator can change them. Your own organisation\'s settings '
         . 'are on the main Settings page and are unaffected.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/sms');
+    header('Location: ' . Site::url('admin/sms'));
     exit();
 }
 
@@ -140,5 +141,5 @@ if ($awsS !== '') {
 
 $_SESSION['flash_msg']  = 'SMS settings saved.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /admin/sms');
+header('Location: ' . Site::url('admin/sms'));
 exit();

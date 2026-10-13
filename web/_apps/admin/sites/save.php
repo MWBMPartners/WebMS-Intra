@@ -27,7 +27,7 @@ use Portal\Core\Site;
 
 // 🛡️ POST only
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/sites', true, 302);
+    header('Location: ' . Site::url('admin/sites'), true, 302);
     exit();
 }
 
@@ -42,7 +42,7 @@ if (App::isUmbrellaAdmin() === false) {
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/sites');
+    header('Location: ' . Site::url('admin/sites'));
     exit();
 }
 
@@ -73,7 +73,7 @@ if (preg_match('/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/', $primaryColor) !== 1) {
 if ($siteName === '' || $siteKey === '') {
     $_SESSION['flash_msg'] = 'Site name and key are required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/sites', true, 302);
+    header('Location: ' . Site::url('admin/sites'), true, 302);
     exit();
 }
 
@@ -81,7 +81,7 @@ if ($siteName === '' || $siteKey === '') {
 if (preg_match('/^[a-z0-9\-]+$/', $siteKey) !== 1) {
     $_SESSION['flash_msg'] = 'Site key must contain only lowercase letters, numbers, and hyphens.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/sites', true, 302);
+    header('Location: ' . Site::url('admin/sites'), true, 302);
     exit();
 }
 
@@ -230,7 +230,7 @@ try {
     Logger::errorPlatform('ReservedKeys', 'Error', 'CHECK_FAIL', $e->getMessage(), 'siteKey=' . $siteKey);
     $_SESSION['flash_msg'] = 'The portal could not check whether that site key is reserved, so nothing was saved. Try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/sites', true, 302);
+    header('Location: ' . Site::url('admin/sites'), true, 302);
     exit();
 }
 // 📝 Not touched here: a key that is merely a DUPLICATE of another
@@ -334,7 +334,7 @@ if ($siteID > 0) {
                 . 'switch it on.';
         }
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/sites', true, 302);
+        header('Location: ' . Site::url('admin/sites'), true, 302);
         exit();
     }
 
@@ -347,7 +347,7 @@ if ($siteID > 0) {
     if ($stmt === false) {
         $_SESSION['flash_msg'] = t('error.db_with_detail', ['detail' => $db->error]);
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/sites', true, 302);
+        header('Location: ' . Site::url('admin/sites'), true, 302);
         exit();
     }
 
@@ -379,7 +379,7 @@ if ($siteID > 0) {
             . ' An organisation with that key would take over the address /' . $siteKey . '/ '
             . 'whenever the portal uses address prefixes. Choose a different key.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/sites', true, 302);
+        header('Location: ' . Site::url('admin/sites'), true, 302);
         exit();
     }
 
@@ -428,5 +428,5 @@ if ($siteID > 0) {
     }
 }
 
-header('Location: /admin/sites', true, 302);
+header('Location: ' . Site::url('admin/sites'), true, 302);
 exit();

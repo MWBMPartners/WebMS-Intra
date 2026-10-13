@@ -30,6 +30,7 @@ use Portal\Core\App;
 use Portal\Core\Asset;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
+use Portal\Core\Site;
 
 // 🛡️ Always start a session so CSRF tokens are issued for this anonymous form
 Auth::ensureSession();
@@ -92,7 +93,7 @@ $flashErr  = (string) ($_GET['err'] ?? '');
             <i class="fa-solid fa-circle-check me-1"></i>
             Thank you for sharing your request — our leadership team will be praying for you.
         </div>
-        <a href="/" class="btn btn-outline-secondary w-100">
+        <a href="<?php echo htmlspecialchars(Site::url(''), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100">
             <i class="fa-solid fa-arrow-left me-1"></i> Back to Home
         </a>
     <?php else: ?>
@@ -109,7 +110,7 @@ $flashErr  = (string) ($_GET['err'] ?? '');
             <strong>only to the leadership team</strong> for confidential prayer.
         </p>
 
-        <form method="post" action="/prayer-requests/anonymous/save" novalidate>
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('prayer-requests/anonymous/save'), ENT_QUOTES, 'UTF-8'); ?>" novalidate>
             <input type="hidden" name="csrf_token"
                    value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
 
@@ -150,7 +151,7 @@ $flashErr  = (string) ($_GET['err'] ?? '');
             </button>
 
             <p class="small text-muted text-center mb-0">
-                Have an account? <a href="/login">Sign in</a> for more options.
+                Have an account? <a href="<?php echo htmlspecialchars(Site::url('login'), ENT_QUOTES, 'UTF-8'); ?>">Sign in</a> for more options.
             </p>
         </form>
 

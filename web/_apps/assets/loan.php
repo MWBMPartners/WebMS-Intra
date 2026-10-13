@@ -91,9 +91,9 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 $pageTitle   = 'New Loan Request';
 $pageSection = 'assets';
 $breadcrumbs = [
-    'Dashboard' => '/',
-    'Assets'    => '/assets',
-    (string) $asset['name'] => '/assets/item?id=' . $assetId,
+    'Dashboard' => Site::url(''),
+    'Assets'    => Site::url('assets'),
+    (string) $asset['name'] => Site::url('assets/item') . '?id=' . $assetId,
     'New loan'  => '',
 ];
 
@@ -109,13 +109,13 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
 
 <h1 class="mb-1"><i class="fa-solid fa-right-left me-2"></i>New loan request</h1>
 <p class="text-muted mb-4">
-    For <a href="/assets/item?id=<?php echo $assetId; ?>"><?php echo htmlspecialchars((string) $asset['name'], ENT_QUOTES, 'UTF-8'); ?></a>
+    For <a href="<?php echo htmlspecialchars(Site::url('assets/item'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $assetId; ?>"><?php echo htmlspecialchars((string) $asset['name'], ENT_QUOTES, 'UTF-8'); ?></a>
     — submitting only REQUESTS the loan; someone with lending authority for this asset must approve it before it can be checked out.
 </p>
 
 <div class="card">
     <div class="card-body">
-        <form method="post" action="/assets/loan-save">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/loan-save'), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
 
@@ -160,7 +160,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                             <option value="<?php echo (int) $org['orgID']; ?>"><?php echo htmlspecialchars((string) $org['orgName'], ENT_QUOTES, 'UTF-8'); ?></option>
                         <?php endforeach; ?>
                     </select>
-                    <small class="text-muted"><a href="/assets/orgs">Manage organisations</a></small>
+                    <small class="text-muted"><a href="<?php echo htmlspecialchars(Site::url('assets/orgs'), ENT_QUOTES, 'UTF-8'); ?>">Manage organisations</a></small>
                 </div>
                 <div class="col-md-8" id="counterpartyPickerWrap-other" hidden>
                     <label class="form-label" for="counterpartyName">Name</label>
@@ -193,7 +193,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                 <button type="submit" class="btn btn-primary">
                     <i class="fa-solid fa-paper-plane me-1"></i>Submit request
                 </button>
-                <a href="/assets/item?id=<?php echo $assetId; ?>" class="btn btn-outline-secondary">Cancel</a>
+                <a href="<?php echo htmlspecialchars(Site::url('assets/item'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $assetId; ?>" class="btn btn-outline-secondary">Cancel</a>
             </div>
         </form>
     </div>

@@ -31,7 +31,7 @@ if (Auth::check() === false) {
 // 📌 Page metadata
 $pageTitle   = 'Announcements';
 $pageSection = 'announcements';
-$breadcrumbs = ['Dashboard' => '/', 'Announcements' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Announcements' => ''];
 
 $siteId = Site::id();
 $now    = date('Y-m-d H:i:s');
@@ -85,7 +85,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-bullhorn me-2"></i>Announcements</h1>
     <?php if (App::isAdmin() === true): ?>
-        <a href="/announcements/manage" class="btn btn-primary">
+        <a href="<?php echo htmlspecialchars(Site::url('announcements/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary">
             <i class="fa-solid fa-plus me-1"></i>New Announcement
         </a>
     <?php endif; ?>
@@ -109,7 +109,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <?php if ((int) $ann['isPinned'] === 1): ?>
                                 <i class="fa-solid fa-thumbtack text-warning me-1" title="Pinned"></i>
                             <?php endif; ?>
-                            <a href="/announcements/view?slug=<?php echo htmlspecialchars(urlencode($ann['slug']), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none">
+                            <a href="<?php echo htmlspecialchars(Site::url('announcements/view'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo htmlspecialchars(urlencode($ann['slug']), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none">
                                 <?php echo htmlspecialchars($ann['title'], ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </h5>

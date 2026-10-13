@@ -36,5 +36,5 @@ if ($methodId > 0) {
     $_SESSION['flash_type'] = 'success';
 }
 
-header('Location: /account/payment-methods');
+header('Location: ' . Site::url('account/payment-methods'));
 exit();

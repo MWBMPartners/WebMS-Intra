@@ -93,7 +93,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $pageTitle   = 'Recipients';
 $pageSection = 'newsletter';
-$breadcrumbs = ['Dashboard' => '/', 'Newsletter' => '/newsletter', 'Recipients' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Newsletter' => Site::url('newsletter'), 'Recipients' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -111,7 +111,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <i class="fa-solid fa-hourglass-half me-1"></i>
             Sending in progress — <?php echo (int) $pendingRecipients; ?> recipient(s) still pending.
         </span>
-        <form method="post" action="/newsletter/send" class="d-inline">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('newsletter/send'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="newsletterID" value="<?php echo $id; ?>">
             <button class="btn btn-warning btn-sm" type="submit">
@@ -167,6 +167,6 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div></div>
 <?php endif; ?>
 
-<p class="mt-3"><a href="/newsletter/edit?id=<?php echo $id; ?>" class="btn btn-outline-secondary btn-sm">← Back to edit</a></p>
+<p class="mt-3"><a href="<?php echo htmlspecialchars(Site::url('newsletter/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $id; ?>" class="btn btn-outline-secondary btn-sm">← Back to edit</a></p>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

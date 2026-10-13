@@ -161,7 +161,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Count Session — ' . date('d/m/Y', (int) strtotime((string) $session['serviceDate']));
 $pageSection = 'giving';
-$breadcrumbs = ['Dashboard' => '/', 'Giving' => '/giving', 'Count Sessions' => '/giving/count', $pageTitle => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Giving' => Site::url('giving'), 'Count Sessions' => Site::url('giving/count'), $pageTitle => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -224,7 +224,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="col-4">Envelope total<br><strong>&pound;<?php echo $envelope !== null ? number_format((float) $envelope, 2) : '—'; ?></strong></div>
                     </div>
                 <?php else: ?>
-                    <form method="post" action="/giving/count/save" class="row g-2">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/count/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="action" value="count">
                         <input type="hidden" name="countSessionID" value="<?php echo $countSessionId; ?>">
@@ -299,7 +299,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card-header bg-warning-subtle"><strong><i class="fa-solid fa-user-shield me-1"></i>Admin: Resolve Discrepancy</strong></div>
     <div class="card-body">
         <p class="small text-muted">Enter the agreed totals (e.g. from a recount, or matching the bank deposit slip). This overrides both counters' independent entries for the gift log.</p>
-        <form method="post" action="/giving/count/save" class="row g-2 align-items-end">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/count/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="resolve">
             <input type="hidden" name="countSessionID" value="<?php echo $countSessionId; ?>">
@@ -360,7 +360,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="col-12 col-md-2 text-md-end">&pound;<?php echo number_format((float) $e['amount'], 2); ?></div>
                         <div class="col-12 col-md-3 text-md-end">
                             <?php if ($session['status'] !== 'closed'): ?>
-                                <form method="post" action="/giving/count/save" class="d-inline">
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/count/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="action" value="envelope-delete">
                                     <input type="hidden" name="countSessionID" value="<?php echo $countSessionId; ?>">
@@ -377,7 +377,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php endif; ?>
 
         <?php if ($session['status'] !== 'closed'): ?>
-            <form method="post" action="/giving/count/save" class="row g-2 align-items-end">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/count/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="envelope-add">
                 <input type="hidden" name="countSessionID" value="<?php echo $countSessionId; ?>">
@@ -430,7 +430,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php endif; ?>
             </ul>
         <?php endif; ?>
-        <form method="post" action="/giving/count/close">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/count/close'), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="countSessionID" value="<?php echo $countSessionId; ?>">
             <button type="submit" class="btn btn-success" <?php echo $canClose === false ? 'disabled' : ''; ?>

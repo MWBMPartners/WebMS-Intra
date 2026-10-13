@@ -80,7 +80,7 @@ if ($rtStmt !== false) {
 
 $pageTitle   = 'Rota Role Types';
 $pageSection = 'rota';
-$breadcrumbs = ['Dashboard' => '/', 'Duty Roster' => '/rota', 'Manage' => '/rota/manage', 'Role Types' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Duty Roster' => Site::url('rota'), 'Manage' => Site::url('rota/manage'), 'Role Types' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -90,7 +90,7 @@ $csrf = Auth::csrfToken();
         <h1 class="mb-1"><i class="fa-solid fa-tags me-2"></i>Role Types</h1>
         <p class="text-muted mb-0">Define the duties members can be scheduled for.</p>
     </div>
-    <a href="/rota/manage" class="btn btn-outline-secondary btn-sm">&larr; Manage</a>
+    <a href="<?php echo htmlspecialchars(Site::url('rota/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Manage</a>
 </div>
 
 <?php if ($flash !== ''): ?>

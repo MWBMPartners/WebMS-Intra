@@ -39,7 +39,7 @@ Auth::requireLogin();
 if (Discipleship::isEnabled() === false) {
     $_SESSION['flash_msg']  = 'Discipleship is not enabled on this site.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /dashboard', true, 302);
+    header('Location: ' . Site::url('dashboard'), true, 302);
     exit();
 }
 
@@ -85,14 +85,14 @@ $pathwayName = (string) $enrolment['name'];
 
 $pageTitle   = $pathwayName;
 $pageSection = 'discipleship';
-$breadcrumbs = ['Dashboard' => '/', 'Discipleship' => '/discipleship', $pathwayName => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Discipleship' => Site::url('discipleship'), $pathwayName => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 <div class="container py-3" style="max-width:880px;">
     <div class="d-flex align-items-center justify-content-between mb-2">
         <h1 class="h4 mb-0"><i class="fa-solid fa-route me-2 text-primary"></i><?php echo htmlspecialchars($pathwayName, ENT_QUOTES, 'UTF-8'); ?></h1>
-        <a href="/discipleship" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>My pathways</a>
+        <a href="<?php echo htmlspecialchars(Site::url('discipleship'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>My pathways</a>
     </div>
     <?php if (empty($enrolment['description']) === false): ?>
         <p class="text-muted small"><?php echo htmlspecialchars((string) $enrolment['description'], ENT_QUOTES, 'UTF-8'); ?></p>

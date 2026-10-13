@@ -29,7 +29,7 @@ Auth::ensureSession();
 Auth::requireLogin();
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /forms/manage', true, 302);
+    header('Location: ' . Site::url('forms/manage'), true, 302);
     exit();
 }
 
@@ -43,7 +43,7 @@ $formId     = (int) ($_POST['formID'] ?? 0);
 $responseId = (int) ($_POST['responseID'] ?? 0);
 $action     = (string) ($_POST['action'] ?? '');
 
-$back = '/forms/responses?id=' . $formId;
+$back = Site::url('forms/responses') . '?id=' . $formId;
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Security check failed — please try again.';

@@ -40,7 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token
     exit('Bad request');
 }
 
-$redirect = '/admin/integrations/push';
+$redirect = Site::url('admin/integrations/push');
 
 if (WebPush::isConfigured() === false) {
     $_SESSION['flash_msg']  = 'Push is not fully configured yet — generate/paste keys, set a contact, and enable it first.';
@@ -67,7 +67,7 @@ if ($stmt !== false) {
     $payload = json_encode([
         'title' => 'Test notification',
         'body'  => 'Web Push is working on this device.',
-        'url'   => '/admin/integrations/push',
+        'url'   => Site::url('admin/integrations/push'),
         'tag'   => 'push-test',
     ], JSON_UNESCAPED_SLASHES);
     while (($row = $rs->fetch_assoc()) !== null) {

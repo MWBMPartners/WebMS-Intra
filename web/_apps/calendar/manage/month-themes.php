@@ -31,9 +31,9 @@ use Portal\Core\Site;
 $pageTitle   = 'Month Themes';
 $pageSection = 'calendar';
 $breadcrumbs = [
-    'Dashboard'        => '/',
-    'Calendar'         => '/calendar',
-    'Manage'           => '/calendar/manage',
+    'Dashboard'        => Site::url(''),
+    'Calendar'         => Site::url('calendar'),
+    'Manage'           => Site::url('calendar/manage'),
     'Month Themes'     => '',
 ];
 
@@ -56,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /calendar/manage/month-themes?year=' . $year, true, 302);
+        header('Location: ' . Site::url('calendar/manage/month-themes') . '?year=' . $year, true, 302);
         exit();
     }
 
@@ -99,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    header('Location: /calendar/manage/month-themes?year=' . $year, true, 302);
+    header('Location: ' . Site::url('calendar/manage/month-themes') . '?year=' . $year, true, 302);
     exit();
 }
 
@@ -139,10 +139,10 @@ $months = [
         <i class="fa-solid fa-quote-left me-2"></i>Month Themes — <?php echo (int) $year; ?>
     </h1>
     <div class="d-flex gap-2">
-        <a href="/calendar/manage" class="btn btn-outline-secondary">
+        <a href="<?php echo htmlspecialchars(Site::url('calendar/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
             <i class="fa-solid fa-arrow-left me-1"></i> Back to Manage
         </a>
-        <a href="/calendar?view=year&amp;date=<?php echo (int) $year; ?>-01-01" class="btn btn-outline-primary">
+        <a href="<?php echo htmlspecialchars(Site::url('calendar'), ENT_QUOTES, 'UTF-8'); ?>?view=year&amp;date=<?php echo (int) $year; ?>-01-01" class="btn btn-outline-primary">
             <i class="fa-solid fa-eye me-1"></i> View on Planner
         </a>
     </div>
@@ -156,7 +156,7 @@ $months = [
 <?php endif; ?>
 
 <!-- Year picker -->
-<form method="get" action="/calendar/manage/month-themes" class="row g-2 align-items-end mb-3">
+<form method="get" action="<?php echo htmlspecialchars(Site::url('calendar/manage/month-themes'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end mb-3">
     <div class="col-auto">
         <label for="year-input" class="form-label small mb-1">Year</label>
         <input id="year-input" type="number" name="year" class="form-control form-control-sm"
@@ -168,7 +168,7 @@ $months = [
 </form>
 
 <!-- Themes editor -->
-<form method="post" action="/calendar/manage/month-themes">
+<form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/month-themes'), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="year" value="<?php echo (int) $year; ?>">
 
@@ -201,7 +201,7 @@ $months = [
             <button type="submit" class="btn btn-success">
                 <i class="fa-solid fa-save me-1"></i> Save Themes
             </button>
-            <a href="/calendar?view=year&amp;date=<?php echo (int) $year; ?>-01-01" class="btn btn-outline-secondary">
+            <a href="<?php echo htmlspecialchars(Site::url('calendar'), ENT_QUOTES, 'UTF-8'); ?>?view=year&amp;date=<?php echo (int) $year; ?>-01-01" class="btn btn-outline-secondary">
                 Cancel
             </a>
         </div>

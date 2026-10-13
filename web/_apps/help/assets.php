@@ -23,7 +23,7 @@ declare(strict_types=1);
 
 $pageTitle   = 'Help - Asset Tracker';
 $pageSection = 'help';
-$breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'Asset Tracker' => ''];
+$breadcrumbs = ['Dashboard' => \Portal\Core\Site::url(''), 'Help' => \Portal\Core\Site::url('help'), 'Asset Tracker' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -33,7 +33,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-boxes-stacked me-2"></i>Asset Tracker Guide</h1>
         <p class="text-secondary mb-0">Everything owned, borrowed, or looked after — in one register, with a full history of who did what.</p>
     </div>
-    <a href="/help" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Help Centre
     </a>
 </div>
@@ -62,7 +62,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <section id="overview" class="mb-5">
     <h2 class="h4 mb-3"><i class="fa-solid fa-boxes-stacked me-2"></i>What is the Asset Tracker?</h2>
     <p>
-        <a href="/assets">Asset Tracker</a> is a register of everything your organisation owns, borrows, or is
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>">Asset Tracker</a> is a register of everything your organisation owns, borrows, or is
         responsible for — from laptops, chairs and projectors to vehicles and musical instruments, right through
         to software licences, subscriptions, and other digital items that don't have a physical form.
     </p>

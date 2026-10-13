@@ -53,14 +53,14 @@ if (SmallGroups::isEnabled() === false) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /small-groups');
+    header('Location: ' . Site::url('small-groups'));
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /small-groups');
+    header('Location: ' . Site::url('small-groups'));
     exit();
 }
 
@@ -85,7 +85,7 @@ if ($isCreate === true) {
     if ($existing === null) {
         $_SESSION['flash_msg']  = 'Group not found.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /small-groups');
+        header('Location: ' . Site::url('small-groups'));
         exit();
     }
     if (SmallGroups::canManage($siteId, $groupId) === false) {
@@ -94,7 +94,7 @@ if ($isCreate === true) {
     }
 }
 
-$backUrl = '/small-groups/manage' . ($isCreate === false ? '?id=' . $groupId : '');
+$backUrl = Site::url('small-groups/manage') . ($isCreate === false ? '?id=' . $groupId : '');
 
 // -----------------------------------------------------------------------------
 // 🧹 Validation / normalisation
@@ -353,5 +353,5 @@ Logger::activity('SmallGroupSaved', ($isCreate === true ? 'Created' : 'Updated')
 
 $_SESSION['flash_msg']  = $isCreate === true ? 'Group created.' : 'Group updated.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /small-groups/group?id=' . $groupId);
+header('Location: ' . Site::url('small-groups/group') . '?id=' . $groupId);
 exit();

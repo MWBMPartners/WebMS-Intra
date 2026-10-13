@@ -21,10 +21,11 @@ declare(strict_types=1);
 
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Site;
 
 // 🛡️ POST only
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /account');
+    header('Location: ' . Site::url('account'));
     exit();
 }
 
@@ -37,7 +38,7 @@ Auth::requireLogin();
 // render `$_SESSION['flash_msg']`), so every early-exit below follows that
 // convention rather than the session-flash pattern used elsewhere in Auth.
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-    header('Location: /account?error=csrf');
+    header('Location: ' . Site::url('account') . '?error=csrf');
     exit();
 }
 
@@ -56,7 +57,7 @@ $currentPassword = (string) ($_POST['current_password'] ?? '');
 
 $pwStmt = $mysqli->prepare('SELECT passwordHash FROM tblLocalAccounts WHERE userID = ? LIMIT 1');
 if ($pwStmt === false) {
-    header('Location: /account?error=db');
+    header('Location: ' . Site::url('account') . '?error=db');
     exit();
 }
 $pwStmt->bind_param('i', $userId);
@@ -68,13 +69,13 @@ if ($pwRow === null || ($pwRow['passwordHash'] ?? '') === '') {
     // 🚫 No local password to confirm against (SSO/passkey-only account) —
     // fail CLOSED rather than silently skipping the re-auth check.
     Logger::activity('TotpDisableFailed', 'Disable refused — no local password to confirm', $userId);
-    header('Location: /account?error=totp_nopw');
+    header('Location: ' . Site::url('account') . '?error=totp_nopw');
     exit();
 }
 
 if ($currentPassword === '' || password_verify($currentPassword, $pwRow['passwordHash']) === false) {
     Logger::activity('TotpDisableFailed', 'Incorrect password on 2FA disable attempt', $userId);
-    header('Location: /account?error=pw_current');
+    header('Location: ' . Site::url('account') . '?error=pw_current');
     exit();
 }
 
@@ -98,5 +99,5 @@ if ($delStmt !== false) {
 
 Logger::activity('TotpDisabled', 'Disabled two-factor authentication', $userId);
 
-header('Location: /account?totp_disabled=1');
+header('Location: ' . Site::url('account') . '?totp_disabled=1');
 exit();

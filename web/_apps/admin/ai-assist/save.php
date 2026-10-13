@@ -33,6 +33,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -67,7 +68,7 @@ if (App::isRootAdmin() === false) {
         . 'administrator can change them. Your own organisation\'s settings '
         . 'are on the main Settings page and are unaffected.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/ai-assist');
+    header('Location: ' . Site::url('admin/ai-assist'));
     exit();
 }
 
@@ -134,5 +135,5 @@ foreach (
 
 $_SESSION['flash_msg']  = 'AI Assist settings saved.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /admin/ai-assist');
+header('Location: ' . Site::url('admin/ai-assist'));
 exit();

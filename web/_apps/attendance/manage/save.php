@@ -31,14 +31,14 @@ if (App::isAdmin() === false) {
 
 // 🛡️ Only accept POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /attendance/manage');
+    header('Location: ' . Site::url('attendance/manage'));
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /attendance/manage');
+    header('Location: ' . Site::url('attendance/manage'));
     exit();
 }
 
@@ -61,7 +61,7 @@ if ($action === 'create') {
     if ($typeName === '') {
         $_SESSION['flash_msg']  = 'Type name is required.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /attendance/manage');
+        header('Location: ' . Site::url('attendance/manage'));
         exit();
     }
 
@@ -93,7 +93,7 @@ if ($action === 'create') {
     if ($stmt === false) {
         $_SESSION['flash_msg']  = t('error.db_create_service_type');
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /attendance/manage');
+        header('Location: ' . Site::url('attendance/manage'));
         exit();
     }
 
@@ -106,7 +106,7 @@ if ($action === 'create') {
 
     $_SESSION['flash_msg']  = 'Service type "' . $typeName . '" created successfully.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /attendance/manage');
+    header('Location: ' . Site::url('attendance/manage'));
     exit();
 }
 
@@ -118,7 +118,7 @@ if ($action === 'toggle') {
     if ($serviceTypeID <= 0) {
         $_SESSION['flash_msg']  = 'Invalid service type ID.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /attendance/manage');
+        header('Location: ' . Site::url('attendance/manage'));
         exit();
     }
 
@@ -140,7 +140,7 @@ if ($action === 'toggle') {
     if ($currentActive === null) {
         $_SESSION['flash_msg']  = 'Service type not found.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /attendance/manage');
+        header('Location: ' . Site::url('attendance/manage'));
         exit();
     }
 
@@ -157,12 +157,12 @@ if ($action === 'toggle') {
 
     $_SESSION['flash_msg']  = 'Service type "' . $typeName . '" ' . $stateLabel . '.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /attendance/manage');
+    header('Location: ' . Site::url('attendance/manage'));
     exit();
 }
 
 // 🚫 Unknown action
 $_SESSION['flash_msg']  = 'Unknown action.';
 $_SESSION['flash_type'] = 'warning';
-header('Location: /attendance/manage');
+header('Location: ' . Site::url('attendance/manage'));
 exit();

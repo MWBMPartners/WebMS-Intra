@@ -18,7 +18,7 @@ declare(strict_types=1);
 
 $pageTitle   = 'Help - Reports';
 $pageSection = 'help';
-$breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'Reports' => ''];
+$breadcrumbs = ['Dashboard' => \Portal\Core\Site::url(''), 'Help' => \Portal\Core\Site::url('help'), 'Reports' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -29,7 +29,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-chart-bar me-2"></i>Reports Guide</h1>
         <p class="text-secondary mb-0">Analytics dashboards, plus a whitelist-driven custom report builder.</p>
     </div>
-    <a href="/help" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Help Centre
     </a>
 </div>
@@ -138,19 +138,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         button on a kiosk &mdash; are counted separately and are <strong>not</strong> part of the report
         builder or of the named attendance figures. Those counts appear on an event's attendance page,
         on the attendance reports page, and in a spreadsheet administrators can download from
-        <a href="/attendance">/attendance</a>.
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('attendance'), ENT_QUOTES, 'UTF-8'); ?>">/attendance</a>.
     </p>
     <p class="small text-muted mb-0">
         They are counted by the day the check-in arrived, while attendance figures are counted by the
         date of an attendance session, so the two are not two views of one thing and one should never be
-        subtracted from the other. <a href="/help/calendar#anon-checkins">The calendar guide explains
+        subtracted from the other. <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/calendar'), ENT_QUOTES, 'UTF-8'); ?>#anon-checkins">The calendar guide explains
         what those figures can and cannot tell you</a>, including who in your organisation may see them.
     </p>
 </div>
 
 <!-- Navigation -->
 <div class="d-flex justify-content-end">
-    <a href="/help/admin" class="btn btn-primary">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary">
         Admin Guide<i class="fa-solid fa-arrow-right ms-1"></i>
     </a>
 </div>

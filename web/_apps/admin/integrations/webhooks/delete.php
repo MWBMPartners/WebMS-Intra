@@ -24,7 +24,7 @@ use Portal\Core\Logger;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/integrations/webhooks', true, 302);
+    header('Location: ' . Site::url('admin/integrations/webhooks'), true, 302);
     exit();
 }
 
@@ -60,7 +60,7 @@ if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'WEBHOOK_DELETE', $mysqli->error, '');
     $_SESSION['flash_msg']  = 'Could not delete webhook — database error.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/integrations/webhooks', true, 302);
+    header('Location: ' . Site::url('admin/integrations/webhooks'), true, 302);
     exit();
 }
 $stmt->bind_param('ii', $webhookId, $siteId);
@@ -70,7 +70,7 @@ if ($ok === false) {
     $stmt->close();
     $_SESSION['flash_msg']  = 'Could not delete webhook — database error.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/integrations/webhooks', true, 302);
+    header('Location: ' . Site::url('admin/integrations/webhooks'), true, 302);
     exit();
 }
 $stmt->close();
@@ -79,5 +79,5 @@ Logger::activity('WebhookDeleted', 'Webhook #' . $webhookId . ' (' . (string) $e
 
 $_SESSION['flash_msg']  = 'Webhook deleted.';
 $_SESSION['flash_type'] = 'warning';
-header('Location: /admin/integrations/webhooks', true, 302);
+header('Location: ' . Site::url('admin/integrations/webhooks'), true, 302);
 exit();

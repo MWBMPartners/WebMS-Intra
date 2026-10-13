@@ -48,6 +48,7 @@ declare(strict_types=1);
 
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -57,7 +58,7 @@ Auth::requireLogin();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets');
+    header('Location: ' . Site::url('assets'));
     exit();
 }
 
@@ -72,7 +73,7 @@ $asset = $assetId > 0 ? AssetRegister::get($assetId) : null;
 if ($asset === null) {
     $_SESSION['flash_msg']  = 'Asset not found.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets');
+    header('Location: ' . Site::url('assets'));
     exit();
 }
 
@@ -89,7 +90,7 @@ if (AssetRegister::canManageMaintenance($assetId, $userId) === false) {
 // anything beyond "which of these two known pages to redirect back to",
 // no open-redirect surface, only these two literals are ever recognised.
 $returnTo = (string) ($_POST['returnTo'] ?? 'item');
-$redirect = $returnTo === 'maintenance' ? ('/assets/maintenance?assetID=' . $assetId) : ('/assets/item?id=' . $assetId);
+$redirect = $returnTo === 'maintenance' ? (Site::url('assets/maintenance') . '?assetID=' . $assetId) : (Site::url('assets/item') . '?id=' . $assetId);
 
 $action = (string) ($_POST['action'] ?? 'add');
 

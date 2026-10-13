@@ -16,7 +16,7 @@ declare(strict_types=1);
 
 $pageTitle   = 'Help - Prayer Requests';
 $pageSection = 'help';
-$breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'Prayer Requests' => ''];
+$breadcrumbs = ['Dashboard' => \Portal\Core\Site::url(''), 'Help' => \Portal\Core\Site::url('help'), 'Prayer Requests' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -26,7 +26,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-hands-praying me-2"></i>Prayer Requests Guide</h1>
         <p class="text-secondary mb-0">Submit prayer requests, choose how widely they're shared, and follow the moderation lifecycle.</p>
     </div>
-    <a href="/help" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Help Centre
     </a>
 </div>
@@ -50,7 +50,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <section id="submitting" class="mb-5">
     <h2 class="h4 mb-3"><i class="fa-solid fa-pen-to-square me-2"></i>Submitting a Request</h2>
     <p>
-        From <a href="/prayer-requests">Prayer Requests</a> click
+        From <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('prayer-requests'), ENT_QUOTES, 'UTF-8'); ?>">Prayer Requests</a> click
         <em>Submit a Request</em>. You'll be asked for a short subject and the body of
         your request. Up to 4000 characters of text are accepted.
     </p>

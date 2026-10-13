@@ -26,7 +26,7 @@ use Portal\Core\Site;
 // 📌 Page metadata
 $pageTitle   = 'Manage Event Series';
 $pageSection = 'calendar';
-$breadcrumbs = ['Dashboard' => '/', 'Calendar' => '/calendar', 'Manage' => '/calendar/manage', 'Series' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Calendar' => Site::url('calendar'), 'Manage' => Site::url('calendar/manage'), 'Series' => ''];
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -44,7 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /calendar/manage/series');
+        header('Location: ' . Site::url('calendar/manage/series'));
         exit();
     }
     $action = $_POST['action'] ?? '';
@@ -187,7 +187,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    header('Location: /calendar/manage/series');
+    header('Location: ' . Site::url('calendar/manage/series'));
     exit();
 }
 
@@ -230,7 +230,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-layer-group me-2"></i>Event Series</h1>
     <div class="d-flex gap-2">
-        <a href="/calendar/manage" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Events</a>
+        <a href="<?php echo htmlspecialchars(Site::url('calendar/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Events</a>
         <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addSeriesModal">
             <i class="fa-solid fa-plus me-1"></i> Add Series
         </button>
@@ -274,7 +274,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <span class="badge bg-secondary"><?php echo (int) $s['eventCount']; ?></span>
             </div>
             <div class="col-12 col-md-3 text-md-end mt-2 mt-md-0">
-                <a href="/calendar/manage/series-edit?seriesID=<?php echo (int) $s['seriesID']; ?>"
+                <a href="<?php echo htmlspecialchars(Site::url('calendar/manage/series-edit'), ENT_QUOTES, 'UTF-8'); ?>?seriesID=<?php echo (int) $s['seriesID']; ?>"
                    class="btn btn-sm btn-outline-success" title="Bulk edit events in this series">
                     <i class="fa-solid fa-pen-ruler"></i>
                 </a>
@@ -285,7 +285,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         data-parent="<?php echo (int) ($s['parentID'] ?? 0); ?>">
                     <i class="fa-solid fa-pen"></i>
                 </button>
-                <form method="post" action="/calendar/manage/series" class="d-inline">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/series'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="action" value="delete">
                     <input type="hidden" name="seriesID" value="<?php echo (int) $s['seriesID']; ?>">
@@ -303,7 +303,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="modal fade" id="addSeriesModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-fullscreen-sm-down">
         <div class="modal-content">
-            <form method="post" action="/calendar/manage/series">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/series'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="create">
                 <div class="modal-header">
@@ -344,7 +344,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="modal fade" id="editSeriesModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-fullscreen-sm-down">
         <div class="modal-content">
-            <form method="post" action="/calendar/manage/series">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/series'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="update">
                 <input type="hidden" name="seriesID" id="editSeries-id">

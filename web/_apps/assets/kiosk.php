@@ -201,7 +201,7 @@ $remainingSeconds = $identified === true ? max(0, (int) ($_SESSION['kiosk_expire
         <div class="card">
             <div class="card-body">
                 <h2 class="h5 mb-3">Who are you?</h2>
-                <form method="post" action="/assets/kiosk-action" novalidate>
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/kiosk-action'), ENT_QUOTES, 'UTF-8'); ?>" novalidate>
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="token" value="<?php echo $tokenSafe; ?>">
                     <input type="hidden" name="action" value="identify">
@@ -234,7 +234,7 @@ $remainingSeconds = $identified === true ? max(0, (int) ($_SESSION['kiosk_expire
                             </p>
                         <?php endif; ?>
                     </div>
-                    <form method="post" action="/assets/kiosk-action" novalidate>
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/kiosk-action'), ENT_QUOTES, 'UTF-8'); ?>" novalidate>
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="token" value="<?php echo $tokenSafe; ?>">
                         <input type="hidden" name="action" value="logout">
@@ -247,7 +247,7 @@ $remainingSeconds = $identified === true ? max(0, (int) ($_SESSION['kiosk_expire
         <div class="card mb-3">
             <div class="card-body">
                 <h3 class="h6 mb-2"><i class="fa-solid fa-arrow-right-to-bracket me-1"></i>Check out an item</h3>
-                <form method="post" action="/assets/kiosk-action" class="d-flex gap-2" novalidate>
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/kiosk-action'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex gap-2" novalidate>
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="token" value="<?php echo $tokenSafe; ?>">
                     <input type="hidden" name="action" value="checkout">
@@ -274,7 +274,7 @@ $remainingSeconds = $identified === true ? max(0, (int) ($_SESSION['kiosk_expire
                                     </small>
                                 <?php endif; ?>
                             </div>
-                            <form method="post" action="/assets/kiosk-action" class="d-flex align-items-center gap-2" novalidate>
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/kiosk-action'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex align-items-center gap-2" novalidate>
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="token" value="<?php echo $tokenSafe; ?>">
                                 <input type="hidden" name="action" value="checkin">
@@ -304,7 +304,7 @@ $remainingSeconds = $identified === true ? max(0, (int) ($_SESSION['kiosk_expire
                 // check on that next load clears the identity if the
                 // session has genuinely expired by then.
                 var remaining = <?php echo json_encode($remainingSeconds); ?>;
-                var kioskUrl  = <?php echo json_encode('/assets/kiosk?token=' . $token); ?>;
+                var kioskUrl  = <?php echo json_encode(Site::url('assets/kiosk') . '?token=' . $token); ?>;
                 var el = document.getElementById('kiosk-countdown');
                 function tick() {
                     if (remaining <= 0) {

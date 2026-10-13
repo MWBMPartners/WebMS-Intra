@@ -37,7 +37,7 @@ Auth::requireLogin();
 $pageTitle   = 'My Prayer List';
 $pageSection = 'account';
 $breadcrumbs = [
-    'Account'        => '/account',
+    'Account'        => Site::url('account'),
     'My Prayer List' => '',
 ];
 
@@ -83,7 +83,7 @@ $csrf = Auth::csrfToken();
         <div class="alert alert-info">
             <i class="fa-solid fa-circle-info me-1"></i>
             You have no open prayer assignments right now. Moderators assign
-            requests from <a href="/prayer-requests/manage">the moderation queue</a>.
+            requests from <a href="<?php echo htmlspecialchars(Site::url('prayer-requests/manage'), ENT_QUOTES, 'UTF-8'); ?>">the moderation queue</a>.
         </div>
     <?php else: ?>
         <div class="portal-data-list">
@@ -117,7 +117,7 @@ $csrf = Auth::csrfToken();
                     </div>
 
                     <!-- 🙏 Mark prayed for -->
-                    <form method="post" action="/account/my-prayer-list/save" class="d-inline">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('account/my-prayer-list/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="requestID" value="<?php echo $requestId; ?>">
                         <input type="hidden" name="action" value="mark-prayed">
@@ -129,7 +129,7 @@ $csrf = Auth::csrfToken();
                     <!-- 🔒 Private note — ONLY the assigned partner (this page is already
                          scoped to the current user) or an admin (via prayer-requests/view)
                          ever sees this field. -->
-                    <form method="post" action="/account/my-prayer-list/save">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('account/my-prayer-list/save'), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="requestID" value="<?php echo $requestId; ?>">
                         <input type="hidden" name="action" value="save-note">

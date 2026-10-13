@@ -64,7 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /assets/found-reports');
+        header('Location: ' . Site::url('assets/found-reports'));
         exit();
     }
 
@@ -80,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         : 'Could not update that report — it may no longer exist, or the status was invalid.';
     $_SESSION['flash_type'] = $ok === true ? 'success' : 'danger';
 
-    header('Location: /assets/found-reports');
+    header('Location: ' . Site::url('assets/found-reports'));
     exit();
 }
 
@@ -116,7 +116,7 @@ $statusBadge = [
 
 $pageTitle   = 'Lost-and-Found Reports';
 $pageSection = 'assets';
-$breadcrumbs = ['Dashboard' => '/', 'Assets' => '/assets', 'Lost-and-Found Reports' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Assets' => Site::url('assets'), 'Lost-and-Found Reports' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -135,7 +135,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </p>
 
 <!-- 🔍 Filters -->
-<form method="get" action="/assets/found-reports" class="row g-2 mb-4 align-items-end">
+<form method="get" action="<?php echo htmlspecialchars(Site::url('assets/found-reports'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mb-4 align-items-end">
     <?php if ($assetIdFilter > 0): ?>
         <input type="hidden" name="assetID" value="<?php echo $assetIdFilter; ?>">
     <?php endif; ?>
@@ -150,7 +150,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
     <div class="col-auto">
         <button type="submit" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-filter me-1"></i>Filter</button>
-        <a href="/assets/found-reports" class="btn btn-outline-secondary btn-sm">Clear</a>
+        <a href="<?php echo htmlspecialchars(Site::url('assets/found-reports'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Clear</a>
     </div>
 </form>
 
@@ -170,7 +170,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             ?>
             <div class="portal-data-row align-items-start">
                 <div class="col-12 col-md-3">
-                    <a href="/assets/item?id=<?php echo $reportAssetId; ?>" class="text-decoration-none">
+                    <a href="<?php echo htmlspecialchars(Site::url('assets/item'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $reportAssetId; ?>" class="text-decoration-none">
                         <strong><?php echo htmlspecialchars((string) $report['assetName'], ENT_QUOTES, 'UTF-8'); ?></strong>
                     </a>
                     <br><small class="text-muted"><?php echo htmlspecialchars((string) $report['createdAt'], ENT_QUOTES, 'UTF-8'); ?></small>
@@ -196,7 +196,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </span>
                     <br>
                     <?php if ($status !== 'actioned'): ?>
-                        <form method="post" action="/assets/found-reports" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/found-reports'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="reportID" value="<?php echo (int) $report['reportID']; ?>">
                             <input type="hidden" name="status" value="actioned">
@@ -206,7 +206,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </form>
                     <?php endif; ?>
                     <?php if ($status !== 'closed'): ?>
-                        <form method="post" action="/assets/found-reports" class="d-inline"
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/found-reports'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                               data-confirm="Close this report? It stays in the log, but drops off the default queue view." >
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="reportID" value="<?php echo (int) $report['reportID']; ?>">
@@ -222,6 +222,6 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endif; ?>
 
-<p class="mt-3"><a href="/assets" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a></p>
+<p class="mt-3"><a href="<?php echo htmlspecialchars(Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a></p>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

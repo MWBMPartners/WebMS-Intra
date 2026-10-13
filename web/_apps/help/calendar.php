@@ -17,7 +17,7 @@ declare(strict_types=1);
 
 $pageTitle   = 'Help - Calendar';
 $pageSection = 'help';
-$breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'Calendar' => ''];
+$breadcrumbs = ['Dashboard' => \Portal\Core\Site::url(''), 'Help' => \Portal\Core\Site::url('help'), 'Calendar' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -27,7 +27,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-calendar-days me-2"></i>Calendar Guide</h1>
         <p class="text-secondary mb-0">View, filter, and (if you're an admin) configure the calendar's seven view modes.</p>
     </div>
-    <a href="/help" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Help Centre
     </a>
 </div>
@@ -52,7 +52,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 1️⃣ View modes -->
 <section id="viewmodes" class="mb-5">
     <h2 class="h4 mb-3"><i class="fa-solid fa-table-cells me-2"></i>The seven view modes</h2>
-    <p>The calendar landing page (<a href="/calendar">/calendar</a>) supports seven different views, each appropriate for a different scale of planning:</p>
+    <p>The calendar landing page (<a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('calendar'), ENT_QUOTES, 'UTF-8'); ?>">/calendar</a>) supports seven different views, each appropriate for a different scale of planning:</p>
 
     <div class="portal-data-list">
         <div class="portal-data-row">
@@ -137,7 +137,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <section id="admin-categories" class="mb-5">
     <h2 class="h4 mb-3"><i class="fa-solid fa-tags me-2"></i>For admins — categories &amp; colours</h2>
     <p>
-        Visit <a href="/calendar/manage/types">/calendar/manage/types</a> to manage event categories.
+        Visit <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('calendar/manage/types'), ENT_QUOTES, 'UTF-8'); ?>">/calendar/manage/types</a> to manage event categories.
         Each category can carry:
     </p>
     <ul>
@@ -160,7 +160,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         If your organisation runs themed months (e.g. "Healthy connections" for February, "Pause?" for November), you can record a short strap-line per month per year and it will appear underneath the month name on the year planner.
     </p>
     <p>
-        Visit <a href="/calendar/manage/month-themes">/calendar/manage/month-themes</a>, pick a year, fill in (or clear) the 12 inputs, save.
+        Visit <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('calendar/manage/month-themes'), ENT_QUOTES, 'UTF-8'); ?>">/calendar/manage/month-themes</a>, pick a year, fill in (or clear) the 12 inputs, save.
         Empty inputs remove the row so the cell goes back to default.
     </p>
     <p class="text-muted small">
@@ -278,7 +278,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h3 class="h5 mt-4">Who can see them</h3>
     <p>
         Your organisation chooses, at
-        <a href="/admin/settings/attendance">/admin/settings/attendance</a>. There are three choices:
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('admin/settings/attendance'), ENT_QUOTES, 'UTF-8'); ?>">/admin/settings/attendance</a>. There are three choices:
     </p>
     <ul>
         <li><strong>Administrators only</strong> &mdash; the narrowest, and what a new installation starts with.</li>
@@ -293,7 +293,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h4 class="h6 mt-4">Who can see the attendance reports page (#529)</h4>
     <p>
         A SEPARATE choice from the one above, also set at
-        <a href="/admin/settings/attendance">/admin/settings/attendance</a>, that decides who may open
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('admin/settings/attendance'), ENT_QUOTES, 'UTF-8'); ?>">/admin/settings/attendance</a>, that decides who may open
         the reports page AT ALL — not only who sees the anonymous section on it. Somebody who is not a
         member of your organisation can never open it, whatever either setting says. Among your
         organisation's own members, there are three choices:

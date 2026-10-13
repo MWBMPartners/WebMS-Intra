@@ -52,7 +52,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Giving Categories';
 $pageSection = 'giving';
-$breadcrumbs = ['Dashboard' => '/', 'Giving' => '/giving', 'Categories' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Giving' => Site::url('giving'), 'Categories' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -63,7 +63,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <h1 class="mb-3"><i class="fa-solid fa-tags me-2"></i>Giving categories</h1>
 
 <div class="card mb-3"><div class="card-body">
-    <form method="post" action="/giving/cat-save" class="row g-2 align-items-end">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/cat-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="action" value="add">
         <div class="col-md-3">
@@ -98,7 +98,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="col-md-2 small"><?php echo htmlspecialchars((string) ($c['defaultFund'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
                     <div class="col-md-2 small text-end"><?php echo (int) $c['entryCount']; ?> · <?php echo htmlspecialchars(Giving::formatAmount((int) $c['totalPence'], $currency), ENT_QUOTES, 'UTF-8'); ?></div>
                     <div class="col-md-1 text-end">
-                        <form method="post" action="/giving/cat-save" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/cat-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="action" value="toggle">
                             <input type="hidden" name="categoryID" value="<?php echo (int) $c['categoryID']; ?>">

@@ -24,6 +24,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\HostConsole;
 use Portal\Core\Livestream;
+use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\WebPush;
 
@@ -103,18 +104,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </p>
         </div>
         <div class="d-flex gap-2">
-            <form method="post" action="/admin/livestream" class="d-inline">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/livestream'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="notify_live">
                 <input type="hidden" name="eventID" value="<?php echo (int) $eventId; ?>">
-                <input type="hidden" name="returnTo" value="/admin/host-console/event?id=<?php echo (int) $eventId; ?>">
+                <input type="hidden" name="returnTo" value="<?php echo htmlspecialchars(Site::url('admin/host-console/event'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $eventId; ?>">
                 <button type="submit" class="btn btn-sm btn-primary"
                         <?php echo ($pushConfigured === false || $currentlyLive === null) ? 'disabled' : ''; ?>
                         title="<?php echo $pushConfigured === false ? 'Configure Web Push at /admin/integrations/push first' : ($currentlyLive === null ? 'No channel is currently in its scheduled live window' : 'Send a push to everyone subscribed to the livestream channel'); ?>">
                     <i class="fa-solid fa-bullhorn me-1"></i>Send "We're live"
                 </button>
             </form>
-            <a href="/admin/host-console" class="btn btn-sm btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
+            <a href="<?php echo htmlspecialchars(Site::url('admin/host-console'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
         </div>
     </div>
 
@@ -167,12 +168,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php endforeach; ?>
     </div>
     <p class="small text-muted mb-3">
-        Increment counters at <a href="/calendar/event/decisions?eventID=<?php echo $eventId; ?>">Decision moments</a>.
+        Increment counters at <a href="<?php echo htmlspecialchars(Site::url('calendar/event/decisions'), ENT_QUOTES, 'UTF-8'); ?>?eventID=<?php echo $eventId; ?>">Decision moments</a>.
     </p>
 
     <h2 class="h6">Latest salvation cards (<?php echo count($cards); ?>)</h2>
     <?php if (count($cards) === 0): ?>
-        <p class="text-muted small">No cards received for this event yet. Public form: <a href="/decision-card?eventID=<?php echo $eventId; ?>">/decision-card?eventID=<?php echo $eventId; ?></a></p>
+        <p class="text-muted small">No cards received for this event yet. Public form: <a href="<?php echo htmlspecialchars(Site::url('decision-card'), ENT_QUOTES, 'UTF-8'); ?>?eventID=<?php echo $eventId; ?>">/decision-card?eventID=<?php echo $eventId; ?></a></p>
     <?php else: ?>
         <div class="portal-data-list">
         <?php foreach ($cards as $c):
@@ -197,7 +198,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php endforeach; ?>
         </div>
         <p class="small text-muted mt-2">
-            Manage all cards at <a href="/admin/decision-cards">/admin/decision-cards</a>.
+            Manage all cards at <a href="<?php echo htmlspecialchars(Site::url('admin/decision-cards'), ENT_QUOTES, 'UTF-8'); ?>">/admin/decision-cards</a>.
         </p>
     <?php endif; ?>
 
@@ -262,7 +263,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             ctaUrl: form.elements['ctaUrl'].value,
         };
         try {
-            const r = await fetch('/api/livechat/prompt-publish', {
+            const r = await fetch('<?php echo Router::urlForScript('api/livechat/prompt-publish'); ?>', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf },
                 body: JSON.stringify(payload),

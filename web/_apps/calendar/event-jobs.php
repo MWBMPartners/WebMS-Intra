@@ -73,7 +73,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="h4 mb-2"><i class="fa-solid fa-clipboard-user me-2 text-primary"></i>Jobs — <?php echo htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8'); ?></h1>
     <p class="text-muted small">Forms-only v1. Drag-and-drop in v1.1.</p>
 
-    <form method="post" action="/calendar/event/jobs/auto-assign" class="d-inline-block mb-3"
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/jobs/auto-assign'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline-block mb-3"
           data-confirm="Auto-assign unassigned crew leaders to under-capacity jobs?">
         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
@@ -82,7 +82,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <details class="mb-4">
         <summary class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-plus me-1"></i>Add a job</summary>
-        <form method="post" action="/calendar/event/jobs/save" class="row g-2 mt-2 align-items-end p-2 bg-light rounded">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/jobs/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mt-2 align-items-end p-2 bg-light rounded">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
             <input type="hidden" name="action" value="addJob">
@@ -120,7 +120,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <?php foreach ($j['volunteers'] as $v): ?>
                                 <div class="d-flex align-items-center small mb-1">
                                     <span class="flex-grow-1"><i class="fa-solid fa-user me-1 text-secondary"></i><?php echo htmlspecialchars($v['name'], ENT_QUOTES, 'UTF-8'); ?></span>
-                                    <form method="post" action="/calendar/event/jobs/save" class="m-0">
+                                    <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/jobs/save'), ENT_QUOTES, 'UTF-8'); ?>" class="m-0">
                                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                                         <input type="hidden" name="action" value="unassign">
@@ -131,7 +131,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <?php endforeach; ?>
                         <?php endif; ?>
 
-                        <form method="post" action="/calendar/event/jobs/save" class="mt-2 d-flex gap-1">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/jobs/save'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-2 d-flex gap-1">
                             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                             <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                             <input type="hidden" name="action" value="assign">

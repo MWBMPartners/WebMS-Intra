@@ -46,7 +46,7 @@ if ($row !== null && $row['jsonSegments'] !== null) {
 
 $pageTitle   = 'Transcript';
 $pageSection = 'recordings';
-$breadcrumbs = ['Dashboard' => '/', 'Recordings' => '/recordings', 'Transcript' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Recordings' => Site::url('recordings'), 'Transcript' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -65,7 +65,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p class="text-muted small">Generated <?php echo htmlspecialchars((string) ($row['generatedAt'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
         · Language <?php echo htmlspecialchars((string) ($row['language'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></p>
 
-    <p><a href="/recordings/view?id=<?php echo $id; ?>" class="btn btn-outline-secondary btn-sm">← Back to player</a></p>
+    <p><a href="<?php echo htmlspecialchars(Site::url('recordings/view'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $id; ?>" class="btn btn-outline-secondary btn-sm">← Back to player</a></p>
 
     <div class="card">
         <div class="card-body" style="line-height:1.7;">
@@ -78,7 +78,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     $sec = (int) floor($start % 60);
                     $ts = ($h > 0 ? sprintf('%d:%02d:%02d', $h, $m, $sec) : sprintf('%d:%02d', $m, $sec));
                 ?>
-                    <a href="/recordings/view?id=<?php echo $id; ?>&t=<?php echo (int) $start; ?>#t=<?php echo (int) $start; ?>"
+                    <a href="<?php echo htmlspecialchars(Site::url('recordings/view'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $id; ?>&t=<?php echo (int) $start; ?>#t=<?php echo (int) $start; ?>"
                        class="text-decoration-none text-muted small me-1"><?php echo htmlspecialchars($ts, ENT_QUOTES, 'UTF-8'); ?></a>
                     <?php echo htmlspecialchars($text, ENT_QUOTES, 'UTF-8'); ?>
                 <?php endforeach; ?>

@@ -44,6 +44,7 @@
 declare(strict_types=1);
 
 use Portal\Core\Logger;
+use Portal\Core\Site;
 use Portal\Core\Workflow;
 
 /**
@@ -91,7 +92,7 @@ function announcements_workflow_gate_publish(
         $announcementId,
         $actorId,
         $label,
-        ['url' => '/announcements/view?slug=' . $slug]
+        ['url' => Site::url('announcements/view') . '?slug=' . $slug]
     );
 
     if ($result['instanceId'] !== null) {

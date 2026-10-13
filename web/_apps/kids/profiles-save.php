@@ -6,7 +6,7 @@ use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /kids/profiles', true, 302); exit(); }
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . Site::url('kids/profiles'), true, 302); exit(); }
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -29,7 +29,7 @@ $action = (string) ($_POST['action'] ?? 'add');
 if ($action === 'deactivate') {
     $childId = (int) ($_POST['childID'] ?? 0);
     if ($childId <= 0) {
-        header('Location: /kids/profiles', true, 302); exit();
+        header('Location: ' . Site::url('kids/profiles'), true, 302); exit();
     }
     $stmt = $mysqli->prepare(
         'UPDATE tblKidProfiles SET isActive = 0 '
@@ -51,7 +51,7 @@ if ($action === 'deactivate') {
         $_SESSION['flash_msg']  = 'Could not deactivate that profile.';
         $_SESSION['flash_type'] = 'danger';
     }
-    header('Location: /kids/profiles', true, 302); exit();
+    header('Location: ' . Site::url('kids/profiles'), true, 302); exit();
 }
 
 // -----------------------------------------------------------------------
@@ -67,7 +67,7 @@ $photo    = (int) ($_POST['photoConsent'] ?? 0) === 1 ? 1 : 0;
 if ($fullName === '') {
     $_SESSION['flash_msg']  = 'Name required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /kids/profiles', true, 302); exit();
+    header('Location: ' . Site::url('kids/profiles'), true, 302); exit();
 }
 $dobArg = (preg_match('/^\d{4}-\d{2}-\d{2}$/', $dob) === 1) ? $dob : null;
 
@@ -84,7 +84,7 @@ $pickupArg  = $pickup  !== '' ? $pickup  : null;
 if ($action === 'edit') {
     $childId = (int) ($_POST['childID'] ?? 0);
     if ($childId <= 0) {
-        header('Location: /kids/profiles', true, 302); exit();
+        header('Location: ' . Site::url('kids/profiles'), true, 302); exit();
     }
     $stmt = $mysqli->prepare(
         'UPDATE tblKidProfiles '
@@ -104,7 +104,7 @@ if ($action === 'edit') {
         $_SESSION['flash_msg']  = 'Could not update that profile.';
         $_SESSION['flash_type'] = 'danger';
     }
-    header('Location: /kids/profiles', true, 302); exit();
+    header('Location: ' . Site::url('kids/profiles'), true, 302); exit();
 }
 
 // -----------------------------------------------------------------------
@@ -122,4 +122,4 @@ $stmt->close();
 Logger::activity('KidProfileAdded', 'Child #' . $newId . ' "' . $fullName . '" by user #' . $userId);
 $_SESSION['flash_msg']  = $fullName . ' added.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /kids/profiles', true, 302); exit();
+header('Location: ' . Site::url('kids/profiles'), true, 302); exit();

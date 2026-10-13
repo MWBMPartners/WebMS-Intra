@@ -17,6 +17,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 $token = trim((string) ($_GET['t'] ?? ''));
@@ -87,7 +88,7 @@ $siteName     = (string) (Site::branding('name')  ?? 'Portal');
 
     async function poll() {
         try {
-            const r = await fetch('/api/worship/state?t=' + encodeURIComponent(token), { cache: 'no-store' });
+            const r = await fetch('<?php echo Router::urlForScript('api/worship/state'); ?>?t=' + encodeURIComponent(token), { cache: 'no-store' });
             const s = await r.json();
             if (!s || s.ok === false) return;
 

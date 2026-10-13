@@ -65,7 +65,7 @@ if (Venues::canManage() !== true) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /venues/invoices');
+    header('Location: ' . Site::url('venues/invoices'));
     exit();
 }
 
@@ -73,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /venues/invoices');
+    header('Location: ' . Site::url('venues/invoices'));
     exit();
 }
 
@@ -91,7 +91,7 @@ $toPence = static function (string $raw): ?int {
 };
 
 $backToInvoice = static function (int $id) use ($invoiceId): never {
-    header('Location: /venues/invoice?id=' . ($id > 0 ? $id : $invoiceId));
+    header('Location: ' . Site::url('venues/invoice') . '?id=' . ($id > 0 ? $id : $invoiceId));
     exit();
 };
 
@@ -108,7 +108,7 @@ if ($action === 'delete') {
     if ($result['ok'] === true) {
         $_SESSION['flash_msg']  = 'Invoice deleted.';
         $_SESSION['flash_type'] = 'success';
-        header('Location: /venues/invoices');
+        header('Location: ' . Site::url('venues/invoices'));
         exit();
     }
     $_SESSION['flash_msg']  = $result['error'] ?? 'Could not delete invoice.';
@@ -165,9 +165,9 @@ $venueId = (int) ($_POST['venueID'] ?? 0);
 // invoice.php) — fall back to the create form's own `?venue=` URL.
 $backToForm = static function () use ($invoiceId, $venueId): never {
     if ($invoiceId > 0) {
-        header('Location: /venues/invoice?id=' . $invoiceId);
+        header('Location: ' . Site::url('venues/invoice') . '?id=' . $invoiceId);
     } else {
-        header('Location: /venues/invoice?venue=' . $venueId);
+        header('Location: ' . Site::url('venues/invoice') . '?venue=' . $venueId);
     }
     exit();
 };

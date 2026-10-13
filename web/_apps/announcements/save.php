@@ -46,7 +46,7 @@ require_once __DIR__ . DIRECTORY_SEPARATOR . '_workflow-gate.php';
 
 // 🛡️ POST only
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /announcements/manage');
+    header('Location: ' . Site::url('announcements/manage'));
     exit();
 }
 
@@ -55,14 +55,14 @@ Auth::requireLogin();
 if (App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = 'You do not have permission to manage announcements.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /announcements');
+    header('Location: ' . Site::url('announcements'));
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /announcements/manage');
+    header('Location: ' . Site::url('announcements/manage'));
     exit();
 }
 
@@ -82,7 +82,7 @@ $expiresAt      = trim($_POST['expiresAt'] ?? '') !== '' ? $_POST['expiresAt'] :
 if ($title === '' || $body === '') {
     $_SESSION['flash_msg']  = 'Title and body are required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /announcements/manage?edit=' . $announcementId);
+    header('Location: ' . Site::url('announcements/manage') . '?edit=' . $announcementId);
     exit();
 }
 
@@ -207,7 +207,7 @@ if ($announcementId > 0) {
     }
 }
 
-header('Location: /announcements/manage');
+header('Location: ' . Site::url('announcements/manage'));
 exit();
 
 /**

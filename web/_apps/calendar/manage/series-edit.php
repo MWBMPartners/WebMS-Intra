@@ -30,10 +30,10 @@ use Portal\Core\Site;
 $pageTitle   = 'Bulk Edit Series Events';
 $pageSection = 'calendar';
 $breadcrumbs = [
-    'Dashboard' => '/',
-    'Calendar'  => '/calendar',
-    'Manage'    => '/calendar/manage',
-    'Series'    => '/calendar/manage/series',
+    'Dashboard' => Site::url(''),
+    'Calendar'  => Site::url('calendar'),
+    'Manage'    => Site::url('calendar/manage'),
+    'Series'    => Site::url('calendar/manage/series'),
     'Bulk Edit' => '',
 ];
 
@@ -52,7 +52,7 @@ $seriesID = (int) ($_GET['seriesID'] ?? $_POST['seriesID'] ?? 0);
 if ($seriesID <= 0) {
     $_SESSION['flash_msg']  = 'Invalid series ID.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /calendar/manage/series');
+    header('Location: ' . Site::url('calendar/manage/series'));
     exit();
 }
 
@@ -89,7 +89,7 @@ if ($stmt !== false) {
 if ($series === null) {
     $_SESSION['flash_msg']  = 'Series not found.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /calendar/manage/series');
+    header('Location: ' . Site::url('calendar/manage/series'));
     exit();
 }
 
@@ -100,7 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /calendar/manage/series');
+        header('Location: ' . Site::url('calendar/manage/series'));
         exit();
     }
 
@@ -108,7 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (is_array($selectedIds) === false || count($selectedIds) === 0) {
         $_SESSION['flash_msg']  = 'No events selected.';
         $_SESSION['flash_type'] = 'warning';
-        header('Location: /calendar/manage/series-edit?seriesID=' . $seriesID);
+        header('Location: ' . Site::url('calendar/manage/series-edit') . '?seriesID=' . $seriesID);
         exit();
     }
 
@@ -157,7 +157,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (count($setClauses) === 0) {
         $_SESSION['flash_msg']  = 'No fields to update. Select at least one field to change.';
         $_SESSION['flash_type'] = 'warning';
-        header('Location: /calendar/manage/series-edit?seriesID=' . $seriesID);
+        header('Location: ' . Site::url('calendar/manage/series-edit') . '?seriesID=' . $seriesID);
         exit();
     }
 
@@ -175,7 +175,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (count($validIds) === 0) {
         $_SESSION['flash_msg']  = 'No valid events selected.';
         $_SESSION['flash_type'] = 'warning';
-        header('Location: /calendar/manage/series-edit?seriesID=' . $seriesID);
+        header('Location: ' . Site::url('calendar/manage/series-edit') . '?seriesID=' . $seriesID);
         exit();
     }
 
@@ -212,7 +212,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $_SESSION['flash_msg']  = $affected . ' event(s) updated successfully.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /calendar/manage/series-edit?seriesID=' . $seriesID);
+    header('Location: ' . Site::url('calendar/manage/series-edit') . '?seriesID=' . $seriesID);
     exit();
 }
 
@@ -293,7 +293,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </h1>
         <small class="text-muted"><?php echo count($events); ?> event(s) in this series</small>
     </div>
-    <a href="/calendar/manage/series" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('calendar/manage/series'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back to Series
     </a>
 </div>
@@ -308,11 +308,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php if (count($events) === 0): ?>
     <div class="alert alert-info">
         <i class="fa-solid fa-circle-info me-1"></i>
-        No events in this series. <a href="/calendar/manage" class="alert-link">Create events</a> and assign them to this series.
+        No events in this series. <a href="<?php echo htmlspecialchars(Site::url('calendar/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">Create events</a> and assign them to this series.
     </div>
 <?php else: ?>
 
-<form method="post" action="/calendar/manage/series-edit">
+<form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/series-edit'), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="seriesID" value="<?php echo (int) $seriesID; ?>">
 

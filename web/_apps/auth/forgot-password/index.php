@@ -26,13 +26,14 @@ require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEP
 use Portal\Core\Asset;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
+use Portal\Core\Site;
 
 // -----------------------------------------------------------------------------
 // 1. 🔀 If already logged in, redirect to account page
 // -----------------------------------------------------------------------------
 
 if (Auth::check() === true) {
-    header('Location: /account', true, 302);
+    header('Location: ' . Site::url('account'), true, 302);
     exit();
 }
 
@@ -89,12 +90,12 @@ $sent = (isset($_GET['sent']) === true && $_GET['sent'] === '1');
             If an account with that email address exists, a password reset link has been sent.
             Please check your inbox.
         </div>
-        <a href="/login" class="btn btn-outline-secondary w-100">
+        <a href="<?php echo htmlspecialchars(Site::url('login'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100">
             <i class="fa-solid fa-arrow-left me-1"></i> Back to Sign In
         </a>
     <?php else: ?>
         <!-- 📝 Email form -->
-        <form method="post" action="/forgot-password/save" novalidate>
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('forgot-password/save'), ENT_QUOTES, 'UTF-8'); ?>" novalidate>
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
 
             <div class="mb-3">
@@ -110,7 +111,7 @@ $sent = (isset($_GET['sent']) === true && $_GET['sent'] === '1');
                 <i class="fa-solid fa-paper-plane me-1"></i> Send Reset Link
             </button>
 
-            <a href="/login" class="btn btn-outline-secondary w-100">
+            <a href="<?php echo htmlspecialchars(Site::url('login'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100">
                 <i class="fa-solid fa-arrow-left me-1"></i> Back to Sign In
             </a>
         </form>

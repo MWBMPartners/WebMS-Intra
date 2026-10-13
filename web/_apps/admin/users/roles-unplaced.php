@@ -59,7 +59,7 @@ if (AccountGuard::actorIsGlobal() === false) {
 // 📌 Page metadata
 $pageTitle   = 'Roles awaiting placement';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Users' => '/admin/users', 'Roles awaiting placement' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Users' => Site::url('admin/users'), 'Roles awaiting placement' => ''];
 
 // -----------------------------------------------------------------------------
 // 📋 Every parked role key, capped at 500 — the same cap #533's page

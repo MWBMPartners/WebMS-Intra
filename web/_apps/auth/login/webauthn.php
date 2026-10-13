@@ -24,6 +24,7 @@ require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEP
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Site;
 use Portal\Core\WebAuthn;
 
 Auth::ensureSession();
@@ -131,7 +132,7 @@ if ($action === 'auth_verify') {
             // "/\evil.com" (browsers normalise "/\" → "//") slipped through as
             // a protocol-relative open redirect. The password + SSO paths
             // already use safeRedirectUrl(); this brings WebAuthn to parity.
-            $redirect = Auth::safeRedirectUrl($input['redirect'] ?? '/');
+            $redirect = Auth::safeRedirectUrl($input['redirect'] ?? Site::url(''));
 
             // ------------------------------------------------------------
             // 🔐 2FA gate (#B2)
@@ -157,7 +158,7 @@ if ($action === 'auth_verify') {
                 $_SESSION['login_redirect'] = $redirect;
                 unset($_SESSION['user_id'], $_SESSION['2fa_passed']);
                 Logger::activity('LoginWebAuthnPending2fa', 'Passkey login pending 2FA challenge: ' . ($row['friendlyName'] ?? 'Passkey'));
-                echo json_encode(['success' => true, 'redirect' => '/auth/2fa/verify']);
+                echo json_encode(['success' => true, 'redirect' => Site::url('auth/2fa/verify')]);
                 exit();
             }
 

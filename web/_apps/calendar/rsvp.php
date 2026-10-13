@@ -62,7 +62,7 @@ $siteId   = Site::id();
 // #512 — same reason as the two redirects above: Site::url() carries the
 // organisation's own address prefix in path mode, which the old bare
 // '/calendar' string here dropped.
-$redirect = Site::url('calendar') . ($slug !== '' ? '/event?slug=' . urlencode($slug) : '');
+$redirect = $slug !== '' ? Site::url('calendar/event') . '?slug=' . urlencode($slug) : Site::url('calendar');
 
 // 🔍 Validate
 $validResponses = ['going', 'maybe', 'not_going', 'cancel'];

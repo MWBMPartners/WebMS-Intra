@@ -30,7 +30,7 @@ Auth::requireLogin();
 if (App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = t('error.access_denied_inline');
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /dashboard');
+    header('Location: ' . Site::url('dashboard'));
     exit();
 }
 
@@ -179,7 +179,7 @@ if ($ta !== false) {
 // 📌 Page metadata
 $pageTitle   = 'Reports & Analytics';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Reports' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Reports' => ''];
 
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
@@ -188,7 +188,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 📊 Reports Dashboard -->
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-chart-bar me-2"></i>Reports & Analytics</h1>
-    <a href="/admin/reports/builder" class="btn btn-primary">
+    <a href="<?php echo htmlspecialchars(Site::url('admin/reports/builder'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary">
         <i class="fa-solid fa-table-list me-1"></i>Custom reports
     </a>
 </div>

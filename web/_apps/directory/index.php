@@ -68,7 +68,7 @@ $can = function (string $level, int $ownerID) use ($userId, $isAdmin): bool {
 
 $pageTitle   = 'Member Directory';
 $pageSection = 'directory';
-$breadcrumbs = ['Dashboard' => '/', 'Directory' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Directory' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -77,7 +77,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-address-book me-2"></i>Member Directory</h1>
         <p class="text-secondary mb-0">Find members and their roles. You control what others see about you.</p>
     </div>
-    <a href="/directory/my-settings" class="btn btn-outline-primary btn-sm">My profile</a>
+    <a href="<?php echo htmlspecialchars(Site::url('directory/my-settings'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm">My profile</a>
 </div>
 
 <form method="get" class="mb-3">
@@ -98,7 +98,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="card h-100">
                     <div class="card-body">
                         <h2 class="h6 mb-1">
-                            <a href="/directory/profile?id=<?php echo $uid; ?>" class="text-decoration-none">
+                            <a href="<?php echo htmlspecialchars(Site::url('directory/profile'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $uid; ?>" class="text-decoration-none">
                                 <?php echo htmlspecialchars((string) $u['fullName'], ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </h2>

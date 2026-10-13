@@ -33,7 +33,7 @@ use Portal\Core\Settings;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/discipleship/pathways', true, 302);
+    header('Location: ' . Site::url('admin/discipleship/pathways'), true, 302);
     exit();
 }
 
@@ -54,7 +54,7 @@ $enabled = (string) Settings::get('discipleship.enabled', 'false');
 if ($enabled !== '1' && $enabled !== 'true') {
     $_SESSION['flash_msg']  = 'Discipleship app is disabled.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /admin/discipleship/pathways', true, 302);
+    header('Location: ' . Site::url('admin/discipleship/pathways'), true, 302);
     exit();
 }
 
@@ -75,8 +75,8 @@ if ($name === '') {
     $_SESSION['flash_msg']  = 'Name is required.';
     $_SESSION['flash_type'] = 'danger';
     $redirect = $pathwayId > 0
-        ? '/admin/discipleship/pathways/edit?id=' . $pathwayId
-        : '/admin/discipleship/pathways/new';
+        ? Site::url('admin/discipleship/pathways/edit') . '?id=' . $pathwayId
+        : Site::url('admin/discipleship/pathways/new');
     header('Location: ' . $redirect, true, 302);
     exit();
 }
@@ -104,7 +104,7 @@ if ($pathwayId === 0) {
 
     $_SESSION['flash_msg']  = 'Pathway created. Add steps below.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /admin/discipleship/pathways/edit?id=' . $newId, true, 302);
+    header('Location: ' . Site::url('admin/discipleship/pathways/edit') . '?id=' . $newId, true, 302);
     exit();
 }
 
@@ -125,7 +125,7 @@ $stmt->close();
 if ($affected === -1) {
     $_SESSION['flash_msg']  = 'Pathway could not be saved.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/discipleship/pathways/edit?id=' . $pathwayId, true, 302);
+    header('Location: ' . Site::url('admin/discipleship/pathways/edit') . '?id=' . $pathwayId, true, 302);
     exit();
 }
 
@@ -137,5 +137,5 @@ Logger::activity(
 
 $_SESSION['flash_msg']  = 'Pathway saved.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /admin/discipleship/pathways/edit?id=' . $pathwayId, true, 302);
+header('Location: ' . Site::url('admin/discipleship/pathways/edit') . '?id=' . $pathwayId, true, 302);
 exit();

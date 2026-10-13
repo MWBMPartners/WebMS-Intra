@@ -30,7 +30,7 @@ Auth::ensureSession();
 Auth::requireLogin();
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /forms/manage', true, 302);
+    header('Location: ' . Site::url('forms/manage'), true, 302);
     exit();
 }
 
@@ -46,7 +46,7 @@ $fieldId = (int) ($_POST['fieldID'] ?? 0);
 $fail = static function (string $msg) use ($formId): never {
     $_SESSION['flash_msg']  = $msg;
     $_SESSION['flash_type'] = 'danger';
-    $target = $formId > 0 ? '/forms/edit?id=' . $formId : '/forms/manage';
+    $target = $formId > 0 ? Site::url('forms/edit') . '?id=' . $formId : Site::url('forms/manage');
     header('Location: ' . $target, true, 302);
     exit();
 };
@@ -79,5 +79,5 @@ if ($ok === false) {
 Logger::activity('FormFieldDeleted', 'Deleted field #' . $fieldId . ' from form #' . $formId);
 $_SESSION['flash_msg']  = 'Field deleted.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /forms/edit?id=' . $formId, true, 302);
+header('Location: ' . Site::url('forms/edit') . '?id=' . $formId, true, 302);
 exit();

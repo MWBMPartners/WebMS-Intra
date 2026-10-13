@@ -76,7 +76,7 @@ use Portal\Core\Site;
 // 📌 Page metadata for the template system
 $pageTitle   = 'Admin Dashboard';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => ''];
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -637,7 +637,7 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
                 </div>
             </div>
             <div class="card-footer bg-transparent border-danger">
-                <a href="/admin/errors" class="text-danger text-decoration-none small">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/errors'), ENT_QUOTES, 'UTF-8'); ?>" class="text-danger text-decoration-none small">
                     View Error Log <i class="fa-solid fa-arrow-right ms-1"></i>
                 </a>
             </div>
@@ -665,7 +665,7 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
                 </div>
             </div>
             <div class="card-footer bg-transparent border-primary">
-                <a href="/admin/users" class="text-primary text-decoration-none small">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>" class="text-primary text-decoration-none small">
                     Manage Users <i class="fa-solid fa-arrow-right ms-1"></i>
                 </a>
             </div>
@@ -693,7 +693,7 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
                 </div>
             </div>
             <div class="card-footer bg-transparent border-success">
-                <a href="/admin/activity" class="text-success text-decoration-none small">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/activity'), ENT_QUOTES, 'UTF-8'); ?>" class="text-success text-decoration-none small">
                     View Activity Log <i class="fa-solid fa-arrow-right ms-1"></i>
                 </a>
             </div>
@@ -722,7 +722,7 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
                 </div>
             </div>
             <div class="card-footer bg-transparent border-warning">
-                <a href="/admin/migrations" class="text-warning text-decoration-none small">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/migrations'), ENT_QUOTES, 'UTF-8'); ?>" class="text-warning text-decoration-none small">
                     Run Migrations <i class="fa-solid fa-arrow-right ms-1"></i>
                 </a>
             </div>
@@ -755,7 +755,7 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
                 <div class="col-12 col-md-8">
                     <?php echo htmlspecialchars($dbVersion, ENT_QUOTES, 'UTF-8'); ?>
                     <?php if ($dbInfo['state'] !== 'ok'): ?>
-                        <a href="/admin/system-info" class="badge bg-warning text-decoration-none ms-1">Needs a look</a>
+                        <a href="<?php echo htmlspecialchars(Site::url('admin/system-info'), ENT_QUOTES, 'UTF-8'); ?>" class="badge bg-warning text-decoration-none ms-1">Needs a look</a>
                     <?php endif; ?>
                 </div>
             </div>
@@ -779,28 +779,26 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
     <div class="card-body">
         <div class="row g-3">
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/errors" class="btn btn-outline-danger w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/errors'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-danger w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-triangle-exclamation fa-lg"></i>
                     <span class="small">Error Log</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/activity" class="btn btn-outline-success w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/activity'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-success w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-clock-rotate-left fa-lg"></i>
                     <span class="small">Activity Log</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/users" class="btn btn-outline-primary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-users fa-lg"></i>
                     <span class="small">Users</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
                 <!-- 🏷️ #516: roles held per organisation — grant on the Users
-                     page, rename/add here. New link, so it uses Site::url()
-                     rather than the bare "/admin/roles" the tiles around it
-                     still use (#536, not fixed by this package). -->
+                     page, rename/add here. -->
                 <a href="<?php echo htmlspecialchars(Site::url('admin/roles'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-user-tag fa-lg"></i>
                     <span class="small">Roles</span>
@@ -826,44 +824,44 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
             <?php // A global administrator only: the page refuses everybody else (#499). ?>
             <?php if ($isUmbrella === true): ?>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/migrations" class="btn btn-outline-warning w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/migrations'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-warning w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-database fa-lg"></i>
                     <span class="small">Migrations</span>
                 </a>
             </div>
             <?php endif; ?>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/settings" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-gear fa-lg"></i>
                     <span class="small">Settings</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/integrations" class="btn btn-outline-info w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/integrations'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-info w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-plug-circle-check fa-lg"></i>
                     <span class="small">Integrations</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/captcha" class="btn btn-outline-warning w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/captcha'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-warning w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-robot fa-lg"></i>
                     <span class="small">Captcha</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/release-notes" class="btn btn-outline-info w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/release-notes'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-info w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-clipboard-list fa-lg"></i>
                     <span class="small">Release Notes</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/email-templates" class="btn btn-outline-primary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/email-templates'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-envelope fa-lg"></i>
                     <span class="small">Email Templates</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/maintenance/retention" class="btn btn-outline-warning w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/retention'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-warning w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-broom fa-lg"></i>
                     <span class="small">Retention</span>
                 </a>
@@ -880,7 +878,7 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/system-info" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/system-info'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-server fa-lg"></i>
                     <span class="small">Server Info</span>
                 </a>
@@ -893,14 +891,14 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
             </div>
             <?php if (App::isUmbrellaAdmin() === true): ?>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/sites" class="btn btn-outline-dark w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/sites'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-dark w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-sitemap fa-lg"></i>
                     <span class="small">Sites</span>
                 </a>
             </div>
             <?php endif; ?>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/settings" class="btn btn-outline-info w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-info w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-sliders fa-lg"></i>
                     <span class="small">Old Settings</span>
                 </a>
@@ -920,55 +918,55 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
     <div class="card-body">
         <div class="row g-3">
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/apps" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/apps'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-cubes fa-lg"></i>
                     <span class="small">Apps</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/reports" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/reports'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-chart-bar fa-lg"></i>
                     <span class="small">Reports</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/reports/builder" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/reports/builder'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-table-list fa-lg"></i>
                     <span class="small">Report Builder</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/workflows" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/workflows'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-diagram-project fa-lg"></i>
                     <span class="small">Workflows</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/audit" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/audit'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-shield-halved fa-lg"></i>
                     <span class="small">Audit Trail</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/sms" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/sms'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-comment-sms fa-lg"></i>
                     <span class="small">SMS</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/transcription" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/transcription'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-closed-captioning fa-lg"></i>
                     <span class="small">Transcription</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/safeguarding/dbs" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/safeguarding/dbs'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-user-shield fa-lg"></i>
                     <span class="small">Safeguarding</span>
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <a href="/admin/decision-cards" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/decision-cards'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-hand-holding-heart fa-lg"></i>
                     <span class="small">Decision Cards</span>
                 </a>

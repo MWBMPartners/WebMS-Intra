@@ -78,7 +78,7 @@ if (AccountGuard::actorIsGlobal() === false) {
 // 📌 Page metadata
 $pageTitle   = 'No organisation';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Users' => '/admin/users', 'No organisation' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Users' => Site::url('admin/users'), 'No organisation' => ''];
 
 // -----------------------------------------------------------------------------
 // 📋 Every account with no tblUserSites row at all, capped at 500 so this
@@ -122,7 +122,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 🧭 No organisation -->
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-compass me-2"></i>Accounts that belong to no organisation</h1>
-    <a href="/admin/users" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Users
     </a>
 </div>

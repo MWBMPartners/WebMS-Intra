@@ -7,7 +7,7 @@ use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /calendar', true, 302); exit(); }
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . Site::url('calendar'), true, 302); exit(); }
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -46,5 +46,5 @@ $stmt->close();
 
 Logger::activity('DecisionMoment', 'Event #' . $eventId . ' ' . $momentType . ' ' . ($delta > 0 ? '+1' : '-1'));
 
-header('Location: /calendar/event/decisions?eventID=' . $eventId, true, 302);
+header('Location: ' . Site::url('calendar/event/decisions') . '?eventID=' . $eventId, true, 302);
 exit();

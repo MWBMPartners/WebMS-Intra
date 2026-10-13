@@ -95,5 +95,5 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
-header('Location: /newsletter/edit?id=' . $newsId);
+header('Location: ' . Site::url('newsletter/edit') . '?id=' . $newsId);
 exit();

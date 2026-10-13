@@ -62,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['flash_msg']  = 'Album deleted. Photos retained as orphans for re-assignment.';
         $_SESSION['flash_type'] = 'info';
     }
-    header('Location: /admin/photos/albums');
+    header('Location: ' . Site::url('admin/photos/albums'));
     exit();
 }
 
@@ -84,7 +84,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Photo albums';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Photos' => '/photos', 'Albums' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Photos' => Site::url('photos'), 'Albums' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 

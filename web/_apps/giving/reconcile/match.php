@@ -97,7 +97,7 @@ function backToView(int $importId, string $msg, string $type): void
 {
     $_SESSION['flash_msg']  = $msg;
     $_SESSION['flash_type'] = $type;
-    header('Location: /giving/reconcile/view?id=' . $importId);
+    header('Location: ' . Site::url('giving/reconcile/view') . '?id=' . $importId);
     exit();
 }
 
@@ -313,7 +313,7 @@ if ($action === 'delete-import') {
     Logger::activity('BankImportDeleted', 'Deleted bank import #' . $importId, $userId);
     $_SESSION['flash_msg']  = 'Import deleted.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /giving/reconcile');
+    header('Location: ' . Site::url('giving/reconcile'));
     exit();
 }
 

@@ -51,6 +51,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Sabbath;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -167,7 +168,7 @@ $bypassCritical = (string) ($settings['portal']['sabbath']['bypass_critical']   
 
 $pageTitle   = 'Sabbath quiet hours';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Settings' => '/admin/settings', 'Sabbath' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Settings' => Site::url('admin/settings'), 'Sabbath' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 
@@ -280,7 +281,7 @@ $readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
     <?php if ($mayChangePortalWideSettings === true): ?>
         <button type="submit" class="btn btn-primary">Save</button>
     <?php endif; ?>
-    <a href="/admin/settings" class="btn btn-outline-secondary">Cancel</a>
+    <a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
 </form>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

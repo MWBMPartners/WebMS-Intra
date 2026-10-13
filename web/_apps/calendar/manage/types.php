@@ -27,7 +27,7 @@ use Portal\Core\Site;
 // 📌 Page metadata
 $pageTitle   = 'Event Types & Categories';
 $pageSection = 'calendar';
-$breadcrumbs = ['Dashboard' => '/', 'Calendar' => '/calendar', 'Manage' => '/calendar/manage', 'Types' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Calendar' => Site::url('calendar'), 'Manage' => Site::url('calendar/manage'), 'Types' => ''];
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -45,7 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /calendar/manage/types');
+        header('Location: ' . Site::url('calendar/manage/types'));
         exit();
     }
     $action = $_POST['action'] ?? '';
@@ -169,7 +169,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    header('Location: /calendar/manage/types');
+    header('Location: ' . Site::url('calendar/manage/types'));
     exit();
 }
 
@@ -219,7 +219,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-tags me-2"></i>Types & Categories</h1>
-    <a href="/calendar/manage" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Events</a>
+    <a href="<?php echo htmlspecialchars(Site::url('calendar/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Events</a>
 </div>
 
 <?php if ($flashMsg !== ''): ?>
@@ -242,7 +242,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
             <div class="collapse" id="addTypeForm">
                 <div class="card-body border-bottom">
-                    <form method="post" action="/calendar/manage/types">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/types'), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="action" value="create">
                         <input type="hidden" name="entity" value="type">
@@ -278,7 +278,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <?php endif; ?>
                             </div>
                             <div class="col-4 text-end">
-                                <form method="post" action="/calendar/manage/types" class="d-inline">
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/types'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="entity" value="type">
@@ -308,7 +308,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
             <div class="collapse" id="addCatForm">
                 <div class="card-body border-bottom">
-                    <form method="post" action="/calendar/manage/types">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/types'), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="action" value="create">
                         <input type="hidden" name="entity" value="category">
@@ -372,7 +372,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <?php endif; ?>
                             </div>
                             <div class="col-12 col-md-5">
-                                <form method="post" action="/calendar/manage/types" class="row g-1 align-items-center">
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/types'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-1 align-items-center">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="action" value="update">
                                     <input type="hidden" name="entity" value="category">
@@ -397,7 +397,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 </form>
                             </div>
                             <div class="col-12 col-md-2 text-end">
-                                <form method="post" action="/calendar/manage/types" class="d-inline">
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/types'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="entity" value="category">

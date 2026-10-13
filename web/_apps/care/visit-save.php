@@ -63,5 +63,5 @@ try {
     \Portal\Core\Logger::errorPlatform('Care', 'Warning', 'VISIT_SAVE', $e->getMessage(), '');
 }
 
-header('Location: /care/case?id=' . $caseId);
+header('Location: ' . Site::url('care/case') . '?id=' . $caseId);
 exit();

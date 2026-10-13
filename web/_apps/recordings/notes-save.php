@@ -94,5 +94,5 @@ if ($noteId > 0) {
 
 Logger::activity('RecordingNoteSaved', 'Recording #' . $recordingId . ', publish=' . ($shouldPublish === true ? 'yes' : 'no'));
 
-header('Location: /recordings/view?id=' . $recordingId, true, 303);
+header('Location: ' . Site::url('recordings/view') . '?id=' . $recordingId, true, 303);
 exit();

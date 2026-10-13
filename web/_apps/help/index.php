@@ -17,7 +17,7 @@ declare(strict_types=1);
 // Page metadata for the template system
 $pageTitle   = 'Help Centre';
 $pageSection = 'help';
-$breadcrumbs = ['Dashboard' => '/', 'Help' => ''];
+$breadcrumbs = ['Dashboard' => \Portal\Core\Site::url(''), 'Help' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -36,16 +36,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div>
         <h6 class="alert-heading mb-1">Quick Links</h6>
         <div class="d-flex flex-wrap gap-2">
-            <a href="/help/getting-started" class="badge text-bg-primary text-decoration-none">
+            <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/getting-started'), ENT_QUOTES, 'UTF-8'); ?>" class="badge text-bg-primary text-decoration-none">
                 <i class="fa-solid fa-rocket me-1"></i>Getting Started
             </a>
-            <a href="/help/expenses" class="badge text-bg-primary text-decoration-none">
+            <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/expenses'), ENT_QUOTES, 'UTF-8'); ?>" class="badge text-bg-primary text-decoration-none">
                 <i class="fa-solid fa-receipt me-1"></i>Submit an Expense
             </a>
-            <a href="/help/approvals" class="badge text-bg-primary text-decoration-none">
+            <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/approvals'), ENT_QUOTES, 'UTF-8'); ?>" class="badge text-bg-primary text-decoration-none">
                 <i class="fa-solid fa-check-double me-1"></i>Approve a Claim
             </a>
-            <a href="/help/faq" class="badge text-bg-primary text-decoration-none">
+            <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/faq'), ENT_QUOTES, 'UTF-8'); ?>" class="badge text-bg-primary text-decoration-none">
                 <i class="fa-solid fa-comments me-1"></i>FAQ
             </a>
         </div>
@@ -57,7 +57,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Getting Started -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/getting-started" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/getting-started'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-primary bg-opacity-10 text-primary" style="width:48px;height:48px;">
@@ -72,7 +72,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Expenses -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/expenses" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/expenses'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-success bg-opacity-10 text-success" style="width:48px;height:48px;">
@@ -87,7 +87,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Approvals -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/approvals" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/approvals'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-warning bg-opacity-10 text-warning" style="width:48px;height:48px;">
@@ -102,7 +102,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Treasury -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/treasury" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/treasury'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-info bg-opacity-10 text-info" style="width:48px;height:48px;">
@@ -117,7 +117,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Admin -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/admin" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/admin'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-danger bg-opacity-10 text-danger" style="width:48px;height:48px;">
@@ -132,7 +132,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Calendar -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/calendar" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/calendar'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-primary bg-opacity-10 text-primary" style="width:48px;height:48px;">
@@ -147,7 +147,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Prayer Requests -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/prayer-requests" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/prayer-requests'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-success bg-opacity-10 text-success" style="width:48px;height:48px;">
@@ -162,7 +162,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Noticeboard -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/noticeboard" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/noticeboard'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-info bg-opacity-10 text-info" style="width:48px;height:48px;">
@@ -177,7 +177,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Asset Tracker -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/assets" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/assets'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-success bg-opacity-10 text-success" style="width:48px;height:48px;">
@@ -192,7 +192,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Small Groups -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/small-groups" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/small-groups'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-info bg-opacity-10 text-info" style="width:48px;height:48px;">
@@ -223,7 +223,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Translations & Languages -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/translations" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/translations'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-primary bg-opacity-10 text-primary" style="width:48px;height:48px;">
@@ -238,7 +238,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- FAQ -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/faq" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/faq'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-secondary bg-opacity-10 text-secondary" style="width:48px;height:48px;">
@@ -257,7 +257,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Venue Bookings -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/venues" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/venues'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-primary bg-opacity-10 text-primary" style="width:48px;height:48px;">
@@ -272,7 +272,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Forms Builder -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/forms" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/forms'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-success bg-opacity-10 text-success" style="width:48px;height:48px;">
@@ -287,7 +287,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Reports -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/reports" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/reports'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-info bg-opacity-10 text-info" style="width:48px;height:48px;">
@@ -302,7 +302,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Admin First Steps -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/admin-first-steps" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/admin-first-steps'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-danger bg-opacity-10 text-danger" style="width:48px;height:48px;">
@@ -317,7 +317,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Disaster Recovery -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/disaster-recovery" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/disaster-recovery'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-warning bg-opacity-10 text-warning" style="width:48px;height:48px;">
@@ -332,7 +332,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- Getting Support -->
     <div class="col-12 col-sm-6 col-lg-4">
-        <a href="/help/support" class="text-decoration-none text-reset">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/support'), ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-reset">
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-secondary bg-opacity-10 text-secondary" style="width:48px;height:48px;">

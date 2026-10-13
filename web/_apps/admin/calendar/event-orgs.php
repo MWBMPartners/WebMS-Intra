@@ -70,7 +70,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php endif; ?>
                 </div>
                 <div class="portal-data-row-aside">
-                    <form method="post" action="/admin/calendar/event-orgs/save" class="d-inline">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/calendar/event-orgs/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                         <input type="hidden" name="eventOrgID" value="<?php echo (int) $o['eventOrgID']; ?>">
@@ -84,7 +84,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php endif; ?>
 
     <h2 class="h6 mt-4">Add organiser</h2>
-    <form method="post" action="/admin/calendar/event-orgs/save" class="row g-2 align-items-end">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/calendar/event-orgs/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
         <input type="hidden" name="action" value="add">

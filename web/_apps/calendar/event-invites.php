@@ -57,7 +57,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <details class="mb-4" open>
         <summary class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-plus me-1"></i>Send an invite</summary>
-        <form method="post" action="/calendar/event/invites/send" class="row g-2 mt-2 align-items-end p-2 bg-light rounded">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/invites/send'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mt-2 align-items-end p-2 bg-light rounded">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
             <div class="col-md-5"><label class="form-label small">Email</label><input type="email" name="email" required maxlength="255" class="form-control form-control-sm"></div>

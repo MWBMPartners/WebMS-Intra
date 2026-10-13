@@ -66,5 +66,5 @@ try {
     \Portal\Core\Logger::errorPlatform('Visitors', 'Warning', 'CONTACT_SAVE', $e->getMessage(), '');
 }
 
-header('Location: /visitors/profile?id=' . $id);
+header('Location: ' . Site::url('visitors/profile') . '?id=' . $id);
 exit();

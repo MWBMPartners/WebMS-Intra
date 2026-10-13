@@ -35,6 +35,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Settings;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -92,7 +93,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card-body small">
             <strong>Settings</strong> — gate coordinator role on valid DBS:
             <span class="badge <?php echo $requireForCoords === '1' ? 'bg-success' : 'bg-secondary'; ?>"><?php echo $requireForCoords === '1' ? 'ENFORCED' : 'Not enforced'; ?></span>
-            <span class="text-muted">(toggle <code>safeguarding.dbs_required_for_coordinators</code> in <a href="/admin/settings">Settings</a>)</span><br>
+            <span class="text-muted">(toggle <code>safeguarding.dbs_required_for_coordinators</code> in <a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>">Settings</a>)</span><br>
             Renewal warning: <strong><?php echo $warningDays; ?> days</strong>
         </div>
     </div>
@@ -130,7 +131,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="portal-data-row-aside">
                 <details>
                     <summary class="btn btn-sm btn-outline-primary">Record DBS</summary>
-                    <form method="post" action="/admin/safeguarding/dbs/save" class="bg-light p-2 rounded mt-2" style="min-width:380px;">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/safeguarding/dbs/save'), ENT_QUOTES, 'UTF-8'); ?>" class="bg-light p-2 rounded mt-2" style="min-width:380px;">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="userID" value="<?php echo (int) $u['userID']; ?>">
                         <div class="row g-2">

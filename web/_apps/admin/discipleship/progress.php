@@ -47,7 +47,7 @@ if ($enabled !== '1' && $enabled !== 'true') {
     echo '<h1 class="h4 mb-2"><i class="fa-solid fa-route me-2 text-primary"></i>Discipleship Progress</h1>';
     echo '<div class="alert alert-info">';
     echo '<p class="mb-2">The Discipleship Pathway Tracker is currently disabled.</p>';
-    echo '<p class="mb-0 small">Enable it under <a href="/admin/settings">Settings</a> by setting <code>discipleship.enabled</code> to <code>true</code>.</p>';
+    echo '<p class="mb-0 small">Enable it under <a href="' . htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8') . '">Settings</a> by setting <code>discipleship.enabled</code> to <code>true</code>.</p>';
     echo '</div></div>';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     exit();
@@ -80,21 +80,21 @@ if ($stmt !== false) {
 
 $pageTitle   = 'Discipleship Progress';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Discipleship Progress' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Discipleship Progress' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 <div class="container py-3" style="max-width:960px;">
     <div class="d-flex align-items-center justify-content-between mb-3">
         <h1 class="h4 mb-0"><i class="fa-solid fa-route me-2 text-primary"></i>Discipleship Progress</h1>
-        <a href="/admin/discipleship/pathways" class="btn btn-outline-secondary btn-sm">
+        <a href="<?php echo htmlspecialchars(Site::url('admin/discipleship/pathways'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">
             <i class="fa-solid fa-list-ol me-1"></i>Manage pathways
         </a>
     </div>
     <p class="text-muted small">
         Per-pathway rosters showing who is enrolled, who's stuck, and who's finished.
         Steps and auto-completion rules are edited on the
-        <a href="/admin/discipleship/pathways">Pathways</a> page.
+        <a href="<?php echo htmlspecialchars(Site::url('admin/discipleship/pathways'), ENT_QUOTES, 'UTF-8'); ?>">Pathways</a> page.
     </p>
 
     <?php if (isset($_SESSION['flash_msg']) === true): ?>
@@ -112,7 +112,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <?php if (count($pathways) === 0): ?>
         <div class="alert alert-info small">
-            No pathways defined yet. <a href="/admin/discipleship/pathways/new">Create one</a> first.
+            No pathways defined yet. <a href="<?php echo htmlspecialchars(Site::url('admin/discipleship/pathways/new'), ENT_QUOTES, 'UTF-8'); ?>">Create one</a> first.
         </div>
     <?php else: ?>
         <div class="portal-data-list">
@@ -120,7 +120,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php $isActive = (int) $p['isActive'] === 1; ?>
                 <div class="portal-data-row">
                     <div class="portal-data-row-main">
-                        <a href="/admin/discipleship/progress/pathway?id=<?php echo (int) $p['pathwayID']; ?>" class="text-decoration-none">
+                        <a href="<?php echo htmlspecialchars(Site::url('admin/discipleship/progress/pathway'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $p['pathwayID']; ?>" class="text-decoration-none">
                             <strong><?php echo htmlspecialchars((string) $p['name'], ENT_QUOTES, 'UTF-8'); ?></strong>
                         </a>
                         <?php if ($isActive === false): ?>
@@ -137,7 +137,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </div>
                     </div>
                     <div class="portal-data-row-aside">
-                        <a href="/admin/discipleship/progress/pathway?id=<?php echo (int) $p['pathwayID']; ?>" class="btn btn-sm btn-outline-primary">
+                        <a href="<?php echo htmlspecialchars(Site::url('admin/discipleship/progress/pathway'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $p['pathwayID']; ?>" class="btn btn-sm btn-outline-primary">
                             <i class="fa-solid fa-users me-1"></i>Roster
                         </a>
                     </div>

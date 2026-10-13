@@ -32,6 +32,7 @@ declare(strict_types=1);
 use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -52,7 +53,7 @@ $disp      = (string) ($_POST['dataDisposition'] ?? 'retain');
 $effective = (string) ($_POST['effectiveDate'] ?? date('Y-m-d'));
 
 if ($userId <= 0 || $reason === '') {
-    header('Location: /admin/users');
+    header('Location: ' . Site::url('admin/users'));
     exit();
 }
 if (in_array($disp, ['retain','anonymise','delete'], true) === false) {
@@ -61,7 +62,7 @@ if (in_array($disp, ['retain','anonymise','delete'], true) === false) {
 if ($userId === $adminId) {
     $_SESSION['flash_msg']  = "You can't offboard your own account.";
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/users');
+    header('Location: ' . Site::url('admin/users'));
     exit();
 }
 
@@ -75,7 +76,7 @@ $verdict = AccountGuard::check($userId, AccountGuard::REACH_ACCOUNT, 'offboard a
 if ($verdict !== AccountGuard::ALLOW) {
     $_SESSION['flash_msg']  = AccountGuard::message($verdict, AccountGuard::REACH_ACCOUNT);
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /offboarding');
+    header('Location: ' . Site::url('offboarding'));
     exit();
 }
 
@@ -236,5 +237,5 @@ try {
     $_SESSION['flash_type'] = 'danger';
 }
 
-header('Location: /offboarding');
+header('Location: ' . Site::url('offboarding'));
 exit();

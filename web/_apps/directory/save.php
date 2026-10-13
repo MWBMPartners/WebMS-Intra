@@ -12,6 +12,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\GeoLocation;
+use Portal\Core\Site;
 use Portal\Core\What3Words;
 
 Auth::ensureSession();
@@ -55,7 +56,7 @@ if ($w3wRaw !== '') {
     if ($w3w === null) {
         $_SESSION['flash_msg']  = t('location.w3w_invalid');
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /directory/my-settings');
+        header('Location: ' . Site::url('directory/my-settings'));
         exit();
     }
     // 🗺️ W3W dual-mode verify (contract §3 / What3Words.php save-path
@@ -107,5 +108,5 @@ try {
     \Portal\Core\Logger::errorPlatform('Directory', 'Warning', 'SAVE', $e->getMessage(), '');
 }
 
-header('Location: /directory/my-settings');
+header('Location: ' . Site::url('directory/my-settings'));
 exit();

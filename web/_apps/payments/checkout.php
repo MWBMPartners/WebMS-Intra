@@ -50,7 +50,7 @@ function sanitizeReturnTo(mixed $raw): string
         || str_contains($value, '\\') === true
         || str_starts_with($value, '/') === false
     ) {
-        return '/';
+        return Site::url('');
     }
     return $value;
 }
@@ -85,7 +85,7 @@ $amountPence = (int) round(((float) $clean) * 100);
 if ($amountPence < 100) {
     $_SESSION['flash_msg']  = 'Minimum amount is 1.00.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? '/'));
+    header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? Site::url('')));
     exit();
 }
 
@@ -125,7 +125,7 @@ if ($purpose === 'pledge') {
     if ($pledge === null || $userId <= 0 || (int) ($pledge['donorID'] ?? 0) !== $userId) {
         $_SESSION['flash_msg']  = "That pledge can't be paid.";
         $_SESSION['flash_type'] = 'danger';
-        header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? '/'));
+        header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? Site::url('')));
         exit();
     }
     // Force the amount + currency to the pledge's own record — never trust
@@ -153,7 +153,7 @@ if ($purpose === 'pledge') {
     if ($category === null) {
         $_SESSION['flash_msg']  = "That giving category can't be used.";
         $_SESSION['flash_type'] = 'danger';
-        header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? '/'));
+        header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? Site::url('')));
         exit();
     }
     // 💷 Fat-finger/fraud ceiling (S10) — large legitimate gifts should go
@@ -161,7 +161,7 @@ if ($purpose === 'pledge') {
     if ($amountPence > GIVING_MAX_AMOUNT_PENCE) {
         $_SESSION['flash_msg']  = 'For large gifts please contact the office.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? '/'));
+        header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? Site::url('')));
         exit();
     }
     // The donation amount is the donor's own choice (subject to the
@@ -181,7 +181,7 @@ $redirect = Payments::startCheckout($siteId, $userId, $amountPence, $currency, $
 if ($redirect === null || $redirect === '') {
     $_SESSION['flash_msg']  = 'Could not start checkout — provider may not be configured.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? '/'));
+    header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? Site::url('')));
     exit();
 }
 

@@ -27,7 +27,7 @@ use Portal\Core\Site;
 // 📌 Page metadata
 $pageTitle   = 'Assign Leadership Role';
 $pageSection = 'leadership';
-$breadcrumbs = ['Dashboard' => '/', 'Leadership' => '/leadership', 'Assign' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Leadership' => Site::url('leadership'), 'Assign' => ''];
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -56,7 +56,7 @@ if ($editID > 0) {
     }
     if ($editAssignment !== null) {
         $pageTitle = 'Edit Assignment';
-        $breadcrumbs = ['Dashboard' => '/', 'Leadership' => '/leadership', 'Edit Assignment' => ''];
+        $breadcrumbs = ['Dashboard' => Site::url(''), 'Leadership' => Site::url('leadership'), 'Edit Assignment' => ''];
     }
 }
 
@@ -146,12 +146,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <i class="fa-solid fa-user-plus me-2"></i>
         <?php echo $editAssignment !== null ? 'Edit Assignment' : 'Assign Leadership Role'; ?>
     </h1>
-    <a href="/leadership" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('leadership'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back
     </a>
 </div>
 
-<form method="post" action="/leadership/save">
+<form method="post" action="<?php echo htmlspecialchars(Site::url('leadership/save'), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="action" value="<?php echo $editAssignment !== null ? 'update' : 'create'; ?>">
     <?php if ($editAssignment !== null): ?>
@@ -285,7 +285,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <i class="fa-solid fa-floppy-disk me-1"></i>
             <?php echo $editAssignment !== null ? 'Save Changes' : 'Assign Role'; ?>
         </button>
-        <a href="/leadership" class="btn btn-secondary">Cancel</a>
+        <a href="<?php echo htmlspecialchars(Site::url('leadership'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-secondary">Cancel</a>
     </div>
 </form>
 

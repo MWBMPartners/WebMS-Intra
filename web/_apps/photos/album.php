@@ -58,7 +58,7 @@ if ($stmt !== false) {
 
 $pageTitle   = (string) $album['name'];
 $pageSection = 'photos';
-$breadcrumbs = ['Dashboard' => '/', 'Photos' => '/photos', (string) $album['name'] => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Photos' => Site::url('photos'), (string) $album['name'] => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -75,8 +75,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="row g-2">
         <?php foreach ($rows as $p): ?>
             <div class="col-6 col-md-3">
-                <a href="/photos/view?id=<?php echo (int) $p['photoID']; ?>" class="d-block">
-                    <img src="/photos/serve?id=<?php echo (int) $p['photoID']; ?>" class="img-fluid rounded" loading="lazy" alt="<?php echo htmlspecialchars((string) ($p['caption'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+                <a href="<?php echo htmlspecialchars(Site::url('photos/view'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $p['photoID']; ?>" class="d-block">
+                    <img src="<?php echo htmlspecialchars(Site::url('photos/serve'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $p['photoID']; ?>" class="img-fluid rounded" loading="lazy" alt="<?php echo htmlspecialchars((string) ($p['caption'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                 </a>
             </div>
         <?php endforeach; ?>

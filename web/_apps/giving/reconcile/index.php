@@ -95,7 +95,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Bank Reconciliation';
 $pageSection = 'giving';
-$breadcrumbs = ['Dashboard' => '/', 'Giving' => '/giving', 'Reconcile' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Giving' => Site::url('giving'), 'Reconcile' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -109,8 +109,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <p class="text-secondary mb-0">Import a bank statement and match its credits against the gift log.</p>
     </div>
     <div class="d-flex gap-2">
-        <a href="/giving/manage" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Giving</a>
-        <a href="/giving/reconcile/import" class="btn btn-primary btn-sm"><i class="fa-solid fa-file-csv me-1"></i>Import statement</a>
+        <a href="<?php echo htmlspecialchars(Site::url('giving/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Giving</a>
+        <a href="<?php echo htmlspecialchars(Site::url('giving/reconcile/import'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-file-csv me-1"></i>Import statement</a>
     </div>
 </div>
 
@@ -124,7 +124,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php endif; ?>
 
 <?php if (count($imports) === 0): ?>
-    <div class="alert alert-light border">No bank statements imported yet. <a href="/giving/reconcile/import">Import one</a> to get started.</div>
+    <div class="alert alert-light border">No bank statements imported yet. <a href="<?php echo htmlspecialchars(Site::url('giving/reconcile/import'), ENT_QUOTES, 'UTF-8'); ?>">Import one</a> to get started.</div>
 <?php else: ?>
     <div class="card"><div class="card-body p-0">
         <div class="portal-data-list">
@@ -168,10 +168,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php endif; ?>
                     </div>
                     <div class="col-12 col-md-2 text-md-end">
-                        <a href="/giving/reconcile/view?id=<?php echo (int) $imp['importID']; ?>" class="btn btn-sm btn-outline-primary">
+                        <a href="<?php echo htmlspecialchars(Site::url('giving/reconcile/view'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $imp['importID']; ?>" class="btn btn-sm btn-outline-primary">
                             <i class="fa-solid fa-magnifying-glass me-1"></i>Open
                         </a>
-                        <form method="post" action="/giving/reconcile/match" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/reconcile/match'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="action" value="delete-import">
                             <input type="hidden" name="importID" value="<?php echo (int) $imp['importID']; ?>">

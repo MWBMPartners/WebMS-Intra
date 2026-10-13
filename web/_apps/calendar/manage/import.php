@@ -30,9 +30,9 @@ use Portal\Core\Site;
 $pageTitle   = 'Bulk Import Events';
 $pageSection = 'calendar';
 $breadcrumbs = [
-    'Dashboard'       => '/',
-    'Calendar'        => '/calendar',
-    'Manage Events'   => '/calendar/manage',
+    'Dashboard'       => Site::url(''),
+    'Calendar'        => Site::url('calendar'),
+    'Manage Events'   => Site::url('calendar/manage'),
     'Bulk Import'     => '',
 ];
 
@@ -278,7 +278,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-file-csv me-2"></i>Bulk Import Events</h1>
-    <a href="/calendar/manage" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('calendar/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back to Manage
     </a>
 </div>
@@ -315,8 +315,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </div>
     </div>
-    <a href="/calendar/manage/import" class="btn btn-outline-primary">Import another file</a>
-    <a href="/calendar/manage" class="btn btn-outline-secondary">Back to Manage Events</a>
+    <a href="<?php echo htmlspecialchars(Site::url('calendar/manage/import'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary">Import another file</a>
+    <a href="<?php echo htmlspecialchars(Site::url('calendar/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Back to Manage Events</a>
 
 <?php elseif (count($preview) > 0): ?>
     <div class="alert alert-info">
@@ -354,13 +354,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </div>
     </div>
-    <form method="post" action="/calendar/manage/import">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/import'), ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="action" value="confirm">
         <button type="submit" class="btn btn-success">
             <i class="fa-solid fa-upload me-1"></i> Confirm &amp; import valid rows
         </button>
-        <a href="/calendar/manage/import" class="btn btn-outline-secondary">Cancel</a>
+        <a href="<?php echo htmlspecialchars(Site::url('calendar/manage/import'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
     </form>
 
 <?php else: ?>
@@ -374,7 +374,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
 
-    <form method="post" action="/calendar/manage/import" enctype="multipart/form-data">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/import'), ENT_QUOTES, 'UTF-8'); ?>" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="action" value="preview">
         <div class="mb-3">

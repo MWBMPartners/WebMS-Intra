@@ -31,9 +31,9 @@ use Portal\Core\Site;
 $pageTitle   = 'Bulk Import Leadership Assignments';
 $pageSection = 'leadership';
 $breadcrumbs = [
-    'Dashboard'  => '/',
-    'Leadership' => '/leadership',
-    'Manage'     => '/leadership/manage',
+    'Dashboard'  => Site::url(''),
+    'Leadership' => Site::url('leadership'),
+    'Manage'     => Site::url('leadership/manage'),
     'Bulk Import' => '',
 ];
 
@@ -226,7 +226,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-file-csv me-2"></i>Bulk Import Leadership Assignments</h1>
-    <a href="/leadership/manage" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('leadership/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back
     </a>
 </div>
@@ -254,8 +254,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </div>
     </div>
-    <a href="/leadership/manage/import" class="btn btn-outline-primary">Import another file</a>
-    <a href="/leadership" class="btn btn-outline-secondary">Back to Leadership</a>
+    <a href="<?php echo htmlspecialchars(Site::url('leadership/manage/import'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary">Import another file</a>
+    <a href="<?php echo htmlspecialchars(Site::url('leadership'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Back to Leadership</a>
 
 <?php elseif (count($preview) > 0): ?>
     <div class="alert alert-info"><strong><?php echo count($preview); ?></strong> row(s) parsed.</div>
@@ -291,13 +291,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </div>
     </div>
-    <form method="post" action="/leadership/manage/import">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('leadership/manage/import'), ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="action" value="confirm">
         <button type="submit" class="btn btn-success">
             <i class="fa-solid fa-upload me-1"></i> Confirm &amp; import valid rows
         </button>
-        <a href="/leadership/manage/import" class="btn btn-outline-secondary">Cancel</a>
+        <a href="<?php echo htmlspecialchars(Site::url('leadership/manage/import'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
     </form>
 
 <?php else: ?>
@@ -310,7 +310,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </p>
         </div>
     </div>
-    <form method="post" action="/leadership/manage/import" enctype="multipart/form-data">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('leadership/manage/import'), ENT_QUOTES, 'UTF-8'); ?>" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="action" value="preview">
         <div class="mb-3">

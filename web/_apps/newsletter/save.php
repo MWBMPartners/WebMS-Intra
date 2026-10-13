@@ -48,5 +48,5 @@ if ($id > 0 && $title !== '') {
     $_SESSION['flash_type'] = 'success';
 }
 
-header('Location: /newsletter/edit?id=' . $id);
+header('Location: ' . Site::url('newsletter/edit') . '?id=' . $id);
 exit();

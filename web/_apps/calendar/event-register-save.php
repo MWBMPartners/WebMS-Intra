@@ -22,7 +22,7 @@ use Portal\Core\Mailer;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /calendar', true, 302); exit(); }
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . Site::url('calendar'), true, 302); exit(); }
 
 Auth::ensureSession();
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
@@ -111,7 +111,7 @@ $emergPhone   = mb_substr(trim((string) ($_POST['emergencyContactPhone'] ?? ''))
 if ($fullName === '') {
     $_SESSION['flash_msg']  = 'Full name is required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /calendar/event/register?slug=' . urlencode($slug), true, 302); exit();
+    header('Location: ' . Site::url('calendar/event/register') . '?slug=' . urlencode($slug), true, 302); exit();
 }
 
 // 🛡️ Validate constrained values; null on miss.
@@ -193,7 +193,7 @@ echo '<i class="fa-solid fa-circle-check fa-3x text-success mb-3"></i>';
 echo '<h1 class="h3 mb-2">Thank you!</h1>';
 echo '<p class="text-muted">We\'ve received the registration for <strong>' . htmlspecialchars($fullName, ENT_QUOTES, 'UTF-8') . '</strong>.</p>';
 echo '<p class="text-muted small">Status: <strong>Pending review</strong>. The event coordinator will be in touch.</p>';
-echo '<a href="/calendar/event?slug=' . htmlspecialchars($slug, ENT_QUOTES, 'UTF-8') . '" class="btn btn-outline-primary mt-3">Back to event</a>';
+echo '<a href="' . htmlspecialchars(Site::url('calendar/event'), ENT_QUOTES, 'UTF-8') . '?slug=' . htmlspecialchars($slug, ENT_QUOTES, 'UTF-8') . '" class="btn btn-outline-primary mt-3">Back to event</a>';
 echo '</div>';
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
 exit();

@@ -54,7 +54,7 @@ if ($stmt !== false) {
 if ($photo === null) {
     $_SESSION['flash_msg']  = 'Photo not found.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/photos/queue');
+    header('Location: ' . Site::url('admin/photos/queue'));
     exit();
 }
 
@@ -120,5 +120,5 @@ if ($action === 'approve') {
     $_SESSION['flash_type'] = 'info';
 }
 
-header('Location: /admin/photos/queue');
+header('Location: ' . Site::url('admin/photos/queue'));
 exit();

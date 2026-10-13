@@ -29,7 +29,7 @@ Auth::requireLogin();
 if (App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = 'You do not have permission to upload documents.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /documents');
+    header('Location: ' . Site::url('documents'));
     exit();
 }
 
@@ -42,7 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /documents/upload');
+        header('Location: ' . Site::url('documents/upload'));
         exit();
     }
 
@@ -91,7 +91,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errCode = $_FILES['document']['error'] ?? UPLOAD_ERR_NO_FILE;
         $_SESSION['flash_msg']  = $errorMessages[$errCode] ?? 'File upload failed.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /documents/upload');
+        header('Location: ' . Site::url('documents/upload'));
         exit();
     }
 
@@ -100,7 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ((int) $file['size'] > $maxSize) {
         $_SESSION['flash_msg']  = 'File exceeds maximum size of ' . round($maxSize / 1048576, 1) . ' MB.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /documents/upload');
+        header('Location: ' . Site::url('documents/upload'));
         exit();
     }
 
@@ -122,7 +122,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (move_uploaded_file($file['tmp_name'], $destPath) === false) {
         $_SESSION['flash_msg']  = 'Failed to save uploaded file.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /documents/upload');
+        header('Location: ' . Site::url('documents/upload'));
         exit();
     }
 
@@ -146,7 +146,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     Logger::activity('DocumentUploaded', 'Uploaded document: ' . $title, $userId);
     $_SESSION['flash_msg']  = 'Document uploaded successfully.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /documents');
+    header('Location: ' . Site::url('documents'));
     exit();
 }
 
@@ -184,7 +184,7 @@ if ($prefillEventId > 0) {
 // 📌 Page metadata
 $pageTitle   = 'Upload Document';
 $pageSection = 'documents';
-$breadcrumbs = ['Dashboard' => '/', 'Documents' => '/documents', 'Upload' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Documents' => Site::url('documents'), 'Upload' => ''];
 
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
@@ -195,7 +195,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="card">
     <div class="card-body">
-        <form method="post" action="/documents/upload" enctype="multipart/form-data">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('documents/upload'), ENT_QUOTES, 'UTF-8'); ?>" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
 
             <div class="mb-3">
@@ -242,7 +242,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <button type="submit" class="btn btn-primary">
                     <i class="fa-solid fa-upload me-1"></i>Upload
                 </button>
-                <a href="/documents" class="btn btn-outline-secondary">Cancel</a>
+                <a href="<?php echo htmlspecialchars(Site::url('documents'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
             </div>
         </form>
     </div>

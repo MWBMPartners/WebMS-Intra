@@ -50,7 +50,7 @@ $enabled = (string) Settings::get('discipleship.enabled', 'false');
 if ($enabled !== '1' && $enabled !== 'true') {
     $_SESSION['flash_msg']  = 'Discipleship app is disabled.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /admin/discipleship/pathways', true, 302);
+    header('Location: ' . Site::url('admin/discipleship/pathways'), true, 302);
     exit();
 }
 
@@ -109,10 +109,10 @@ if ($stmt !== false) {
 $pageTitle   = (string) $context['memberName'] . ' — ' . (string) $context['pathwayName'];
 $pageSection = 'admin';
 $breadcrumbs = [
-    'Dashboard'             => '/',
-    'Admin'                 => '/admin',
-    'Discipleship Progress' => '/admin/discipleship/progress',
-    (string) $context['pathwayName'] => '/admin/discipleship/progress/pathway?id=' . $pathwayId,
+    'Dashboard'             => Site::url(''),
+    'Admin'                 => Site::url('admin'),
+    'Discipleship Progress' => Site::url('admin/discipleship/progress'),
+    (string) $context['pathwayName'] => Site::url('admin/discipleship/progress/pathway') . '?id=' . $pathwayId,
     (string) $context['memberName']  => '',
 ];
 $csrf = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
@@ -126,7 +126,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php echo htmlspecialchars((string) $context['memberName'], ENT_QUOTES, 'UTF-8'); ?>
             <small class="text-muted">on <?php echo htmlspecialchars((string) $context['pathwayName'], ENT_QUOTES, 'UTF-8'); ?></small>
         </h1>
-        <a href="/admin/discipleship/progress/pathway?id=<?php echo $pathwayId; ?>" class="btn btn-outline-secondary btn-sm">
+        <a href="<?php echo htmlspecialchars(Site::url('admin/discipleship/progress/pathway'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $pathwayId; ?>" class="btn btn-outline-secondary btn-sm">
             <i class="fa-solid fa-arrow-left me-1"></i>Roster
         </a>
     </div>
@@ -191,7 +191,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <div class="portal-data-row-aside">
                         <?php if ($isDone === true): ?>
-                            <form method="post" action="/admin/discipleship/progress/mark" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/discipleship/progress/mark'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                 <input type="hidden" name="action" value="revoke">
                                 <input type="hidden" name="pathwayID" value="<?php echo $pathwayId; ?>">
@@ -203,7 +203,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 </button>
                             </form>
                         <?php else: ?>
-                            <form method="post" action="/admin/discipleship/progress/mark" class="d-flex gap-1">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/discipleship/progress/mark'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex gap-1">
                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                 <input type="hidden" name="action" value="complete">
                                 <input type="hidden" name="pathwayID" value="<?php echo $pathwayId; ?>">

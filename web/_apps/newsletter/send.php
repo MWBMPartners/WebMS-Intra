@@ -84,7 +84,7 @@ if ((string) ($result['notSent'] ?? '') !== '') {
         . 'own web address, so the unsubscribe link that every copy must carry could not be written. Ask a global '
         . 'administrator to set the portal\'s address at Admin, Settings, Organisation, then send it again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /newsletter/recipients?id=' . $id);
+    header('Location: ' . Site::url('newsletter/recipients') . '?id=' . $id);
     exit();
 }
 
@@ -136,5 +136,5 @@ $_SESSION['flash_msg']  = sprintf(
 );
 $_SESSION['flash_type'] = (int) $result['failed'] > 0 ? 'warning' : 'success';
 
-header('Location: /newsletter/recipients?id=' . $id);
+header('Location: ' . Site::url('newsletter/recipients') . '?id=' . $id);
 exit();

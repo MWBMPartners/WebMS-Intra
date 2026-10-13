@@ -429,7 +429,7 @@ if ($testResult !== null && $testResult['steps'] !== []) {
 
 $pageTitle   = 'Email Deliverability';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Integrations' => '/admin/integrations', 'Email' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Integrations' => Site::url('admin/integrations'), 'Email' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 /** Escape for HTML. Every value printed below goes through this. */
@@ -913,7 +913,7 @@ mail_queue_page_draw($mysqli, [
         <p class="small text-muted">
             Comma-separated email addresses receive automated alerts when the Logger writes a Critical or Fatal error.
             Rate-limited per fingerprint (default 30-minute cooldown).
-            Edit at <code>portal.alerts.recipients</code> + <code>portal.alerts.severities</code> + <code>portal.alerts.cooldown_minutes</code> in <a href="/admin/settings">/admin/settings</a>.
+            Edit at <code>portal.alerts.recipients</code> + <code>portal.alerts.severities</code> + <code>portal.alerts.cooldown_minutes</code> in <a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>">/admin/settings</a>.
         </p>
         <p class="small mb-0">Current: <code><?php echo htmlspecialchars((string) ($settings['portal']['alerts']['recipients'] ?? '(empty — alerts disabled)'), ENT_QUOTES, 'UTF-8'); ?></code></p>
     </div>

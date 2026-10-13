@@ -23,20 +23,21 @@ require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEP
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Site;
 
 // -----------------------------------------------------------------------------
 // 1. 🛡️ Only accept POST from authenticated users
 // -----------------------------------------------------------------------------
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /account', true, 302);
+    header('Location: ' . Site::url('account'), true, 302);
     exit();
 }
 
 Auth::requireLogin();
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-    header('Location: /account?error=csrf', true, 302);
+    header('Location: ' . Site::url('account') . '?error=csrf', true, 302);
     exit();
 }
 
@@ -64,7 +65,7 @@ if ($action === 'update_notifications') {
     Logger::activity('NotificationPrefsUpdate', 'Updated notification preferences');
     $_SESSION['flash_msg']  = 'Notification preferences saved.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /account', true, 302);
+    header('Location: ' . Site::url('account'), true, 302);
     exit();
 }
 
@@ -78,12 +79,12 @@ $emailAddress = strtolower(trim($_POST['emailAddress'] ?? ''));
 $phoneNumber  = trim($_POST['phoneNumber'] ?? '');
 
 if ($fullName === '') {
-    header('Location: /account?error=name', true, 302);
+    header('Location: ' . Site::url('account') . '?error=name', true, 302);
     exit();
 }
 
 if ($emailAddress === '' || filter_var($emailAddress, FILTER_VALIDATE_EMAIL) === false) {
-    header('Location: /account?error=email', true, 302);
+    header('Location: ' . Site::url('account') . '?error=email', true, 302);
     exit();
 }
 
@@ -97,7 +98,7 @@ $checkStmt = $mysqli->prepare(
 
 if ($checkStmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'PROFILE_PREP_FAIL', $mysqli->error, '');
-    header('Location: /account?error=db', true, 302);
+    header('Location: ' . Site::url('account') . '?error=db', true, 302);
     exit();
 }
 
@@ -108,7 +109,7 @@ $existing    = $checkResult->fetch_assoc();
 $checkStmt->close();
 
 if ($existing !== null) {
-    header('Location: /account?error=email_taken', true, 302);
+    header('Location: ' . Site::url('account') . '?error=email_taken', true, 302);
     exit();
 }
 
@@ -122,7 +123,7 @@ $updateStmt = $mysqli->prepare(
 
 if ($updateStmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'PROFILE_UPDATE_FAIL', $mysqli->error, '');
-    header('Location: /account?error=db', true, 302);
+    header('Location: ' . Site::url('account') . '?error=db', true, 302);
     exit();
 }
 
@@ -145,5 +146,5 @@ Logger::activity('ProfileUpdate', 'User updated profile information');
 // 6. 🔀 Redirect with success message
 // -----------------------------------------------------------------------------
 
-header('Location: /account?success=1', true, 302);
+header('Location: ' . Site::url('account') . '?success=1', true, 302);
 exit();

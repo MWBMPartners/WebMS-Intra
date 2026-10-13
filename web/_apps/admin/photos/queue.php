@@ -61,7 +61,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Photo moderation';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Photos' => '/photos', 'Moderation' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Photos' => Site::url('photos'), 'Moderation' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -78,7 +78,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card mb-3">
             <div class="card-body row g-3">
                 <div class="col-md-3">
-                    <img src="/photos/serve?id=<?php echo (int) $p['photoID']; ?>" class="img-fluid rounded" style="max-height:200px;" alt="">
+                    <img src="<?php echo htmlspecialchars(Site::url('photos/serve'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $p['photoID']; ?>" class="img-fluid rounded" style="max-height:200px;" alt="">
                 </div>
                 <div class="col-md-9">
                     <div class="row mb-2 small">
@@ -90,7 +90,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php if (($p['caption'] ?? '') !== ''): ?>
                         <p class="text-muted small">"<?php echo htmlspecialchars((string) $p['caption'], ENT_QUOTES, 'UTF-8'); ?>"</p>
                     <?php endif; ?>
-                    <form method="post" action="/admin/photos/moderate" class="row g-2 align-items-end">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/photos/moderate'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="photoID" value="<?php echo (int) $p['photoID']; ?>">
                         <div class="col-md-3">

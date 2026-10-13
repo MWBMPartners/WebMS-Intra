@@ -24,7 +24,7 @@ if ($captchaConfigured === true) { echo Captcha::scriptTag(); }
     <h1 class="h3 mb-2"><i class="fa-solid fa-hand-holding-heart me-2 text-primary"></i>Decision Card</h1>
     <p class="text-muted small">Tell us how we can support you. Your details are confidential and seen only by the follow-up team.</p>
 
-    <form method="post" action="/decision-card/save">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('decision-card/save'), ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
         <?php if ($eventId > 0): ?>
             <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">

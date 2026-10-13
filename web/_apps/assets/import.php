@@ -505,7 +505,7 @@ function assets_import_resolve_ref_cached(array &$cache, string $rawName, string
 /** Redirect back to the import page, optionally forcing the mapping view. */
 function assetsImportRedirect(bool $adjust = false): void
 {
-    header('Location: /assets/import' . ($adjust === true ? '?adjust=1' : ''));
+    header('Location: ' . Site::url('assets/import') . ($adjust === true ? '?adjust=1' : ''));
     exit();
 }
 
@@ -717,7 +717,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             . ($duplicateCount > 0 ? ' ' . $duplicateCount . ' duplicate row(s) were skipped.' : '')
             . ($failed > 0 ? ' ' . $failed . ' row(s) failed unexpectedly — check the activity log.' : '');
         $_SESSION['flash_type'] = 'success';
-        header('Location: /assets');
+        header('Location: ' . Site::url('assets'));
         exit();
     }
 
@@ -726,7 +726,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // -------------------------------------------------------------------
     if ($action === 'cancel') {
         unset($_SESSION[ASSETS_IMPORT_SESSION_KEY]);
-        header('Location: /assets');
+        header('Location: ' . Site::url('assets'));
         exit();
     }
 
@@ -767,7 +767,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $pageTitle   = 'Import Assets';
 $pageSection = 'assets';
-$breadcrumbs = ['Dashboard' => '/', 'Assets' => '/assets', 'Import' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Assets' => Site::url('assets'), 'Import' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -780,7 +780,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-file-csv me-2"></i>Import Assets</h1>
         <p class="text-secondary mb-0">Bulk-add assets from a CSV file — columns match the register's own CSV export.</p>
     </div>
-    <a href="/assets" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
+    <a href="<?php echo htmlspecialchars(Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
 </div>
 
 <?php if ($state === 'upload'): ?>
@@ -789,7 +789,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card-body">
             <p class="small mb-0">
                 Columns are matched by header name against the Asset Tracker's own
-                <a href="/assets?export=csv&csrf_token=<?php echo htmlspecialchars(urlencode($csrf), ENT_QUOTES, 'UTF-8'); ?>">CSV export</a>
+                <a href="<?php echo htmlspecialchars(Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>?export=csv&csrf_token=<?php echo htmlspecialchars(urlencode($csrf), ENT_QUOTES, 'UTF-8'); ?>">CSV export</a>
                 — Name, Kind, Category, Location, Manufacturer, Model, Serial Number, Asset Tag, Condition, Status,
                 Purchase Date, Purchase Cost (GBP). Only <strong>Name</strong> is required; you can adjust the column
                 mapping if it doesn't match automatically. Max 1&nbsp;MB / 2000 rows. New assets always import as
@@ -799,7 +799,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
     <div class="card">
         <div class="card-body">
-            <form method="post" action="/assets/import" enctype="multipart/form-data">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/import'), ENT_QUOTES, 'UTF-8'); ?>" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="upload">
                 <div class="mb-3">
@@ -820,7 +820,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card mb-3">
         <div class="card-header"><strong><?php echo htmlspecialchars((string) $upload['filename'], ENT_QUOTES, 'UTF-8'); ?></strong></div>
         <div class="card-body">
-            <form method="post" action="/assets/import" class="row g-3">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/import'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="map">
                 <?php foreach (assets_import_field_defs() as $key => $def): ?>
@@ -851,7 +851,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </form>
         </div>
     </div>
-    <form method="post" action="/assets/import" class="mt-2">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/import'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-2">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="action" value="cancel">
         <button type="submit" class="btn btn-outline-secondary btn-sm">Cancel</button>
@@ -884,7 +884,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php if ((int) ($dryRun['skippedBlank'] ?? 0) > 0): ?>
                 <p class="small text-muted mt-2 mb-0"><?php echo (int) $dryRun['skippedBlank']; ?> blank line(s) ignored.</p>
             <?php endif; ?>
-            <a href="/assets/import?adjust=1" class="small">Adjust mapping</a>
+            <a href="<?php echo htmlspecialchars(Site::url('assets/import'), ENT_QUOTES, 'UTF-8'); ?>?adjust=1" class="small">Adjust mapping</a>
             <?php if (((bool) ($upload['autoCreateRefs'] ?? false)) === true): ?>
                 <span class="badge bg-info text-dark ms-2">Auto-create categories/locations: ON</span>
             <?php endif; ?>
@@ -937,13 +937,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php endif; ?>
 
     <?php if ($canConfirm === true): ?>
-        <form method="post" action="/assets/import" class="d-inline">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/import'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="confirm">
             <button type="submit" class="btn btn-success"><i class="fa-solid fa-check me-1"></i>Confirm &amp; import <?php echo $counts['create']; ?> asset<?php echo $counts['create'] === 1 ? '' : 's'; ?></button>
         </form>
     <?php endif; ?>
-    <form method="post" action="/assets/import" class="d-inline">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/import'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="action" value="cancel">
         <button type="submit" class="btn btn-outline-secondary">Cancel</button>

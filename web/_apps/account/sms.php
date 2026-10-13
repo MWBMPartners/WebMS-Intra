@@ -57,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['flash_msg']  = 'Notification categories updated.';
         $_SESSION['flash_type'] = 'success';
     }
-    header('Location: /account/sms');
+    header('Location: ' . Site::url('account/sms'));
     exit();
 }
 
@@ -78,7 +78,7 @@ $currentCats = $pref !== null ? array_filter(array_map('trim', explode(',', (str
 
 $pageTitle   = 'SMS notifications';
 $pageSection = 'account';
-$breadcrumbs = ['Dashboard' => '/', 'My Account' => '/account', 'SMS' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'My Account' => Site::url('account'), 'SMS' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -110,7 +110,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </form>
         <?php if ($pref !== null && (int) $pref['isVerified'] === 0): ?>
-            <form method="post" action="/account/sms/verify" class="row g-2 align-items-end mt-3 border-top pt-3">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('account/sms/verify'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end mt-3 border-top pt-3">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <div class="col-md-6">
                     <label class="form-label small">Enter 6-digit code</label>

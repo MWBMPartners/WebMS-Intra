@@ -64,7 +64,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'SMS';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'SMS' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'SMS' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -98,7 +98,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-3">
     <div class="card-header"><strong>Provider configuration</strong></div>
     <div class="card-body">
-        <form method="post" action="/admin/sms/save" class="row g-3">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/sms/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="col-md-3">
                 <label class="form-label">Provider</label>
@@ -146,7 +146,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
             <div class="col-12">
                 <button class="btn btn-primary" type="submit">Save</button>
-                <a href="/admin/sms/send" class="btn btn-outline-secondary ms-2">Compose broadcast →</a>
+                <a href="<?php echo htmlspecialchars(Site::url('admin/sms/send'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary ms-2">Compose broadcast →</a>
             </div>
         </form>
     </div>

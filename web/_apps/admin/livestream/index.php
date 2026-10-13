@@ -145,7 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['flash_type'] = 'warning';
             } else {
                 $eventId  = (int) ($_POST['eventID'] ?? 0);
-                $liveUrl  = $eventId > 0 ? '/live?eventID=' . $eventId : '/live';
+                $liveUrl  = $eventId > 0 ? Site::url('live') . '?eventID=' . $eventId : Site::url('live');
                 $ttl      = (int) (App::settings('push.ttl.golive') ?? '900');
                 $siteName = (string) (App::settings('site.name') ?? 'Portal');
                 $stats = WebPush::sendToChannel(
@@ -172,13 +172,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // "We're live" button lives on a per-event page and should stay
         // there; the allowlist keeps this from ever being an open redirect.
         $returnTo = (string) ($_POST['returnTo'] ?? '');
-        if ($returnTo !== '' && preg_match('#^/admin/host-console/event\?id=\d+$#', $returnTo) === 1) {
+        // The Host Console page now writes this address with the organisation's part in front
+        // (Site::url), so the allow-list must expect that same part. With no part in use the
+        // pattern is exactly what it was before: ^/admin/host-console/event\?id=\d+$ (#536).
+        if ($returnTo !== '' && preg_match('#^' . preg_quote(Site::url('admin/host-console/event'), '#') . '\?id=\d+$#', $returnTo) === 1) {
             header('Location: ' . $returnTo);
             exit();
         }
     }
 
-    header('Location: /admin/livestream');
+    header('Location: ' . Site::url('admin/livestream'));
     exit();
 }
 
@@ -221,7 +224,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $pageTitle   = 'Livestream';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Livestream' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Livestream' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -246,7 +249,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <i class="fa-solid fa-bullhorn me-1"></i>Send "We're live" notification
             </button>
         </form>
-        <a href="/live" class="btn btn-outline-secondary btn-sm" target="_blank"><i class="fa-solid fa-arrow-up-right-from-square me-1"></i>Open live page</a>
+        <a href="<?php echo htmlspecialchars(Site::url('live'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm" target="_blank"><i class="fa-solid fa-arrow-up-right-from-square me-1"></i>Open live page</a>
     </div>
 </div>
 

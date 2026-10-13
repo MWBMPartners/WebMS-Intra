@@ -30,7 +30,7 @@ use Portal\Core\RateLimiter;
 
 // 🛡️ Only POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /prayer-requests/submit', true, 302);
+    header('Location: ' . Site::url('prayer-requests/submit'), true, 302);
     exit();
 }
 
@@ -39,14 +39,14 @@ Auth::requireLogin();
 
 // 🚦 Feature gate
 if ((App::settings('prayer-requests.enabled') ?? 'true') !== 'true') {
-    header('Location: /prayer-requests', true, 302);
+    header('Location: ' . Site::url('prayer-requests'), true, 302);
     exit();
 }
 
 // 🔐 CSRF
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     Logger::activity('PrayerRequestRejected', 'Invalid CSRF on prayer-requests/save');
-    header('Location: /prayer-requests/submit?err=' . urlencode('Security check failed. Please try again.'), true, 302);
+    header('Location: ' . Site::url('prayer-requests/submit') . '?err=' . urlencode('Security check failed. Please try again.'), true, 302);
     exit();
 }
 
@@ -58,7 +58,7 @@ $isAnonymous = isset($_POST['isAnonymous']) === true && $_POST['isAnonymous'] ==
 
 // 🛡️ Validate
 if ($subject === '' || $body === '') {
-    header('Location: /prayer-requests/submit?err=' . urlencode('Subject and request text are required.'), true, 302);
+    header('Location: ' . Site::url('prayer-requests/submit') . '?err=' . urlencode('Subject and request text are required.'), true, 302);
     exit();
 }
 if (mb_strlen($subject) > 255) {
@@ -108,7 +108,7 @@ $stmt = $mysqli->prepare(
 );
 if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'PR_INSERT_PREP', $mysqli->error, '');
-    header('Location: /prayer-requests/submit?err=' . urlencode('Something went wrong. Please try again.'), true, 302);
+    header('Location: ' . Site::url('prayer-requests/submit') . '?err=' . urlencode('Something went wrong. Please try again.'), true, 302);
     exit();
 }
 
@@ -129,7 +129,7 @@ $stmt->close();
 
 if ($ok === false) {
     Logger::errorPlatform('MySQL', 'Error', 'PR_INSERT_FAIL', $mysqli->error, '');
-    header('Location: /prayer-requests/submit?err=' . urlencode('Failed to save your request. Please try again.'), true, 302);
+    header('Location: ' . Site::url('prayer-requests/submit') . '?err=' . urlencode('Failed to save your request. Please try again.'), true, 302);
     exit();
 }
 
@@ -150,8 +150,8 @@ PrayerChain::maybeAutoAssign($siteId, $newId);
 
 // 🔀 Redirect — pending shows a "thanks, awaiting review" message; active jumps straight to view
 if ($initialStatus === 'pending') {
-    header('Location: /prayer-requests?submitted=1', true, 302);
+    header('Location: ' . Site::url('prayer-requests') . '?submitted=1', true, 302);
 } else {
-    header('Location: /prayer-requests/view?id=' . $newId, true, 302);
+    header('Location: ' . Site::url('prayer-requests/view') . '?id=' . $newId, true, 302);
 }
 exit();

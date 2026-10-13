@@ -85,7 +85,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $pageTitle   = 'Members — ' . $group['groupName'];
 $pageSection = 'small-groups';
-$breadcrumbs = ['Dashboard' => '/', 'Small Groups' => '/small-groups', (string) $group['groupName'] => '/small-groups/group?id=' . $groupId, 'Members' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Small Groups' => Site::url('small-groups'), (string) $group['groupName'] => Site::url('small-groups/group') . '?id=' . $groupId, 'Members' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
@@ -102,14 +102,14 @@ $csrf = $esc(Auth::csrfToken());
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-users-gear me-2"></i>Members — <?php echo $esc($group['groupName']); ?></h1>
-    <a href="/small-groups/group?id=<?php echo $groupId; ?>" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back to group</a>
+    <a href="<?php echo htmlspecialchars(Site::url('small-groups/group'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $groupId; ?>" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back to group</a>
 </div>
 
 <!-- ➕ Add member -->
 <div class="card mb-4">
     <div class="card-header"><h5 class="mb-0">Add a member</h5></div>
     <div class="card-body">
-        <form method="post" action="/small-groups/member-save" class="row g-2 align-items-end">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('small-groups/member-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <input type="hidden" name="action" value="add">
             <input type="hidden" name="groupID" value="<?php echo $groupId; ?>">
@@ -152,14 +152,14 @@ $csrf = $esc(Auth::csrfToken());
                     <?php endif; ?>
                 </div>
                 <div class="col-12 col-md-7 text-md-end mt-2 mt-md-0">
-                    <form method="post" action="/small-groups/member-save" class="d-inline">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('small-groups/member-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="action" value="approve">
                         <input type="hidden" name="groupID" value="<?php echo $groupId; ?>">
                         <input type="hidden" name="membershipID" value="<?php echo (int) $m['membershipID']; ?>">
                         <button type="submit" class="btn btn-sm btn-success"><i class="fa-solid fa-check me-1"></i>Approve</button>
                     </form>
-                    <form method="post" action="/small-groups/member-save" class="d-inline">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('small-groups/member-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="action" value="decline">
                         <input type="hidden" name="groupID" value="<?php echo $groupId; ?>">
@@ -189,7 +189,7 @@ $csrf = $esc(Auth::csrfToken());
                 <small><?php echo $m['joinedAt'] !== null ? $esc(date('j M Y', strtotime((string) $m['joinedAt']))) : '—'; ?></small>
             </div>
             <div class="col-6 col-md-3">
-                <form method="post" action="/small-groups/member-save" class="d-flex gap-1">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('small-groups/member-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex gap-1">
                     <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                     <input type="hidden" name="action" value="change-role">
                     <input type="hidden" name="groupID" value="<?php echo $groupId; ?>">
@@ -203,7 +203,7 @@ $csrf = $esc(Auth::csrfToken());
                 </form>
             </div>
             <div class="col-12 col-md-2 text-md-end mt-2 mt-md-0">
-                <form method="post" action="/small-groups/member-save" class="d-inline">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('small-groups/member-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                     <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                     <input type="hidden" name="action" value="remove">
                     <input type="hidden" name="groupID" value="<?php echo $groupId; ?>">
@@ -228,7 +228,7 @@ $csrf = $esc(Auth::csrfToken());
                     <small class="text-muted">— ended <?php echo $m['endedAt'] !== null ? $esc(date('j M Y', strtotime((string) $m['endedAt']))) : ''; ?></small>
                 </div>
                 <div class="col-12 col-md-6 text-md-end mt-2 mt-md-0">
-                    <form method="post" action="/small-groups/member-save" class="d-inline">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('small-groups/member-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="action" value="rejoin">
                         <input type="hidden" name="groupID" value="<?php echo $groupId; ?>">

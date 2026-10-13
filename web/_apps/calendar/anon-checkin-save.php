@@ -68,7 +68,7 @@ use Portal\Core\RateLimiter;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /', true, 302); exit(); }
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . Site::url(''), true, 302); exit(); }
 
 Auth::ensureSession();
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {

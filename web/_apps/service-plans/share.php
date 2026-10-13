@@ -72,7 +72,7 @@ if ($action === 'enable') {
     if ((string) App::settings('service_plans.public_share.enabled') !== 'true') {
         $_SESSION['flash_msg']  = 'Public sharing is turned off for this site — ask an admin to enable it at /admin/hymns.';
         $_SESSION['flash_type'] = 'warning';
-        header('Location: /service-plans/edit?id=' . $planId);
+        header('Location: ' . Site::url('service-plans/edit') . '?id=' . $planId);
         exit();
     }
     $token = (string) ($plan['publicToken'] ?? '');
@@ -120,5 +120,5 @@ if ($action === 'enable') {
     }
 }
 
-header('Location: /service-plans/edit?id=' . $planId);
+header('Location: ' . Site::url('service-plans/edit') . '?id=' . $planId);
 exit();

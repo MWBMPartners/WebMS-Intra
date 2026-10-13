@@ -69,7 +69,7 @@ $asset   = $assetId > 0 ? AssetRegister::get($assetId) : null;
 if ($assetId > 0 && $asset === null) {
     $_SESSION['flash_msg']  = 'Asset not found.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets');
+    header('Location: ' . Site::url('assets'));
     exit();
 }
 $isEdit = $asset !== null;
@@ -124,15 +124,15 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 $pageTitle   = $isEdit === true ? 'Edit Asset' : 'Add Asset';
 $pageSection = 'assets';
 $breadcrumbs = [
-    'Dashboard' => '/',
-    'Assets'    => '/assets',
+    'Dashboard' => Site::url(''),
+    'Assets'    => Site::url('assets'),
     $pageTitle  => '',
 ];
 if ($isEdit === true) {
     $breadcrumbs = [
-        'Dashboard' => '/',
-        'Assets'    => '/assets',
-        (string) $asset['name'] => '/assets/item?id=' . $assetId,
+        'Dashboard' => Site::url(''),
+        'Assets'    => Site::url('assets'),
+        (string) $asset['name'] => Site::url('assets/item') . '?id=' . $assetId,
         'Edit'      => '',
     ];
 }
@@ -151,7 +151,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
     <i class="fa-solid fa-boxes-stacked me-2"></i><?php echo $isEdit === true ? 'Edit Asset' : 'Add Asset'; ?>
 </h1>
 
-<form method="post" action="/assets/save">
+<form method="post" action="<?php echo htmlspecialchars(Site::url('assets/save'), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
 
@@ -185,7 +185,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                         </option>
                     <?php endforeach; ?>
                 </select>
-                <small class="text-muted"><a href="/assets/categories">Manage categories</a></small>
+                <small class="text-muted"><a href="<?php echo htmlspecialchars(Site::url('assets/categories'), ENT_QUOTES, 'UTF-8'); ?>">Manage categories</a></small>
             </div>
             <div class="col-md-4">
                 <label class="form-label" for="locationID">Location</label>
@@ -198,7 +198,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                         </option>
                     <?php endforeach; ?>
                 </select>
-                <small class="text-muted"><a href="/assets/locations">Manage locations</a></small>
+                <small class="text-muted"><a href="<?php echo htmlspecialchars(Site::url('assets/locations'), ENT_QUOTES, 'UTF-8'); ?>">Manage locations</a></small>
             </div>
             <div class="col-md-4">
                 <label class="form-label" for="parentAssetID">Parent asset (bundle/kit)</label>
@@ -245,7 +245,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                     <?php endforeach; ?>
                 </select>
                 <small class="text-muted">
-                    Which code prints on <a href="/assets/labels">Label Designer</a> labels (#404). EAN-13/EAN-8/UPC-A/UPC-E/ITF-14
+                    Which code prints on <a href="<?php echo htmlspecialchars(Site::url('assets/labels'), ENT_QUOTES, 'UTF-8'); ?>">Label Designer</a> labels (#404). EAN-13/EAN-8/UPC-A/UPC-E/ITF-14
                     need a matching primary identifier recorded below, or the label falls back to the QR code.
                 </small>
             </div>
@@ -425,7 +425,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
         <button type="submit" class="btn btn-primary">
             <i class="fa-solid fa-floppy-disk me-1"></i><?php echo $isEdit === true ? 'Save changes' : 'Create asset'; ?>
         </button>
-        <a href="<?php echo $isEdit === true ? '/assets/item?id=' . $assetId : '/assets'; ?>" class="btn btn-outline-secondary">Cancel</a>
+        <a href="<?php echo htmlspecialchars($isEdit === true ? Site::url('assets/item') . '?id=' . $assetId : Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
     </div>
 </form>
 

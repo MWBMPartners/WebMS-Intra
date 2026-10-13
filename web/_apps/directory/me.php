@@ -44,7 +44,7 @@ if ($stmt !== false) {
 
 $pageTitle   = 'My directory profile';
 $pageSection = 'directory';
-$breadcrumbs = ['Dashboard' => '/', 'Directory' => '/directory', 'My profile' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Directory' => Site::url('directory'), 'My profile' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 
@@ -67,7 +67,7 @@ $visRow = function (string $field, string $label, string $current, string $help 
 <h1 class="mb-3"><i class="fa-solid fa-user-pen me-2"></i>My directory profile</h1>
 <p class="text-muted">Update what you share and who sees it.</p>
 
-<form method="post" action="/directory/save">
+<form method="post" action="<?php echo htmlspecialchars(Site::url('directory/save'), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
 
     <div class="card mb-3">
@@ -126,7 +126,7 @@ $visRow = function (string $field, string $label, string $current, string $help 
     </div>
 
     <button type="submit" class="btn btn-primary">Save</button>
-    <a href="/directory" class="btn btn-outline-secondary">Cancel</a>
+    <a href="<?php echo htmlspecialchars(Site::url('directory'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
 </form>
 
 <?php

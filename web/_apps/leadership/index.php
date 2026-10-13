@@ -26,7 +26,7 @@ use Portal\Core\Site;
 // 📌 Page metadata
 $pageTitle   = 'Leadership';
 $pageSection = 'leadership';
-$breadcrumbs = ['Dashboard' => '/', 'Leadership' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Leadership' => ''];
 
 // 🛡️ Auth check
 Auth::ensureSession();
@@ -121,17 +121,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="mb-0"><i class="fa-solid fa-crown me-2" style="color:#d4af37;"></i>Leadership Directory</h1>
     <?php if ($isAdmin === true): ?>
         <div class="d-flex gap-2">
-            <a href="/leadership/export?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
+            <a href="<?php echo htmlspecialchars(Site::url('leadership/export'), ENT_QUOTES, 'UTF-8'); ?>?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
                class="btn btn-outline-success" title="Export CSV">
                 <i class="fa-solid fa-file-csv me-1"></i> Export
             </a>
-            <a href="/leadership/history" class="btn btn-outline-secondary">
+            <a href="<?php echo htmlspecialchars(Site::url('leadership/history'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
                 <i class="fa-solid fa-clock-rotate-left me-1"></i> History
             </a>
-            <a href="/leadership/assign" class="btn btn-primary">
+            <a href="<?php echo htmlspecialchars(Site::url('leadership/assign'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary">
                 <i class="fa-solid fa-user-plus me-1"></i> Assign Role
             </a>
-            <a href="/leadership/manage" class="btn btn-outline-primary">
+            <a href="<?php echo htmlspecialchars(Site::url('leadership/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary">
                 <i class="fa-solid fa-gear me-1"></i> Manage Roles
             </a>
         </div>
@@ -172,7 +172,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <i class="fa-solid fa-circle-info me-1"></i>
         No leadership roles have been defined yet.
         <?php if ($isAdmin === true): ?>
-            <a href="/leadership/manage" class="alert-link">Create roles</a> to get started.
+            <a href="<?php echo htmlspecialchars(Site::url('leadership/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">Create roles</a> to get started.
         <?php endif; ?>
     </div>
 <?php else: ?>
@@ -224,7 +224,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <?php if ($isAdmin === true): ?>
                         <div class="card-footer text-end">
-                            <a href="/leadership/assign?roleID=<?php echo (int) $role['roleID']; ?>"
+                            <a href="<?php echo htmlspecialchars(Site::url('leadership/assign'), ENT_QUOTES, 'UTF-8'); ?>?roleID=<?php echo (int) $role['roleID']; ?>"
                                class="btn btn-sm btn-outline-primary" title="Assign someone to this role">
                                 <i class="fa-solid fa-user-plus me-1"></i> Assign
                             </a>

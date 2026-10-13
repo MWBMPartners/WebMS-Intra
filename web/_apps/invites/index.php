@@ -59,7 +59,7 @@ $status = static function (array $r) use ($now): array {
 
 $pageTitle   = 'Invitations';
 $pageSection = 'invites';
-$breadcrumbs = ['Dashboard' => '/', 'Invitations' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Invitations' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -69,7 +69,7 @@ $csrf = Auth::csrfToken();
         <h1 class="mb-1"><i class="fa-solid fa-envelope-open-text me-2"></i>Invitations</h1>
         <p class="text-secondary mb-0">Single-use invite links for new-member self-registration.</p>
     </div>
-    <a href="/invites/new" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>New invitation</a>
+    <a href="<?php echo htmlspecialchars(Site::url('invites/new'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>New invitation</a>
 </div>
 
 <?php if (count($invites) === 0): ?>
@@ -97,7 +97,7 @@ $csrf = Auth::csrfToken();
                         </div>
                         <div class="col-md-2 text-end">
                             <?php if ($label === 'Pending'): ?>
-                                <form method="post" action="/invites/revoke" class="d-inline">
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('invites/revoke'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="invitationID" value="<?php echo (int) $r['invitationID']; ?>">
                                     <button type="submit" class="btn btn-outline-danger btn-sm"

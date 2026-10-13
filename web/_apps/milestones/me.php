@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -32,7 +33,7 @@ if ($stmt !== false) {
 
 $pageTitle   = 'My Milestones';
 $pageSection = 'milestones';
-$breadcrumbs = ['Dashboard' => '/', 'Milestones' => '/milestones', 'My Milestones' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Milestones' => Site::url('milestones'), 'My Milestones' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -43,7 +44,7 @@ $csrf = Auth::csrfToken();
 <div class="card mb-4">
     <div class="card-body">
         <h2 class="h5">Add a milestone</h2>
-        <form method="post" action="/milestones/save" class="row g-2">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('milestones/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="col-md-2">
                 <label class="form-label small">Kind</label>
@@ -93,7 +94,7 @@ $csrf = Auth::csrfToken();
                         <div class="col-md-3 small text-muted"><?php echo htmlspecialchars((string) ($r['label'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-2"><span class="badge bg-light text-dark"><?php echo htmlspecialchars((string) $r['privacy'], ENT_QUOTES, 'UTF-8'); ?></span></div>
                         <div class="col-md-3 text-end">
-                            <form method="post" action="/milestones/save" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('milestones/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="delete" value="<?php echo (int) $r['milestoneID']; ?>">
                                 <button type="submit" class="btn btn-outline-danger btn-sm"

@@ -126,7 +126,7 @@ $loggedIn           = Auth::check();
 if ($loggedIn === true) {
     $privileged = App::isAdmin() === true || AssetRegister::isResponsibleFor($assetId) === true;
     if ($isConfidential === false || $privileged === true) {
-        header('Location: /assets/item?id=' . $assetId, true, 302);
+        header('Location: ' . Site::url('assets/item') . '?id=' . $assetId, true, 302);
         exit();
     }
     // ⬇️ Deliberately falls through — see access-model comment above.
@@ -253,7 +253,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
              found-save.php looks the asset up exactly the way this page
              did. Field allow-list is deliberately tiny: a name, SOME way
              to get in touch (or at least a message), nothing else. -->
-        <form method="post" action="/assets/found-save" novalidate>
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/found-save'), ENT_QUOTES, 'UTF-8'); ?>" novalidate>
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="token" value="<?php echo htmlspecialchars($token, ENT_QUOTES, 'UTF-8'); ?>">
 

@@ -27,7 +27,7 @@ $bookingId = (int) ($_POST['bookingID'] ?? 0);
 $action    = (string) ($_POST['action'] ?? '');
 
 if ($bookingId <= 0) {
-    header('Location: /resources');
+    header('Location: ' . Site::url('resources'));
     exit();
 }
 
@@ -62,14 +62,14 @@ try {
             $stmt->execute();
             $stmt->close();
         }
-        $back = '/resources/my-bookings';
+        $back = Site::url('resources/my-bookings');
     } elseif ($action === 'approve' || $action === 'decline') {
         if (App::isAdmin() === false) {
             http_response_code(403);
             exit('Admin only');
         }
         if ($b['status'] !== 'pending') {
-            header('Location: /resources/approvals');
+            header('Location: ' . Site::url('resources/approvals'));
             exit();
         }
         $newStatus = $action === 'approve' ? 'approved' : 'declined';
@@ -81,13 +81,13 @@ try {
             $stmt->execute();
             $stmt->close();
         }
-        $back = '/resources/approvals';
+        $back = Site::url('resources/approvals');
     } else {
-        $back = '/resources';
+        $back = Site::url('resources');
     }
 } catch (\Throwable $e) {
     \Portal\Core\Logger::errorPlatform('Resources', 'Warning', 'ACTION', $e->getMessage(), '');
-    $back = '/resources';
+    $back = Site::url('resources');
 }
 
 header('Location: ' . $back);

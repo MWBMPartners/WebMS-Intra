@@ -35,7 +35,7 @@ $form = FormEngine::getForm($formId, $siteId);
 
 $pageTitle   = 'Fill in Form';
 $pageSection = 'forms';
-$breadcrumbs = ['Dashboard' => '/', 'Forms' => '/forms', 'Fill in' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Forms' => Site::url('forms'), 'Fill in' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
@@ -43,7 +43,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 // NOT the anonymous public route, so there is no oracle to protect here).
 if ($form === null) {
     echo '<div class="alert alert-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i>Form not found.</div>';
-    echo '<a href="/forms" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i> Back to Forms</a>';
+    echo '<a href="' . htmlspecialchars(Site::url('forms'), ENT_QUOTES, 'UTF-8') . '" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i> Back to Forms</a>';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     exit();
 }
@@ -53,7 +53,7 @@ $isOpen     = FormEngine::isOpen($form);
 
 if ($audienceOk === false || $isOpen === false) {
     echo '<div class="alert alert-light border"><i class="fa-solid fa-circle-info me-1"></i>This form is not currently available.</div>';
-    echo '<a href="/forms" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i> Back to Forms</a>';
+    echo '<a href="' . htmlspecialchars(Site::url('forms'), ENT_QUOTES, 'UTF-8') . '" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i> Back to Forms</a>';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     exit();
 }
@@ -74,7 +74,7 @@ if ($allowMultiple === false) {
 
 if ($alreadySubmitted === true) {
     echo '<div class="alert alert-success"><i class="fa-solid fa-circle-check me-1"></i>You have already submitted this form. Thank you.</div>';
-    echo '<a href="/forms" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i> Back to Forms</a>';
+    echo '<a href="' . htmlspecialchars(Site::url('forms'), ENT_QUOTES, 'UTF-8') . '" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i> Back to Forms</a>';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     exit();
 }
@@ -107,7 +107,7 @@ $descRaw = (string) ($form['description'] ?? '');
 
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-pen-to-square me-2"></i><?php echo $titleSafe; ?></h1>
-    <a href="/forms" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>
+    <a href="<?php echo htmlspecialchars(Site::url('forms'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>
 </div>
 
 <?php if ($flashMsg !== ''): ?>
@@ -122,7 +122,7 @@ $descRaw = (string) ($form['description'] ?? '');
 
 <div class="card">
     <div class="card-body">
-        <form method="post" action="/forms/submit" novalidate>
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/submit'), ENT_QUOTES, 'UTF-8'); ?>" novalidate>
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="formID" value="<?php echo $formId; ?>">
 

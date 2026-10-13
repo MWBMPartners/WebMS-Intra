@@ -127,7 +127,7 @@ $startNice = date('l j F Y, H:i', $startTs);
 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $host   = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
 $publicUrl = $scheme . '://' . $host . '/e/' . urlencode((string) $event['eventSlug']);
-$rsvpUrl   = '/calendar/event?slug=' . urlencode((string) $event['eventSlug']);
+$rsvpUrl   = Site::url('calendar/event') . '?slug=' . urlencode((string) $event['eventSlug']);
 $qrSrc     = 'https://chart.googleapis.com/chart?cht=qr&chs=200x200&choe=UTF-8&chl=' . urlencode($publicUrl);
 
 $eventNameSafe = htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8');

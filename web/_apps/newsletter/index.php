@@ -46,7 +46,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $pageTitle   = 'Newsletter';
 $pageSection = 'newsletter';
-$breadcrumbs = ['Dashboard' => '/', 'Newsletter' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Newsletter' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -60,13 +60,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <p class="text-secondary mb-0">Compose and send branded newsletters to your membership.</p>
     </div>
     <div class="d-flex gap-2">
-        <a href="/newsletter/segments" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-users me-1"></i>Segments</a>
-        <a href="/newsletter/new" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>New newsletter</a>
+        <a href="<?php echo htmlspecialchars(Site::url('newsletter/segments'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-users me-1"></i>Segments</a>
+        <a href="<?php echo htmlspecialchars(Site::url('newsletter/new'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>New newsletter</a>
     </div>
 </div>
 
 <?php if (count($rows) === 0): ?>
-    <div class="alert alert-info">No newsletters yet. <a href="/newsletter/new">Compose the first →</a></div>
+    <div class="alert alert-info">No newsletters yet. <a href="<?php echo htmlspecialchars(Site::url('newsletter/new'), ENT_QUOTES, 'UTF-8'); ?>">Compose the first →</a></div>
 <?php else: ?>
     <div class="card">
         <div class="card-body">
@@ -82,7 +82,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 ?>
                     <div class="row py-2 border-bottom align-items-center">
                         <div class="col-md-5">
-                            <a href="/newsletter/edit?id=<?php echo (int) $r['newsletterID']; ?>" class="text-decoration-none">
+                            <a href="<?php echo htmlspecialchars(Site::url('newsletter/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $r['newsletterID']; ?>" class="text-decoration-none">
                                 <strong><?php echo htmlspecialchars((string) $r['title'], ENT_QUOTES, 'UTF-8'); ?></strong>
                             </a>
                             <?php if (($r['subject'] ?? '') !== ''): ?>
@@ -101,8 +101,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </div>
                         <div class="col-md-1 small text-muted text-end"><?php echo (int) $r['sentCount']; ?> / <?php echo (int) $r['recipientCount']; ?></div>
                         <div class="col-md-2 text-end">
-                            <a href="/newsletter/preview?id=<?php echo (int) $r['newsletterID']; ?>" class="btn btn-outline-secondary btn-sm" target="_blank">Preview</a>
-                            <a href="/newsletter/edit?id=<?php echo (int) $r['newsletterID']; ?>" class="btn btn-outline-primary btn-sm">Edit</a>
+                            <a href="<?php echo htmlspecialchars(Site::url('newsletter/preview'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $r['newsletterID']; ?>" class="btn btn-outline-secondary btn-sm" target="_blank">Preview</a>
+                            <a href="<?php echo htmlspecialchars(Site::url('newsletter/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $r['newsletterID']; ?>" class="btn btn-outline-primary btn-sm">Edit</a>
                         </div>
                     </div>
                 <?php endforeach; ?>

@@ -69,5 +69,5 @@ if ($meeting !== null) {
     $_SESSION['flash_type'] = 'info';
 }
 
-header('Location: /calendar/event?id=' . $eventId);
+header('Location: ' . Site::url('calendar/event') . '?id=' . $eventId);
 exit();

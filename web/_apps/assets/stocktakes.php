@@ -70,7 +70,7 @@ $statusIcon = [
 
 $pageTitle   = 'Stocktakes';
 $pageSection = 'assets';
-$breadcrumbs = ['Dashboard' => '/', 'Assets' => '/assets', 'Stocktakes' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Assets' => Site::url('assets'), 'Stocktakes' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -79,7 +79,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-clipboard-check me-2"></i>Stocktakes</h1>
         <p class="text-secondary mb-0">Scan-to-verify audit runs across your asset register.</p>
     </div>
-    <a href="/assets" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
+    <a href="<?php echo htmlspecialchars(Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
 </div>
 
 <?php if ($flashMsg !== ''): ?>
@@ -92,7 +92,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card-body">
         <h2 class="h5"><i class="fa-solid fa-play me-2"></i>Start a stocktake</h2>
         <p class="text-muted small">Leave location/category unset to cover the whole site register.</p>
-        <form method="post" action="/assets/stocktake-save" class="row g-2 align-items-end">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/stocktake-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="start">
             <div class="col-md-4">
@@ -159,7 +159,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             ?>
             <div class="portal-data-row align-items-center">
                 <div class="col-4">
-                    <a href="/assets/stocktake?id=<?php echo (int) $st['stocktakeID']; ?>" class="text-decoration-none">
+                    <a href="<?php echo htmlspecialchars(Site::url('assets/stocktake'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $st['stocktakeID']; ?>" class="text-decoration-none">
                         <strong><?php echo htmlspecialchars((string) $st['label'], ENT_QUOTES, 'UTF-8'); ?></strong>
                     </a>
                     <br><small class="text-muted"><?php echo (int) $st['itemCount']; ?> asset(s) expected</small>
@@ -176,7 +176,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <br><?php echo htmlspecialchars(date('d M Y H:i', strtotime((string) $st['startedAt'])), ENT_QUOTES, 'UTF-8'); ?>
                 </div>
                 <div class="col-1 text-end">
-                    <a href="/assets/stocktake?id=<?php echo (int) $st['stocktakeID']; ?>" class="btn btn-sm btn-outline-primary" title="View">
+                    <a href="<?php echo htmlspecialchars(Site::url('assets/stocktake'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $st['stocktakeID']; ?>" class="btn btn-sm btn-outline-primary" title="View">
                         <i class="fa-solid fa-eye"></i>
                     </a>
                 </div>

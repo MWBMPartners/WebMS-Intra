@@ -55,7 +55,7 @@ use Portal\Core\Venues;
 // 📌 Page metadata
 $pageTitle   = 'Calendar';
 $pageSection = 'calendar';
-$breadcrumbs = ['Dashboard' => '/', 'Calendar' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Calendar' => ''];
 
 // 🛡️ Ensure session for nav state
 Auth::ensureSession();
@@ -518,7 +518,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="mb-0"><i class="fa-solid fa-calendar-days me-2"></i>Calendar</h1>
     <div class="d-flex gap-2">
         <?php if (App::isAdmin() === true): ?>
-            <a href="/calendar/manage" class="btn btn-outline-primary">
+            <a href="<?php echo htmlspecialchars(Site::url('calendar/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary">
                 <i class="fa-solid fa-list-check me-1"></i> Manage Events
             </a>
         <?php endif; ?>

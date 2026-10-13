@@ -53,7 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /assets/orgs');
+        header('Location: ' . Site::url('assets/orgs'));
         exit();
     }
 
@@ -70,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['flash_type'] = $saved > 0 ? 'success' : 'danger';
     }
 
-    header('Location: /assets/orgs');
+    header('Location: ' . Site::url('assets/orgs'));
     exit();
 }
 
@@ -95,7 +95,7 @@ if ($editId > 0) {
 
 $pageTitle   = 'External Organisations';
 $pageSection = 'assets';
-$breadcrumbs = ['Dashboard' => '/', 'Assets' => '/assets', 'Organisations' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Assets' => Site::url('assets'), 'Organisations' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -111,7 +111,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-3">
     <div class="card-body">
         <h2 class="h5"><?php echo $editOrg !== null ? 'Edit organisation' : 'Add organisation'; ?></h2>
-        <form method="post" action="/assets/orgs" class="row g-2 align-items-end">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/orgs'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="save">
             <input type="hidden" name="orgID" value="<?php echo $editOrg !== null ? (int) $editOrg['orgID'] : 0; ?>">
@@ -150,7 +150,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <i class="fa-solid fa-<?php echo $editOrg !== null ? 'check' : 'plus'; ?> me-1"></i><?php echo $editOrg !== null ? 'Update' : 'Add'; ?>
                 </button>
                 <?php if ($editOrg !== null): ?>
-                    <a href="/assets/orgs" class="btn btn-outline-secondary btn-sm w-100 mt-1">Cancel edit</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('assets/orgs'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm w-100 mt-1">Cancel edit</a>
                 <?php endif; ?>
             </div>
         </form>
@@ -187,10 +187,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="col-2 small text-muted"><?php echo htmlspecialchars((string) ($org['agreementRef'] ?? '—'), ENT_QUOTES, 'UTF-8'); ?></div>
                 <div class="col-4 text-end">
-                    <a href="/assets/orgs?edit=<?php echo (int) $org['orgID']; ?>" class="btn btn-sm btn-outline-secondary" title="Edit">
+                    <a href="<?php echo htmlspecialchars(Site::url('assets/orgs'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo (int) $org['orgID']; ?>" class="btn btn-sm btn-outline-secondary" title="Edit">
                         <i class="fa-solid fa-pen"></i>
                     </a>
-                    <form method="post" action="/assets/orgs" class="d-inline">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/orgs'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="action" value="toggle">
                         <input type="hidden" name="orgID" value="<?php echo (int) $org['orgID']; ?>">
@@ -205,6 +205,6 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endif; ?>
 
-<a href="/assets" class="btn btn-outline-secondary mt-3"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
+<a href="<?php echo htmlspecialchars(Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary mt-3"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

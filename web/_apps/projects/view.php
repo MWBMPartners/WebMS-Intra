@@ -80,7 +80,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $pageTitle   = (string) $project['title'];
 $pageSection = 'projects';
-$breadcrumbs = ['Dashboard' => '/', 'Projects' => '/projects', (string) $project['title'] => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Projects' => Site::url('projects'), (string) $project['title'] => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -125,14 +125,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php if ($pledged > 0): ?> · <?php echo $sym . number_format($pledged / 100, 2); ?> pending<?php endif; ?>
             </p>
             <p class="text-muted small mt-2 mb-0">
-                <a href="/projects/contributors?slug=<?php echo urlencode($slug); ?>">See contributors →</a>
+                <a href="<?php echo htmlspecialchars(Site::url('projects/contributors'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo urlencode($slug); ?>">See contributors →</a>
             </p>
         </div></div>
 
         <?php if ($canPledge === true): ?>
             <div class="card"><div class="card-body">
                 <h5>Make a pledge</h5>
-                <form method="post" action="/projects/pledge">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('projects/pledge'), ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="slug" value="<?php echo htmlspecialchars($slug, ENT_QUOTES, 'UTF-8'); ?>">
                     <div class="mb-2">

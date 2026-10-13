@@ -16,7 +16,7 @@ declare(strict_types=1);
 
 $pageTitle   = 'Help - Approvals';
 $pageSection = 'help';
-$breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'Approvals' => ''];
+$breadcrumbs = ['Dashboard' => \Portal\Core\Site::url(''), 'Help' => \Portal\Core\Site::url('help'), 'Approvals' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -27,7 +27,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-check-double me-2"></i>Approvals Guide</h1>
         <p class="text-secondary mb-0">For approvers: how to review, approve, or reject expense claims.</p>
     </div>
-    <a href="/help" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Help Centre
     </a>
 </div>
@@ -36,7 +36,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="alert alert-info d-flex gap-2 mb-4" role="alert">
     <i class="fa-solid fa-user-shield mt-1"></i>
     <div>
-        <strong>Who is this for?</strong> This guide is for users who have been designated as expense approvers. If you only need to submit claims, see the <a href="/help/expenses" class="alert-link">Expenses Guide</a> instead.
+        <strong>Who is this for?</strong> This guide is for users who have been designated as expense approvers. If you only need to submit claims, see the <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/expenses'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">Expenses Guide</a> instead.
     </div>
 </div>
 
@@ -280,10 +280,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <!-- Navigation -->
 <div class="d-flex justify-content-between">
-    <a href="/help/expenses" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/expenses'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i>Expenses Guide
     </a>
-    <a href="/help/treasury" class="btn btn-primary">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/treasury'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary">
         Treasury Guide<i class="fa-solid fa-arrow-right ms-1"></i>
     </a>
 </div>

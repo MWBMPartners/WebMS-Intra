@@ -126,7 +126,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Offering Count Sessions';
 $pageSection = 'giving';
-$breadcrumbs = ['Dashboard' => '/', 'Giving' => '/giving', 'Count Sessions' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Giving' => Site::url('giving'), 'Count Sessions' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -139,7 +139,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-money-bill-transfer me-2"></i>Offering Count Sessions</h1>
         <p class="text-secondary mb-0">Two-person offering count with automatic discrepancy flagging.</p>
     </div>
-    <a href="/giving/manage" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Giving</a>
+    <a href="<?php echo htmlspecialchars(Site::url('giving/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Giving</a>
 </div>
 
 <!-- ➕ Start a new count session -->
@@ -148,10 +148,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card-body">
         <?php if (count($categories) === 0): ?>
             <div class="alert alert-warning mb-0">
-                No giving categories yet. <a href="/giving/categories" class="alert-link">Add one</a> before starting a count session.
+                No giving categories yet. <a href="<?php echo htmlspecialchars(Site::url('giving/categories'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">Add one</a> before starting a count session.
             </div>
         <?php else: ?>
-            <form method="post" action="/giving/count/save" class="row g-2 align-items-end">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/count/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="create">
                 <div class="col-md-2">
@@ -247,7 +247,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <span class="badge bg-<?php echo $statusClass((string) $s['status']); ?>"><?php echo htmlspecialchars((string) $s['status'], ENT_QUOTES, 'UTF-8'); ?></span>
                 </div>
                 <div class="col-12 col-md-2 text-md-end">
-                    <a href="/giving/count/session?id=<?php echo (int) $s['countSessionID']; ?>" class="btn btn-sm btn-outline-primary">
+                    <a href="<?php echo htmlspecialchars(Site::url('giving/count/session'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $s['countSessionID']; ?>" class="btn btn-sm btn-outline-primary">
                         <i class="fa-solid fa-magnifying-glass me-1"></i>Open
                     </a>
                 </div>

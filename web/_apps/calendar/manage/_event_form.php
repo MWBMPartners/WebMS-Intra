@@ -31,6 +31,7 @@
 declare(strict_types=1);
 
 use Portal\Core\I18n;
+use Portal\Core\Router;
 use Portal\Core\Site;
 
 // 📌 Extract values for pre-population (edit mode)
@@ -475,7 +476,7 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
             }
             currentController = (typeof AbortController !== 'undefined') ? new AbortController() : null;
 
-            fetch('/api/venues/check?' + params.toString(), {
+            fetch('<?php echo Router::urlForScript('api/venues/check'); ?>?' + params.toString(), {
                 method: 'GET',
                 credentials: 'same-origin',
                 signal: currentController !== null ? currentController.signal : undefined

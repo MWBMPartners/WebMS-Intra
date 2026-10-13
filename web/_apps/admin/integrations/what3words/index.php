@@ -24,6 +24,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -43,7 +44,7 @@ $csrf = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
 
 $pageTitle   = 'what3words Integration';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Integrations' => '/admin/integrations', 'what3words' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Integrations' => Site::url('admin/integrations'), 'what3words' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -68,7 +69,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-4">
     <div class="card-header"><strong>API</strong></div>
     <div class="card-body">
-        <form method="post" action="/admin/integrations/what3words/save" class="row g-3">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/what3words/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
 
             <div class="col-12">
@@ -90,7 +91,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </form>
 
-        <form method="post" action="/admin/integrations/what3words/test" class="mt-3 pt-3 border-top">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/what3words/test'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-3 pt-3 border-top">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <button class="btn btn-outline-secondary" type="submit" <?php echo ($enabled === false || $hasApiKey === false) ? 'disabled' : ''; ?>>
                 <i class="fa-solid fa-plug me-1"></i>Test connection
@@ -102,6 +103,6 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<a href="/admin/integrations" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Integrations</a>
+<a href="<?php echo htmlspecialchars(Site::url('admin/integrations'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Integrations</a>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

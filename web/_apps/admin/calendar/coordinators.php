@@ -80,7 +80,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="h3 mb-2"><i class="fa-solid fa-users-gear me-2 text-primary"></i>Event Coordinators</h1>
     <p class="text-muted">
         <strong><?php echo htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8'); ?></strong>
-        &middot; <a href="/calendar/event?slug=<?php echo htmlspecialchars((string) $event['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none">view public page</a>
+        &middot; <a href="<?php echo htmlspecialchars(Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo htmlspecialchars((string) $event['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none">view public page</a>
     </p>
 
     <h2 class="h5 mt-4 mb-2">Active coordinators</h2>
@@ -98,7 +98,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                 </div>
                 <div class="portal-data-row-aside">
-                    <form method="post" action="/admin/calendar/coordinators/save" class="d-inline">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/calendar/coordinators/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                         <input type="hidden" name="coordinatorID" value="<?php echo (int) $c['coordinatorID']; ?>">
@@ -114,7 +114,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php endif; ?>
 
     <h2 class="h5 mt-4 mb-2">Add coordinator</h2>
-    <form method="post" action="/admin/calendar/coordinators/save">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/calendar/coordinators/save'), ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
         <input type="hidden" name="action" value="grant">
@@ -124,7 +124,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="form-text">The user must already have a portal account.</div>
         </div>
         <button type="submit" class="btn btn-primary"><i class="fa-solid fa-user-plus me-1"></i> Grant coordinator</button>
-        <a href="/calendar/manage?edit=<?php echo $eventId; ?>" class="btn btn-outline-secondary">Back to event</a>
+        <a href="<?php echo htmlspecialchars(Site::url('calendar/manage'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo $eventId; ?>" class="btn btn-outline-secondary">Back to event</a>
     </form>
 </div>
 

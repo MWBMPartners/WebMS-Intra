@@ -24,7 +24,7 @@ use Portal\Core\Site;
 
 // 🛡️ POST only
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /documents');
+    header('Location: ' . Site::url('documents'));
     exit();
 }
 
@@ -33,14 +33,14 @@ Auth::requireLogin();
 if (App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = 'You do not have permission to delete documents.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /documents');
+    header('Location: ' . Site::url('documents'));
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /documents');
+    header('Location: ' . Site::url('documents'));
     exit();
 }
 
@@ -51,7 +51,7 @@ $userId     = (int) ($_SESSION['user_id'] ?? 0);
 if ($documentId <= 0) {
     $_SESSION['flash_msg']  = 'Invalid document.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /documents');
+    header('Location: ' . Site::url('documents'));
     exit();
 }
 
@@ -69,5 +69,5 @@ Logger::activity('DocumentDeleted', 'Deleted document ID: ' . $documentId, $user
 
 $_SESSION['flash_msg']  = 'Document deleted.';
 $_SESSION['flash_type'] = 'info';
-header('Location: /documents');
+header('Location: ' . Site::url('documents'));
 exit();

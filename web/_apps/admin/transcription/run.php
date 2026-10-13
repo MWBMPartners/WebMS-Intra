@@ -14,6 +14,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 use Portal\Core\Transcription;
 
 Auth::ensureSession();
@@ -35,5 +36,5 @@ Logger::activity('TranscriptionRun', sprintf('Processed %d, failed %d', (int) $r
 
 $_SESSION['flash_msg']  = sprintf('Processed %d transcript(s), %d failed.', (int) $result['done'], (int) $result['failed']);
 $_SESSION['flash_type'] = (int) $result['failed'] > 0 ? 'warning' : 'success';
-header('Location: /admin/transcription');
+header('Location: ' . Site::url('admin/transcription'));
 exit();

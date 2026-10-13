@@ -23,7 +23,7 @@ use Portal\Core\Logger;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/workflows');
+    header('Location: ' . Site::url('admin/workflows'));
     exit();
 }
 
@@ -32,14 +32,14 @@ Auth::requireLogin();
 if (App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = t('error.access_denied_inline');
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /dashboard');
+    header('Location: ' . Site::url('dashboard'));
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/workflows');
+    header('Location: ' . Site::url('admin/workflows'));
     exit();
 }
 
@@ -54,7 +54,7 @@ $isActive   = isset($_POST['isActive']) === true ? 1 : 0;
 if ($name === '' || $key === '') {
     $_SESSION['flash_msg']  = 'Name and key are required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/workflows?edit=' . $workflowId);
+    header('Location: ' . Site::url('admin/workflows') . '?edit=' . $workflowId);
     exit();
 }
 
@@ -102,7 +102,7 @@ if ($stepName !== '' && $workflowId > 0) {
     if ($ownsWorkflow === false) {
         $_SESSION['flash_msg']  = 'Workflow not found for this site.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/workflows?edit=' . $workflowId);
+        header('Location: ' . Site::url('admin/workflows') . '?edit=' . $workflowId);
         exit();
     }
 
@@ -139,5 +139,5 @@ if ($stepName !== '' && $workflowId > 0) {
 
 $_SESSION['flash_msg']  = 'Workflow saved.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /admin/workflows?edit=' . $workflowId);
+header('Location: ' . Site::url('admin/workflows') . '?edit=' . $workflowId);
 exit();

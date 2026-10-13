@@ -109,7 +109,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     <?php endif; ?>
 
-    <form method="post" action="/calendar/event/broadcast/send">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/broadcast/send'), ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
 
@@ -140,7 +140,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
 
         <button type="submit" class="btn btn-primary"><i class="fa-solid fa-paper-plane me-1"></i>Send</button>
-        <a href="/calendar/event?slug=<?php echo (int) $eventId; ?>" class="btn btn-outline-secondary">Cancel</a>
+        <a href="<?php echo htmlspecialchars(Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo (int) $eventId; ?>" class="btn btn-outline-secondary">Cancel</a>
     </form>
 </div>
 

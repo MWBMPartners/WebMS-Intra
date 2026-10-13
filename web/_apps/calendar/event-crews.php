@@ -84,7 +84,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="h4 mb-2"><i class="fa-solid fa-people-group me-2 text-primary"></i>Crews — <?php echo htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8'); ?></h1>
     <p class="text-muted small">Forms-only v1. Drag-and-drop is a v1.1 polish layer.</p>
 
-    <form method="post" action="/calendar/event/crews/auto-build" class="d-inline-block mb-3"
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/crews/auto-build'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline-block mb-3"
           data-confirm="Distribute all approved registrations across these crews, balancing by grade?">
         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
@@ -93,7 +93,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <details class="mb-4">
         <summary class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-plus me-1"></i>Add a crew</summary>
-        <form method="post" action="/calendar/event/crews/save" class="row g-2 mt-2 align-items-end p-2 bg-light rounded">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/crews/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mt-2 align-items-end p-2 bg-light rounded">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
             <input type="hidden" name="action" value="addCrew">
@@ -126,7 +126,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <?php foreach ($c['leaders'] as $l): ?>
                                 <div class="d-flex align-items-center small mb-1">
                                     <span class="flex-grow-1"><i class="fa-solid fa-user-tie me-1 text-secondary"></i><?php echo htmlspecialchars($l['name'], ENT_QUOTES, 'UTF-8'); ?></span>
-                                    <form method="post" action="/calendar/event/crews/save" class="m-0">
+                                    <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/crews/save'), ENT_QUOTES, 'UTF-8'); ?>" class="m-0">
                                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                                         <input type="hidden" name="action" value="removeMember">
@@ -144,7 +144,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <?php foreach ($c['participants'] as $p): ?>
                                 <div class="d-flex align-items-center small mb-1">
                                     <span class="flex-grow-1"><i class="fa-solid fa-user me-1 text-secondary"></i><?php echo htmlspecialchars($p['name'], ENT_QUOTES, 'UTF-8'); ?></span>
-                                    <form method="post" action="/calendar/event/crews/save" class="m-0">
+                                    <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/crews/save'), ENT_QUOTES, 'UTF-8'); ?>" class="m-0">
                                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                                         <input type="hidden" name="action" value="removeMember">
@@ -155,7 +155,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <?php endforeach; ?>
                         <?php endif; ?>
 
-                        <form method="post" action="/calendar/event/crews/save" class="mt-2 d-flex gap-1">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/crews/save'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-2 d-flex gap-1">
                             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                             <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                             <input type="hidden" name="action" value="addMember">

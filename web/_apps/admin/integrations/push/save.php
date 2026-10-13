@@ -63,6 +63,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 use Portal\Core\WebPush;
 
 Auth::ensureSession();
@@ -76,7 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token
     exit('Bad request');
 }
 
-$redirect = '/admin/integrations/push';
+$redirect = Site::url('admin/integrations/push');
 
 /**
  * 🚩 Flash an error and redirect back WITHOUT saving anything.

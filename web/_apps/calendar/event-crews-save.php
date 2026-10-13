@@ -22,7 +22,7 @@ use Portal\Core\Logger;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /calendar', true, 302); exit();
+    header('Location: ' . Site::url('calendar'), true, 302); exit();
 }
 
 Auth::ensureSession();
@@ -48,7 +48,7 @@ $ok = (bool) $stmt->get_result()->fetch_assoc();
 $stmt->close();
 if ($ok === false) { http_response_code(404); exit('Event not found'); }
 
-$redirect = '/calendar/event/crews?eventID=' . $eventId;
+$redirect = Site::url('calendar/event/crews') . '?eventID=' . $eventId;
 
 if ($action === 'addCrew') {
     $name           = mb_substr(trim((string) ($_POST['name'] ?? '')), 0, 80);

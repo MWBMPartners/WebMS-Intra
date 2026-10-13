@@ -101,13 +101,13 @@ if ($session['status'] !== 'counting') {
         ? 'This session has an unresolved discrepancy — resolve it before closing.'
         : ($session['status'] === 'closed' ? 'This session is already closed.' : 'This session is not ready to close yet.');
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /giving/count/session?id=' . $countSessionId);
+    header('Location: ' . Site::url('giving/count/session') . '?id=' . $countSessionId);
     exit();
 }
 if ($session['cashTotal'] === null || $session['chequeTotal'] === null || $session['envelopeTotal'] === null) {
     $_SESSION['flash_msg']  = 'Agreed totals are not set yet — both counters must agree, or an admin must resolve.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /giving/count/session?id=' . $countSessionId);
+    header('Location: ' . Site::url('giving/count/session') . '?id=' . $countSessionId);
     exit();
 }
 
@@ -147,7 +147,7 @@ if ($envelopeSumPence > $agreedEnvelopePence) {
     $_SESSION['flash_msg']  = 'Named envelopes (' . Giving::formatAmount($envelopeSumPence) . ') exceed the agreed envelope total ('
         . Giving::formatAmount($agreedEnvelopePence) . '). Adjust the named envelopes or the agreed envelope total before closing.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /giving/count/session?id=' . $countSessionId);
+    header('Location: ' . Site::url('giving/count/session') . '?id=' . $countSessionId);
     exit();
 }
 
@@ -296,5 +296,5 @@ try {
     $_SESSION['flash_type'] = 'danger';
 }
 
-header('Location: /giving/count/session?id=' . $countSessionId);
+header('Location: ' . Site::url('giving/count/session') . '?id=' . $countSessionId);
 exit();

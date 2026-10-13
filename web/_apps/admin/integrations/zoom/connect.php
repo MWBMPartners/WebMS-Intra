@@ -15,6 +15,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 use Portal\Core\Zoom;
 
 Auth::ensureSession();
@@ -35,7 +36,7 @@ $clientSecret = (string) ($settings['clientSecret'] ?? '');
 if ($clientId === '' || $clientSecret === '') {
     $_SESSION['flash_msg']  = 'Zoom Client ID / Secret are not configured.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/integrations/zoom');
+    header('Location: ' . Site::url('admin/integrations/zoom'));
     exit();
 }
 

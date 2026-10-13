@@ -167,7 +167,7 @@ $cellBg = static function (array $dayEvents, DateTimeImmutable $dt) use ($cleanH
             <!-- Header row: month names (each spans 2 sub-columns) -->
             <?php foreach ($months as $monthNum => $monthName): ?>
                 <?php $strap = $monthThemes[$monthNum] ?? ''; ?>
-                <a href="/calendar?view=month&amp;date=<?php echo $year; ?>-<?php echo sprintf('%02d', $monthNum); ?>-01"
+                <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('calendar'), ENT_QUOTES, 'UTF-8'); ?>?view=month&amp;date=<?php echo $year; ?>-<?php echo sprintf('%02d', $monthNum); ?>-01"
                    class="portal-cal-yearplan-monthhead"
                    style="grid-column: span 2;">
                     <span class="portal-cal-yearplan-monthhead-name"><?php echo $esc($monthName); ?></span>
@@ -238,7 +238,7 @@ $cellBg = static function (array $dayEvents, DateTimeImmutable $dt) use ($cleanH
 
                     <!-- Day number + day-of-week initial -->
                     <a class="<?php echo implode(' ', $numClasses); ?>"
-                       href="/calendar?view=day&amp;date=<?php echo $esc($cellDate); ?>"
+                       href="<?php echo htmlspecialchars(\Portal\Core\Site::url('calendar'), ENT_QUOTES, 'UTF-8'); ?>?view=day&amp;date=<?php echo $esc($cellDate); ?>"
                        title="<?php echo $esc($dt->format('l, j F Y')); ?>"<?php echo $numVenueStyle; ?>>
                         <span class="portal-cal-yearplan-num-day"><?php echo sprintf('%02d', $day); ?></span>
                         <span class="portal-cal-yearplan-num-dow"><?php echo $esc($dowInit); ?></span>
@@ -255,7 +255,7 @@ $cellBg = static function (array $dayEvents, DateTimeImmutable $dt) use ($cleanH
                                     $textColored = ($evStyle === 'text' && $evColor !== null);
                                     ?>
                                     <li class="<?php echo $textColored === true ? 'is-text-style' : ''; ?>">
-                                        <a href="/calendar/event?slug=<?php echo $esc((string) $ev['eventSlug']); ?>"
+                                        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo $esc((string) $ev['eventSlug']); ?>"
                                            <?php if ($evColor !== null): ?>style="--ev-color: <?php echo $esc($evColor); ?>;<?php echo $textColored === true ? ' color: ' . $esc($evColor) . '; font-weight: 600;' : ''; ?>"<?php endif; ?>
                                            title="<?php echo $esc((string) $ev['eventName']); ?>">
                                             <?php echo $esc((string) $ev['eventName']); ?>

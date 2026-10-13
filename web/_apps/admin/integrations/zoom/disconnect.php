@@ -35,7 +35,7 @@ if (App::isAdmin() === true) {
         $stmt->execute();
         $stmt->close();
     }
-    $returnTo = '/admin/integrations/zoom';
+    $returnTo = Site::url('admin/integrations/zoom');
 } else {
     $stmt = $db->prepare('DELETE FROM tblZoomAccount WHERE accountID = ? AND siteID = ? AND userID = ?');
     if ($stmt !== false) {
@@ -43,7 +43,7 @@ if (App::isAdmin() === true) {
         $stmt->execute();
         $stmt->close();
     }
-    $returnTo = '/account/integrations/zoom';
+    $returnTo = Site::url('account/integrations/zoom');
 }
 
 $_SESSION['flash_msg']  = 'Zoom account disconnected.';

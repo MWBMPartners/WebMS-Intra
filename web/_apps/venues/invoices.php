@@ -85,7 +85,7 @@ $statusBadge = [
 
 $pageTitle   = 'Invoices & Payments';
 $pageSection = 'venues';
-$breadcrumbs = ['Dashboard' => '/', 'Venue Bookings' => '/venues', 'Invoices' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Venue Bookings' => Site::url('venues'), 'Invoices' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -100,7 +100,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="card mb-3">
     <div class="card-body">
-        <form method="get" action="/venues/invoices" class="row g-2 align-items-end">
+        <form method="get" action="<?php echo htmlspecialchars(Site::url('venues/invoices'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
             <div class="col-md-4">
                 <label class="form-label small" for="venue">Venue</label>
                 <select class="form-select form-select-sm" id="venue" name="venue" onchange="this.form.submit()">
@@ -125,7 +125,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
             <div class="col-md-5 text-end">
                 <?php if (count($venues) > 0): ?>
-                    <form method="get" action="/venues/invoice" class="d-inline-flex gap-2">
+                    <form method="get" action="<?php echo htmlspecialchars(Site::url('venues/invoice'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline-flex gap-2">
                         <select name="venue" class="form-select form-select-sm" required>
                             <option value="">— choose a venue —</option>
                             <?php foreach ($venues as $v): ?>
@@ -185,7 +185,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </span>
                 </div>
                 <div class="col-1 text-end">
-                    <a href="/venues/invoice?id=<?php echo (int) $inv['invoiceID']; ?>" class="btn btn-sm btn-outline-secondary" title="Open">
+                    <a href="<?php echo htmlspecialchars(Site::url('venues/invoice'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $inv['invoiceID']; ?>" class="btn btn-sm btn-outline-secondary" title="Open">
                         <i class="fa-solid fa-arrow-right"></i>
                     </a>
                 </div>
@@ -199,6 +199,6 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endif; ?>
 
-<a href="/venues" class="btn btn-outline-secondary mt-3"><i class="fa-solid fa-arrow-left me-1"></i>Back to schedule</a>
+<a href="<?php echo htmlspecialchars(Site::url('venues'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary mt-3"><i class="fa-solid fa-arrow-left me-1"></i>Back to schedule</a>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

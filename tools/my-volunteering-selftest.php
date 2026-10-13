@@ -311,9 +311,14 @@ file_put_contents($runner, <<<'PHP'
 <?php
 declare(strict_types=1);
 namespace Portal\Core {
-    // Stand-ins: the page only asks these two classes three questions.
+    // Stand-ins: the page only asks these two classes four questions. (Site::url() was added on
+    // 13 October 2026: the link sweep made the page build its "Account" link with it, and this test
+    // then failed with "Call to undefined method" although the page itself was right.)
     class Auth { public static function ensureSession(): void {} public static function requireLogin(): void {} }
-    class Site { public static function id(): int { return (int) getenv('MV_SITE'); } }
+    class Site {
+        public static function id(): int { return (int) getenv('MV_SITE'); }
+        public static function url(string $routeKey): string { return '/' . ltrim($routeKey, '/'); }
+    }
 }
 namespace {
     [, $core, $page, $host, $user, $pass, $name, $port] = $argv;

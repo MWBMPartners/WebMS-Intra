@@ -54,7 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /assets/kiosk-pin');
+        header('Location: ' . Site::url('assets/kiosk-pin'));
         exit();
     }
 
@@ -75,7 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $_SESSION['flash_msg']  = $result['msg'];
     $_SESSION['flash_type'] = $result['ok'] === true ? 'success' : 'danger';
-    header('Location: /assets/kiosk-pin');
+    header('Location: ' . Site::url('assets/kiosk-pin'));
     exit();
 }
 
@@ -92,7 +92,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'My Kiosk PIN';
 $pageSection = 'assets';
-$breadcrumbs = ['Dashboard' => '/', 'Assets' => '/assets', 'My Kiosk PIN' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Assets' => Site::url('assets'), 'My Kiosk PIN' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -101,7 +101,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-lock me-2"></i>My Kiosk PIN</h1>
         <p class="text-secondary mb-0">Used to identify yourself at a shared self check-in/out kiosk terminal.</p>
     </div>
-    <a href="/assets" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
+    <a href="<?php echo htmlspecialchars(Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
 </div>
 
 <?php if ($flashMsg !== ''): ?>
@@ -127,7 +127,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php endif; ?>
         </p>
 
-        <form method="post" action="/assets/kiosk-pin" novalidate>
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/kiosk-pin'), ENT_QUOTES, 'UTF-8'); ?>" novalidate>
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="set">
             <div class="mb-3">
@@ -143,7 +143,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
         <?php if ($hasPin === true): ?>
             <hr>
-            <form method="post" action="/assets/kiosk-pin" data-confirm="Clear your kiosk PIN? You won't be able to use kiosk terminals until you set a new one." data-confirm-destructive="true">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/kiosk-pin'), ENT_QUOTES, 'UTF-8'); ?>" data-confirm="Clear your kiosk PIN? You won't be able to use kiosk terminals until you set a new one." data-confirm-destructive="true">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="clear">
                 <button type="submit" class="btn btn-outline-danger btn-sm">

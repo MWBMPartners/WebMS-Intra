@@ -89,7 +89,7 @@ use Portal\Core\Site;
 // 📌 Page metadata
 $pageTitle   = 'Captcha Providers';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Captcha' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Captcha' => ''];
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -203,7 +203,7 @@ $providerIcon = static function (string $key): string {
             <?php endif; ?>
         </p>
     </div>
-    <a href="/admin" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back to Admin
     </a>
 </div>
@@ -300,7 +300,7 @@ $providerIcon = static function (string $key): string {
         <h2 class="h6 mb-0"><i class="fa-solid fa-arrows-up-down me-2"></i>Provider Priority</h2>
     </div>
     <div class="card-body">
-        <form method="post" action="/admin/captcha/save" id="priorityForm">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/captcha/save'), ENT_QUOTES, 'UTF-8'); ?>" id="priorityForm">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action"     value="priority">
             <input type="hidden" name="priority"   id="priorityField"
@@ -341,7 +341,7 @@ $providerIcon = static function (string $key): string {
 <!-- ============================================================================ -->
 <!-- 🔑 Provider key inputs -->
 <!-- ============================================================================ -->
-<form method="post" action="/admin/captcha/save">
+<form method="post" action="<?php echo htmlspecialchars(Site::url('admin/captcha/save'), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="action"     value="keys">
 
@@ -494,7 +494,7 @@ $providerIcon = static function (string $key): string {
         <button type="submit" class="btn btn-success">
             <i class="fa-solid fa-save me-1"></i> Save Provider Keys
         </button>
-        <a href="/admin/captcha" class="btn btn-outline-secondary">Cancel</a>
+        <a href="<?php echo htmlspecialchars(Site::url('admin/captcha'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
     <?php endif; ?>
 </form>
 

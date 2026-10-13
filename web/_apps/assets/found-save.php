@@ -92,7 +92,7 @@ use Portal\Core\Site;
 // 🚦 1. Method gate — POST only. Nothing has been looked up yet, so a
 // plain redirect home is safe (no oracle to protect here — see header).
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /', true, 303);
+    header('Location: ' . Site::url(''), true, 303);
     exit();
 }
 
@@ -152,7 +152,7 @@ if ($globalPagesEnabled === false || $assetPageEnabled === false || $isConfident
 // rejection redirects back to the token page with a flash message rather
 // than a 404 (see file header, step 4).
 // -----------------------------------------------------------------------------
-$backToTag = '/a/' . $token;
+$backToTag = Site::url('a/') . $token;
 
 /**
  * Redirect back to this asset's public page with a flash message, then

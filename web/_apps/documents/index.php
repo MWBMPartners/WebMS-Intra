@@ -32,7 +32,7 @@ if (Auth::check() === false) {
 // 📌 Page metadata
 $pageTitle   = 'Documents';
 $pageSection = 'documents';
-$breadcrumbs = ['Dashboard' => '/', 'Documents' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Documents' => ''];
 
 $siteId    = Site::id();
 $filterCat = isset($_GET['cat']) ? (int) $_GET['cat'] : null;
@@ -106,10 +106,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="mb-0"><i class="fa-solid fa-folder-open me-2"></i>Documents</h1>
     <?php if (App::isAdmin() === true): ?>
         <div class="d-flex gap-2">
-            <a href="/documents/categories" class="btn btn-outline-secondary">
+            <a href="<?php echo htmlspecialchars(Site::url('documents/categories'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
                 <i class="fa-solid fa-folder me-1"></i>Categories
             </a>
-            <a href="/documents/upload" class="btn btn-primary">
+            <a href="<?php echo htmlspecialchars(Site::url('documents/upload'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary">
                 <i class="fa-solid fa-upload me-1"></i>Upload
             </a>
         </div>
@@ -119,9 +119,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 🏷️ Category filter -->
 <?php if (count($categories) > 0): ?>
     <div class="mb-4">
-        <a href="/documents" class="btn btn-sm <?php echo ($filterCat === null ? 'btn-primary' : 'btn-outline-primary'); ?> me-1">All</a>
+        <a href="<?php echo htmlspecialchars(Site::url('documents'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm <?php echo ($filterCat === null ? 'btn-primary' : 'btn-outline-primary'); ?> me-1">All</a>
         <?php foreach ($categories as $cat): ?>
-            <a href="/documents?cat=<?php echo (int) $cat['categoryID']; ?>"
+            <a href="<?php echo htmlspecialchars(Site::url('documents'), ENT_QUOTES, 'UTF-8'); ?>?cat=<?php echo (int) $cat['categoryID']; ?>"
                class="btn btn-sm <?php echo ($filterCat === (int) $cat['categoryID'] ? 'btn-primary' : 'btn-outline-primary'); ?> me-1 mb-1">
                 <?php echo htmlspecialchars($cat['categoryName'], ENT_QUOTES, 'UTF-8'); ?>
             </a>
@@ -177,7 +177,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php endif; ?>
                     </div>
                     <div class="col-3 col-md-2 text-end">
-                        <a href="/documents/download?id=<?php echo (int) $doc['documentID']; ?>" class="btn btn-sm btn-outline-primary" title="Download">
+                        <a href="<?php echo htmlspecialchars(Site::url('documents/download'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $doc['documentID']; ?>" class="btn btn-sm btn-outline-primary" title="Download">
                             <i class="fa-solid fa-download"></i>
                         </a>
                         <?php if (App::isAdmin() === true): ?>
@@ -192,7 +192,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     data-doc-published="<?php echo ((int) $doc['isPublished'] === 1) ? '1' : '0'; ?>">
                                 <i class="fa-solid fa-pen"></i>
                             </button>
-                            <form method="post" action="/documents/delete" class="d-inline" data-confirm="Delete this document?" data-confirm-destructive="true">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('documents/delete'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline" data-confirm="Delete this document?" data-confirm-destructive="true">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="documentID" value="<?php echo (int) $doc['documentID']; ?>">
                                 <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
@@ -295,7 +295,7 @@ document.addEventListener('DOMContentLoaded', function () {
         };
 
         window.Portal.fetch(
-            '/api/documents/update?id=' + encodeURIComponent(id),
+            '<?php echo \Portal\Core\Router::urlForScript('api/documents/update'); ?>?id=' + encodeURIComponent(id),
             { method: 'POST', body: payload },
             function () {
                 if (window.Portal.toast) {

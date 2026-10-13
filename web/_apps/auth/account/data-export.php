@@ -84,7 +84,7 @@ Auth::requireLogin();
 $user   = App::user();
 $userId = (int) ($user['userID'] ?? 0);
 if ($userId <= 0) {
-    header('Location: /account', true, 302);
+    header('Location: ' . Site::url('account'), true, 302);
     exit();
 }
 

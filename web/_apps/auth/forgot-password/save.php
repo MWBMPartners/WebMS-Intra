@@ -64,13 +64,14 @@ use Portal\Core\Mailer;
 use Portal\Core\MailQueue;
 use Portal\Core\PortalAddress;
 use Portal\Core\RateLimiter;
+use Portal\Core\Site;
 
 // -----------------------------------------------------------------------------
 // 1. 🛡️ Only accept POST
 // -----------------------------------------------------------------------------
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /forgot-password', true, 302);
+    header('Location: ' . Site::url('forgot-password'), true, 302);
     exit();
 }
 
@@ -88,13 +89,13 @@ $text = static fn (mixed $value): string => is_string($value) === true ? $value 
 
 if (Auth::verifyCsrf($text($_POST['csrf_token'] ?? '')) === false) {
     Logger::activity('PasswordResetFailed', 'Invalid CSRF token on forgot-password');
-    header('Location: /forgot-password', true, 302);
+    header('Location: ' . Site::url('forgot-password'), true, 302);
     exit();
 }
 
 if (Captcha::verify($_POST, Captcha::FOR_PASSWORD_RESET) === false) {
     Logger::activity('PasswordResetFailed', 'Captcha failed on forgot-password');
-    header('Location: /forgot-password', true, 302);
+    header('Location: ' . Site::url('forgot-password'), true, 302);
     exit();
 }
 
@@ -139,7 +140,7 @@ if (Captcha::verify($_POST, Captcha::FOR_PASSWORD_RESET) === false) {
 //    REJECTED: sleeping for a fixed or random time. It slows everybody down
 //    and only blurs the difference; enough tries average it away.
 $answerNow = static function (): void {
-    header('Location: /forgot-password?sent=1', true, 302);
+    header('Location: ' . Site::url('forgot-password') . '?sent=1', true, 302);
     session_write_close();
     ignore_user_abort(true);
     if (function_exists('fastcgi_finish_request') === true) {

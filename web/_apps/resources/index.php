@@ -43,7 +43,7 @@ foreach ($rows as $r) {
 
 $pageTitle   = 'Resource Booking';
 $pageSection = 'resources';
-$breadcrumbs = ['Dashboard' => '/', 'Resources' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Resources' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
 $icons = ['room' => 'fa-door-open', 'equipment' => 'fa-screwdriver-wrench', 'vehicle' => 'fa-car', 'other' => 'fa-cube'];
@@ -55,10 +55,10 @@ $icons = ['room' => 'fa-door-open', 'equipment' => 'fa-screwdriver-wrench', 'veh
         <p class="text-secondary mb-0">Reserve rooms, equipment, and vehicles. Some resources require admin approval.</p>
     </div>
     <div>
-        <a href="/resources/my-bookings" class="btn btn-outline-primary btn-sm me-1">My bookings</a>
+        <a href="<?php echo htmlspecialchars(Site::url('resources/my-bookings'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm me-1">My bookings</a>
         <?php if (App::isAdmin() === true): ?>
-            <a href="/resources/approvals" class="btn btn-outline-warning btn-sm me-1">Approvals</a>
-            <a href="/resources/manage" class="btn btn-primary btn-sm">Manage</a>
+            <a href="<?php echo htmlspecialchars(Site::url('resources/approvals'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-warning btn-sm me-1">Approvals</a>
+            <a href="<?php echo htmlspecialchars(Site::url('resources/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm">Manage</a>
         <?php endif; ?>
     </div>
 </div>
@@ -67,7 +67,7 @@ $icons = ['room' => 'fa-door-open', 'equipment' => 'fa-screwdriver-wrench', 'veh
     <div class="alert alert-info">
         No resources configured yet.
         <?php if (App::isAdmin() === true): ?>
-            <a href="/resources/manage">Add some →</a>
+            <a href="<?php echo htmlspecialchars(Site::url('resources/manage'), ENT_QUOTES, 'UTF-8'); ?>">Add some →</a>
         <?php endif; ?>
     </div>
 <?php else: ?>
@@ -82,7 +82,7 @@ $icons = ['room' => 'fa-door-open', 'equipment' => 'fa-screwdriver-wrench', 'veh
                     <div class="card h-100">
                         <div class="card-body">
                             <h3 class="h6 mb-1">
-                                <a href="/resources/resource?id=<?php echo (int) $r['resourceID']; ?>" class="text-decoration-none">
+                                <a href="<?php echo htmlspecialchars(Site::url('resources/resource'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $r['resourceID']; ?>" class="text-decoration-none">
                                     <?php echo htmlspecialchars((string) $r['name'], ENT_QUOTES, 'UTF-8'); ?>
                                 </a>
                             </h3>
@@ -101,7 +101,7 @@ $icons = ['room' => 'fa-door-open', 'equipment' => 'fa-screwdriver-wrench', 'veh
                             <?php if (($r['description'] ?? '') !== ''): ?>
                                 <p class="small mt-2 mb-2"><?php echo htmlspecialchars((string) $r['description'], ENT_QUOTES, 'UTF-8'); ?></p>
                             <?php endif; ?>
-                            <a href="/resources/book?id=<?php echo (int) $r['resourceID']; ?>" class="btn btn-primary btn-sm">Book</a>
+                            <a href="<?php echo htmlspecialchars(Site::url('resources/book'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $r['resourceID']; ?>" class="btn btn-primary btn-sm">Book</a>
                         </div>
                     </div>
                 </div>

@@ -29,7 +29,7 @@ Auth::requireLogin();
 if (App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = 'You do not have permission to manage categories.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /documents');
+    header('Location: ' . Site::url('documents'));
     exit();
 }
 
@@ -41,7 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /documents/categories');
+        header('Location: ' . Site::url('documents/categories'));
         exit();
     }
 
@@ -92,7 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    header('Location: /documents/categories');
+    header('Location: ' . Site::url('documents/categories'));
     exit();
 }
 
@@ -115,7 +115,7 @@ if ($catStmt !== false) {
 // 📌 Page metadata
 $pageTitle   = 'Document Categories';
 $pageSection = 'documents';
-$breadcrumbs = ['Dashboard' => '/', 'Documents' => '/documents', 'Categories' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Documents' => Site::url('documents'), 'Categories' => ''];
 
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
@@ -128,7 +128,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-4">
     <div class="card-header"><h5 class="mb-0">Add Category</h5></div>
     <div class="card-body">
-        <form method="post" action="/documents/categories">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('documents/categories'), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="categoryID" value="0">
             <div class="row g-3">
@@ -175,7 +175,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="col-1"><?php echo (int) $cat['sortOrder']; ?></div>
                 <div class="col-2"><span class="badge bg-secondary"><?php echo (int) $cat['docCount']; ?></span></div>
                 <div class="col-2 text-end">
-                    <form method="post" action="/documents/categories" class="d-inline" data-confirm="Delete this category? Documents will become uncategorised." data-confirm-destructive="true">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('documents/categories'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline" data-confirm="Delete this category? Documents will become uncategorised." data-confirm-destructive="true">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="action" value="delete">
                         <input type="hidden" name="categoryID" value="<?php echo (int) $cat['categoryID']; ?>">
@@ -189,7 +189,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endif; ?>
 
-<a href="/documents" class="btn btn-outline-secondary mt-3">
+<a href="<?php echo htmlspecialchars(Site::url('documents'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary mt-3">
     <i class="fa-solid fa-arrow-left me-1"></i>Back to Documents
 </a>
 

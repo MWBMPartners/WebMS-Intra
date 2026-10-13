@@ -79,7 +79,7 @@ if ($isCsvExport === true) {
     if (Auth::verifyCsrf($_GET['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /assets' . ($statusFilter !== '' ? '?status=' . urlencode($statusFilter) : ''));
+        header('Location: ' . Site::url('assets') . ($statusFilter !== '' ? '?status=' . urlencode($statusFilter) : ''));
         exit();
     }
 }
@@ -142,7 +142,7 @@ if ($isCsvExport === true) {
 // 📌 Page metadata
 $pageTitle   = 'Asset Tracker';
 $pageSection = 'assets';
-$breadcrumbs = ['Dashboard' => '/', 'Assets' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Assets' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
@@ -166,7 +166,7 @@ $kindIcon = ['physical' => 'fa-box', 'digital' => 'fa-cloud'];
 // view plus a fresh CSRF token, so clicking it exports exactly what's on
 // screen (see the CSRF check in the export branch above, and
 // AssetRegister::listForSite()'s $canManage-gated confidential filter).
-$exportCsvUrl = '/assets?export=csv&csrf_token=' . urlencode(Auth::csrfToken());
+$exportCsvUrl = Site::url('assets') . '?export=csv&csrf_token=' . urlencode(Auth::csrfToken());
 if ($statusFilter !== '') {
     $exportCsvUrl .= '&status=' . urlencode($statusFilter);
 }
@@ -185,7 +185,7 @@ if ($statusFilter !== '') {
             <!-- 📥 Bulk CSV import (#407) — manager-only, mirrors this
                  page's own $canManage gate; import.php re-checks
                  independently server-side regardless. -->
-            <a href="/assets/import" class="btn btn-outline-secondary btn-sm" title="Bulk-import assets from a CSV file">
+            <a href="<?php echo htmlspecialchars(Site::url('assets/import'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm" title="Bulk-import assets from a CSV file">
                 <i class="fa-solid fa-file-import me-1"></i>Import CSV
             </a>
         <?php endif; ?>
@@ -193,10 +193,10 @@ if ($statusFilter !== '') {
             <!-- 📊 Value dashboard (#408) — manager-only, mirrors this
                  page's own $canManage gate; value-report.php re-checks
                  independently server-side regardless. -->
-            <a href="/assets/value-report" class="btn btn-outline-secondary btn-sm" title="Purchase, current & insured value report">
+            <a href="<?php echo htmlspecialchars(Site::url('assets/value-report'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm" title="Purchase, current & insured value report">
                 <i class="fa-solid fa-chart-column me-1"></i>Value report
             </a>
-            <a href="/assets/edit" class="btn btn-primary btn-sm">
+            <a href="<?php echo htmlspecialchars(Site::url('assets/edit'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm">
                 <i class="fa-solid fa-plus me-1"></i><?php echo htmlspecialchars(I18n::t('assets.new_asset'), ENT_QUOTES, 'UTF-8'); ?>
             </a>
         <?php endif; ?>
@@ -208,7 +208,7 @@ if ($statusFilter !== '') {
         <i class="fa-solid fa-circle-info me-2"></i>
         <?php echo htmlspecialchars(I18n::t('assets.empty_state'), ENT_QUOTES, 'UTF-8'); ?>
         <?php if ($canManage === true): ?>
-            <a href="/assets/edit">Add the first one &rarr;</a>
+            <a href="<?php echo htmlspecialchars(Site::url('assets/edit'), ENT_QUOTES, 'UTF-8'); ?>">Add the first one &rarr;</a>
         <?php endif; ?>
     </div>
 <?php else: ?>
@@ -225,7 +225,7 @@ if ($statusFilter !== '') {
             <div class="portal-data-row align-items-center">
                 <div class="col-8 col-md-5">
                     <i class="fa-solid <?php echo htmlspecialchars($icon, ENT_QUOTES, 'UTF-8'); ?> me-2 text-muted"></i>
-                    <a href="/assets/item?id=<?php echo (int) $asset['assetID']; ?>" class="text-decoration-none">
+                    <a href="<?php echo htmlspecialchars(Site::url('assets/item'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $asset['assetID']; ?>" class="text-decoration-none">
                         <strong><?php echo htmlspecialchars((string) $asset['name'], ENT_QUOTES, 'UTF-8'); ?></strong>
                     </a>
                     <?php if ((int) $asset['isConfidential'] === 1): ?>
@@ -248,7 +248,7 @@ if ($statusFilter !== '') {
                     <?php echo $asset['serialNumber'] !== null ? htmlspecialchars((string) $asset['serialNumber'], ENT_QUOTES, 'UTF-8') : '&mdash;'; ?>
                 </div>
                 <div class="col-6 col-md-2 text-end">
-                    <a href="/assets/item?id=<?php echo (int) $asset['assetID']; ?>" class="btn btn-sm btn-outline-primary" title="View">
+                    <a href="<?php echo htmlspecialchars(Site::url('assets/item'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $asset['assetID']; ?>" class="btn btn-sm btn-outline-primary" title="View">
                         <i class="fa-solid fa-eye"></i>
                     </a>
                 </div>

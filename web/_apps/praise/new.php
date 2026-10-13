@@ -42,7 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
                 $stmt->bind_param('iissi', $siteId, $userId, $subject, $body, $anon);
                 $stmt->execute();
                 $stmt->close();
-                header('Location: /praise');
+                header('Location: ' . Site::url('praise'));
                 exit();
             }
         } catch (\Throwable $e) {
@@ -57,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
 
 $pageTitle   = 'Share Praise';
 $pageSection = 'praise';
-$breadcrumbs = ['Dashboard' => '/', 'Praise Reports' => '/praise', 'Share' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Praise Reports' => Site::url('praise'), 'Share' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -86,7 +86,7 @@ $csrf = Auth::csrfToken();
                 <label for="anon" class="form-check-label">Post anonymously</label>
             </div>
             <button type="submit" class="btn btn-primary">Share praise</button>
-            <a href="/praise" class="btn btn-outline-secondary">Cancel</a>
+            <a href="<?php echo htmlspecialchars(Site::url('praise'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
         </form>
     </div>
 </div>

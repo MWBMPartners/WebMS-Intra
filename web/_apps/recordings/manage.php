@@ -61,7 +61,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Manage Recordings';
 $pageSection = 'recordings';
-$breadcrumbs = ['Dashboard' => '/', 'Recordings' => '/recordings', 'Manage' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Recordings' => Site::url('recordings'), 'Manage' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -71,14 +71,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-gear me-2"></i>Manage recordings</h1>
-    <a href="/recordings/upload" class="btn btn-primary btn-sm"><i class="fa-solid fa-upload me-1"></i>Upload new</a>
+    <a href="<?php echo htmlspecialchars(Site::url('recordings/upload'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-upload me-1"></i>Upload new</a>
 </div>
 
 <?php if ($editing !== null): ?>
     <div class="card mb-4">
         <div class="card-header"><strong>Edit: <?php echo htmlspecialchars((string) $editing['title'], ENT_QUOTES, 'UTF-8'); ?></strong></div>
         <div class="card-body">
-            <form method="post" action="/recordings/save" class="row g-3">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('recordings/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="recordingID" value="<?php echo (int) $editing['recordingID']; ?>">
                 <div class="col-md-8">
@@ -129,7 +129,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="col-12 d-flex gap-2">
                     <button class="btn btn-primary" type="submit">Save changes</button>
-                    <a href="/recordings/manage" class="btn btn-outline-secondary">Cancel</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('recordings/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
                 </div>
             </form>
         </div>
@@ -137,7 +137,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php endif; ?>
 
 <?php if (count($recordings) === 0): ?>
-    <div class="alert alert-info">No recordings yet. <a href="/recordings/upload">Upload the first →</a></div>
+    <div class="alert alert-info">No recordings yet. <a href="<?php echo htmlspecialchars(Site::url('recordings/upload'), ENT_QUOTES, 'UTF-8'); ?>">Upload the first →</a></div>
 <?php else: ?>
     <div class="card">
         <div class="card-body">
@@ -145,7 +145,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php foreach ($recordings as $r): ?>
                     <div class="row py-2 border-bottom align-items-center">
                         <div class="col-md-5">
-                            <a href="/recordings/view?id=<?php echo (int) $r['recordingID']; ?>"><strong><?php echo htmlspecialchars((string) $r['title'], ENT_QUOTES, 'UTF-8'); ?></strong></a>
+                            <a href="<?php echo htmlspecialchars(Site::url('recordings/view'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $r['recordingID']; ?>"><strong><?php echo htmlspecialchars((string) $r['title'], ENT_QUOTES, 'UTF-8'); ?></strong></a>
                             <span class="badge bg-light text-dark ms-1"><?php echo htmlspecialchars((string) $r['kind'], ENT_QUOTES, 'UTF-8'); ?></span>
                         </div>
                         <div class="col-md-2 small text-muted">
@@ -163,8 +163,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <?php endif; ?>
                         </div>
                         <div class="col-md-2 text-end">
-                            <a href="/recordings/manage?id=<?php echo (int) $r['recordingID']; ?>" class="btn btn-outline-primary btn-sm">Edit</a>
-                            <form method="post" action="/recordings/delete" class="d-inline">
+                            <a href="<?php echo htmlspecialchars(Site::url('recordings/manage'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $r['recordingID']; ?>" class="btn btn-outline-primary btn-sm">Edit</a>
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('recordings/delete'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="recordingID" value="<?php echo (int) $r['recordingID']; ?>">
                                 <button type="submit" class="btn btn-outline-danger btn-sm" data-confirm="Delete this recording and its file?">

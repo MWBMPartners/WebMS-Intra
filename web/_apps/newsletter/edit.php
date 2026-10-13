@@ -38,7 +38,7 @@ if ($id === 0) {
         $id = (int) $stmt->insert_id;
         $stmt->close();
     }
-    header('Location: /newsletter/edit?id=' . $id);
+    header('Location: ' . Site::url('newsletter/edit') . '?id=' . $id);
     exit();
 }
 
@@ -83,21 +83,21 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Edit Newsletter';
 $pageSection = 'newsletter';
-$breadcrumbs = ['Dashboard' => '/', 'Newsletter' => '/newsletter', 'Edit' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Newsletter' => Site::url('newsletter'), 'Edit' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-pen-to-square me-2"></i>Edit newsletter</h1>
     <div class="d-flex gap-2">
-        <a href="/newsletter/preview?id=<?php echo $id; ?>" class="btn btn-outline-secondary btn-sm" target="_blank">Preview</a>
-        <a href="/newsletter/recipients?id=<?php echo $id; ?>" class="btn btn-outline-secondary btn-sm">Recipients</a>
+        <a href="<?php echo htmlspecialchars(Site::url('newsletter/preview'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $id; ?>" class="btn btn-outline-secondary btn-sm" target="_blank">Preview</a>
+        <a href="<?php echo htmlspecialchars(Site::url('newsletter/recipients'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $id; ?>" class="btn btn-outline-secondary btn-sm">Recipients</a>
     </div>
 </div>
 
 <div class="card mb-3">
     <div class="card-body">
-        <form method="post" action="/newsletter/save" class="row g-3">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('newsletter/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="newsletterID" value="<?php echo $id; ?>">
             <div class="col-md-6">
@@ -161,7 +161,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             ?>
                         </div>
                         <div class="col-md-2 text-end">
-                            <form method="post" action="/newsletter/block-delete" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('newsletter/block-delete'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="newsletterID" value="<?php echo $id; ?>">
                                 <input type="hidden" name="contentID" value="<?php echo (int) $b['contentID']; ?>">
@@ -175,7 +175,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         <?php endif; ?>
 
-        <form method="post" action="/newsletter/block-save" class="row g-2 align-items-end">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('newsletter/block-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="newsletterID" value="<?php echo $id; ?>">
             <div class="col-md-2">
@@ -228,7 +228,7 @@ if ($newsletterStatus === 'sending') {
 ?>
 
 <?php if (in_array($newsletterStatus, ['draft', 'scheduled'], true) === true): ?>
-    <form method="post" action="/newsletter/send" class="d-inline">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('newsletter/send'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="newsletterID" value="<?php echo $id; ?>">
         <button class="btn btn-success" type="submit" data-confirm="Send this newsletter now? Recipients will be locked in.">
@@ -243,7 +243,7 @@ if ($newsletterStatus === 'sending') {
         "Continue sending" dispatches another batch (rate-limited per
         <code>newsletter.batchPerHour</code>).
     </p>
-    <form method="post" action="/newsletter/send" class="d-inline">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('newsletter/send'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="newsletterID" value="<?php echo $id; ?>">
         <button class="btn btn-warning" type="submit">

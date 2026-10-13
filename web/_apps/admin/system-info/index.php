@@ -70,6 +70,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\DbServer;
+use Portal\Core\Site;
 
 // 🔐 Administrators only.
 Auth::ensureSession();
@@ -221,7 +222,7 @@ $phpLimits = [
 
 $pageTitle   = 'Server Information';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Server Information' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Server Information' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
 /**
@@ -249,7 +250,7 @@ $colourFor = static function (string $state): string {
             connected to, and the limits set by your hosting.
         </p>
     </div>
-    <a href="/admin" class="btn btn-outline-secondary btn-sm">&larr; Admin</a>
+    <a href="<?php echo htmlspecialchars(Site::url('admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Admin</a>
 </div>
 
 <!-- 🛢️ Database server -->
@@ -451,7 +452,7 @@ $colourFor = static function (string $state): string {
                 secret are hidden; the setting names are always shown. There is a plain
                 text version for pasting into a support ticket.
             </p>
-            <a href="/admin/system-info/phpinfo" class="btn btn-outline-primary" target="_blank" rel="noopener">
+            <a href="<?php echo htmlspecialchars(Site::url('admin/system-info/phpinfo'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary" target="_blank" rel="noopener">
                 <i class="fa-solid fa-up-right-from-square me-1"></i>Open the full PHP report
             </a>
         <?php else: ?>

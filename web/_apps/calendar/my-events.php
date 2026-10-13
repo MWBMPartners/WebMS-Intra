@@ -29,7 +29,7 @@ Auth::requireLogin();
 
 $pageTitle   = 'My Events';
 $pageSection = 'calendar';
-$breadcrumbs = ['Dashboard' => '/', 'Calendar' => '/calendar', 'My Events' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Calendar' => Site::url('calendar'), 'My Events' => ''];
 
 $userId = (int) ($_SESSION['user_id'] ?? 0);
 $siteId = Site::id();
@@ -81,7 +81,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="portal-data-row">
                 <div class="portal-data-row-main">
                     <h2 class="h6 mb-1">
-                        <a href="/calendar/event?slug=<?php echo htmlspecialchars((string) $r['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none">
+                        <a href="<?php echo htmlspecialchars(Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo htmlspecialchars((string) $r['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none">
                             <?php echo htmlspecialchars((string) $r['eventName'], ENT_QUOTES, 'UTF-8'); ?>
                         </a>
                     </h2>
@@ -99,10 +99,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="portal-data-row-aside text-end">
                     <span class="badge <?php echo $statusBadge[$r['status']] ?? 'bg-secondary'; ?> mb-2"><?php echo htmlspecialchars(ucfirst((string) $r['status']), ENT_QUOTES, 'UTF-8'); ?></span>
                     <div>
-                        <a href="/calendar/event/hub?eventID=<?php echo (int) $r['eventID']; ?>" class="btn btn-outline-secondary btn-sm" title="Team Hub">
+                        <a href="<?php echo htmlspecialchars(Site::url('calendar/event/hub'), ENT_QUOTES, 'UTF-8'); ?>?eventID=<?php echo (int) $r['eventID']; ?>" class="btn btn-outline-secondary btn-sm" title="Team Hub">
                             <i class="fa-solid fa-people-roof"></i> Team Hub
                         </a>
-                        <a href="/calendar/manage?edit=<?php echo (int) $r['eventID']; ?>" class="btn btn-outline-primary btn-sm" title="Manage">
+                        <a href="<?php echo htmlspecialchars(Site::url('calendar/manage'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo (int) $r['eventID']; ?>" class="btn btn-outline-primary btn-sm" title="Manage">
                             <i class="fa-solid fa-pen"></i> Manage
                         </a>
                     </div>

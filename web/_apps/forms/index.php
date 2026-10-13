@@ -69,7 +69,7 @@ if ($idStmt !== false) {
 
 $pageTitle   = 'Forms';
 $pageSection = 'forms';
-$breadcrumbs = ['Dashboard' => '/', 'Forms' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Forms' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -80,7 +80,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <p class="text-secondary mb-0">Forms open for you to fill in.</p>
     </div>
     <?php if (App::isAdmin() === true): ?>
-        <a href="/forms/manage" class="btn btn-outline-secondary">
+        <a href="<?php echo htmlspecialchars(Site::url('forms/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
             <i class="fa-solid fa-gear me-1"></i> Manage forms
         </a>
     <?php endif; ?>
@@ -114,7 +114,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <i class="fa-solid fa-circle-check me-1"></i> Submitted
                                 </span>
                             <?php else: ?>
-                                <a href="/forms/fill?id=<?php echo $formId; ?>" class="btn btn-primary btn-sm">
+                                <a href="<?php echo htmlspecialchars(Site::url('forms/fill'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $formId; ?>" class="btn btn-primary btn-sm">
                                     <i class="fa-solid fa-pen-to-square me-1"></i> Fill in
                                 </a>
                             <?php endif; ?>

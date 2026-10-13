@@ -36,6 +36,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 
@@ -77,7 +78,7 @@ if ($valid === false) {
     echo '<!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>Invitation</title></head>'
        . '<body style="font-family:system-ui;text-align:center;padding:4rem 1rem;">'
        . '<h1>Invitation unavailable</h1><p>' . htmlspecialchars($message, ENT_QUOTES, 'UTF-8') . '</p>'
-       . '<p><a href="/">Return to portal</a></p></body></html>';
+       . '<p><a href="' . htmlspecialchars(Site::url(''), ENT_QUOTES, 'UTF-8') . '">Return to portal</a></p></body></html>';
     exit();
 }
 
@@ -190,7 +191,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['user_id'] = $newUserId;
                 Auth::initSessionSite($newUserId, $db);
 
-                header('Location: /');
+                header('Location: ' . Site::url(''));
                 exit();
             } catch (\Throwable $e) {
                 $db->rollback();

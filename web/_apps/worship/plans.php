@@ -72,7 +72,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="container py-3" style="max-width:960px;">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h4 mb-0"><i class="fa-solid fa-music me-2 text-primary"></i>Service Plans</h1>
-        <a href="/worship/plan?new=1" class="btn btn-sm btn-primary"><i class="fa-solid fa-plus me-1"></i>New plan</a>
+        <a href="<?php echo htmlspecialchars(Site::url('worship/plan'), ENT_QUOTES, 'UTF-8'); ?>?new=1" class="btn btn-sm btn-primary"><i class="fa-solid fa-plus me-1"></i>New plan</a>
     </div>
 
     <div class="btn-group btn-group-sm mb-3" role="group">
@@ -84,7 +84,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php if (count($plans) === 0): ?>
         <div class="alert alert-info small">
             <?php if ($filter === 'active'): ?>
-                No active service plans yet. <a href="/worship/plan?new=1">Create your first plan</a>.
+                No active service plans yet. <a href="<?php echo htmlspecialchars(Site::url('worship/plan'), ENT_QUOTES, 'UTF-8'); ?>?new=1">Create your first plan</a>.
             <?php else: ?>
                 No plans in this view.
             <?php endif; ?>
@@ -94,7 +94,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php foreach ($plans as $p): ?>
             <div class="portal-data-row">
                 <div class="portal-data-row-main">
-                    <a href="/worship/plan?id=<?php echo (int) $p['planID']; ?>" class="text-decoration-none fw-semibold h6 mb-1">
+                    <a href="<?php echo htmlspecialchars(Site::url('worship/plan'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $p['planID']; ?>" class="text-decoration-none fw-semibold h6 mb-1">
                         <?php echo htmlspecialchars((string) $p['name'], ENT_QUOTES, 'UTF-8'); ?>
                     </a>
                     <?php if ((int) $p['isActive'] === 0): ?>
@@ -114,7 +114,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                 </div>
                 <div class="portal-data-row-aside">
-                    <a href="/worship/plan?id=<?php echo (int) $p['planID']; ?>" class="btn btn-sm btn-outline-primary">
+                    <a href="<?php echo htmlspecialchars(Site::url('worship/plan'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $p['planID']; ?>" class="btn btn-sm btn-outline-primary">
                         <i class="fa-solid fa-pen me-1"></i>Open
                     </a>
                 </div>

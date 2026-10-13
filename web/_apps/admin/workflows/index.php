@@ -28,7 +28,7 @@ Auth::requireLogin();
 if (App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = t('error.access_denied_inline');
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /dashboard');
+    header('Location: ' . Site::url('dashboard'));
     exit();
 }
 
@@ -84,7 +84,7 @@ if ($wStmt !== false) {
 // 📌 Page metadata
 $pageTitle   = 'Workflow Management';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Workflows' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Workflows' => ''];
 
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
@@ -93,7 +93,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- ⚙️ Workflow Management -->
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-diagram-project me-2"></i>Workflows</h1>
-    <a href="/admin/workflows?edit=0" class="btn btn-primary">
+    <a href="<?php echo htmlspecialchars(Site::url('admin/workflows'), ENT_QUOTES, 'UTF-8'); ?>?edit=0" class="btn btn-primary">
         <i class="fa-solid fa-plus me-1"></i>New Workflow
     </a>
 </div>
@@ -122,7 +122,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <h5 class="mb-0"><?php echo $editing !== null ? 'Edit' : 'New'; ?> Workflow</h5>
         </div>
         <div class="card-body">
-            <form method="post" action="/admin/workflows/save">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/workflows/save'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="workflowID" value="<?php echo (int) ($editing['workflowID'] ?? 0); ?>">
 
@@ -185,7 +185,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <div class="col-1"><?php echo $step['timeoutHours'] !== null ? (int) $step['timeoutHours'] . 'h' : '—'; ?></div>
                                 <div class="col-1"><?php echo htmlspecialchars($step['autoAction'] ?? '—', ENT_QUOTES, 'UTF-8'); ?></div>
                                 <div class="col-1 text-end">
-                                    <form method="post" action="/admin/workflows/step-delete" class="d-inline" data-confirm="Delete this step?" data-confirm-destructive="true">
+                                    <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/workflows/step-delete'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline" data-confirm="Delete this step?" data-confirm-destructive="true">
                                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                         <input type="hidden" name="workflowID" value="<?php echo (int) $editing['workflowID']; ?>">
                                         <input type="hidden" name="stepID" value="<?php echo (int) $step['stepID']; ?>">
@@ -244,7 +244,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <button type="submit" class="btn btn-primary">
                         <i class="fa-solid fa-floppy-disk me-1"></i>Save
                     </button>
-                    <a href="/admin/workflows" class="btn btn-outline-secondary">Cancel</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('admin/workflows'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
                 </div>
             </form>
         </div>
@@ -280,7 +280,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php endif; ?>
                 </div>
                 <div class="col-2 text-end">
-                    <a href="/admin/workflows?edit=<?php echo (int) $wf['workflowID']; ?>" class="btn btn-sm btn-outline-primary" title="Edit">
+                    <a href="<?php echo htmlspecialchars(Site::url('admin/workflows'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo (int) $wf['workflowID']; ?>" class="btn btn-sm btn-outline-primary" title="Edit">
                         <i class="fa-solid fa-pen"></i>
                     </a>
                 </div>

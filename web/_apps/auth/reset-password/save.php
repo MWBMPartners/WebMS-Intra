@@ -27,6 +27,7 @@ use Portal\Core\Captcha;
 use Portal\Core\Logger;
 use Portal\Core\RateLimiter;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 🧵 A form field is text or it is nothing (#580). A request written by hand
 //    can send a LIST where text is expected ("token[]=x"), which stopped this
@@ -38,7 +39,7 @@ $text = static fn (mixed $value): string => is_string($value) === true ? $value 
 // -----------------------------------------------------------------------------
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /forgot-password', true, 302);
+    header('Location: ' . Site::url('forgot-password'), true, 302);
     exit();
 }
 
@@ -101,13 +102,13 @@ RateLimiter::recordHit($resetUseBucket, $resetUseWindow, $resetUseFamily);
 
 if (Auth::verifyCsrf($text($_POST['csrf_token'] ?? '')) === false) {
     Logger::activity('PasswordResetFailed', 'Invalid CSRF token on reset-password');
-    header('Location: /forgot-password', true, 302);
+    header('Location: ' . Site::url('forgot-password'), true, 302);
     exit();
 }
 
 if (Captcha::verify($_POST, Captcha::FOR_PASSWORD_RESET) === false) {
     Logger::activity('PasswordResetFailed', 'Captcha failed on reset-password');
-    header('Location: /forgot-password', true, 302);
+    header('Location: ' . Site::url('forgot-password'), true, 302);
     exit();
 }
 
@@ -119,7 +120,7 @@ $plaintextToken = $text($_POST['token'] ?? '');
 
 if ($plaintextToken === '') {
     Logger::activity('PasswordResetFailed', 'Empty token on reset-password submit');
-    header('Location: /forgot-password', true, 302);
+    header('Location: ' . Site::url('forgot-password'), true, 302);
     exit();
 }
 
@@ -133,14 +134,14 @@ try {
     $reset = Auth::findResetLink($mysqli, $plaintextToken);
 } catch (\Throwable $ex) {
     Logger::errorPlatform('MySQL', 'Error', 'RESET_VALIDATE_FAIL', $ex->getMessage(), '');
-    header('Location: /forgot-password', true, 302);
+    header('Location: ' . Site::url('forgot-password'), true, 302);
     exit();
 }
 
 if ($reset['state'] !== 'usable') {
     Logger::activity('PasswordResetFailed', 'Invalid or expired token used');
     // 🔀 Redirect back to the reset page with the (now-invalid) token so it shows the error
-    header('Location: /reset-password?token=' . urlencode($plaintextToken), true, 302);
+    header('Location: ' . Site::url('reset-password') . '?token=' . urlencode($plaintextToken), true, 302);
     exit();
 }
 
@@ -156,20 +157,20 @@ $passwordConfirm = $text($_POST['password_confirm'] ?? '');
 
 if ($password === '' || $passwordConfirm === '') {
     // 🔀 Redirect back with token to re-show the form
-    header('Location: /reset-password?token=' . urlencode($plaintextToken), true, 302);
+    header('Location: ' . Site::url('reset-password') . '?token=' . urlencode($plaintextToken), true, 302);
     exit();
 }
 
 if ($password !== $passwordConfirm) {
     Logger::activity('PasswordResetFailed', 'Password mismatch on reset');
-    header('Location: /reset-password?token=' . urlencode($plaintextToken), true, 302);
+    header('Location: ' . Site::url('reset-password') . '?token=' . urlencode($plaintextToken), true, 302);
     exit();
 }
 
 $validation = Auth::validatePassword($password);
 if ($validation['valid'] === false) {
     Logger::activity('PasswordResetFailed', 'Password policy not met on reset');
-    header('Location: /reset-password?token=' . urlencode($plaintextToken), true, 302);
+    header('Location: ' . Site::url('reset-password') . '?token=' . urlencode($plaintextToken), true, 302);
     exit();
 }
 
@@ -259,7 +260,7 @@ try {
 } catch (\Throwable $ex) {
     $mysqli->rollback();
     Logger::errorPlatform('Auth', 'Error', 'RESET_UPDATE_FAIL', $ex->getMessage(), '');
-    header('Location: /reset-password?token=' . urlencode($plaintextToken), true, 302);
+    header('Location: ' . Site::url('reset-password') . '?token=' . urlencode($plaintextToken), true, 302);
     exit();
 }
 
@@ -267,5 +268,5 @@ try {
 // 6. 🔀 Redirect to login with success message
 // -----------------------------------------------------------------------------
 
-header('Location: /login?reset=1', true, 302);
+header('Location: ' . Site::url('login') . '?reset=1', true, 302);
 exit();

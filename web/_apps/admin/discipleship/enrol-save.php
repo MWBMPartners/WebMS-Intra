@@ -35,7 +35,7 @@ use Portal\Core\Settings;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/discipleship/progress', true, 302);
+    header('Location: ' . Site::url('admin/discipleship/progress'), true, 302);
     exit();
 }
 
@@ -56,7 +56,7 @@ $enabled = (string) Settings::get('discipleship.enabled', 'false');
 if ($enabled !== '1' && $enabled !== 'true') {
     $_SESSION['flash_msg']  = 'Discipleship app is disabled.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /admin/discipleship/pathways', true, 302);
+    header('Location: ' . Site::url('admin/discipleship/pathways'), true, 302);
     exit();
 }
 
@@ -67,7 +67,7 @@ $action      = (string) ($_POST['action'] ?? '');
 $pathwayId   = (int) ($_POST['pathwayID'] ?? 0);
 $targetId    = (int) ($_POST['userID'] ?? 0);
 
-$redirect = '/admin/discipleship/progress/pathway?id=' . $pathwayId;
+$redirect = Site::url('admin/discipleship/progress/pathway') . '?id=' . $pathwayId;
 
 if ($pathwayId <= 0 || $targetId <= 0 || in_array($action, ['enrol', 'withdraw'], true) === false) {
     http_response_code(400);

@@ -38,7 +38,7 @@ if (App::isAdmin() === false) {
 if (Auth::verifyCsrf($_GET['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /forms/manage', true, 302);
+    header('Location: ' . Site::url('forms/manage'), true, 302);
     exit();
 }
 
@@ -49,7 +49,7 @@ $form = FormEngine::getForm($formId, $siteId);
 if ($form === null) {
     $_SESSION['flash_msg']  = 'Form not found.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /forms/manage', true, 302);
+    header('Location: ' . Site::url('forms/manage'), true, 302);
     exit();
 }
 

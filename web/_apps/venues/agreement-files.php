@@ -51,7 +51,7 @@ if (Venues::canManage() !== true) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /venues/agreements');
+    header('Location: ' . Site::url('venues/agreements'));
     exit();
 }
 
@@ -59,7 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /venues/agreements');
+    header('Location: ' . Site::url('venues/agreements'));
     exit();
 }
 
@@ -71,7 +71,7 @@ $agreementId = (int) ($_POST['agreementID'] ?? 0);
 $fail = static function (string $msg) use ($agreementId): never {
     $_SESSION['flash_msg']  = $msg;
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /venues/agreements?edit=' . $agreementId);
+    header('Location: ' . Site::url('venues/agreements') . '?edit=' . $agreementId);
     exit();
 };
 
@@ -87,7 +87,7 @@ if ($action === 'delete') {
         $_SESSION['flash_msg']  = 'File not found.';
         $_SESSION['flash_type'] = 'danger';
     }
-    header('Location: /venues/agreements?edit=' . $agreementId);
+    header('Location: ' . Site::url('venues/agreements') . '?edit=' . $agreementId);
     exit();
 }
 
@@ -157,5 +157,5 @@ if ($result['fileID'] <= 0) {
 
 $_SESSION['flash_msg']  = 'File uploaded.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /venues/agreements?edit=' . $agreementId);
+header('Location: ' . Site::url('venues/agreements') . '?edit=' . $agreementId);
 exit();

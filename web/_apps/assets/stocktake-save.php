@@ -39,6 +39,7 @@ use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -54,7 +55,7 @@ if (App::isAdmin() !== true && App::hasRole('asset_manager') !== true) {
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets/stocktakes');
+    header('Location: ' . Site::url('assets/stocktakes'));
     exit();
 }
 
@@ -80,8 +81,8 @@ switch ($action) {
         $_SESSION['flash_type'] = $result['ok'] === true ? 'success' : 'danger';
 
         header('Location: ' . ($result['ok'] === true
-            ? '/assets/stocktake?id=' . (int) $result['stocktakeId']
-            : '/assets/stocktakes'));
+            ? Site::url('assets/stocktake') . '?id=' . (int) $result['stocktakeId']
+            : Site::url('assets/stocktakes')));
         exit();
 
     // -------------------------------------------------------------------
@@ -105,7 +106,7 @@ switch ($action) {
             $_SESSION['flash_type'] = 'danger';
         }
 
-        header('Location: /assets/stocktake?id=' . $stocktakeId);
+        header('Location: ' . Site::url('assets/stocktake') . '?id=' . $stocktakeId);
         exit();
 
     // -------------------------------------------------------------------
@@ -119,7 +120,7 @@ switch ($action) {
         $_SESSION['flash_msg']  = $result['msg'];
         $_SESSION['flash_type'] = $result['ok'] === true ? 'success' : 'danger';
 
-        header('Location: /assets/stocktake?id=' . $stocktakeId);
+        header('Location: ' . Site::url('assets/stocktake') . '?id=' . $stocktakeId);
         exit();
 
     // -------------------------------------------------------------------
@@ -129,6 +130,6 @@ switch ($action) {
     default:
         $_SESSION['flash_msg']  = 'Unknown stocktake action.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /assets/stocktakes');
+        header('Location: ' . Site::url('assets/stocktakes'));
         exit();
 }

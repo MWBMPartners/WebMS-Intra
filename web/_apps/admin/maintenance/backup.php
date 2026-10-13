@@ -99,6 +99,7 @@ use Portal\Core\Auth;
 use Portal\Core\DbBackup;
 use Portal\Core\Logger;
 use Portal\Core\Maintenance;
+use Portal\Core\Site;
 use Portal\Core\TimeLimit;
 
 Auth::ensureSession();
@@ -135,7 +136,7 @@ if (App::isRootAdmin() === false) {
     http_response_code(403);
     $pageTitle   = 'Backup Management';
     $pageSection = 'admin';
-    $breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Maintenance' => '/admin/maintenance', 'Backups' => ''];
+    $breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => Site::url('admin/maintenance'), 'Backups' => ''];
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
     ?>
     <h1 class="mb-3"><i class="fa-solid fa-database me-2"></i>Backup Management</h1>
@@ -144,7 +145,7 @@ if (App::isRootAdmin() === false) {
         not only yours. Taking, restoring or deleting one affects all of them,
         so only a global administrator can use this page. Nothing has been
         changed. To see how recent the latest backup is, open the
-        <a href="/admin/maintenance/health">Health page</a>.
+        <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/health'), ENT_QUOTES, 'UTF-8'); ?>">Health page</a>.
     </div>
     <?php
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
@@ -253,11 +254,11 @@ $stopOnClosedConnection = static function (string $words, bool $settingsPutBack 
     <p><?php echo htmlspecialchars($words, ENT_QUOTES, 'UTF-8'); ?></p>
     <p><?php echo htmlspecialchars($portal, ENT_QUOTES, 'UTF-8'); ?></p>
     <p>
-        To reopen the portal, go to <a href="/admin/settings/maintenance">Admin, Settings, Maintenance mode</a>,
+        To reopen the portal, go to <a href="<?php echo htmlspecialchars(Site::url('admin/settings/maintenance'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Settings, Maintenance mode</a>,
         switch &ldquo;Maintenance mode active&rdquo; off and save. If that page will not load, the recovery
         guide gives the one database statement that does the same.
     </p>
-    <p><a href="/admin/maintenance/backup">Back to Backup Management</a></p>
+    <p><a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/backup'), ENT_QUOTES, 'UTF-8'); ?>">Back to Backup Management</a></p>
 </body>
 </html>
     <?php
@@ -550,7 +551,7 @@ if (DbBackup::isSnapshotName($inspect) === true) {
 
 $pageTitle   = 'Backup Management';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Maintenance' => '/admin/maintenance', 'Backups' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => Site::url('admin/maintenance'), 'Backups' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -561,8 +562,8 @@ $csrf = Auth::csrfToken();
         <p class="text-secondary mb-0">Snapshots of every <code>tbl*</code> table, kept in <code>web/_backups/</code>.</p>
     </div>
     <div>
-        <a href="/admin/maintenance/backup-check" class="btn btn-outline-secondary btn-sm me-1">Freshness check</a>
-        <a href="/admin/maintenance" class="btn btn-outline-secondary btn-sm">&larr; Maintenance</a>
+        <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/backup-check'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm me-1">Freshness check</a>
+        <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Maintenance</a>
     </div>
 </div>
 

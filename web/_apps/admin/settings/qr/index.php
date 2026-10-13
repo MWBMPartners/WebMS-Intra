@@ -224,7 +224,7 @@ $apiKeyMasked = $apiKey !== '' ? str_repeat('•', 8) : '';
 
 $pageTitle   = 'QR Code Settings';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Settings' => '/admin/settings', 'QR Codes' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Settings' => Site::url('admin/settings'), 'QR Codes' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 
@@ -305,7 +305,7 @@ $readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
             <?php if ($mayChangePortalWideSettings === true): ?>
                 <button type="submit" class="btn btn-primary">Save</button>
             <?php endif; ?>
-            <a href="/admin/settings" class="btn btn-outline-secondary">All settings</a>
+            <a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">All settings</a>
         </form>
     </div>
     <div class="col-md-4">
@@ -313,7 +313,7 @@ $readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
             <div class="card-body text-center">
                 <h2 class="h6">Sample QR (your portal's address)</h2>
                 <?php if ($portalUrl !== ''): ?>
-                <object data="/qr?content=<?php echo urlencode($portalUrl); ?>&size=200" type="image/svg+xml" style="max-width:200px"></object>
+                <object data="<?php echo htmlspecialchars(Site::url('qr'), ENT_QUOTES, 'UTF-8'); ?>?content=<?php echo urlencode($portalUrl); ?>&size=200" type="image/svg+xml" style="max-width:200px"></object>
                 <p class="small text-muted mt-2 mb-0"><code class="text-break"><?php echo htmlspecialchars($portalUrl, ENT_QUOTES, 'UTF-8'); ?></code></p>
                 <?php else: ?>
                 <p class="small text-muted mb-0">

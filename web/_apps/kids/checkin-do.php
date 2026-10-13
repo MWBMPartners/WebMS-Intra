@@ -8,7 +8,7 @@ use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /kids/checkin', true, 302); exit(); }
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . Site::url('kids/checkin'), true, 302); exit(); }
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -40,7 +40,7 @@ $child = $stmt->get_result()->fetch_assoc() ?: null;
 $stmt->close();
 if ($child === null) { http_response_code(404); exit('Child not found'); }
 if ((int) $child['isCheckedIn'] === 1) {
-    header('Location: /kids/checkin', true, 302); exit();
+    header('Location: ' . Site::url('kids/checkin'), true, 302); exit();
 }
 
 // 🎟️ Issue a 6-digit numeric badge code (random, unique-enough across the
@@ -84,4 +84,4 @@ $stmt->close();
 Logger::activity('KidCheckedIn', 'Child #' . $childId . ' badge=' . $badge);
 
 $_SESSION['kids_badge_issued'] = ['name' => (string) $child['fullName'], 'code' => $badge];
-header('Location: /kids/checkin', true, 302); exit();
+header('Location: ' . Site::url('kids/checkin'), true, 302); exit();

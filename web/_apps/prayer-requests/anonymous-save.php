@@ -36,7 +36,7 @@ use Portal\Core\Site;
 
 // 🛡️ Only POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /prayer-requests/anonymous', true, 302);
+    header('Location: ' . Site::url('prayer-requests/anonymous'), true, 302);
     exit();
 }
 
@@ -46,21 +46,21 @@ Auth::ensureSession();
 $featureEnabled   = (App::settings('prayer-requests.enabled') ?? 'true') === 'true';
 $anonymousEnabled = (App::settings('prayer-requests.allowAnonymous') ?? 'true') === 'true';
 if ($featureEnabled === false || $anonymousEnabled === false) {
-    header('Location: /prayer-requests/anonymous', true, 302);
+    header('Location: ' . Site::url('prayer-requests/anonymous'), true, 302);
     exit();
 }
 
 // 🔐 CSRF
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     Logger::activity('PrayerRequestAnonRejected', 'Invalid CSRF on anonymous prayer-request save');
-    header('Location: /prayer-requests/anonymous?err=' . urlencode('Security check failed. Please try again.'), true, 302);
+    header('Location: ' . Site::url('prayer-requests/anonymous') . '?err=' . urlencode('Security check failed. Please try again.'), true, 302);
     exit();
 }
 
 // 🤖 Captcha
 if (Captcha::verify($_POST, 'prayer-request') === false) {
     Logger::activity('PrayerRequestAnonRejected', 'Captcha failed on anonymous prayer-request save');
-    header('Location: /prayer-requests/anonymous?err=' . urlencode('Captcha verification failed. Please try again.'), true, 302);
+    header('Location: ' . Site::url('prayer-requests/anonymous') . '?err=' . urlencode('Captcha verification failed. Please try again.'), true, 302);
     exit();
 }
 
@@ -68,7 +68,7 @@ if (Captcha::verify($_POST, 'prayer-request') === false) {
 if (RateLimiter::isBlocked() === true) {
     Logger::activity('PrayerRequestAnonBlocked', 'Rate-limited anonymous prayer-request submission');
     // Show success page anyway — don't tell automated abusers they're blocked
-    header('Location: /prayer-requests/anonymous?submitted=1', true, 302);
+    header('Location: ' . Site::url('prayer-requests/anonymous') . '?submitted=1', true, 302);
     exit();
 }
 
@@ -80,11 +80,11 @@ $body    = trim((string) ($_POST['body'] ?? ''));
 
 // 🛡️ Validate
 if ($subject === '' || $body === '') {
-    header('Location: /prayer-requests/anonymous?err=' . urlencode('Subject and request text are required.'), true, 302);
+    header('Location: ' . Site::url('prayer-requests/anonymous') . '?err=' . urlencode('Subject and request text are required.'), true, 302);
     exit();
 }
 if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-    header('Location: /prayer-requests/anonymous?err=' . urlencode('Please enter a valid email address (or leave it blank).'), true, 302);
+    header('Location: ' . Site::url('prayer-requests/anonymous') . '?err=' . urlencode('Please enter a valid email address (or leave it blank).'), true, 302);
     exit();
 }
 
@@ -122,7 +122,7 @@ $stmt = $mysqli->prepare(
 if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'PR_ANON_INSERT_PREP', $mysqli->error, '');
     // Still redirect to success to avoid leaking server state
-    header('Location: /prayer-requests/anonymous?submitted=1', true, 302);
+    header('Location: ' . Site::url('prayer-requests/anonymous') . '?submitted=1', true, 302);
     exit();
 }
 
@@ -157,5 +157,5 @@ if ($ok === false) {
 }
 
 // ✅ Always show success — even on failure, prevent fingerprinting
-header('Location: /prayer-requests/anonymous?submitted=1', true, 302);
+header('Location: ' . Site::url('prayer-requests/anonymous') . '?submitted=1', true, 302);
 exit();

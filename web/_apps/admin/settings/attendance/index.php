@@ -187,7 +187,7 @@ $csrf = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
 
 $pageTitle   = 'Anonymous Check-in Counts';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Attendance' => '/attendance', 'Anonymous check-in counts' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Attendance' => Site::url('attendance'), 'Anonymous check-in counts' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -199,7 +199,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-door-open me-2"></i>Anonymous check-in counts</h1>
-    <a href="/attendance" class="btn btn-outline-secondary btn-sm">
+    <a href="<?php echo htmlspecialchars(Site::url('attendance'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to attendance
     </a>
 </div>
@@ -256,7 +256,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card-body">
         <h2 class="h5 mb-3">Your organisation's setting</h2>
 
-        <form method="post" action="/admin/settings/attendance/save">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/settings/attendance/save'), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <input type="hidden" name="scope" value="site">
 
@@ -345,7 +345,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </p>
 
         <?php if ($mayChangeInstallationWide === true): ?>
-            <form method="post" action="/admin/settings/attendance/save">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/settings/attendance/save'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                 <input type="hidden" name="scope" value="global">
 

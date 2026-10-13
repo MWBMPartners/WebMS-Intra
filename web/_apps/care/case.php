@@ -27,7 +27,7 @@ $userId = (int) ($_SESSION['user_id'] ?? 0);
 $caseId = (int) ($_GET['id'] ?? 0);
 
 if ($caseId <= 0) {
-    header('Location: /care');
+    header('Location: ' . Site::url('care'));
     exit();
 }
 
@@ -84,7 +84,7 @@ if ($stmt !== false) {
 
 $pageTitle   = 'Care case';
 $pageSection = 'care';
-$breadcrumbs = ['Dashboard' => '/', 'Care Register' => '/care', $case['personName'] => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Care Register' => Site::url('care'), $case['personName'] => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -100,7 +100,7 @@ $csrf = Auth::csrfToken();
 <div class="card mb-3">
     <div class="card-body">
         <h2 class="h5">Add visit / contact</h2>
-        <form method="post" action="/care/visit-save" class="row g-2">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('care/visit-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="caseID" value="<?php echo (int) $caseId; ?>">
             <div class="col-md-3">

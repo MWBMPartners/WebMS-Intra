@@ -16,7 +16,7 @@ declare(strict_types=1);
 
 $pageTitle   = 'Help - Getting Started';
 $pageSection = 'help';
-$breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'Getting Started' => ''];
+$breadcrumbs = ['Dashboard' => \Portal\Core\Site::url(''), 'Help' => \Portal\Core\Site::url('help'), 'Getting Started' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -27,7 +27,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-rocket me-2"></i>Getting Started</h1>
         <p class="text-secondary mb-0">Everything you need to know to start using the portal.</p>
     </div>
-    <a href="/help" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Help Centre
     </a>
 </div>
@@ -317,10 +317,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <!-- Navigation -->
 <div class="d-flex justify-content-between">
-    <a href="/help" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i>Help Centre
     </a>
-    <a href="/help/expenses" class="btn btn-primary">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/expenses'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary">
         Expenses Guide<i class="fa-solid fa-arrow-right ms-1"></i>
     </a>
 </div>

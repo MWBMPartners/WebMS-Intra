@@ -143,7 +143,7 @@ if ($captchaConfigured === true) {
     <h1 class="h3 mb-1"><i class="fa-solid fa-user-plus me-2 text-primary"></i>Register for <?php echo htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8'); ?></h1>
     <p class="text-muted small mb-4">Please fill in the details below. Required fields are marked with <span class="text-danger">*</span>.</p>
 
-    <form method="post" action="/calendar/event/register/save" class="needs-validation">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/register/save'), ENT_QUOTES, 'UTF-8'); ?>" class="needs-validation">
         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
         <input type="hidden" name="slug" value="<?php echo htmlspecialchars($slug, ENT_QUOTES, 'UTF-8'); ?>">
 
@@ -224,7 +224,7 @@ if ($captchaConfigured === true) {
         <?php endif; ?>
 
         <button type="submit" class="btn btn-primary btn-lg"><i class="fa-solid fa-paper-plane me-1"></i>Submit registration</button>
-        <a href="/calendar/event?slug=<?php echo htmlspecialchars($slug, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-link">Cancel</a>
+        <a href="<?php echo htmlspecialchars(Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo htmlspecialchars($slug, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-link">Cancel</a>
     </form>
 </div>
 

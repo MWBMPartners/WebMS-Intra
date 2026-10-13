@@ -44,7 +44,7 @@ $today = time();
 
 $pageTitle   = 'My visitor follow-ups';
 $pageSection = 'visitors';
-$breadcrumbs = ['Dashboard' => '/', 'Visitors' => '/visitors', 'My follow-ups' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Visitors' => Site::url('visitors'), 'My follow-ups' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -66,7 +66,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     }
                 ?>
                     <div class="row py-2 border-bottom align-items-center">
-                        <div class="col-md-3"><a href="/visitors/profile?id=<?php echo (int) $r['visitorID']; ?>"><strong><?php echo htmlspecialchars((string) $r['fullName'], ENT_QUOTES, 'UTF-8'); ?></strong></a></div>
+                        <div class="col-md-3"><a href="<?php echo htmlspecialchars(Site::url('visitors/profile'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $r['visitorID']; ?>"><strong><?php echo htmlspecialchars((string) $r['fullName'], ENT_QUOTES, 'UTF-8'); ?></strong></a></div>
                         <div class="col-md-2"><span class="badge bg-info text-dark"><?php echo htmlspecialchars((string) $r['status'], ENT_QUOTES, 'UTF-8'); ?></span></div>
                         <div class="col-md-3 small text-muted">
                             <?php

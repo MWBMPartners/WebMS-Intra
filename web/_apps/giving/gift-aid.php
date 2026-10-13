@@ -72,7 +72,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Gift Aid';
 $pageSection = 'giving';
-$breadcrumbs = ['Dashboard' => '/', 'Giving' => '/giving', 'Gift Aid' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Giving' => Site::url('giving'), 'Gift Aid' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -105,7 +105,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         <?php endif; ?>
 
-        <form method="post" action="/giving/gad-save" class="border-top pt-3">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/gad-save'), ENT_QUOTES, 'UTF-8'); ?>" class="border-top pt-3">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="accept">
             <p>
@@ -148,7 +148,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </div>
                         <div class="col-md-2 text-end">
                             <?php if ((string) $a['status'] === 'active'): ?>
-                                <form method="post" action="/giving/gad-save" class="d-inline">
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/gad-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="action" value="withdraw">
                                     <input type="hidden" name="declarationID" value="<?php echo (int) $a['declarationID']; ?>">

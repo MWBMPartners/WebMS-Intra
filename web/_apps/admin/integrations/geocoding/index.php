@@ -24,6 +24,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -60,7 +61,7 @@ $csrf = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
 
 $pageTitle   = 'Geocoding Integration';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Integrations' => '/admin/integrations', 'Geocoding' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Integrations' => Site::url('admin/integrations'), 'Geocoding' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -81,13 +82,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     Nominatim's usage policy requires a descriptive User-Agent identifying this install and an admin
     contact. That contact currently resolves to
     <code><?php echo $contactEmail !== '' ? htmlspecialchars($contactEmail, ENT_QUOTES, 'UTF-8') : 'not set'; ?></code>
-    (<a href="/admin/settings">privacy.contactEmail</a>, falling back to <code>mail.defaultFromAddress</code>).
+    (<a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>">privacy.contactEmail</a>, falling back to <code>mail.defaultFromAddress</code>).
 </div>
 
 <div class="card mb-4">
     <div class="card-header"><strong>Provider</strong></div>
     <div class="card-body">
-        <form method="post" action="/admin/integrations/geocoding/save" class="row g-3">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/geocoding/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
 
             <div class="col-md-6">
@@ -112,7 +113,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </form>
 
-        <form method="post" action="/admin/integrations/geocoding/test" class="mt-3 pt-3 border-top">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/geocoding/test'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-3 pt-3 border-top">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <button class="btn btn-outline-secondary" type="submit">
                 <i class="fa-solid fa-plug me-1"></i>Test connection
@@ -138,6 +139,6 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<a href="/admin/integrations" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Integrations</a>
+<a href="<?php echo htmlspecialchars(Site::url('admin/integrations'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Integrations</a>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

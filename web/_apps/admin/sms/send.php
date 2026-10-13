@@ -40,7 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($body === '') {
         $_SESSION['flash_msg']  = 'Message body is required.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/sms/send');
+        header('Location: ' . Site::url('admin/sms/send'));
         exit();
     }
     if (mb_strlen($body) > 480) {
@@ -50,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     Logger::activity('SmsBroadcast', 'Broadcast to ' . $category . ': ' . $result['sent'] . ' sent', $userId);
     $_SESSION['flash_msg']  = sprintf('Broadcast complete: %d sent, %d skipped.', (int) $result['sent'], (int) $result['skipped']);
     $_SESSION['flash_type'] = 'success';
-    header('Location: /admin/sms');
+    header('Location: ' . Site::url('admin/sms'));
     exit();
 }
 
@@ -58,7 +58,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Broadcast SMS';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'SMS' => '/admin/sms', 'Broadcast' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'SMS' => Site::url('admin/sms'), 'Broadcast' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -86,7 +86,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <button class="btn btn-danger" type="submit" data-confirm="Send SMS to all opted-in subscribers in this category?">
                 <i class="fa-solid fa-paper-plane me-1"></i>Send broadcast
             </button>
-            <a href="/admin/sms" class="btn btn-outline-secondary">Cancel</a>
+            <a href="<?php echo htmlspecialchars(Site::url('admin/sms'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
         </div>
     </div>
 </form>

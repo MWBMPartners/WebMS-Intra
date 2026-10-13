@@ -36,14 +36,14 @@ Auth::requireLogin();
 if (App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = t('error.access_denied_inline');
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /dashboard');
+    header('Location: ' . Site::url('dashboard'));
     exit();
 }
 
 if (AppRegistry::isEnabled('reports') === false) {
     $_SESSION['flash_msg']  = 'Reports is disabled for this site.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /admin/apps');
+    header('Location: ' . Site::url('admin/apps'));
     exit();
 }
 
@@ -54,7 +54,7 @@ $reportId = (int) ($_GET['id'] ?? 0);
 if ($reportId <= 0) {
     $_SESSION['flash_msg']  = 'Invalid report.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/reports/builder');
+    header('Location: ' . Site::url('admin/reports/builder'));
     exit();
 }
 
@@ -62,7 +62,7 @@ $row = ReportBuilder::get($reportId, $siteId);
 if ($row === null) {
     $_SESSION['flash_msg']  = 'Report not found.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/reports/builder');
+    header('Location: ' . Site::url('admin/reports/builder'));
     exit();
 }
 
@@ -71,7 +71,7 @@ $isShared = (int) $row['isShared'] === 1;
 if ($isShared === false && $isOwner === false && App::isSiteAdmin() === false) {
     $_SESSION['flash_msg']  = 'You do not have access to this report.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/reports/builder');
+    header('Location: ' . Site::url('admin/reports/builder'));
     exit();
 }
 
@@ -81,7 +81,7 @@ try {
 } catch (\InvalidArgumentException $e) {
     $_SESSION['flash_msg']  = 'This report definition is no longer valid and could not be exported: ' . $e->getMessage() . '.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/reports/builder/run?id=' . $reportId);
+    header('Location: ' . Site::url('admin/reports/builder/run') . '?id=' . $reportId);
     exit();
 }
 

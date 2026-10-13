@@ -69,7 +69,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 // 🎨 Page setup
 $pageTitle   = 'Site Management';
 $pageSection = 'admin';
-$breadcrumbs = ['Admin' => '/admin', 'Sites' => ''];
+$breadcrumbs = ['Admin' => Site::url('admin'), 'Sites' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -211,7 +211,7 @@ $zonesWait = Site::timezoneFacts()['inRow'] === false;
 
                     <dt class="col-5">Users</dt>
                     <dd class="col-7">
-                        <a href="/admin/sites/users?site=<?php echo $sId; ?>"><?php echo $sUsers; ?> user<?php echo ($sUsers !== 1) ? 's' : ''; ?></a>
+                        <a href="<?php echo htmlspecialchars(Site::url('admin/sites/users'), ENT_QUOTES, 'UTF-8'); ?>?site=<?php echo $sId; ?>"><?php echo $sUsers; ?> user<?php echo ($sUsers !== 1) ? 's' : ''; ?></a>
                     </dd>
                 </dl>
             </div>
@@ -221,7 +221,7 @@ $zonesWait = Site::timezoneFacts()['inRow'] === false;
                         onclick="editSite(<?php echo htmlspecialchars(json_encode($site, JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES, 'UTF-8'); ?>)">
                     <i class="fa-solid fa-pen me-1"></i> Edit
                 </button>
-                <a href="/admin/sites/users?site=<?php echo $sId; ?>" class="btn btn-sm btn-outline-secondary">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/sites/users'), ENT_QUOTES, 'UTF-8'); ?>?site=<?php echo $sId; ?>" class="btn btn-sm btn-outline-secondary">
                     <i class="fa-solid fa-users me-1"></i> Users
                 </a>
             </div>
@@ -234,7 +234,7 @@ $zonesWait = Site::timezoneFacts()['inRow'] === false;
 <!-- 📝 Create/Edit Site Modal -->
 <div class="modal fade" id="siteModal" tabindex="-1" aria-labelledby="siteModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-fullscreen-sm-down">
-        <form method="post" action="/admin/sites/save" class="modal-content">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/sites/save'), ENT_QUOTES, 'UTF-8'); ?>" class="modal-content">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="siteID" id="formSiteID" value="">
 

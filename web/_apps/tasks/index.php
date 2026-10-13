@@ -32,7 +32,7 @@ if (Auth::check() === false) {
 // 📌 Page metadata
 $pageTitle   = 'Tasks';
 $pageSection = 'tasks';
-$breadcrumbs = ['Dashboard' => '/', 'Tasks' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Tasks' => ''];
 
 $siteId = Site::id();
 $userId = (int) ($_SESSION['user_id'] ?? 0);
@@ -66,7 +66,7 @@ if ($editId !== null && $editId > 0) {
     ) {
         $_SESSION['flash_msg']  = 'You do not have permission to edit this task.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /tasks');
+        header('Location: ' . Site::url('tasks'));
         exit();
     }
 }
@@ -134,21 +134,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- ✅ Task Management -->
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-list-check me-2"></i>Tasks</h1>
-    <a href="/tasks?edit=0" class="btn btn-primary">
+    <a href="<?php echo htmlspecialchars(Site::url('tasks'), ENT_QUOTES, 'UTF-8'); ?>?edit=0" class="btn btn-primary">
         <i class="fa-solid fa-plus me-1"></i>New Task
     </a>
 </div>
 
 <!-- 🔍 Filters -->
 <div class="d-flex gap-2 mb-4">
-    <a href="/tasks" class="btn btn-sm <?php echo ($filterStatus === '' && $showAll === false ? 'btn-primary' : 'btn-outline-primary'); ?>">My Tasks</a>
+    <a href="<?php echo htmlspecialchars(Site::url('tasks'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm <?php echo ($filterStatus === '' && $showAll === false ? 'btn-primary' : 'btn-outline-primary'); ?>">My Tasks</a>
     <?php foreach (['pending', 'in_progress', 'completed'] as $fs): ?>
-        <a href="/tasks?status=<?php echo $fs; ?>" class="btn btn-sm <?php echo ($filterStatus === $fs ? 'btn-primary' : 'btn-outline-primary'); ?>">
+        <a href="<?php echo htmlspecialchars(Site::url('tasks'), ENT_QUOTES, 'UTF-8'); ?>?status=<?php echo $fs; ?>" class="btn btn-sm <?php echo ($filterStatus === $fs ? 'btn-primary' : 'btn-outline-primary'); ?>">
             <?php echo htmlspecialchars(ucwords(str_replace('_', ' ', $fs)), ENT_QUOTES, 'UTF-8'); ?>
         </a>
     <?php endforeach; ?>
     <?php if ($isAdmin === true): ?>
-        <a href="/tasks?all=1" class="btn btn-sm <?php echo ($showAll === true ? 'btn-primary' : 'btn-outline-primary'); ?>">All Tasks</a>
+        <a href="<?php echo htmlspecialchars(Site::url('tasks'), ENT_QUOTES, 'UTF-8'); ?>?all=1" class="btn btn-sm <?php echo ($showAll === true ? 'btn-primary' : 'btn-outline-primary'); ?>">All Tasks</a>
     <?php endif; ?>
 </div>
 
@@ -159,7 +159,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <h5 class="mb-0"><?php echo $editing !== null ? 'Edit Task' : 'New Task'; ?></h5>
         </div>
         <div class="card-body">
-            <form method="post" action="/tasks/save">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('tasks/save'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="taskID" value="<?php echo (int) ($editing['taskID'] ?? 0); ?>">
 
@@ -257,7 +257,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <button type="submit" class="btn btn-primary">
                         <i class="fa-solid fa-floppy-disk me-1"></i><?php echo $editing !== null ? 'Update' : 'Create'; ?>
                     </button>
-                    <a href="/tasks" class="btn btn-outline-secondary">Cancel</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('tasks'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
                 </div>
             </form>
         </div>
@@ -320,7 +320,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="col-2 text-end">
                     <?php if ($task['status'] !== 'completed' && $task['status'] !== 'cancelled'): ?>
-                        <form method="post" action="/tasks/complete" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('tasks/complete'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="taskID" value="<?php echo (int) $task['taskID']; ?>">
                             <button type="submit" class="btn btn-sm btn-outline-success" title="Complete">
@@ -328,7 +328,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             </button>
                         </form>
                     <?php endif; ?>
-                    <a href="/tasks?edit=<?php echo (int) $task['taskID']; ?>" class="btn btn-sm btn-outline-primary" title="Edit">
+                    <a href="<?php echo htmlspecialchars(Site::url('tasks'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo (int) $task['taskID']; ?>" class="btn btn-sm btn-outline-primary" title="Edit">
                         <i class="fa-solid fa-pen"></i>
                     </a>
                 </div>

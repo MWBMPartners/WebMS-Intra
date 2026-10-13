@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -64,5 +65,5 @@ try {
     \Portal\Core\Logger::errorPlatform('Milestones', 'Warning', 'SAVE', $e->getMessage(), '');
 }
 
-header('Location: /milestones/me');
+header('Location: ' . Site::url('milestones/me'));
 exit();

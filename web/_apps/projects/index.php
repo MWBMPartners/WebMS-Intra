@@ -42,14 +42,14 @@ $displayName = (string) ($settings['displayName'] ?? 'Projects');
 
 $pageTitle   = $displayName;
 $pageSection = 'projects';
-$breadcrumbs = ['Dashboard' => '/', $displayName => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), $displayName => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-bullseye me-2"></i><?php echo htmlspecialchars($displayName, ENT_QUOTES, 'UTF-8'); ?></h1>
     <?php if (App::isAdmin() === true): ?>
-        <a href="/projects/manage" class="btn btn-primary btn-sm"><i class="fa-solid fa-gear me-1"></i>Manage</a>
+        <a href="<?php echo htmlspecialchars(Site::url('projects/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-gear me-1"></i>Manage</a>
     <?php endif; ?>
 </div>
 
@@ -70,7 +70,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <img src="<?php echo htmlspecialchars((string) $r['coverImagePath'], ENT_QUOTES, 'UTF-8'); ?>" class="card-img-top" alt="" style="max-height:180px;object-fit:cover;">
                     <?php endif; ?>
                     <div class="card-body">
-                        <h5><a href="/projects/view?slug=<?php echo urlencode((string) $r['slug']); ?>" class="text-decoration-none"><?php echo htmlspecialchars((string) $r['title'], ENT_QUOTES, 'UTF-8'); ?></a></h5>
+                        <h5><a href="<?php echo htmlspecialchars(Site::url('projects/view'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo urlencode((string) $r['slug']); ?>" class="text-decoration-none"><?php echo htmlspecialchars((string) $r['title'], ENT_QUOTES, 'UTF-8'); ?></a></h5>
                         <?php if ((string) $r['status'] === 'funded'): ?>
                             <span class="badge bg-success mb-2"><i class="fa-solid fa-check me-1"></i>Funded</span>
                         <?php endif; ?>

@@ -35,7 +35,7 @@ use Portal\Core\ReportBuilder;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/reports/builder');
+    header('Location: ' . Site::url('admin/reports/builder'));
     exit();
 }
 
@@ -44,21 +44,21 @@ Auth::requireLogin();
 if (App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = t('error.access_denied_inline');
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /dashboard');
+    header('Location: ' . Site::url('dashboard'));
     exit();
 }
 
 if (AppRegistry::isEnabled('reports') === false) {
     $_SESSION['flash_msg']  = 'Reports is disabled for this site.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /admin/apps');
+    header('Location: ' . Site::url('admin/apps'));
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/reports/builder');
+    header('Location: ' . Site::url('admin/reports/builder'));
     exit();
 }
 
@@ -70,7 +70,7 @@ $descRaw   = trim((string) ($_POST['description'] ?? ''));
 $isShared  = (string) ($_POST['isShared'] ?? '') === '1';
 $defRaw    = (string) ($_POST['definition'] ?? '');
 
-$redirectBack = $reportId > 0 ? '/admin/reports/builder/edit?id=' . $reportId : '/admin/reports/builder/edit';
+$redirectBack = $reportId > 0 ? Site::url('admin/reports/builder/edit') . '?id=' . $reportId : Site::url('admin/reports/builder/edit');
 
 if ($name === '' || mb_strlen($name) > 150) {
     $_SESSION['flash_msg']  = 'A report name (1-150 characters) is required.';
@@ -88,14 +88,14 @@ if ($reportId > 0) {
     if ($existing === null) {
         $_SESSION['flash_msg']  = 'Report not found.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/reports/builder');
+        header('Location: ' . Site::url('admin/reports/builder'));
         exit();
     }
     $isOwner = ((int) ($existing['createdByID'] ?? 0)) === $userId;
     if ($isOwner === false && App::isSiteAdmin() === false) {
         $_SESSION['flash_msg']  = 'You can only edit reports you created.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/reports/builder');
+        header('Location: ' . Site::url('admin/reports/builder'));
         exit();
     }
 }
@@ -116,7 +116,7 @@ try {
 
     $_SESSION['flash_msg']  = 'Report saved.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /admin/reports/builder/edit?id=' . $newId);
+    header('Location: ' . Site::url('admin/reports/builder/edit') . '?id=' . $newId);
     exit();
 } catch (\InvalidArgumentException $e) {
     $_SESSION['flash_msg']  = 'Could not save report: ' . $e->getMessage();

@@ -102,7 +102,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                 </div>
                 <div class="portal-data-row-aside">
-                    <form method="post" action="/admin/calendar/registrations/act" class="d-flex gap-1">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/calendar/registrations/act'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex gap-1">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="registrationID" value="<?php echo (int) $r['registrationID']; ?>">
                         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">

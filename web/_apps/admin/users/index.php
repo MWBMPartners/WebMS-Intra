@@ -46,7 +46,7 @@ use Portal\Core\Site;
 // 📌 Page metadata
 $pageTitle   = 'User Management';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Users' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Users' => ''];
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -236,10 +236,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-users me-2"></i>User Management</h1>
     <div class="d-flex gap-2">
-        <a href="/admin/users/import" class="btn btn-outline-primary" title="Import CSV">
+        <a href="<?php echo htmlspecialchars(Site::url('admin/users/import'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary" title="Import CSV">
             <i class="fa-solid fa-file-import"></i>
         </a>
-        <a href="/admin/users/export?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
+        <a href="<?php echo htmlspecialchars(Site::url('admin/users/export'), ENT_QUOTES, 'UTF-8'); ?>?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
            class="btn btn-outline-success" title="Export CSV">
             <i class="fa-solid fa-file-csv"></i>
         </a>
@@ -269,7 +269,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         belong<?php echo $unplacedCount === 1 ? 's' : ''; ?> to no organisation, so
         <?php echo $unplacedCount === 1 ? 'its' : 'their'; ?> calendar subscription<?php echo $unplacedCount !== 1 ? 's do' : ' does'; ?> not work
         and no organisation's administrator can see <?php echo $unplacedCount === 1 ? 'it' : 'them'; ?>.
-        <a href="/admin/users/unplaced" class="alert-link">Place <?php echo $unplacedCount === 1 ? 'it' : 'them'; ?></a>.
+        <a href="<?php echo htmlspecialchars(Site::url('admin/users/unplaced'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">Place <?php echo $unplacedCount === 1 ? 'it' : 'them'; ?></a>.
     </div>
 <?php endif; ?>
 
@@ -318,7 +318,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
     <?php if ($search !== '' || $filterStatus !== ''): ?>
         <div class="col-12 col-md-2">
-            <a href="/admin/users" class="btn btn-outline-secondary w-100">
+            <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100">
                 <i class="fa-solid fa-times me-1"></i> Clear
             </a>
         </div>
@@ -512,7 +512,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="modal fade" id="addUserModal" tabindex="-1" aria-labelledby="addUserLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
         <div class="modal-content">
-            <form method="post" action="/admin/users/save">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/users/save'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="create">
                 <div class="modal-header">
@@ -600,7 +600,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="modal fade" id="editUserModal" tabindex="-1" aria-labelledby="editUserLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
         <div class="modal-content">
-            <form method="post" action="/admin/users/save">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/users/save'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="update">
                 <input type="hidden" name="userID" id="edit-userID">

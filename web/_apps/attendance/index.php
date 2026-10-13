@@ -26,7 +26,7 @@ use Portal\Core\Site;
 // 📌 Page metadata
 $pageTitle   = 'Attendance';
 $pageSection = 'attendance';
-$breadcrumbs = ['Dashboard' => '/', 'Attendance' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Attendance' => ''];
 
 // 🛡️ Ensure session
 Auth::ensureSession();
@@ -186,7 +186,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="mb-0"><i class="fa-solid fa-clipboard-list me-2"></i>Attendance</h1>
     <div class="d-flex gap-2">
         <?php if (App::isAdmin() === true): ?>
-            <a href="/attendance/export?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
+            <a href="<?php echo htmlspecialchars(Site::url('attendance/export'), ENT_QUOTES, 'UTF-8'); ?>?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
                class="btn btn-outline-success" title="Export CSV">
                 <i class="fa-solid fa-file-csv"></i>
             </a>
@@ -197,16 +197,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                  as well as on the screens. Administrators only, whatever the
                  organisation's visibility setting says — a file leaves the
                  building, and unlike the screens it names the events. -->
-            <a href="/attendance/export/anonymous?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
+            <a href="<?php echo htmlspecialchars(Site::url('attendance/export/anonymous'), ENT_QUOTES, 'UTF-8'); ?>?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
                class="btn btn-outline-info" title="Download the anonymous check-in counts (administrators only)">
                 <i class="fa-solid fa-door-open"></i>
             </a>
         <?php endif; ?>
-        <a href="/attendance/record" class="btn btn-success">
+        <a href="<?php echo htmlspecialchars(Site::url('attendance/record'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-success">
             <i class="fa-solid fa-plus me-1"></i> Record Attendance
         </a>
         <?php if (App::isAdmin() === true): ?>
-            <a href="/attendance/manage" class="btn btn-outline-primary">
+            <a href="<?php echo htmlspecialchars(Site::url('attendance/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary">
                 <i class="fa-solid fa-gear me-1"></i> Manage Types
             </a>
             <!-- ⚙️ The way in to the anonymous check-in settings (#525). This
@@ -214,7 +214,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                  with nothing anywhere linking to it, so it can only be reached
                  by typing its address and almost nobody knows it exists. A new
                  page with the same problem would be a second one. -->
-            <a href="/admin/settings/attendance" class="btn btn-outline-secondary"
+            <a href="<?php echo htmlspecialchars(Site::url('admin/settings/attendance'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary"
                title="Who may see the anonymous check-in counts">
                 <i class="fa-solid fa-door-open me-1"></i> Check-in counts
             </a>
@@ -252,7 +252,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="col-6 col-md-3">
         <div class="card text-center shadow-sm">
             <div class="card-body">
-                <a href="/attendance/report" class="btn btn-outline-secondary btn-sm w-100">
+                <a href="<?php echo htmlspecialchars(Site::url('attendance/report'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm w-100">
                     <i class="fa-solid fa-chart-bar me-1"></i> View Reports
                 </a>
                 <small class="text-muted d-block mt-1">Trends &amp; Insights</small>
@@ -263,7 +263,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <!-- 🔍 Filters -->
-<form method="get" action="/attendance" class="row g-2 mb-4">
+<form method="get" action="<?php echo htmlspecialchars(Site::url('attendance'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mb-4">
     <div class="col-12 col-md-3">
         <select name="type" class="form-select form-select-sm">
             <option value="">All Service Types</option>
@@ -290,7 +290,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
     <?php if ($filterType !== '' || $filterFrom !== '' || $filterTo !== ''): ?>
         <div class="col-12 col-md-2">
-            <a href="/attendance" class="btn btn-sm btn-outline-secondary w-100">
+            <a href="<?php echo htmlspecialchars(Site::url('attendance'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-secondary w-100">
                 <i class="fa-solid fa-xmark me-1"></i> Clear
             </a>
         </div>
@@ -301,7 +301,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php if (count($sessions) === 0): ?>
     <div class="alert alert-info">
         <i class="fa-solid fa-circle-info me-1"></i>
-        No attendance sessions found. <a href="/attendance/record" class="alert-link">Record your first attendance</a>.
+        No attendance sessions found. <a href="<?php echo htmlspecialchars(Site::url('attendance/record'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">Record your first attendance</a>.
     </div>
 <?php else: ?>
     <div class="portal-data-list">
@@ -347,11 +347,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <small><?php echo htmlspecialchars($sess['recorderName'] ?? '—', ENT_QUOTES, 'UTF-8'); ?></small>
                 </div>
                 <div class="col-12 col-md-2 text-md-end mt-2 mt-md-0">
-                    <a href="/attendance/record?edit=<?php echo (int) $sess['sessionID']; ?>"
+                    <a href="<?php echo htmlspecialchars(Site::url('attendance/record'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo (int) $sess['sessionID']; ?>"
                        class="btn btn-sm btn-outline-primary me-1" title="Edit">
                         <i class="fa-solid fa-pen"></i>
                     </a>
-                    <form method="post" action="/attendance/record/delete" class="d-inline">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('attendance/record/delete'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="sessionID" value="<?php echo (int) $sess['sessionID']; ?>">
                         <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete"
@@ -369,7 +369,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <nav aria-label="Attendance pagination" class="mt-4">
             <ul class="pagination justify-content-center">
                 <?php
-                $baseUrl = '/attendance?' . http_build_query(array_filter([
+                $baseUrl = Site::url('attendance') . '?' . http_build_query(array_filter([
                     'type' => $filterType,
                     'from' => $filterFrom,
                     'to'   => $filterTo,

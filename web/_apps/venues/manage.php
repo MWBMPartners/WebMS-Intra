@@ -95,7 +95,7 @@ $allTimezones = \DateTimeZone::listIdentifiers();
 
 $pageTitle   = 'Manage Venues';
 $pageSection = 'venues';
-$breadcrumbs = ['Dashboard' => '/', 'Venues' => '/venues', 'Manage' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Venues' => Site::url('venues'), 'Manage' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -107,14 +107,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-building-columns me-2"></i>Manage Venues</h1>
-    <a href="/venues" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to schedule</a>
+    <a href="<?php echo htmlspecialchars(Site::url('venues'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to schedule</a>
 </div>
 <p class="text-muted">Rented external buildings — the landlord, address, timezone and on-site contact for each hire arrangement.</p>
 
 <div class="card mb-4">
     <div class="card-body">
         <h2 class="h5"><?php echo $editVenue !== null ? 'Edit venue' : 'Add venue'; ?></h2>
-        <form method="post" action="/venues/venue-save" class="row g-2">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/venue-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="save">
             <input type="hidden" name="venueID" value="<?php echo $editVenue !== null ? (int) $editVenue['venueID'] : 0; ?>">
@@ -152,7 +152,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <i class="fa-solid fa-plus me-1"></i>New landlord…
                 </button>
                 <?php if ($assetsEnabled === true): ?>
-                    <a href="/assets/orgs" class="small ms-3"><i class="fa-solid fa-arrow-up-right-from-square me-1"></i>Manage organisations</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('assets/orgs'), ENT_QUOTES, 'UTF-8'); ?>" class="small ms-3"><i class="fa-solid fa-arrow-up-right-from-square me-1"></i>Manage organisations</a>
                 <?php endif; ?>
             </div>
             <div class="collapse col-12" id="newLandlordFieldset">
@@ -249,7 +249,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <i class="fa-solid fa-<?php echo $editVenue !== null ? 'check' : 'plus'; ?> me-1"></i><?php echo $editVenue !== null ? 'Update venue' : 'Add venue'; ?>
                 </button>
                 <?php if ($editVenue !== null): ?>
-                    <a href="/venues/manage" class="btn btn-outline-secondary btn-sm">Cancel edit</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('venues/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Cancel edit</a>
                 <?php endif; ?>
             </div>
         </form>
@@ -257,7 +257,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php if ($editLandlord !== null): ?>
             <hr>
             <h3 class="h6">Edit landlord contact — <?php echo htmlspecialchars((string) $editLandlord['orgName'], ENT_QUOTES, 'UTF-8'); ?></h3>
-            <form method="post" action="/venues/venue-save" class="row g-2">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/venue-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="landlord_edit">
                 <input type="hidden" name="orgID" value="<?php echo (int) $editLandlord['orgID']; ?>">
@@ -315,10 +315,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="col-2 small text-muted"><?php echo htmlspecialchars((string) ($venue['landlordName'] ?? '—'), ENT_QUOTES, 'UTF-8'); ?></div>
                 <div class="col-1"><span class="badge bg-light text-dark border"><?php echo (int) $venue['bookingCount']; ?></span></div>
                 <div class="col-6 text-end">
-                    <a href="/venues/manage?edit=<?php echo (int) $venue['venueID']; ?>" class="btn btn-sm btn-outline-secondary" title="Edit"><i class="fa-solid fa-pen"></i></a>
-                    <a href="/venues/rooms?venue=<?php echo (int) $venue['venueID']; ?>" class="btn btn-sm btn-outline-secondary" title="Rooms"><i class="fa-solid fa-door-open"></i></a>
-                    <a href="/venues/usage-types?venue=<?php echo (int) $venue['venueID']; ?>" class="btn btn-sm btn-outline-secondary" title="Usage types"><i class="fa-solid fa-clock"></i></a>
-                    <form method="post" action="/venues/venue-save" class="d-inline">
+                    <a href="<?php echo htmlspecialchars(Site::url('venues/manage'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo (int) $venue['venueID']; ?>" class="btn btn-sm btn-outline-secondary" title="Edit"><i class="fa-solid fa-pen"></i></a>
+                    <a href="<?php echo htmlspecialchars(Site::url('venues/rooms'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venue['venueID']; ?>" class="btn btn-sm btn-outline-secondary" title="Rooms"><i class="fa-solid fa-door-open"></i></a>
+                    <a href="<?php echo htmlspecialchars(Site::url('venues/usage-types'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venue['venueID']; ?>" class="btn btn-sm btn-outline-secondary" title="Usage types"><i class="fa-solid fa-clock"></i></a>
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/venue-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="action" value="toggle">
                         <input type="hidden" name="venueID" value="<?php echo (int) $venue['venueID']; ?>">
@@ -328,7 +328,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </button>
                     </form>
                     <?php if (App::isAdmin() === true): ?>
-                        <form method="post" action="/venues/venue-save" class="d-inline" data-confirm="Delete this venue permanently? Only possible when it has no bookings, invoices or agreements attached." data-confirm-destructive="true">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/venue-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline" data-confirm="Delete this venue permanently? Only possible when it has no bookings, invoices or agreements attached." data-confirm-destructive="true">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="action" value="delete">
                             <input type="hidden" name="venueID" value="<?php echo (int) $venue['venueID']; ?>">
@@ -342,8 +342,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php endif; ?>
 
 <div class="mt-3">
-    <a href="/venues/statuses" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-flag me-1"></i>Site-wide booking statuses</a>
-    <a href="/venues/settings" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-gear me-1"></i>Settings</a>
+    <a href="<?php echo htmlspecialchars(Site::url('venues/statuses'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-flag me-1"></i>Site-wide booking statuses</a>
+    <a href="<?php echo htmlspecialchars(Site::url('venues/settings'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-gear me-1"></i>Settings</a>
 </div>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

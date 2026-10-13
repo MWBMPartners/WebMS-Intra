@@ -51,14 +51,14 @@ if (App::isAdmin() === false
 
 // 🛡️ Only accept POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /attendance/record');
+    header('Location: ' . Site::url('attendance/record'));
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /attendance/record');
+    header('Location: ' . Site::url('attendance/record'));
     exit();
 }
 
@@ -107,7 +107,7 @@ $counts = $_POST['counts'] ?? [];
 if ($serviceTypeID <= 0 || $sessionDate === '') {
     $_SESSION['flash_msg']  = 'Service type and date are required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /attendance/record');
+    header('Location: ' . Site::url('attendance/record'));
     exit();
 }
 
@@ -123,7 +123,7 @@ if ($stmt !== false) {
 if ($typeValid === false) {
     $_SESSION['flash_msg']  = 'Invalid service type selected.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /attendance/record');
+    header('Location: ' . Site::url('attendance/record'));
     exit();
 }
 
@@ -132,7 +132,7 @@ $dateObj = DateTime::createFromFormat('Y-m-d', $sessionDate);
 if ($dateObj === false || $dateObj->format('Y-m-d') !== $sessionDate) {
     $_SESSION['flash_msg']  = 'Invalid date format.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /attendance/record');
+    header('Location: ' . Site::url('attendance/record'));
     exit();
 }
 
@@ -152,7 +152,7 @@ if (is_array($groups) === true && is_array($counts) === true) {
 if (count($validGroups) === 0) {
     $_SESSION['flash_msg']  = 'At least one headcount group is required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /attendance/record');
+    header('Location: ' . Site::url('attendance/record'));
     exit();
 }
 
@@ -171,7 +171,7 @@ if ($action === 'create') {
         $mysqli->rollback();
         $_SESSION['flash_msg']  = t('error.db_create_session');
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /attendance/record');
+        header('Location: ' . Site::url('attendance/record'));
         exit();
     }
 
@@ -203,7 +203,7 @@ if ($action === 'create') {
 
     $_SESSION['flash_msg']  = 'Attendance recorded successfully (total: ' . number_format($totalCount) . ').';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /attendance');
+    header('Location: ' . Site::url('attendance'));
     exit();
 }
 
@@ -215,7 +215,7 @@ if ($action === 'update') {
     if ($sessionID <= 0) {
         $_SESSION['flash_msg']  = 'Invalid session ID.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /attendance');
+        header('Location: ' . Site::url('attendance'));
         exit();
     }
 
@@ -236,7 +236,7 @@ if ($action === 'update') {
     if ($ownsSession === false) {
         $_SESSION['flash_msg']  = 'Attendance session not found.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /attendance');
+        header('Location: ' . Site::url('attendance'));
         exit();
     }
 
@@ -252,7 +252,7 @@ if ($action === 'update') {
         $mysqli->rollback();
         $_SESSION['flash_msg']  = t('error.db_update_session');
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /attendance');
+        header('Location: ' . Site::url('attendance'));
         exit();
     }
 
@@ -291,12 +291,12 @@ if ($action === 'update') {
 
     $_SESSION['flash_msg']  = 'Attendance updated successfully (total: ' . number_format($totalCount) . ').';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /attendance');
+    header('Location: ' . Site::url('attendance'));
     exit();
 }
 
 // 🚫 Unknown action
 $_SESSION['flash_msg']  = 'Unknown action.';
 $_SESSION['flash_type'] = 'warning';
-header('Location: /attendance/record');
+header('Location: ' . Site::url('attendance/record'));
 exit();

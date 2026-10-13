@@ -40,7 +40,7 @@ $userId = (int) ($_SESSION['user_id'] ?? 0);
 
 // 🚪 Non-POST hits this mutation-only route → send it back to the schedule.
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /venues');
+    header('Location: ' . Site::url('venues'));
     exit();
 }
 
@@ -48,7 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /venues');
+    header('Location: ' . Site::url('venues'));
     exit();
 }
 
@@ -75,8 +75,8 @@ switch ($action) {
             $_SESSION['flash_msg']  = implode(' ', $result['errors']);
             $_SESSION['flash_type'] = 'danger';
             $back = $bookingId > 0
-                ? '/venues/booking?id=' . $bookingId
-                : '/venues/booking?venue=' . $venueId . '&date=' . rawurlencode((string) ($_POST['bookingDate'] ?? ''));
+                ? Site::url('venues/booking') . '?id=' . $bookingId
+                : Site::url('venues/booking') . '?venue=' . $venueId . '&date=' . rawurlencode((string) ($_POST['bookingDate'] ?? ''));
             header('Location: ' . $back);
             exit();
         }
@@ -86,7 +86,7 @@ switch ($action) {
         $_SESSION['flash_type'] = 'success';
         $bookingDate = (string) ($_POST['bookingDate'] ?? '');
         $yr = $bookingDate !== '' ? (int) date('Y', (int) strtotime($bookingDate)) : (int) date('Y');
-        header('Location: /venues?venue=' . $venueId . '&year=' . $yr . '#d-' . rawurlencode($bookingDate));
+        header('Location: ' . Site::url('venues') . '?venue=' . $venueId . '&year=' . $yr . '#d-' . rawurlencode($bookingDate));
         exit();
 
     case 'delete':
@@ -94,7 +94,7 @@ switch ($action) {
         $ok = Venues::softDeleteBooking($bookingId, $siteId, $userId);
         $_SESSION['flash_msg']  = $ok === true ? 'Booking deleted.' : 'Could not delete that booking.';
         $_SESSION['flash_type'] = $ok === true ? 'success' : 'danger';
-        header('Location: /venues?venue=' . $venueId);
+        header('Location: ' . Site::url('venues') . '?venue=' . $venueId);
         exit();
 
     case 'group-status':
@@ -103,7 +103,7 @@ switch ($action) {
         $count = Venues::setGroupStatus($groupId, $siteId, $statusId, $userId);
         $_SESSION['flash_msg']  = $count > 0 ? 'Status applied to ' . $count . ' booking(s).' : 'Could not update the run.';
         $_SESSION['flash_type'] = $count > 0 ? 'success' : 'danger';
-        header('Location: /venues?venue=' . $venueId);
+        header('Location: ' . Site::url('venues') . '?venue=' . $venueId);
         exit();
 
     case 'group-delete':
@@ -111,10 +111,10 @@ switch ($action) {
         $count = Venues::softDeleteGroup($groupId, $siteId, $userId);
         $_SESSION['flash_msg']  = $count > 0 ? 'Deleted ' . $count . ' booking(s).' : 'Could not delete the run.';
         $_SESSION['flash_type'] = $count > 0 ? 'success' : 'danger';
-        header('Location: /venues?venue=' . $venueId);
+        header('Location: ' . Site::url('venues') . '?venue=' . $venueId);
         exit();
 
     default:
-        header('Location: /venues?venue=' . $venueId);
+        header('Location: ' . Site::url('venues') . '?venue=' . $venueId);
         exit();
 }

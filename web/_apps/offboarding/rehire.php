@@ -45,7 +45,7 @@ $undoWindowDays = (int) (App::settings()['offboarding']['undo_window_days'] ?? 7
 // 🛡️ #518: a record number of 0 or less redirects silently, with NO log
 //    at all — there is nothing to log; the page has been sent no number.
 if ($id <= 0) {
-    header('Location: /offboarding');
+    header('Location: ' . Site::url('offboarding'));
     exit();
 }
 
@@ -98,25 +98,25 @@ if ($stmt !== false) {
 $targetUserId = $o === null ? 0 : (int) $o['userID'];
 $verdict = AccountGuard::check($targetUserId, AccountGuard::REACH_REHIRE, 'undo offboarding record #' . $id);
 if ($verdict === AccountGuard::NOT_FOUND || $o === null) {
-    header('Location: /offboarding');
+    header('Location: ' . Site::url('offboarding'));
     exit();
 }
 if ($verdict !== AccountGuard::ALLOW) {
     $_SESSION['flash_msg']  = AccountGuard::message($verdict, AccountGuard::REACH_REHIRE);
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /offboarding');
+    header('Location: ' . Site::url('offboarding'));
     exit();
 }
 
 if ($o['rehiredAt'] !== null) {
-    header('Location: /offboarding');
+    header('Location: ' . Site::url('offboarding'));
     exit();
 }
 $ageDays = (time() - strtotime((string) $o['offboardedAt'])) / 86400;
 if ($ageDays > $undoWindowDays) {
     $_SESSION['flash_msg']  = 'Undo window has passed.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /offboarding');
+    header('Location: ' . Site::url('offboarding'));
     exit();
 }
 
@@ -176,5 +176,5 @@ try {
     $_SESSION['flash_type'] = 'danger';
 }
 
-header('Location: /offboarding');
+header('Location: ' . Site::url('offboarding'));
 exit();

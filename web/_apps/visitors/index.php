@@ -38,7 +38,7 @@ if ($rs !== false) {
 
 $pageTitle   = 'Visitor Tracking';
 $pageSection = 'visitors';
-$breadcrumbs = ['Dashboard' => '/', 'Visitors' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Visitors' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
 $statusMeta = [
@@ -55,8 +55,8 @@ $statusMeta = [
         <p class="text-secondary mb-0">First-time visitors + their follow-up status.</p>
     </div>
     <div>
-        <a href="/visitors/my-follow-ups" class="btn btn-outline-primary btn-sm me-1">My follow-ups</a>
-        <a href="/visitors/new" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>Add visitor</a>
+        <a href="<?php echo htmlspecialchars(Site::url('visitors/my-follow-ups'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm me-1">My follow-ups</a>
+        <a href="<?php echo htmlspecialchars(Site::url('visitors/new'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>Add visitor</a>
     </div>
 </div>
 
@@ -72,7 +72,7 @@ $statusMeta = [
                     <?php if (count($visitors) === 0): ?>
                         <p class="small text-muted text-center my-3">No visitors here.</p>
                     <?php else: foreach ($visitors as $v): ?>
-                        <a href="/visitors/profile?id=<?php echo (int) $v['visitorID']; ?>"
+                        <a href="<?php echo htmlspecialchars(Site::url('visitors/profile'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $v['visitorID']; ?>"
                            class="d-block text-decoration-none text-reset card mb-2 p-2 small">
                             <strong><?php echo htmlspecialchars((string) $v['fullName'], ENT_QUOTES, 'UTF-8'); ?></strong><br>
                             <span class="text-muted">Visited <?php echo htmlspecialchars(date('j M', strtotime((string) $v['firstVisitedAt'])), ENT_QUOTES, 'UTF-8'); ?></span><br>

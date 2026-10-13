@@ -12,6 +12,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 use Portal\Core\Transcription;
 
 Auth::ensureSession();
@@ -64,7 +65,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Transcription';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Transcription' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Transcription' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -96,7 +97,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-3">
     <div class="card-header"><strong>Configuration</strong></div>
     <div class="card-body">
-        <form method="post" action="/admin/transcription/save" class="row g-3">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/transcription/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="col-md-3">
                 <label class="form-label">Provider</label>
@@ -141,7 +142,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="col-12">
                 <button class="btn btn-primary" type="submit">Save</button>
                 <?php if ((int) $queueStats['queued'] > 0): ?>
-                    <form method="post" action="/admin/transcription/run" class="d-inline ms-2">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/transcription/run'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline ms-2">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                         <button class="btn btn-outline-success" type="submit">
                             <i class="fa-solid fa-play me-1"></i>Process next <?php echo (int) $batch; ?>
@@ -169,7 +170,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     };
                 ?>
                     <div class="row py-1 border-bottom small">
-                        <div class="col-md-4"><a href="/recordings/view?id=<?php echo (int) $t['recordingID']; ?>"><?php echo htmlspecialchars((string) $t['title'], ENT_QUOTES, 'UTF-8'); ?></a></div>
+                        <div class="col-md-4"><a href="<?php echo htmlspecialchars(Site::url('recordings/view'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $t['recordingID']; ?>"><?php echo htmlspecialchars((string) $t['title'], ENT_QUOTES, 'UTF-8'); ?></a></div>
                         <div class="col-md-2"><span class="badge bg-<?php echo $cls; ?>"><?php echo htmlspecialchars((string) $t['status'], ENT_QUOTES, 'UTF-8'); ?></span></div>
                         <div class="col-md-2 text-muted"><?php echo htmlspecialchars((string) $t['provider'], ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-2 text-muted"><?php echo $t['durationSec'] !== null ? round(((int) $t['durationSec']) / 60, 1) . ' min' : '—'; ?></div>

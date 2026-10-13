@@ -54,7 +54,7 @@ $action = (string) ($_POST['action'] ?? '');
 /** Redirect back, optionally to a specific hymnal's entry view. */
 $redirect = static function (?int $hymnalId = null): never {
     $qs = ($hymnalId !== null && $hymnalId > 0) ? ('?hymnalID=' . $hymnalId) : '';
-    header('Location: /admin/hymns' . $qs);
+    header('Location: ' . Site::url('admin/hymns') . $qs);
     exit();
 };
 

@@ -67,7 +67,7 @@ if ($venueId > 0) {
 if ($venue === null) {
     $_SESSION['flash_msg']  = 'Choose a venue before exporting its schedule.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /venues');
+    header('Location: ' . Site::url('venues'));
     exit();
 }
 

@@ -88,7 +88,7 @@ if ($hasCoords === true) {
 
 $pageTitle   = 'Organisation Address';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Settings' => '/admin/settings', 'Organisation' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Settings' => Site::url('admin/settings'), 'Organisation' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -106,7 +106,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="card mb-4">
     <div class="card-body">
-        <form method="post" action="/admin/settings/organisation/save">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/settings/organisation/save'), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <?php portal_location_input([
                 'values'     => $values,
@@ -166,7 +166,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         <?php endif; ?>
 
-        <form method="post" action="/admin/settings/organisation/save">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/settings/organisation/save'), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <input type="hidden" name="form" value="web-addresses">
             <div class="row g-3">
@@ -216,7 +216,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<a href="/admin/settings" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Settings</a>
+<a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Settings</a>
 
 <?php
 portal_location_map_assets(App::cspNonce());

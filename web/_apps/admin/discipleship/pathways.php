@@ -46,7 +46,7 @@ if ($enabled !== '1' && $enabled !== 'true') {
     echo '<h1 class="h4 mb-2"><i class="fa-solid fa-route me-2 text-primary"></i>Discipleship Pathways</h1>';
     echo '<div class="alert alert-info">';
     echo '<p class="mb-2">The Discipleship Pathway Tracker is currently disabled.</p>';
-    echo '<p class="mb-0 small">Enable it under <a href="/admin/settings">Settings</a> by setting <code>discipleship.enabled</code> to <code>true</code>.</p>';
+    echo '<p class="mb-0 small">Enable it under <a href="' . htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8') . '">Settings</a> by setting <code>discipleship.enabled</code> to <code>true</code>.</p>';
     echo '</div></div>';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     exit();
@@ -80,7 +80,7 @@ if ($stmt !== false) {
 
 $pageTitle   = 'Discipleship Pathways';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Discipleship Pathways' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Discipleship Pathways' => ''];
 $csrf        = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
@@ -88,7 +88,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="container py-3" style="max-width:960px;">
     <div class="d-flex align-items-center justify-content-between mb-3">
         <h1 class="h4 mb-0"><i class="fa-solid fa-route me-2 text-primary"></i>Discipleship Pathways</h1>
-        <a href="/admin/discipleship/pathways/new" class="btn btn-primary btn-sm">
+        <a href="<?php echo htmlspecialchars(Site::url('admin/discipleship/pathways/new'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm">
             <i class="fa-solid fa-plus me-1"></i>New pathway
         </a>
     </div>
@@ -113,7 +113,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <?php if (count($pathways) === 0): ?>
         <div class="alert alert-info small">
-            No pathways defined yet. <a href="/admin/discipleship/pathways/new">Create your first pathway</a>
+            No pathways defined yet. <a href="<?php echo htmlspecialchars(Site::url('admin/discipleship/pathways/new'), ENT_QUOTES, 'UTF-8'); ?>">Create your first pathway</a>
             to start building a discipleship journey.
         </div>
     <?php else: ?>
@@ -125,7 +125,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 ?>
                 <div class="portal-data-row">
                     <div class="portal-data-row-main">
-                        <a href="/admin/discipleship/pathways/edit?id=<?php echo (int) $p['pathwayID']; ?>"
+                        <a href="<?php echo htmlspecialchars(Site::url('admin/discipleship/pathways/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $p['pathwayID']; ?>"
                            class="text-decoration-none">
                             <strong><?php echo htmlspecialchars((string) $p['name'], ENT_QUOTES, 'UTF-8'); ?></strong>
                         </a>
@@ -145,12 +145,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </div>
                     </div>
                     <div class="portal-data-row-aside">
-                        <a href="/admin/discipleship/pathways/edit?id=<?php echo (int) $p['pathwayID']; ?>"
+                        <a href="<?php echo htmlspecialchars(Site::url('admin/discipleship/pathways/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $p['pathwayID']; ?>"
                            class="btn btn-sm btn-outline-primary" title="Edit">
                             <i class="fa-solid fa-pen"></i>
                         </a>
                         <form method="post"
-                              action="/admin/discipleship/pathways/delete"
+                              action="<?php echo htmlspecialchars(Site::url('admin/discipleship/pathways/delete'), ENT_QUOTES, 'UTF-8'); ?>"
                               class="d-inline"
                               data-confirm="Delete this pathway and ALL its steps? This cannot be undone."
                               data-confirm-destructive="true">

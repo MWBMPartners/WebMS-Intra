@@ -87,7 +87,7 @@ function backToCountSession(int $id, string $msg, string $type): void
 {
     $_SESSION['flash_msg']  = $msg;
     $_SESSION['flash_type'] = $type;
-    header('Location: /giving/count/session?id=' . $id);
+    header('Location: ' . Site::url('giving/count/session') . '?id=' . $id);
     exit();
 }
 
@@ -103,7 +103,7 @@ if ($action === 'create') {
     if ($serviceDate === '' || strtotime($serviceDate) === false || $categoryId <= 0) {
         $_SESSION['flash_msg']  = 'Service date and category are required.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /giving/count');
+        header('Location: ' . Site::url('giving/count'));
         exit();
     }
 
@@ -119,7 +119,7 @@ if ($action === 'create') {
     if ($categoryValid === false) {
         $_SESSION['flash_msg']  = 'Invalid category.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /giving/count');
+        header('Location: ' . Site::url('giving/count'));
         exit();
     }
 
@@ -141,7 +141,7 @@ if ($action === 'create') {
     if ($newId <= 0) {
         $_SESSION['flash_msg']  = 'Could not create the count session.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /giving/count');
+        header('Location: ' . Site::url('giving/count'));
         exit();
     }
 

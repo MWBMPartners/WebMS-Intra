@@ -217,7 +217,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = (string) $campaign['name'];
 $pageSection = 'giving';
-$breadcrumbs = ['Dashboard' => '/', 'Giving' => '/giving', 'Campaigns' => '/giving/campaigns', (string) $campaign['name'] => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Giving' => Site::url('giving'), 'Campaigns' => Site::url('giving/campaigns'), (string) $campaign['name'] => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -239,7 +239,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php echo $campaign['endDate'] !== null ? htmlspecialchars(date('d/m/Y', (int) strtotime((string) $campaign['endDate'])), ENT_QUOTES, 'UTF-8') : 'ongoing'; ?>
         </p>
     </div>
-    <a href="/giving/campaigns" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>All campaigns</a>
+    <a href="<?php echo htmlspecialchars(Site::url('giving/campaigns'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>All campaigns</a>
 </div>
 
 <?php if ((string) ($campaign['description'] ?? '') !== ''): ?>
@@ -292,7 +292,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php if ((int) $campaign['isActive'] === 0): ?>
             <p class="text-muted mb-0">This campaign is no longer accepting pledges.</p>
         <?php else: ?>
-            <form method="post" action="/giving/pledge-save" class="row g-2 align-items-end">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/pledge-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="campaignID" value="<?php echo $campaignId; ?>">
                 <input type="hidden" name="action" value="save">
@@ -316,7 +316,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
             </form>
             <?php if ($myPledge !== null): ?>
-                <form method="post" action="/giving/pledge-save" class="mt-2">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/pledge-save'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-2">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="campaignID" value="<?php echo $campaignId; ?>">
                     <input type="hidden" name="action" value="cancel">
@@ -396,7 +396,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card mb-4">
         <div class="card-header"><strong>Edit campaign</strong></div>
         <div class="card-body">
-            <form method="post" action="/giving/campaign-save" class="row g-2 align-items-end">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/campaign-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="campaignID" value="<?php echo $campaignId; ?>">
                 <div class="col-md-4">

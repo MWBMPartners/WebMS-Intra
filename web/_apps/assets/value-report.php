@@ -91,7 +91,7 @@ if ($isCsvExport === true) {
     if (Auth::verifyCsrf($_GET['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /assets/value-report');
+        header('Location: ' . Site::url('assets/value-report'));
         exit();
     }
 }
@@ -165,11 +165,11 @@ $money = static function (?int $pence): string {
 };
 
 $csrf = Auth::csrfToken();
-$exportCsvUrl = '/assets/value-report?export=csv&csrf_token=' . urlencode($csrf);
+$exportCsvUrl = Site::url('assets/value-report') . '?export=csv&csrf_token=' . urlencode($csrf);
 
 $pageTitle   = 'Asset Value Report';
 $pageSection = 'assets';
-$breadcrumbs = ['Dashboard' => '/', 'Assets' => '/assets', 'Value Report' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Assets' => Site::url('assets'), 'Value Report' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -183,7 +183,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <a href="<?php echo htmlspecialchars($exportCsvUrl, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-success btn-sm" title="Export the depreciation table as CSV">
             <i class="fa-solid fa-file-csv me-1"></i>Export CSV
         </a>
-        <a href="/assets" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
+        <a href="<?php echo htmlspecialchars(Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
     </div>
 </div>
 
@@ -334,7 +334,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php foreach ($renewingInsurance as $ins): ?>
                         <div class="portal-data-row align-items-center">
                             <div class="col-7 col-md-6">
-                                <a href="/assets/item?id=<?php echo (int) $ins['assetID']; ?>" class="text-decoration-none">
+                                <a href="<?php echo htmlspecialchars(Site::url('assets/item'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $ins['assetID']; ?>" class="text-decoration-none">
                                     <?php echo htmlspecialchars((string) $ins['name'], ENT_QUOTES, 'UTF-8'); ?>
                                 </a>
                                 <?php if ($ins['insurerName'] !== null): ?>
@@ -357,7 +357,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php foreach ($underInsured as $r): ?>
                         <div class="portal-data-row align-items-center">
                             <div class="col-6 col-md-5">
-                                <a href="/assets/item?id=<?php echo (int) $r['assetID']; ?>" class="text-decoration-none">
+                                <a href="<?php echo htmlspecialchars(Site::url('assets/item'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $r['assetID']; ?>" class="text-decoration-none">
                                     <?php echo htmlspecialchars((string) $r['name'], ENT_QUOTES, 'UTF-8'); ?>
                                 </a>
                             </div>
@@ -383,7 +383,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php foreach ($depreciationRows as $r): ?>
                         <div class="portal-data-row align-items-center">
                             <div class="col-12 col-md-4">
-                                <a href="/assets/item?id=<?php echo (int) $r['assetID']; ?>" class="text-decoration-none">
+                                <a href="<?php echo htmlspecialchars(Site::url('assets/item'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $r['assetID']; ?>" class="text-decoration-none">
                                     <?php echo htmlspecialchars((string) $r['name'], ENT_QUOTES, 'UTF-8'); ?>
                                 </a>
                                 <?php if ($r['categoryName'] !== null): ?>

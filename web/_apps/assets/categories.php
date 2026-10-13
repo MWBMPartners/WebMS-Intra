@@ -50,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /assets/categories');
+        header('Location: ' . Site::url('assets/categories'));
         exit();
     }
 
@@ -67,7 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['flash_type'] = $saved > 0 ? 'success' : 'danger';
     }
 
-    header('Location: /assets/categories');
+    header('Location: ' . Site::url('assets/categories'));
     exit();
 }
 
@@ -92,7 +92,7 @@ if ($editId > 0) {
 
 $pageTitle   = 'Asset Categories';
 $pageSection = 'assets';
-$breadcrumbs = ['Dashboard' => '/', 'Assets' => '/assets', 'Categories' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Assets' => Site::url('assets'), 'Categories' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -107,7 +107,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-3">
     <div class="card-body">
         <h2 class="h5"><?php echo $editCategory !== null ? 'Edit category' : 'Add category'; ?></h2>
-        <form method="post" action="/assets/categories" class="row g-2 align-items-end">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/categories'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="save">
             <input type="hidden" name="categoryID" value="<?php echo $editCategory !== null ? (int) $editCategory['categoryID'] : 0; ?>">
@@ -131,7 +131,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <i class="fa-solid fa-<?php echo $editCategory !== null ? 'check' : 'plus'; ?> me-1"></i><?php echo $editCategory !== null ? 'Update' : 'Add'; ?>
                 </button>
                 <?php if ($editCategory !== null): ?>
-                    <a href="/assets/categories" class="btn btn-outline-secondary btn-sm w-100 mt-1">Cancel edit</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('assets/categories'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm w-100 mt-1">Cancel edit</a>
                 <?php endif; ?>
             </div>
         </form>
@@ -157,10 +157,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="col-3 small text-muted"><?php echo htmlspecialchars((string) ($cat['icon'] ?? '—'), ENT_QUOTES, 'UTF-8'); ?></div>
                 <div class="col-1"><?php echo (int) $cat['sortOrder']; ?></div>
                 <div class="col-4 text-end">
-                    <a href="/assets/categories?edit=<?php echo (int) $cat['categoryID']; ?>" class="btn btn-sm btn-outline-secondary" title="Edit">
+                    <a href="<?php echo htmlspecialchars(Site::url('assets/categories'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo (int) $cat['categoryID']; ?>" class="btn btn-sm btn-outline-secondary" title="Edit">
                         <i class="fa-solid fa-pen"></i>
                     </a>
-                    <form method="post" action="/assets/categories" class="d-inline">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/categories'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="action" value="toggle">
                         <input type="hidden" name="categoryID" value="<?php echo (int) $cat['categoryID']; ?>">
@@ -175,6 +175,6 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endif; ?>
 
-<a href="/assets" class="btn btn-outline-secondary mt-3"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
+<a href="<?php echo htmlspecialchars(Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary mt-3"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

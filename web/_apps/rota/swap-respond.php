@@ -40,7 +40,7 @@ if ($stmt !== false) {
     $stmt->close();
 }
 if ($swap === null || $swap['status'] !== 'pending') {
-    header('Location: /rota');
+    header('Location: ' . Site::url('rota'));
     exit();
 }
 $isTarget = (int) ($swap['targetUserID'] ?? 0) === $userId
@@ -89,5 +89,5 @@ try {
     \Portal\Core\Logger::errorPlatform('Rota', 'Warning', 'SWAP_RESPOND', $e->getMessage(), '');
 }
 
-header('Location: /rota');
+header('Location: ' . Site::url('rota'));
 exit();

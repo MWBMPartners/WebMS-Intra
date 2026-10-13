@@ -39,7 +39,7 @@ use Portal\Core\Logger;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/workflows');
+    header('Location: ' . Site::url('admin/workflows'));
     exit();
 }
 
@@ -48,14 +48,14 @@ Auth::requireLogin();
 if (App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = t('error.access_denied_inline');
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /dashboard');
+    header('Location: ' . Site::url('dashboard'));
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/workflows');
+    header('Location: ' . Site::url('admin/workflows'));
     exit();
 }
 
@@ -67,7 +67,7 @@ $workflowId = (int) ($_POST['workflowID'] ?? 0);
 if ($stepId <= 0 || $workflowId <= 0) {
     $_SESSION['flash_msg']  = 'Invalid step.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/workflows');
+    header('Location: ' . Site::url('admin/workflows'));
     exit();
 }
 
@@ -88,7 +88,7 @@ if ($stmt !== false) {
 if ($owns === false) {
     $_SESSION['flash_msg']  = 'Step not found for this site.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/workflows?edit=' . $workflowId);
+    header('Location: ' . Site::url('admin/workflows') . '?edit=' . $workflowId);
     exit();
 }
 
@@ -108,7 +108,7 @@ if ($stmt !== false) {
 if ($activeCount > 0) {
     $_SESSION['flash_msg']  = 'Cannot delete a step while this workflow has ' . $activeCount . ' active instance(s). Wait for them to complete first.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /admin/workflows?edit=' . $workflowId);
+    header('Location: ' . Site::url('admin/workflows') . '?edit=' . $workflowId);
     exit();
 }
 
@@ -133,5 +133,5 @@ try {
     $_SESSION['flash_type'] = 'danger';
 }
 
-header('Location: /admin/workflows?edit=' . $workflowId);
+header('Location: ' . Site::url('admin/workflows') . '?edit=' . $workflowId);
 exit();

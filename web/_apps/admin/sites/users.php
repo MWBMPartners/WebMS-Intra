@@ -34,7 +34,7 @@ $db     = App::db();
 $siteId = (int) ($_GET['site'] ?? 0);
 
 if ($siteId <= 0) {
-    header('Location: /admin/sites', true, 302);
+    header('Location: ' . Site::url('admin/sites'), true, 302);
     exit();
 }
 
@@ -53,7 +53,7 @@ $siteStmt->close();
 if ($siteInfo === null) {
     $_SESSION['flash_msg'] = 'Site not found.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/sites', true, 302);
+    header('Location: ' . Site::url('admin/sites'), true, 302);
     exit();
 }
 
@@ -62,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/sites');
+        header('Location: ' . Site::url('admin/sites'));
         exit();
     }
 
@@ -149,7 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    header('Location: /admin/sites/users?site=' . $siteId, true, 302);
+    header('Location: ' . Site::url('admin/sites/users') . '?site=' . $siteId, true, 302);
     exit();
 }
 
@@ -194,7 +194,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 $siteName    = htmlspecialchars($siteInfo['siteName'], ENT_QUOTES, 'UTF-8');
 $pageTitle   = 'Users — ' . $siteInfo['siteName'];
 $pageSection = 'admin';
-$breadcrumbs = ['Admin' => '/admin', 'Sites' => '/admin/sites', $siteInfo['siteName'] . ' Users' => ''];
+$breadcrumbs = ['Admin' => Site::url('admin'), 'Sites' => Site::url('admin/sites'), $siteInfo['siteName'] . ' Users' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -203,7 +203,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="h3 mb-0">
         <i class="fa-solid fa-users me-2"></i> <?php echo $siteName; ?> — User Assignments
     </h1>
-    <a href="/admin/sites" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('admin/sites'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back to Sites
     </a>
 </div>

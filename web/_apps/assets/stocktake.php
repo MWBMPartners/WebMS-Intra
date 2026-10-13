@@ -102,7 +102,7 @@ $scopeLabel = count($scopeParts) > 0 ? implode(' · ', $scopeParts) : 'Whole sit
 
 $pageTitle   = 'Stocktake — ' . (string) $stocktake['label'];
 $pageSection = 'assets';
-$breadcrumbs = ['Dashboard' => '/', 'Assets' => '/assets', 'Stocktakes' => '/assets/stocktakes', (string) $stocktake['label'] => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Assets' => Site::url('assets'), 'Stocktakes' => Site::url('assets/stocktakes'), (string) $stocktake['label'] => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -126,7 +126,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php endif; ?>
         </p>
     </div>
-    <a href="/assets/stocktakes" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Stocktakes</a>
+    <a href="<?php echo htmlspecialchars(Site::url('assets/stocktakes'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Stocktakes</a>
 </div>
 
 <?php if ($flashMsg !== ''): ?>
@@ -139,14 +139,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
      together, never colour alone — see $verifyMeta above). -->
 <div class="d-flex flex-wrap gap-2 mb-4">
     <?php foreach ($verifyMeta as $vs => $meta): ?>
-        <a href="/assets/stocktake?id=<?php echo $stocktakeId; ?>&filter=<?php echo urlencode($vs); ?>"
+        <a href="<?php echo htmlspecialchars(Site::url('assets/stocktake'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $stocktakeId; ?>&filter=<?php echo urlencode($vs); ?>"
            class="badge bg-<?php echo htmlspecialchars($meta['badge'], ENT_QUOTES, 'UTF-8'); ?> text-decoration-none fs-6 p-2 <?php echo $filterValue === $vs ? 'border border-3 border-dark' : ''; ?>">
             <i class="fa-solid <?php echo htmlspecialchars($meta['icon'], ENT_QUOTES, 'UTF-8'); ?> me-1"></i>
             <?php echo htmlspecialchars($meta['label'], ENT_QUOTES, 'UTF-8'); ?>: <?php echo (int) ($variance[$vs] ?? 0); ?>
         </a>
     <?php endforeach; ?>
     <?php if ($filterValue !== null): ?>
-        <a href="/assets/stocktake?id=<?php echo $stocktakeId; ?>" class="badge bg-light text-dark border text-decoration-none fs-6 p-2">
+        <a href="<?php echo htmlspecialchars(Site::url('assets/stocktake'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $stocktakeId; ?>" class="badge bg-light text-dark border text-decoration-none fs-6 p-2">
             <i class="fa-solid fa-xmark me-1"></i>Clear filter
         </a>
     <?php endif; ?>
@@ -157,7 +157,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card-body">
             <h2 class="h5"><i class="fa-solid fa-barcode me-2"></i>Scan an asset</h2>
             <p class="text-muted small mb-2">Matches an asset tag, serial number, public QR/label token, or any recorded GS1/RFID identifier.</p>
-            <form method="post" action="/assets/stocktake-save" class="row g-2 align-items-end">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/stocktake-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="scan">
                 <input type="hidden" name="stocktakeID" value="<?php echo $stocktakeId; ?>">
@@ -183,7 +183,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
 
-    <form method="post" action="/assets/stocktake-save" class="mb-4"
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/stocktake-save'), ENT_QUOTES, 'UTF-8'); ?>" class="mb-4"
           data-confirm="Close this stocktake? Every asset still pending will be marked missing — this can't be undone."
           data-confirm-destructive="true">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
@@ -224,7 +224,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php endif; ?>
             <div class="portal-data-row align-items-center">
                 <div class="col-5">
-                    <a href="/assets/item?id=<?php echo (int) $item['assetID']; ?>" class="text-decoration-none">
+                    <a href="<?php echo htmlspecialchars(Site::url('assets/item'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $item['assetID']; ?>" class="text-decoration-none">
                         <?php echo htmlspecialchars((string) $item['assetName'], ENT_QUOTES, 'UTF-8'); ?>
                     </a>
                     <?php if ((int) ($item['isConfidential'] ?? 0) === 1): ?>

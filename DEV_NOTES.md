@@ -3058,14 +3058,23 @@ ignore rules remain the first wall; these guards are the second.
   It sends every request to the address of the page it is on, so it cannot work on another website.
 - **Every address a page writes goes through `Site::url()`** (`Router::url()` is the same thing under its older
   name). `check_site_aware_addresses.py` reads the whole of `web/_apps`, `web/_core`, the web folder and
-  `web/_install/upgrade.php`; a place not swept yet is named in `site_aware_addresses_pending.txt`, and the check
-  fails if a place on it is in fact clean. Take a place's line out in the same change that sweeps it. Its `STRICT`
+  `web/_install/upgrade.php`. The list of places not swept yet, `site_aware_addresses_pending.txt`, has been EMPTY
+  since 13 October 2026 (the second part of the sweep did the last 44 places, about 2,700 addresses in 503 files);
+  nothing is added to it, and `--strict` fails if a line appears. Its `STRICT`
   list (it was called `LISTED`) names the places held to the widest rule. The check reads whether an address is
   built by the helper, not whether it is the right address; `tools/site-addresses-selftest.php` runs the portal
-  and reads the pages. **An empty pending list is needed before `Site::FIRST_PART_MODE_READY` is switched on,
+  and reads the pages. **The empty pending list is needed before `Site::FIRST_PART_MODE_READY` is switched on,
   and is not enough on its own:** the check reads text (its header lists what it cannot see), and the service
-  worker, the installable app, the chat box on `/live` and the return address of a Microsoft or Google sign-in
-  are not organisation-aware.
+  worker, the installable app, the chat box on `/live`, the return address of a Microsoft or Google sign-in, and
+  a link in a push or an e-mail made by a scheduled job (a job has no organisation's part) are not
+  organisation-aware.
+- **Three things the sweep taught** (13 October 2026). (1) Never join two built addresses:
+  `Site::url('small-groups') . Site::url('group')` prints the organisation's part twice. The sweep script did this
+  in two files and its own inverse test could not see it; comparing every key inside `Site::url('…')` with the
+  registered addresses did. (2) A page that ACCEPTS a come-back address by a pattern or a list must accept it with
+  the organisation's part in front, and must go on refusing an address that leaves the portal. (3) A class used by
+  its short name needs its `use` line in that very file, and a missing one fails only when the line runs: of the
+  2,441 rewritten lines, 547 ran in no test (most are redirects inside save handlers).
 
 ---
 

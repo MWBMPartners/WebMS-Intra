@@ -62,7 +62,7 @@ if ($payment !== null) {
 
 $pageTitle   = 'Payment ' . ($result === 'ok' ? 'received' : 'cancelled');
 $pageSection = 'payments';
-$breadcrumbs = ['Dashboard' => '/', 'Payment' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Payment' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -100,11 +100,11 @@ $isPaypalFailed  = $payment !== null && (string) $payment['provider'] === 'paypa
     <?php endif; ?>
     <p class="mt-4">
         <?php if ($payment !== null && (string) $payment['purpose'] === 'pledge'): ?>
-            <a href="/projects/my-pledges" class="btn btn-outline-primary">My pledges</a>
+            <a href="<?php echo htmlspecialchars(Site::url('projects/my-pledges'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary">My pledges</a>
         <?php elseif ($payment !== null && (string) $payment['purpose'] === 'giving'): ?>
-            <a href="/giving" class="btn btn-outline-primary">My giving</a>
+            <a href="<?php echo htmlspecialchars(Site::url('giving'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary">My giving</a>
         <?php else: ?>
-            <a href="/" class="btn btn-outline-primary">Return home</a>
+            <a href="<?php echo htmlspecialchars(Site::url(''), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary">Return home</a>
         <?php endif; ?>
     </p>
 </div>

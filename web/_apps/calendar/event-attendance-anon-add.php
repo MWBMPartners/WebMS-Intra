@@ -56,7 +56,7 @@ if (App::isAdmin() === false) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /attendance');
+    header('Location: ' . Site::url('attendance'));
     exit();
 }
 
@@ -67,7 +67,7 @@ $eventId = (int) ($_POST['eventID'] ?? 0);
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Nothing was changed. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /calendar/event/attendance?eventID=' . $eventId);
+    header('Location: ' . Site::url('calendar/event/attendance') . '?eventID=' . $eventId);
     exit();
 }
 
@@ -98,7 +98,7 @@ if ($result['ok'] !== true) {
 
     $_SESSION['flash_msg']  = 'That event or attendance session could not be used. Nothing was changed.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /calendar/event/attendance?eventID=' . $eventId);
+    header('Location: ' . Site::url('calendar/event/attendance') . '?eventID=' . $eventId);
     exit();
 }
 
@@ -119,5 +119,5 @@ $_SESSION['flash_msg'] = $was === null
     : 'Updated "' . $label . '" in that attendance session from ' . $was . ' to ' . $now . '.';
 $_SESSION['flash_type'] = 'success';
 
-header('Location: /calendar/event/attendance?eventID=' . $eventId);
+header('Location: ' . Site::url('calendar/event/attendance') . '?eventID=' . $eventId);
 exit();

@@ -97,7 +97,7 @@ if (isset($_SESSION['kids_badge_issued']) === true) {
                 </div>
                 <div class="portal-data-row-aside">
                     <?php if ((int) $m['isCheckedIn'] === 0): ?>
-                        <form method="post" action="/kids/checkin/do">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('kids/checkin/do'), ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                             <input type="hidden" name="childID" value="<?php echo (int) $m['childID']; ?>">
                             <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
@@ -131,6 +131,6 @@ if (isset($_SESSION['kids_badge_issued']) === true) {
     <?php endif; ?>
 
     <hr>
-    <p class="small text-muted">Parent picking up? Go to <a href="/kids/checkout">checkout</a> and enter the badge code.</p>
+    <p class="small text-muted">Parent picking up? Go to <a href="<?php echo htmlspecialchars(Site::url('kids/checkout'), ENT_QUOTES, 'UTF-8'); ?>">checkout</a> and enter the badge code.</p>
 </div>
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

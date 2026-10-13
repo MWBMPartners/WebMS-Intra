@@ -57,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /venues/usage-types?venue=' . $venueId);
+        header('Location: ' . Site::url('venues/usage-types') . '?venue=' . $venueId);
         exit();
     }
 
@@ -100,7 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['flash_type'] = 'success';
     }
 
-    header('Location: /venues/usage-types?venue=' . $venueId);
+    header('Location: ' . Site::url('venues/usage-types') . '?venue=' . $venueId);
     exit();
 }
 
@@ -156,7 +156,7 @@ $kindBadge = ['hire' => 'primary', 'closed' => 'secondary', 'unavailable' => 'da
 
 $pageTitle   = 'Usage Types — ' . (string) $venue['venueName'];
 $pageSection = 'venues';
-$breadcrumbs = ['Dashboard' => '/', 'Venues' => '/venues', (string) $venue['venueName'] => '/venues/venue?id=' . $venueId, 'Usage types' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Venues' => Site::url('venues'), (string) $venue['venueName'] => Site::url('venues/venue') . '?id=' . $venueId, 'Usage types' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -168,7 +168,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-clock me-2"></i>Usage Types — <?php echo htmlspecialchars((string) $venue['venueName'], ENT_QUOTES, 'UTF-8'); ?></h1>
-    <a href="/venues/manage" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to venues</a>
+    <a href="<?php echo htmlspecialchars(Site::url('venues/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to venues</a>
 </div>
 <div class="alert alert-secondary small">
     <i class="fa-solid fa-circle-info me-1"></i>A new window applies to bookings dated on/after its start date; existing bookings keep their saved times unless you <strong>Re-apply</strong>.
@@ -177,7 +177,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-4">
     <div class="card-body">
         <h2 class="h5"><?php echo $editType !== null ? 'Edit usage type' : 'Add usage type'; ?></h2>
-        <form method="post" action="/venues/usage-types?venue=<?php echo $venueId; ?>" class="row g-2 align-items-end">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/usage-types'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo $venueId; ?>" class="row g-2 align-items-end">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="save-type">
             <input type="hidden" name="venue" value="<?php echo $venueId; ?>">
@@ -213,7 +213,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <i class="fa-solid fa-<?php echo $editType !== null ? 'check' : 'plus'; ?> me-1"></i><?php echo $editType !== null ? 'Update' : 'Add'; ?>
                 </button>
                 <?php if ($editType !== null): ?>
-                    <a href="/venues/usage-types?venue=<?php echo $venueId; ?>" class="btn btn-outline-secondary btn-sm w-100 mt-1">Cancel edit</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('venues/usage-types'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo $venueId; ?>" class="btn btn-outline-secondary btn-sm w-100 mt-1">Cancel edit</a>
                 <?php endif; ?>
             </div>
         </form>
@@ -247,8 +247,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="col-3 small text-muted"><?php echo htmlspecialchars($windowText, ENT_QUOTES, 'UTF-8'); ?></div>
                 <div class="col-1"><span class="badge bg-light text-dark border"><?php echo (int) $type['bookingCount']; ?></span></div>
                 <div class="col-3 text-end">
-                    <a href="/venues/usage-types?venue=<?php echo $venueId; ?>&edit=<?php echo (int) $type['usageTypeID']; ?>" class="btn btn-sm btn-outline-secondary" title="Edit"><i class="fa-solid fa-pen"></i></a>
-                    <form method="post" action="/venues/usage-types?venue=<?php echo $venueId; ?>" class="d-inline">
+                    <a href="<?php echo htmlspecialchars(Site::url('venues/usage-types'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo $venueId; ?>&edit=<?php echo (int) $type['usageTypeID']; ?>" class="btn btn-sm btn-outline-secondary" title="Edit"><i class="fa-solid fa-pen"></i></a>
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/usage-types'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo $venueId; ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="action" value="toggle-type">
                         <input type="hidden" name="venue" value="<?php echo $venueId; ?>">
@@ -279,7 +279,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         </div>
                                         <div class="col-4 small text-muted"><?php echo htmlspecialchars((string) ($window['note'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
                                         <div class="col-2 text-end">
-                                            <form method="post" action="/venues/usage-types?venue=<?php echo $venueId; ?>" class="d-inline" data-confirm="Remove this window entry?" data-confirm-destructive="true">
+                                            <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/usage-types'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo $venueId; ?>" class="d-inline" data-confirm="Remove this window entry?" data-confirm-destructive="true">
                                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                                 <input type="hidden" name="action" value="delete-window">
                                                 <input type="hidden" name="venue" value="<?php echo $venueId; ?>">
@@ -294,7 +294,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
                         <div class="row g-2 align-items-end">
                             <div class="col-auto">
-                                <form method="post" action="/venues/usage-types?venue=<?php echo $venueId; ?>" class="row g-1 align-items-end">
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/usage-types'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo $venueId; ?>" class="row g-1 align-items-end">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="action" value="add-window">
                                     <input type="hidden" name="venue" value="<?php echo $venueId; ?>">
@@ -323,7 +323,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </div>
 
                         <?php if ((int) $type['bookingCount'] > 0): ?>
-                            <form method="post" action="/venues/usage-types?venue=<?php echo $venueId; ?>" class="row g-1 align-items-end mt-2"
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/usage-types'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo $venueId; ?>" class="row g-1 align-items-end mt-2"
                                   data-confirm="Re-apply the current default window to every future booking of this type that hasn't had its times manually overridden?">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="action" value="reapply">

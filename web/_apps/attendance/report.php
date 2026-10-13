@@ -29,7 +29,7 @@ use Portal\Core\Site;
 // 📌 Page metadata
 $pageTitle   = 'Attendance Reports';
 $pageSection = 'attendance';
-$breadcrumbs = ['Dashboard' => '/', 'Attendance' => '/attendance', 'Reports' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Attendance' => Site::url('attendance'), 'Reports' => ''];
 
 // 🛡️ Ensure session
 Auth::ensureSession();
@@ -247,13 +247,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 📊 Reports Header -->
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-chart-bar me-2"></i>Attendance Reports</h1>
-    <a href="/attendance" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('attendance'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back
     </a>
 </div>
 
 <!-- 📅 Report Period Selector -->
-<form method="get" action="/attendance/report" class="row g-2 mb-4">
+<form method="get" action="<?php echo htmlspecialchars(Site::url('attendance/report'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mb-4">
     <div class="col-6 col-md-3">
         <select name="year" class="form-select form-select-sm">
             <?php foreach ($availableYears as $y): ?>
@@ -360,7 +360,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <div class="col-12 col-md-2 text-md-end mt-2 mt-md-0">
                         <?php if ($mSessions > 0): ?>
-                            <a href="/attendance/report?year=<?php echo $reportYear; ?>&month=<?php echo $m; ?>"
+                            <a href="<?php echo htmlspecialchars(Site::url('attendance/report'), ENT_QUOTES, 'UTF-8'); ?>?year=<?php echo $reportYear; ?>&month=<?php echo $m; ?>"
                                class="btn btn-sm btn-outline-primary">
                                 <i class="fa-solid fa-magnifying-glass"></i>
                             </a>
@@ -580,7 +580,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php endif; ?>
                 <?php if (App::isAdmin() === true): ?>
                     A spreadsheet of these figures, broken down by event and day, is on the
-                    <a href="/attendance">attendance page</a> — that download is for administrators
+                    <a href="<?php echo htmlspecialchars(Site::url('attendance'), ENT_QUOTES, 'UTF-8'); ?>">attendance page</a> — that download is for administrators
                     only, whatever this organisation's visibility setting says.
                 <?php endif; ?>
             </p>

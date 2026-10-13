@@ -32,14 +32,14 @@ if (App::isAdmin() === false) {
 
 // 🛡️ Only accept POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /leadership');
+    header('Location: ' . Site::url('leadership'));
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /leadership');
+    header('Location: ' . Site::url('leadership'));
     exit();
 }
 
@@ -50,7 +50,7 @@ $siteId       = Site::id();
 if ($assignmentID <= 0) {
     $_SESSION['flash_msg']  = 'Invalid assignment ID.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /leadership');
+    header('Location: ' . Site::url('leadership'));
     exit();
 }
 
@@ -72,8 +72,8 @@ $_SESSION['flash_type'] = 'success';
 // 📌 Return to history page if referrer is history, otherwise main page
 $referer = $_SERVER['HTTP_REFERER'] ?? '';
 if (strpos($referer, '/leadership/history') !== false) {
-    header('Location: /leadership/history');
+    header('Location: ' . Site::url('leadership/history'));
 } else {
-    header('Location: /leadership');
+    header('Location: ' . Site::url('leadership'));
 }
 exit();

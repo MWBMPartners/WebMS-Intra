@@ -82,7 +82,7 @@ $upcoming = array_slice(
 
 $pageTitle   = $venue['venueName'];
 $pageSection = 'venues';
-$breadcrumbs = ['Dashboard' => '/', 'Venue Bookings' => '/venues', (string) $venue['venueName'] => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Venue Bookings' => Site::url('venues'), (string) $venue['venueName'] => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
 $esc = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
@@ -94,10 +94,10 @@ $esc = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES,
         <?php if ((int) $venue['isActive'] === 0): ?><span class="badge bg-secondary">inactive</span><?php endif; ?>
     </div>
     <div class="d-flex flex-wrap gap-2">
-        <a href="/venues?venue=<?php echo (int) $venueId; ?>" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-calendar-days me-1"></i>Schedule</a>
+        <a href="<?php echo htmlspecialchars(Site::url('venues'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venueId; ?>" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-calendar-days me-1"></i>Schedule</a>
         <?php if ($isMgr === true): ?>
-            <a href="/venues/booking?venue=<?php echo (int) $venueId; ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>Booking</a>
-            <a href="/venues/manage?edit=<?php echo (int) $venueId; ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-pen me-1"></i>Edit</a>
+            <a href="<?php echo htmlspecialchars(Site::url('venues/booking'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venueId; ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>Booking</a>
+            <a href="<?php echo htmlspecialchars(Site::url('venues/manage'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo (int) $venueId; ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-pen me-1"></i>Edit</a>
         <?php endif; ?>
     </div>
 </div>
@@ -198,7 +198,7 @@ $esc = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES,
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     Agreements
-                    <a href="/venues/agreements?venue=<?php echo (int) $venueId; ?>" class="small">View all →</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('venues/agreements'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venueId; ?>" class="small">View all →</a>
                 </div>
                 <div class="card-body small">
                     <?php if (count($agreements) === 0): ?>
@@ -237,7 +237,7 @@ $esc = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES,
                     <ul class="list-unstyled mb-0">
                         <?php foreach ($upcoming as $b): ?>
                             <li class="mb-1">
-                                <a href="/venues/booking?id=<?php echo (int) $b['bookingID']; ?>">
+                                <a href="<?php echo htmlspecialchars(Site::url('venues/booking'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $b['bookingID']; ?>">
                                     <?php echo $esc(date('j M Y', strtotime((string) $b['bookingDate']))); ?>
                                 </a>
                                 — <?php echo $esc($b['usageTypeName']); ?>

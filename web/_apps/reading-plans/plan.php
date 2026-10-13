@@ -23,7 +23,7 @@ $userId = (int) ($_SESSION['user_id'] ?? 0);
 $planId = (int) ($_GET['id'] ?? 0);
 
 if ($planId <= 0) {
-    header('Location: /reading-plans');
+    header('Location: ' . Site::url('reading-plans'));
     exit();
 }
 
@@ -105,7 +105,7 @@ if ($enrollment !== null && count($recent) > 0) {
 
 $pageTitle   = (string) $plan['name'];
 $pageSection = 'reading-plans';
-$breadcrumbs = ['Dashboard' => '/', 'Reading Plans' => '/reading-plans', (string) $plan['name'] => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Reading Plans' => Site::url('reading-plans'), (string) $plan['name'] => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 
@@ -126,11 +126,11 @@ $progressPct = $enrollment !== null
             <?php if (($plan['description'] ?? '') !== ''): ?>
                 <p><?php echo htmlspecialchars((string) $plan['description'], ENT_QUOTES, 'UTF-8'); ?></p>
             <?php endif; ?>
-            <form method="post" action="/reading-plans/enroll">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('reading-plans/enroll'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="planID" value="<?php echo (int) $planId; ?>">
                 <button type="submit" class="btn btn-primary">Enroll in this plan</button>
-                <a href="/reading-plans" class="btn btn-outline-secondary">Back</a>
+                <a href="<?php echo htmlspecialchars(Site::url('reading-plans'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Back</a>
             </form>
         </div>
     </div>
@@ -153,7 +153,7 @@ $progressPct = $enrollment !== null
                         <p class="text-muted">No reading content defined for this day. An admin can populate <code>tblReadingPlanDay</code> rows for richer guidance.</p>
                     <?php endif; ?>
                     <?php if ($enrollment['completedAt'] === null && $todayDay <= (int) $plan['totalDays']): ?>
-                        <form method="post" action="/reading-plans/check" class="mt-3">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('reading-plans/check'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-3">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="enrollmentID" value="<?php echo (int) $enrollment['enrollmentID']; ?>">
                             <input type="hidden" name="dayNumber" value="<?php echo $todayDay; ?>">

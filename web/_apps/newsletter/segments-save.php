@@ -35,7 +35,7 @@ if ($action === 'add') {
     if ($name === '') {
         $_SESSION['flash_msg']  = 'Segment name is required.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /newsletter/segments');
+        header('Location: ' . Site::url('newsletter/segments'));
         exit();
     }
     $rule = ['all' => true];
@@ -66,5 +66,5 @@ if ($action === 'add') {
     $_SESSION['flash_type'] = 'success';
 }
 
-header('Location: /newsletter/segments');
+header('Location: ' . Site::url('newsletter/segments'));
 exit();

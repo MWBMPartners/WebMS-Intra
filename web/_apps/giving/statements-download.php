@@ -58,7 +58,7 @@ $to   = (string) ($_GET['to']   ?? '');
 if (strtotime($from) === false || strtotime($to) === false || strtotime($from) > strtotime($to)) {
     $_SESSION['flash_msg']  = 'Invalid date range.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /giving/statements');
+    header('Location: ' . Site::url('giving/statements'));
     exit();
 }
 $periodKey = Giving::statementPeriodKey($from, $to);
@@ -85,7 +85,7 @@ if ($donorId > 0) {
     if ($row === null || $pdfPath === '' || is_file($pdfPath) === false) {
         $_SESSION['flash_msg']  = 'That statement has not been generated yet.';
         $_SESSION['flash_type'] = 'warning';
-        header('Location: /giving/statements?from=' . urlencode($from) . '&to=' . urlencode($to));
+        header('Location: ' . Site::url('giving/statements') . '?from=' . urlencode($from) . '&to=' . urlencode($to));
         exit();
     }
 
@@ -105,7 +105,7 @@ if ($donorId > 0) {
 if (class_exists('ZipArchive') === false) {
     $_SESSION['flash_msg']  = 'ZIP download is not available on this server — use the per-row "PDF" links instead.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /giving/statements?from=' . urlencode($from) . '&to=' . urlencode($to));
+    header('Location: ' . Site::url('giving/statements') . '?from=' . urlencode($from) . '&to=' . urlencode($to));
     exit();
 }
 
@@ -143,14 +143,14 @@ if ($missingCount > 0 && $partial === false) {
     $_SESSION['flash_msg']  = $missingCount . ' statement(s) for this period are not generated yet — click Generate first, '
         . 'or add &partial=1 to the download link to bundle just the ' . count($ready) . ' that are ready.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /giving/statements?from=' . urlencode($from) . '&to=' . urlencode($to));
+    header('Location: ' . Site::url('giving/statements') . '?from=' . urlencode($from) . '&to=' . urlencode($to));
     exit();
 }
 
 if (count($ready) === 0) {
     $_SESSION['flash_msg']  = 'No generated statements to download for this period yet.';
     $_SESSION['flash_type'] = 'info';
-    header('Location: /giving/statements?from=' . urlencode($from) . '&to=' . urlencode($to));
+    header('Location: ' . Site::url('giving/statements') . '?from=' . urlencode($from) . '&to=' . urlencode($to));
     exit();
 }
 
@@ -165,7 +165,7 @@ $zip = new \ZipArchive();
 if ($zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
     $_SESSION['flash_msg']  = 'Could not build the ZIP archive — try again, or use the per-row "PDF" links.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /giving/statements?from=' . urlencode($from) . '&to=' . urlencode($to));
+    header('Location: ' . Site::url('giving/statements') . '?from=' . urlencode($from) . '&to=' . urlencode($to));
     exit();
 }
 foreach ($ready as $r) {

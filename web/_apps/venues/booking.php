@@ -74,7 +74,7 @@ if ($bookingId > 0) {
     $prefillDate = (string) ($_GET['date'] ?? '');
     if ($isMgr === false) {
         // Viewers may only view existing bookings, never create.
-        header('Location: /venues?venue=' . $venueId);
+        header('Location: ' . Site::url('venues') . '?venue=' . $venueId);
         exit();
     }
 }
@@ -229,7 +229,7 @@ $costValue = $booking !== null && $booking['costPence'] !== null ? number_format
 
 $pageTitle   = $booking !== null ? 'Booking — ' . $venue['venueName'] : 'New booking — ' . $venue['venueName'];
 $pageSection = 'venues';
-$breadcrumbs = ['Dashboard' => '/', 'Venue Bookings' => '/venues', (string) $venue['venueName'] => '/venues/venue?id=' . $venueId, 'Booking' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Venue Bookings' => Site::url('venues'), (string) $venue['venueName'] => Site::url('venues/venue') . '?id=' . $venueId, 'Booking' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -255,13 +255,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php if (($booking['eventName'] ?? '') !== '' && $linkedEventVisible === true): ?><p><strong>Linked event:</strong> <?php echo $esc($booking['eventName']); ?></p><?php endif; ?>
         </div>
     </div>
-    <a href="/venues?venue=<?php echo (int) $venueId; ?>" class="btn btn-outline-secondary mt-3"><i class="fa-solid fa-arrow-left me-1"></i>Back to schedule</a>
+    <a href="<?php echo htmlspecialchars(Site::url('venues'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venueId; ?>" class="btn btn-outline-secondary mt-3"><i class="fa-solid fa-arrow-left me-1"></i>Back to schedule</a>
 
 <?php else: ?>
     <!-- ============================== ✏️ Manager save form ============================== -->
     <div class="card mb-3">
         <div class="card-body">
-            <form method="post" action="/venues/booking-save">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/booking-save'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
                 <input type="hidden" name="action" value="save">
                 <input type="hidden" name="bookingID" value="<?php echo (int) $bookingId; ?>">
@@ -372,7 +372,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
                 <div class="mt-3">
                     <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk me-1"></i>Save</button>
-                    <a href="/venues?venue=<?php echo (int) $venueId; ?>" class="btn btn-outline-secondary">Cancel</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('venues'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $venueId; ?>" class="btn btn-outline-secondary">Cancel</a>
                 </div>
             </form>
         </div>
@@ -387,7 +387,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </p>
                 <p class="mb-2 text-muted"><?php echo $esc($group['dateFrom'] . ' → ' . $group['dateTo']); ?></p>
                 <div class="d-flex flex-wrap gap-2">
-                    <form method="post" action="/venues/booking-save" class="d-flex align-items-center gap-1" data-confirm="Apply this status to every booking in the run?">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/booking-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex align-items-center gap-1" data-confirm="Apply this status to every booking in the run?">
                         <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
                         <input type="hidden" name="action" value="group-status">
                         <input type="hidden" name="groupID" value="<?php echo (int) $group['groupID']; ?>">
@@ -399,14 +399,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </select>
                         <button type="submit" class="btn btn-outline-secondary btn-sm">Set status for whole run</button>
                     </form>
-                    <form method="post" action="/venues/booking-save" data-confirm="Delete EVERY booking in this run? This can't be undone from the UI." data-confirm-destructive="true">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/booking-save'), ENT_QUOTES, 'UTF-8'); ?>" data-confirm="Delete EVERY booking in this run? This can't be undone from the UI." data-confirm-destructive="true">
                         <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
                         <input type="hidden" name="action" value="group-delete">
                         <input type="hidden" name="groupID" value="<?php echo (int) $group['groupID']; ?>">
                         <input type="hidden" name="venueID" value="<?php echo (int) $venueId; ?>">
                         <button type="submit" class="btn btn-outline-danger btn-sm">Delete whole run</button>
                     </form>
-                    <a href="/venues/generate?group=<?php echo (int) $group['groupID']; ?>" class="btn btn-outline-primary btn-sm">Extend series</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('venues/generate'), ENT_QUOTES, 'UTF-8'); ?>?group=<?php echo (int) $group['groupID']; ?>" class="btn btn-outline-primary btn-sm">Extend series</a>
                 </div>
             </div>
         </div>
@@ -417,7 +417,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="card-header text-danger">Danger zone</div>
             <div class="card-body small">
                 <p class="text-muted">Cancellations should normally be a status change; delete only true mistakes.</p>
-                <form method="post" action="/venues/booking-save" data-confirm="Delete this booking? This can't be undone from the UI." data-confirm-destructive="true">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/booking-save'), ENT_QUOTES, 'UTF-8'); ?>" data-confirm="Delete this booking? This can't be undone from the UI." data-confirm-destructive="true">
                     <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
                     <input type="hidden" name="action" value="delete">
                     <input type="hidden" name="bookingID" value="<?php echo (int) $bookingId; ?>">

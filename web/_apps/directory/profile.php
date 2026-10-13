@@ -28,7 +28,7 @@ $viewer = (int) ($_SESSION['user_id'] ?? 0);
 $isAdmin = App::isAdmin();
 $id = (int) ($_GET['id'] ?? 0);
 if ($id <= 0) {
-    header('Location: /directory');
+    header('Location: ' . Site::url('directory'));
     exit();
 }
 
@@ -88,7 +88,7 @@ if ($showCoordsBlock === true) {
 
 $pageTitle   = $u['fullName'];
 $pageSection = 'directory';
-$breadcrumbs = ['Dashboard' => '/', 'Directory' => '/directory', $u['fullName'] => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Directory' => Site::url('directory'), $u['fullName'] => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -136,7 +136,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             ?>
         <?php endif; ?>
         <?php if ($viewer === $id): ?>
-            <a href="/directory/my-settings" class="btn btn-outline-primary btn-sm mt-2">Edit my profile</a>
+            <a href="<?php echo htmlspecialchars(Site::url('directory/my-settings'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm mt-2">Edit my profile</a>
         <?php endif; ?>
     </div>
 </div>

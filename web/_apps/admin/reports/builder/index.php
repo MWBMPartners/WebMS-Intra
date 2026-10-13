@@ -35,7 +35,7 @@ Auth::requireLogin();
 if (App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = t('error.access_denied_inline');
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /dashboard');
+    header('Location: ' . Site::url('dashboard'));
     exit();
 }
 
@@ -44,7 +44,7 @@ if (App::isAdmin() !== true) {
 if (AppRegistry::isEnabled('reports') === false) {
     $_SESSION['flash_msg']  = 'Reports is disabled for this site.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /admin/apps');
+    header('Location: ' . Site::url('admin/apps'));
     exit();
 }
 
@@ -65,7 +65,7 @@ foreach (ReportRegistry::availableSources() as $key => $meta) {
 
 $pageTitle   = 'Report Builder';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Reports' => '/admin/reports', 'Builder' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Reports' => Site::url('admin/reports'), 'Builder' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -77,10 +77,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <p class="text-secondary mb-0">Custom reports built from a whitelist of safe data sources — never free-form SQL.</p>
     </div>
     <div class="d-flex gap-2">
-        <a href="/admin/reports" class="btn btn-outline-secondary">
+        <a href="<?php echo htmlspecialchars(Site::url('admin/reports'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
             <i class="fa-solid fa-chart-bar me-1"></i>Dashboards
         </a>
-        <a href="/admin/reports/builder/edit" class="btn btn-primary">
+        <a href="<?php echo htmlspecialchars(Site::url('admin/reports/builder/edit'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary">
             <i class="fa-solid fa-plus me-1"></i>New report
         </a>
     </div>
@@ -134,14 +134,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="col-1"><?php echo (int) $r['runCount']; ?></div>
                 <div class="col-3 text-end">
-                    <a href="/admin/reports/builder/run?id=<?php echo $rid; ?>" class="btn btn-sm btn-outline-primary" title="Run">
+                    <a href="<?php echo htmlspecialchars(Site::url('admin/reports/builder/run'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $rid; ?>" class="btn btn-sm btn-outline-primary" title="Run">
                         <i class="fa-solid fa-play"></i>
                     </a>
                     <?php if ($canManage === true): ?>
-                        <a href="/admin/reports/builder/edit?id=<?php echo $rid; ?>" class="btn btn-sm btn-outline-secondary" title="Edit">
+                        <a href="<?php echo htmlspecialchars(Site::url('admin/reports/builder/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $rid; ?>" class="btn btn-sm btn-outline-secondary" title="Edit">
                             <i class="fa-solid fa-pen"></i>
                         </a>
-                        <form method="post" action="/admin/reports/builder/delete" class="d-inline"
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/reports/builder/delete'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                               data-confirm="Delete the report &quot;<?php echo htmlspecialchars($r['reportName'], ENT_QUOTES, 'UTF-8'); ?>&quot;? This cannot be undone."
                               data-confirm-destructive="true">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">

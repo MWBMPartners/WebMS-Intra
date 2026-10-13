@@ -45,7 +45,7 @@ if (SmallGroups::isEnabled() === false) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /small-groups');
+    header('Location: ' . Site::url('small-groups'));
     exit();
 }
 
@@ -53,7 +53,7 @@ $siteId  = Site::id();
 $user    = App::user();
 $userId  = (int) ($user['userID'] ?? 0);
 $groupId = (int) ($_POST['groupID'] ?? 0);
-$backUrl = '/small-groups/group?id=' . $groupId;
+$backUrl = Site::url('small-groups/group') . '?id=' . $groupId;
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
@@ -66,7 +66,7 @@ $group = SmallGroups::getGroup($siteId, $groupId);
 if ($group === null) {
     $_SESSION['flash_msg']  = 'Group not found.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /small-groups');
+    header('Location: ' . Site::url('small-groups'));
     exit();
 }
 if (SmallGroups::canManage($siteId, $groupId) === false) {

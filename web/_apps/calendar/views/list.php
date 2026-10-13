@@ -52,7 +52,7 @@ declare(strict_types=1);
                         <?php endif; ?>
 
                         <h5 class="card-title">
-                            <a href="/calendar/event?slug=<?php echo htmlspecialchars($event['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none">
+                            <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo htmlspecialchars($event['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none">
                                 <?php echo htmlspecialchars($event['eventName'], ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </h5>
@@ -99,7 +99,7 @@ declare(strict_types=1);
         <nav aria-label="Calendar pagination" class="mt-4">
             <ul class="pagination justify-content-center">
                 <?php
-                $baseUrl = '/calendar?' . http_build_query(array_filter([
+                $baseUrl = \Portal\Core\Site::url('calendar') . '?' . http_build_query(array_filter([
                     'view'     => 'list',
                     'category' => $filterCategory,
                     'type'     => $filterType,

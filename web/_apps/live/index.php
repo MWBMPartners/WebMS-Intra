@@ -29,7 +29,7 @@ $displayName = (string) (App::settings()['livestream']['displayName'] ?? 'Livest
 
 $pageTitle   = $displayName;
 $pageSection = 'livestream';
-$breadcrumbs = ['Dashboard' => '/', $displayName => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), $displayName => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -130,7 +130,7 @@ if ($livePushPublicKey !== ''):
     <div class="alert alert-info">
         No livestream channels are configured.
         <?php if (App::isAdmin() === true): ?>
-            <a href="/admin/livestream">Configure now →</a>
+            <a href="<?php echo htmlspecialchars(Site::url('admin/livestream'), ENT_QUOTES, 'UTF-8'); ?>">Configure now →</a>
         <?php endif; ?>
     </div>
 <?php endif; ?>

@@ -446,7 +446,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="alert alert-warning small py-2">
                             <i class="fa-solid fa-triangle-exclamation me-1"></i>
                             This label includes the event's name, and it will then appear on the
-                            <a href="/attendance/report">attendance reports page</a>, which every
+                            <a href="<?php echo htmlspecialchars(Site::url('attendance/report'), ENT_QUOTES, 'UTF-8'); ?>">attendance reports page</a>, which every
                             signed-in user on this installation can open at the moment, not only
                             members of your organisation (a pre-existing gap, tracked as #529). If this
                             event's name is not something members should see there, do not add it to
@@ -455,10 +455,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php if (count($anonSessions) === 0): ?>
                             <p class="small text-muted mb-0">
                                 There are no attendance sessions to add them to yet.
-                                <a href="/attendance/record">Record an attendance session</a> first.
+                                <a href="<?php echo htmlspecialchars(Site::url('attendance/record'), ENT_QUOTES, 'UTF-8'); ?>">Record an attendance session</a> first.
                             </p>
                         <?php else: ?>
-                            <form method="post" action="/calendar/event/attendance/anonymous/add"
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/attendance/anonymous/add'), ENT_QUOTES, 'UTF-8'); ?>"
                                   class="row g-2 align-items-end">
                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                 <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
@@ -565,7 +565,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             $dayLabel = htmlspecialchars(date('D j M', strtotime($d)), ENT_QUOTES, 'UTF-8');
                         ?>
                             <div class="portal-data-cell attendance-day" data-label="<?php echo $dayLabel; ?>">
-                                <form method="post" action="/calendar/event/attendance/mark" class="m-0">
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/attendance/mark'), ENT_QUOTES, 'UTF-8'); ?>" class="m-0">
                                     <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                     <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                                     <?php if ($p['userID'] !== null): ?>
@@ -588,7 +588,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php endif; ?>
 
     <h2 class="h6 mt-4">Walk-in enrol</h2>
-    <form method="post" action="/calendar/event/attendance/mark" class="row g-2 align-items-end">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/attendance/mark'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
         <input type="hidden" name="toggle" value="1">

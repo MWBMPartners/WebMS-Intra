@@ -30,7 +30,7 @@ use Portal\Core\Workflow;
 
 // 🛡️ POST only
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /announcements/manage');
+    header('Location: ' . Site::url('announcements/manage'));
     exit();
 }
 
@@ -39,14 +39,14 @@ Auth::requireLogin();
 if (App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = 'You do not have permission to manage announcements.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /announcements');
+    header('Location: ' . Site::url('announcements'));
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /announcements/manage');
+    header('Location: ' . Site::url('announcements/manage'));
     exit();
 }
 
@@ -57,7 +57,7 @@ $userId         = (int) ($_SESSION['user_id'] ?? 0);
 if ($announcementId <= 0) {
     $_SESSION['flash_msg']  = 'Invalid announcement.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /announcements/manage');
+    header('Location: ' . Site::url('announcements/manage'));
     exit();
 }
 
@@ -78,5 +78,5 @@ Logger::activity('AnnouncementDeleted', 'Deleted announcement ID: ' . $announcem
 
 $_SESSION['flash_msg']  = 'Announcement deleted.';
 $_SESSION['flash_type'] = 'info';
-header('Location: /announcements/manage');
+header('Location: ' . Site::url('announcements/manage'));
 exit();

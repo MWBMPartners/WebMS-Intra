@@ -20,10 +20,11 @@
 declare(strict_types=1);
 
 use Portal\Core\FormEngine;
+use Portal\Core\Site;
 
 $pageTitle   = 'Help - Forms Builder';
 $pageSection = 'help';
-$breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'Forms Builder' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Help' => Site::url('help'), 'Forms Builder' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -33,7 +34,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-clipboard-list me-2"></i>Forms Builder Guide</h1>
         <p class="text-secondary mb-0">Design a form, publish it internally or publicly, and collect and export the responses.</p>
     </div>
-    <a href="/help" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
+    <a href="<?php echo htmlspecialchars(Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Help Centre
     </a>
 </div>
@@ -57,7 +58,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <section id="overview" class="mb-5">
     <h2 class="h4 mb-3"><i class="fa-solid fa-circle-info me-2"></i>What is Forms Builder?</h2>
     <p>
-        <a href="/forms">Forms</a> lets an admin design a custom form — registration, survey, sign-up,
+        <a href="<?php echo htmlspecialchars(Site::url('forms'), ENT_QUOTES, 'UTF-8'); ?>">Forms</a> lets an admin design a custom form — registration, survey, sign-up,
         feedback, whatever a "we need a quick form" request calls for — without a code change. Each
         form has its own set of fields, and can be filled in by signed-in site members, or shared
         publicly with anyone via a short link, or both.
@@ -68,7 +69,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <section id="building" class="mb-5">
     <h2 class="h4 mb-3"><i class="fa-solid fa-hammer me-2"></i>Building a Form</h2>
     <p>
-        From <a href="/forms/manage">Manage forms</a>, click <strong>New form</strong>, give it a title
+        From <a href="<?php echo htmlspecialchars(Site::url('forms/manage'), ENT_QUOTES, 'UTF-8'); ?>">Manage forms</a>, click <strong>New form</strong>, give it a title
         and (optionally) a description, then save it. Once saved, you can add fields — each field has a
         label, a type, whether it's required, and a small amount of type-specific configuration
         (for example, the choices for a dropdown).
@@ -123,7 +124,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </ul>
     <p>Audience controls WHO can fill it in:</p>
     <ul>
-        <li><strong>Internal</strong> — signed-in members of this site only, via <a href="/forms">Forms</a>.</li>
+        <li><strong>Internal</strong> — signed-in members of this site only, via <a href="<?php echo htmlspecialchars(Site::url('forms'), ENT_QUOTES, 'UTF-8'); ?>">Forms</a>.</li>
         <li><strong>Public only</strong> / <strong>Internal + public</strong> — also shareable with anyone via a
             short link (<code>/f/&lt;token&gt;</code>) and a printable QR code, generated the first time the
             form is published. "Rotate link" on the manage page invalidates the old link/QR and mints a new one.</li>
@@ -155,9 +156,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <section id="admins" class="mb-5">
     <h2 class="h4 mb-3"><i class="fa-solid fa-gauge-high me-2"></i>For Admins</h2>
     <ul>
-        <li>Forms Builder is enabled/disabled per site like any other app at <a href="/admin/apps">/admin/apps</a>.</li>
+        <li>Forms Builder is enabled/disabled per site like any other app at <a href="<?php echo htmlspecialchars(Site::url('admin/apps'), ENT_QUOTES, 'UTF-8'); ?>">/admin/apps</a>.</li>
         <li><strong>Public sharing</strong> (<code>forms.allowPublic</code>) is a separate, default-OFF switch
-            in <a href="/settings">Settings</a> — flip it on before a form's audience can be set to public/both.</li>
+            in <a href="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>">Settings</a> — flip it on before a form's audience can be set to public/both.</li>
         <li>Only admins can build forms, publish/close them, and view or export responses (v1 — no separate
             "forms manager" role yet).</li>
     </ul>

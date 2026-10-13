@@ -36,8 +36,8 @@ use Portal\Core\Site;
 $pageTitle   = 'Prayer Request';
 $pageSection = 'prayer-requests';
 $breadcrumbs = [
-    'Dashboard'        => '/',
-    'Prayer Requests'  => '/prayer-requests',
+    'Dashboard'        => Site::url(''),
+    'Prayer Requests'  => Site::url('prayer-requests'),
     'View'             => '',
 ];
 
@@ -52,7 +52,7 @@ $isMod     = App::isAdmin();
 $requestId = (int) ($_GET['id'] ?? 0);
 
 if ($requestId <= 0) {
-    header('Location: /prayer-requests', true, 302);
+    header('Location: ' . Site::url('prayer-requests'), true, 302);
     exit();
 }
 
@@ -86,7 +86,7 @@ if ($req === null) {
     echo '<div class="alert alert-warning"><i class="fa-solid fa-circle-exclamation me-1"></i>'
         . htmlspecialchars(t('prayer_requests.error.not_found'), ENT_QUOTES, 'UTF-8')
         . '</div>';
-    echo '<a href="/prayer-requests" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>';
+    echo '<a href="' . htmlspecialchars(Site::url('prayer-requests'), ENT_QUOTES, 'UTF-8') . '" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     exit();
 }
@@ -103,7 +103,7 @@ if ($isOwner === false && $isMod === false && $isCongregationVisible === false) 
     echo '<div class="alert alert-danger"><i class="fa-solid fa-lock me-1"></i>'
         . htmlspecialchars(t('prayer_requests.error.no_access'), ENT_QUOTES, 'UTF-8')
         . '</div>';
-    echo '<a href="/prayer-requests" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>';
+    echo '<a href="' . htmlspecialchars(Site::url('prayer-requests'), ENT_QUOTES, 'UTF-8') . '" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back</a>';
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
     exit();
 }
@@ -160,11 +160,11 @@ $badge = $statusBadges[$req['status']] ?? ['secondary', 'fa-circle', ucfirst((st
     </div>
     <div class="d-flex gap-2">
         <?php if ($isMod === true): ?>
-            <a href="/prayer-requests/manage" class="btn btn-outline-primary">
+            <a href="<?php echo htmlspecialchars(Site::url('prayer-requests/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary">
                 <i class="fa-solid fa-gauge-high me-1"></i> Moderate
             </a>
         <?php endif; ?>
-        <a href="/prayer-requests" class="btn btn-outline-secondary">
+        <a href="<?php echo htmlspecialchars(Site::url('prayer-requests'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
             <i class="fa-solid fa-arrow-left me-1"></i> Back
         </a>
     </div>
@@ -226,7 +226,7 @@ $badge = $statusBadges[$req['status']] ?? ['secondary', 'fa-circle', ucfirst((st
     <div class="card shadow-sm mb-4">
         <div class="card-body">
             <h2 class="h6 mb-3"><i class="fa-solid fa-gauge-high me-1"></i>Moderator actions</h2>
-            <form method="post" action="/prayer-requests/moderate" class="row g-2 align-items-end">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('prayer-requests/moderate'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                 <input type="hidden" name="csrf_token"
                        value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="requestID" value="<?php echo (int) $req['requestID']; ?>">
@@ -280,10 +280,10 @@ $badge = $statusBadges[$req['status']] ?? ['secondary', 'fa-circle', ucfirst((st
                 <p class="text-muted small mb-0">
                     No eligible prayer partners yet — grant the
                     <strong>Prayer Team</strong> role to active site members at
-                    <a href="/admin/users">Admin &rarr; Users</a>.
+                    <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>">Admin &rarr; Users</a>.
                 </p>
             <?php else: ?>
-                <form method="post" action="/prayer-requests/moderate" class="row g-2 align-items-end">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('prayer-requests/moderate'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                     <input type="hidden" name="csrf_token"
                            value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="requestID" value="<?php echo (int) $req['requestID']; ?>">
@@ -328,7 +328,7 @@ $badge = $statusBadges[$req['status']] ?? ['secondary', 'fa-circle', ucfirst((st
                 note. It clears automatically whenever the assignment above
                 changes to a different partner.
             </p>
-            <form method="post" action="/prayer-requests/moderate">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('prayer-requests/moderate'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token"
                        value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="requestID" value="<?php echo (int) $req['requestID']; ?>">

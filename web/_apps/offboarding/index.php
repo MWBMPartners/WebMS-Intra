@@ -20,6 +20,7 @@ declare(strict_types=1);
 use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -67,7 +68,7 @@ $undoWindowDays = (int) (App::settings()['offboarding']['undo_window_days'] ?? 7
 
 $pageTitle   = 'Offboarding';
 $pageSection = 'offboarding';
-$breadcrumbs = ['Dashboard' => '/', 'Offboarding' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Offboarding' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -77,11 +78,11 @@ $csrf = Auth::csrfToken();
         <h1 class="mb-1"><i class="fa-solid fa-door-open me-2 text-danger"></i>Offboarding</h1>
         <p class="text-secondary mb-0">Revoke access when a volunteer or staff member leaves. <?php echo $undoWindowDays; ?>-day undo window.</p>
     </div>
-    <a href="/admin/users" class="btn btn-outline-secondary btn-sm">Pick user → /admin/users</a>
+    <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Pick user → /admin/users</a>
 </div>
 
 <div class="alert alert-info small">
-    To offboard a user, navigate to <a href="/admin/users">/admin/users</a> → click the user → "Offboard" action. This page lists what's already been done.
+    To offboard a user, navigate to <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>">/admin/users</a> → click the user → "Offboard" action. This page lists what's already been done.
 </div>
 
 <?php if (count($rows) === 0): ?>
@@ -109,7 +110,7 @@ $csrf = Auth::csrfToken();
                             <?php if ($r['rehiredAt'] !== null): ?>
                                 <span class="badge bg-success">Rehired</span>
                             <?php elseif ($canUndo === true): ?>
-                                <form method="post" action="/offboarding/rehire" class="d-inline">
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('offboarding/rehire'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="offboardingID" value="<?php echo (int) $r['offboardingID']; ?>">
                                     <button type="submit" class="btn btn-outline-success btn-sm"

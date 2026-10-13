@@ -25,7 +25,7 @@ use Portal\Core\Logger;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /account/notifications', true, 302);
+    header('Location: ' . Site::url('account/notifications'), true, 302);
     exit();
 }
 
@@ -35,7 +35,7 @@ Auth::requireLogin();
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['notifications_flash']      = 'Invalid or expired form token.';
     $_SESSION['notifications_flash_type'] = 'danger';
-    header('Location: /account/notifications', true, 302);
+    header('Location: ' . Site::url('account/notifications'), true, 302);
     exit();
 }
 
@@ -79,7 +79,7 @@ $json = json_encode($prefs, JSON_UNESCAPED_UNICODE);
 if ($json === false) {
     $_SESSION['notifications_flash']      = 'Failed to encode preferences.';
     $_SESSION['notifications_flash_type'] = 'danger';
-    header('Location: /account/notifications', true, 302);
+    header('Location: ' . Site::url('account/notifications'), true, 302);
     exit();
 }
 
@@ -95,7 +95,7 @@ if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'NOTIFY_PREFS_PREP', $mysqli->error, '');
     $_SESSION['notifications_flash']      = t('error.db_save_preferences');
     $_SESSION['notifications_flash_type'] = 'danger';
-    header('Location: /account/notifications', true, 302);
+    header('Location: ' . Site::url('account/notifications'), true, 302);
     exit();
 }
 $stmt->bind_param('ssi', $json, $sabbathHonour, $userId);
@@ -140,5 +140,5 @@ if ($newsletterOn === '1' || $newsletterOn === 'true') {
 Logger::activity('NotificationPrefsUpdated', 'User updated notification preferences');
 $_SESSION['notifications_flash']      = 'Preferences saved.';
 $_SESSION['notifications_flash_type'] = 'success';
-header('Location: /account/notifications', true, 302);
+header('Location: ' . Site::url('account/notifications'), true, 302);
 exit();

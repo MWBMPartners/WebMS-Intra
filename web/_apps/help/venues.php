@@ -25,7 +25,7 @@ declare(strict_types=1);
 
 $pageTitle   = 'Help - Venue Bookings';
 $pageSection = 'help';
-$breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'Venue Bookings' => ''];
+$breadcrumbs = ['Dashboard' => \Portal\Core\Site::url(''), 'Help' => \Portal\Core\Site::url('help'), 'Venue Bookings' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -35,7 +35,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-building-columns me-2"></i>Venue Bookings Guide</h1>
         <p class="text-secondary mb-0">The agreed hire schedule for a building your organisation rents from someone else — so nobody plans an event into a slot that was never booked.</p>
     </div>
-    <a href="/help" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Help Centre
     </a>
 </div>
@@ -65,7 +65,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <section id="overview" class="mb-5">
     <h2 class="h4 mb-3"><i class="fa-solid fa-building-columns me-2"></i>What is Venue Bookings?</h2>
     <p>
-        <a href="/venues">Venue Bookings</a> is for organisations that <strong>rent</strong> the building they meet
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('venues'), ENT_QUOTES, 'UTF-8'); ?>">Venue Bookings</a> is for organisations that <strong>rent</strong> the building they meet
         in from someone else — a school hall, a community centre, a shared church building — rather than owning it
         outright. It records exactly what's been agreed with the landlord: which dates you've booked, what hours
         you're allowed to use, and what the current status of that agreement is, so leaders planning an event can
@@ -97,7 +97,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <section id="reading-schedule" class="mb-5">
     <h2 class="h4 mb-3"><i class="fa-solid fa-calendar-days me-2"></i>Reading the Schedule</h2>
     <p>
-        The main <a href="/venues">Venue Bookings</a> page is a year schedule, grouped by month — one row per hire
+        The main <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('venues'), ENT_QUOTES, 'UTF-8'); ?>">Venue Bookings</a> page is a year schedule, grouped by month — one row per hire
         date, matching the shape of a typical booking spreadsheet so it's instantly familiar. Use the venue switcher
         and year selector at the top to move between venues and years, and jump straight to the current date with
         the "Today" link.
@@ -123,7 +123,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <section id="calendar-overlay" class="mb-5">
     <h2 class="h4 mb-3"><i class="fa-solid fa-triangle-exclamation me-2"></i>The Calendar Overlay &amp; Warnings</h2>
     <p>
-        Once a default venue is configured (an admin setting), every view of the main <a href="/calendar">Calendar</a>
+        Once a default venue is configured (an admin setting), every view of the main <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('calendar'), ENT_QUOTES, 'UTF-8'); ?>">Calendar</a>
         shows a thin strip on each day that has a venue booking, so you can see building availability without
         leaving the calendar you already use to plan events.
     </p>
@@ -395,7 +395,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
     <p class="text-muted small mb-0">
         If you can't see a "New booking" or "Manage" option and think you should be able to, ask an administrator
-        to give your account the Venue Manager role from <a href="/admin">Admin → Users</a>.
+        to give your account the Venue Manager role from <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('admin'), ENT_QUOTES, 'UTF-8'); ?>">Admin → Users</a>.
     </p>
 </section>
 

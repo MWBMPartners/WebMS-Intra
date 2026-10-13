@@ -61,7 +61,7 @@ $toTs   = strtotime($to);
 if ($fromTs === false || $toTs === false || $fromTs > $toTs || ($toTs - $fromTs) > (5 * 366 * 86400)) {
     $_SESSION['flash_msg']  = 'Invalid date range.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /giving/statements');
+    header('Location: ' . Site::url('giving/statements'));
     exit();
 }
 
@@ -94,7 +94,7 @@ if ($action === 'retry') {
     }
     $_SESSION['flash_msg']  = 'Error cleared — click Generate or Email again to retry.';
     $_SESSION['flash_type'] = 'info';
-    header('Location: /giving/statements?from=' . urlencode($from) . '&to=' . urlencode($to));
+    header('Location: ' . Site::url('giving/statements') . '?from=' . urlencode($from) . '&to=' . urlencode($to));
     exit();
 }
 
@@ -141,5 +141,5 @@ $msg .= $result['remaining'] > 0
 
 $_SESSION['flash_msg']  = $msg;
 $_SESSION['flash_type'] = $result['failed'] > 0 ? 'warning' : 'success';
-header('Location: /giving/statements?from=' . urlencode($from) . '&to=' . urlencode($to));
+header('Location: ' . Site::url('giving/statements') . '?from=' . urlencode($from) . '&to=' . urlencode($to));
 exit();

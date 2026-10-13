@@ -56,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($title === '') {
         $_SESSION['flash_msg']  = 'Title is required.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /recordings/upload');
+        header('Location: ' . Site::url('recordings/upload'));
         exit();
     }
 
@@ -70,14 +70,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ((int) $f['size'] > $maxBytes) {
             $_SESSION['flash_msg']  = 'File exceeds max ' . $maxMb . ' MB.';
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /recordings/upload');
+            header('Location: ' . Site::url('recordings/upload'));
             exit();
         }
         $mt = (string) $f['type'];
         if (strpos($mt, 'audio/') !== 0 && strpos($mt, 'video/') !== 0) {
             $_SESSION['flash_msg']  = 'Only audio or video files are accepted.';
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /recordings/upload');
+            header('Location: ' . Site::url('recordings/upload'));
             exit();
         }
         $ext      = strtolower(pathinfo((string) $f['name'], PATHINFO_EXTENSION));
@@ -86,7 +86,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (move_uploaded_file((string) $f['tmp_name'], $dest) === false) {
             $_SESSION['flash_msg']  = 'Failed to save uploaded file.';
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /recordings/upload');
+            header('Location: ' . Site::url('recordings/upload'));
             exit();
         }
         $filePath = $safeName;
@@ -95,7 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($externalUrl === '') {
         $_SESSION['flash_msg']  = 'Provide either a media file or an external URL.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /recordings/upload');
+        header('Location: ' . Site::url('recordings/upload'));
         exit();
     }
 
@@ -123,13 +123,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $_SESSION['flash_msg']  = 'Recording uploaded.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /recordings/manage');
+    header('Location: ' . Site::url('recordings/manage'));
     exit();
 }
 
 $pageTitle   = 'Upload Recording';
 $pageSection = 'recordings';
-$breadcrumbs = ['Dashboard' => '/', 'Recordings' => '/recordings', 'Upload' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Recordings' => Site::url('recordings'), 'Upload' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -187,7 +187,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
             <div class="col-12 d-flex gap-2">
                 <button class="btn btn-primary" type="submit"><i class="fa-solid fa-upload me-1"></i>Save recording</button>
-                <a href="/recordings/manage" class="btn btn-outline-secondary">Cancel</a>
+                <a href="<?php echo htmlspecialchars(Site::url('recordings/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
             </div>
         </form>
     </div>

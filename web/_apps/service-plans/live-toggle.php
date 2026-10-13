@@ -69,5 +69,5 @@ if ($stmt !== false) {
     Logger::activity('ServicePlanLive' . ucfirst($action), 'Plan #' . $planId);
 }
 
-header('Location: /service-plans/live?id=' . $planId, true, 303);
+header('Location: ' . Site::url('service-plans/live') . '?id=' . $planId, true, 303);
 exit();

@@ -37,53 +37,9 @@
 # Copyright 2026-present MWBM Partners Ltd (t/a MWservices). All Rights Reserved.
 
 # [S1] sign-in, account, dashboard, help and the other everyday pages
-_apps/account
-_apps/approvals
-_apps/auth
-_apps/dashboard
-_apps/directory
-_apps/help
-_apps/invites
-_apps/offboarding
-_apps/privacy
-_apps/settings
 
 # [S2] the administration pages
-_apps/admin
 
 # [S3] venues, calendar, giving, forms, payments and projects
-_apps/calendar
-_apps/forms
-_apps/giving
-_apps/payments
-_apps/projects
-_apps/venues
 
 # [S4] every other app folder
-_apps/announcements
-_apps/assets
-_apps/attendance
-_apps/care
-_apps/cron
-_apps/discipleship
-_apps/documents
-_apps/kids
-_apps/leadership
-_apps/live
-_apps/milestones
-_apps/newsletter
-_apps/noticeboard
-_apps/photos
-_apps/praise
-_apps/prayer-requests
-_apps/reading-plans
-_apps/recordings
-_apps/resources
-_apps/rota
-_apps/salvation
-_apps/service-plans
-_apps/small-groups
-_apps/tasks
-_apps/visitors
-_apps/widget
-_apps/worship

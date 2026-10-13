@@ -95,12 +95,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <h1 class="h4 mb-1"><i class="fa-solid fa-tower-broadcast me-2 text-danger"></i><?php echo htmlspecialchars((string) $plan['title'], ENT_QUOTES, 'UTF-8'); ?></h1>
             <div class="text-muted small">
                 <?php echo htmlspecialchars(date('l j F Y', strtotime((string) $plan['serviceDate'])), ENT_QUOTES, 'UTF-8'); ?>
-                &middot; <a href="/service-plans/edit?id=<?php echo $planId; ?>" class="text-decoration-none">Edit plan</a>
-                &middot; <a href="/service-plans/confidence?id=<?php echo $planId; ?>" target="_blank" class="text-decoration-none">Open confidence monitor <i class="fa-solid fa-arrow-up-right-from-square ms-1"></i></a>
+                &middot; <a href="<?php echo htmlspecialchars(Site::url('service-plans/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $planId; ?>" class="text-decoration-none">Edit plan</a>
+                &middot; <a href="<?php echo htmlspecialchars(Site::url('service-plans/confidence'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $planId; ?>" target="_blank" class="text-decoration-none">Open confidence monitor <i class="fa-solid fa-arrow-up-right-from-square ms-1"></i></a>
             </div>
         </div>
 
-        <form method="post" action="/service-plans/live-toggle">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('service-plans/live-toggle'), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <input type="hidden" name="planID" value="<?php echo $planId; ?>">
             <?php if ($isLive === false && $startedAt === 0): ?>
@@ -145,7 +145,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="fw-semibold">
                         <?php echo htmlspecialchars((string) $activeMsg['body'], ENT_QUOTES, 'UTF-8'); ?>
                     </div>
-                    <form method="post" action="/service-plans/live-message" class="ms-2">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('service-plans/live-message'), ENT_QUOTES, 'UTF-8'); ?>" class="ms-2">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="planID" value="<?php echo $planId; ?>">
                         <input type="hidden" name="action" value="clear">
@@ -159,7 +159,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php endif; ?>
 
             <?php if ($closedAt === 0): ?>
-                <form method="post" action="/service-plans/live-message" class="input-group">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('service-plans/live-message'), ENT_QUOTES, 'UTF-8'); ?>" class="input-group">
                     <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                     <input type="hidden" name="planID" value="<?php echo $planId; ?>">
                     <input type="hidden" name="action" value="send">

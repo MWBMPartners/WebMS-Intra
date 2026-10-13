@@ -32,14 +32,14 @@ if (App::isAdmin() === false) {
 
 // 🛡️ Only accept POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /leadership/manage');
+    header('Location: ' . Site::url('leadership/manage'));
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /leadership/manage');
+    header('Location: ' . Site::url('leadership/manage'));
     exit();
 }
 
@@ -61,7 +61,7 @@ if ($action === 'create') {
     if ($roleName === '') {
         $_SESSION['flash_msg']  = 'Role name is required.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /leadership/manage');
+        header('Location: ' . Site::url('leadership/manage'));
         exit();
     }
 
@@ -95,7 +95,7 @@ if ($action === 'create') {
     if ($stmt === false) {
         $_SESSION['flash_msg']  = t('error.db_create_role');
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /leadership/manage');
+        header('Location: ' . Site::url('leadership/manage'));
         exit();
     }
 
@@ -108,7 +108,7 @@ if ($action === 'create') {
 
     $_SESSION['flash_msg']  = 'Role "' . $roleName . '" created successfully.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /leadership/manage');
+    header('Location: ' . Site::url('leadership/manage'));
     exit();
 }
 
@@ -120,7 +120,7 @@ if ($action === 'toggle') {
     if ($roleID <= 0) {
         $_SESSION['flash_msg']  = 'Invalid role ID.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /leadership/manage');
+        header('Location: ' . Site::url('leadership/manage'));
         exit();
     }
 
@@ -144,7 +144,7 @@ if ($action === 'toggle') {
     if ($currentActive === null) {
         $_SESSION['flash_msg']  = 'Role not found.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /leadership/manage');
+        header('Location: ' . Site::url('leadership/manage'));
         exit();
     }
 
@@ -161,12 +161,12 @@ if ($action === 'toggle') {
 
     $_SESSION['flash_msg']  = 'Role "' . $roleName . '" ' . $stateLabel . '.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /leadership/manage');
+    header('Location: ' . Site::url('leadership/manage'));
     exit();
 }
 
 // 🚫 Unknown action
 $_SESSION['flash_msg']  = 'Unknown action.';
 $_SESSION['flash_type'] = 'warning';
-header('Location: /leadership/manage');
+header('Location: ' . Site::url('leadership/manage'));
 exit();

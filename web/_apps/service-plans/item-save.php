@@ -209,5 +209,5 @@ try {
     \Portal\Core\Logger::errorPlatform('ServicePlans', 'Warning', 'ITEM_SAVE', $e->getMessage(), '');
 }
 
-header('Location: /service-plans/edit?id=' . $planId);
+header('Location: ' . Site::url('service-plans/edit') . '?id=' . $planId);
 exit();

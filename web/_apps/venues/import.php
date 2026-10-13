@@ -129,7 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /venues/import');
+        header('Location: ' . Site::url('venues/import'));
         exit();
     }
 
@@ -144,7 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($venue === null) {
             $_SESSION['flash_msg']  = 'Choose a venue before uploading.';
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /venues/import');
+            header('Location: ' . Site::url('venues/import'));
             exit();
         }
 
@@ -152,7 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($file === null || $file['error'] !== UPLOAD_ERR_OK || is_uploaded_file((string) $file['tmp_name']) === false) {
             $_SESSION['flash_msg']  = 'File upload failed — please choose a file and try again.';
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /venues/import');
+            header('Location: ' . Site::url('venues/import'));
             exit();
         }
 
@@ -165,7 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ((int) $file['size'] > $maxSize) {
             $_SESSION['flash_msg']  = 'File exceeds the maximum size of ' . round($maxSize / 1048576, 1) . ' MB.';
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /venues/import');
+            header('Location: ' . Site::url('venues/import'));
             exit();
         }
 
@@ -173,7 +173,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($binary === false || strlen($binary) === 0) {
             $_SESSION['flash_msg']  = 'The uploaded file was empty or unreadable.';
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /venues/import');
+            header('Location: ' . Site::url('venues/import'));
             exit();
         }
 
@@ -202,7 +202,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ? 'Unsupported file — upload a .xlsx workbook or a .csv file.'
                 : 'Unsupported file — XLSX import is unavailable on this server; upload a .csv file instead.';
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /venues/import');
+            header('Location: ' . Site::url('venues/import'));
             exit();
         }
 
@@ -231,7 +231,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } catch (\RuntimeException $e) {
             $_SESSION['flash_msg']  = $e->getMessage() . ' If the problem persists, save each year as a .csv file and upload those instead.';
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /venues/import');
+            header('Location: ' . Site::url('venues/import'));
             exit();
         }
 
@@ -239,7 +239,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($batchId === 0) {
             $_SESSION['flash_msg']  = 'Could not start the import.';
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /venues/import');
+            header('Location: ' . Site::url('venues/import'));
             exit();
         }
 
@@ -248,7 +248,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $_SESSION['flash_msg']  = $dupWarning . 'File staged — resolve any unrecognised hours/status values below.';
         $_SESSION['flash_type'] = $dupWarning !== '' ? 'warning' : 'info';
-        header('Location: /venues/import?batch=' . $batchId);
+        header('Location: ' . Site::url('venues/import') . '?batch=' . $batchId);
         exit();
     }
 
@@ -309,7 +309,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['flash_msg']  = 'Resolved ' . $result['resolved'] . ' value(s) (' . $result['created'] . ' newly created)'
             . ($windowsCreated > 0 ? '; ' . $windowsCreated . ' default window(s) added from the workbook' : '') . '.';
         $_SESSION['flash_type'] = 'success';
-        header('Location: /venues/import?batch=' . $batchId);
+        header('Location: ' . Site::url('venues/import') . '?batch=' . $batchId);
         exit();
     }
 
@@ -327,7 +327,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($result['imported'] === 0 && $result['skipped'] === 0 && $result['errors'] === 0) {
             $_SESSION['flash_msg']  = 'Could not commit — the batch still has unresolved rows, or is not ready to commit.';
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /venues/import?batch=' . $batchId);
+            header('Location: ' . Site::url('venues/import') . '?batch=' . $batchId);
             exit();
         }
         Logger::activity(
@@ -340,7 +340,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             . ($result['skipped'] > 0 ? ', ' . $result['skipped'] . ' skipped' : '')
             . ($result['errors'] > 0 ? ', ' . $result['errors'] . ' row(s) had errors' : '') . '.';
         $_SESSION['flash_type'] = 'success';
-        header('Location: /venues/import?batch=' . $batchId);
+        header('Location: ' . Site::url('venues/import') . '?batch=' . $batchId);
         exit();
     }
 
@@ -355,11 +355,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $_SESSION['flash_msg']  = 'Import cancelled.';
         $_SESSION['flash_type'] = 'info';
-        header('Location: /venues/import');
+        header('Location: ' . Site::url('venues/import'));
         exit();
     }
 
-    header('Location: /venues/import');
+    header('Location: ' . Site::url('venues/import'));
     exit();
 }
 
@@ -484,7 +484,7 @@ $venues = Venues::listVenues($siteId, true);
 
 $pageTitle   = 'Import Schedule';
 $pageSection = 'venues';
-$breadcrumbs = ['Dashboard' => '/', 'Venues' => '/venues', 'Import' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Venues' => Site::url('venues'), 'Import' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -496,7 +496,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-file-import me-2"></i>Import Schedule</h1>
-    <a href="/venues" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to schedule</a>
+    <a href="<?php echo htmlspecialchars(Site::url('venues'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to schedule</a>
 </div>
 
 <?php if ($state === 'upload'): ?>
@@ -514,11 +514,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
     <?php if (count($venues) === 0): ?>
-        <div class="alert alert-info">Add a venue first (<a href="/venues/manage">Manage Venues</a>) before importing a schedule.</div>
+        <div class="alert alert-info">Add a venue first (<a href="<?php echo htmlspecialchars(Site::url('venues/manage'), ENT_QUOTES, 'UTF-8'); ?>">Manage Venues</a>) before importing a schedule.</div>
     <?php else: ?>
         <div class="card">
             <div class="card-body">
-                <form method="post" action="/venues/import" enctype="multipart/form-data" class="row g-2 align-items-end">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/import'), ENT_QUOTES, 'UTF-8'); ?>" enctype="multipart/form-data" class="row g-2 align-items-end">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="action" value="upload">
                     <div class="col-md-4">
@@ -545,7 +545,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <?php elseif ($state === 'mapping'): ?>
     <div class="alert alert-warning">Resolve every unrecognised HOURS/STATUS value below before this batch can be previewed.</div>
-    <form method="post" action="/venues/import">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/import'), ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="action" value="map">
         <input type="hidden" name="batch" value="<?php echo $batchId; ?>">
@@ -586,7 +586,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     </select>
                                 </div>
                             </div>
-                            <div class="form-text">New types get a default time window afterwards from <a href="/venues/usage-types?venue=<?php echo (int) $batch['venueID']; ?>" target="_blank">Usage Types</a>.</div>
+                            <div class="form-text">New types get a default time window afterwards from <a href="<?php echo htmlspecialchars(Site::url('venues/usage-types'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $batch['venueID']; ?>" target="_blank">Usage Types</a>.</div>
                         </div>
                     <?php endforeach; ?>
                 </div>
@@ -683,7 +683,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         (row numbers: <?php echo htmlspecialchars(implode(', ', $stepData['pendingRowNums']), ENT_QUOTES, 'UTF-8'); ?>).
         Fix the source file and re-upload, or cancel this import.
     </div>
-    <form method="post" action="/venues/import" class="d-inline">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/import'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="action" value="cancel">
         <input type="hidden" name="batch" value="<?php echo $batchId; ?>">
@@ -728,13 +728,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <p class="small text-muted">Showing the first 20 rows of <?php echo array_sum($counts); ?>.</p>
     <?php endif; ?>
 
-    <form method="post" action="/venues/import" class="d-inline" data-confirm="Commit this import? Ready rows will become real bookings — this cannot be undone from here.">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/import'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline" data-confirm="Commit this import? Ready rows will become real bookings — this cannot be undone from here.">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="action" value="commit">
         <input type="hidden" name="batch" value="<?php echo $batchId; ?>">
         <button type="submit" class="btn btn-success" <?php echo $counts['ready'] === 0 ? 'disabled' : ''; ?>><i class="fa-solid fa-check me-1"></i>Commit &amp; import <?php echo $counts['ready']; ?> booking(s)</button>
     </form>
-    <form method="post" action="/venues/import" class="d-inline">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/import'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="action" value="cancel">
         <input type="hidden" name="batch" value="<?php echo $batchId; ?>">
@@ -745,8 +745,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="alert alert-success">
         Imported <?php echo (int) $batch['importedCount']; ?> booking(s); <?php echo (int) $batch['skippedCount']; ?> skipped.
     </div>
-    <a href="/venues?venue=<?php echo (int) $batch['venueID']; ?>" class="btn btn-primary"><i class="fa-solid fa-calendar me-1"></i>View schedule</a>
-    <a href="/venues/import" class="btn btn-outline-secondary">Import another file</a>
+    <a href="<?php echo htmlspecialchars(Site::url('venues'), ENT_QUOTES, 'UTF-8'); ?>?venue=<?php echo (int) $batch['venueID']; ?>" class="btn btn-primary"><i class="fa-solid fa-calendar me-1"></i>View schedule</a>
+    <a href="<?php echo htmlspecialchars(Site::url('venues/import'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Import another file</a>
 <?php endif; ?>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

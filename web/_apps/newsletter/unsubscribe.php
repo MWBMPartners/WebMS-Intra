@@ -11,6 +11,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\Site;
 
 $token = (string) ($_GET['token'] ?? '');
 if ($token === '' || preg_match('/^[a-f0-9]{40}$/', $token) !== 1) {
@@ -85,7 +86,7 @@ h1 { color: #5e6ad2; }
         <h1>Link expired</h1>
         <p>This unsubscribe link is invalid or has already been used. If you'd still like to opt out, sign in and update your notification preferences.</p>
     <?php endif; ?>
-    <p><a href="/">Return to the portal</a></p>
+    <p><a href="<?php echo htmlspecialchars(Site::url(''), ENT_QUOTES, 'UTF-8'); ?>">Return to the portal</a></p>
 </div>
 </body>
 </html>

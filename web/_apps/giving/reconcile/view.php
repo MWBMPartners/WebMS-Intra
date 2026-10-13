@@ -308,7 +308,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Statement: ' . $import['filename'];
 $pageSection = 'giving';
-$breadcrumbs = ['Dashboard' => '/', 'Giving' => '/giving', 'Reconcile' => '/giving/reconcile', 'Statement' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Giving' => Site::url('giving'), 'Reconcile' => Site::url('giving/reconcile'), 'Statement' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -319,13 +319,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-file-invoice-dollar me-2"></i><?php echo htmlspecialchars((string) $import['filename'], ENT_QUOTES, 'UTF-8'); ?></h1>
     <div class="d-flex gap-2">
-        <form method="post" action="/giving/reconcile/match" class="d-inline">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/reconcile/match'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="rematch">
             <input type="hidden" name="importID" value="<?php echo $importId; ?>">
             <button type="submit" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-rotate me-1"></i>Re-run auto-match</button>
         </form>
-        <form method="post" action="/giving/reconcile/match" class="d-inline">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/reconcile/match'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="delete-import">
             <input type="hidden" name="importID" value="<?php echo $importId; ?>">
@@ -335,7 +335,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <i class="fa-solid fa-trash me-1"></i>Delete import
             </button>
         </form>
-        <a href="/giving/reconcile" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
+        <a href="<?php echo htmlspecialchars(Site::url('giving/reconcile'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
     </div>
 </div>
 
@@ -385,7 +385,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <?php else: ?>
                                 <?php foreach ($suggestions as $sug): ?>
                                     <?php if ($sug['type'] === 'session'): ?>
-                                        <form method="post" action="/giving/reconcile/match" class="d-flex align-items-center gap-1 mb-1">
+                                        <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/reconcile/match'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex align-items-center gap-1 mb-1">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                             <input type="hidden" name="action" value="match-session">
                                             <input type="hidden" name="txnID" value="<?php echo $txnId; ?>">
@@ -394,7 +394,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                             <button type="submit" class="btn btn-outline-success btn-sm">Match</button>
                                         </form>
                                     <?php else: ?>
-                                        <form method="post" action="/giving/reconcile/match" class="d-flex align-items-center gap-1 mb-1">
+                                        <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/reconcile/match'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex align-items-center gap-1 mb-1">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                             <input type="hidden" name="action" value="match-entry">
                                             <input type="hidden" name="txnID" value="<?php echo $txnId; ?>">
@@ -407,7 +407,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <?php endif; ?>
                         </div>
                         <div class="col-12 col-md-2">
-                            <form method="post" action="/giving/reconcile/match" class="d-flex gap-1">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/reconcile/match'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex gap-1">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="action" value="ignore">
                                 <input type="hidden" name="txnID" value="<?php echo $txnId; ?>">
@@ -454,7 +454,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="col-12 col-md-2 text-md-end"><?php echo htmlspecialchars(Giving::formatAmount((int) $t['amountPence'], $currency), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-12 col-md-3 small"><?php echo htmlspecialchars($matchLabel, ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-12 col-md-2">
-                            <form method="post" action="/giving/reconcile/match" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/reconcile/match'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="action" value="unmatch">
                                 <input type="hidden" name="txnID" value="<?php echo (int) $t['txnID']; ?>">
@@ -488,7 +488,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="col-12 col-md-2 text-md-end"><?php echo htmlspecialchars(Giving::formatAmount((int) $t['amountPence'], $currency), ENT_QUOTES, 'UTF-8'); ?></div>
                     <div class="col-12 col-md-3 small text-muted"><?php echo htmlspecialchars((string) ($t['matchNote'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
                     <div class="col-12 col-md-2">
-                        <form method="post" action="/giving/reconcile/match" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/reconcile/match'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="action" value="unmatch">
                             <input type="hidden" name="txnID" value="<?php echo (int) $t['txnID']; ?>">

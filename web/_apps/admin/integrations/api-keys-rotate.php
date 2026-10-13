@@ -18,7 +18,7 @@ use Portal\Core\Auth;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/integrations/api-keys', true, 302); exit();
+    header('Location: ' . Site::url('admin/integrations/api-keys'), true, 302); exit();
 }
 
 Auth::ensureSession();
@@ -62,5 +62,5 @@ try {
     $_SESSION['flash_type'] = 'danger';
 }
 
-header('Location: /admin/integrations/api-keys', true, 302);
+header('Location: ' . Site::url('admin/integrations/api-keys'), true, 302);
 exit();

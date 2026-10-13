@@ -82,7 +82,7 @@ $enrolmentUrl = $newToken !== '' ? $scheme . $host . '/assets/kiosk?token=' . $n
 
 $pageTitle   = 'Kiosk Terminals';
 $pageSection = 'assets';
-$breadcrumbs = ['Dashboard' => '/', 'Assets' => '/assets', 'Kiosk Terminals' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Assets' => Site::url('assets'), 'Kiosk Terminals' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -91,7 +91,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-tablet-screen-button me-2"></i>Kiosk Terminals</h1>
         <p class="text-secondary mb-0">Register and manage shared self check-in/out devices.</p>
     </div>
-    <a href="/assets" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
+    <a href="<?php echo htmlspecialchars(Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a>
 </div>
 
 <?php if ($flashMsg !== ''): ?>
@@ -118,14 +118,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="alert alert-info">
     <i class="fa-solid fa-circle-info me-2"></i>
     A kiosk terminal is a SHARED, unattended device — anyone standing in front of it can identify themselves with
-    their own PIN (set at <a href="/assets/kiosk-pin">My kiosk PIN</a>) to check items in or out. Revoke a terminal
+    their own PIN (set at <a href="<?php echo htmlspecialchars(Site::url('assets/kiosk-pin'), ENT_QUOTES, 'UTF-8'); ?>">My kiosk PIN</a>) to check items in or out. Revoke a terminal
     immediately if the device is lost or decommissioned.
 </div>
 
 <div class="card mb-4">
     <div class="card-body">
         <h2 class="h5"><i class="fa-solid fa-plus me-2"></i>Register a terminal</h2>
-        <form method="post" action="/assets/kiosk-save" class="row g-2 align-items-end">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/kiosk-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="create">
             <div class="col-md-8">
@@ -182,7 +182,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="col-3 text-end">
                     <?php if ($isActive === true): ?>
-                        <form method="post" action="/assets/kiosk-save" class="d-inline"
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/kiosk-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                               data-confirm="Revoke this terminal? It will stop working immediately.">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="action" value="revoke">
@@ -192,7 +192,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             </button>
                         </form>
                     <?php else: ?>
-                        <form method="post" action="/assets/kiosk-save" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/kiosk-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="action" value="reactivate">
                             <input type="hidden" name="tokenID" value="<?php echo $tokenId; ?>">
@@ -201,7 +201,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             </button>
                         </form>
                     <?php endif; ?>
-                    <form method="post" action="/assets/kiosk-save" class="d-inline"
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/kiosk-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                           data-confirm="Permanently delete this terminal registration? This can't be undone."
                           data-confirm-destructive="true">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">

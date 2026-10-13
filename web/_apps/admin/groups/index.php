@@ -58,7 +58,7 @@ $site   = Site::current();
 // 📌 Page metadata
 $pageTitle   = 'Groups';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Groups' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Groups' => ''];
 
 // 📋 Every group of this organisation (retired ones too, so they can be
 //    reinstated), with how many people are in each.

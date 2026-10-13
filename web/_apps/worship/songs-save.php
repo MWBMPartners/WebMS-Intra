@@ -7,7 +7,7 @@ use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /worship/songs', true, 302); exit(); }
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . Site::url('worship/songs'), true, 302); exit(); }
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -24,7 +24,7 @@ if (($_POST['delete'] ?? '') === '1' && $songId > 0) {
     $stmt->execute();
     $stmt->close();
     Logger::activity('SongArchived', 'Song #' . $songId);
-    header('Location: /worship/songs', true, 302); exit();
+    header('Location: ' . Site::url('worship/songs'), true, 302); exit();
 }
 
 $title = mb_substr(trim((string) ($_POST['title'] ?? '')), 0, 255);
@@ -68,4 +68,4 @@ if ($songId === 0) {
     Logger::activity('SongUpdated', 'Song #' . $songId);
 }
 
-header('Location: /worship/song?id=' . $songId, true, 302); exit();
+header('Location: ' . Site::url('worship/song') . '?id=' . $songId, true, 302); exit();

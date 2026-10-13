@@ -62,7 +62,7 @@ $emails = array_filter(
     static fn (string $e): bool => $e !== '' && filter_var($e, FILTER_VALIDATE_EMAIL) !== false
 );
 if (count($emails) === 0) {
-    header('Location: /invites/new');
+    header('Location: ' . Site::url('invites/new'));
     exit();
 }
 
@@ -75,7 +75,7 @@ $portalName = (string) (App::settings()['site']['name'] ?? 'the portal');
 //    back there is the message. (A message carried in the session would be
 //    lost: neither invitations page shows one.)
 if (PortalAddress::absolute('auth/invite', $siteId) === '') {
-    header('Location: /invites/new');
+    header('Location: ' . Site::url('invites/new'));
     exit();
 }
 
@@ -147,5 +147,5 @@ foreach (array_unique($emails) as $email) {
 
 $_SESSION['flash_msg']  = sprintf('Issued %d invitation(s).', $issued);
 $_SESSION['flash_type'] = 'success';
-header('Location: /invites');
+header('Location: ' . Site::url('invites'));
 exit();

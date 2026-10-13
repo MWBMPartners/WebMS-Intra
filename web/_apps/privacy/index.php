@@ -22,10 +22,11 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 $pageTitle   = 'Privacy & Data Protection';
 $pageSection = '';
-$breadcrumbs = ['Home' => '/', 'Privacy' => ''];
+$breadcrumbs = ['Home' => Site::url(''), 'Privacy' => ''];
 
 Auth::ensureSession();
 
@@ -101,12 +102,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <h2 class="h4 mt-4">Your rights</h2>
 <ul>
     <li><strong>Access</strong> — request a copy of your data via
-        <a href="/account/data-export">Account → Data Export</a>.</li>
+        <a href="<?php echo htmlspecialchars(Site::url('account/data-export'), ENT_QUOTES, 'UTF-8'); ?>">Account → Data Export</a>.</li>
     <li><strong>Rectification</strong> — update inaccurate data via
-        <a href="/account">your Account page</a> or by contacting an admin.</li>
+        <a href="<?php echo htmlspecialchars(Site::url('account'), ENT_QUOTES, 'UTF-8'); ?>">your Account page</a> or by contacting an admin.</li>
     <li><strong>Erasure</strong> —
         <?php if ($allowDelete === true): ?>
-            request deletion via <a href="/account/delete">Account → Delete my account</a>.
+            request deletion via <a href="<?php echo htmlspecialchars(Site::url('account/delete'), ENT_QUOTES, 'UTF-8'); ?>">Account → Delete my account</a>.
         <?php else: ?>
             currently disabled on this site; contact an admin.
         <?php endif; ?>

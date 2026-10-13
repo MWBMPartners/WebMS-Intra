@@ -13,6 +13,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Ical;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -49,7 +50,7 @@ if ($stmt !== false) {
 
 $pageTitle   = 'Calendar feed';
 $pageSection = 'auth';
-$breadcrumbs = ['Dashboard' => '/', 'Account' => '/account', 'Calendar feed' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Account' => Site::url('account'), 'Calendar feed' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 $host = $_SERVER['HTTP_HOST'] ?? 'portal';
@@ -77,7 +78,7 @@ $host = $_SERVER['HTTP_HOST'] ?? 'portal';
                 $feedUrl = 'https://' . ($_SERVER['HTTP_HOST'] ?? 'portal') . '/calendar.ics?token=' . $newToken;
                 ?>
                 <p class="small text-muted mb-1">Scan on a phone:</p>
-                <object data="/qr?content=<?php echo urlencode($feedUrl); ?>&size=160" type="image/svg+xml" style="max-width:160px"></object>
+                <object data="<?php echo htmlspecialchars(Site::url('qr'), ENT_QUOTES, 'UTF-8'); ?>?content=<?php echo urlencode($feedUrl); ?>&size=160" type="image/svg+xml" style="max-width:160px"></object>
             </div>
         </div>
     </div>

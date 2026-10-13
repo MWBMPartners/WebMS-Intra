@@ -66,7 +66,7 @@ if ($coordRole !== '') {
 
 $pageTitle   = 'Add visitor';
 $pageSection = 'visitors';
-$breadcrumbs = ['Dashboard' => '/', 'Visitors' => '/visitors', 'Add' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Visitors' => Site::url('visitors'), 'Add' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -75,7 +75,7 @@ $csrf = Auth::csrfToken();
 
 <div class="card">
     <div class="card-body">
-        <form method="post" action="/visitors/save">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('visitors/save'), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="row g-2">
                 <div class="col-md-6"><label class="form-label">Full name</label><input type="text" name="fullName" class="form-control" required maxlength="255"></div>
@@ -106,7 +106,7 @@ $csrf = Auth::csrfToken();
             </div>
             <div class="mt-3">
                 <button type="submit" class="btn btn-primary">Save visitor</button>
-                <a href="/visitors" class="btn btn-outline-secondary">Cancel</a>
+                <a href="<?php echo htmlspecialchars(Site::url('visitors'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
             </div>
         </form>
     </div>

@@ -36,7 +36,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="h4 mb-3"><i class="fa-solid fa-music me-2 text-primary"></i><?php echo htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8'); ?></h1>
 
     <?php if (App::isAdmin() === true): ?>
-        <form method="post" action="/worship/songs/save">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('worship/songs/save'), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <input type="hidden" name="songID" value="<?php echo (int) $song['songID']; ?>">
             <div class="row g-2">
@@ -60,7 +60,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php if ($isNew !== true): ?>
                         <button name="delete" value="1" class="btn btn-outline-danger" data-confirm="Archive this song?" data-confirm-destructive="true"><i class="fa-solid fa-box-archive me-1"></i>Archive</button>
                     <?php endif; ?>
-                    <a href="/worship/songs" class="btn btn-link ms-auto">Back</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('worship/songs'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-link ms-auto">Back</a>
                 </div>
             </div>
         </form>

@@ -59,13 +59,13 @@ $isActive    = isset($_POST['isActive']) ? 1 : 0;
 if ($name === '' || $goalAmount <= 0 || $startDate === '' || strtotime($startDate) === false) {
     $_SESSION['flash_msg']  = 'Name, a positive goal amount, and a valid start date are required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /giving/campaigns');
+    header('Location: ' . Site::url('giving/campaigns'));
     exit();
 }
 if ($endDate !== null && (strtotime($endDate) === false || $endDate < $startDate)) {
     $_SESSION['flash_msg']  = 'End date must be a valid date on or after the start date.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /giving/campaigns');
+    header('Location: ' . Site::url('giving/campaigns'));
     exit();
 }
 
@@ -111,5 +111,5 @@ if ($campaignId > 0) {
     $_SESSION['flash_type'] = 'success';
 }
 
-header('Location: /giving/campaigns');
+header('Location: ' . Site::url('giving/campaigns'));
 exit();

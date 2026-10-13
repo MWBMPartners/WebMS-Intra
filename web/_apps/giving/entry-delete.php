@@ -44,5 +44,5 @@ if ($id > 0) {
     $_SESSION['flash_type'] = 'success';
 }
 
-header('Location: /giving/manage');
+header('Location: ' . Site::url('giving/manage'));
 exit();

@@ -100,7 +100,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
          gave it an address of its own; this is the way in. -->
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
         <h1 class="h4 mb-0"><i class="fa-solid fa-video me-2 text-primary"></i>Livestream Analytics</h1>
-        <a href="/admin/livestream/channels" class="btn btn-sm btn-outline-primary">
+        <a href="<?php echo htmlspecialchars(Site::url('admin/livestream/channels'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary">
             <i class="fa-solid fa-sliders me-1"></i> Channels &amp; schedule
         </a>
     </div>
@@ -163,7 +163,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <pre class="bg-light p-2 small" style="white-space: pre-wrap;"><code>const token = crypto.randomUUID().replace(/-/g, '');
 const eventID = 42;
 function ping(leaving) {
-  fetch('/api/livestream/ping', {
+  fetch('<?php echo htmlspecialchars(Site::url('api/livestream/ping'), ENT_QUOTES, 'UTF-8'); ?>', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token, eventID, leaving }),
     keepalive: true

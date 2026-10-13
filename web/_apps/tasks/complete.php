@@ -24,7 +24,7 @@ use Portal\Core\Logger;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /tasks');
+    header('Location: ' . Site::url('tasks'));
     exit();
 }
 
@@ -33,7 +33,7 @@ Auth::requireLogin();
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /tasks');
+    header('Location: ' . Site::url('tasks'));
     exit();
 }
 
@@ -44,7 +44,7 @@ $userId = (int) ($_SESSION['user_id'] ?? 0);
 if ($taskId <= 0) {
     $_SESSION['flash_msg']  = 'Invalid task.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /tasks');
+    header('Location: ' . Site::url('tasks'));
     exit();
 }
 
@@ -55,7 +55,7 @@ $tStmt = $mysqli->prepare(
 if ($tStmt === false) {
     $_SESSION['flash_msg']  = t('error.database');
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /tasks');
+    header('Location: ' . Site::url('tasks'));
     exit();
 }
 $tStmt->bind_param('ii', $taskId, $siteId);
@@ -66,7 +66,7 @@ $tStmt->close();
 if ($task === null) {
     $_SESSION['flash_msg']  = 'Task not found.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /tasks');
+    header('Location: ' . Site::url('tasks'));
     exit();
 }
 
@@ -75,7 +75,7 @@ if ($task === null) {
 if ((int) $task['assignedToID'] !== $userId && App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = 'Only the assignee or an admin can complete this task.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /tasks');
+    header('Location: ' . Site::url('tasks'));
     exit();
 }
 
@@ -167,5 +167,5 @@ if ((int) $task['isRecurring'] === 1 && $task['recurrenceType'] !== null) {
 
 $_SESSION['flash_msg']  = 'Task completed.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /tasks');
+header('Location: ' . Site::url('tasks'));
 exit();

@@ -85,7 +85,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $pageTitle   = 'Hymnal Lookup';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Hymnal Lookup' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Hymnal Lookup' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -97,7 +97,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <p class="text-secondary">
     Local hymn-book index used by the Service Plans hymn picker (gap #128). Metadata
     only — number, title, tune, author, CCLI — never lyrics; lyrics stay hand-entered
-    in the Worship <a href="/worship/songs">Song Library</a> under your own CCLI licence.
+    in the Worship <a href="<?php echo htmlspecialchars(Site::url('worship/songs'), ENT_QUOTES, 'UTF-8'); ?>">Song Library</a> under your own CCLI licence.
 </p>
 
 <?php if ($viewHymnal !== null): ?>
@@ -106,7 +106,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h2 class="h5 mb-0"><?php echo htmlspecialchars((string) $viewHymnal['name'], ENT_QUOTES, 'UTF-8'); ?>
             <span class="badge bg-secondary"><?php echo htmlspecialchars((string) $viewHymnal['code'], ENT_QUOTES, 'UTF-8'); ?></span>
         </h2>
-        <a href="/admin/hymns" class="btn btn-outline-secondary btn-sm">&larr; All hymnals</a>
+        <a href="<?php echo htmlspecialchars(Site::url('admin/hymns'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; All hymnals</a>
     </div>
 
     <div class="card mb-3">
@@ -118,7 +118,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 Re-importing the same file is safe (upsert on hymn number). Max
                 <?php echo number_format(Hymnal::CSV_MAX_BYTES / 1024); ?> KB / <?php echo Hymnal::CSV_MAX_ROWS; ?> rows.
             </p>
-            <form method="post" action="/admin/hymns/save" enctype="multipart/form-data" class="row g-2 align-items-end">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/hymns/save'), ENT_QUOTES, 'UTF-8'); ?>" enctype="multipart/form-data" class="row g-2 align-items-end">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="csv_import">
                 <input type="hidden" name="hymnalID" value="<?php echo (int) $viewHymnal['hymnalID']; ?>">
@@ -135,7 +135,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card mb-3">
         <div class="card-header"><strong>Add a single entry</strong></div>
         <div class="card-body">
-            <form method="post" action="/admin/hymns/save" class="row g-2">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/hymns/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="entry_save">
                 <input type="hidden" name="hymnalID" value="<?php echo (int) $viewHymnal['hymnalID']; ?>">
@@ -159,7 +159,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="col-4 col-md-3 small text-muted"><?php echo htmlspecialchars((string) ($e['author'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-6 col-md-2 small text-muted"><?php echo htmlspecialchars((string) ($e['tuneName'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-6 col-md-2 text-end">
-                            <form method="post" action="/admin/hymns/save" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/hymns/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="action" value="entry_delete">
                                 <input type="hidden" name="hymnalID" value="<?php echo (int) $viewHymnal['hymnalID']; ?>">
@@ -185,7 +185,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php foreach ($hymnals as $h): ?>
                     <div class="portal-data-row">
                         <div class="portal-data-row-main">
-                            <a href="/admin/hymns?hymnalID=<?php echo (int) $h['hymnalID']; ?>" class="text-decoration-none fw-semibold">
+                            <a href="<?php echo htmlspecialchars(Site::url('admin/hymns'), ENT_QUOTES, 'UTF-8'); ?>?hymnalID=<?php echo (int) $h['hymnalID']; ?>" class="text-decoration-none fw-semibold">
                                 <?php echo htmlspecialchars((string) $h['name'], ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                             <span class="badge bg-secondary ms-1"><?php echo htmlspecialchars((string) $h['code'], ENT_QUOTES, 'UTF-8'); ?></span>
@@ -193,8 +193,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <div class="small text-muted mt-1"><?php echo (int) $h['entryCount']; ?> entr<?php echo (int) $h['entryCount'] === 1 ? 'y' : 'ies'; ?></div>
                         </div>
                         <div class="portal-data-row-aside">
-                            <a href="/admin/hymns?hymnalID=<?php echo (int) $h['hymnalID']; ?>" class="btn btn-sm btn-outline-primary">Open</a>
-                            <form method="post" action="/admin/hymns/save" class="d-inline">
+                            <a href="<?php echo htmlspecialchars(Site::url('admin/hymns'), ENT_QUOTES, 'UTF-8'); ?>?hymnalID=<?php echo (int) $h['hymnalID']; ?>" class="btn btn-sm btn-outline-primary">Open</a>
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/hymns/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="action" value="hymnal_toggle">
                                 <input type="hidden" name="hymnalID" value="<?php echo (int) $h['hymnalID']; ?>">
@@ -213,7 +213,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card mb-4">
         <div class="card-header"><strong>Add a hymnal</strong></div>
         <div class="card-body">
-            <form method="post" action="/admin/hymns/save" class="row g-2">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/hymns/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="hymnal_save">
                 <div class="col-md-3"><input type="text" name="code" maxlength="20" required class="form-control form-control-sm" placeholder="Code (e.g. SDAH)"></div>
@@ -236,7 +236,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 Single host only; https:// required; API key is encrypted at rest and never
                 shown again once saved.
             </p>
-            <form method="post" action="/admin/hymns/save" class="row g-2">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/hymns/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="remote_save">
                 <div class="col-md-3 d-flex align-items-center">
@@ -265,7 +265,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <button type="submit" class="btn btn-primary btn-sm w-100">Save</button>
                 </div>
             </form>
-            <form method="post" action="/admin/hymns/save" class="mt-2">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/hymns/save'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-2">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="remote_test">
                 <button type="submit" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-plug me-1"></i>Test connection</button>
@@ -283,7 +283,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 enables sharing (see the Share panel on a service plan). Presenter names are
                 shown; internal notes/AV cues are never included.
             </p>
-            <form method="post" action="/admin/hymns/save" class="d-flex align-items-center gap-2">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/hymns/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex align-items-center gap-2">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="public_share_toggle">
                 <div class="form-check">

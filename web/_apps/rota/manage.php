@@ -77,7 +77,7 @@ if ($stmt !== false) {
 
 $pageTitle   = 'Manage Rota';
 $pageSection = 'rota';
-$breadcrumbs = ['Dashboard' => '/', 'Duty Roster' => '/rota', 'Manage' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Duty Roster' => Site::url('rota'), 'Manage' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -88,20 +88,20 @@ $csrf = Auth::csrfToken();
         <p class="text-secondary mb-0">Add, edit, and assign duties for the next 12 weeks.</p>
     </div>
     <div>
-        <a href="/rota/role-types" class="btn btn-outline-secondary btn-sm me-1">Role types</a>
-        <a href="/rota" class="btn btn-outline-secondary btn-sm">&larr; Roster</a>
+        <a href="<?php echo htmlspecialchars(Site::url('rota/role-types'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm me-1">Role types</a>
+        <a href="<?php echo htmlspecialchars(Site::url('rota'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Roster</a>
     </div>
 </div>
 
 <?php if (count($roleTypes) === 0): ?>
     <div class="alert alert-info">
-        Define role types first → <a href="/rota/role-types">/rota/role-types</a>.
+        Define role types first → <a href="<?php echo htmlspecialchars(Site::url('rota/role-types'), ENT_QUOTES, 'UTF-8'); ?>">/rota/role-types</a>.
     </div>
 <?php else: ?>
     <div class="card mb-4">
         <div class="card-body">
             <h2 class="h5"><i class="fa-solid fa-plus me-1"></i>Add slot</h2>
-            <form method="post" action="/rota/slot-save" class="row g-2">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('rota/slot-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <div class="col-md-3">
                     <label class="form-label small">Role</label>
@@ -162,7 +162,7 @@ $csrf = Auth::csrfToken();
                             <?php endif; ?>
                         </div>
                         <div class="col-md-3 text-end">
-                            <form method="post" action="/rota/slot-save" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('rota/slot-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="delete" value="<?php echo (int) $s['slotID']; ?>">
                                 <button type="submit" class="btn btn-outline-danger btn-sm"

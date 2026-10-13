@@ -21,13 +21,14 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 // 📌 Page metadata
 $pageTitle   = 'Submit Prayer Request';
 $pageSection = 'prayer-requests';
 $breadcrumbs = [
-    'Dashboard'        => '/',
-    'Prayer Requests'  => '/prayer-requests',
+    'Dashboard'        => Site::url(''),
+    'Prayer Requests'  => Site::url('prayer-requests'),
     'Submit'           => '',
 ];
 
@@ -41,7 +42,7 @@ $congregationEnabled = (App::settings('prayer-requests.allowCongregationFeed') ?
 $requireModeration   = (App::settings('prayer-requests.requireModeration') ?? 'true') === 'true';
 
 if ($featureEnabled === false) {
-    header('Location: /prayer-requests', true, 302);
+    header('Location: ' . Site::url('prayer-requests'), true, 302);
     exit();
 }
 
@@ -54,7 +55,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-pen-to-square me-2"></i>Submit a Prayer Request</h1>
-    <a href="/prayer-requests" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('prayer-requests'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back
     </a>
 </div>
@@ -68,7 +69,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="card shadow-sm">
     <div class="card-body">
-        <form method="post" action="/prayer-requests/save" novalidate>
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('prayer-requests/save'), ENT_QUOTES, 'UTF-8'); ?>" novalidate>
             <input type="hidden" name="csrf_token"
                    value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
 
@@ -147,7 +148,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <button type="submit" class="btn btn-success">
                     <i class="fa-solid fa-paper-plane me-1"></i> Submit Request
                 </button>
-                <a href="/prayer-requests" class="btn btn-outline-secondary">Cancel</a>
+                <a href="<?php echo htmlspecialchars(Site::url('prayer-requests'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
             </div>
         </form>
     </div>

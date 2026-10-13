@@ -25,8 +25,9 @@ use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Site;
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /admin/safeguarding/dbs', true, 302); exit(); }
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . Site::url('admin/safeguarding/dbs'), true, 302); exit(); }
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -49,7 +50,7 @@ if ($userId <= 0
     || $expires < $issued) {
     $_SESSION['flash_msg']  = 'Invalid input.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/safeguarding/dbs', true, 302); exit();
+    header('Location: ' . Site::url('admin/safeguarding/dbs'), true, 302); exit();
 }
 
 // 🛡️ #518: tblDbsChecks has no organisation column of its own — a DBS
@@ -62,7 +63,7 @@ if ($verdict === AccountGuard::NOT_FOUND) {
 if ($verdict !== AccountGuard::ALLOW) {
     $_SESSION['flash_msg']  = AccountGuard::message($verdict, AccountGuard::REACH_ACCOUNT);
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/safeguarding/dbs', true, 302); exit();
+    header('Location: ' . Site::url('admin/safeguarding/dbs'), true, 302); exit();
 }
 
 // 🛡️ Confirm target user exists and is active.
@@ -86,5 +87,5 @@ Logger::activity('SafeguardingDbsRecorded', 'User #' . $userId . ' type=' . $dbs
 
 $_SESSION['flash_msg']  = 'DBS check recorded.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /admin/safeguarding/dbs', true, 302);
+header('Location: ' . Site::url('admin/safeguarding/dbs'), true, 302);
 exit();

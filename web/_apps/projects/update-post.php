@@ -32,7 +32,7 @@ $slug   = (string) ($_POST['slug'] ?? '');
 $content = trim((string) ($_POST['content'] ?? ''));
 
 if ($slug === '' || $content === '') {
-    header('Location: /projects/manage');
+    header('Location: ' . Site::url('projects/manage'));
     exit();
 }
 
@@ -56,5 +56,5 @@ if ($projectId > 0) {
     $_SESSION['flash_type'] = 'success';
 }
 
-header('Location: /projects/manage?slug=' . urlencode($slug));
+header('Location: ' . Site::url('projects/manage') . '?slug=' . urlencode($slug));
 exit();

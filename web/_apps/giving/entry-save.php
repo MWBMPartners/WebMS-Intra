@@ -51,7 +51,7 @@ if (in_array($method, ['cash','cheque','bank-transfer','card','standing-order','
 if ($amount <= 0 || $categoryId <= 0 || $date === '' || strtotime($date) === false) {
     $_SESSION['flash_msg']  = 'Amount, category, and date are required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /giving/manage');
+    header('Location: ' . Site::url('giving/manage'));
     exit();
 }
 
@@ -102,5 +102,5 @@ Logger::activity('GivingEntryRecorded', 'Recorded ' . Giving::formatAmount($amou
 
 $_SESSION['flash_msg']  = 'Entry recorded.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /giving/manage');
+header('Location: ' . Site::url('giving/manage'));
 exit();

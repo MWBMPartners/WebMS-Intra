@@ -48,7 +48,7 @@ $enabled = (string) Settings::get('discipleship.enabled', 'false');
 if ($enabled !== '1' && $enabled !== 'true') {
     $_SESSION['flash_msg']  = 'Discipleship app is disabled.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /admin/discipleship/pathways', true, 302);
+    header('Location: ' . Site::url('admin/discipleship/pathways'), true, 302);
     exit();
 }
 
@@ -106,9 +106,9 @@ if ($stmt !== false) {
 $pageTitle   = (string) $pathway['name'];
 $pageSection = 'admin';
 $breadcrumbs = [
-    'Dashboard'            => '/',
-    'Admin'                => '/admin',
-    'Discipleship Progress' => '/admin/discipleship/progress',
+    'Dashboard'            => Site::url(''),
+    'Admin'                => Site::url('admin'),
+    'Discipleship Progress' => Site::url('admin/discipleship/progress'),
     (string) $pathway['name'] => '',
 ];
 $csrf = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
@@ -118,7 +118,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="container py-3" style="max-width:960px;">
     <div class="d-flex align-items-center justify-content-between mb-2">
         <h1 class="h4 mb-0"><i class="fa-solid fa-route me-2 text-primary"></i><?php echo htmlspecialchars((string) $pathway['name'], ENT_QUOTES, 'UTF-8'); ?></h1>
-        <a href="/admin/discipleship/progress" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>All pathways</a>
+        <a href="<?php echo htmlspecialchars(Site::url('admin/discipleship/progress'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>All pathways</a>
     </div>
     <?php if (empty($pathway['description']) === false): ?>
         <p class="text-muted small"><?php echo htmlspecialchars((string) $pathway['description'], ENT_QUOTES, 'UTF-8'); ?></p>
@@ -144,7 +144,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php if (count($candidates) === 0): ?>
                 <p class="text-muted small mb-0">Every active site member is already enrolled (or there are none to add).</p>
             <?php else: ?>
-                <form method="post" action="/admin/discipleship/enrol" class="d-flex flex-wrap gap-2 align-items-end">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/discipleship/enrol'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex flex-wrap gap-2 align-items-end">
                     <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                     <input type="hidden" name="action" value="enrol">
                     <input type="hidden" name="pathwayID" value="<?php echo (int) $pathwayId; ?>">
@@ -180,7 +180,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 ?>
                 <div class="portal-data-row">
                     <div class="portal-data-row-main">
-                        <a href="/admin/discipleship/progress/member?pathway=<?php echo (int) $pathwayId; ?>&user=<?php echo (int) $m['userID']; ?>" class="text-decoration-none">
+                        <a href="<?php echo htmlspecialchars(Site::url('admin/discipleship/progress/member'), ENT_QUOTES, 'UTF-8'); ?>?pathway=<?php echo (int) $pathwayId; ?>&user=<?php echo (int) $m['userID']; ?>" class="text-decoration-none">
                             <strong><?php echo htmlspecialchars((string) $m['fullName'], ENT_QUOTES, 'UTF-8'); ?></strong>
                         </a>
                         <span class="badge bg-<?php echo $sColor; ?> ms-1">
@@ -198,11 +198,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </div>
                     </div>
                     <div class="portal-data-row-aside">
-                        <a href="/admin/discipleship/progress/member?pathway=<?php echo (int) $pathwayId; ?>&user=<?php echo (int) $m['userID']; ?>" class="btn btn-sm btn-outline-primary" title="Steps">
+                        <a href="<?php echo htmlspecialchars(Site::url('admin/discipleship/progress/member'), ENT_QUOTES, 'UTF-8'); ?>?pathway=<?php echo (int) $pathwayId; ?>&user=<?php echo (int) $m['userID']; ?>" class="btn btn-sm btn-outline-primary" title="Steps">
                             <i class="fa-solid fa-list-check"></i>
                         </a>
                         <?php if ((string) $m['status'] !== 'withdrawn'): ?>
-                            <form method="post" action="/admin/discipleship/enrol" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/discipleship/enrol'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                 <input type="hidden" name="action" value="withdraw">
                                 <input type="hidden" name="pathwayID" value="<?php echo (int) $pathwayId; ?>">

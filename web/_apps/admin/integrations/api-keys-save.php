@@ -21,7 +21,7 @@ use Portal\Core\Auth;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/integrations/api-keys', true, 302); exit();
+    header('Location: ' . Site::url('admin/integrations/api-keys'), true, 302); exit();
 }
 
 Auth::ensureSession();
@@ -38,7 +38,7 @@ $exp       = trim((string) ($_POST['expiresAt'] ?? ''));
 if (trim($name) === '') {
     $_SESSION['flash_msg']  = 'Name is required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/integrations/api-keys', true, 302); exit();
+    header('Location: ' . Site::url('admin/integrations/api-keys'), true, 302); exit();
 }
 
 // -----------------------------------------------------------------------------
@@ -83,7 +83,7 @@ foreach ($scopeList as $tok) {
     }
     $_SESSION['flash_msg']  = 'Invalid scope "' . $tok . '" — must be one of the recognised resource:verb pairs, "*", or "{resource}:*".';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/integrations/api-keys', true, 302); exit();
+    header('Location: ' . Site::url('admin/integrations/api-keys'), true, 302); exit();
 }
 
 $expiresAt = null;
@@ -100,5 +100,5 @@ $_SESSION['api_key_minted'] = [
 ];
 $_SESSION['flash_msg']  = 'API key minted.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /admin/integrations/api-keys', true, 302);
+header('Location: ' . Site::url('admin/integrations/api-keys'), true, 302);
 exit();

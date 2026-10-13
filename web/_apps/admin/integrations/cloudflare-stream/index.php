@@ -38,6 +38,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -68,7 +69,7 @@ $csrf = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
 
 $pageTitle   = 'Cloudflare Stream Integration';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Integrations' => '/admin/integrations', 'Cloudflare Stream' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Integrations' => Site::url('admin/integrations'), 'Cloudflare Stream' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -80,7 +81,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <h1 class="mb-3"><i class="fa-solid fa-video me-2"></i>Cloudflare Stream Integration</h1>
 <p class="text-secondary">
-    Powers video playback on the Calendar <a href="/calendar">Team Hub</a> (#386) — pasted YouTube / Vimeo links
+    Powers video playback on the Calendar <a href="<?php echo htmlspecialchars(Site::url('calendar'), ENT_QUOTES, 'UTF-8'); ?>">Team Hub</a> (#386) — pasted YouTube / Vimeo links
     play with no configuration needed here; Cloudflare Stream links require the signing key below for
     signed-URL playback.
 </p>
@@ -96,7 +97,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-4">
     <div class="card-header"><strong>Account</strong></div>
     <div class="card-body">
-        <form method="post" action="/admin/integrations/cloudflare-stream/save" class="row g-3">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/cloudflare-stream/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
 
             <div class="col-12">
@@ -175,7 +176,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </form>
 
-        <form method="post" action="/admin/integrations/cloudflare-stream/test" class="mt-3 pt-3 border-top">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/cloudflare-stream/test'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-3 pt-3 border-top">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <button class="btn btn-outline-secondary" type="submit"
                     <?php echo ($hasApiToken === false || $accountId === '') ? 'disabled' : ''; ?>>

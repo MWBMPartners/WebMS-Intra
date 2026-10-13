@@ -95,13 +95,13 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
 
 $pageTitle   = 'Annual Statements';
 $pageSection = 'giving';
-$breadcrumbs = ['Dashboard' => '/', 'Giving' => '/giving', 'Manage' => '/giving/manage', 'Statements' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Giving' => Site::url('giving'), 'Manage' => Site::url('giving/manage'), 'Statements' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-file-invoice me-2"></i>Annual Statements</h1>
-    <a href="/giving/manage" class="btn btn-outline-secondary btn-sm">← Back to Manage</a>
+    <a href="<?php echo htmlspecialchars(Site::url('giving/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">← Back to Manage</a>
 </div>
 
 <?php if ($flashMsg !== ''): ?>
@@ -148,7 +148,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card mb-3">
     <div class="card-header"><strong>Actions</strong></div>
     <div class="card-body d-flex flex-wrap gap-2">
-        <form method="post" action="/giving/statements-generate" class="d-inline">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/statements-generate'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="from" value="<?php echo htmlspecialchars($from, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="to" value="<?php echo htmlspecialchars($to, ENT_QUOTES, 'UTF-8'); ?>">
@@ -160,11 +160,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </form>
 
         <a class="btn btn-outline-secondary btn-sm"
-           href="/giving/statements-download?from=<?php echo urlencode($from); ?>&to=<?php echo urlencode($to); ?>">
+           href="<?php echo htmlspecialchars(Site::url('giving/statements-download'), ENT_QUOTES, 'UTF-8'); ?>?from=<?php echo urlencode($from); ?>&to=<?php echo urlencode($to); ?>">
             <i class="fa-solid fa-file-zipper me-1"></i>Download all as ZIP
         </a>
 
-        <form method="post" action="/giving/statements-email" class="d-inline">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/statements-email'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="from" value="<?php echo htmlspecialchars($from, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="to" value="<?php echo htmlspecialchars($to, ENT_QUOTES, 'UTF-8'); ?>">
@@ -222,13 +222,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="col-md-2 text-end">
                         <?php if ($r['pdfPath'] !== null): ?>
                             <a class="btn btn-link btn-sm p-0 me-2"
-                               href="/giving/statements-download?from=<?php echo urlencode($from); ?>&to=<?php echo urlencode($to); ?>&donorID=<?php echo (int) $r['donorID']; ?>">
+                               href="<?php echo htmlspecialchars(Site::url('giving/statements-download'), ENT_QUOTES, 'UTF-8'); ?>?from=<?php echo urlencode($from); ?>&to=<?php echo urlencode($to); ?>&donorID=<?php echo (int) $r['donorID']; ?>">
                                 <i class="fa-solid fa-download"></i> PDF
                             </a>
                         <?php endif; ?>
                         <?php // No Retry for a waiting e-mail: there is nothing to retry, and clearing the mark would hide that it has not gone. ?>
                         <?php if ($r['errorMsg'] !== null && $r['errorMsg'] !== Giving::MAIL_WAITING): ?>
-                            <form method="post" action="/giving/statements-generate" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/statements-generate'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="action" value="retry">
                                 <input type="hidden" name="from" value="<?php echo htmlspecialchars($from, ENT_QUOTES, 'UTF-8'); ?>">

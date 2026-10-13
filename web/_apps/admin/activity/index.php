@@ -32,7 +32,7 @@ use Portal\Core\Site;
 // 📌 Page metadata
 $pageTitle   = 'Activity Log';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Activity Log' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Activity Log' => ''];
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -189,7 +189,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="mb-0"><i class="fa-solid fa-clock-rotate-left me-2"></i>Activity Log</h1>
     <div class="d-flex align-items-center gap-2">
         <span class="badge bg-secondary"><?php echo number_format($totalRows); ?> record<?php echo $totalRows !== 1 ? 's' : ''; ?></span>
-        <a href="/admin/activity/export?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
+        <a href="<?php echo htmlspecialchars(Site::url('admin/activity/export'), ENT_QUOTES, 'UTF-8'); ?>?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
            class="btn btn-sm btn-outline-success" title="Export CSV">
             <i class="fa-solid fa-file-csv"></i>
         </a>
@@ -197,7 +197,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <!-- 🔍 Filters -->
-<form method="get" action="/admin/activity" class="row g-2 mb-4">
+<form method="get" action="<?php echo htmlspecialchars(Site::url('admin/activity'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mb-4">
     <div class="col-12 col-md-4">
         <select name="type" class="form-select form-select-sm">
             <option value="">All Activity Types</option>
@@ -291,7 +291,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <nav aria-label="Activity log pagination" class="mt-4">
             <ul class="pagination justify-content-center">
                 <?php
-                $baseUrl = '/admin/activity?' . http_build_query(array_filter([
+                $baseUrl = Site::url('admin/activity') . '?' . http_build_query(array_filter([
                     'type' => $filterType,
                     'user' => $filterUser,
                 ]));

@@ -42,6 +42,7 @@ use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -51,7 +52,7 @@ Auth::requireLogin();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets/kiosks');
+    header('Location: ' . Site::url('assets/kiosks'));
     exit();
 }
 
@@ -83,7 +84,7 @@ switch ($action) {
             $_SESSION['kiosk_new_token_label'] = $label;
         }
 
-        header('Location: /assets/kiosks');
+        header('Location: ' . Site::url('assets/kiosks'));
         exit();
 
     // -------------------------------------------------------------------
@@ -95,7 +96,7 @@ switch ($action) {
 
         $_SESSION['flash_msg']  = $result['msg'];
         $_SESSION['flash_type'] = $result['ok'] === true ? 'success' : 'danger';
-        header('Location: /assets/kiosks');
+        header('Location: ' . Site::url('assets/kiosks'));
         exit();
 
     // -------------------------------------------------------------------
@@ -107,7 +108,7 @@ switch ($action) {
 
         $_SESSION['flash_msg']  = $result['msg'];
         $_SESSION['flash_type'] = $result['ok'] === true ? 'success' : 'danger';
-        header('Location: /assets/kiosks');
+        header('Location: ' . Site::url('assets/kiosks'));
         exit();
 
     // -------------------------------------------------------------------
@@ -119,7 +120,7 @@ switch ($action) {
 
         $_SESSION['flash_msg']  = $result['msg'];
         $_SESSION['flash_type'] = $result['ok'] === true ? 'success' : 'danger';
-        header('Location: /assets/kiosks');
+        header('Location: ' . Site::url('assets/kiosks'));
         exit();
 
     // -------------------------------------------------------------------
@@ -129,6 +130,6 @@ switch ($action) {
     default:
         $_SESSION['flash_msg']  = 'Unknown kiosk terminal action.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /assets/kiosks');
+        header('Location: ' . Site::url('assets/kiosks'));
         exit();
 }

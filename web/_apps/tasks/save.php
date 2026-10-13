@@ -23,7 +23,7 @@ use Portal\Core\Logger;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /tasks');
+    header('Location: ' . Site::url('tasks'));
     exit();
 }
 
@@ -32,7 +32,7 @@ Auth::requireLogin();
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /tasks');
+    header('Location: ' . Site::url('tasks'));
     exit();
 }
 
@@ -54,7 +54,7 @@ $recurrenceEndDate = trim($_POST['recurrenceEndDate'] ?? '') !== '' ? $_POST['re
 if ($title === '') {
     $_SESSION['flash_msg']  = 'Title is required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /tasks?edit=' . $taskId);
+    header('Location: ' . Site::url('tasks') . '?edit=' . $taskId);
     exit();
 }
 
@@ -91,7 +91,7 @@ if ($taskId > 0) {
     ) {
         $_SESSION['flash_msg']  = 'You do not have permission to edit this task.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /tasks');
+        header('Location: ' . Site::url('tasks'));
         exit();
     }
 
@@ -136,5 +136,5 @@ if ($taskId > 0) {
 }
 
 $_SESSION['flash_type'] = 'success';
-header('Location: /tasks');
+header('Location: ' . Site::url('tasks'));
 exit();

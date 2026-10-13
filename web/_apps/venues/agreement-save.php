@@ -53,7 +53,7 @@ if (Venues::canManage() !== true) {
 // 🚪 Non-POST hits redirect to the parent page rather than rendering
 // anything (house convention, calendar/manage/save.php l.33-36 shape).
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /venues/agreements');
+    header('Location: ' . Site::url('venues/agreements'));
     exit();
 }
 
@@ -61,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /venues/agreements');
+    header('Location: ' . Site::url('venues/agreements'));
     exit();
 }
 
@@ -94,7 +94,7 @@ if ($action === 'set-status') {
     if (in_array($status, $manualFamily, true) === false) {
         $_SESSION['flash_msg']  = 'Invalid status transition.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /venues/agreements?edit=' . $agreementId);
+        header('Location: ' . Site::url('venues/agreements') . '?edit=' . $agreementId);
         exit();
     }
 
@@ -110,7 +110,7 @@ if ($action === 'set-status') {
 
     $_SESSION['flash_msg']  = count($result['errors']) > 0 ? implode(' ', $result['errors']) : 'Agreement status updated.';
     $_SESSION['flash_type'] = count($result['errors']) > 0 ? 'danger' : 'success';
-    header('Location: /venues/agreements?edit=' . $agreementId);
+    header('Location: ' . Site::url('venues/agreements') . '?edit=' . $agreementId);
     exit();
 }
 
@@ -142,13 +142,13 @@ if ($action === 'supersede') {
     if ($result['newId'] <= 0) {
         $_SESSION['flash_msg']  = count($result['errors']) > 0 ? implode(' ', $result['errors']) : 'Could not create the renewal.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /venues/agreements?edit=0&supersede=' . $oldAgreementId);
+        header('Location: ' . Site::url('venues/agreements') . '?edit=0&supersede=' . $oldAgreementId);
         exit();
     }
 
     $_SESSION['flash_msg']  = 'Renewal created; previous agreement marked superseded.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /venues/agreements?edit=' . (int) $result['newId']);
+    header('Location: ' . Site::url('venues/agreements') . '?edit=' . (int) $result['newId']);
     exit();
 }
 
@@ -178,11 +178,11 @@ $result = Venues::saveAgreement($siteId, $agreementId, $data, $userId);
 if (count($result['errors']) > 0 || $result['id'] <= 0) {
     $_SESSION['flash_msg']  = count($result['errors']) > 0 ? implode(' ', $result['errors']) : 'Could not save agreement.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /venues/agreements?edit=' . $agreementId);
+    header('Location: ' . Site::url('venues/agreements') . '?edit=' . $agreementId);
     exit();
 }
 
 $_SESSION['flash_msg']  = 'Agreement saved.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /venues/agreements?edit=' . (int) $result['id']);
+header('Location: ' . Site::url('venues/agreements') . '?edit=' . (int) $result['id']);
 exit();

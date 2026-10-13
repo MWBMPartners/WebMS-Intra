@@ -33,6 +33,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -41,7 +42,7 @@ Auth::requireLogin();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets');
+    header('Location: ' . Site::url('assets'));
     exit();
 }
 
@@ -59,7 +60,7 @@ $assignmentId   = (int) ($_POST['assignmentID'] ?? 0);
 if ($licenseAssetId <= 0 || $assignmentId <= 0) {
     $_SESSION['flash_msg']  = 'Missing seat assignment reference.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets');
+    header('Location: ' . Site::url('assets'));
     exit();
 }
 
@@ -70,5 +71,5 @@ $_SESSION['flash_msg']  = $ok === true
     : 'Could not release that seat — it may already be released or no longer belong to this asset.';
 $_SESSION['flash_type'] = $ok === true ? 'success' : 'danger';
 
-header('Location: /assets/item?id=' . $licenseAssetId);
+header('Location: ' . Site::url('assets/item') . '?id=' . $licenseAssetId);
 exit();

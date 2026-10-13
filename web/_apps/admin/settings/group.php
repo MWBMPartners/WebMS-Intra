@@ -48,6 +48,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -255,7 +256,7 @@ $currentValue = static function (string $key) use ($settings): string {
 
 $pageTitle   = $group['title'];
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Settings' => '/admin/settings', $group['title'] => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Settings' => Site::url('admin/settings'), $group['title'] => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 
@@ -282,7 +283,7 @@ $readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
         These settings apply to <strong>every organisation</strong> on this
         installation, not only yours, so only a global administrator can change
         them. You can see the current values here. Your own organisation's
-        settings are on the <a href="/admin/settings">main Settings page</a> and
+        settings are on the <a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>">main Settings page</a> and
         are unaffected.
     </div>
 <?php endif; ?>
@@ -338,7 +339,7 @@ $readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
             <?php if ($mayChangePortalWideSettings === true): ?>
                 <button type="submit" class="btn btn-primary">Save</button>
             <?php endif; ?>
-            <a href="/admin/settings" class="btn btn-outline-secondary">All settings</a>
+            <a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">All settings</a>
         </div>
     </div>
 </form>

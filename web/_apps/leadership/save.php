@@ -32,14 +32,14 @@ if (App::isAdmin() === false) {
 
 // 🛡️ Only accept POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /leadership');
+    header('Location: ' . Site::url('leadership'));
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /leadership');
+    header('Location: ' . Site::url('leadership'));
     exit();
 }
 
@@ -61,7 +61,7 @@ $notes      = trim($_POST['notes'] ?? '') !== '' ? trim($_POST['notes']) : null;
 if ($roleID <= 0) {
     $_SESSION['flash_msg']  = 'Please select a leadership role.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /leadership/assign');
+    header('Location: ' . Site::url('leadership/assign'));
     exit();
 }
 
@@ -84,7 +84,7 @@ if ($stmtRole !== false) {
 if ($roleValid === false) {
     $_SESSION['flash_msg']  = 'Invalid leadership role selected.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /leadership/assign');
+    header('Location: ' . Site::url('leadership/assign'));
     exit();
 }
 
@@ -97,7 +97,7 @@ if ($personType === 'user') {
     if ($assignUser <= 0) {
         $_SESSION['flash_msg']  = 'Please select a portal user.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /leadership/assign?roleID=' . $roleID);
+        header('Location: ' . Site::url('leadership/assign') . '?roleID=' . $roleID);
         exit();
     }
     $assignUserID = $assignUser;
@@ -105,7 +105,7 @@ if ($personType === 'user') {
     if ($personName === '') {
         $_SESSION['flash_msg']  = 'Please enter the person\'s name.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /leadership/assign?roleID=' . $roleID);
+        header('Location: ' . Site::url('leadership/assign') . '?roleID=' . $roleID);
         exit();
     }
     $assignName  = $personName;
@@ -121,7 +121,7 @@ if ($startDate !== '') {
     if ($dateObj === false || $dateObj->format('Y-m-d') !== $startDate) {
         $_SESSION['flash_msg']  = 'Invalid start date format.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /leadership/assign?roleID=' . $roleID);
+        header('Location: ' . Site::url('leadership/assign') . '?roleID=' . $roleID);
         exit();
     }
     $startDateVal = $startDate;
@@ -132,7 +132,7 @@ if ($endDate !== '') {
     if ($dateObj === false || $dateObj->format('Y-m-d') !== $endDate) {
         $_SESSION['flash_msg']  = 'Invalid end date format.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /leadership/assign?roleID=' . $roleID);
+        header('Location: ' . Site::url('leadership/assign') . '?roleID=' . $roleID);
         exit();
     }
     $endDateVal = $endDate;
@@ -142,7 +142,7 @@ if ($endDate !== '') {
 if ($startDateVal !== null && $endDateVal !== null && $endDateVal < $startDateVal) {
     $_SESSION['flash_msg']  = 'End date must be on or after the start date.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /leadership/assign?roleID=' . $roleID);
+    header('Location: ' . Site::url('leadership/assign') . '?roleID=' . $roleID);
     exit();
 }
 
@@ -192,7 +192,7 @@ if ($action === 'create') {
     if ($stmt === false) {
         $_SESSION['flash_msg']  = t('error.database');
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /leadership/assign?roleID=' . $roleID);
+        header('Location: ' . Site::url('leadership/assign') . '?roleID=' . $roleID);
         exit();
     }
 
@@ -218,7 +218,7 @@ if ($action === 'create') {
     }
     $_SESSION['flash_msg']  = $flashMsg;
     $_SESSION['flash_type'] = 'success';
-    header('Location: /leadership');
+    header('Location: ' . Site::url('leadership'));
     exit();
 }
 
@@ -228,7 +228,7 @@ if ($action === 'update') {
     if ($assignmentID <= 0) {
         $_SESSION['flash_msg']  = 'Invalid assignment ID.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /leadership');
+        header('Location: ' . Site::url('leadership'));
         exit();
     }
 
@@ -241,7 +241,7 @@ if ($action === 'update') {
     if ($stmt === false) {
         $_SESSION['flash_msg']  = t('error.database');
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /leadership');
+        header('Location: ' . Site::url('leadership'));
         exit();
     }
 
@@ -259,12 +259,12 @@ if ($action === 'update') {
 
     $_SESSION['flash_msg']  = 'Assignment updated successfully.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /leadership');
+    header('Location: ' . Site::url('leadership'));
     exit();
 }
 
 // 🚫 Unknown action
 $_SESSION['flash_msg']  = 'Unknown action.';
 $_SESSION['flash_type'] = 'warning';
-header('Location: /leadership');
+header('Location: ' . Site::url('leadership'));
 exit();

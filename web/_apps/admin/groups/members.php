@@ -66,7 +66,7 @@ if ($group === null) {
 // 📌 Page metadata
 $pageTitle   = 'Group members — ' . $group['groupName'];
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Groups' => Site::url('admin/groups'), 'Members' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Groups' => Site::url('admin/groups'), 'Members' => ''];
 
 $members = UserGroups::membersOf($mysqli, $groupId, $siteId);
 

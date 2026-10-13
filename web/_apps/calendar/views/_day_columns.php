@@ -148,7 +148,7 @@ if (function_exists('render_day_columns') === false) {
                         <div class="portal-cal-allday-cell">
                             <?php foreach ($allDayByDay[$k] as $ev): ?>
                                 <a class="portal-cal-event portal-cal-event-allday"
-                                   href="/calendar/event?slug=<?php echo $esc((string) $ev['eventSlug']); ?>"
+                                   href="<?php echo htmlspecialchars(\Portal\Core\Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo $esc((string) $ev['eventSlug']); ?>"
                                    style="--ev-color: <?php echo $esc($eventColor($ev)); ?>;"
                                    title="<?php echo $esc((string) $ev['eventName']); ?>">
                                     <?php echo $esc((string) $ev['eventName']); ?>
@@ -203,7 +203,7 @@ if (function_exists('render_day_columns') === false) {
                             $height = ($duration  / 60) * $pxPerHour;
                             ?>
                             <a class="portal-cal-event portal-cal-event-timed <?php echo (int) ($ev['isFeatured'] ?? 0) === 1 ? 'is-featured' : ''; ?>"
-                               href="/calendar/event?slug=<?php echo $esc((string) $ev['eventSlug']); ?>"
+                               href="<?php echo htmlspecialchars(\Portal\Core\Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo $esc((string) $ev['eventSlug']); ?>"
                                style="top: <?php echo (int) round($top); ?>px; height: <?php echo (int) round($height); ?>px; --ev-color: <?php echo $esc($eventColor($ev)); ?>;"
                                title="<?php echo $esc($evStart->format('H:i') . ' – ' . $evEnd->format('H:i') . ' · ' . (string) $ev['eventName']); ?>">
                                 <div class="portal-cal-event-time small">

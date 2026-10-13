@@ -37,6 +37,7 @@ declare(strict_types=1);
 
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -49,7 +50,7 @@ $myAssets = AssetRegister::listForUser($userId);
 
 $pageTitle   = 'My Assets';
 $pageSection = 'assets';
-$breadcrumbs = ['Dashboard' => '/', 'Assets' => '/assets', 'My Assets' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Assets' => Site::url('assets'), 'My Assets' => ''];
 
 // 🎨 Small display maps — mirrors item.php's own $statusBadge/reason-icon
 // lookup convention.
@@ -79,7 +80,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php foreach ($myAssets as $a): ?>
             <div class="portal-data-row align-items-start <?php echo (bool) $a['loanIsOverdue'] === true ? 'bg-danger-subtle' : ''; ?>">
                 <div class="col-6 col-md-4">
-                    <a href="/assets/item?id=<?php echo (int) $a['assetID']; ?>" class="text-decoration-none">
+                    <a href="<?php echo htmlspecialchars(Site::url('assets/item'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $a['assetID']; ?>" class="text-decoration-none">
                         <i class="fa-solid <?php echo (string) $a['assetKind'] === 'digital' ? 'fa-cloud' : 'fa-box'; ?> me-2 text-muted"></i>
                         <?php echo htmlspecialchars((string) $a['name'], ENT_QUOTES, 'UTF-8'); ?>
                     </a>
@@ -115,6 +116,6 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endif; ?>
 
-<p class="mt-3"><a href="/assets" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a></p>
+<p class="mt-3"><a href="<?php echo htmlspecialchars(Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a></p>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

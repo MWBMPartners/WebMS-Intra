@@ -66,7 +66,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="alert alert-info mt-4">
         <i class="fa-solid fa-circle-info me-1"></i>
         The widget reads from the public events feed at
-        <a href="/widget/countdown.json"><code>/widget/countdown.json</code></a>
+        <a href="<?php echo htmlspecialchars(Site::url('widget/countdown.json'), ENT_QUOTES, 'UTF-8'); ?>"><code>/widget/countdown.json</code></a>
         and only shows events with public-or-members visibility &mdash;
         leadership-only events are never exposed.
     </div>

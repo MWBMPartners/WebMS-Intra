@@ -27,7 +27,7 @@ declare(strict_types=1);
 
 $pageTitle   = 'Help — Getting Support';
 $pageSection = 'help';
-$breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'Support' => ''];
+$breadcrumbs = ['Dashboard' => \Portal\Core\Site::url(''), 'Help' => \Portal\Core\Site::url('help'), 'Support' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
@@ -43,7 +43,7 @@ $supportEmail = htmlspecialchars(
         <h1 class="mb-1"><i class="fa-solid fa-life-ring me-2"></i>Getting Support</h1>
         <p class="text-secondary mb-0">Found a problem? Here's how to report it and what to expect next.</p>
     </div>
-    <a href="/help" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Help Centre
     </a>
 </div>

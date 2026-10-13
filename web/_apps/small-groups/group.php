@@ -109,7 +109,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $pageTitle   = (string) $group['groupName'];
 $pageSection = 'small-groups';
-$breadcrumbs = ['Dashboard' => '/', 'Small Groups' => '/small-groups', (string) $group['groupName'] => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Small Groups' => Site::url('small-groups'), (string) $group['groupName'] => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
@@ -131,13 +131,13 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
         <?php if ((int) $group['isActive'] === 0): ?><span class="badge bg-secondary">inactive</span><?php endif; ?>
     </div>
     <div class="d-flex flex-wrap gap-2">
-        <a href="/small-groups" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
+        <a href="<?php echo htmlspecialchars(Site::url('small-groups'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
         <?php if ($canManageHere === true): ?>
-            <a href="/small-groups/manage?id=<?php echo $groupId; ?>" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-pen me-1"></i>Edit</a>
-            <a href="/small-groups/members?id=<?php echo $groupId; ?>" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-users-gear me-1"></i>Manage Members</a>
-            <a href="/small-groups/meeting?id=<?php echo $groupId; ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-clipboard-check me-1"></i>Record Meeting</a>
+            <a href="<?php echo htmlspecialchars(Site::url('small-groups/manage'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $groupId; ?>" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-pen me-1"></i>Edit</a>
+            <a href="<?php echo htmlspecialchars(Site::url('small-groups/members'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $groupId; ?>" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-users-gear me-1"></i>Manage Members</a>
+            <a href="<?php echo htmlspecialchars(Site::url('small-groups/meeting'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $groupId; ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-clipboard-check me-1"></i>Record Meeting</a>
         <?php elseif ($isMemberHere === true): ?>
-            <form method="post" action="/small-groups/join" class="d-inline">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('small-groups/join'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                 <input type="hidden" name="csrf_token" value="<?php echo $esc(Auth::csrfToken()); ?>">
                 <input type="hidden" name="action" value="leave">
                 <input type="hidden" name="groupID" value="<?php echo $groupId; ?>">
@@ -148,7 +148,7 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
         <?php elseif ($isPendingHere === true): ?>
             <span class="badge bg-warning text-dark align-self-center">Join request pending</span>
         <?php elseif ((int) $group['isOpenEnrolment'] === 1 && $openEnrolmentOn === true && (int) $group['isActive'] === 1): ?>
-            <form method="post" action="/small-groups/join" class="d-inline">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('small-groups/join'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                 <input type="hidden" name="csrf_token" value="<?php echo $esc(Auth::csrfToken()); ?>">
                 <input type="hidden" name="action" value="join">
                 <input type="hidden" name="groupID" value="<?php echo $groupId; ?>">
@@ -250,7 +250,7 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 Recent Meetings
-                <a href="/small-groups/report?id=<?php echo $groupId; ?>" class="btn btn-sm btn-outline-secondary">Full report</a>
+                <a href="<?php echo htmlspecialchars(Site::url('small-groups/report'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $groupId; ?>" class="btn btn-sm btn-outline-secondary">Full report</a>
             </div>
             <div class="card-body small">
                 <?php if (count($recentMeetings) === 0): ?>
@@ -267,7 +267,7 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
                                     <?php endif; ?>
                                 </div>
                                 <div class="col-6 col-md-2 text-md-end">
-                                    <a href="/small-groups/meeting?id=<?php echo $groupId; ?>&amp;meetingID=<?php echo (int) $mt['meetingID']; ?>" class="btn btn-sm btn-outline-primary">Edit</a>
+                                    <a href="<?php echo htmlspecialchars(Site::url('small-groups/meeting'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $groupId; ?>&amp;meetingID=<?php echo (int) $mt['meetingID']; ?>" class="btn btn-sm btn-outline-primary">Edit</a>
                                 </div>
                             </div>
                         <?php endforeach; ?>

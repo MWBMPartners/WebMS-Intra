@@ -26,7 +26,7 @@ use Portal\Core\Site;
 // 📌 Page metadata
 $pageTitle   = 'Error Log';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Error Log' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Error Log' => ''];
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -41,7 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) === true) {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin');
+        header('Location: ' . Site::url('admin'));
         exit();
     }
 
@@ -73,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) === true) {
     }
 
     // 🔄 Redirect to prevent form resubmission (PRG pattern)
-    $redirectUrl = '/admin/errors';
+    $redirectUrl = Site::url('admin/errors');
     $qs = http_build_query(array_filter([
         'platform' => $_POST['filter_platform'] ?? '',
         'severity' => $_POST['filter_severity'] ?? '',
@@ -230,7 +230,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <!-- 🔍 Filters -->
-<form method="get" action="/admin/errors" class="row g-2 mb-4">
+<form method="get" action="<?php echo htmlspecialchars(Site::url('admin/errors'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mb-4">
     <div class="col-12 col-md-3">
         <select name="platform" class="form-select form-select-sm">
             <option value="">All Platforms</option>
@@ -346,7 +346,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
                     <!-- 🔧 Actions -->
                     <div class="mt-2">
-                        <form method="post" action="/admin/errors" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/errors'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="error_id" value="<?php echo (int) $row['errorID']; ?>">
                             <input type="hidden" name="filter_platform" value="<?php echo htmlspecialchars($filterPlatform, ENT_QUOTES, 'UTF-8'); ?>">
@@ -373,7 +373,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <nav aria-label="Error log pagination" class="mt-4">
             <ul class="pagination justify-content-center">
                 <?php
-                $baseUrl = '/admin/errors?' . http_build_query(array_filter([
+                $baseUrl = Site::url('admin/errors') . '?' . http_build_query(array_filter([
                     'platform' => $filterPlatform,
                     'severity' => $filterSeverity,
                     'resolved' => $filterResolved,

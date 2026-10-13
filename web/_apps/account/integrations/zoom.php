@@ -39,7 +39,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Zoom — My Account';
 $pageSection = 'account';
-$breadcrumbs = ['Dashboard' => '/', 'My Account' => '/account', 'Zoom' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'My Account' => Site::url('account'), 'Zoom' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -58,7 +58,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card-body">
             <p class="mb-2"><i class="fa-solid fa-check-circle text-success me-1"></i>Connected: <strong><?php echo htmlspecialchars((string) ($account['zoomAccountEmail'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></strong></p>
             <p class="small text-muted">Last refresh: <?php echo htmlspecialchars((string) $account['updatedAt'], ENT_QUOTES, 'UTF-8'); ?></p>
-            <form method="post" action="/admin/integrations/zoom/disconnect" class="d-inline">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/zoom/disconnect'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="accountID" value="<?php echo (int) $account['accountID']; ?>">
                 <button type="submit" class="btn btn-outline-danger btn-sm" data-confirm="Disconnect your Zoom account?">Disconnect</button>
@@ -69,7 +69,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card">
         <div class="card-body">
             <p>Connect your Zoom account to create meetings from calendar events.</p>
-            <a href="/admin/integrations/zoom/connect?mode=user" class="btn btn-primary"><i class="fa-solid fa-link me-1"></i>Connect Zoom</a>
+            <a href="<?php echo htmlspecialchars(Site::url('admin/integrations/zoom/connect'), ENT_QUOTES, 'UTF-8'); ?>?mode=user" class="btn btn-primary"><i class="fa-solid fa-link me-1"></i>Connect Zoom</a>
         </div>
     </div>
 <?php endif; ?>

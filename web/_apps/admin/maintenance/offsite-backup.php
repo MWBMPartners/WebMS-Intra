@@ -57,6 +57,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -107,7 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
             . 'off-site copy for every organisation on this installation, not only yours. '
             . 'Only a global administrator can change them. Nothing has been changed.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/maintenance/offsite-backup');
+        header('Location: ' . Site::url('admin/maintenance/offsite-backup'));
         exit();
     }
     $upsert = static function (mysqli $db, string $key, string $value): void {
@@ -148,7 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
     $upsert($db, 'backup.offsite.alertEmail',   trim((string) ($_POST['alertEmail'] ?? '')));
     $_SESSION['flash_msg']  = 'Off-site backup settings saved.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /admin/maintenance/offsite-backup');
+    header('Location: ' . Site::url('admin/maintenance/offsite-backup'));
     exit();
 }
 
@@ -186,7 +187,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Off-site backup';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Maintenance' => '/admin/maintenance', 'Off-site backup' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => Site::url('admin/maintenance'), 'Off-site backup' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -271,7 +272,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 change these settings. You can see the current values here.
             </div>
         <?php endif; ?>
-        <form method="post" action="/admin/maintenance/offsite-backup" class="row g-3">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/maintenance/offsite-backup'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="save">
             <div class="col-md-3">
@@ -312,7 +313,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <?php if ($scriptExists === true && $keyExists === true && $mayRunOffsiteBackup === true): ?>
-    <form method="post" action="/admin/maintenance/offsite-backup/run" class="mb-3">
+    <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/maintenance/offsite-backup/run'), ENT_QUOTES, 'UTF-8'); ?>" class="mb-3">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
         <button class="btn btn-warning" type="submit" data-confirm="Run the off-site sync now? This can take several minutes.">
             <i class="fa-solid fa-play me-1"></i>Run now

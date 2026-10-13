@@ -32,14 +32,14 @@ Auth::requireLogin();
 if (App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = t('error.access_denied_inline');
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /dashboard');
+    header('Location: ' . Site::url('dashboard'));
     exit();
 }
 
 // 📌 Page metadata
 $pageTitle   = 'Audit Trail';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Audit Trail' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Audit Trail' => ''];
 
 $siteId = Site::id();
 
@@ -129,7 +129,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <h1 class="mb-4"><i class="fa-solid fa-shield-halved me-2"></i>Audit Trail</h1>
 
 <!-- 🔍 Filters -->
-<form method="get" action="/admin/audit" class="row g-3 mb-4">
+<form method="get" action="<?php echo htmlspecialchars(Site::url('admin/audit'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3 mb-4">
     <div class="col-md-4">
         <select class="form-select" name="table">
             <option value="">All Tables</option>

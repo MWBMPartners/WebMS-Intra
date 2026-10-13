@@ -40,7 +40,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Payment methods';
 $pageSection = 'account';
-$breadcrumbs = ['Dashboard' => '/', 'My Account' => '/account', 'Payment methods' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'My Account' => Site::url('account'), 'Payment methods' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -64,7 +64,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <div class="col-md-2 small text-muted"><?php echo htmlspecialchars(date('j M Y', (int) strtotime((string) $m['createdAt'])), ENT_QUOTES, 'UTF-8'); ?></div>
                     <div class="col-md-2 text-end">
-                        <form method="post" action="/account/payment-methods/delete" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('account/payment-methods/delete'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="methodID" value="<?php echo (int) $m['methodID']; ?>">
                             <button type="submit" class="btn btn-outline-danger btn-sm" data-confirm="Forget this card?" title="Forget this card" aria-label="Forget this card">

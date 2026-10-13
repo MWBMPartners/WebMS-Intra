@@ -136,8 +136,8 @@ $maintStatusBadge = ['scheduled' => 'info', 'completed' => 'success', 'cancelled
 $pageTitle   = $asset !== null ? 'Maintenance — ' . (string) $asset['name'] : 'Maintenance Due';
 $pageSection = 'assets';
 $breadcrumbs = $asset !== null
-    ? ['Dashboard' => '/', 'Assets' => '/assets', (string) $asset['name'] => '/assets/item?id=' . $assetId, 'Maintenance' => '']
-    : ['Dashboard' => '/', 'Assets' => '/assets', 'Maintenance Due' => ''];
+    ? ['Dashboard' => Site::url(''), 'Assets' => Site::url('assets'), (string) $asset['name'] => Site::url('assets/item') . '?id=' . $assetId, 'Maintenance' => '']
+    : ['Dashboard' => Site::url(''), 'Assets' => Site::url('assets'), 'Maintenance Due' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -154,7 +154,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <!-- ============================================================ -->
     <h1 class="mb-1"><i class="fa-solid fa-screwdriver-wrench me-2"></i>Maintenance</h1>
     <p class="text-muted mb-4">
-        For <a href="/assets/item?id=<?php echo $assetId; ?>"><?php echo htmlspecialchars((string) $asset['name'], ENT_QUOTES, 'UTF-8'); ?></a>
+        For <a href="<?php echo htmlspecialchars(Site::url('assets/item'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $assetId; ?>"><?php echo htmlspecialchars((string) $asset['name'], ENT_QUOTES, 'UTF-8'); ?></a>
     </p>
 
     <div class="card mb-3">
@@ -201,7 +201,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             </div>
                             <?php if ($canManageMaintenance === true): ?>
                             <div class="col-12 col-md-2 text-md-end">
-                                <form method="post" action="/assets/maintenance-save" class="d-inline"
+                                <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/maintenance-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                                       data-confirm="Remove this maintenance entry?" data-confirm-destructive="true">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="action" value="delete">
@@ -222,7 +222,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php if ($canManageMaintenance === true): ?>
                 <hr>
                 <h2 class="h6">Add a maintenance entry</h2>
-                <form method="post" action="/assets/maintenance-save" class="row g-2">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/maintenance-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="action" value="add">
                     <input type="hidden" name="assetID" value="<?php echo $assetId; ?>">
@@ -284,7 +284,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
 
-    <p><a href="/assets/item?id=<?php echo $assetId; ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to asset</a></p>
+    <p><a href="<?php echo htmlspecialchars(Site::url('assets/item'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $assetId; ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to asset</a></p>
 
 <?php else: ?>
     <!-- ============================================================ -->
@@ -304,7 +304,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="portal-data-row align-items-start <?php echo $mIsOverdue === true ? 'bg-danger-subtle' : ''; ?>">
                     <div class="col-12 col-md-4">
                         <i class="fa-solid <?php echo htmlspecialchars($maintTypeIcon[(string) $m['maintType']] ?? 'fa-clipboard-list', ENT_QUOTES, 'UTF-8'); ?> me-2 text-muted"></i>
-                        <a href="/assets/item?id=<?php echo (int) $m['assetID']; ?>" class="text-decoration-none">
+                        <a href="<?php echo htmlspecialchars(Site::url('assets/item'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $m['assetID']; ?>" class="text-decoration-none">
                             <strong><?php echo htmlspecialchars((string) $m['assetName'], ENT_QUOTES, 'UTF-8'); ?></strong>
                         </a>
                         <br><small class="text-muted"><?php echo htmlspecialchars((string) $m['title'], ENT_QUOTES, 'UTF-8'); ?></small>
@@ -324,7 +324,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php endif; ?>
                     </div>
                     <div class="col-3 col-md-2 text-md-end">
-                        <a href="/assets/maintenance?assetID=<?php echo (int) $m['assetID']; ?>" class="btn btn-sm btn-outline-primary" title="View log">
+                        <a href="<?php echo htmlspecialchars(Site::url('assets/maintenance'), ENT_QUOTES, 'UTF-8'); ?>?assetID=<?php echo (int) $m['assetID']; ?>" class="btn btn-sm btn-outline-primary" title="View log">
                             <i class="fa-solid fa-arrow-up-right-from-square"></i>
                         </a>
                     </div>
@@ -333,7 +333,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     <?php endif; ?>
 
-    <p class="mt-3"><a href="/assets" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a></p>
+    <p class="mt-3"><a href="<?php echo htmlspecialchars(Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a></p>
 <?php endif; ?>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

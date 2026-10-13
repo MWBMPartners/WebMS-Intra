@@ -33,7 +33,7 @@ if ($action === 'accept') {
     if ($address === '' || $postcode === '') {
         $_SESSION['flash_msg']  = 'Address and postcode are required for Gift Aid.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /giving/gift-aid');
+        header('Location: ' . Site::url('giving/gift-aid'));
         exit();
     }
     $today = date('Y-m-d');
@@ -64,5 +64,5 @@ if ($action === 'accept') {
     $_SESSION['flash_type'] = 'success';
 }
 
-header('Location: /giving/gift-aid');
+header('Location: ' . Site::url('giving/gift-aid'));
 exit();

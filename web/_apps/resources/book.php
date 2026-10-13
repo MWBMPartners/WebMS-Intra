@@ -22,7 +22,7 @@ $userId = (int) ($_SESSION['user_id'] ?? 0);
 $id     = (int) ($_GET['id'] ?? $_POST['resourceID'] ?? 0);
 
 if ($id <= 0) {
-    header('Location: /resources');
+    header('Location: ' . Site::url('resources'));
     exit();
 }
 
@@ -122,7 +122,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
                     ? 'Booking confirmed.'
                     : 'Booking submitted — awaiting admin approval.';
                 $_SESSION['flash_type'] = 'success';
-                header('Location: /resources/my-bookings');
+                header('Location: ' . Site::url('resources/my-bookings'));
                 exit();
             }
         }
@@ -131,7 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
 
 $pageTitle   = 'Book ' . $r['name'];
 $pageSection = 'resources';
-$breadcrumbs = ['Dashboard' => '/', 'Resources' => '/resources', $r['name'] => '/resources/resource?id=' . $id, 'Book' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Resources' => Site::url('resources'), $r['name'] => Site::url('resources/resource') . '?id=' . $id, 'Book' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -177,7 +177,7 @@ $csrf = Auth::csrfToken();
             </div>
             <div class="mt-3">
                 <button type="submit" class="btn btn-primary">Request booking</button>
-                <a href="/resources/resource?id=<?php echo (int) $id; ?>" class="btn btn-outline-secondary">Cancel</a>
+                <a href="<?php echo htmlspecialchars(Site::url('resources/resource'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $id; ?>" class="btn btn-outline-secondary">Cancel</a>
             </div>
         </form>
     </div>

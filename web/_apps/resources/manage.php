@@ -132,14 +132,14 @@ $defaultBuffer = (int) (App::settings()['resources']['default_buffer'] ?? 15);
 
 $pageTitle   = 'Manage Resources';
 $pageSection = 'resources';
-$breadcrumbs = ['Dashboard' => '/', 'Resources' => '/resources', 'Manage' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Resources' => Site::url('resources'), 'Manage' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="mb-0"><i class="fa-solid fa-screwdriver-wrench me-2"></i>Manage Resources</h1>
-    <a href="/resources" class="btn btn-outline-secondary btn-sm">&larr; Resources</a>
+    <a href="<?php echo htmlspecialchars(Site::url('resources'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Resources</a>
 </div>
 
 <?php if ($flash !== ''): ?>

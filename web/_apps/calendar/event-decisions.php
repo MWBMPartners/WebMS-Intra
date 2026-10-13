@@ -46,7 +46,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 ?>
 <div class="container py-3" style="max-width:760px;">
     <h1 class="h4 mb-2"><i class="fa-solid fa-hand-holding-heart me-2 text-primary"></i>Decision Moments — <?php echo htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8'); ?></h1>
-    <p class="text-muted small">Tap to add. Each card is its own counter. No personal info — that's <a href="/decision-card">decision cards</a> (#316).</p>
+    <p class="text-muted small">Tap to add. Each card is its own counter. No personal info — that's <a href="<?php echo htmlspecialchars(Site::url('decision-card'), ENT_QUOTES, 'UTF-8'); ?>">decision cards</a> (#316).</p>
 
     <div class="row g-3">
     <?php foreach ($types as $key => $meta): ?>
@@ -56,7 +56,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <i class="fa-solid <?php echo htmlspecialchars($meta['icon'], ENT_QUOTES, 'UTF-8'); ?> fa-2x text-<?php echo $meta['colour']; ?> mb-2"></i>
                     <h2 class="h6 mb-0"><?php echo htmlspecialchars($meta['label'], ENT_QUOTES, 'UTF-8'); ?></h2>
                     <div class="display-5 fw-bold my-2"><?php echo (int) $counts[$key]; ?></div>
-                    <form method="post" action="/calendar/event/decisions/bump" class="d-flex gap-1 justify-content-center">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/event/decisions/bump'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex gap-1 justify-content-center">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="eventID" value="<?php echo $eventId; ?>">
                         <input type="hidden" name="momentType" value="<?php echo htmlspecialchars($key, ENT_QUOTES, 'UTF-8'); ?>">

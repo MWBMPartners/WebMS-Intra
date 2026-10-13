@@ -62,7 +62,7 @@ if ($announcement === null) {
 // 📌 Page metadata
 $pageTitle   = $announcement['title'];
 $pageSection = 'announcements';
-$breadcrumbs = ['Dashboard' => '/', 'Announcements' => '/announcements', $announcement['title'] => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Announcements' => Site::url('announcements'), $announcement['title'] => ''];
 
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
@@ -102,7 +102,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </p>
         </div>
         <?php if (App::isAdmin() === true): ?>
-            <a href="/announcements/manage?edit=<?php echo (int) $announcement['announcementID']; ?>" class="btn btn-outline-primary btn-sm">
+            <a href="<?php echo htmlspecialchars(Site::url('announcements/manage'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo (int) $announcement['announcementID']; ?>" class="btn btn-outline-primary btn-sm">
                 <i class="fa-solid fa-pen me-1"></i>Edit
             </a>
         <?php endif; ?>
@@ -123,7 +123,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <hr>
 
-    <a href="/announcements" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('announcements'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Announcements
     </a>
 </article>

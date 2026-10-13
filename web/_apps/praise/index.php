@@ -44,7 +44,7 @@ if ($stmt !== false) {
 
 $pageTitle   = 'Praise Reports';
 $pageSection = 'praise';
-$breadcrumbs = ['Dashboard' => '/', 'Praise Reports' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Praise Reports' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -53,14 +53,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-hands-clapping me-2 text-success"></i>Praise Reports</h1>
         <p class="text-secondary mb-0">Gratitude, answered prayers, celebrations from across the community.</p>
     </div>
-    <a href="/praise/new" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>Share praise</a>
+    <a href="<?php echo htmlspecialchars(Site::url('praise/new'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus me-1"></i>Share praise</a>
 </div>
 
 <?php if (count($rows) === 0): ?>
     <div class="card">
         <div class="card-body text-center text-muted">
             <p class="mb-2">No praise reports yet — be the first!</p>
-            <a href="/praise/new" class="btn btn-primary btn-sm">Share praise</a>
+            <a href="<?php echo htmlspecialchars(Site::url('praise/new'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm">Share praise</a>
         </div>
     </div>
 <?php else: ?>

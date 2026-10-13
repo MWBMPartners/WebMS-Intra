@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -61,7 +62,7 @@ $thisMonth = $fetchWindow($todayMd, $monthFromMd);
 
 $pageTitle   = 'Milestones';
 $pageSection = 'milestones';
-$breadcrumbs = ['Dashboard' => '/', 'Milestones' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Milestones' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
 $kindEmoji = [
@@ -95,7 +96,7 @@ $renderRow = function (array $r) use ($kindEmoji): string {
         <h1 class="mb-1"><i class="fa-solid fa-cake-candles me-2 text-pink"></i>Milestones</h1>
         <p class="text-secondary mb-0">Birthdays, anniversaries, and joining dates worth remembering.</p>
     </div>
-    <a href="/milestones/me" class="btn btn-outline-primary btn-sm">My milestones</a>
+    <a href="<?php echo htmlspecialchars(Site::url('milestones/me'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm">My milestones</a>
 </div>
 
 <div class="card mb-3">

@@ -60,16 +60,16 @@ $exif       = $showExif === true ? Photos::readExif($photo) : [];
 
 $pageTitle   = 'Photo';
 $pageSection = 'photos';
-$breadcrumbs = ['Dashboard' => '/', 'Photos' => '/photos'];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Photos' => Site::url('photos')];
 if ($album !== null) {
-    $breadcrumbs[(string) $album['name']] = '/photos/album?id=' . (int) $album['albumID'];
+    $breadcrumbs[(string) $album['name']] = Site::url('photos/album') . '?id=' . (int) $album['albumID'];
 }
 $breadcrumbs['Photo'] = '';
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
 <div class="text-center mb-3">
-    <img src="/photos/serve?id=<?php echo $id; ?>" class="img-fluid rounded" style="max-height:75vh;" alt="<?php echo htmlspecialchars((string) ($photo['caption'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+    <img src="<?php echo htmlspecialchars(Site::url('photos/serve'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $id; ?>" class="img-fluid rounded" style="max-height:75vh;" alt="<?php echo htmlspecialchars((string) ($photo['caption'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
 </div>
 
 <?php if (($photo['caption'] ?? '') !== ''): ?>
@@ -81,7 +81,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h5><i class="fa-solid fa-info-circle me-1"></i>Metadata</h5>
         <p class="small text-muted">EXIF visible because you are the uploader or an admin. Non-privileged viewers receive an EXIF-stripped copy.</p>
         <p>
-            <a class="btn btn-outline-primary btn-sm" href="/photos/serve-raw?id=<?php echo $id; ?>">
+            <a class="btn btn-outline-primary btn-sm" href="<?php echo htmlspecialchars(Site::url('photos/serve-raw'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $id; ?>">
                 <i class="fa-solid fa-download me-1"></i>Download with full EXIF
             </a>
         </p>

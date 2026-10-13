@@ -20,12 +20,13 @@ declare(strict_types=1);
 
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-    header('Location: /account?error=unlink_csrf');
+    header('Location: ' . Site::url('account') . '?error=unlink_csrf');
     exit();
 }
 
@@ -33,16 +34,16 @@ $userId = (int) ($_SESSION['user_id'] ?? 0);
 $linkID = (int) ($_POST['linkID'] ?? 0);
 
 if ($linkID === 0) {
-    header('Location: /account?error=unlink_fail');
+    header('Location: ' . Site::url('account') . '?error=unlink_fail');
     exit();
 }
 
 $result = Auth::unlinkAccount($userId, $linkID, $mysqli);
 
 if ($result['success'] === true) {
-    header('Location: /account?unlinked=1');
+    header('Location: ' . Site::url('account') . '?unlinked=1');
     exit();
 }
 
-header('Location: /account?error=unlink_fail');
+header('Location: ' . Site::url('account') . '?error=unlink_fail');
 exit();

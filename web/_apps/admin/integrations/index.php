@@ -44,7 +44,7 @@ use Portal\Core\WebPush;
 // 📌 Page metadata
 $pageTitle   = 'Integration Diagnostics';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Integrations' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Integrations' => ''];
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -97,7 +97,7 @@ $globalAdminOnly = static function (string $what) use ($isGlobalAdmin): void {
     $_SESSION['flash_msg'] = 'These tests use the mail and sign-in settings of the whole installation, which every organisation shares, '
         . 'not only yours. Only a global administrator can run them. Nothing was sent or tested.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/integrations');
+    header('Location: ' . Site::url('admin/integrations'));
     exit();
 };
 
@@ -111,7 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) === true &&
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/integrations');
+        header('Location: ' . Site::url('admin/integrations'));
         exit();
     }
     $globalAdminOnly('sending a test message');
@@ -135,7 +135,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) === true &&
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/integrations');
+        header('Location: ' . Site::url('admin/integrations'));
         exit();
     }
     $globalAdminOnly('testing the sign-in to Microsoft 365 for sending mail');
@@ -153,7 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) === true &&
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/integrations');
+        header('Location: ' . Site::url('admin/integrations'));
         exit();
     }
     $globalAdminOnly('sending a test message through Google');
@@ -328,7 +328,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-plug-circle-check me-2" aria-hidden="true"></i>Integration Diagnostics</h1>
         <p class="text-secondary mb-0">Test Microsoft 365 OAuth, Graph API email, and Google OAuth integrations.</p>
     </div>
-    <a href="/admin" class="btn btn-outline-secondary mt-2 mt-md-0">
+    <a href="<?php echo htmlspecialchars(Site::url('admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary mt-2 mt-md-0">
         <i class="fa-solid fa-arrow-left me-1" aria-hidden="true"></i>Admin Dashboard
     </a>
 </div>
@@ -354,7 +354,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card-body">
         <p class="text-secondary small mb-3">
             These settings control end-user login via Microsoft 365. Configure them in
-            <a href="/admin/settings">Admin Settings</a> or <code>tblSettings</code>.
+            <a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>">Admin Settings</a> or <code>tblSettings</code>.
         </p>
         <div class="portal-data-list">
             <?php foreach ($ms365OAuthStatus as $item): ?>
@@ -441,7 +441,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
             <?php // 🚧 Shown to a global administrator only: anybody else who posted it would be refused (see the top of this file). ?>
             <?php if ($isGlobalAdmin === true): ?>
-            <form method="POST" action="/admin/integrations" class="d-inline">
+            <form method="POST" action="<?php echo htmlspecialchars(Site::url('admin/integrations'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="test_token">
                 <button type="submit" class="btn btn-outline-primary btn-sm">
@@ -501,7 +501,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php endif; ?>
         </div>
 
-        <form method="POST" action="/admin/integrations/ms365-mail-save" class="row g-2">
+        <form method="POST" action="<?php echo htmlspecialchars(Site::url('admin/integrations/ms365-mail-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
             <div class="col-12 col-md-6">
                 <label for="ms365_shared_mailbox" class="form-label small fw-semibold">Shared mailbox address</label>
@@ -578,7 +578,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
             <?php // 🚧 Shown to a global administrator only: this sends a real message through the installation's mail route. ?>
             <?php if ($isGlobalAdmin === true): ?>
-            <form method="POST" action="/admin/integrations" class="row g-2 align-items-end">
+            <form method="POST" action="<?php echo htmlspecialchars(Site::url('admin/integrations'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="send_test_email">
                 <div class="col-12 col-md-6 col-lg-4">
@@ -615,7 +615,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card-body">
         <p class="text-secondary small mb-3">
             Google Workspace OAuth settings for user login. Configure in
-            <a href="/admin/settings">Admin Settings</a>.
+            <a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>">Admin Settings</a>.
         </p>
         <div class="portal-data-list">
             <?php foreach ($googleStatus as $item): ?>
@@ -728,7 +728,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
             <?php // 🚧 Shown to a global administrator only: this sends a real message as the installation's Google sender. ?>
             <?php if ($isGlobalAdmin === true): ?>
-            <form method="POST" action="/admin/integrations" class="row g-2 align-items-end">
+            <form method="POST" action="<?php echo htmlspecialchars(Site::url('admin/integrations'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="send_google_test_email">
                 <div class="col-12 col-md-6 col-lg-4">
@@ -767,10 +767,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
     <div class="card-body">
         <p class="text-secondary small mb-3">
-            Signing key + video-playback settings for the Calendar <a href="/calendar">Team Hub</a>'s
+            Signing key + video-playback settings for the Calendar <a href="<?php echo htmlspecialchars(Site::url('calendar'), ENT_QUOTES, 'UTF-8'); ?>">Team Hub</a>'s
             YouTube / Vimeo / Cloudflare Stream video grid (#386).
         </p>
-        <a href="/admin/integrations/cloudflare-stream" class="btn btn-outline-primary btn-sm">
+        <a href="<?php echo htmlspecialchars(Site::url('admin/integrations/cloudflare-stream'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm">
             <i class="fa-solid fa-arrow-right me-1" aria-hidden="true"></i>Manage Cloudflare Stream
         </a>
     </div>
@@ -797,7 +797,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             always available for manual entry across Events, Venues, Resources and Asset Locations —
             this integration adds validation, coordinate conversion, and typing autosuggest.
         </p>
-        <a href="/admin/integrations/what3words" class="btn btn-outline-primary btn-sm">
+        <a href="<?php echo htmlspecialchars(Site::url('admin/integrations/what3words'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm">
             <i class="fa-solid fa-arrow-right me-1" aria-hidden="true"></i>Manage what3words
         </a>
     </div>
@@ -823,7 +823,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             Address <i class="fa-solid fa-arrows-left-right"></i> coordinates. Google when a key is set,
             otherwise OpenStreetMap Nominatim — throttled and cached, one request per second.
         </p>
-        <a href="/admin/integrations/geocoding" class="btn btn-outline-primary btn-sm">
+        <a href="<?php echo htmlspecialchars(Site::url('admin/integrations/geocoding'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm">
             <i class="fa-solid fa-arrow-right me-1" aria-hidden="true"></i>Manage Geocoding
         </a>
     </div>
@@ -847,7 +847,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             (e.g. <code>prayer-requests.created</code>, <code>expenses.approved</code>, or <code>all</code>).
             Create, pause, and delete webhooks — the signing secret is shown once at creation.
         </p>
-        <a href="/admin/integrations/webhooks" class="btn btn-outline-primary btn-sm">
+        <a href="<?php echo htmlspecialchars(Site::url('admin/integrations/webhooks'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm">
             <i class="fa-solid fa-arrow-right me-1" aria-hidden="true"></i>Manage Webhooks
         </a>
     </div>
@@ -873,7 +873,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             Browser push notifications for "we're live now" and upcoming-service reminders — VAPID
             (RFC 8292) signed, RFC 8291 end-to-end encrypted. No third-party account needed.
         </p>
-        <a href="/admin/integrations/push" class="btn btn-outline-primary btn-sm">
+        <a href="<?php echo htmlspecialchars(Site::url('admin/integrations/push'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm">
             <i class="fa-solid fa-arrow-right me-1" aria-hidden="true"></i>Manage Web Push
         </a>
     </div>
@@ -900,7 +900,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     mailbox is strongly recommended once one is configured below</li>
                 <li>Set the <strong>Shared-Mailbox Sending</strong> fields above (in the MS365 Graph API card) to
                     route through a dedicated shared mailbox instead of <code>mail.defaultFromAddress</code> — see
-                    <a href="/help/admin#ms365-shared-mailbox">the admin guide</a> for the full owner runbook</li>
+                    <a href="<?php echo htmlspecialchars(Site::url('help/admin'), ENT_QUOTES, 'UTF-8'); ?>#ms365-shared-mailbox">the admin guide</a> for the full owner runbook</li>
             </ul>
             <p class="mb-2">For <strong>Google Workspace email sending</strong> (Gmail API via service account):</p>
             <ul class="mb-0">

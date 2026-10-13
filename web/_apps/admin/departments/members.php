@@ -66,7 +66,7 @@ if ($dept === null) {
 // 📌 Page metadata
 $pageTitle   = 'Department members — ' . $dept['deptName'];
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Departments' => Site::url('admin/departments'), 'Members' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Departments' => Site::url('admin/departments'), 'Members' => ''];
 
 $members = Departments::membersOf($mysqli, $deptId, $siteId);
 

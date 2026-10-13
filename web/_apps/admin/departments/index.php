@@ -56,7 +56,7 @@ $site   = Site::current();
 // 📌 Page metadata
 $pageTitle   = 'Departments';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Departments' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Departments' => ''];
 
 // 📋 Every department of this organisation (retired ones too), with how
 //    many people are in each.

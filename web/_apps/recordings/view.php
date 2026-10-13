@@ -63,7 +63,7 @@ $external = (string) ($rec['externalUrl'] ?? '');
 
 $pageTitle   = (string) $rec['title'];
 $pageSection = 'recordings';
-$breadcrumbs = ['Dashboard' => '/', 'Recordings' => '/recordings', (string) $rec['title'] => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Recordings' => Site::url('recordings'), (string) $rec['title'] => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -84,11 +84,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php elseif ($rec['filePath'] !== null): ?>
             <?php if ($isVideo === true): ?>
                 <video controls preload="metadata" class="w-100" style="max-height:480px;">
-                    <source src="/recordings/stream?id=<?php echo (int) $rec['recordingID']; ?>" type="<?php echo htmlspecialchars((string) $rec['mimeType'], ENT_QUOTES, 'UTF-8'); ?>">
+                    <source src="<?php echo htmlspecialchars(Site::url('recordings/stream'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $rec['recordingID']; ?>" type="<?php echo htmlspecialchars((string) $rec['mimeType'], ENT_QUOTES, 'UTF-8'); ?>">
                 </video>
             <?php else: ?>
                 <audio controls preload="metadata" class="w-100">
-                    <source src="/recordings/stream?id=<?php echo (int) $rec['recordingID']; ?>" type="<?php echo htmlspecialchars((string) ($rec['mimeType'] ?? 'audio/mpeg'), ENT_QUOTES, 'UTF-8'); ?>">
+                    <source src="<?php echo htmlspecialchars(Site::url('recordings/stream'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $rec['recordingID']; ?>" type="<?php echo htmlspecialchars((string) ($rec['mimeType'] ?? 'audio/mpeg'), ENT_QUOTES, 'UTF-8'); ?>">
                 </audio>
             <?php endif; ?>
         <?php else: ?>
@@ -105,7 +105,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php if (($rec['topics'] ?? '') !== ''): ?>
             <div class="mt-1"><strong>Topics:</strong>
                 <?php foreach (array_filter(array_map('trim', explode(',', (string) $rec['topics']))) as $t): ?>
-                    <a href="/recordings?topic=<?php echo urlencode($t); ?>" class="badge bg-secondary text-decoration-none me-1"><?php echo htmlspecialchars($t, ENT_QUOTES, 'UTF-8'); ?></a>
+                    <a href="<?php echo htmlspecialchars(Site::url('recordings'), ENT_QUOTES, 'UTF-8'); ?>?topic=<?php echo urlencode($t); ?>" class="badge bg-secondary text-decoration-none me-1"><?php echo htmlspecialchars($t, ENT_QUOTES, 'UTF-8'); ?></a>
                 <?php endforeach; ?>
             </div>
         <?php endif; ?>

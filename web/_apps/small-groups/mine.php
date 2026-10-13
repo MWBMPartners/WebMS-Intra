@@ -51,7 +51,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $pageTitle   = 'My Groups';
 $pageSection = 'small-groups';
-$breadcrumbs = ['Dashboard' => '/', 'Small Groups' => '/small-groups', 'My Groups' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Small Groups' => Site::url('small-groups'), 'My Groups' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
@@ -71,7 +71,7 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
         <h1 class="mb-1"><i class="fa-solid fa-user-group me-2"></i>My Groups</h1>
         <p class="text-secondary mb-0">Groups and classes you belong to.</p>
     </div>
-    <a href="/small-groups" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-list me-1"></i>All Groups</a>
+    <a href="<?php echo htmlspecialchars(Site::url('small-groups'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-list me-1"></i>All Groups</a>
 </div>
 
 <?php if (count($myPending) > 0): ?>
@@ -80,7 +80,7 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
         <?php foreach ($myPending as $g): ?>
             <div class="portal-data-row">
                 <div class="col-8">
-                    <a href="/small-groups/group?id=<?php echo (int) $g['groupID']; ?>" class="text-decoration-none">
+                    <a href="<?php echo htmlspecialchars(Site::url('small-groups/group'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $g['groupID']; ?>" class="text-decoration-none">
                         <?php echo $esc($g['groupName']); ?>
                     </a>
                 </div>
@@ -97,7 +97,7 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
         <i class="fa-solid fa-circle-info me-1"></i>
         You are not a member of any group yet.
         <?php if ($directoryOn === true): ?>
-            <a href="/small-groups" class="alert-link">Browse the directory</a> to find one to join.
+            <a href="<?php echo htmlspecialchars(Site::url('small-groups'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">Browse the directory</a> to find one to join.
         <?php endif; ?>
     </div>
 <?php else: ?>
@@ -116,7 +116,7 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
                 <div class="card h-100">
                     <div class="card-body">
                         <h5 class="card-title">
-                            <a href="/small-groups/group?id=<?php echo (int) $g['groupID']; ?>" class="text-decoration-none">
+                            <a href="<?php echo htmlspecialchars(Site::url('small-groups/group'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $g['groupID']; ?>" class="text-decoration-none">
                                 <?php echo $esc($g['groupName']); ?>
                             </a>
                         </h5>
@@ -127,7 +127,7 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
                         <?php if (($g['joinedAt'] ?? null) !== null): ?>
                             <p class="small text-muted mb-2">Member since <?php echo $esc(date('j M Y', strtotime((string) $g['joinedAt']))); ?></p>
                         <?php endif; ?>
-                        <form method="post" action="/small-groups/join">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('small-groups/join'), ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="csrf_token" value="<?php echo $esc(Auth::csrfToken()); ?>">
                             <input type="hidden" name="action" value="leave">
                             <input type="hidden" name="groupID" value="<?php echo (int) $g['groupID']; ?>">

@@ -53,7 +53,7 @@ Auth::requireLogin();
 
 $pageTitle   = 'Notification preferences';
 $pageSection = 'auth';
-$breadcrumbs = ['Dashboard' => '/', 'Account' => '/account', 'Notifications' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Account' => Site::url('account'), 'Notifications' => ''];
 
 $user   = App::user();
 $userId = (int) ($user['userID'] ?? 0);
@@ -170,7 +170,7 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h1 class="mb-0"><i class="fa-solid fa-bell me-2"></i>Notification preferences</h1>
-    <a href="/account" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(Site::url('account'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back to Account
     </a>
 </div>
@@ -191,7 +191,7 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
     </div>
 <?php endif; ?>
 
-<form method="post" action="/account/notifications/save">
+<form method="post" action="<?php echo htmlspecialchars(Site::url('account/notifications/save'), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
 
     <div class="card shadow-sm mb-3">
@@ -380,7 +380,7 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
     <button type="submit" class="btn btn-success">
         <i class="fa-solid fa-save me-1"></i> Save preferences
     </button>
-    <a href="/account" class="btn btn-outline-secondary">Cancel</a>
+    <a href="<?php echo htmlspecialchars(Site::url('account'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
 </form>
 
 <?php if ($pushPublicKey !== ''): ?>

@@ -101,7 +101,7 @@ $directionIcon  = ['out' => 'fa-arrow-right', 'in' => 'fa-arrow-left'];
 
 $pageTitle   = 'Loan Register';
 $pageSection = 'assets';
-$breadcrumbs = ['Dashboard' => '/', 'Assets' => '/assets', 'Loan Register' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Assets' => Site::url('assets'), 'Loan Register' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -116,7 +116,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <p class="text-secondary mb-4">Outbound and inbound asset loans across the whole site.</p>
 
 <!-- 🔍 Filters -->
-<form method="get" action="/assets/loans" class="row g-2 mb-4 align-items-end">
+<form method="get" action="<?php echo htmlspecialchars(Site::url('assets/loans'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mb-4 align-items-end">
     <?php if ($assetIdFilter > 0): ?>
         <input type="hidden" name="assetID" value="<?php echo $assetIdFilter; ?>">
     <?php endif; ?>
@@ -147,7 +147,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
     <div class="col-auto">
         <button type="submit" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-filter me-1"></i>Filter</button>
-        <a href="/assets/loans" class="btn btn-outline-secondary btn-sm">Clear</a>
+        <a href="<?php echo htmlspecialchars(Site::url('assets/loans'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Clear</a>
     </div>
 </form>
 
@@ -169,7 +169,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="portal-data-row align-items-start <?php echo $isOverdue === true ? 'bg-danger-subtle' : ''; ?>">
                 <div class="col-12 col-md-3">
                     <i class="fa-solid <?php echo htmlspecialchars($directionIcon[$direction] ?? 'fa-right-left', ENT_QUOTES, 'UTF-8'); ?> me-2 text-muted"></i>
-                    <a href="/assets/item?id=<?php echo $loanAssetId; ?>" class="text-decoration-none">
+                    <a href="<?php echo htmlspecialchars(Site::url('assets/item'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $loanAssetId; ?>" class="text-decoration-none">
                         <strong><?php echo htmlspecialchars((string) $loan['assetName'], ENT_QUOTES, 'UTF-8'); ?></strong>
                     </a>
                     <br><small class="text-muted"><?php echo htmlspecialchars($directionLabel[$direction] ?? $direction, ENT_QUOTES, 'UTF-8'); ?></small>
@@ -197,7 +197,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="col-12 col-md-2 text-md-end">
                     <?php if ($status === 'requested' && $canApproveThis === true): ?>
-                        <form method="post" action="/assets/loan-action" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/loan-action'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="action" value="approve">
                             <input type="hidden" name="assetID" value="<?php echo $loanAssetId; ?>">
@@ -207,7 +207,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <i class="fa-solid fa-check"></i>
                             </button>
                         </form>
-                        <form method="post" action="/assets/loan-action" class="d-inline"
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/loan-action'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                               data-confirm="Decline this loan request?" data-confirm-destructive="true">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="action" value="decline">
@@ -220,7 +220,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </form>
                     <?php endif; ?>
                     <?php if ($status === 'approved' && $canApproveThis === true): ?>
-                        <form method="post" action="/assets/loan-action" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/loan-action'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="action" value="checkout">
                             <input type="hidden" name="assetID" value="<?php echo $loanAssetId; ?>">
@@ -247,7 +247,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         ?>
                         <details class="d-inline-block mb-1">
                             <summary class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-dolly-flatbed me-1"></i>Check in</summary>
-                            <form method="post" action="/assets/loan-action" class="mt-2 text-start">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/loan-action'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-2 text-start">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="action" value="checkin">
                                 <input type="hidden" name="assetID" value="<?php echo $loanAssetId; ?>">
@@ -271,7 +271,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </details>
                     <?php endif; ?>
                     <?php if (in_array($status, ['requested', 'approved'], true) === true && ($canApproveThis === true || $isRequesterThis === true)): ?>
-                        <form method="post" action="/assets/loan-action" class="d-inline"
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('assets/loan-action'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline"
                               data-confirm="Cancel this loan?" data-confirm-destructive="true">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="action" value="cancel">
@@ -289,6 +289,6 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endif; ?>
 
-<p class="mt-3"><a href="/assets" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a></p>
+<p class="mt-3"><a href="<?php echo htmlspecialchars(Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to Asset Tracker</a></p>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

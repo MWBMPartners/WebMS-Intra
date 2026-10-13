@@ -40,5 +40,5 @@ if ($paymentId > 0 && Payments::refund($paymentId, $siteId) === true) {
     $_SESSION['flash_type'] = 'danger';
 }
 
-header('Location: /payments');
+header('Location: ' . Site::url('payments'));
 exit();

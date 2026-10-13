@@ -35,13 +35,13 @@ Auth::ensureSession();
 Auth::requireLogin();
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /account/my-prayer-list', true, 302);
+    header('Location: ' . Site::url('account/my-prayer-list'), true, 302);
     exit();
 }
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     Logger::activity('PrayerListActionRejected', 'Invalid CSRF on account/my-prayer-list/save');
-    header('Location: /account/my-prayer-list', true, 302);
+    header('Location: ' . Site::url('account/my-prayer-list'), true, 302);
     exit();
 }
 
@@ -51,7 +51,7 @@ $requestId = (int) ($_POST['requestID'] ?? 0);
 $action    = (string) ($_POST['action'] ?? '');
 
 if ($requestId <= 0 || $userId <= 0) {
-    header('Location: /account/my-prayer-list', true, 302);
+    header('Location: ' . Site::url('account/my-prayer-list'), true, 302);
     exit();
 }
 
@@ -93,5 +93,5 @@ if ($action === 'mark-prayed') {
     }
 }
 
-header('Location: /account/my-prayer-list', true, 302);
+header('Location: ' . Site::url('account/my-prayer-list'), true, 302);
 exit();

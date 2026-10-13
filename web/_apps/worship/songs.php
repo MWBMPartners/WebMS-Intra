@@ -41,7 +41,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h4 mb-0"><i class="fa-solid fa-music me-2 text-primary"></i>Song Library</h1>
         <?php if (App::isAdmin() === true): ?>
-            <a href="/worship/song?new=1" class="btn btn-sm btn-primary"><i class="fa-solid fa-plus me-1"></i>Add song</a>
+            <a href="<?php echo htmlspecialchars(Site::url('worship/song'), ENT_QUOTES, 'UTF-8'); ?>?new=1" class="btn btn-sm btn-primary"><i class="fa-solid fa-plus me-1"></i>Add song</a>
         <?php endif; ?>
     </div>
 
@@ -59,7 +59,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php foreach ($songs as $s): ?>
             <div class="portal-data-row">
                 <div class="portal-data-row-main">
-                    <a href="/worship/song?id=<?php echo (int) $s['songID']; ?>" class="text-decoration-none fw-semibold"><?php echo htmlspecialchars((string) $s['title'], ENT_QUOTES, 'UTF-8'); ?></a>
+                    <a href="<?php echo htmlspecialchars(Site::url('worship/song'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $s['songID']; ?>" class="text-decoration-none fw-semibold"><?php echo htmlspecialchars((string) $s['title'], ENT_QUOTES, 'UTF-8'); ?></a>
                     <?php if (!empty($s['author'])): ?>
                         <span class="text-muted small"> — <?php echo htmlspecialchars((string) $s['author'], ENT_QUOTES, 'UTF-8'); ?></span>
                     <?php endif; ?>

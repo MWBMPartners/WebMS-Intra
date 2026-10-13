@@ -36,7 +36,7 @@ if ($rs !== false) {
 
 $pageTitle   = 'Photos';
 $pageSection = 'photos';
-$breadcrumbs = ['Dashboard' => '/', 'Photos' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Photos' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -44,11 +44,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="mb-0"><i class="fa-solid fa-images me-2"></i>Photos</h1>
     <div class="d-flex gap-2">
         <?php if (Auth::check() === true): ?>
-            <a class="btn btn-outline-primary btn-sm" href="/photos/upload"><i class="fa-solid fa-upload me-1"></i>Upload</a>
+            <a class="btn btn-outline-primary btn-sm" href="<?php echo htmlspecialchars(Site::url('photos/upload'), ENT_QUOTES, 'UTF-8'); ?>"><i class="fa-solid fa-upload me-1"></i>Upload</a>
         <?php endif; ?>
         <?php if (App::isAdmin() === true): ?>
-            <a class="btn btn-outline-warning btn-sm" href="/admin/photos/queue"><i class="fa-solid fa-clock me-1"></i>Moderation queue</a>
-            <a class="btn btn-outline-secondary btn-sm" href="/admin/photos/albums">Albums</a>
+            <a class="btn btn-outline-warning btn-sm" href="<?php echo htmlspecialchars(Site::url('admin/photos/queue'), ENT_QUOTES, 'UTF-8'); ?>"><i class="fa-solid fa-clock me-1"></i>Moderation queue</a>
+            <a class="btn btn-outline-secondary btn-sm" href="<?php echo htmlspecialchars(Site::url('admin/photos/albums'), ENT_QUOTES, 'UTF-8'); ?>">Albums</a>
         <?php endif; ?>
     </div>
 </div>
@@ -61,12 +61,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="col-md-4">
                 <div class="card h-100">
                     <?php if ($a['coverPhotoID'] !== null): ?>
-                        <a href="/photos/album?id=<?php echo (int) $a['albumID']; ?>">
-                            <img src="/photos/serve?id=<?php echo (int) $a['coverPhotoID']; ?>" class="card-img-top" style="max-height:180px;object-fit:cover;" alt="">
+                        <a href="<?php echo htmlspecialchars(Site::url('photos/album'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $a['albumID']; ?>">
+                            <img src="<?php echo htmlspecialchars(Site::url('photos/serve'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $a['coverPhotoID']; ?>" class="card-img-top" style="max-height:180px;object-fit:cover;" alt="">
                         </a>
                     <?php endif; ?>
                     <div class="card-body">
-                        <h5><a href="/photos/album?id=<?php echo (int) $a['albumID']; ?>" class="text-decoration-none"><?php echo htmlspecialchars((string) $a['name'], ENT_QUOTES, 'UTF-8'); ?></a></h5>
+                        <h5><a href="<?php echo htmlspecialchars(Site::url('photos/album'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $a['albumID']; ?>" class="text-decoration-none"><?php echo htmlspecialchars((string) $a['name'], ENT_QUOTES, 'UTF-8'); ?></a></h5>
                         <p class="small text-muted mb-0">
                             <span class="badge bg-light text-dark"><?php echo htmlspecialchars((string) $a['visibility'], ENT_QUOTES, 'UTF-8'); ?></span>
                         </p>

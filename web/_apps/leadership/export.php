@@ -31,7 +31,7 @@ Auth::requireLogin();
 if (Auth::verifyCsrf($_GET['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /leadership');
+    header('Location: ' . Site::url('leadership'));
     exit();
 }
 

@@ -36,7 +36,7 @@ use Portal\Core\Settings;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/discipleship/pathways', true, 302);
+    header('Location: ' . Site::url('admin/discipleship/pathways'), true, 302);
     exit();
 }
 
@@ -57,7 +57,7 @@ $enabled = (string) Settings::get('discipleship.enabled', 'false');
 if ($enabled !== '1' && $enabled !== 'true') {
     $_SESSION['flash_msg']  = 'Discipleship app is disabled.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /admin/discipleship/pathways', true, 302);
+    header('Location: ' . Site::url('admin/discipleship/pathways'), true, 302);
     exit();
 }
 
@@ -91,7 +91,7 @@ if ($sortOrder < 0) { $sortOrder = 0; }
 if ($pathwayId <= 0 || $name === '') {
     $_SESSION['flash_msg']  = 'Step name is required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/discipleship/pathways/edit?id=' . $pathwayId, true, 302);
+    header('Location: ' . Site::url('admin/discipleship/pathways/edit') . '?id=' . $pathwayId, true, 302);
     exit();
 }
 
@@ -119,7 +119,7 @@ if ($autoRule === 'attended_event' || $autoRule === 'rsvpd_event') {
     if ($refCandidate <= 0) {
         $_SESSION['flash_msg']  = 'Choose an event for this auto-completion rule.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/discipleship/pathways/edit?id=' . $pathwayId, true, 302);
+        header('Location: ' . Site::url('admin/discipleship/pathways/edit') . '?id=' . $pathwayId, true, 302);
         exit();
     }
     // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
@@ -135,7 +135,7 @@ if ($autoRule === 'attended_event' || $autoRule === 'rsvpd_event') {
     if ($refOk === false) {
         $_SESSION['flash_msg']  = 'That event could not be found on this site.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/discipleship/pathways/edit?id=' . $pathwayId, true, 302);
+        header('Location: ' . Site::url('admin/discipleship/pathways/edit') . '?id=' . $pathwayId, true, 302);
         exit();
     }
     $autoRefId = $refCandidate;
@@ -144,7 +144,7 @@ if ($autoRule === 'attended_event' || $autoRule === 'rsvpd_event') {
     if ($refCandidate <= 0) {
         $_SESSION['flash_msg']  = 'Choose a category for this auto-completion rule.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/discipleship/pathways/edit?id=' . $pathwayId, true, 302);
+        header('Location: ' . Site::url('admin/discipleship/pathways/edit') . '?id=' . $pathwayId, true, 302);
         exit();
     }
     $chk = $db->prepare('SELECT categoryID FROM tblEventCategories WHERE categoryID = ? AND siteID = ?');
@@ -159,7 +159,7 @@ if ($autoRule === 'attended_event' || $autoRule === 'rsvpd_event') {
     if ($refOk === false) {
         $_SESSION['flash_msg']  = 'That category could not be found on this site.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/discipleship/pathways/edit?id=' . $pathwayId, true, 302);
+        header('Location: ' . Site::url('admin/discipleship/pathways/edit') . '?id=' . $pathwayId, true, 302);
         exit();
     }
     $autoRefId = $refCandidate;
@@ -189,7 +189,7 @@ if ($stepId === 0) {
 
     $_SESSION['flash_msg']  = 'Step added.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /admin/discipleship/pathways/edit?id=' . $pathwayId, true, 302);
+    header('Location: ' . Site::url('admin/discipleship/pathways/edit') . '?id=' . $pathwayId, true, 302);
     exit();
 }
 
@@ -215,5 +215,5 @@ Logger::activity(
 
 $_SESSION['flash_msg']  = 'Step saved.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /admin/discipleship/pathways/edit?id=' . $pathwayId, true, 302);
+header('Location: ' . Site::url('admin/discipleship/pathways/edit') . '?id=' . $pathwayId, true, 302);
 exit();

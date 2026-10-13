@@ -52,6 +52,7 @@ use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -180,7 +181,7 @@ ksort($grouped);
 
 $pageTitle   = 'Apps';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Apps' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Apps' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -190,7 +191,7 @@ $csrf = Auth::csrfToken();
         <h1 class="mb-1"><i class="fa-solid fa-cubes me-2"></i>Apps</h1>
         <p class="text-secondary mb-0">Enable or disable installable apps. Core apps are always on.</p>
     </div>
-    <a href="/admin" class="btn btn-outline-secondary btn-sm">&larr; Admin</a>
+    <a href="<?php echo htmlspecialchars(Site::url('admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Admin</a>
 </div>
 
 <?php if ($flash !== ''): ?>
@@ -215,7 +216,7 @@ $csrf = Auth::csrfToken();
         <p class="mb-0">
             <strong>Current:</strong>
             <code><?php echo $orgIndustry !== '' ? htmlspecialchars($orgIndustry, ENT_QUOTES, 'UTF-8') : '(unset — all apps shown)'; ?></code>
-            &middot; <a href="/admin/settings">Change in /admin/settings</a>
+            &middot; <a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>">Change in /admin/settings</a>
         </p>
     </div>
 </div>

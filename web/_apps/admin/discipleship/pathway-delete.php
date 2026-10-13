@@ -25,7 +25,7 @@ use Portal\Core\Settings;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/discipleship/pathways', true, 302);
+    header('Location: ' . Site::url('admin/discipleship/pathways'), true, 302);
     exit();
 }
 
@@ -46,7 +46,7 @@ $enabled = (string) Settings::get('discipleship.enabled', 'false');
 if ($enabled !== '1' && $enabled !== 'true') {
     $_SESSION['flash_msg']  = 'Discipleship app is disabled.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /admin/discipleship/pathways', true, 302);
+    header('Location: ' . Site::url('admin/discipleship/pathways'), true, 302);
     exit();
 }
 
@@ -95,5 +95,5 @@ Logger::activity(
 
 $_SESSION['flash_msg']  = 'Pathway deleted.';
 $_SESSION['flash_type'] = 'warning';
-header('Location: /admin/discipleship/pathways', true, 302);
+header('Location: ' . Site::url('admin/discipleship/pathways'), true, 302);
 exit();

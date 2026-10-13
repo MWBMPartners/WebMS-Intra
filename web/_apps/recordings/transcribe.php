@@ -54,5 +54,5 @@ if (Transcription::queue($recordingId, $provider) === true) {
     $_SESSION['flash_type'] = 'danger';
 }
 
-header('Location: /recordings/view?id=' . $recordingId);
+header('Location: ' . Site::url('recordings/view') . '?id=' . $recordingId);
 exit();

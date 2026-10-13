@@ -49,7 +49,7 @@ if ($stmt !== false) {
 
 $pageTitle   = 'Booking Approvals';
 $pageSection = 'resources';
-$breadcrumbs = ['Dashboard' => '/', 'Resources' => '/resources', 'Approvals' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Resources' => Site::url('resources'), 'Approvals' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -86,13 +86,13 @@ $csrf = Auth::csrfToken();
                             <?php endif; ?>
                         </div>
                         <div class="col-md-4 text-md-end">
-                            <form method="post" action="/resources/action" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('resources/action'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="bookingID" value="<?php echo (int) $r['bookingID']; ?>">
                                 <input type="hidden" name="action" value="approve">
                                 <button type="submit" class="btn btn-success btn-sm">Approve</button>
                             </form>
-                            <form method="post" action="/resources/action" class="d-inline ms-1">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('resources/action'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline ms-1">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="bookingID" value="<?php echo (int) $r['bookingID']; ?>">
                                 <input type="hidden" name="action" value="decline">

@@ -48,6 +48,7 @@ use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 🔓 Public page — session started purely for parity with every other
 // public Asset Tracker entry point (tag.php/kiosk.php); this file never
@@ -105,5 +106,5 @@ if ($token === null) {
 // $token is always a DB-sourced, shape-validated publicToken (re-checked
 // inside resolveDigitalLink() itself) — safe to concatenate, but never
 // anything other than that already-validated value regardless.
-header('Location: /a/' . $token, true, 302);
+header('Location: ' . Site::url('a/') . $token, true, 302);
 exit();

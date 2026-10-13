@@ -22,7 +22,7 @@ use Portal\Core\Router;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/email-templates', true, 302);
+    header('Location: ' . Site::url('admin/email-templates'), true, 302);
     exit();
 }
 Auth::ensureSession();
@@ -33,7 +33,7 @@ if (App::isAdmin() === false) {
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['email_template_flash']      = 'Invalid or expired form token.';
     $_SESSION['email_template_flash_type'] = 'danger';
-    header('Location: /admin/email-templates', true, 302);
+    header('Location: ' . Site::url('admin/email-templates'), true, 302);
     exit();
 }
 
@@ -44,7 +44,7 @@ $action = (string) ($_POST['action'] ?? 'save');
 if ($key === '' || preg_match('/^[a-zA-Z0-9_\-\.]+$/', $key) !== 1) {
     $_SESSION['email_template_flash']      = 'Invalid template key.';
     $_SESSION['email_template_flash_type'] = 'danger';
-    header('Location: /admin/email-templates', true, 302);
+    header('Location: ' . Site::url('admin/email-templates'), true, 302);
     exit();
 }
 
@@ -61,7 +61,7 @@ if ($action === 'revert') {
     Logger::activity('EmailTemplateRevert', 'Site override removed for: ' . $key);
     $_SESSION['email_template_flash']      = 'Site override removed — template now uses the global default.';
     $_SESSION['email_template_flash_type'] = 'success';
-    header('Location: /admin/email-templates/edit?key=' . urlencode($key), true, 302);
+    header('Location: ' . Site::url('admin/email-templates/edit') . '?key=' . urlencode($key), true, 302);
     exit();
 }
 
@@ -72,7 +72,7 @@ $bodyHtml = (string) ($_POST['bodyHtml'] ?? '');
 if ($subject === '' || $bodyHtml === '') {
     $_SESSION['email_template_flash']      = 'Subject and body are required.';
     $_SESSION['email_template_flash_type'] = 'danger';
-    header('Location: /admin/email-templates/edit?key=' . urlencode($key), true, 302);
+    header('Location: ' . Site::url('admin/email-templates/edit') . '?key=' . urlencode($key), true, 302);
     exit();
 }
 if (mb_strlen($subject) > 255) {
@@ -108,7 +108,7 @@ if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'EMAIL_TEMPLATE_UPSERT_PREP', $mysqli->error, '');
     $_SESSION['email_template_flash']      = t('error.db_save_template');
     $_SESSION['email_template_flash_type'] = 'danger';
-    header('Location: /admin/email-templates/edit?key=' . urlencode($key), true, 302);
+    header('Location: ' . Site::url('admin/email-templates/edit') . '?key=' . urlencode($key), true, 302);
     exit();
 }
 $stmt->bind_param('isssss', $siteId, $key, $subject, $bodyHtml, $descr, $tokens);
@@ -118,5 +118,5 @@ $stmt->close();
 Logger::activity('EmailTemplateUpdated', 'Site override saved for: ' . $key);
 $_SESSION['email_template_flash']      = 'Template saved as site override.';
 $_SESSION['email_template_flash_type'] = 'success';
-header('Location: /admin/email-templates/edit?key=' . urlencode($key), true, 302);
+header('Location: ' . Site::url('admin/email-templates/edit') . '?key=' . urlencode($key), true, 302);
 exit();

@@ -82,7 +82,7 @@ if (App::isAdmin() === false) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/settings/attendance');
+    header('Location: ' . Site::url('admin/settings/attendance'));
     exit();
 }
 
@@ -91,7 +91,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Nothing was changed. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/settings/attendance');
+    header('Location: ' . Site::url('admin/settings/attendance'));
     exit();
 }
 
@@ -195,7 +195,7 @@ if ($scope === 'global' && App::isRootAdmin() === false) {
         . 'installation follows, not only yours. Only a global administrator can change it. Nothing was '
         . 'changed, and your own organisation\'s setting is unaffected.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/settings/attendance');
+    header('Location: ' . Site::url('admin/settings/attendance'));
     exit();
 }
 
@@ -207,7 +207,7 @@ if (array_key_exists($postedChoice, AnonymousCheckins::VISIBILITY_CHOICES) === f
     $_SESSION['flash_msg']  = 'That is not one of the three choices, so nothing was saved. '
         . 'Please pick one of the options on the page and save again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/settings/attendance');
+    header('Location: ' . Site::url('admin/settings/attendance'));
     exit();
 }
 
@@ -220,7 +220,7 @@ if (preg_match('/^\d{1,4}$/', $rawDays) !== 1) {
     $_SESSION['flash_msg']  = 'The number of days has to be a whole number between 0 and 3650. '
         . 'Nothing was saved.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/settings/attendance');
+    header('Location: ' . Site::url('admin/settings/attendance'));
     exit();
 }
 $days = (int) $rawDays;
@@ -228,7 +228,7 @@ if ($days < 0 || $days > 3650) {
     $_SESSION['flash_msg']  = 'The number of days has to be a whole number between 0 and 3650. '
         . 'Nothing was saved.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/settings/attendance');
+    header('Location: ' . Site::url('admin/settings/attendance'));
     exit();
 }
 
@@ -242,7 +242,7 @@ if (array_key_exists($postedReportsChoice, AttendanceAccess::VISIBILITY_CHOICES)
     $_SESSION['flash_msg']  = '"Who can see the attendance reports page" is not one of the three '
         . 'choices, so nothing was saved. Please pick one of the options on the page and save again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/settings/attendance');
+    header('Location: ' . Site::url('admin/settings/attendance'));
     exit();
 }
 
@@ -261,7 +261,7 @@ if ($scope === 'global') {
     $_SESSION['flash_msg']  = 'The installation-wide default was saved. Organisations that have chosen '
         . 'a setting of their own keep it.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /admin/settings/attendance');
+    header('Location: ' . Site::url('admin/settings/attendance'));
     exit();
 }
 
@@ -278,5 +278,5 @@ Logger::activity(
 
 $_SESSION['flash_msg']  = 'Saved for your organisation.';
 $_SESSION['flash_type'] = 'success';
-header('Location: /admin/settings/attendance');
+header('Location: ' . Site::url('admin/settings/attendance'));
 exit();

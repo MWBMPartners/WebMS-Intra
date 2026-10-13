@@ -42,5 +42,5 @@ if ($planId > 0 && $title !== '' && strtotime($date) !== false) {
     }
 }
 
-header('Location: /service-plans/edit?id=' . $planId);
+header('Location: ' . Site::url('service-plans/edit') . '?id=' . $planId);
 exit();

@@ -55,6 +55,7 @@ use Portal\Core\Captcha;
 use Portal\Core\FormEngine;
 use Portal\Core\PortalAddress;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 🔍 Defensive re-validation — the Router already checked this shape.
 $token = (string) ($_GET['token'] ?? '');
@@ -182,7 +183,7 @@ $csrf = Auth::csrfToken();
             <p class="text-muted small"><?php echo nl2br(htmlspecialchars($descRaw, ENT_QUOTES, 'UTF-8')); ?></p>
         <?php endif; ?>
 
-        <form method="post" action="/forms/public-submit" novalidate>
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/public-submit'), ENT_QUOTES, 'UTF-8'); ?>" novalidate>
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="formToken" value="<?php echo htmlspecialchars($token, ENT_QUOTES, 'UTF-8'); ?>">
 

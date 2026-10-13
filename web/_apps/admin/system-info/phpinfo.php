@@ -80,6 +80,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 // 🔐 Umbrella administrators only. This runs before a single byte of output.
 Auth::ensureSession();
@@ -743,9 +744,9 @@ if (ob_get_level() === $guardLevelBefore) {
 $pageTitle   = 'Full PHP report';
 $pageSection = 'admin';
 $breadcrumbs = [
-    'Dashboard'          => '/',
-    'Admin'              => '/admin',
-    'Server Information' => '/admin/system-info',
+    'Dashboard'          => Site::url(''),
+    'Admin'              => Site::url('admin'),
+    'Server Information' => Site::url('admin/system-info'),
     'Full PHP report'    => '',
 ];
 
@@ -761,10 +762,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </p>
     </div>
     <div class="d-flex gap-2">
-        <a href="/admin/system-info/phpinfo?format=text" class="btn btn-outline-primary btn-sm" target="_blank" rel="noopener">
+        <a href="<?php echo htmlspecialchars(Site::url('admin/system-info/phpinfo'), ENT_QUOTES, 'UTF-8'); ?>?format=text" class="btn btn-outline-primary btn-sm" target="_blank" rel="noopener">
             <i class="fa-solid fa-align-left me-1"></i>Plain text
         </a>
-        <a href="/admin/system-info" class="btn btn-outline-secondary btn-sm">&larr; Server Information</a>
+        <a href="<?php echo htmlspecialchars(Site::url('admin/system-info'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Server Information</a>
     </div>
 </div>
 

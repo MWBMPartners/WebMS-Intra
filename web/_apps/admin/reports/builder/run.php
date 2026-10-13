@@ -38,14 +38,14 @@ Auth::requireLogin();
 if (App::isAdmin() !== true) {
     $_SESSION['flash_msg']  = t('error.access_denied_inline');
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /dashboard');
+    header('Location: ' . Site::url('dashboard'));
     exit();
 }
 
 if (AppRegistry::isEnabled('reports') === false) {
     $_SESSION['flash_msg']  = 'Reports is disabled for this site.';
     $_SESSION['flash_type'] = 'warning';
-    header('Location: /admin/apps');
+    header('Location: ' . Site::url('admin/apps'));
     exit();
 }
 
@@ -57,7 +57,7 @@ $page     = max(1, (int) ($_GET['page'] ?? 1));
 if ($reportId <= 0) {
     $_SESSION['flash_msg']  = 'Invalid report.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/reports/builder');
+    header('Location: ' . Site::url('admin/reports/builder'));
     exit();
 }
 
@@ -65,7 +65,7 @@ $row = ReportBuilder::get($reportId, $siteId);
 if ($row === null) {
     $_SESSION['flash_msg']  = 'Report not found.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/reports/builder');
+    header('Location: ' . Site::url('admin/reports/builder'));
     exit();
 }
 
@@ -74,7 +74,7 @@ $isShared = (int) $row['isShared'] === 1;
 if ($isShared === false && $isOwner === false && App::isSiteAdmin() === false) {
     $_SESSION['flash_msg']  = 'You do not have access to this report.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/reports/builder');
+    header('Location: ' . Site::url('admin/reports/builder'));
     exit();
 }
 
@@ -125,7 +125,7 @@ $sourceLabel = ReportRegistry::source((string) $row['sourceKey'])['label'] ?? (s
 
 $pageTitle   = htmlspecialchars($row['reportName'], ENT_QUOTES, 'UTF-8');
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Reports' => '/admin/reports', 'Builder' => '/admin/reports/builder', (string) $row['reportName'] => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Reports' => Site::url('admin/reports'), 'Builder' => Site::url('admin/reports/builder'), (string) $row['reportName'] => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -141,13 +141,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </p>
     </div>
     <div class="d-flex gap-2">
-        <a href="/admin/reports/builder/export?id=<?php echo (int) $reportId; ?>" class="btn btn-outline-secondary">
+        <a href="<?php echo htmlspecialchars(Site::url('admin/reports/builder/export'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $reportId; ?>" class="btn btn-outline-secondary">
             <i class="fa-solid fa-file-csv me-1"></i>Export CSV
         </a>
-        <a href="/admin/reports/builder/edit?id=<?php echo (int) $reportId; ?>" class="btn btn-outline-secondary">
+        <a href="<?php echo htmlspecialchars(Site::url('admin/reports/builder/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $reportId; ?>" class="btn btn-outline-secondary">
             <i class="fa-solid fa-pen me-1"></i>Edit
         </a>
-        <a href="/admin/reports/builder" class="btn btn-outline-secondary">
+        <a href="<?php echo htmlspecialchars(Site::url('admin/reports/builder'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
             <i class="fa-solid fa-arrow-left me-1"></i>Back
         </a>
     </div>
@@ -207,12 +207,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <!-- ⏮️⏭️ Prev/Next pagination — hasMore-driven, no COUNT(*) query needed. -->
     <nav aria-label="Report pagination" class="d-flex justify-content-between align-items-center">
         <a class="btn btn-sm btn-outline-secondary <?php echo $page <= 1 ? 'disabled' : ''; ?>"
-           href="/admin/reports/builder/run?id=<?php echo (int) $reportId; ?>&amp;page=<?php echo max(1, $page - 1); ?>">
+           href="<?php echo htmlspecialchars(Site::url('admin/reports/builder/run'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $reportId; ?>&amp;page=<?php echo max(1, $page - 1); ?>">
             <i class="fa-solid fa-chevron-left me-1"></i>Previous
         </a>
         <span class="text-muted small">Page <?php echo (int) $page; ?></span>
         <a class="btn btn-sm btn-outline-secondary <?php echo $result['hasMore'] !== true ? 'disabled' : ''; ?>"
-           href="/admin/reports/builder/run?id=<?php echo (int) $reportId; ?>&amp;page=<?php echo $page + 1; ?>">
+           href="<?php echo htmlspecialchars(Site::url('admin/reports/builder/run'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $reportId; ?>&amp;page=<?php echo $page + 1; ?>">
             Next<i class="fa-solid fa-chevron-right ms-1"></i>
         </a>
     </nav>

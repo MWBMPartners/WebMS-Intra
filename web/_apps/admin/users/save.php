@@ -44,7 +44,7 @@ if (App::isAdmin() === false) {
 
 // 🛡️ Only accept POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/users');
+    header('Location: ' . Site::url('admin/users'));
     exit();
 }
 
@@ -52,7 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /admin/users');
+    header('Location: ' . Site::url('admin/users'));
     exit();
 }
 
@@ -79,7 +79,7 @@ if ($action === 'create') {
         );
         $_SESSION['flash_msg']  = AccountGuard::message(AccountGuard::GLOBAL_ONLY, AccountGuard::REACH_PORTAL);
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/users');
+        header('Location: ' . Site::url('admin/users'));
         exit();
     }
 
@@ -97,7 +97,7 @@ if ($action === 'create') {
     if ($fullName === '' || $emailAddress === '') {
         $_SESSION['flash_msg']  = 'Full name and email address are required.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/users');
+        header('Location: ' . Site::url('admin/users'));
         exit();
     }
 
@@ -116,7 +116,7 @@ if ($action === 'create') {
     if ($emailVerdict !== AccountGuard::EMAIL_FREE) {
         $_SESSION['flash_msg']  = AccountGuard::emailMessage($emailVerdict);
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/users');
+        header('Location: ' . Site::url('admin/users'));
         exit();
     }
 
@@ -124,14 +124,14 @@ if ($action === 'create') {
     if ($username !== '' && $password === '') {
         $_SESSION['flash_msg']  = 'Password is required when creating a local account.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/users');
+        header('Location: ' . Site::url('admin/users'));
         exit();
     }
 
     if ($password !== '' && $password !== $passConfirm) {
         $_SESSION['flash_msg']  = 'Passwords do not match.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/users');
+        header('Location: ' . Site::url('admin/users'));
         exit();
     }
 
@@ -141,7 +141,7 @@ if ($action === 'create') {
         if ($check['valid'] === false) {
             $_SESSION['flash_msg']  = 'Password does not meet policy: ' . implode(' ', $check['errors']);
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /admin/users');
+            header('Location: ' . Site::url('admin/users'));
             exit();
         }
     }
@@ -206,7 +206,7 @@ if ($action === 'create') {
 
         $_SESSION['flash_msg']  = 'User "' . $fullName . '" created successfully.';
         $_SESSION['flash_type'] = 'success';
-        header('Location: /admin/users');
+        header('Location: ' . Site::url('admin/users'));
         exit();
 
     } catch (\Throwable $ex) {
@@ -214,7 +214,7 @@ if ($action === 'create') {
         Logger::exception($ex);
         $_SESSION['flash_msg']  = t('error.db_create_user');
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/users');
+        header('Location: ' . Site::url('admin/users'));
         exit();
     }
 }
@@ -233,7 +233,7 @@ if ($action === 'update') {
     if ($userID <= 0) {
         $_SESSION['flash_msg']  = AccountGuard::message(AccountGuard::NOT_FOUND, AccountGuard::REACH_VIEW);
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/users');
+        header('Location: ' . Site::url('admin/users'));
         exit();
     }
 
@@ -244,7 +244,7 @@ if ($action === 'update') {
     if (AccountGuard::check($userID, AccountGuard::REACH_VIEW, 'edit account #' . $userID) !== AccountGuard::ALLOW) {
         $_SESSION['flash_msg']  = AccountGuard::message(AccountGuard::NOT_FOUND, AccountGuard::REACH_VIEW);
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/users');
+        header('Location: ' . Site::url('admin/users'));
         exit();
     }
 
@@ -268,7 +268,7 @@ if ($action === 'update') {
         // deleted in the instant between that check and this read.
         $_SESSION['flash_msg']  = AccountGuard::message(AccountGuard::NOT_FOUND, AccountGuard::REACH_VIEW);
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/users');
+        header('Location: ' . Site::url('admin/users'));
         exit();
     }
 
@@ -282,7 +282,7 @@ if ($action === 'update') {
     if ($fullName === '' || $emailAddress === '') {
         $_SESSION['flash_msg']  = 'Full name and email address are required.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/users');
+        header('Location: ' . Site::url('admin/users'));
         exit();
     }
 
@@ -326,7 +326,7 @@ if ($action === 'update') {
     if ($portalChanged === false && $rootChanged === false && $detailsChanged === false) {
         $_SESSION['flash_msg']  = 'Nothing was changed.';
         $_SESSION['flash_type'] = 'info';
-        header('Location: /admin/users');
+        header('Location: ' . Site::url('admin/users'));
         exit();
     }
 
@@ -343,7 +343,7 @@ if ($action === 'update') {
         if ($verdict !== AccountGuard::ALLOW) {
             $_SESSION['flash_msg']  = AccountGuard::message($verdict, AccountGuard::REACH_PORTAL);
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /admin/users');
+            header('Location: ' . Site::url('admin/users'));
             exit();
         }
     }
@@ -358,7 +358,7 @@ if ($action === 'update') {
         if ($verdict !== AccountGuard::ALLOW) {
             $_SESSION['flash_msg']  = AccountGuard::message($verdict, AccountGuard::REACH_ACCOUNT);
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /admin/users');
+            header('Location: ' . Site::url('admin/users'));
             exit();
         }
     }
@@ -378,7 +378,7 @@ if ($action === 'update') {
         if ($emailVerdict !== AccountGuard::EMAIL_FREE) {
             $_SESSION['flash_msg']  = AccountGuard::emailMessage($emailVerdict);
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /admin/users');
+            header('Location: ' . Site::url('admin/users'));
             exit();
         }
     }
@@ -391,7 +391,7 @@ if ($action === 'update') {
         if ($check['valid'] === false) {
             $_SESSION['flash_msg']  = 'Password does not meet policy: ' . implode(' ', $check['errors']);
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /admin/users');
+            header('Location: ' . Site::url('admin/users'));
             exit();
         }
     }
@@ -449,7 +449,7 @@ if ($action === 'update') {
         Logger::exception($ex);
         $_SESSION['flash_msg']  = 'The account could not be saved. Nothing was changed.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin/users');
+        header('Location: ' . Site::url('admin/users'));
         exit();
     }
 
@@ -458,12 +458,12 @@ if ($action === 'update') {
 
     $_SESSION['flash_msg']  = 'User "' . $fullName . '" updated successfully.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /admin/users');
+    header('Location: ' . Site::url('admin/users'));
     exit();
 }
 
 // 🚫 Unknown action
 $_SESSION['flash_msg']  = 'Unknown action.';
 $_SESSION['flash_type'] = 'warning';
-header('Location: /admin/users');
+header('Location: ' . Site::url('admin/users'));
 exit();

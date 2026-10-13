@@ -143,7 +143,7 @@ $nonce     = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
         async function pollMsg() {
             try {
                 const r = await fetch(
-                    '/service-plans/message-poll?id=' + planId + '&sinceID=' + lastId,
+                    '<?php echo \Portal\Core\Router::urlForScript('service-plans/message-poll'); ?>?id=' + planId + '&sinceID=' + lastId,
                     { cache: 'no-store' }
                 );
                 if (!r.ok) return;

@@ -22,20 +22,21 @@ require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEP
 
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Site;
 
 // -----------------------------------------------------------------------------
 // 1. 🛡️ Only accept POST from authenticated users
 // -----------------------------------------------------------------------------
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /account', true, 302);
+    header('Location: ' . Site::url('account'), true, 302);
     exit();
 }
 
 Auth::requireLogin();
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-    header('Location: /account?error=csrf', true, 302);
+    header('Location: ' . Site::url('account') . '?error=csrf', true, 302);
     exit();
 }
 
@@ -49,7 +50,7 @@ $newPassword     = $_POST['new_password'] ?? '';
 $confirmPassword = $_POST['new_password_confirm'] ?? '';
 
 if ($currentPassword === '' || $newPassword === '' || $confirmPassword === '') {
-    header('Location: /account?error=pw_empty', true, 302);
+    header('Location: ' . Site::url('account') . '?error=pw_empty', true, 302);
     exit();
 }
 
@@ -63,7 +64,7 @@ $stmt = $mysqli->prepare(
 
 if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'CHANGEPW_PREP_FAIL', $mysqli->error, '');
-    header('Location: /account?error=db', true, 302);
+    header('Location: ' . Site::url('account') . '?error=db', true, 302);
     exit();
 }
 
@@ -75,13 +76,13 @@ $stmt->close();
 
 if ($local === null || ($local['passwordHash'] ?? '') === '') {
     Logger::activity('PasswordChangeFailed', 'No local account found for userID: ' . $userId);
-    header('Location: /account?error=db', true, 302);
+    header('Location: ' . Site::url('account') . '?error=db', true, 302);
     exit();
 }
 
 if (password_verify($currentPassword, $local['passwordHash']) === false) {
     Logger::activity('PasswordChangeFailed', 'Incorrect current password');
-    header('Location: /account?error=pw_current', true, 302);
+    header('Location: ' . Site::url('account') . '?error=pw_current', true, 302);
     exit();
 }
 
@@ -90,13 +91,13 @@ if (password_verify($currentPassword, $local['passwordHash']) === false) {
 // -----------------------------------------------------------------------------
 
 if ($newPassword !== $confirmPassword) {
-    header('Location: /account?error=pw_match', true, 302);
+    header('Location: ' . Site::url('account') . '?error=pw_match', true, 302);
     exit();
 }
 
 $validation = Auth::validatePassword($newPassword);
 if ($validation['valid'] === false) {
-    header('Location: /account?error=pw_policy', true, 302);
+    header('Location: ' . Site::url('account') . '?error=pw_policy', true, 302);
     exit();
 }
 
@@ -113,7 +114,7 @@ $updateStmt = $mysqli->prepare(
 
 if ($updateStmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'CHANGEPW_UPDATE_FAIL', $mysqli->error, '');
-    header('Location: /account?error=db', true, 302);
+    header('Location: ' . Site::url('account') . '?error=db', true, 302);
     exit();
 }
 
@@ -140,5 +141,5 @@ Logger::activity('PasswordChanged', 'User changed their password');
 // 6. 🔀 Redirect with success message
 // -----------------------------------------------------------------------------
 
-header('Location: /account?pwchanged=1', true, 302);
+header('Location: ' . Site::url('account') . '?pwchanged=1', true, 302);
 exit();

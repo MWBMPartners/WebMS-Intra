@@ -97,7 +97,7 @@ Auth::requireLogin();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets/labels');
+    header('Location: ' . Site::url('assets/labels'));
     exit();
 }
 
@@ -142,7 +142,7 @@ $assets = AssetRegister::assetsForLabels($siteId, $postedAssetIds);
 if (count($assets) === 0) {
     $_SESSION['flash_msg']  = 'No matching assets were selected — pick at least one asset and try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets/labels');
+    header('Location: ' . Site::url('assets/labels'));
     exit();
 }
 
@@ -153,7 +153,7 @@ if ($totalLabels > AssetRegister::MAX_TOTAL_LABELS) {
         . AssetRegister::MAX_TOTAL_LABELS . '-label limit per batch. Reduce the number of assets, '
         . 'copies, or start offset and try again.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /assets/labels');
+    header('Location: ' . Site::url('assets/labels'));
     exit();
 }
 
@@ -227,7 +227,7 @@ if ($generatedPath !== false) {
     <button onclick="window.print()" style="padding: 0.5rem 1rem; background:#198754; color:#fff; border:none; border-radius:0.375rem; cursor:pointer;">
         Print
     </button>
-    <a href="/assets/labels" style="margin-left:0.5rem;">Back to designer</a>
+    <a href="<?php echo htmlspecialchars(Site::url('assets/labels'), ENT_QUOTES, 'UTF-8'); ?>" style="margin-left:0.5rem;">Back to designer</a>
     <p style="max-width:220px; font-size:0.8rem; color:#555;">
         A PDF library isn't installed on this server, so use your browser's print dialog
         (set paper size to A4 and margins to "None") instead.

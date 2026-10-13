@@ -93,7 +93,7 @@ h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
 <body class="print-view">
 <div class="print-controls">
     <button onclick="window.print()" style="padding: 0.5rem 1rem; background:#5e6ad2; color:#fff; border:none; border-radius:0.375rem; cursor:pointer;">Print</button>
-    <a href="/service-plans/edit?id=<?php echo $id; ?>" style="margin-left:0.5rem;">Back</a>
+    <a href="<?php echo htmlspecialchars(Site::url('service-plans/edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $id; ?>" style="margin-left:0.5rem;">Back</a>
 </div>
 
 <h1><?php echo htmlspecialchars((string) $plan['title'], ENT_QUOTES, 'UTF-8'); ?></h1>

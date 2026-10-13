@@ -48,7 +48,7 @@ if (in_array($status, ['planning','active','funded','completed','cancelled'], tr
 if ($title === '' || $targetPence < 100) {
     $_SESSION['flash_msg']  = 'Title and target amount are required.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: /projects/manage');
+    header('Location: ' . Site::url('projects/manage'));
     exit();
 }
 $startOrNull = $started !== '' && strtotime($started) !== false ? $started : null;
@@ -96,8 +96,8 @@ if ($id > 0) {
 $_SESSION['flash_type'] = 'success';
 
 if ($slugForRedirect !== '') {
-    header('Location: /projects/manage?slug=' . urlencode($slugForRedirect));
+    header('Location: ' . Site::url('projects/manage') . '?slug=' . urlencode($slugForRedirect));
 } else {
-    header('Location: /projects/manage');
+    header('Location: ' . Site::url('projects/manage'));
 }
 exit();

@@ -17,7 +17,7 @@ declare(strict_types=1);
 
 $pageTitle   = 'Help - FAQ';
 $pageSection = 'help';
-$breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'FAQ' => ''];
+$breadcrumbs = ['Dashboard' => \Portal\Core\Site::url(''), 'Help' => \Portal\Core\Site::url('help'), 'FAQ' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -28,7 +28,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-comments me-2"></i>Frequently Asked Questions</h1>
         <p class="text-secondary mb-0">Quick answers to common questions about the portal.</p>
     </div>
-    <a href="/help" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Help Centre
     </a>
 </div>
@@ -219,7 +219,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <span>Taken back by the person who made it, before a final decision. It will not be approved or paid, and it cannot be reopened.</span>
                     </div>
                 </div>
-                <p class="mt-2 mb-0 small text-secondary">For more detail, see the <a href="/help/expenses#statuses">Expenses Guide -- Status Meanings</a>.</p>
+                <p class="mt-2 mb-0 small text-secondary">For more detail, see the <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/expenses'), ENT_QUOTES, 'UTF-8'); ?>#statuses">Expenses Guide -- Status Meanings</a>.</p>
             </div>
         </div>
     </div>
@@ -327,7 +327,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div id="faqPortal1" class="accordion-collapse collapse" data-bs-parent="#accordionPortal">
             <div class="accordion-body">
                 <p>Click the <i class="fa-solid fa-moon"></i> moon icon in the top navigation bar (near your avatar). The theme toggles between light and dark mode instantly. Your preference is saved in your browser's local storage and will persist across visits.</p>
-                <p class="mb-0">See the <a href="/help/getting-started#dark-mode">Getting Started -- Dark Mode</a> section for more details.</p>
+                <p class="mb-0">See the <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/getting-started'), ENT_QUOTES, 'UTF-8'); ?>#dark-mode">Getting Started -- Dark Mode</a> section for more details.</p>
             </div>
         </div>
     </div>
@@ -421,21 +421,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h5>Didn't find your answer?</h5>
         <p class="text-secondary mb-2">Try the detailed guides for step-by-step instructions:</p>
         <div class="d-flex flex-wrap justify-content-center gap-2">
-            <a href="/help/getting-started" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-rocket me-1"></i>Getting Started</a>
-            <a href="/help/expenses" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-receipt me-1"></i>Expenses</a>
-            <a href="/help/approvals" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-check-double me-1"></i>Approvals</a>
-            <a href="/help/treasury" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-sterling-sign me-1"></i>Treasury</a>
-            <a href="/help/admin" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-gear me-1"></i>Admin</a>
+            <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/getting-started'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-rocket me-1"></i>Getting Started</a>
+            <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/expenses'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-receipt me-1"></i>Expenses</a>
+            <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/approvals'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-check-double me-1"></i>Approvals</a>
+            <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/treasury'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-sterling-sign me-1"></i>Treasury</a>
+            <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-gear me-1"></i>Admin</a>
         </div>
     </div>
 </div>
 
 <!-- Navigation -->
 <div class="d-flex justify-content-between">
-    <a href="/help/admin" class="btn btn-outline-secondary">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i>Admin Guide
     </a>
-    <a href="/help" class="btn btn-primary">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary">
         <i class="fa-solid fa-house me-1"></i>Help Centre Home
     </a>
 </div>

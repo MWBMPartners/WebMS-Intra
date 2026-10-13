@@ -35,7 +35,7 @@ if (in_array($category, ['illness','hospital','bereavement','family','transition
     $category = 'other';
 }
 if ($summary === '') {
-    header('Location: /care');
+    header('Location: ' . Site::url('care'));
     exit();
 }
 
@@ -52,5 +52,5 @@ try {
     \Portal\Core\Logger::errorPlatform('Care', 'Warning', 'CASE_SAVE', $e->getMessage(), '');
 }
 
-header('Location: /care');
+header('Location: ' . Site::url('care'));
 exit();

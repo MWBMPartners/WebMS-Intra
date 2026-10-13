@@ -36,7 +36,7 @@ try {
 
 $pageTitle   = 'Privacy policy';
 $pageSection = 'privacy';
-$breadcrumbs = ['Dashboard' => '/', 'Privacy policy' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Privacy policy' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -47,14 +47,14 @@ We handle personal data under the UK GDPR and the Data Protection Act 2018.</p>
 
 <h3>Your rights</h3>
 <ul>
-    <li><strong>Article 15 — Right of access</strong>: download everything we hold about you from <a href="/account/my-data">/account/my-data</a>.</li>
-    <li><strong>Article 17 — Right to erasure</strong>: file a request at <a href="/account/erasure-request">/account/erasure-request</a>. We respond within one month.</li>
-    <li><strong>Article 16 — Right to rectification</strong>: edit your profile via <a href="/account">/account</a>.</li>
+    <li><strong>Article 15 — Right of access</strong>: download everything we hold about you from <a href="<?php echo htmlspecialchars(Site::url('account/my-data'), ENT_QUOTES, 'UTF-8'); ?>">/account/my-data</a>.</li>
+    <li><strong>Article 17 — Right to erasure</strong>: file a request at <a href="<?php echo htmlspecialchars(Site::url('account/erasure-request'), ENT_QUOTES, 'UTF-8'); ?>">/account/erasure-request</a>. We respond within one month.</li>
+    <li><strong>Article 16 — Right to rectification</strong>: edit your profile via <a href="<?php echo htmlspecialchars(Site::url('account'), ENT_QUOTES, 'UTF-8'); ?>">/account</a>.</li>
     <li><strong>Article 21 — Right to object</strong>: unsubscribe from any newsletter via the link in its footer.</li>
 </ul>
 
 <h3>Data we hold</h3>
-<p>Sign in to see the exact inventory at <a href="/account/my-data">/account/my-data</a>. In summary we hold: profile information (name, email), authentication tokens, app-specific records (attendance, expenses, giving, etc.), and audit logs.</p>
+<p>Sign in to see the exact inventory at <a href="<?php echo htmlspecialchars(Site::url('account/my-data'), ENT_QUOTES, 'UTF-8'); ?>">/account/my-data</a>. In summary we hold: profile information (name, email), authentication tokens, app-specific records (attendance, expenses, giving, etc.), and audit logs.</p>
 
 <h3>Retention policy</h3>
 <ul>

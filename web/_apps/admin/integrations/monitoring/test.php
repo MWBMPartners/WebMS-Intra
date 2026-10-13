@@ -14,6 +14,7 @@ use Portal\Core\Auth;
 use Portal\Core\ErrorMonitor;
 use Portal\Core\Logger;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -38,5 +39,5 @@ if ($ok === true) {
     $_SESSION['flash_msg']  = 'Test event was NOT accepted — verify DSN and that the host is reachable.';
     $_SESSION['flash_type'] = 'danger';
 }
-header('Location: /admin/integrations/monitoring');
+header('Location: ' . Site::url('admin/integrations/monitoring'));
 exit();

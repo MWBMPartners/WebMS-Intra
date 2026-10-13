@@ -42,14 +42,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_FILES['photo']) === false || $_FILES['photo']['error'] !== UPLOAD_ERR_OK) {
         $_SESSION['flash_msg']  = 'No file uploaded.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /photos/upload');
+        header('Location: ' . Site::url('photos/upload'));
         exit();
     }
     $f = $_FILES['photo'];
     if ((int) $f['size'] > $maxBytes) {
         $_SESSION['flash_msg']  = 'File exceeds ' . $maxMb . ' MB.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /photos/upload');
+        header('Location: ' . Site::url('photos/upload'));
         exit();
     }
     // 🛡️ Never trust the client-declared MIME type ($f['type']) — finfo-sniff
@@ -68,7 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($sniffedMime === false || array_key_exists($sniffedMime, $allowedMimeExt) === false) {
         $_SESSION['flash_msg']  = 'Only JPEG / PNG / WebP accepted.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /photos/upload');
+        header('Location: ' . Site::url('photos/upload'));
         exit();
     }
     $mime = $sniffedMime;
@@ -78,7 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (move_uploaded_file((string) $f['tmp_name'], $dst) === false) {
         $_SESSION['flash_msg']  = 'Could not save file.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /photos/upload');
+        header('Location: ' . Site::url('photos/upload'));
         exit();
     }
 
@@ -117,7 +117,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $_SESSION['flash_msg']  = 'Photo uploaded — pending moderator approval.';
     $_SESSION['flash_type'] = 'success';
-    header('Location: /photos');
+    header('Location: ' . Site::url('photos'));
     exit();
 }
 
@@ -128,7 +128,7 @@ $csrf = Auth::csrfToken();
 
 $pageTitle   = 'Upload photo';
 $pageSection = 'photos';
-$breadcrumbs = ['Dashboard' => '/', 'Photos' => '/photos', 'Upload' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Photos' => Site::url('photos'), 'Upload' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -170,7 +170,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
     <div class="col-12">
         <button class="btn btn-primary" type="submit"><i class="fa-solid fa-upload me-1"></i>Upload for review</button>
-        <a href="/photos" class="btn btn-outline-secondary">Cancel</a>
+        <a href="<?php echo htmlspecialchars(Site::url('photos'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
     </div>
 </div></form>
 

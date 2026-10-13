@@ -22,7 +22,7 @@ declare(strict_types=1);
 
 $pageTitle   = 'Help - Small Groups';
 $pageSection = 'help';
-$breadcrumbs = ['Dashboard' => '/', 'Help' => '/help', 'Small Groups' => ''];
+$breadcrumbs = ['Dashboard' => \Portal\Core\Site::url(''), 'Help' => \Portal\Core\Site::url('help'), 'Small Groups' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -32,7 +32,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-people-group me-2"></i>Small Groups Guide</h1>
         <p class="text-secondary mb-0">Groups, classes, and Bible studies — rosters, meeting rolls, and an optional link to Attendance.</p>
     </div>
-    <a href="/help" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
+    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
         <i class="fa-solid fa-arrow-left me-1"></i>Back to Help Centre
     </a>
 </div>
@@ -55,7 +55,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <section id="overview" class="mb-5">
     <h2 class="h4 mb-3"><i class="fa-solid fa-people-group me-2"></i>What is Small Groups?</h2>
     <p>
-        <a href="/small-groups">Small Groups</a> is a register of the groups, classes, and studies your organisation
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('small-groups'), ENT_QUOTES, 'UTF-8'); ?>">Small Groups</a> is a register of the groups, classes, and studies your organisation
         runs — Sabbath School classes, home groups, Bible studies, or any other regularly-meeting group. Each group has
         a roster of members with roles, an optional meeting location, an optional link to a lesson/study resource, and
         a per-meeting roll for recording who attended.
@@ -63,7 +63,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p class="text-muted small mb-0">
         <strong>Adults only in this version.</strong> Small Groups records portal user memberships — it does not hold
         named child rows. Children's classes can still exist here as groups (with visitor/headcount-only rolls), but
-        a child's own identity, allergies, and safeguarding information live exclusively in the <a href="/kids/checkin">Kids</a>
+        a child's own identity, allergies, and safeguarding information live exclusively in the <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('kids/checkin'), ENT_QUOTES, 'UTF-8'); ?>">Kids</a>
         app, which has its own safeguarding model.
     </p>
 </section>
@@ -71,7 +71,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <section id="attendance-link" class="mb-5">
     <h2 class="h4 mb-3"><i class="fa-solid fa-link me-2"></i>Groups vs Attendance Service Types</h2>
     <p>
-        The <a href="/attendance">Attendance</a> app records headcounts by <strong>service type</strong> — a
+        The <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('attendance'), ENT_QUOTES, 'UTF-8'); ?>">Attendance</a> app records headcounts by <strong>service type</strong> — a
         congregation-wide total for "Sabbath School", "Morning Service", and so on. Small Groups is different: it
         tracks <strong>who, by name</strong>, attended a specific group's meeting.
     </p>
@@ -147,10 +147,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h2 class="h4 mb-3"><i class="fa-solid fa-shield-halved me-2"></i>Data Protection</h2>
     <p>
         Your group memberships, meeting attendance, and any group you created appear in your
-        <a href="/account/data-export">data export</a>. If your account is erased, your membership rows are removed,
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('account/data-export'), ENT_QUOTES, 'UTF-8'); ?>">data export</a>. If your account is erased, your membership rows are removed,
         your attendance/authorship rows are anonymised (the group's own history is retained, but your name is
         detached from it), and any group leadership you held is ended as part of
-        <a href="/offboarding">offboarding</a>.
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('offboarding'), ENT_QUOTES, 'UTF-8'); ?>">offboarding</a>.
     </p>
 </section>
 

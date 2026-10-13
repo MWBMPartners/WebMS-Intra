@@ -385,7 +385,7 @@ if (App::isRootAdmin() === false) {
     http_response_code(403);
     $pageTitle   = 'Demo Data';
     $pageSection = 'admin';
-    $breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Maintenance' => '/admin/maintenance', 'Demo Data' => ''];
+    $breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => Site::url('admin/maintenance'), 'Demo Data' => ''];
     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
     ?>
     <h1 class="mb-3"><i class="fa-solid fa-flask me-2"></i>Demo Data</h1>
@@ -1633,7 +1633,7 @@ $currentSiteName = is_array($currentSite) === true ? (string) ($currentSite['sit
 
 $pageTitle   = 'Demo Data';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Maintenance' => '/admin/maintenance', 'Demo Data' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Maintenance' => Site::url('admin/maintenance'), 'Demo Data' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -1643,7 +1643,7 @@ $csrf = Auth::csrfToken();
         <h1 class="mb-1"><i class="fa-solid fa-flask me-2"></i>Demo Data</h1>
         <p class="text-secondary mb-0">Put a few made-up people and announcements into the portal for training, then take exactly those out again.</p>
     </div>
-    <a href="/admin/maintenance" class="btn btn-outline-secondary btn-sm">&larr; Maintenance</a>
+    <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Maintenance</a>
 </div>
 
 <?php if ($flash !== ''): ?>
@@ -1675,7 +1675,7 @@ $csrf = Auth::csrfToken();
         <p class="mb-0">
             To switch it on, a global administrator sets the portal-wide setting
             <code>portal.demo_mode.enabled</code> to <code>1</code> in
-            <a href="/admin/settings">Settings</a>. A value saved for a single
+            <a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>">Settings</a>. A value saved for a single
             organisation is ignored on purpose, because this page acts on the
             database every organisation shares.
         </p>
@@ -1690,7 +1690,7 @@ $csrf = Auth::csrfToken();
                 while each is still exactly as it was created. It refuses rather
                 than touch anything else. Even so, take a backup first.
             </p>
-            <a href="/admin/maintenance/backup" class="btn btn-outline-primary btn-sm">Take a backup first</a>
+            <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/backup'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm">Take a backup first</a>
         </div>
     </div>
 
@@ -1823,7 +1823,7 @@ $csrf = Auth::csrfToken();
             If you do find any, Wipe will never touch them, because they are not
             on this page's list, and a number alone cannot prove a row is demo
             data. Check each one, then remove it by hand in
-            <a href="/admin/users">Users</a> or Announcements.
+            <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>">Users</a> or Announcements.
         </p>
     </div>
 </div>

@@ -25,7 +25,7 @@ use Portal\Core\Logger;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /admin/calendar/coordinators', true, 302);
+    header('Location: ' . Site::url('admin/calendar/coordinators'), true, 302);
     exit();
 }
 
@@ -46,7 +46,7 @@ $eventId  = (int) ($_POST['eventID'] ?? 0);
 $action   = (string) ($_POST['action'] ?? '');
 $adminId  = (int) ($_SESSION['user_id'] ?? 0);
 $siteId   = Site::id();
-$redirect = '/admin/calendar/coordinators?eventID=' . $eventId;
+$redirect = Site::url('admin/calendar/coordinators') . '?eventID=' . $eventId;
 
 // 🛡️ Confirm event exists in active site.
 // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.

@@ -24,6 +24,7 @@
 declare(strict_types=1);
 
 use Portal\Core\I18n;
+use Portal\Core\Site;
 
 // 🏛️ Venue Bookings (#429) — $venueOverlay is set by the router ([] when
 // the app is disabled/absent/throwing). Only require the strip renderer
@@ -76,7 +77,7 @@ $urlFor = static function (array $overrides) use ($view, $cursor, $filterCategor
             $params[$k] = $v;
         }
     }
-    return '/calendar?' . http_build_query($params);
+    return Site::url('calendar') . '?' . http_build_query($params);
 };
 
 // 📆 Compute prev/next cursors per view (used by the date-nav arrows)
@@ -135,7 +136,7 @@ $viewMeta = [
                 <h2 class="h5 mb-0 ms-2"><?php echo $rangeTitle; /* contains a literal &ndash; — safe */ ?></h2>
             </div>
 
-            <form method="get" action="/calendar" class="d-flex align-items-center gap-2">
+            <form method="get" action="<?php echo htmlspecialchars(Site::url('calendar'), ENT_QUOTES, 'UTF-8'); ?>" class="d-flex align-items-center gap-2">
                 <input type="hidden" name="view" value="<?php echo htmlspecialchars($view, ENT_QUOTES, 'UTF-8'); ?>">
                 <?php if ($filterCategory !== ''): ?>
                     <input type="hidden" name="category" value="<?php echo htmlspecialchars($filterCategory, ENT_QUOTES, 'UTF-8'); ?>">
@@ -191,7 +192,7 @@ $viewMeta = [
     </div>
 
     <!-- Filters row -->
-    <form method="get" action="/calendar" class="row g-2 align-items-end">
+    <form method="get" action="<?php echo htmlspecialchars(Site::url('calendar'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
         <input type="hidden" name="view" value="<?php echo htmlspecialchars($view, ENT_QUOTES, 'UTF-8'); ?>">
         <?php if ($view !== 'list'): ?>
             <input type="hidden" name="date" value="<?php echo htmlspecialchars($cursor->format('Y-m-d'), ENT_QUOTES, 'UTF-8'); ?>">
@@ -256,7 +257,7 @@ $viewMeta = [
             <button type="submit" class="btn btn-sm btn-outline-primary flex-grow-1">
                 <i class="fa-solid fa-filter me-1"></i> Apply
             </button>
-            <a href="/calendar?view=<?php echo htmlspecialchars($view, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-secondary" title="Clear filters">
+            <a href="<?php echo htmlspecialchars(Site::url('calendar'), ENT_QUOTES, 'UTF-8'); ?>?view=<?php echo htmlspecialchars($view, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-secondary" title="Clear filters">
                 <i class="fa-solid fa-rotate-left"></i>
             </a>
         </div>

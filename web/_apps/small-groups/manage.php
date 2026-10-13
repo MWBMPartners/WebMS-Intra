@@ -89,7 +89,7 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $pageTitle   = $isCreate === true ? 'New Group' : 'Edit Group';
 $pageSection = 'small-groups';
-$breadcrumbs = ['Dashboard' => '/', 'Small Groups' => '/small-groups', $pageTitle => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Small Groups' => Site::url('small-groups'), $pageTitle => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
@@ -108,10 +108,10 @@ $val = static fn (string $k, string $default = ''): string => $editGroup !== nul
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-<?php echo $isCreate === true ? 'plus' : 'pen'; ?> me-2"></i><?php echo $esc($pageTitle); ?></h1>
-    <a href="/small-groups" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
+    <a href="<?php echo htmlspecialchars(Site::url('small-groups'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
 </div>
 
-<form method="post" action="/small-groups/save">
+<form method="post" action="<?php echo htmlspecialchars(Site::url('small-groups/save'), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="csrf_token" value="<?php echo $esc(Auth::csrfToken()); ?>">
     <input type="hidden" name="action" value="<?php echo $isCreate === true ? 'create' : 'update'; ?>">
     <?php if ($isCreate === false): ?>
@@ -293,7 +293,7 @@ $val = static fn (string $k, string $default = ''): string => $editGroup !== nul
 
     <div class="d-flex gap-2">
         <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk me-1"></i>Save</button>
-        <a href="/small-groups" class="btn btn-secondary">Cancel</a>
+        <a href="<?php echo htmlspecialchars(Site::url('small-groups'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-secondary">Cancel</a>
     </div>
 </form>
 

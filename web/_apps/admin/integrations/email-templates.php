@@ -17,6 +17,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -51,7 +52,7 @@ if (isset($_GET['render']) === true) {
     $samples = [
         'password-reset'  => ['name' => 'Jane Volunteer', 'resetUrl' => 'https://example.invalid/auth/reset/TOKEN', 'expiresInMinutes' => 60],
         'invite'          => ['inviterName' => 'Alex', 'portalName' => (string) (App::settings()['site']['name'] ?? 'WebMS Intra'), 'inviteUrl' => 'https://example.invalid/auth/invite/TOKEN', 'expiresAt' => '7 days from now', 'message' => 'Welcome aboard!'],
-        'critical-alert'  => ['severity' => 'Critical', 'platform' => 'PHP', 'code' => '500', 'title' => 'Uncaught Error: Call to undefined function foo()', 'detail' => '#0 /var/www/portal/file.php(42): bar()\n#1 {main}', 'url' => '/dashboard'],
+        'critical-alert'  => ['severity' => 'Critical', 'platform' => 'PHP', 'code' => '500', 'title' => 'Uncaught Error: Call to undefined function foo()', 'detail' => '#0 /var/www/portal/file.php(42): bar()\n#1 {main}', 'url' => '/dashboard'], // address-check: allow — sample text for an e-mail preview, shown as words and never followed; links in e-mails are whole addresses and belong to PortalAddress
     ];
     $vars = $samples[$tpl] ?? [];
 
@@ -67,7 +68,7 @@ if (isset($_GET['render']) === true) {
 
 $pageTitle   = 'Email Templates';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Integrations' => '/admin/integrations', 'Email Templates' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Integrations' => Site::url('admin/integrations'), 'Email Templates' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 

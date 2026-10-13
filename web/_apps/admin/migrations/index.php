@@ -46,7 +46,7 @@ use Portal\Core\Site;
 // 📌 Page metadata
 $pageTitle   = 'Database Migrations';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Migrations' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Migrations' => ''];
 
 // 🛡️ A GLOBAL administrator only: see the top of this file. This page
 //    reshapes the database for the WHOLE installation, so an administrator
@@ -115,7 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /admin');
+        header('Location: ' . Site::url('admin'));
         exit();
     }
 
@@ -163,7 +163,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-database me-2"></i>Database Migrations</h1>
     <?php if (count($pendingList) > 0): ?>
-        <form method="post" action="/admin/migrations" class="d-inline">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/migrations'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="run" value="all">
             <button type="submit" class="btn btn-warning"
@@ -245,7 +245,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
             <div class="col-12 col-md-3 text-md-end mt-2 mt-md-0">
                 <?php if ($isApplied === false): ?>
-                    <form method="post" action="/admin/migrations" class="d-inline">
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/migrations'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="run" value="single">
                         <input type="hidden" name="filename" value="<?php echo htmlspecialchars($file, ENT_QUOTES, 'UTF-8'); ?>">

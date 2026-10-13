@@ -43,7 +43,7 @@ if ($stmt !== false) {
 
 $pageTitle   = 'Reading Plans';
 $pageSection = 'reading-plans';
-$breadcrumbs = ['Dashboard' => '/', 'Reading Plans' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Reading Plans' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -52,7 +52,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h1 class="mb-1"><i class="fa-solid fa-book-open me-2"></i>Reading Plans</h1>
         <p class="text-secondary mb-0">Daily reading commitments with progress tracking.</p>
     </div>
-    <a href="/reading-plans/my" class="btn btn-outline-primary btn-sm">My plans</a>
+    <a href="<?php echo htmlspecialchars(Site::url('reading-plans/my'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm">My plans</a>
 </div>
 
 <?php if (count($plans) === 0): ?>
@@ -86,7 +86,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             </div>
                             <p class="small text-muted mb-2">Day <?php echo (int) $p['currentDay']; ?> of <?php echo (int) $p['totalDays']; ?></p>
                         <?php endif; ?>
-                        <a href="/reading-plans/plan?id=<?php echo (int) $p['planID']; ?>" class="btn btn-sm <?php echo $enrolled === true ? 'btn-success' : 'btn-outline-primary'; ?>">
+                        <a href="<?php echo htmlspecialchars(Site::url('reading-plans/plan'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $p['planID']; ?>" class="btn btn-sm <?php echo $enrolled === true ? 'btn-success' : 'btn-outline-primary'; ?>">
                             <?php echo $enrolled === true ? 'Continue' : 'View / enroll'; ?>
                         </a>
                     </div>

@@ -25,7 +25,7 @@ use Portal\Core\Logger;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /calendar', true, 302);
+    header('Location: ' . Site::url('calendar'), true, 302);
     exit();
 }
 
@@ -62,7 +62,7 @@ $ok = (bool) $stmt->get_result()->fetch_assoc();
 $stmt->close();
 if ($ok === false) { http_response_code(404); exit('Event not found'); }
 
-$redirect = '/calendar/event/attendance?eventID=' . $eventId;
+$redirect = Site::url('calendar/event/attendance') . '?eventID=' . $eventId;
 
 if ($toggle === 1) {
     // 💾 Insert (idempotent via unique key).

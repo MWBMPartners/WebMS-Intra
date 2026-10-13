@@ -40,7 +40,7 @@ try {
             $stmt->execute();
             $stmt->close();
         }
-        header('Location: /visitors/profile?id=' . $id);
+        header('Location: ' . Site::url('visitors/profile') . '?id=' . $id);
         exit();
     }
 
@@ -52,7 +52,7 @@ try {
     $assignedToID = (int) ($_POST['assignedToID'] ?? 0);
     $notes  = trim((string) ($_POST['notes'] ?? '')) ?: null;
     if ($name === '') {
-        header('Location: /visitors/new');
+        header('Location: ' . Site::url('visitors/new'));
         exit();
     }
     if (in_array($source, ['in-person','public-form','referral','website','other'], true) === false) {
@@ -72,5 +72,5 @@ try {
     \Portal\Core\Logger::errorPlatform('Visitors', 'Warning', 'SAVE', $e->getMessage(), '');
 }
 
-header('Location: /visitors');
+header('Location: ' . Site::url('visitors'));
 exit();

@@ -51,10 +51,11 @@ use Portal\Core\FormEngine;
 use Portal\Core\Logger;
 use Portal\Core\RateLimiter;
 use Portal\Core\Router;
+use Portal\Core\Site;
 
 // 🚦 1. Method gate.
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /', true, 303);
+    header('Location: ' . Site::url(''), true, 303);
     exit();
 }
 
@@ -92,7 +93,7 @@ if ($audienceOk === false || $isPublished === false || $isOpen === false || $sit
 }
 
 $formId = (int) $form['formID'];
-$backToForm = '/f/' . $token;
+$backToForm = Site::url('f/') . $token;
 
 /**
  * Redirect back to the public fill page with a generic `?err=` flash, then

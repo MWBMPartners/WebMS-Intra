@@ -77,7 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
                 }
             }
             $db->commit();
-            header('Location: /service-plans/edit?id=' . $planId);
+            header('Location: ' . Site::url('service-plans/edit') . '?id=' . $planId);
             exit();
         } catch (\Throwable $e) {
             $db->rollback();
@@ -88,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
 
 $pageTitle   = 'New service plan';
 $pageSection = 'service-plans';
-$breadcrumbs = ['Dashboard' => '/', 'Service Plans' => '/service-plans', 'New' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Service Plans' => Site::url('service-plans'), 'New' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 ?>
@@ -117,7 +117,7 @@ $csrf = Auth::csrfToken();
                 <div class="form-text">Each template seeds a recommended set of sections; you can edit, reorder, add and remove afterwards.</div>
             </div>
             <button type="submit" class="btn btn-primary">Create plan</button>
-            <a href="/service-plans" class="btn btn-outline-secondary">Cancel</a>
+            <a href="<?php echo htmlspecialchars(Site::url('service-plans'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Cancel</a>
         </form>
     </div>
 </div>

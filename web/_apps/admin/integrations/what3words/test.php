@@ -21,6 +21,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Site;
 use Portal\Core\What3Words;
 
 Auth::ensureSession();
@@ -34,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token
     exit('Bad request');
 }
 
-$redirect = '/admin/integrations/what3words';
+$redirect = Site::url('admin/integrations/what3words');
 
 $result = What3Words::testConnection();
 

@@ -14,6 +14,7 @@ use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
 use Portal\Core\Markdown;
 use Portal\Core\PortalAddress;
+use Portal\Core\Router;
 use Portal\Core\ServicePlanLink;
 use Portal\Core\Site;
 
@@ -24,7 +25,7 @@ $db     = App::db();
 $siteId = Site::id();
 $id     = (int) ($_GET['id'] ?? 0);
 if ($id <= 0) {
-    header('Location: /service-plans');
+    header('Location: ' . Site::url('service-plans'));
     exit();
 }
 
@@ -103,7 +104,7 @@ if ($stmt !== false) {
 
 $pageTitle   = (string) $plan['title'];
 $pageSection = 'service-plans';
-$breadcrumbs = ['Dashboard' => '/', 'Service Plans' => '/service-plans', (string) $plan['title'] => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Service Plans' => Site::url('service-plans'), (string) $plan['title'] => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 
@@ -152,13 +153,13 @@ $sectionTypes = [
         </p>
     </div>
     <div>
-        <a href="/service-plans/print?id=<?php echo $id; ?>&version=leader" target="_blank" class="btn btn-outline-secondary btn-sm">
+        <a href="<?php echo htmlspecialchars(Site::url('service-plans/print'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $id; ?>&version=leader" target="_blank" class="btn btn-outline-secondary btn-sm">
             <i class="fa-solid fa-print me-1"></i>Print (leader)
         </a>
-        <a href="/service-plans/print?id=<?php echo $id; ?>&version=congregation" target="_blank" class="btn btn-outline-secondary btn-sm">
+        <a href="<?php echo htmlspecialchars(Site::url('service-plans/print'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $id; ?>&version=congregation" target="_blank" class="btn btn-outline-secondary btn-sm">
             <i class="fa-solid fa-print me-1"></i>Print (congregation)
         </a>
-        <a href="/service-plans" class="btn btn-outline-secondary btn-sm">&larr; Back</a>
+        <a href="<?php echo htmlspecialchars(Site::url('service-plans'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Back</a>
     </div>
 </div>
 
@@ -169,7 +170,7 @@ $sectionTypes = [
 <!-- Plan metadata -->
 <div class="card mb-3">
     <div class="card-body">
-        <form method="post" action="/service-plans/save" class="row g-2">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('service-plans/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="planID" value="<?php echo $id; ?>">
             <div class="col-md-5">
@@ -203,7 +204,7 @@ $sectionTypes = [
             <p class="text-muted small mb-0">
                 Public sharing is turned off for this site.
                 <?php if (App::isAdmin() === true): ?>
-                    An admin can enable it at <a href="/admin/hymns">/admin/hymns</a>.
+                    An admin can enable it at <a href="<?php echo htmlspecialchars(Site::url('admin/hymns'), ENT_QUOTES, 'UTF-8'); ?>">/admin/hymns</a>.
                 <?php endif; ?>
             </p>
         <?php elseif ($isPlanShared === true): ?>
@@ -218,13 +219,13 @@ $sectionTypes = [
                   // (.htaccess), so this picture was broken on every installation (found 12 October 2026, #500). ?>
             <img src="<?php echo htmlspecialchars(Site::url('qr'), ENT_QUOTES, 'UTF-8'); ?>?content=<?php echo urlencode($publicUrl); ?>&amp;size=160" width="160" height="160" alt="QR code for the public Order of Service" class="mb-2 border rounded">
             <div class="d-flex gap-2">
-                <form method="post" action="/service-plans/share">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('service-plans/share'), ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="planID" value="<?php echo $id; ?>">
                     <input type="hidden" name="action" value="rotate">
                     <button type="submit" class="btn btn-sm btn-outline-secondary" data-confirm="Rotate the link? The old link/QR code will stop working." data-confirm-destructive="true"><i class="fa-solid fa-rotate me-1"></i>Rotate link</button>
                 </form>
-                <form method="post" action="/service-plans/share">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('service-plans/share'), ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="planID" value="<?php echo $id; ?>">
                     <input type="hidden" name="action" value="disable">
@@ -233,7 +234,7 @@ $sectionTypes = [
             </div>
         <?php else: ?>
             <p class="text-muted small">Not shared. Enabling renders only the order/titles/hymns/presenter names — internal notes are never shown, and it only becomes visible once this plan's status is "published".</p>
-            <form method="post" action="/service-plans/share">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('service-plans/share'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="planID" value="<?php echo $id; ?>">
                 <input type="hidden" name="action" value="enable">
@@ -252,7 +253,7 @@ $sectionTypes = [
             <div class="portal-data-list">
                 <div class="portal-data-row">
                     <div class="portal-data-row-main">
-                        <a href="/worship/plan?id=<?php echo (int) $worshipLink['planID']; ?>" class="text-decoration-none fw-semibold">
+                        <a href="<?php echo htmlspecialchars(Site::url('worship/plan'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $worshipLink['planID']; ?>" class="text-decoration-none fw-semibold">
                             <?php echo htmlspecialchars((string) $worshipLink['name'], ENT_QUOTES, 'UTF-8'); ?>
                         </a>
                         <?php if ((int) $worshipLink['isActive'] === 0): ?>
@@ -279,10 +280,10 @@ $sectionTypes = [
                         </div>
                     </div>
                     <div class="portal-data-row-aside">
-                        <a href="/worship/plan?id=<?php echo (int) $worshipLink['planID']; ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-pen me-1"></i>Open</a>
-                        <a href="/worship/present?id=<?php echo (int) $worshipLink['planID']; ?>" class="btn btn-sm btn-outline-secondary"><i class="fa-solid fa-play me-1"></i>Present</a>
+                        <a href="<?php echo htmlspecialchars(Site::url('worship/plan'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $worshipLink['planID']; ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-pen me-1"></i>Open</a>
+                        <a href="<?php echo htmlspecialchars(Site::url('worship/present'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $worshipLink['planID']; ?>" class="btn btn-sm btn-outline-secondary"><i class="fa-solid fa-play me-1"></i>Present</a>
                         <?php if (App::isAdmin() === true): ?>
-                            <form method="post" action="/worship/plan/link" class="d-inline">
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('worship/plan/link'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="worshipPlanID" value="<?php echo (int) $worshipLink['planID']; ?>">
                                 <input type="hidden" name="action" value="unpair">
@@ -295,7 +296,7 @@ $sectionTypes = [
             </div>
         <?php elseif (App::isAdmin() === true): ?>
             <?php if (count($worshipCandidates) > 0): ?>
-                <form method="post" action="/worship/plan/link" class="row g-2 align-items-end">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('worship/plan/link'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="runPlanID" value="<?php echo $id; ?>">
                     <input type="hidden" name="action" value="pair">
@@ -333,21 +334,21 @@ $sectionTypes = [
         <h2 class="h5">Sections</h2>
         <?php foreach ($items as $idx => $it): ?>
             <div class="border-bottom py-3">
-                <form method="post" action="/service-plans/item-save" class="row g-2">
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('service-plans/item-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="planID" value="<?php echo $id; ?>">
                     <input type="hidden" name="itemID" value="<?php echo (int) $it['itemID']; ?>">
                     <input type="hidden" name="action" value="update">
                     <div class="col-md-1 text-center small text-muted">
                         <strong><?php echo $idx + 1; ?></strong><br>
-                        <form method="post" action="/service-plans/item-save" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('service-plans/item-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="planID" value="<?php echo $id; ?>">
                             <input type="hidden" name="itemID" value="<?php echo (int) $it['itemID']; ?>">
                             <input type="hidden" name="action" value="move-up">
                             <button type="submit" class="btn btn-link btn-sm p-0" title="Move up" <?php echo $idx === 0 ? 'disabled' : ''; ?>>▲</button>
                         </form>
-                        <form method="post" action="/service-plans/item-save" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('service-plans/item-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="planID" value="<?php echo $id; ?>">
                             <input type="hidden" name="itemID" value="<?php echo (int) $it['itemID']; ?>">
@@ -393,7 +394,7 @@ $sectionTypes = [
                     </div>
                     <div class="col-md-2 text-end">
                         <button type="submit" class="btn btn-success btn-sm">Save</button>
-                        <form method="post" action="/service-plans/item-save" class="d-inline">
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('service-plans/item-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="planID" value="<?php echo $id; ?>">
                             <input type="hidden" name="itemID" value="<?php echo (int) $it['itemID']; ?>">
@@ -413,7 +414,7 @@ $sectionTypes = [
         <?php endforeach; ?>
 
         <!-- Add item -->
-        <form method="post" action="/service-plans/item-save" class="row g-2 mt-3 pt-3 border-top">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('service-plans/item-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mt-3 pt-3 border-top">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="planID" value="<?php echo $id; ?>">
             <input type="hidden" name="action" value="create">
@@ -515,7 +516,7 @@ $sectionTypes = [
                 list.innerHTML = '';
                 return;
             }
-            fetch('/api/service-plans/hymn-search?q=' + encodeURIComponent(q) + '&limit=12', { credentials: 'same-origin' })
+            fetch('<?php echo Router::urlForScript('api/service-plans/hymn-search'); ?>?q=' + encodeURIComponent(q) + '&limit=12', { credentials: 'same-origin' })
                 .then(function (r) { return r.json(); })
                 .then(function (json) {
                     var results = (json && json.data && json.data.results) || [];

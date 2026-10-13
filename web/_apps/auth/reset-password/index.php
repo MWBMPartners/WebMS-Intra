@@ -25,13 +25,14 @@ require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEP
 use Portal\Core\Asset;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
+use Portal\Core\Site;
 
 // -----------------------------------------------------------------------------
 // 1. 🔀 If already logged in, redirect to account page
 // -----------------------------------------------------------------------------
 
 if (Auth::check() === true) {
-    header('Location: /account', true, 302);
+    header('Location: ' . Site::url('account'), true, 302);
     exit();
 }
 
@@ -149,17 +150,17 @@ $policyItems = $policy['rules'];
             <i class="fa-solid fa-circle-exclamation me-1"></i>
             <?php echo htmlspecialchars($errorMsg, ENT_QUOTES, 'UTF-8'); ?>
         </div>
-        <a href="/forgot-password" class="btn btn-outline-primary w-100 mb-2">
+        <a href="<?php echo htmlspecialchars(Site::url('forgot-password'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary w-100 mb-2">
             <i class="fa-solid fa-paper-plane me-1"></i> Request a New Reset Link
         </a>
-        <a href="/login" class="btn btn-outline-secondary w-100">
+        <a href="<?php echo htmlspecialchars(Site::url('login'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100">
             <i class="fa-solid fa-arrow-left me-1"></i> Back to Sign In
         </a>
     <?php else: ?>
         <p class="text-muted small text-center mb-3">Enter your new password below.</p>
 
         <!-- 📝 New password form -->
-        <form method="post" action="/reset-password/save" novalidate>
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('reset-password/save'), ENT_QUOTES, 'UTF-8'); ?>" novalidate>
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="token" value="<?php echo htmlspecialchars($plaintextToken, ENT_QUOTES, 'UTF-8'); ?>">
 
@@ -202,7 +203,7 @@ $policyItems = $policy['rules'];
                 <i class="fa-solid fa-check me-1"></i> Update Password
             </button>
 
-            <a href="/login" class="btn btn-outline-secondary w-100">
+            <a href="<?php echo htmlspecialchars(Site::url('login'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100">
                 <i class="fa-solid fa-arrow-left me-1"></i> Back to Sign In
             </a>
         </form>

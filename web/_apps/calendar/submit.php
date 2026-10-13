@@ -51,7 +51,7 @@ $captchaOn = $requireCap === true
     && Captcha::isConfigured() === true;
 
 if ($isLoggedIn === false && $allowAnon === false) {
-    header('Location: /auth/login?redirect=' . urlencode('/calendar/submit'), true, 302);
+    header('Location: ' . Site::url('login') . '?redirect=' . urlencode(Site::url('calendar/submit')), true, 302);
     exit();
 }
 
@@ -104,9 +104,9 @@ if ($captchaOn === true) {
                 You'll receive an email at the address you provided when it's approved.
             <?php endif; ?>
         </div>
-        <a href="/calendar" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back to calendar</a>
+        <a href="<?php echo htmlspecialchars(Site::url('calendar'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back to calendar</a>
     <?php else: ?>
-        <form method="post" action="/calendar/submit-save" autocomplete="off">
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/submit-save'), ENT_QUOTES, 'UTF-8'); ?>" autocomplete="off">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
 
             <div class="row g-3">
@@ -181,7 +181,7 @@ if ($captchaOn === true) {
 
                 <div class="col-12">
                     <button type="submit" class="btn btn-primary"><i class="fa-solid fa-paper-plane me-1"></i> Submit for review</button>
-                    <a href="/calendar" class="btn btn-outline-secondary ms-2">Cancel</a>
+                    <a href="<?php echo htmlspecialchars(Site::url('calendar'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary ms-2">Cancel</a>
                 </div>
             </div>
         </form>

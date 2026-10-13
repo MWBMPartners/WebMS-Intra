@@ -460,7 +460,7 @@ while ($e = $result->fetch_assoc()) {
                 [
                     'title' => (string) $e['eventName'] . ' starts soon',
                     'body'  => 'Starting at ' . $when . $pushWhere,
-                    'url'   => '/calendar/event?slug=' . rawurlencode((string) $e['eventSlug']),
+                    'url'   => Site::url('calendar/event') . '?slug=' . rawurlencode((string) $e['eventSlug']),
                     'tag'   => 'evt' . (int) $e['eventID'],
                 ],
                 $ttl,

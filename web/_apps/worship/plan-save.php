@@ -28,7 +28,7 @@ use Portal\Core\Logger;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /worship/plans', true, 302); exit();
+    header('Location: ' . Site::url('worship/plans'), true, 302); exit();
 }
 
 Auth::ensureSession();
@@ -77,7 +77,7 @@ if ($action === 'save-metadata') {
     if ($name === '') {
         $_SESSION['flash_msg']  = 'Name is required.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /worship/plan' . ($planId > 0 ? '?id=' . $planId : '?new=1'), true, 302);
+        header('Location: ' . Site::url('worship/plan') . ($planId > 0 ? '?id=' . $planId : '?new=1'), true, 302);
         exit();
     }
 
@@ -114,7 +114,7 @@ if ($action === 'save-metadata') {
         $newId = (int) $stmt->insert_id;
         $stmt->close();
         Logger::activity('ServicePlanCreated', 'Plan #' . $newId . ' "' . $name . '"');
-        header('Location: /worship/plan?id=' . $newId, true, 302); exit();
+        header('Location: ' . Site::url('worship/plan') . '?id=' . $newId, true, 302); exit();
     }
 
     // ✏️ Update existing.
@@ -129,7 +129,7 @@ if ($action === 'save-metadata') {
     $stmt->execute();
     $stmt->close();
     Logger::activity('ServicePlanUpdated', 'Plan #' . $planId);
-    header('Location: /worship/plan?id=' . $planId, true, 302); exit();
+    header('Location: ' . Site::url('worship/plan') . '?id=' . $planId, true, 302); exit();
 }
 
 // =============================================================================
@@ -138,7 +138,7 @@ if ($action === 'save-metadata') {
 if ($plan === null) { http_response_code(400); exit('Plan required'); }
 if ($gate($plan) === false) { http_response_code(403); exit('Forbidden'); }
 
-$redirect = '/worship/plan?id=' . $planId;
+$redirect = Site::url('worship/plan') . '?id=' . $planId;
 
 if ($action === 'add-song') {
     $songId = (int) ($_POST['songID'] ?? 0);

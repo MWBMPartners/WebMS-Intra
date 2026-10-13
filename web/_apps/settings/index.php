@@ -57,7 +57,7 @@ use Portal\Core\Site;
 // 📌 Page metadata for the template system
 $pageTitle   = 'Settings';
 $pageSection = 'admin';
-$breadcrumbs = ['Dashboard' => '/', 'Admin' => '/admin', 'Settings' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Settings' => ''];
 
 // 🛡️ Admin access check (Router handles isProtected login enforcement)
 if (App::isAdmin() === false) {
@@ -84,7 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: /settings');
+        header('Location: ' . Site::url('settings'));
         exit();
     }
     // -------------------------------------------------------------------------
@@ -140,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
             );
             $_SESSION['flash_msg']  = GivingRetention::LOCKED_MESSAGE;
             $_SESSION['flash_type'] = 'danger';
-            header('Location: /settings');
+            header('Location: ' . Site::url('settings'));
             exit();
         }
 
@@ -249,7 +249,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
                     . 'unless it has set its own. Only a global administrator '
                     . 'can delete it.';
                 $_SESSION['flash_type'] = 'danger';
-                header('Location: /settings');
+                header('Location: ' . Site::url('settings'));
                 exit();
             }
 
@@ -267,7 +267,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
                     . 'website, which anybody on the internet can read without '
                     . 'signing in. Only a global administrator can delete those.';
                 $_SESSION['flash_type'] = 'danger';
-                header('Location: /settings');
+                header('Location: ' . Site::url('settings'));
                 exit();
             }
 
@@ -285,7 +285,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
                     . 'name like that as the same name as a protected setting, so '
                     . 'only a global administrator can delete it.';
                 $_SESSION['flash_type'] = 'danger';
-                header('Location: /settings');
+                header('Location: ' . Site::url('settings'));
                 exit();
             }
         }
@@ -362,7 +362,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
             . 'organisation\'s own settings, but not remove them.';
         $_SESSION['flash_type'] = 'danger';
     }
-    header('Location: /settings');
+    header('Location: ' . Site::url('settings'));
     exit();
 }
 
@@ -639,7 +639,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     </button>
                                     <?php endif; ?>
                                     <?php if ($isRoot === true && $isGivingRule === false && $organisationsLocked === false && $mailLocked === false && $versionLocked === false && $zoneLocked === false): ?>
-                                        <form method="post" action="/settings" class="d-inline">
+                                        <form method="post" action="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                             <input type="hidden" name="action" value="delete">
                                             <input type="hidden" name="settingID" value="<?php echo (int) $row['settingID']; ?>">
@@ -664,7 +664,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="modal fade" id="editModal" tabindex="-1" aria-labelledby="editLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
         <div class="modal-content">
-            <form method="post" action="/settings/save">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('settings/save'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="settingID" id="edit-settingID">
                 <div class="modal-header">
@@ -709,7 +709,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="modal fade" id="addModal" tabindex="-1" aria-labelledby="addLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
         <div class="modal-content">
-            <form method="post" action="/settings/save">
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('settings/save'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                 <div class="modal-header">
                     <h5 class="modal-title" id="addLabel"><i class="fa-solid fa-plus me-1"></i> Add New Setting</h5>

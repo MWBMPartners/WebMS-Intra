@@ -42,7 +42,7 @@ use Portal\Core\ServicePlanLink;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: /worship/plans', true, 302);
+    header('Location: ' . Site::url('worship/plans'), true, 302);
     exit();
 }
 
@@ -134,8 +134,8 @@ if ($action === 'pair') {
 }
 
 if ($from === 'runsheet' && $redirectRunPlanId > 0) {
-    header('Location: /service-plans/edit?id=' . $redirectRunPlanId, true, 302);
+    header('Location: ' . Site::url('service-plans/edit') . '?id=' . $redirectRunPlanId, true, 302);
 } else {
-    header('Location: /worship/plan?id=' . $worshipPlanId, true, 302);
+    header('Location: ' . Site::url('worship/plan') . '?id=' . $worshipPlanId, true, 302);
 }
 exit();

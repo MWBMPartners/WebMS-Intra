@@ -15,6 +15,8 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Router;
+use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -25,7 +27,7 @@ $nonce   = App::cspNonce();
 
 $pageTitle   = 'Noticeboard';
 $pageSection = 'noticeboard';
-$breadcrumbs = ['Dashboard' => '/', 'Noticeboard' => ''];
+$breadcrumbs = ['Dashboard' => Site::url(''), 'Noticeboard' => ''];
 
 // 🔐 Board needs Canva iframes + externally-hosted poster media on THIS page only.
 //    See _core/templates/header.php CSP extension contract.
@@ -48,14 +50,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     // Load all posters for the current site.
     load: async function () {
-      const r = await fetch('/api/noticeboard/list', { credentials: 'same-origin' });
+      const r = await fetch('<?php echo Router::urlForScript('api/noticeboard/list'); ?>', { credentials: 'same-origin' });
       const j = await r.json();
       return (j && j.data) ? j.data : [];
     },
 
     // Persist the full poster array (called on add / edit / delete).
     save: async function (posters) {
-      await fetch('/api/noticeboard/save', {
+      await fetch('<?php echo Router::urlForScript('api/noticeboard/save'); ?>', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.NoticeboardHost.csrf },
@@ -71,7 +73,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     upload: async function (file) {
       const fd = new FormData();
       fd.append('file', file);
-      const r = await fetch('/api/noticeboard/upload', {
+      const r = await fetch('<?php echo Router::urlForScript('api/noticeboard/upload'); ?>', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'X-CSRF-Token': window.NoticeboardHost.csrf },
@@ -86,7 +88,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     // QR for the share/deep-link panel — served by Portal\Core\Qr (or CueRCode).
     qrUrl: function (text) {
-      return '/api/noticeboard/qr?data=' + encodeURIComponent(text);
+      return '<?php echo Router::urlForScript('api/noticeboard/qr'); ?>?data=' + encodeURIComponent(text);
     }
   };
 </script>
