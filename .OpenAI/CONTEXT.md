@@ -364,8 +364,27 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     from `UTC_TIMESTAMP()`; a time on a clock becomes one through
     `MailQueue::useBy()`. **An event's time zone is `tblEvents.timezone`, the
     column the event form writes; never read `tblEvents.eventTimezone` for it**
-    (only the feed importer writes that one). The certificate is always checked;
-    a failure holds mail, and so does restoring a backup.
+    (only the feed importer writes that one). The certificate is always checked unless a global administrator has
+    deliberately decided otherwise: `MailRoutes::certificateCheck()` is the ONE
+    place `mail.smtp.certCheck` is read (`on`, `off`, or `only:<fingerprint>`;
+    anything else counts as `on`). A failure holds mail, and so does restoring a
+    backup. The three ways past a failed check (one held message, accept only
+    this certificate, switch off) are on the e-mail page, for a global
+    administrator and SMTP only, through the one chain at the top of
+    `web/_apps/admin/integrations/email.php`. **The e-mail page is the ONE place
+    the mail server's name and the certificate setting are changed: the general
+    Settings page refuses them (`MailRoutes::lockedInGeneralEditor()`).**
+    Checking switches itself back on (`MailRoutes::recheckCertificate()`, asked
+    at every run of the job whatever route is in use), and the standing warning
+    is read from what is stored (`MailRoutes::standingWarning()`), never from a
+    session and never from which route is in use; its `publicLine` names nobody
+    and is what the health line shows. A send made for ONE message past the
+    check must never clear the fault on record because it got through. **A fault
+    on record for the SMTP mailbox stops mail only while SMTP is the route in
+    use: `MailRoutes::standingProblem()` is the ONE place that says whether a
+    fault stands in the way of mail, and `certificateOnRecord()` /
+    `certificateProblem()` are for showing only.** Test: `tools/mail-queue-
+    pages-selftest.php`.
     Sending a test, from the e-mail page or the Integrations page, is for a
     global administrator only: one mail route serves every organisation.
 

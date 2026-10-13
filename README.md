@@ -168,6 +168,14 @@ for about a minute before putting it back:
 SELFTEST_DB_NAME=selftest_strict SELFTEST_DB_PORT=<port> SELFTEST_DB_PASS=<password> php tools/db-strict-mode-selftest.php
 ```
 
+The mail queue's page and the ways past a failed certificate have a page test of their own (#592, part 4). It needs a
+throwaway database that already holds `web/_sql/full_schema.sql`, and two free ports (the second stands in for
+Microsoft 365):
+
+```bash
+SELFTEST_DB_NAME=selftest_x SELFTEST_DB_PORT=<port> SELFTEST_DB_PASS=<password> SELFTEST_WEB_DIR=/a/quiet/folder php tools/mail-queue-pages-selftest.php
+```
+
 (That command is given instead of a number on purpose. This sentence used to
 say "15 crafted version strings". The count reached 36 within hours, and the
 sentence did not. A number in prose goes stale the moment somebody improves the

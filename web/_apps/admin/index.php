@@ -65,6 +65,9 @@ use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Channel;
+use Portal\Core\Mailer;
+use Portal\Core\MailQueue;
+use Portal\Core\MailRoutes;
 use Portal\Core\PortalAddress;
 use Portal\Core\ReservedKeys;
 use Portal\Core\Router;
@@ -494,6 +497,63 @@ $addressOffer      = ($isUmbrella === true && $addressHere !== '' && $addressIsA
     <?php else: ?>
     Ask a global administrator to check it.
     <?php endif; ?>
+</div>
+<?php endif; ?>
+<?php
+// ✉️ Two notices about the mail server's certificate (#592, part 4), for a
+// GLOBAL administrator only: the mail route is the installation's, and only
+// they can do anything about either.
+//
+//   MAIL IS HELD: the certificate failed its check, so nothing is going out,
+//   password-reset links included. This is how the global administrator is
+//   told WITHOUT e-mail, which is the one thing that cannot reach them now.
+//
+//   CHECKING IS OFF, OR ONE CERTIFICATE IS ACCEPTED: the standing warning.
+//   It is read from what is STORED (MailRoutes::standingWarning()), on every
+//   load, so it shows to every global administrator, whoever set it and
+//   however, until checking is back on. It says when it was set, and who
+//   set it when the activity log still vouches for that. It is drawn
+//   WHATEVER MAIL ROUTE IS IN USE: "off" stays stored, and in force for a
+//   "Send test" through the SMTP mailbox, after another route is chosen.
+//   (It used to vanish then, with checking still off.)
+//
+// Both can show at once: one certificate is accepted, and the server has
+// started showing another. "Mail is held" is drawn only while SMTP is the
+// route in use. A record that cannot be read shows nothing here; the health
+// page says so.
+$mailHeld        = null;
+$mailUnchecked   = null;
+$mailHeldCount   = 0;
+if ($isUmbrella === true) {
+    try {
+        $mailZone      = (string) (Site::current()['timezone'] ?? 'UTC');
+        $mailUnchecked = MailRoutes::standingWarning($mysqli, $mailZone);
+        if (Mailer::provider() === MailRoutes::SMTP) {
+            $mailHeld = MailRoutes::certificateOnRecord($mysqli, $mailZone);
+        }
+        $mailHeldCount = $mailHeld === null ? 0 : MailQueue::counts($mysqli)['held'];
+    } catch (\Throwable $e) {
+        error_log('The admin dashboard could not read the mail route\'s record: ' . $e->getMessage());
+    }
+}
+$mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES, 'UTF-8');
+?>
+<?php if ($mailHeld !== null): ?>
+<div class="alert alert-danger small text-break" role="alert" id="mail-certificate-failed">
+    <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
+    <strong>No e-mail is going out: the mail server's certificate failed its check.</strong>
+    Every message is being held (<?php echo (int) $mailHeldCount; ?> so far), password-reset links included. This notice is here because an e-mail could not reach you.
+    What the check found: <?php echo htmlspecialchars($mailHeld['words'], ENT_QUOTES, 'UTF-8'); ?>
+    First seen <?php echo htmlspecialchars($mailHeld['since'], ENT_QUOTES, 'UTF-8'); ?>.
+    <a href="<?php echo $mailPage; ?>" class="alert-link">See the certificate, and what can be done, at Admin, Integrations, Email</a>.
+</div>
+<?php endif; ?>
+<?php if ($mailUnchecked !== null): ?>
+<div class="alert alert-<?php echo $mailUnchecked['mode'] === MailRoutes::CHECK_OFF ? 'danger' : 'warning'; ?> small text-break" role="alert" id="mail-certificate-unchecked" data-mail-warning="<?php echo $mailUnchecked['mode'] === MailRoutes::CHECK_OFF ? 'checking-off' : 'one-certificate'; ?>">
+    <i class="fa-solid fa-shield-halved me-1" aria-hidden="true"></i>
+    <strong><?php echo htmlspecialchars($mailUnchecked['headline'], ENT_QUOTES, 'UTF-8'); ?>.</strong>
+    <?php echo htmlspecialchars($mailUnchecked['line'], ENT_QUOTES, 'UTF-8'); ?>
+    <a href="<?php echo $mailPage; ?>" class="alert-link">Open the e-mail page</a>.
 </div>
 <?php endif; ?>
 <?php if ($dbStrictness['state'] !== 'ok'): ?>

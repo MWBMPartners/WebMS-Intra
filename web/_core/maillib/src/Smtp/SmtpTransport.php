@@ -16,9 +16,16 @@
  *   recipients, "here comes the message", the message, the server's verdict.
  *
  * THE RULES IT KEEPS
- *   - 🔒 Always encrypted, certificate always checked. No sign-in line, no
- *     address and no message is written before encryption is on. A server
- *     that does not offer encryption gets nothing.
+ *   - 🔒 Always encrypted. No sign-in line, no address and no message is
+ *     written before encryption is on. A server that does not offer
+ *     encryption gets nothing. The certificate is checked in full unless the
+ *     caller asks otherwise for that send (`SendOptions`): for ONE named
+ *     certificate, or, since 13 October 2026, for no check at all.
+ *   - 🔓 "No check at all" is still two careful steps, on every new
+ *     connection: the certificate is READ on a connection that cannot write
+ *     (`CertificateReader`), and the sending connection then accepts exactly
+ *     the certificate that was read. See `connect()`. It cannot tell the mail
+ *     server from an impostor: that is what the caller gave up by asking.
  *   - 🪪 When the certificate check fails, nothing is sent, and the result
  *     says WHY (see `CertificateReader`), as `needs-person`. The certificate
  *     is blamed only when PHP says it refused the certificate, or this
@@ -63,7 +70,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.1.0
+ * @version   0.2.0
  * @link      https://www.rfc-editor.org/rfc/rfc5321 (SMTP)
  * @link      https://www.rfc-editor.org/rfc/rfc4954 (signing in)
  * -----------------------------------------------------------------------------
@@ -102,10 +109,21 @@ final class SmtpTransport implements Transport
 
     private readonly Clock $clock;
 
+    /**
+     * What `$connectionRule` holds for a connection made with the certificate
+     * not checked. It can never be mistaken for a fingerprint, which is 64
+     * hexadecimal characters.
+     */
+    private const NOT_CHECKED = 'not-checked';
+
     private ?Connection $connection = null;
 
-    /** The certificate rule the open connection was made under: empty for checked, else a fingerprint. */
-    private string $connectionPin = '';
+    /**
+     * The certificate rule the open connection was made under: empty for
+     * checked, `NOT_CHECKED`, or the fingerprint of the one certificate that
+     * was asked for.
+     */
+    private string $connectionRule = '';
 
     private int $sentOnConnection = 0;
 
@@ -201,15 +219,16 @@ final class SmtpTransport implements Transport
         }
 
         $this->deadline = $this->clock->ticks() + $this->config->messageSeconds;
-        $pin = $options->onlyCertificateSha256;
+        $rule = $options->notChecked === true ? self::NOT_CHECKED : $options->onlyCertificateSha256;
 
         // ♻️ Use the open connection if it was made under the same certificate
         // rule and has not carried its fill.
         // 🔒 The first test matters most: a connection opened for one approved
-        // certificate must never carry a message that did not ask for that.
+        // certificate, or with the certificate not checked, must never carry
+        // a message that did not ask for exactly that.
         if (
             $this->connection !== null
-            && ($this->connectionPin !== $pin || $this->sentOnConnection >= $this->config->messagesPerConnection)
+            && ($this->connectionRule !== $rule || $this->sentOnConnection >= $this->config->messagesPerConnection)
         ) {
             $this->hangUp(true);
         }
@@ -223,7 +242,7 @@ final class SmtpTransport implements Transport
             }
         }
         if ($this->connection === null) {
-            $failure = $this->connect($pin);
+            $failure = $this->connect($rule);
             if ($failure !== null) {
                 return $failure;
             }
@@ -379,10 +398,48 @@ final class SmtpTransport implements Transport
     /**
      * Open a connection and take it as far as "signed in".
      *
+     * @param string $rule Empty for the full check, `NOT_CHECKED`, or the fingerprint of the one
+     *                     certificate to accept.
+     *
      * @return SendResult|null Null when signed in; otherwise why not, with the connection closed.
      */
-    private function connect(string $pin): ?SendResult
+    private function connect(string $rule): ?SendResult
     {
+        $notChecked = $rule === self::NOT_CHECKED;
+        $pin = $notChecked === true ? '' : $rule;
+        if ($notChecked === true) {
+            // 🔓 "The certificate is not checked", in two steps. FIRST read
+            // the certificate the server shows, on a connection that can
+            // write nothing once encryption is on. THEN open the connection
+            // that will send, and let it accept exactly that certificate.
+            // The sending connection is therefore the same "one certificate"
+            // connection a named fingerprint gets, with every rule of that
+            // mode still in force: TLS 1.2 or later, and nothing private
+            // before encryption is on.
+            // WHAT THIS DOES NOT DO: tell the mail server from an impostor.
+            // Whoever answers is read, and then accepted.
+            $this->stage = SendResult::STAGE_CONNECT;
+            $reader = new CertificateReader($this->config, $this->clock);
+            $read = $reader->read();
+            array_push($this->steps, ...$reader->transcript());
+            if ($read === null) {
+                // No encrypted connection could be made to read it from. The
+                // reader says where it stopped; nothing was sent, and no
+                // sign-in was attempted, exactly as on a checked connection.
+                $this->stage = $reader->stoppedAt() === '' ? SendResult::STAGE_TLS : $reader->stoppedAt();
+                $why = $reader->stoppedWhy() === '' || $reader->stoppedWhy() === SendResult::REASON_CERTIFICATE
+                    ? SendResult::REASON_ENCRYPTION_FAILED
+                    : $reader->stoppedWhy();
+                $said = $reader->stoppedWords();
+                return $this->result(SendResult::TRY_LATER, $why, 0, 'No encrypted connection could be made to the mail '
+                    . 'server, so nothing was sent and no sign-in was attempted. Encryption (TLS 1.2 or later) is required '
+                    . 'even when the certificate is not being checked. ' . (self::WORDS[$why] ?? '')
+                    . ($said === '' ? '' : ' PHP said: ' . $said));
+            }
+            $pin = $read->sha256;
+            $this->steps[] = 'The certificate is NOT being checked. The one the server showed (fingerprint ' . $pin
+                . ') is accepted as it is for this connection.';
+        }
         $connection = new Connection(
             $this->config,
             $this->clock,
@@ -390,7 +447,7 @@ final class SmtpTransport implements Transport
             $pin,
         );
         $this->connection = $connection;
-        $this->connectionPin = $pin;
+        $this->connectionRule = $rule;
         $this->sentOnConnection = 0;
         $this->offers = [];
 
@@ -405,7 +462,7 @@ final class SmtpTransport implements Transport
 
         // "tls": encryption comes before the server says anything at all.
         if ($this->config->security === SmtpConfig::TLS) {
-            $failure = $this->encrypt($pin);
+            $failure = $this->encrypt($pin, $notChecked);
             if ($failure !== null) {
                 return $failure;
             }
@@ -435,7 +492,7 @@ final class SmtpTransport implements Transport
             if ($this->isReply($reply, 220) !== true) {
                 return $this->failed($reply, false);
             }
-            $failure = $this->encrypt($pin);
+            $failure = $this->encrypt($pin, $notChecked);
             if ($failure !== null) {
                 return $failure;
             }
@@ -478,9 +535,13 @@ final class SmtpTransport implements Transport
     /**
      * Switch encryption on. When that is refused, find out why.
      *
+     * @param string $pin        Empty for the full check; otherwise the fingerprint the connection accepts.
+     * @param bool   $notChecked True when that fingerprint was read from the server a moment ago
+     *                           (`SendOptions::certificateNotChecked()`), and not named by a person.
+     *
      * @return SendResult|null Null when encryption is on and the certificate passed.
      */
-    private function encrypt(string $pin): ?SendResult
+    private function encrypt(string $pin, bool $notChecked = false): ?SendResult
     {
         $this->stage = SendResult::STAGE_TLS;
         $connection = $this->connection;
@@ -504,6 +565,17 @@ final class SmtpTransport implements Transport
             // beside a perfectly good certificate.)
             return $this->result(SendResult::TRY_LATER, $problem, 0, (self::WORDS[$problem] ?? 'Encryption could not be '
                 . 'switched on.') . ($said === '' ? '' : ' PHP said: ' . $said));
+        }
+        if ($notChecked === true) {
+            // 🔓 The certificate is not being checked, and the server showed
+            // one certificate when it was read and ANOTHER a moment later.
+            // That is not for a person to decide (nobody approved either), so
+            // it is "try later": the next attempt reads again. It is NOT
+            // quietly accepted here, because then the certificate this
+            // connection used would be one that was never read.
+            return $this->result(SendResult::TRY_LATER, SendResult::REASON_ENCRYPTION_FAILED, 0, 'The mail server showed one '
+                . 'certificate when it was read and a different one a moment later, so nothing was sent. It will be tried '
+                . 'again.' . ($said === '' ? '' : ' PHP said: ' . $said));
         }
 
         // 🪪 The certificate was refused. If this library refused it by its
@@ -686,7 +758,7 @@ final class SmtpTransport implements Transport
         array_push($this->steps, ...$this->connection->takeTranscript());
         $this->connection->close(false);
         $this->connection = null;
-        $this->connectionPin = '';
+        $this->connectionRule = '';
         $this->sentOnConnection = 0;
         $this->offers = [];
     }

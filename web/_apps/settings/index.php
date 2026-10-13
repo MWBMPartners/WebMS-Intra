@@ -49,6 +49,7 @@ use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
+use Portal\Core\MailRoutes;
 use Portal\Core\Router;
 use Portal\Core\SecretSettings;
 use Portal\Core\Site;
@@ -165,6 +166,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
                 $_SESSION['user_id'] ?? null
             );
             $_SESSION['flash_msg']  = Site::LOCKED_MESSAGE;
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('settings'));
+            exit();
+        }
+
+        // 🔒 Nor can the mail server's name or either certificate row be
+        //    deleted here (#592), by anybody. The save handler refuses to
+        //    change them, and a delete is not a smaller act: with the name's
+        //    row gone no SMTP mail can go, and with the certificate rows gone
+        //    the e-mail page cannot store a decision. They are changed at
+        //    Admin, Integrations, Email. See
+        //    MailRoutes::lockedInGeneralEditor(). (Asked here as well as in
+        //    the save handler because the two "how organisations are told
+        //    apart" rows were once refused there and not here.)
+        if ($lockedKey !== null && MailRoutes::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
+            Logger::activity(
+                'SettingsDeleteRefused',
+                'Refused: "' . (string) $lockedKey['settingKey'] . '" is changed on the e-mail page (Admin, Integrations, Email) and cannot be deleted here',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = MailRoutes::LOCKED_MESSAGE;
             $_SESSION['flash_type'] = 'danger';
             header('Location: ' . Site::url('settings'));
             exit();
@@ -539,8 +561,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     //    both handlers refuse them. Only a global administrator can
                                     //    open the page that changes them, so only they get the link.
                                     $organisationsLocked = Site::lockedInGeneralEditor((string) $row['settingKey']);
+                                    // 🔒 And for the mail server's name and the two certificate rows
+                                    //    (#592): changed on the e-mail page only, where a changed name
+                                    //    asks for the password again and a change to certificate
+                                    //    checking shows its warning first. Any administrator can open
+                                    //    that page, so everybody gets the link; only a global
+                                    //    administrator can change anything on it, and the words say so.
+                                    $mailLocked = MailRoutes::lockedInGeneralEditor((string) $row['settingKey']);
                                     ?>
-                                    <?php if ($organisationsLocked === true && $isRoot === true): ?>
+                                    <?php if ($mailLocked === true): ?>
+                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/integrations/email'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo $isRoot === true ? 'Changed at Admin, Integrations, Email' : 'Changed by a global administrator, at Admin, Integrations, Email'; ?></a>
+                                    <?php elseif ($organisationsLocked === true && $isRoot === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/sites/setup'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Organisations</a>
                                     <?php elseif ($organisationsLocked === true): ?>
                                         <span class="small text-secondary">Changed by a global administrator, at Admin, Organisations</span>
@@ -556,7 +587,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         <i class="fa-solid fa-pen"></i>
                                     </button>
                                     <?php endif; ?>
-                                    <?php if ($isRoot === true && $isGivingRule === false && $organisationsLocked === false): ?>
+                                    <?php if ($isRoot === true && $isGivingRule === false && $organisationsLocked === false && $mailLocked === false): ?>
                                         <form method="post" action="/settings" class="d-inline">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                             <input type="hidden" name="action" value="delete">

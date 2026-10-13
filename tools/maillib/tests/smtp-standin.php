@@ -56,6 +56,13 @@
  *   tls           'starttls' (default), 'implicit' (encrypted from the first
  *                 byte) or 'none' (never encrypts)
  *   certs         certificate names by connection number; the last repeats
+ *   certNamedIn   a file name in the scratch folder. When that file exists
+ *                 and holds a certificate's name, THAT certificate is shown,
+ *                 whatever `certs` says: it is read afresh at every
+ *                 connection, so a test can change the certificate a server
+ *                 shows at a moment of its own choosing. (Counting connections
+ *                 could not do that for a test that drives whole web pages:
+ *                 how many connections a page makes is not the test's to know.)
  *   key           the private key file to serve them with (default 'leaf')
  *   lowSecurity   true: let this server use a key or signature that today's
  *                 OpenSSL would refuse to serve (a 1024-bit key, SHA-1)
@@ -461,6 +468,16 @@ final class StandinSession
         }
         $certs = (array) ($this->spec['certs'] ?? ['good']);
         $cert = (string) ($certs[min($this->number, count($certs)) - 1]);
+        // `certNamedIn`: the certificate a test has named for "now". Only a
+        // plain name is taken (letters, digits, hyphens), so the file can
+        // never point this server at a file outside its own folder.
+        $namedIn = (string) ($this->spec['certNamedIn'] ?? '');
+        if ($namedIn !== '' && preg_match('/\A[A-Za-z0-9.-]+\z/', $namedIn) === 1 && is_file($this->dir . '/' . $namedIn) === true) {
+            $named = trim((string) file_get_contents($this->dir . '/' . $namedIn));
+            if (preg_match('/\A[A-Za-z0-9-]+\z/', $named) === 1 && is_file($this->dir . '/certs/' . $named . '.pem') === true) {
+                $cert = $named;
+            }
+        }
         stream_context_set_option($this->socket, 'ssl', 'local_cert', $this->dir . '/certs/' . $cert . '.pem');
         stream_context_set_option($this->socket, 'ssl', 'local_pk', $this->dir . '/certs/' . ($this->spec['key'] ?? 'leaf') . '.key');
         if (($this->spec['lowSecurity'] ?? false) === true) {

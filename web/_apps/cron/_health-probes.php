@@ -303,9 +303,21 @@ function maintenance_health_probes(\mysqli $db): array
     //     a subject or any part of a message: this line is also in the
     //     report an outside monitor reads. The one moment it shows is in
     //     this organisation's time zone, with the zone's short name.
-    //     Not shown while no mail route is set up AND nothing is waiting:
-    //     "Email" above already says that nothing can be sent, and a line
-    //     about a job nobody needs yet would be a warning to ignore.
+    //     WHILE CERTIFICATE CHECKING IS OFF, OR ONE CERTIFICATE IS ACCEPTED
+    //     (#592, part 4), this is also the line that says so: it turns amber
+    //     at least, and carries the same standing warning as the e-mail page
+    //     and the admin dashboard (MailRoutes::standingWarning(), read from
+    //     what is stored), with what is in force and the date it was set,
+    //     whatever mail route is in use. NOBODY IS NAMED HERE. This line
+    //     used to carry the name of the global administrator who switched
+    //     checking off, and it is read by every organisation's
+    //     administrator and by the outside monitoring service. The e-mail
+    //     page and the admin dashboard name them, to a global
+    //     administrator only.
+    //     Not shown while no mail route is set up AND nothing is waiting
+    //     AND the certificate is checked in full: "Email" above already
+    //     says that nothing can be sent, and a line about a job nobody
+    //     needs yet would be a warning to ignore.
     try {
         $mailQueue = \Portal\Core\MailQueue::health(
             $db,

@@ -1073,8 +1073,8 @@ $seeds = [];
 foreach (q("SELECT settingKey, defaultValue, isSensitive FROM tblSettings WHERE siteID IS NULL AND (settingKey LIKE 'mail.smtp.%' OR settingKey = 'mail.limit.perHour') ORDER BY settingKey") as $row) {
     $seeds[(string) $row['settingKey']] = [(string) $row['defaultValue'], (int) $row['isSensitive']];
 }
-// The two `certCheck` rows came with migration 216 (the mail queue). Nothing
-// reads them yet: they are for the page a later package adds.
+// The two `certCheck` rows came with migration 216 (the mail queue). They are
+// read by MailRoutes::certificateCheck() since the queue's page (#592, part 4).
 $expectedSeeds = [
     'mail.limit.perHour' => ['', 0], 'mail.smtp.certCheck' => ['on', 0], 'mail.smtp.certCheckOffAt' => ['', 0], 'mail.smtp.host' => ['', 0],
     'mail.smtp.password' => ['', 1], 'mail.smtp.port' => ['587', 0], 'mail.smtp.security' => ['starttls', 0], 'mail.smtp.username' => ['', 0],
@@ -2108,7 +2108,11 @@ $text = words($page['body']);
 ok(
     'the administrator\'s guide has a section on the SMTP mailbox: the password is typed on the e-mail page, where it can be tested, the certificate is always checked, and mail that cannot go at once is kept and tried again by a job the administrator adds',
     $page['status'] === 200 && str_contains($page['body'], 'id="smtp-mailbox"') === true && str_contains($text, 'Type it on that page, where it can be tested before the portal relies on it.') === true
-        && str_contains($text, 'certificate is always checked, and this cannot be switched off') === true && str_contains($text, 'Mail that cannot be sent at once is kept and tried again.') === true
+        // (Until the queue's page (#592, part 4) this held the guide to "…is always checked, and this cannot be
+        // switched off". A global administrator can now let mail past a failed check, so that sentence would be
+        // untrue. The guide must still say the certificate is always checked, and now who can go past it.)
+        && str_contains($text, 'The mail server’s certificate is always checked.') === true && str_contains($text, 'Only a global administrator can let mail past a failed check') === true
+        && str_contains($text, 'Mail that cannot be sent at once is kept and tried again.') === true
         && str_contains($text, '/cron/mail-queue') === true && str_contains($text, 'It does not keep mail to try again.') === false,
     'HTTP ' . $page['status']
 );

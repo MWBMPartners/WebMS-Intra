@@ -4,7 +4,7 @@ A small library for sending e-mail from a PHP application on shared hosting: no 
 
 **What is here today:** the core (a message, a result, the interface every route implements) and one route, our own SMTP client. Routes for Microsoft 365, Google and PHPMailer are planned as further classes implementing the same `Transport` interface; they are not built yet.
 
-**Nothing in the portal calls this yet.** It changes no behaviour until a later package wires it in.
+The portal sends through it by way of one file, `web/_core/MailRoutes.php`, which is the only file of the portal that names the library.
 
 ## Where it lives, and why in two places
 
@@ -21,11 +21,14 @@ A `composer.json` can replace `autoload.php` later without moving a file: the fo
 
 ## The rules it keeps
 
-- **Always encrypted, certificate always checked.** `starttls` or `tls` only. There is no unencrypted choice and no switch to skip the check. A server that offers no encryption is told nothing: no sign-in, no address, no message.
+- **Always encrypted.** `starttls` or `tls` only, TLS 1.2 or later. There is no unencrypted choice in any mode. A server that offers no encryption is told nothing: no sign-in, no address, no message.
+- **The certificate is checked in full unless the caller asks otherwise for that one send.** There are three ways to send (`SendOptions`): checked (the default), "this certificate only", and, since 13 October 2026, "certificate not checked". The last two are for an application whose administrator has decided to send past a failed check; the library never chooses them itself.
 - **When the certificate check fails, nothing is sent, and the result says why**: expired, not valid yet, issued for another name, signed by itself, a key too short, an old signature method, not marked for a server; or, when the certificate itself shows none of those, "most often not traceable to a trusted authority".
 - **The certificate is blamed only when it was the certificate.** That means: PHP said it refused the certificate, or the library's own name rule did. A handshake that was cut off, answered with an alert, or too slow is `try-later`, with no certificate offered for approval. An application may hold all mail on a certificate fault, so a passing fault on the line must not look like one.
 - **The server name is checked twice**, by PHP and by the library's own stricter rule (PHP 8.5 accepts names that PHP 8.4 refuses). Only the certificate's list of names counts; the old "common name" counts only when there is no list at all; a star may stand only as the whole first label (`*.example.org`) and covers one label; an address matches only an address.
-- **One narrow way through, for a person to use**: `SendOptions::onlyThisCertificate($fingerprint)` sends ONE message accepting exactly the certificate with that SHA-256 fingerprint. It cannot mean "accept anything": anything but a whole fingerprint is refused, and it still requires encryption (TLS 1.2 or later).
+- **A narrow way through, for a person to use**: `SendOptions::onlyThisCertificate($fingerprint)` sends ONE message accepting exactly the certificate with that SHA-256 fingerprint. It cannot mean "accept anything": anything but a whole fingerprint is refused, and it still requires encryption (TLS 1.2 or later). It skips the name, the dates and the key strength by design.
+- **A wide way through, and what it costs**: `SendOptions::certificateNotChecked()` does not judge the certificate at all. **With it the library cannot tell the mail server from an impostor: somebody on the network path can read the mailbox's user name and password and every message sent.** It is still not a connection with the check switched off. On every new connection the certificate is first READ on a connection that can write nothing once encryption is on, and the sending connection then accepts exactly the certificate that was read, the same way as "this certificate only". So encryption, TLS 1.2 or later and "no sign-in before encryption" all still hold, and there is still one mode only in which the library writes without the full check. If the server shows one certificate when read and another a moment later, nothing is sent (`try-later`).
+- **"Would the certificate pass now?"**: `CertificateReader::wouldPass()` makes one fully checked connection as far as the handshake, says nothing private, and answers yes, no, or "cannot tell" (null: the server could not be reached, or the handshake failed in a way that is not the certificate's doing). An application that has stopped checking asks this now and then to find out when it can start again. Treat null as "nothing has changed".
 - **Every wait is on a clock**: connecting, the encryption handshake, each reply, each write, the verdict after the message, and the message as a whole.
 - **A line break smuggled into a subject, a name, an address or a file name refuses the message.** It is not cleaned and sent.
 - **The password is never printed, logged, put in an error text, or left in the transcript.**

@@ -71,13 +71,65 @@
  * carries a fingerprint of them, so a new password is tried at once).
  * "Send test" always tries, whatever is on record: it is how an
  * administrator finds out.
+ * BOTH ARE ABOUT THE SMTP MAILBOX, AND STOP MAIL ONLY WHILE SMTP IS THE
+ * ROUTE IN USE. "Send test" tries the SMTP mailbox while Microsoft 365 or
+ * Google carries the mail, so that it can be proved first; what such a test
+ * finds is put on record and SHOWN (the e-mail page shows the certificate
+ * and lets a global administrator decide about it before switching), but it
+ * holds nothing and stops nothing. standingProblem() is the one place that
+ * says whether a fault stands in the way of mail; certificateOnRecord() and
+ * certificateProblem() say what is on record, for showing.
+ *
+ * THE CERTIFICATE CHECK, AND THE THREE WAYS PAST A FAILED ONE (package M4)
+ * ----------------------------------------------------------------------
+ * The mail server's certificate is checked in full, always, unless a GLOBAL
+ * ADMINISTRATOR has deliberately decided otherwise. A certificate that fails
+ * holds every message. The owner (Salem874) decided the three ways through:
+ *   1. ONE held message sent past the check, accepting only the certificate
+ *      the administrator was shown (sendSmtp()'s `onlyCertificate`). It
+ *      changes nothing that is stored.
+ *   2. "Accept only this certificate": `mail.smtp.certCheck` holds
+ *      `only:<fingerprint>`. Mail goes while the server shows exactly that
+ *      certificate; any other holds mail again.
+ *   3. Checking switched OFF: `mail.smtp.certCheck` holds `off`.
+ * certificateCheck() is THE ONE PLACE that reads that setting, and anything
+ * it does not recognise counts as "on": a mistyped value checks, it never
+ * stops checking. Encryption is required in every one of them (the library
+ * has no way to send without it).
+ * CHECKING SWITCHES ITSELF BACK ON. While it is off, or one certificate is
+ * accepted, every request that sends through SMTP, and every run of the mail
+ * job WHATEVER ROUTE IS IN USE, first asks the mail server once whether its
+ * certificate would now pass the full check (recheckCertificate()). When it
+ * would, the setting goes back to `on` and a line is written to the
+ * activity log.
+ * These are for the SMTP route only. Microsoft 365 and Google are reached
+ * by https, checked by PHP itself, and get no way through.
+ * WHAT IS STORED OUTLIVES A CHANGE OF ROUTE. With `off` stored and
+ * Microsoft 365 chosen, a "Send test" through the SMTP mailbox still goes
+ * with the check off. So the standing warning, the button that switches
+ * checking back on, and the job's question are all tied to what is STORED,
+ * never to which route is in use. (They were tied to the route at first:
+ * the warning vanished, the button was refused and "off" never lapsed.)
+ *
+ * THE E-MAIL PAGE IS THE ONE PLACE the mail server's name and the two
+ * certificate rows are changed. The general Settings page refuses to add,
+ * change or remove them, for everybody: see lockedInGeneralEditor().
  *
  * WHAT THIS CANNOT DO
  * -------------------
- * - The mail server's certificate is always checked and there is no way to
- *   switch that off. A certificate that fails holds every message until the
- *   mail server's certificate is put right. (`mail.smtp.certCheck` is seeded
- *   for the page package M4 adds; NOTHING HERE READS IT.)
+ * - With checking off, tell the mail server from an impostor. That is what
+ *   switching it off gives up, and the page that offers it says so.
+ * - Stop somebody who can write to the DATABASE setting
+ *   `mail.smtp.certCheck` to `off` without the warning and the typed server
+ *   name the e-mail page asks for, or changing the mail server's name there
+ *   and so keeping the stored password and the certificate decision. What
+ *   it does do: the same standing warning shows wherever the value came
+ *   from, because the warning is read from what is stored.
+ * - Tie the stored password to the server it was saved for. saveSmtp() asks
+ *   for the password again, and puts checking back on, when the name or the
+ *   port is changed on the e-mail page. The port, the user name, the kind
+ *   of encryption and the password can still be changed on the general
+ *   Settings page, which does neither.
  * - canSend's facts are settings only. They cannot show that the mail server
  *   will accept the mailbox's password: only "Send test" shows that.
  * - The hourly limit is counted from this portal's own log. It knows nothing
@@ -92,7 +144,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/592
  * -----------------------------------------------------------------------------
  */
@@ -105,7 +157,9 @@ use MWBM\Mail\Client;
 use MWBM\Mail\Message;
 use MWBM\Mail\MessageRefused;
 use MWBM\Mail\Secret;
+use MWBM\Mail\SendOptions;
 use MWBM\Mail\SendResult;
+use MWBM\Mail\Smtp\CertificateReader;
 use MWBM\Mail\Smtp\SmtpConfig;
 use MWBM\Mail\Smtp\SmtpTransport;
 use MWBM\Mail\SystemClock;
@@ -172,6 +226,50 @@ final class MailRoutes
     /** @var int How many failures in a row to switch encryption on before the health page says so. */
     public const ENCRYPTION_FAILURES_WORTH_SAYING = 5;
 
+    // 🪪 How the mail server's certificate is treated (`mode` in what
+    //    certificateCheck() returns). See the file header.
+    public const CHECK_ON   = 'on';   // checked in full: the default, and what anything unrecognised means
+    public const CHECK_ONLY = 'only'; // one certificate is accepted, by its fingerprint
+    public const CHECK_OFF  = 'off';  // not checked at all
+
+    /** @var string What `mail.smtp.certCheck` begins with when one certificate is accepted; the 64-character fingerprint follows. */
+    private const CHECK_ONLY_PREFIX = 'only:';
+
+    // 🏷️ The rule one attempt was made under (`rule` in what sendSmtp()
+    //    returns), for "Send test" and the activity log to say truthfully.
+    public const RULE_CHECKED     = 'checked';
+    public const RULE_ONE         = 'one-certificate';
+    public const RULE_NOT_CHECKED = 'not-checked';
+
+    // 📒 The activity log's names for the deliberate acts. standingWarning()
+    //    reads the newest of the four back, to say who set what is stored.
+    public const LOG_ACCEPTED = 'MailCertificateAccepted';
+    public const LOG_OFF      = 'MailCertificateCheckOff';
+    public const LOG_ON       = 'MailCertificateCheckOn';
+    public const LOG_BACK_ON  = 'MailCertificateCheckBackOn';
+
+    /**
+     * @var int How far apart, in seconds, the moment stored beside the
+     *      certificate setting and the activity log's line may be and still
+     *      count as ONE change: see standingWarning(). The page stores the
+     *      setting and writes the line in the same request, one straight
+     *      after the other, so a minute is generous for a slow host and far
+     *      too short for two separate changes to be mistaken for one.
+     */
+    private const SAME_CHANGE_SECONDS = 60;
+
+    /**
+     * @var list<string> The settings the general Settings page must not add,
+     *      change or remove, in small letters: see lockedInGeneralEditor().
+     */
+    private const LOCKED_IN_GENERAL_EDITOR = ['mail.smtp.host', 'mail.smtp.certcheck', 'mail.smtp.certcheckoffat'];
+
+    /** What the general Settings page says when it refuses one of them. Plain text: that page escapes it. */
+    public const LOCKED_MESSAGE = 'That setting is changed at Admin, Integrations, Email, and nowhere else. '
+        . 'The mail server\'s name and the certificate settings decide which server is given the mailbox\'s password, '
+        . 'so the e-mail page asks for the password again when the name changes, and shows a warning and asks for a '
+        . 'confirmation before certificate checking is changed. Nothing was changed.';
+
     /**
      * ⏱️ How long each step of a send may take, in seconds.
      *
@@ -207,6 +305,22 @@ final class MailRoutes
 
     /** @var array{problem: string, words: string, since: string, seenAt: string, tryNow: bool}|null What standingProblem() found, kept for the rest of the request. */
     private static ?array $standing = null;
+
+    /**
+     * @var string|null What recheckCertificate() found in this request: null
+     *      before it has asked, then 'not-needed' (checking is on, or no SMTP
+     *      mailbox is set up), 'passes' (and checking was switched back on),
+     *      'fails' or 'cannot-tell'.
+     */
+    private static ?string $rechecked = null;
+
+    /**
+     * @var bool True once, in this request, ONE message sent past the check
+     *      was refused because the server showed another certificate, and
+     *      that other certificate was then found to pass the full check.
+     *      See noteResult() and passedAfterRefusal().
+     */
+    private static bool $passedAfterRefusal = false;
 
     // =========================================================================
     // 📖 Reading
@@ -585,6 +699,8 @@ final class MailRoutes
         // And what is on record about the route is read again: a save
         // changes the fingerprint the record is compared with.
         self::$standing = null;
+        // (`$rechecked` is NOT reset here: the mail server is asked "would
+        // your certificate pass now?" once a request, whatever is saved.)
     }
 
     // =========================================================================
@@ -799,15 +915,22 @@ final class MailRoutes
      *
      * @param list<string> $to    The recipients' addresses.
      * @param list<string> $files Paths of files to attach.
-     * @param array{messageId?: string, date?: int, repeatSafe?: bool} $again
+     * @param array{messageId?: string, date?: int, repeatSafe?: bool, onlyCertificate?: string} $again
      *        For the mail queue. `messageId` and `date` (seconds since 1970,
      *        UTC) are the ones the message was first tried with, so that every
      *        attempt is the SAME message to a mail system that has seen it
      *        before. `repeatSafe` true means a second copy does no harm.
+     *        `onlyCertificate` is for ONE held message a global administrator
+     *        is sending past a failed check: the SHA-256 fingerprint of the
+     *        certificate they were shown. The connection then accepts that
+     *        certificate and no other, whatever `mail.smtp.certCheck` holds,
+     *        and nothing this attempt shows clears the fault on record.
      *
      * @return array{sent: bool, outcome: string, reason: string, code: int|null, words: string, from: string,
      *               attachments: int, steps: list<string>, certificate: bool, next: string, stage: string,
-     *               messageId: string, routeFault: bool}
+     *               messageId: string, routeFault: bool, rule: string}
+     *         rule:        how the certificate was treated for this attempt:
+     *                      one of the RULE_ values.
      *         next:        what should become of the message: one of the NEXT_
      *                      values. See whatNext().
      *         stage:       the step the attempt stopped at, in the mail
@@ -834,11 +957,29 @@ final class MailRoutes
      */
     public static function sendSmtp(array $to, string $subject, string $text, string $html, array $files = [], array $again = []): array
     {
+        // 🪪 ONE message a global administrator is sending past a failed
+        //    check names its certificate here; every other send follows the
+        //    installation's standing rule (see further down).
+        $oneOff   = strtolower(trim((string) ($again['onlyCertificate'] ?? '')));
+        $standing = $oneOff === '';
+        // 🩺 While that standing rule is not "checked in full", the mail
+        //    server is first asked, once a request, whether its certificate
+        //    would pass now. If it would, checking has just gone back on.
+        //    ASKED BEFORE THE ROUTE IS OPENED, and it must stay there:
+        //    switching checking back on forgets the open route and wipes
+        //    the password it held, so a route opened first would be sent
+        //    through with no password. (Built that way at first: the one
+        //    message that found the certificate good again was answered
+        //    "not set up" and kept to try later.)
+        if ($standing === true) {
+            self::recheckCertificate(App::db());
+        }
         $route  = self::open();
         $answer = [
             'sent' => false, 'outcome' => Mailer::OUTCOME_NOT_SET_UP, 'reason' => self::NOT_SET_UP, 'code' => null, 'words' => '',
             'from' => $route['from'], 'attachments' => 0, 'steps' => [], 'certificate' => false,
             'next' => self::NEXT_NOT_SET_UP, 'stage' => SendResult::STAGE_CONFIG, 'messageId' => '', 'routeFault' => true,
+            'rule' => self::RULE_CHECKED,
         ];
         $client = $route['client'];
         if ($client === null) {
@@ -914,7 +1055,44 @@ final class MailRoutes
             return $answer;
         }
 
-        $result = $client->send($message);
+        // 🪪 HOW THE CERTIFICATE IS TREATED FOR THIS ATTEMPT. Three cases:
+        //    - ONE message a global administrator is sending past a failed
+        //      check (`onlyCertificate`): exactly the certificate they were
+        //      shown, and no other. This is the fingerprint that MUST reach
+        //      the mail library: without it the connection would accept
+        //      whatever the server showed at that moment.
+        //    - otherwise the installation's standing rule
+        //      (certificateCheck()): checked in full, one accepted
+        //      certificate, or not checked. (It was looked at again at the
+        //      top of this method, and may have just gone back to "checked
+        //      in full".)
+        $options  = null;
+        if ($standing === false) {
+            if (SendOptions::isFingerprint($oneOff) === false) {
+                // Refused here, in words. (The library refuses it too, by
+                // throwing; this never gets that far.)
+                $answer['outcome']    = Mailer::OUTCOME_NOT_SENT;
+                $answer['reason']     = SendResult::REASON_CERTIFICATE;
+                $answer['next']       = self::NEXT_HOLD_CERTIFICATE;
+                $answer['stage']      = SendResult::STAGE_TLS;
+                $answer['words']      = 'Not sent: no certificate was named to send it through. Nothing was tried.';
+
+                return $answer;
+            }
+            $options        = SendOptions::onlyThisCertificate($oneOff);
+            $answer['rule'] = self::RULE_ONE;
+        } else {
+            $check = self::certificateCheck();
+            if ($check['mode'] === self::CHECK_OFF) {
+                $options        = SendOptions::certificateNotChecked();
+                $answer['rule'] = self::RULE_NOT_CHECKED;
+            } elseif ($check['mode'] === self::CHECK_ONLY) {
+                $options        = SendOptions::onlyThisCertificate($check['fingerprint']);
+                $answer['rule'] = self::RULE_ONE;
+            }
+        }
+
+        $result = $client->send($message, $options);
         // ONLY a refused sign-in is remembered: the mail server said no (a
         // reply beginning with 5) to the user name and password. A refusal of
         // one message (its sender, a recipient, its size) says nothing about
@@ -927,7 +1105,7 @@ final class MailRoutes
 
         // 📒 What this attempt showed about the ROUTE goes on record, for
         //    every later request and run: see noteResult().
-        self::noteResult($result);
+        self::noteResult($result, $standing);
 
         $answer['steps']       = $result->transcript;
         $answer['code']        = $result->code > 0 ? $result->code : null;
@@ -1091,17 +1269,22 @@ final class MailRoutes
 
     /**
      * A fingerprint of the settings a fault was met with: which route is
-     * chosen, the mail server, the port, the encryption, the user name and
-     * the stored (encrypted) password. When any of them changes, a fault on
-     * record is no longer assumed, so a corrected password is tried at once.
-     * The password's stored form changes on every save, even when the same
-     * password is typed again, which is what an administrator saving it
-     * again would expect.
+     * chosen, the mail server, the port, the encryption, the user name, the
+     * stored (encrypted) password, and how the certificate is to be treated.
+     * When any of them changes, a fault on record is no longer assumed, so a
+     * corrected password is tried at once. The password's stored form
+     * changes on every save, even when the same password is typed again,
+     * which is what an administrator saving it again would expect.
+     *
+     * `mail.smtp.certCheck` is part of it (package M4) so that accepting a
+     * certificate, or switching checking off, releases the mail held for the
+     * certificate WHEREVER the setting was changed: on the e-mail page, or
+     * straight in the database, which knows nothing of the queue.
      */
     public static function settingsMark(): string
     {
         $parts = [];
-        foreach (['mail.provider', 'mail.smtp.host', 'mail.smtp.port', 'mail.smtp.security', 'mail.smtp.username', 'mail.smtp.password'] as $key) {
+        foreach (['mail.provider', 'mail.smtp.host', 'mail.smtp.port', 'mail.smtp.security', 'mail.smtp.username', 'mail.smtp.password', 'mail.smtp.certCheck'] as $key) {
             $parts[] = self::rows()[$key]['value'] ?? '';
         }
 
@@ -1139,9 +1322,52 @@ final class MailRoutes
     }
 
     /**
-     * 🚧 The fault on record for the route, if there is one that still
-     * stands. Mailer asks before every send, and the mail job before every
-     * run. Read once a request.
+     * 🚧 THE FAULT THAT STANDS IN THE WAY OF MAIL NOW, if there is one.
+     * Mailer asks before every send, the mail job before every run, the
+     * e-mail page before it sends a held message again, and the health page.
+     *
+     * ONLY WHILE SMTP IS THE ROUTE IN USE. What is on record is about the
+     * SMTP mailbox. "Send test" tries that mailbox whatever route is in use,
+     * so that it can be proved before the portal is switched to it, and what
+     * the test finds goes on record like any other attempt. With Microsoft
+     * 365 or Google in use that record says nothing about the mail that is
+     * going out, so this answers "nothing". WHAT USED TO HAPPEN: this
+     * answered whatever was on record. One test with a wrong password, made
+     * while the mailbox was being set up, stopped the job's runs until its
+     * wait was over; one that failed the certificate check held every
+     * queued message; and the health line went red. All of that mail was
+     * going by the other route.
+     * WHAT IS ON RECORD is still there to be SHOWN, whatever the route: see
+     * onRecord(), certificateProblem() and certificateOnRecord().
+     * WHEN THE PORTAL IS SWITCHED TO SMTP, a record made by a test under the
+     * other route was made under other settings (the route is part of
+     * settingsMark()), so it is cleared like any such record, and the fault
+     * is found again by the first message: that message is held, or waits,
+     * and the mail server is given nothing it should not have. The
+     * certificate is still checked in full; nothing is trusted meanwhile.
+     *
+     * Never throws.
+     *
+     * @return array{problem: string, words: string, since: string, seenAt: string, tryNow: bool}
+     *         problem: '' or one of the PROBLEM_ values.
+     *         since, seenAt: moments in UTC, 'Y-m-d H:i:s'.
+     *         tryNow:  for a refused sign-in, true once the wait before the
+     *                  next try is over.
+     */
+    public static function standingProblem(mysqli $db): array
+    {
+        // Read FIRST, whatever the route: reading is also what clears a
+        // record made under other settings and releases the mail held for it.
+        $found = self::onRecord($db);
+
+        return self::chosenRoute() === self::SMTP ? $found : ['problem' => '', 'words' => '', 'since' => '', 'seenAt' => '', 'tryNow' => true];
+    }
+
+    /**
+     * 📒 The fault ON RECORD for the SMTP mailbox, if there is one that
+     * still stands, WHATEVER ROUTE IS IN USE. For showing, and for
+     * standingProblem() above, which is the one to ask before sending
+     * anything. Read once a request.
      *
      * A fault recorded under OTHER settings no longer stands: it is cleared
      * here, and mail held for a certificate is released, so that changing
@@ -1152,12 +1378,9 @@ final class MailRoutes
      * record": a send is then tried in the ordinary way.
      *
      * @return array{problem: string, words: string, since: string, seenAt: string, tryNow: bool}
-     *         problem: '' or one of the PROBLEM_ values.
-     *         since, seenAt: moments in UTC, 'Y-m-d H:i:s'.
-     *         tryNow:  for a refused sign-in, true once the wait before the
-     *                  next try is over.
+     *         As standingProblem().
      */
-    public static function standingProblem(mysqli $db): array
+    private static function onRecord(mysqli $db): array
     {
         if (self::$standing !== null) {
             return self::$standing;
@@ -1293,18 +1516,62 @@ final class MailRoutes
      * A write is made only when something changes, so an ordinary accepted
      * message costs one small read and no write.
      *
+     * AN ATTEMPT MADE FOR ONE MESSAGE, PAST THE CHECK (`$standing` false:
+     * "send this one message with the check skipped") proves nothing about
+     * the route as it normally is. The connection accepted one certificate
+     * because a person said so, for that message. So such an attempt can PUT
+     * a certificate fault on record (the server showed a different
+     * certificate from the one that was approved), and getting THROUGH
+     * clears nothing. REJECTED while this was designed: treating it like any
+     * other attempt that got past the encryption. Clearing the fault
+     * releases every held message, so "send this ONE" would have put the
+     * whole queue back in line for the job's next run, and taken the notices
+     * down until that run failed the check again.
+     * ONE CASE DOES CLEAR THE FAULT, and it is not "the message got through":
+     * the server showed a different certificate BECAUSE ITS CERTIFICATE HAS
+     * BEEN PUT RIGHT. So after such a refusal the server is asked once, on a
+     * fully checked connection, whether its certificate passes now
+     * (wouldPassNow()). If it does, the fault goes and held mail is
+     * released. WHAT USED TO HAPPEN: the good certificate was put on record
+     * as "not the approved certificate", every message was held, new mail
+     * was held without the server being tried, and the page offered three
+     * ways past a certificate that passes. With no scheduled job it stayed
+     * so until somebody pressed another button. "No" and "cannot tell" are
+     * recorded as before: somebody on the network path can cause either,
+     * and neither lets any mail go.
+     *
      * Never throws: a record that cannot be kept must not stop mail. What it
      * could not write goes to the server's error log.
+     *
+     * @param bool $standing True when the attempt was made under the
+     *                       installation's standing rule (certificateCheck()).
      */
-    private static function noteResult(SendResult $result): void
+    private static function noteResult(SendResult $result, bool $standing = true): void
     {
         try {
+            if ($standing === false && $result->reason !== SendResult::REASON_CERTIFICATE) {
+                return;
+            }
             $db    = App::db();
             $state = self::state($db);
             $key   = self::ROUTE_KEY;
             $mark  = self::settingsMark();
             $was   = (string) $state['problem'];
             $words = mb_substr($result->serverWords, 0, 1000);
+
+            // 🩺 ONE message past the check, refused because the server
+            //    showed another certificate. If that other certificate
+            //    passes the FULL check, the fault is over: see the note
+            //    above this method. (MailQueue::sendOneHeld() then puts the
+            //    one message back in the queue with the rest, and says so.)
+            if ($standing === false && self::wouldPassNow() === true) {
+                self::$passedAfterRefusal = true;
+                if ($was === self::PROBLEM_CERTIFICATE) {
+                    self::clearProblem($db, $was);
+                }
+
+                return;
+            }
 
             // 🪪 The certificate failed.
             if ($result->reason === SendResult::REASON_CERTIFICATE) {
@@ -1332,8 +1599,14 @@ final class MailRoutes
                 $stmt->execute();
                 $stmt->close();
                 self::$standing = null;
-                // Everything still queued would meet the same refusal.
-                MailQueue::holdAllForCertificate($db, $words);
+                // Everything still queued would meet the same refusal: but
+                // ONLY when it would go through this mailbox. With another
+                // route in use this attempt was a "Send test", and what is
+                // queued goes by that route. (It used to be held all the
+                // same, and then nothing sent it.)
+                if (self::chosenRoute() === self::SMTP) {
+                    MailQueue::holdAllForCertificate($db, $words);
+                }
 
                 return;
             }
@@ -1402,6 +1675,18 @@ final class MailRoutes
     }
 
     /**
+     * 🩺 In this request: was ONE message, sent past the check, refused
+     * because the mail server now shows a certificate that PASSES the full
+     * check? MailQueue::sendOneHeld() asks, so that what it tells the person
+     * is what happened and not a guess from the fault having gone (which a
+     * change of the mail settings by somebody else can cause too).
+     */
+    public static function passedAfterRefusal(): bool
+    {
+        return self::$passedAfterRefusal;
+    }
+
+    /**
      * 🕰️ Record that the mail queue's SCHEDULED JOB has just run (a moment in
      * UTC, from the database's clock).
      *
@@ -1438,13 +1723,434 @@ final class MailRoutes
      *
      * @return array{words: string, at: string}|null `at` is the moment it was
      *         last seen, in UTC, 'Y-m-d H:i:s'. Null when nothing is on
-     *         record, or the record cannot be read.
+     *         record, or the record cannot be read. WHATEVER ROUTE IS IN
+     *         USE: with another route in use it is what a "Send test" found,
+     *         and the page says that no mail is held for it.
      */
     public static function certificateProblem(mysqli $db): ?array
     {
-        $problem = self::standingProblem($db);
+        // What is ON RECORD, whatever route is in use: this is for showing.
+        $problem = self::onRecord($db);
 
         return $problem['problem'] === self::PROBLEM_CERTIFICATE ? ['words' => $problem['words'], 'at' => $problem['seenAt']] : null;
+    }
+
+    // =========================================================================
+    // 🪪 The certificate check: on, one certificate accepted, or off (package M4)
+    // =========================================================================
+
+    /**
+     * 🪪 HOW THE MAIL SERVER'S CERTIFICATE IS TO BE TREATED. THE ONE PLACE
+     * `mail.smtp.certCheck` is read: do not read it anywhere else.
+     *
+     * The installation's own row only (see the file header: an
+     * organisation's row is never a mail setting). What it may hold:
+     *   on                  checked in full. Also what an EMPTY value means.
+     *   only:<fingerprint>  one certificate is accepted: 64 hexadecimal
+     *                       characters, its SHA-256 fingerprint.
+     *   off                 not checked.
+     * ANYTHING ELSE COUNTS AS "on", and `unreadable` says so. The direction
+     * is chosen on purpose: a value somebody mistyped straight into the
+     * database ("Off " is read, "no" and "disabled" are not) must never
+     * stop the check; the worst it can do is leave it running.
+     *
+     * @return array{mode: string, fingerprint: string, unreadable: bool}
+     *         mode: one of the CHECK_ values. fingerprint: for 'only', the
+     *         accepted certificate's, in small letters; '' otherwise.
+     */
+    public static function certificateCheck(): array
+    {
+        $stored = strtolower(self::value('mail.smtp.certCheck'));
+        $answer = ['mode' => self::CHECK_ON, 'fingerprint' => '', 'unreadable' => false];
+        if ($stored === '' || $stored === self::CHECK_ON) {
+            return $answer;
+        }
+        if ($stored === self::CHECK_OFF) {
+            return ['mode' => self::CHECK_OFF] + $answer;
+        }
+        $fingerprint = str_starts_with($stored, self::CHECK_ONLY_PREFIX) === true ? substr($stored, strlen(self::CHECK_ONLY_PREFIX)) : '';
+        if (SendOptions::isFingerprint($fingerprint) === true) {
+            return ['mode' => self::CHECK_ONLY, 'fingerprint' => $fingerprint] + $answer;
+        }
+
+        return ['unreadable' => true] + $answer;
+    }
+
+    /**
+     * 🔏 Store how the certificate is to be treated. The e-mail page calls
+     * this for "accept only this certificate", "switch checking off" and
+     * "switch checking back on"; recheckCertificate() calls it to switch
+     * checking back on by itself.
+     *
+     * The caller has checked the form's token and that the person is a
+     * global administrator, and writes the activity log. This method does
+     * neither: it has no way to know who is asking.
+     *
+     * BOTH ROWS ARE WRITTEN BY ONE STATEMENT: the setting, and the moment
+     * (UTC, from the database's own clock; emptied when checking goes back
+     * on). One statement, so that there is never a moment when one is
+     * written and the other is not. REJECTED: a transaction. This is also
+     * called from inside a send, and starting a transaction there would
+     * quietly commit whatever transaction the page that is sending was in
+     * the middle of.
+     *
+     * AFTERWARDS a fault that was on record under the old rule no longer
+     * stands (the setting is part of settingsMark()), so the mail held for
+     * the certificate goes back into the queue, due at once.
+     *
+     * @param string $mode        One of the CHECK_ values.
+     * @param string $fingerprint For CHECK_ONLY: the certificate to accept.
+     *
+     * @return bool False when nothing was changed: the mode or the
+     *              fingerprint is not one this class knows, or the two rows
+     *              are not in the database (the upgrade has not been run),
+     *              or the database refused. The reason is in the server's
+     *              error log.
+     */
+    public static function setCertificateCheck(mysqli $db, string $mode, string $fingerprint = ''): bool
+    {
+        $fingerprint = strtolower($fingerprint);
+        if ($mode === self::CHECK_ONLY && SendOptions::isFingerprint($fingerprint) === false) {
+            return false;
+        }
+        $value = [self::CHECK_ON => self::CHECK_ON, self::CHECK_OFF => self::CHECK_OFF, self::CHECK_ONLY => self::CHECK_ONLY_PREFIX . $fingerprint][$mode] ?? null;
+        if ($value === null) {
+            return false;
+        }
+        $stamp = $mode === self::CHECK_ON ? 0 : 1;
+        try {
+            $stmt = $db->prepare(
+                "UPDATE tblSettings SET settingValue = CASE settingKey WHEN 'mail.smtp.certCheck' THEN ? "
+                . "ELSE IF(? = 1, DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%d %H:%i:%s'), '') END, isSensitive = 0, updatedAt = NOW() "
+                . "WHERE siteID IS NULL AND settingKey IN ('mail.smtp.certCheck', 'mail.smtp.certCheckOffAt')"
+            );
+            $stmt->bind_param('si', $value, $stamp);
+            $stmt->execute();
+            $stmt->close();
+            // Read it back: "no rows changed" is also what a database
+            // without the two rows answers, and that must not read as done.
+            $read = $db->prepare("SELECT settingValue FROM tblSettings WHERE siteID IS NULL AND settingKey = 'mail.smtp.certCheck'");
+            $read->execute();
+            $now = $read->get_result()->fetch_assoc();
+            $read->close();
+            if ($now === null || (string) $now['settingValue'] !== $value) {
+                error_log('MailRoutes: the certificate setting could not be stored: its row is not in the database (has the upgrade been run?).');
+
+                return false;
+            }
+        } catch (\Throwable $e) {
+            error_log('MailRoutes: the certificate setting could not be stored: ' . $e->getMessage());
+
+            return false;
+        }
+        self::forget();
+        // The fault on record was met under the old rule: this clears it
+        // and releases the mail held for it (see onRecord()), whatever
+        // route is in use.
+        self::onRecord($db);
+
+        return true;
+    }
+
+    /**
+     * 🩺 WHILE CHECKING IS OFF, OR ONE CERTIFICATE IS ACCEPTED: would the
+     * mail server's certificate pass the full check NOW? If it would,
+     * checking is switched back on, with a line in the activity log (the
+     * owner's decision, 13 October 2026: a way past the check is for as long
+     * as the certificate is wrong, and not a day longer).
+     *
+     * ASKED ONCE A REQUEST, before the first message it sends, and once at
+     * the start of every run of the mail queue, so an installation that
+     * sends nothing for a week still finds out at the job's next run. One
+     * fully checked connection as far as the encryption, which says nothing
+     * private (see the library's CertificateReader::wouldPass()).
+     *
+     * WHATEVER ROUTE IS IN USE. What is asked about is the SMTP mailbox as
+     * it is set up, and "off" stays in force for it (a "Send test" through
+     * it, and all mail the day the portal is switched back to it) while
+     * Microsoft 365 or Google carries the mail. So the caller does not ask
+     * which route is chosen, and neither does this. (MailQueue::send() used
+     * to call this only when SMTP was the route in use: with another route
+     * chosen, "off" then never lapsed by itself.)
+     *
+     * "Cannot tell" (the mail server could not be reached, or the handshake
+     * failed in a way that is not the certificate's doing) CHANGES NOTHING.
+     * Somebody on the network path can cause that at will; they cannot
+     * cause a "yes".
+     *
+     * Never throws.
+     *
+     * @return string 'not-needed' (checking is on, or no SMTP mailbox is
+     *                set up), 'passes' (and checking is now on), 'fails' or
+     *                'cannot-tell'.
+     */
+    public static function recheckCertificate(mysqli $db): string
+    {
+        if (self::$rechecked !== null) {
+            return self::$rechecked;
+        }
+        try {
+            // The setting FIRST: while checking is on (nearly always), the
+            // SMTP route is not opened, and its password not decrypted, for
+            // a request that sends through another route.
+            $check = self::certificateCheck();
+            if ($check['mode'] === self::CHECK_ON || self::open()['config'] === null) {
+                return self::$rechecked = 'not-needed';
+            }
+            $passes = self::wouldPassNow();
+            if ($passes !== true) {
+                return self::$rechecked = $passes === false ? 'fails' : 'cannot-tell';
+            }
+            if (self::setCertificateCheck($db, self::CHECK_ON) === false) {
+                // Not switched back: the message about to go follows the
+                // stored rule, as before. The reason is in the error log.
+                return self::$rechecked = 'cannot-tell';
+            }
+            // No person did this, so no account is named: the portal did.
+            Logger::activity(
+                self::LOG_BACK_ON,
+                'Certificate checking for the mail server switched itself back ON: the server\'s certificate passes the full check again. '
+                . ($check['mode'] === self::CHECK_OFF ? 'Checking had been switched off.' : 'One certificate had been accepted (fingerprint ' . $check['fingerprint'] . ').'),
+                null
+            );
+
+            return self::$rechecked = 'passes';
+        } catch (\Throwable $e) {
+            error_log('MailRoutes: the mail server\'s certificate could not be looked at again: ' . $e->getMessage());
+
+            return self::$rechecked = 'cannot-tell';
+        }
+    }
+
+    /**
+     * 🩺 Would the SMTP mailbox's mail server pass the FULL certificate check
+     * at this moment? One fully checked connection as far as the encryption,
+     * which gives the server nothing private: the mail library's
+     * CertificateReader::wouldPass().
+     *
+     * @return bool|null True or false; null for "cannot tell", and when no
+     *                   SMTP mailbox is set up. A caller must treat null as
+     *                   "nothing has changed".
+     */
+    private static function wouldPassNow(): ?bool
+    {
+        $config = self::open()['config'];
+
+        return $config === null ? null : (new CertificateReader($config, new SystemClock()))->wouldPass();
+    }
+
+    /**
+     * ⚠️ THE STANDING WARNING: what the e-mail page, the admin dashboard and
+     * the health page all say while checking is off, or one certificate is
+     * accepted. Null only when the certificate is checked in full.
+     *
+     * READ FROM WHAT IS STORED, every time, and from nothing else: the
+     * setting itself, the moment stored beside it, and the activity log for
+     * who set it. So it shows the same whoever set it and however (the
+     * e-mail page, or a line of SQL), on every page, to every
+     * administrator, until the setting is `on` again. REJECTED: a note kept
+     * in the session of the person who switched it off. Nobody else would
+     * have been warned, and they would have stopped being warned at their
+     * next sign-in.
+     *
+     * WHATEVER ROUTE IS IN USE. This used to answer null unless SMTP was the
+     * route in use. With checking off and Microsoft 365 chosen, no page then
+     * said so, and "Send test" through the SMTP mailbox still went with the
+     * check off. It now says which route IS in use and that the setting
+     * applies to what is sent through the SMTP mailbox.
+     *
+     * WHEN: the moment stored beside the setting
+     * (`mail.smtp.certCheckOffAt`, UTC, the database's clock), whenever it
+     * is there. It is worded as "the moment stored beside this setting"
+     * unless a log line vouches for it, because a change made in the
+     * database can leave an older moment in place.
+     * WHO: an administrator is NAMED ONLY WHEN THE LOG LINE AND THE STORED
+     * MOMENT ARE THE SAME CHANGE. That means all of: the newest line of the
+     * four this class writes is "accepted" or "switched off"; it is the kind
+     * that matches what is stored now (and, for one certificate, names the
+     * same fingerprint); and its moment is within SAME_CHANGE_SECONDS of the
+     * stored one. WHAT WAS WRONG BEFORE: the newest line was believed
+     * whenever a moment was stored. After a value was changed by SQL it
+     * named the administrator of an EARLIER change; and once the log's line
+     * had been cleared out with age it said "no record of who set this or
+     * when" although the moment was still stored.
+     *
+     * WHAT THIS CANNOT DO:
+     *   - name anybody when the setting was changed in the database, or the
+     *     log line has been cleared out (the activity log is kept for a
+     *     year by default; an accepted certificate can stay for longer);
+     *   - name a person whose account has since been removed;
+     *   - match the two moments across the night the clocks change, when
+     *     the database server keeps its clock in a zone that changes: the
+     *     activity log stores its times on that clock with no zone, so one
+     *     of them is then an hour out, and nobody is named. That is the
+     *     safe direction.
+     *
+     * @param string $zone The time zone to show the moment in.
+     *
+     * @return array{mode: string, fingerprint: string, headline: string, since: string, by: string, named: bool, line: string, publicLine: string}|null
+     *         headline: a few words, for a label. since: the stored moment,
+     *         as a person reads it, or ''. named: true when a log line
+     *         vouches for who set it; by: that person's name, or '' when
+     *         their account has gone. line: one plain paragraph holding all
+     *         of it, FOR A GLOBAL ADMINISTRATOR. publicLine: the same with
+     *         nobody named, for everybody else: an organisation's
+     *         administrator, and the health line, which an outside monitor
+     *         reads too.
+     */
+    public static function standingWarning(mysqli $db, string $zone): ?array
+    {
+        $check = self::certificateCheck();
+        if ($check['mode'] === self::CHECK_ON) {
+            return null;
+        }
+        $off      = $check['mode'] === self::CHECK_OFF;
+        $stored   = self::value('mail.smtp.certCheckOffAt');
+        $isMoment = preg_match('/\A\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\z/', $stored) === 1;
+        $since    = $isMoment === true ? MailQueue::shown($stored, $zone) : '';
+        $by       = '';
+        $named    = false;
+        try {
+            if ($isMoment === true) {
+                // The newest of the four lines, and how many seconds its
+                // moment is from the stored one. The database does the sum:
+                // the log's time is on its own clock (see the note above).
+                $own  = [self::LOG_ACCEPTED, self::LOG_OFF, self::LOG_ON, self::LOG_BACK_ON];
+                $stmt = $db->prepare(
+                    'SELECT a.activityType, a.activityDescription, u.fullName, '
+                    . 'ABS(TIMESTAMPDIFF(SECOND, ?, UTC_TIMESTAMP() - INTERVAL TIMESTAMPDIFF(SECOND, a.timestamp, NOW()) SECOND)) AS secondsApart '
+                    . 'FROM tblActivityLogs a LEFT JOIN tblUsers u ON u.userID = a.userID '
+                    . 'WHERE a.activityType IN (?, ?, ?, ?) ORDER BY a.logID DESC LIMIT 1'
+                );
+                $stmt->bind_param('sssss', $stored, $own[0], $own[1], $own[2], $own[3]);
+                $stmt->execute();
+                $row = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                $sameKind = $row !== null && ($off === true
+                    ? (string) $row['activityType'] === self::LOG_OFF
+                    : (string) $row['activityType'] === self::LOG_ACCEPTED && str_contains((string) $row['activityDescription'], 'fingerprint ' . $check['fingerprint'] . ' ') === true);
+                if ($sameKind === true && $row['secondsApart'] !== null && (int) $row['secondsApart'] <= self::SAME_CHANGE_SECONDS) {
+                    $named = true;
+                    $by    = trim((string) ($row['fullName'] ?? ''));
+                }
+            }
+        } catch (\Throwable $e) {
+            // The warning still shows; only who set it is left out.
+            error_log('MailRoutes: who changed the certificate setting could not be read: ' . $e->getMessage());
+        }
+
+        $headline = $off === true ? 'Certificate checking is OFF' : 'One certificate is accepted without the full check';
+        // 🧭 Which route is in use decides what is true to say about it.
+        $route = Mailer::provider();
+        if ($route === self::SMTP) {
+            $what = $off === true
+                ? 'Certificate checking for the mail server is switched OFF. The portal cannot tell the mail server from an impostor: somebody on the network path could read or change every e-mail it sends, password-reset links included, and capture the mailbox\'s password.'
+                : 'The portal is sending mail through one certificate that failed the full check, accepted by its fingerprint (' . $check['fingerprint'] . '). Mail goes only while the mail server shows exactly that certificate.';
+        } else {
+            $elsewhere = 'This applies to the SMTP mailbox, which is not the route in use now: e-mail is set to go through ' . Mailer::ROUTES[$route] . '. '
+                . 'It is in force for anything sent through the SMTP mailbox (a "Send test" through it, and every e-mail if the portal is switched to it).';
+            $what = $off === true
+                ? 'Certificate checking for the SMTP mailbox\'s mail server is switched OFF. ' . $elsewhere . ' For those, the portal cannot tell the mail server from an impostor: somebody on the network path could read or change them, and capture the mailbox\'s password.'
+                : 'One certificate that failed the full check is accepted for the SMTP mailbox\'s mail server, by its fingerprint (' . $check['fingerprint'] . '). ' . $elsewhere . ' Those go only while the mail server shows exactly that certificate.';
+        }
+        // 🕰️ When, and who. `publicWho` is the same with nobody named.
+        if ($named === true) {
+            $publicWho = 'Set on ' . $since . '.';
+            $who       = 'Set on ' . $since . ' by ' . ($by === '' ? 'a person whose account is no longer held' : $by) . '.';
+        } elseif ($since !== '') {
+            $publicWho = 'The moment stored beside this setting says it was set on ' . $since . '.';
+            $who       = $publicWho . ' Who set it is not on record: the activity log holds no line for that change.';
+        } else {
+            $publicWho = 'The portal has no record of when this was set.';
+            $who       = 'The portal has no record of who set this or when.';
+        }
+        $after = ' Checking switches itself back on when the mail server\'s certificate passes the full check again; a global administrator can switch it back on sooner at Admin → Integrations → Email.';
+
+        return [
+            'mode' => $check['mode'], 'fingerprint' => $check['fingerprint'], 'headline' => $headline, 'since' => $since, 'by' => $by, 'named' => $named,
+            'line' => $what . ' ' . $who . $after, 'publicLine' => $what . ' ' . $publicWho . $after,
+        ];
+    }
+
+    /**
+     * 🪪 The certificate that failed its check, as it is on record, for the
+     * e-mail page to show before a global administrator decides anything.
+     * Null when no certificate fault is on record.
+     *
+     * `sha256` is '' when the certificate could not be read to say what is
+     * wrong with it. There is then nothing to accept and no message can be
+     * sent past the check: an approval names a certificate by its
+     * fingerprint, and there is none.
+     *
+     * @param string $zone The time zone to show moments in.
+     *
+     * @return array{words: string, names: string, issuer: string, validFrom: string, validTo: string, sha256: string, since: string, seenAt: string}|null
+     */
+    public static function certificateOnRecord(mysqli $db, string $zone): ?array
+    {
+        // What is ON RECORD, whatever route is in use: a certificate that a
+        // "Send test" found while another route was in use is shown too, so
+        // that it can be looked at, and decided about, before the portal is
+        // switched to the SMTP mailbox. Whether it stops mail is
+        // standingProblem()'s to say, not this method's.
+        if (self::onRecord($db)['problem'] !== self::PROBLEM_CERTIFICATE) {
+            return null;
+        }
+        try {
+            $state = self::state($db);
+        } catch (\Throwable $e) {
+            return null;
+        }
+        $moment = static fn (mixed $utc): string => is_string($utc) === true && $utc !== '' ? MailQueue::shown($utc, $zone) : '';
+
+        return [
+            'words'     => (string) $state['problemWords'],
+            'names'     => (string) $state['certNames'],
+            'issuer'    => (string) $state['certIssuer'],
+            'validFrom' => $moment($state['certValidFrom']),
+            'validTo'   => $moment($state['certValidTo']),
+            'sha256'    => strtolower((string) $state['certSha256']),
+            'since'     => $moment($state['problemSince']),
+            'seenAt'    => $moment($state['problemSeenAt']),
+        ];
+    }
+
+    /**
+     * 🔒 Is this setting kept out of the GENERAL settings editor (/settings)?
+     *
+     * Yes for three: the mail server's name, and the two rows of the
+     * certificate setting. THE E-MAIL PAGE IS THE ONE PLACE THEY ARE
+     * CHANGED, for everybody, a global administrator included.
+     *
+     * WHAT WAS WRONG (found by the check of package M4, by running it): with
+     * certificate checking off, a global administrator changed
+     * `mail.smtp.host` on the general Settings page. That page knows nothing
+     * of saveSmtp()'s two rules, so the stored password and "off" were both
+     * kept: the next message went to the new server, which showed a
+     * certificate nobody had looked at, and it was given the sign-in line
+     * carrying the password. And `off` could be typed into
+     * `mail.smtp.certCheck` there with no warning, no typed server name and
+     * no certificate fault on record.
+     *
+     * The editor asks this in THREE places, and all three refuse: changing
+     * a row and adding one (web/_apps/settings/save.php), and deleting one
+     * (web/_apps/settings/index.php). Deleting matters as much: with the
+     * name's row gone no SMTP mail can go, and with the certificate rows
+     * gone the e-mail page can no longer store a decision
+     * (setCertificateCheck() changes the two rows, it does not add them).
+     * An ORGANISATION'S own row of the same name is refused as well.
+     * Nothing reads one (see the file header), so it would only mislead
+     * whoever found it later.
+     *
+     * WHAT IT CANNOT DO: stop somebody changing the rows straight in the
+     * database; or cover the port, the user name, the kind of encryption
+     * and the password, which the general editor can still change.
+     *
+     * Names are compared without regard to capitals, as the database does.
+     */
+    public static function lockedInGeneralEditor(string $key): bool
+    {
+        return in_array(strtolower($key), self::LOCKED_IN_GENERAL_EDITOR, true) === true;
     }
 
     // =========================================================================
@@ -1468,14 +2174,36 @@ final class MailRoutes
      *   - "remove" ticked: the stored one is emptied, still marked as a secret;
      *   - both a new one and "remove": refused, because the two contradict.
      *
+     * WHEN THE MAIL SERVER'S NAME OR ITS PORT IS CHANGED (package M4, from
+     * #592's list; the port was added after the package's check, which found
+     * that a changed port under the same name kept both):
+     *   - A STORED PASSWORD IS NOT CARRIED OVER TO THE NEW SERVER. It must
+     *     be typed again, or removed, in the same save. A stored password
+     *     was saved for one server; with the box left empty it used to be
+     *     kept, and was offered to whatever answered at the new name or
+     *     port the next time a message was sent. Another port is another
+     *     program answering, and with checking off nothing else tells the
+     *     two apart.
+     *   - CERTIFICATE CHECKING GOES BACK ON, from "off" AND from "one
+     *     certificate accepted". Either was decided about the server that
+     *     was set then (its name was typed to confirm it). It is not
+     *     carried over to another.
+     * WHAT THIS CANNOT DO: either of those when the port is changed on the
+     * general Settings page, or anything is changed in the database. (The
+     * general Settings page refuses to change the NAME: see
+     * lockedInGeneralEditor().)
+     *
      * @param array<string, mixed> $input The form's fields: host, port,
      *        security, username, password, removePassword, fromAddress,
      *        fromName, replyTo, perHour.
      *
-     * @return array{errors: list<string>, password: string} `errors` empty
-     *         means saved. `password` says what happened to the stored one:
-     *         'kept', 'stored' or 'removed' (for the activity log; never the
-     *         password itself).
+     * @return array{errors: list<string>, password: string, checkingBackOn: bool, serverChange: string}
+     *         `errors` empty means saved. `password` says what happened to
+     *         the stored one: 'kept', 'stored' or 'removed' (for the activity
+     *         log; never the password itself). `checkingBackOn` is true when
+     *         this save put certificate checking back on. `serverChange`
+     *         says which of the two changed, in words: '', 'name', 'port' or
+     *         'name and port'.
      */
     public static function saveSmtp(array $input): array
     {
@@ -1541,6 +2269,24 @@ final class MailRoutes
         if ($newPassword !== '' && (preg_match('/[\x00-\x1F\x7F]/', $newPassword) === 1 || strlen($newPassword) > 1000)) {
             $errors[] = 'The password contains a character that cannot be typed, or is longer than 1,000 characters.';
         }
+        // 🔑 The server's name or port has changed and a stored password
+        //    would be kept: refused. See the note above this method.
+        //    (formValues() says only which state the stored password is in.)
+        //    A port is compared as a number where it is one, so that "0587"
+        //    typed over "587" is not taken for a different server.
+        $asPort      = static fn (string $typed): string => preg_match('/\A[0-9]{1,5}\z/', $typed) === 1 ? (string) (int) $typed : $typed;
+        $nameChanged = $host !== strtolower(self::value('mail.smtp.host'));
+        $portChanged = $asPort($port) !== $asPort(self::value('mail.smtp.port'));
+        $serverChange = trim(($nameChanged === true ? 'name' : '') . ($nameChanged === true && $portChanged === true ? ' and ' : '') . ($portChanged === true ? 'port' : ''));
+        if ($serverChange !== '' && $newPassword === '' && $remove === false && self::formValues()['passwordState'] === 'stored') {
+            // (This used to end "the portal does not send a password to a
+            // server it was not saved for". That was more than is true: a
+            // port changed on the general Settings page, or a name changed
+            // in the database, does exactly that. What is true is what THIS
+            // page does.)
+            $errors[] = "The mail server's " . $serverChange . ($serverChange === 'name and port' ? ' have' : ' has') . ' changed, so type the mailbox\'s password again (or tick the box to remove the stored one). '
+                . 'The stored password was saved for the server set before, and this page does not keep a stored password for a different server name or port.';
+        }
         // The library's own, stricter rules for a sender, asked only when the
         // simpler checks above found nothing (or the same fault is said twice).
         if ($errors === [] && $fromAddress !== '') {
@@ -1550,7 +2296,7 @@ final class MailRoutes
             }
         }
         if ($errors !== []) {
-            return ['errors' => $errors, 'password' => 'kept'];
+            return ['errors' => $errors, 'password' => 'kept', 'checkingBackOn' => false, 'serverChange' => ''];
         }
 
         // 🔐 Encrypt BEFORE anything is written, so that a missing key file
@@ -1573,7 +2319,7 @@ final class MailRoutes
                 // The exception names the key file's path, never the password.
                 error_log('MailRoutes: the password could not be encrypted: ' . $e->getMessage());
 
-                return ['errors' => ["The password could not be encrypted, so nothing was saved. The installation's key file is missing or cannot be read; see the server's error log."], 'password' => 'kept'];
+                return ['errors' => ["The password could not be encrypted, so nothing was saved. The installation's key file is missing or cannot be read; see the server's error log."], 'password' => 'kept', 'checkingBackOn' => false, 'serverChange' => ''];
             }
             $passwordChange = 'stored';
         } elseif ($remove === true) {
@@ -1582,6 +2328,15 @@ final class MailRoutes
         }
         // (The box left empty and "remove" not ticked: no password row is in
         //  $rows at all, so the stored one cannot be touched by this save.)
+
+        // 🪪 A new server name or port: certificate checking goes back on,
+        //    from "off" and from "one certificate accepted" alike, in the
+        //    same save. See the note above this method.
+        $checkingBackOn = $serverChange !== '' && self::certificateCheck()['mode'] !== self::CHECK_ON;
+        if ($checkingBackOn === true) {
+            $rows['mail.smtp.certCheck']      = [self::CHECK_ON, 0];
+            $rows['mail.smtp.certCheckOffAt'] = ['', 0];
+        }
 
         $db = App::db();
         try {
@@ -1598,11 +2353,11 @@ final class MailRoutes
             }
             error_log('MailRoutes: the mail settings could not be saved: ' . $e->getMessage());
 
-            return ['errors' => ['The settings could not be saved because the database refused them. Nothing was changed. The reason is in the server\'s error log.'], 'password' => 'kept'];
+            return ['errors' => ['The settings could not be saved because the database refused them. Nothing was changed. The reason is in the server\'s error log.'], 'password' => 'kept', 'checkingBackOn' => false, 'serverChange' => ''];
         }
         self::forget();
 
-        return ['errors' => [], 'password' => $passwordChange];
+        return ['errors' => [], 'password' => $passwordChange, 'checkingBackOn' => $checkingBackOn, 'serverChange' => $serverChange];
     }
 
     /**

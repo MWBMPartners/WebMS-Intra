@@ -6,19 +6,37 @@
  * -----------------------------------------------------------------------------
  * The e-mail page: which route the portal sends through and whether it is
  * ready, the choice of route, the SMTP mailbox's settings, "Send test", the
- * sender domain's DNS records, and the last ten sends.
+ * mail queue, the ways past a failed certificate check, the sender domain's
+ * DNS records, and the last ten sends.
  *
- * WHO MAY DO WHAT (#592, 12 October 2026)
- * ---------------------------------------
+ * WHO MAY DO WHAT (#592, 12 October 2026; the queue's seven, 13 October)
+ * ---------------------------------------------------------------------
  * Any administrator may LOOK at this page. Everything it can CHANGE or DO is
  * for a global administrator only: saving the SMTP settings, choosing the
- * route, and sending a test. All three act on the whole installation (one
- * mail route serves every organisation), and a test sends a message from the
- * installation's mailbox. Anybody else who posts a form here is refused, is
- * told why, and the refusal is written to the activity log. The forms are also
- * not shown to them, but it is the refusal that enforces the rule.
+ * route, sending a test, and the seven actions of the mail queue and the
+ * certificate (`_mail-queue.php`, beside this file). All of them act on the
+ * whole installation (one mail route serves every organisation). Anybody
+ * else who posts a form here is refused, is told why, and the refusal is
+ * written to the activity log. The forms are also not shown to them, but it
+ * is the refusal that enforces the rule.
+ * THE ONE CHAIN BELOW (the form's token, then "is it one of this page's
+ * actions", then "is this a global administrator") is the only place those
+ * three are asked, for every action alike. Do not add an action beside it.
  *
  * Before this, "Send test" was open to an administrator of one organisation.
+ *
+ * WHAT AN ORGANISATION'S ADMINISTRATOR IS NOT SHOWN (#592, point 4): the
+ * mail server's own words about a message that did not go (they can name
+ * another person's address, or the mailbox), the mailbox's user name, the
+ * certificate's details, and any button. They see that a message is
+ * waiting, held or not sent, in the page's own words.
+ *
+ * THE ONE PLACE FOR THE SERVER'S NAME AND THE CERTIFICATE SETTING
+ * -----------------------------------------------------------------
+ * The mail server's name and the two certificate rows are changed HERE and
+ * nowhere else: the general Settings page refuses them, for everybody
+ * (MailRoutes::lockedInGeneralEditor()). A changed name or port needs the
+ * password typed again and puts certificate checking back on.
  *
  * THE MAILBOX'S PASSWORD
  * ----------------------
@@ -43,9 +61,9 @@
  *   hourly limit, a missing setting) leaves it showing. (It used to go
  *   after any attempt that ended another way, because it was read from the
  *   newest line of the send log.)
- * - It does not list the mail queue, send a held message or accept one
- *   certificate. Those are a later package (M4). "Recent sends" shows a
- *   waiting or held message as "Not sent", with its reason beside it.
+ * - Tell whether a certificate that failed the check is the mail server's
+ *   own: see `_mail-queue.php`, which shows it and offers the three ways
+ *   past the check.
  * - The hourly limit is not exact for mail sent straight from a page:
  *   messages sent at the same moment are each counted before the others
  *   are recorded, so together they can pass it. The form says so.
@@ -56,7 +74,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.2.0
+ * @version   1.3.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/234
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/592
  * -----------------------------------------------------------------------------
@@ -68,9 +86,13 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
+use Portal\Core\MailQueue;
 use Portal\Core\MailRoutes;
 use Portal\Core\Router;
 use Portal\Core\Site;
+
+// 📬 The mail queue's part of this page: its seven actions, and how it is drawn.
+require_once __DIR__ . DIRECTORY_SEPARATOR . '_mail-queue.php';
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -105,7 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'save_smtp' => 'saving the SMTP settings',
         'set_route' => 'choosing the mail route',
         'test_send' => 'sending a test message',
-    ];
+    ] + mail_queue_page_actions();
     $action = is_string($_POST['action'] ?? null) === true ? $_POST['action'] : '';
     // Who is asking, for the activity log. Logger::activity() does not work
     // this out for itself: left out, the log says a mail setting changed and
@@ -129,6 +151,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $flash = 'The mail settings are portal-wide: they apply to every organisation on this installation, not only yours. '
             . 'Only a global administrator can change them or send a test. Nothing was changed.';
         $flashType = 'danger';
+    } elseif (isset(mail_queue_page_actions()[$action]) === true) {
+        // 📬 One of the mail queue's seven. Reached only past the three tests
+        //    above. Redirected afterwards, so that pressing "reload" cannot
+        //    send a message, or switch checking off, a second time.
+        try {
+            [$_SESSION['flash_msg'], $_SESSION['flash_type']] = mail_queue_page_act($mysqli, $action, $_POST, $actorId);
+        } catch (\Throwable $e) {
+            // The database went away part way, most likely. Said in words,
+            // and honestly: this cannot know how far the action got.
+            error_log('The e-mail page could not finish "' . $actions[$action] . '": ' . get_class($e) . ': ' . $e->getMessage());
+            $_SESSION['flash_msg']  = 'Something went wrong on the server while ' . $actions[$action] . ', and it may not have been finished. '
+                . 'Look at the mail queue and the notices on this page before you try again. The reason is in the server\'s error log.';
+            $_SESSION['flash_type'] = 'danger';
+        }
+        header('Location: ' . $selfUrl, true, 302);
+        exit();
     } elseif ($action === 'save_smtp') {
         $saved = MailRoutes::saveSmtp([
             'host'           => $_POST['smtpHost'] ?? '',
@@ -146,7 +184,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $passwordNote = ['kept' => '', 'stored' => ' A new mailbox password was stored.', 'removed' => ' The stored mailbox password was removed.'][$saved['password']];
             // The activity log says THAT the password changed, never what it is.
             Logger::activity('MailSettingsSaved', 'The SMTP mail settings were saved.' . $passwordNote, $actorId);
-            $_SESSION['flash_msg']  = 'The SMTP settings were saved.' . $passwordNote . ' Use "Send test" to check that they work.';
+            // 🪪 A new server name or port put certificate checking back on
+            //    (see MailRoutes::saveSmtp()). Said, and logged as its own
+            //    line, naming which of the two changed.
+            $checkNote = '';
+            if ($saved['checkingBackOn'] === true) {
+                $changed = $saved['serverChange'] . ($saved['serverChange'] === 'name and port' ? ' were' : ' was');
+                Logger::activity(MailRoutes::LOG_ON, 'Certificate checking for the mail server went back ON because the mail server\'s ' . $changed . ' changed.', $actorId);
+                $checkNote = ' Certificate checking is back ON: it had been switched off, or one certificate accepted, for the server set before.';
+            }
+            $_SESSION['flash_msg']  = 'The SMTP settings were saved.' . $passwordNote . $checkNote . ' Use "Send test" to check that they work.';
             $_SESSION['flash_type'] = 'success';
             header('Location: ' . $selfUrl, true, 302);
             exit();
@@ -243,21 +290,42 @@ if ($senderEmail !== '' && str_contains($senderEmail, '@') === true) {
     $senderDomain = substr($senderEmail, strpos($senderEmail, '@') + 1);
 }
 
-/**
- * A moment stored in UTC, shown in this organisation's time zone with the
- * zone's short name beside it. Converted here, once, and nowhere earlier.
- */
-$showMoment = static function (string $utc): string {
-    try {
-        return (new DateTimeImmutable($utc, new DateTimeZone('UTC')))
-            ->setTimezone(new DateTimeZone(date_default_timezone_get()))
-            ->format('j M Y, H:i T');
-    } catch (\Throwable $e) {
-        return $utc . ' UTC';
-    }
-};
+// 🕰️ ONE time zone for EVERY moment this page shows (MailQueue::shown()
+//    converts once, and names the zone beside the moment).
+//
+//    WHICH ZONE. The portal keeps an organisation's zone in two places, and
+//    they can differ: the organisation's own row (`tblSites.timezone`, set
+//    at Admin, Organisations, and "UTC" until somebody sets it), and the
+//    `site.timezone` setting, which the portal's start-up makes PHP's own
+//    zone. The queue's part of this page used the first and the rest of the
+//    page the second, so ONE PAGE SHOWED THE SAME MOMENT TWICE, IN TWO
+//    ZONES. Now the whole page uses the organisation's own row when it has
+//    been set to something, and PHP's zone otherwise. That is the order the
+//    start-up's own note gives (the organisation's row comes first), and no
+//    list on this page loses a zone it showed before.
+//    REJECTED: the organisation's row alone. An installation that set only
+//    the setting would have seen "Recent sends" go from its own zone to UTC.
+//
+//    WHAT THIS CANNOT DO: tell an organisation that chose UTC on purpose
+//    from one that never chose; or make the admin dashboard and the health
+//    page agree with this page for an installation that set only the
+//    setting (those two read the organisation's row alone). Every moment
+//    names its zone, so none of them is ever wrong, only differently told.
+$siteZone = (string) (Site::current()['timezone'] ?? '');
+$zone     = ($siteZone !== '' && $siteZone !== 'UTC') ? $siteZone : date_default_timezone_get();
+/** A moment stored in UTC, as this page shows it: in that one zone, with the zone's short name beside it. */
+$showMoment = static fn (string $utc): string => MailQueue::shown($utc, $zone);
+// ⚠️ Certificate checking is off, or one certificate is accepted. Read from
+//    what is STORED, on every load, for whoever opens the page, whatever
+//    mail route is in use: see MailRoutes::standingWarning().
+$standingWarning = MailRoutes::standingWarning($mysqli, $zone);
 
-// 🪪 The certificate problem on record, when SMTP is the route in use.
+// 🪪 The certificate problem on record for the SMTP mailbox, WHATEVER ROUTE IS
+//    IN USE. With SMTP in use it is what holds mail. With another route in use
+//    it is what a "Send test" of the mailbox found: nothing is held for it,
+//    and the notice below says so. (It used to be read only while SMTP was the
+//    route in use. A test made before switching then failed with nothing on
+//    the page to say why, and nothing to decide about it with.)
 $certificateProblem = null;
 // 📜 The last ten sends. A global administrator sees every organisation's,
 //    because the route is the installation's. An administrator of one
@@ -266,9 +334,7 @@ $certificateProblem = null;
 $recentSends   = [];
 $logUnreadable = false;
 try {
-    if ($smtpInUse === true) {
-        $certificateProblem = MailRoutes::certificateProblem($mysqli);
-    }
+    $certificateProblem = MailRoutes::certificateProblem($mysqli);
     $siteId = Site::id();
     $rsStmt = $mysqli->prepare(
         'SELECT provider, toRecipients, subject, status, errorCode, errorDetail, sentAt, sentAtUtc FROM tblEmailLog '
@@ -341,9 +407,17 @@ if ($testResult !== null && $testResult['steps'] !== []) {
 
         return false;
     };
+    // 🪪 How the certificate was treated for this test, said truthfully: a
+    //    test sent while checking is off, or one certificate is accepted,
+    //    did NOT check the certificate.
+    $encryptedAs = [
+        MailRoutes::RULE_CHECKED     => "Encryption switched on, and the server's certificate checked",
+        MailRoutes::RULE_ONE         => 'Encryption switched on, through the ONE certificate that is accepted (it was not checked in full)',
+        MailRoutes::RULE_NOT_CHECKED => "Encryption switched on. The server's certificate was NOT checked: checking is switched off",
+    ][(string) ($testResult['rule'] ?? MailRoutes::RULE_CHECKED)] ?? "Encryption switched on, and the server's certificate checked";
     $done = [
         'Reached the mail server'                              => $recorded('/\AConnected to /'),
-        "Encryption switched on, and the server's certificate checked" => $recorded('/\AEncryption is on /'),
+        $encryptedAs                                           => $recorded('/\AEncryption is on /'),
         'Signed in to the mailbox'                             => $recorded('/\AS: 235[ -]/'),
         'The mail server accepted the message'                 => $testResult['sent'] === true,
     ];
@@ -381,7 +455,23 @@ $esc = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES,
 </div>
 
 <?php if ($flash !== ''): ?>
-    <div class="alert alert-<?php echo $esc($flashType); ?>"><?php echo $esc($flash); ?></div>
+    <div class="alert alert-<?php echo $esc($flashType); ?>" data-mail-flash="<?php echo $esc($flashType); ?>"><?php echo $esc($flash); ?></div>
+<?php endif; ?>
+
+<?php if ($standingWarning !== null): ?>
+    <!-- ⚠️ Certificate checking is off, or one certificate is accepted. Shown to every administrator, from what is stored, whatever route is in use. -->
+    <?php // 🧑 Who set it is named to a GLOBAL administrator only. Everybody else reads the same warning with nobody named (`publicLine`): the person is a global administrator, and an organisation's administrator has no need of their name. ?>
+    <div class="alert alert-<?php echo $standingWarning['mode'] === MailRoutes::CHECK_OFF ? 'danger' : 'warning'; ?>" role="alert" data-mail-warning="<?php echo $standingWarning['mode'] === MailRoutes::CHECK_OFF ? 'checking-off' : 'one-certificate'; ?>">
+        <h2 class="h5 alert-heading"><i class="fa-solid fa-shield-halved me-1" aria-hidden="true"></i><?php echo $esc($standingWarning['headline']); ?></h2>
+        <p class="text-break<?php echo $isGlobalAdmin === true ? '' : ' mb-0'; ?>"><?php echo $esc($isGlobalAdmin === true ? $standingWarning['line'] : $standingWarning['publicLine']); ?></p>
+        <?php if ($isGlobalAdmin === true): ?>
+            <form method="post" action="<?php echo $esc($selfUrl); ?>" class="mb-0">
+                <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
+                <input type="hidden" name="action" value="cert_on">
+                <button type="submit" class="btn btn-sm btn-<?php echo $standingWarning['mode'] === MailRoutes::CHECK_OFF ? 'danger' : 'dark'; ?>">Switch certificate checking back on now</button>
+            </form>
+        <?php endif; ?>
+    </div>
 <?php endif; ?>
 
 <?php if ($mailRoute['missing'] !== []): ?>
@@ -437,7 +527,33 @@ $esc = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES,
     </div>
 <?php endif; ?>
 
-<?php if ($certificateProblem !== null): ?>
+<?php if ($certificateProblem !== null && $smtpInUse === false): ?>
+    <!-- 🪪 A "Send test" of the SMTP mailbox failed the certificate check while ANOTHER route is in use. Nothing is held for it: said first, in bold. -->
+    <div class="alert alert-info" role="alert" data-mail-warning="certificate-not-in-use">
+        <h2 class="h5 alert-heading"><i class="fa-solid fa-certificate me-1" aria-hidden="true"></i>The SMTP mailbox&rsquo;s mail server did not pass the certificate check</h2>
+        <p>
+            <strong>No e-mail is held because of this.</strong> The SMTP mailbox is not the route in use: e-mail is going out through <?php echo $esc($mailRoute['label']); ?>.
+            The last time the SMTP mailbox was tried<?php echo $certificateProblem['at'] !== '' ? ' (' . $esc($showMoment($certificateProblem['at'])) . ')' : ''; ?>, by a
+            &ldquo;Send test&rdquo;, its mail server&rsquo;s certificate was not accepted, so that test was not sent.
+            If the portal is switched to the SMTP mailbox while the certificate stays as it is, mail will be held until it passes the check.
+        </p>
+        <p class="text-break"><strong>What the check found:</strong> <?php echo $esc($certificateProblem['words']); ?></p>
+        <p class="mb-0">
+            What to do: ask whoever runs the mail server to put its certificate right, or check that the server name under
+            &ldquo;SMTP mailbox&rdquo; below is the name the certificate is for. Then use &ldquo;Send test&rdquo; through the SMTP mailbox again.
+            <?php if ($isGlobalAdmin === true): ?>
+                If the mailbox has to be used before then, <a href="#mail-certificate" class="alert-link">the certificate itself, and the ways to let mail past the check</a>,
+                are further down this page. They can be decided before the portal is switched to the SMTP mailbox.
+            <?php else: ?>
+                Only a global administrator can let mail past a failed check.
+            <?php endif; ?>
+        </p>
+        <p class="mb-0 mt-2 small">
+            This notice shows what the last test of the SMTP mailbox found. It goes when a later test passes the check, or when the mail settings
+            below are changed. It also goes when the portal is switched to the SMTP mailbox: the first message sent then finds the certificate again, and is held.
+        </p>
+    </div>
+<?php elseif ($certificateProblem !== null): ?>
     <!-- 🪪 The mail server's certificate failed its check, and that is on record for the mail route. -->
     <div class="alert alert-warning" role="alert" data-mail-warning="certificate">
         <h2 class="h5 alert-heading"><i class="fa-solid fa-certificate me-1" aria-hidden="true"></i>The mail server&rsquo;s certificate did not pass the check</h2>
@@ -452,7 +568,11 @@ $esc = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES,
         <p class="mb-0">
             What to do: ask whoever runs the mail server to put its certificate right, or check that the server name under
             &ldquo;SMTP mailbox&rdquo; below is the name the certificate is for. Then use &ldquo;Send test&rdquo;.
-            The portal always checks the certificate.
+            <?php if ($isGlobalAdmin === true): ?>
+                If mail has to go before then, <a href="#mail-certificate" class="alert-link">the certificate itself, and three deliberate ways past the check</a>, are further down this page.
+            <?php else: ?>
+                Only a global administrator can let mail past a failed check.
+            <?php endif; ?>
         </p>
         <p class="mb-0 mt-2 small">
             This notice shows what the last attempt to reach the mail server found. It goes when the certificate passes the check
@@ -605,11 +725,18 @@ $esc = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES,
                 <div class="col-12 col-md-6">
                     <label class="form-label" for="smtp-host">Mail server&rsquo;s name</label>
                     <input type="text" name="smtpHost" id="smtp-host" class="form-control" maxlength="253" value="<?php echo $esc($form['host']); ?>" autocapitalize="none" spellcheck="false">
-                    <div class="form-text">The name only, as your mail provider gives it. It must be the name the server&rsquo;s certificate is for.</div>
+                    <?php // (This used to say "the portal does not send a stored password to a server it was not saved for", which was more than is true: see MailRoutes::saveSmtp().) ?>
+                    <div class="form-text" id="smtp-host-help">
+                        The name only, as your mail provider gives it. It must be the name the server&rsquo;s certificate is for.
+                        <strong>If you change this name or the port, type the mailbox&rsquo;s password again</strong> (or tick the box to remove it): this page does not
+                        keep a stored password for a different server name or port. Certificate checking also goes back on if it had been switched off, or one
+                        certificate accepted.
+                    </div>
                 </div>
                 <div class="col-6 col-md-2">
                     <label class="form-label" for="smtp-port">Port</label>
-                    <input type="text" inputmode="numeric" name="smtpPort" id="smtp-port" class="form-control" maxlength="5" value="<?php echo $esc($form['port']); ?>">
+                    <input type="text" inputmode="numeric" name="smtpPort" id="smtp-port" class="form-control" maxlength="5" value="<?php echo $esc($form['port']); ?>" aria-describedby="smtp-port-help">
+                    <div class="form-text" id="smtp-port-help">A changed port counts as a changed server: type the password again.</div>
                 </div>
                 <div class="col-6 col-md-4">
                     <label class="form-label" for="smtp-security">Encryption</label>
@@ -681,6 +808,16 @@ $esc = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES,
 </div>
 <?php endif; ?>
 
+<?php
+// 📬 The certificate that failed (a global administrator only) and the mail
+//    queue. Drawn by `_mail-queue.php`; every button in it comes back to the
+//    chain at the top of this file.
+mail_queue_page_draw($mysqli, [
+    'isGlobalAdmin' => $isGlobalAdmin, 'smtpInUse' => $smtpInUse, 'csrf' => $csrf, 'selfUrl' => $selfUrl,
+    'zone' => $zone, 'siteId' => Site::id(), 'host' => $stored['host'],
+]);
+?>
+
 <div class="card mt-3">
     <div class="card-body">
         <h2 class="h5 text-break">DNS records for the sender&rsquo;s domain<?php echo $senderDomain !== '' ? ' (' . $esc($senderDomain) . ')' : ''; ?></h2>
@@ -713,6 +850,7 @@ $esc = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES,
 </div>
 
 <!-- 📜 The last ten sends, every route. House rule: no <table> for data display (portal-data-list). -->
+<?php // (A page that lists what is WAITING is above: the mail queue. This list is what has been tried, newest first.) ?>
 <div class="card mt-3">
     <div class="card-body">
         <h2 class="h5">Recent sends (last 10)</h2>
@@ -724,19 +862,38 @@ $esc = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES,
         <?php elseif (count($recentSends) === 0): ?>
             <p class="small text-muted mb-0">Nothing has been sent yet. Use &ldquo;Send test&rdquo; above to try the route in use; every attempt, sent or not, is then listed here.</p>
         <?php else: ?>
+            <?php
+            // 🏷️ Each kind of line has its own plain label (#592). A waiting,
+            //    held or expired message used to read "Not sent" in red,
+            //    which is true and frightening: a waiting one is on its way.
+            //    Only a message that was given up on is red now.
+            $sendLabels = [
+                'sent'    => ['Sent', 'success', ''],
+                'queued'  => ['Waiting', 'info text-dark', 'Waiting in the mail queue: it has not gone yet, and will be tried again.'],
+                'held'    => ['Held', 'warning text-dark', 'Held in the mail queue: it has not gone, and waits for a person or for the mail route to be put right.'],
+                'expired' => ['Expired, not sent', 'secondary', 'Not sent: its use-by time passed before it could go.'],
+                'failed'  => ['Not sent', 'danger', 'Not sent. A global administrator can see why.'],
+            ];
+            ?>
             <div class="portal-data-list">
                 <?php foreach ($recentSends as $row): ?>
-                    <?php $wasSent = (string) $row['status'] === 'sent'; ?>
+                    <?php
+                    $wasSent = (string) $row['status'] === 'sent';
+                    [$sendLabel, $sendColour, $sendPlain] = $sendLabels[(string) $row['status']] ?? $sendLabels['failed'];
+                    ?>
                     <div class="portal-data-row" data-mail-log-status="<?php echo $esc((string) $row['status']); ?>">
                         <div class="col-12 col-md-2">
-                            <span class="badge bg-<?php echo $wasSent === true ? 'success' : 'danger'; ?>"><?php echo $wasSent === true ? 'Sent' : 'Not sent'; ?></span>
+                            <span class="badge bg-<?php echo $esc($sendColour); ?>"><?php echo $esc($sendLabel); ?></span>
                             <span class="small text-muted ms-1"><?php echo $esc((string) $row['provider']); ?></span>
                         </div>
                         <div class="col-12 col-md-3 small text-break"><?php echo $esc((string) $row['toRecipients']); ?></div>
                         <div class="col-12 col-md-4 small text-break">
                             <?php echo $esc((string) $row['subject']); ?>
-                            <?php if ($wasSent === false && (string) $row['errorDetail'] !== ''): ?>
-                                <br><span class="text-danger"><?php echo $esc((string) $row['errorDetail']); ?></span>
+                            <?php if ($wasSent === false && $isGlobalAdmin === true && (string) $row['errorDetail'] !== ''): ?>
+                                <?php // The reason as recorded. It can quote the mail server, which can name an address or the mailbox: a global administrator only. ?>
+                                <br><span class="<?php echo (string) $row['status'] === 'failed' ? 'text-danger' : 'text-muted'; ?>"><?php echo $esc((string) $row['errorDetail']); ?></span>
+                            <?php elseif ($wasSent === false): ?>
+                                <br><span class="text-muted" data-mail-log-plain><?php echo $esc($sendPlain); ?></span>
                             <?php endif; ?>
                         </div>
                         <div class="col-12 col-md-3 small text-muted">
@@ -749,7 +906,7 @@ $esc = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES,
                                 ? $esc($showMoment($row['sentAtUtc']))
                                 : $esc((string) $row['sentAt']) . ' (the database server&rsquo;s clock)';
                             ?>
-                            <?php if ($wasSent === false && (string) $row['errorCode'] !== ''): ?>
+                            <?php if ($wasSent === false && $isGlobalAdmin === true && (string) $row['errorCode'] !== ''): ?>
                                 <br><code class="small"><?php echo $esc((string) $row['errorCode']); ?></code>
                             <?php endif; ?>
                         </div>

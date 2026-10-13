@@ -103,7 +103,7 @@ use MWBM\Mail\Transport;
 const DISABLED_FOR_THE_LIBRARY = 'proc_open,popen,exec,shell_exec,system,passthru,mail,fsockopen';
 
 /** How many proofs a whole run holds. A run with any other number has not finished properly. */
-const EXPECTED_PROOFS = 74;
+const EXPECTED_PROOFS = 79;
 
 /** The sign-in every stand-in server accepts. The password is made up and easy to spot in a leak. */
 const TEST_USER = 'mailbox-user';
@@ -683,6 +683,28 @@ function scenarios(): array
             'rcpt' => ['nobody@standin.test' => '550 5.1.1 no such mailbox; you signed in with ' . TEST_PASS . ' and ' . base64_encode("\0" . TEST_USER . "\0" . TEST_PASS)],
             'offersEncrypted' => ['AUTH PLAIN LOGIN', 'X-ECHO ' . TEST_PASS],
         ],
+        // 🔓 "The certificate is not checked" (proofs L19a to L19e). Each has
+        // a server of its own, so that what it saw can be counted exactly.
+        'nc-expired' => $ok + ['certs' => ['expired']],
+        'nc-expired-implicit' => $ok + ['certs' => ['expired'], 'tls' => 'implicit'],
+        'nc-selfsigned' => $ok + ['certs' => ['selfsigned']],
+        'nc-wrongname' => $ok + ['certs' => ['wrongname']],
+        'nc-no-starttls' => $ok + ['offers' => ['AUTH PLAIN LOGIN']],
+        'nc-starttls-refused' => $says('STARTTLS', '454 4.7.0 encryption is not available just now'),
+        'nc-plain-only' => $ok + ['tls' => 'none'],
+        'nc-old-tls' => $ok + ['oldTls' => true, 'tls' => 'implicit'],
+        'old-tls-low-notchecked' => $ok + ['oldTls' => true, 'tls' => 'implicit'],
+        // One certificate when it is read (connection 1), another when the message is to go (connection 2).
+        'nc-swap' => $ok + ['certs' => ['expired', 'expired2']],
+        // "Would the certificate pass the full check now?"
+        'wp-good' => $ok,
+        'wp-good-implicit' => $ok + ['tls' => 'implicit'],
+        'wp-expired' => $ok + ['certs' => ['expired']],
+        'wp-wrongname' => $ok + ['certs' => ['wrongname']],
+        'wp-name-list-other' => $ok + ['certs' => ['name-list-other']],
+        'wp-cut' => $ok + ['handshake' => 'cut-first'],
+        'wp-plain' => $ok + ['tls' => 'none'],
+        'wp-no-starttls' => $ok + ['offers' => ['AUTH PLAIN LOGIN']],
         // Faults inside the client itself.
         'after-handover' => $ok,
         'fault-words' => $ok,
@@ -1335,7 +1357,9 @@ function runCases(array $options): int
             $t->expect($result, SendResult::TRY_LATER, SendResult::STAGE_TLS, SendResult::REASON_NO_ENCRYPTION, null, 'with a certificate approved:');
             $reader = new CertificateReader($t->config('old-tls-low-reader', ['security' => SmtpConfig::TLS]), new SystemClock());
             $t->check($reader->read() === null, 'the connection that only reads a certificate refuses it too');
-            foreach (['old-tls-low', 'old-tls-low-pinned', 'old-tls-low-reader'] as $scenario) {
+            [$result] = $t->send($t->transport('old-tls-low-notchecked', ['security' => SmtpConfig::TLS]), build(plainSpec($now)), SendOptions::certificateNotChecked());
+            $t->expect($result, SendResult::TRY_LATER, SendResult::STAGE_TLS, SendResult::REASON_NO_ENCRYPTION, null, 'with the certificate not checked:');
+            foreach (['old-tls-low', 'old-tls-low-pinned', 'old-tls-low-reader', 'old-tls-low-notchecked'] as $scenario) {
                 // The server's own account. Had the library asked for "any
                 // TLS" and refused only afterwards, the server would have
                 // completed a TLS 1.1 handshake and written "ok" here.
@@ -2315,7 +2339,10 @@ function runCases(array $options): int
             } catch (LogicException) {
             }
         }
-        $t->check((new ReflectionClass(SendOptions::class))->getConstructor()?->isPrivate() === true, 'SendOptions can only be made through its two named ways');
+        $t->check((new ReflectionClass(SendOptions::class))->getConstructor()?->isPrivate() === true, 'SendOptions can only be made through its three named ways');
+        // The three ways never overlap: "not checked" names no certificate, and neither of the other two is "not checked".
+        $t->check(SendOptions::checked()->notChecked === false && SendOptions::onlyThisCertificate($whole)->notChecked === false, 'a checked send and a one-certificate send are never "not checked"');
+        $t->check(SendOptions::certificateNotChecked()->notChecked === true && SendOptions::certificateNotChecked()->onlyCertificateSha256 === '', '"not checked" is its own way and names no certificate');
     });
 
     $t->proof('L17a', '"This certificate only" still demands encryption: a server with no STARTTLS is refused', static function () use ($t, $now): void {
@@ -2366,6 +2393,134 @@ function runCases(array $options): int
         $t->check($connection->sendBody("Subject: x\r\n\r\nx\r\n", $deadline) === Connection::NOT_ALLOWED, 'a message is refused');
         $connection->close(true);
         $t->check($t->story('reader-mode') === ['1 tls ok'], 'the server saw the handshake and not one byte more: ' . implode(' | ', $t->story('reader-mode')));
+    });
+
+    // -------------------------------------------------------------------------
+    // L19: "the certificate is not checked", and "would it pass now?"
+    // -------------------------------------------------------------------------
+
+    $t->proof('L19a', 'With the certificate NOT checked, a message goes through a server whose certificate fails: read first on a connection that says nothing, then exactly that one accepted', static function () use ($t, $now): void {
+        foreach (['nc-expired' => SmtpConfig::STARTTLS, 'nc-expired-implicit' => SmtpConfig::TLS, 'nc-selfsigned' => SmtpConfig::STARTTLS, 'nc-wrongname' => SmtpConfig::STARTTLS] as $scenario => $security) {
+            // THE CONTROL: the same server, the normal way, is refused. Without
+            // this, "it went" below would prove nothing about the new way.
+            [$control] = $t->send($t->transport($scenario, ['security' => $security]), build(plainSpec($now)));
+            $t->expect($control, SendResult::NEEDS_PERSON, SendResult::STAGE_TLS, SendResult::REASON_CERTIFICATE, null, $scenario . ', checked (the control):');
+            $before = $t->count($scenario, 'connect');
+            $transport = $t->transport($scenario, ['security' => $security]);
+            [$result] = $t->send($transport, build(plainSpec($now)), SendOptions::certificateNotChecked());
+            $t->expect($result, SendResult::ACCEPTED, SendResult::STAGE_BODY, SendResult::REASON_OK, 250, $scenario . ', not checked:');
+            $said = implode("\n", $result->transcript);
+            $t->check(strpos($said, 'The certificate is NOT being checked') !== false && strpos($said, '(reading the certificate)') !== false, $scenario . ': the record of the conversation says the certificate was read and not checked');
+            // The reading connection: the handshake, and not one byte after it.
+            $reading = $t->story($scenario, $before + 1, false);
+            $t->check(in_array('1 tls ok', $reading, true) === true && preg_grep('/^1 (line|auth|body) /', $reading) === [], $scenario . ': the reading connection said NOTHING after the handshake: ' . implode(' | ', $reading));
+            $t->check(preg_grep('/^\d auth /', $reading) === [], $scenario . ': and was given no sign-in');
+            // The sending connection: signed in and handed the message, all of it encrypted.
+            $sending = $t->story($scenario, $before + 2, false);
+            $t->check(in_array('1 auth PLAIN user=' . TEST_USER . ' matched=1', $sending, true) === true && in_array('1 body complete=1', $sending, true) === true, $scenario . ': the sending connection signed in and delivered: ' . implode(' | ', $sending));
+            $t->check(preg_grep('/^0 (auth|body) |^0 line (MAIL|RCPT|DATA|AUTH)/', $sending) === [], $scenario . ': nothing private went before encryption');
+            if ($scenario !== 'nc-expired') {
+                continue;
+            }
+            // ♻️ A second message the same way rides the same connection: no new read, no new sign-in.
+            [$again] = $t->send($transport, build(plainSpec($now)), SendOptions::certificateNotChecked());
+            $t->expect($again, SendResult::ACCEPTED, SendResult::STAGE_BODY, SendResult::REASON_OK, 250, 'a second message the same way:');
+            $t->check($t->count($scenario, 'connect', '', false) === $before + 2 && $t->count($scenario, 'body', '', false) === 2, 'it used the open connection (' . ($t->count($scenario, 'connect', '', false) - $before) . ' connections, ' . $t->count($scenario, 'body', '', false) . ' messages)');
+            // 🔒 A message that did NOT ask for it must not ride that connection: checked, and for one named certificate.
+            [$checked] = $t->send($transport, build(plainSpec($now)));
+            $t->expect($checked, SendResult::NEEDS_PERSON, SendResult::STAGE_TLS, SendResult::REASON_CERTIFICATE, null, 'a checked message through the same route:');
+            [$other] = $t->send($transport, build(plainSpec($now)), SendOptions::onlyThisCertificate(str_repeat('ab', 32)));
+            $t->expect($other, SendResult::NEEDS_PERSON, SendResult::STAGE_TLS, SendResult::REASON_CERTIFICATE, null, 'a message for another certificate through the same route:');
+            $t->check($t->count($scenario, 'body') === 2, 'neither of those two went out on the unchecked connection (messages received: ' . $t->count($scenario, 'body') . ')');
+        }
+    });
+
+    $t->proof('L19b', 'With the certificate NOT checked, encryption is still required: a server offering none gets no sign-in and no message', static function () use ($t, $now): void {
+        $cases = [
+            'nc-no-starttls' => [SmtpConfig::STARTTLS, SendResult::STAGE_STARTTLS, SendResult::REASON_NO_ENCRYPTION],
+            'nc-starttls-refused' => [SmtpConfig::STARTTLS, SendResult::STAGE_STARTTLS, SendResult::REASON_NO_ENCRYPTION],
+            'nc-plain-only' => [SmtpConfig::TLS, SendResult::STAGE_TLS, SendResult::REASON_NO_ENCRYPTION],
+        ];
+        foreach ($cases as $scenario => [$security, $stage, $reason]) {
+            [$result] = $t->send($t->transport($scenario, ['security' => $security]), build(plainSpec($now)), SendOptions::certificateNotChecked());
+            $t->expect($result, SendResult::TRY_LATER, $stage, $reason, null, $scenario . ':');
+            $t->check($result->certificate === null, $scenario . ': no certificate is offered for approval');
+            $t->check(strpos($result->serverWords, 'no sign-in was attempted') !== false, $scenario . ': the words say no sign-in was attempted: ' . $result->serverWords);
+            $story = $t->story($scenario);
+            $t->check(preg_grep('/^\d (auth|body) |^\d line (AUTH|MAIL|RCPT|DATA)/', $story) === [], $scenario . ': the server was given no sign-in, no address and no message: ' . implode(' | ', $story));
+            if ($scenario === 'nc-no-starttls') {
+                // This stand-in does not LIST encryption and still agrees to
+                // it when asked. The connection that only reads a certificate
+                // asks without looking at the list (it says nothing private
+                // either way), so the certificate was read. The connection
+                // that would SEND does look, and stopped there: that is the
+                // one that matters, and it is the result checked above.
+                $t->check($t->count($scenario, 'connect') === 2 && $t->count($scenario, 'tls', 'ok') === 1, $scenario . ': one read, then one connection that stopped because encryption was not offered');
+                continue;
+            }
+            $t->check(strpos($result->serverWords, 'even when the certificate is not being checked') !== false, $scenario . ': the words say encryption is required all the same: ' . $result->serverWords);
+            $t->check($t->count($scenario, 'tls', 'ok') === 0, $scenario . ': and no encryption was ever agreed');
+        }
+        // And where it does go (L19a), the password went only after encryption: looked for across every one of those servers.
+        foreach (['nc-expired', 'nc-expired-implicit', 'nc-selfsigned', 'nc-wrongname', 'nc-swap'] as $scenario) {
+            $t->check(preg_grep('/^0 auth /', $t->story($scenario, null, false)) === [], $scenario . ': no sign-in ever arrived in the clear');
+        }
+    });
+
+    $t->proof('L19c', 'With the certificate NOT checked, a server offering only the old TLS 1.1 is still refused', static function () use ($t, $now): void {
+        [$result] = $t->send($t->transport('nc-old-tls', ['security' => SmtpConfig::TLS]), build(plainSpec($now)), SendOptions::certificateNotChecked());
+        $t->expect($result, SendResult::TRY_LATER, SendResult::STAGE_TLS, SendResult::REASON_NO_ENCRYPTION);
+        $t->check($t->count('nc-old-tls', 'tls', 'ok') === 0 && $t->count('nc-old-tls', 'auth') === 0 && $t->count('nc-old-tls', 'body') === 0, 'no encryption was agreed, and no sign-in or message was sent');
+    });
+
+    $t->proof('L19d', 'With the certificate NOT checked, a certificate that changes between the read and the send is not used: nothing goes, and the next try reads again', static function () use ($t, $now): void {
+        $transport = $t->transport('nc-swap');
+        [$result] = $t->send($transport, build(plainSpec($now)), SendOptions::certificateNotChecked());
+        $t->expect($result, SendResult::TRY_LATER, SendResult::STAGE_TLS, SendResult::REASON_ENCRYPTION_FAILED);
+        $t->check(strpos($result->serverWords, 'a different one a moment later') !== false, 'the words say what happened: ' . $result->serverWords);
+        $t->check($result->certificate === null, 'it is not handed to a person to approve: nobody approved either certificate');
+        $t->check($t->count('nc-swap', 'auth', '', false) === 0 && $t->count('nc-swap', 'body', '', false) === 0, 'the server that showed the second certificate was given no sign-in and no message');
+        // The next try reads again (the server now shows the second certificate both times) and goes.
+        [$result] = $t->send($transport, build(plainSpec($now)), SendOptions::certificateNotChecked());
+        $t->expect($result, SendResult::ACCEPTED, SendResult::STAGE_BODY, SendResult::REASON_OK, 250, 'the next try:');
+        $t->check($t->count('nc-swap', 'body') === 1 && $t->count('nc-swap', 'connect') === 4, 'one message in all, over four connections (read, refused, read, sent)');
+    });
+
+    $t->proof('L19e', '"Would the certificate pass now?" answers yes, no or cannot tell, and the server hears nothing after the handshake', static function () use ($t): void {
+        $cases = [
+            'wp-good' => [SmtpConfig::STARTTLS, true, '', ''],
+            'wp-good-implicit' => [SmtpConfig::TLS, true, '', ''],
+            'wp-expired' => [SmtpConfig::STARTTLS, false, SendResult::STAGE_TLS, SendResult::REASON_CERTIFICATE],
+            'wp-wrongname' => [SmtpConfig::STARTTLS, false, SendResult::STAGE_TLS, SendResult::REASON_CERTIFICATE],
+            // PHP 8.5 accepts this one; the library's own name rule refuses it. The answer must be "no" on every PHP.
+            'wp-name-list-other' => [SmtpConfig::STARTTLS, false, SendResult::STAGE_TLS, SendResult::REASON_CERTIFICATE],
+            // Not the certificate's doing: nothing can be told, and nothing may be concluded.
+            'wp-cut' => [SmtpConfig::STARTTLS, null, SendResult::STAGE_TLS, SendResult::REASON_ENCRYPTION_FAILED],
+            'wp-plain' => [SmtpConfig::TLS, null, SendResult::STAGE_TLS, SendResult::REASON_NO_ENCRYPTION],
+            // A server that does not LIST encryption but agrees to it when
+            // asked, with a good certificate. The question is about the
+            // certificate, and the answer is yes. (A send to such a server
+            // still stops, for the missing offer: proof L7a. Answering "yes"
+            // here only ever sends an application back to the full check.)
+            'wp-no-starttls' => [SmtpConfig::STARTTLS, true, '', ''],
+        ];
+        $shown = static fn (?bool $answer): string => $answer === null ? 'cannot tell' : ($answer === true ? 'yes' : 'no');
+        foreach ($cases as $scenario => [$security, $expected, $stage, $reason]) {
+            // The settings name the server "localhost" for the name-rule certificate, as proof L6n does.
+            $over = ['security' => $security] + ($scenario === 'wp-name-list-other' ? ['host' => 'localhost'] : []);
+            $reader = new CertificateReader($t->config($scenario, $over), new SystemClock());
+            $answer = $reader->wouldPass();
+            $t->check($answer === $expected, $scenario . ': expected "' . $shown($expected) . '", got "' . $shown($answer) . '" (stopped at "' . $reader->stoppedAt() . '" for "' . $reader->stoppedWhy() . '")');
+            $t->check($reader->stoppedAt() === $stage && $reader->stoppedWhy() === $reason, $scenario . ': where and why it stopped: "' . $reader->stoppedAt() . '" / "' . $reader->stoppedWhy() . '"');
+            $story = $t->story($scenario);
+            $t->check(preg_grep('/^1 (line|auth|body) |^\d auth |^\d line (AUTH|MAIL|RCPT|DATA|QUIT)/', $story) === [], $scenario . ': the server heard nothing after the handshake, and no sign-in at all: ' . implode(' | ', $story));
+        }
+        // A server that is not there at all.
+        $reader = new CertificateReader($t->config('wp-good', ['port' => closedPort(), 'connectSeconds' => 3.0]), new SystemClock());
+        $t->check($reader->wouldPass() === null && $reader->stoppedAt() === SendResult::STAGE_CONNECT, 'a server that cannot be reached: "cannot tell" (stopped at "' . $reader->stoppedAt() . '")');
+        // The reader's own read still says where it stopped, for the caller that sends with the certificate not checked.
+        $reader = new CertificateReader($t->config('wp-plain', ['security' => SmtpConfig::TLS]), new SystemClock());
+        $t->check($reader->read() === null && $reader->stoppedAt() === SendResult::STAGE_TLS && $reader->stoppedWhy() === SendResult::REASON_NO_ENCRYPTION, 'a read that fails says where and why too');
     });
 
     // -------------------------------------------------------------------------

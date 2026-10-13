@@ -20,6 +20,12 @@
  * `MailRoutes` knows the route and what is wrong with it; the scheduled job
  * (`_apps/cron/mail-queue.php`) only calls run().
  *
+ * WHAT A PERSON CAN DO TO A WAITING MESSAGE (package M4; the page is
+ * `_apps/admin/integrations/_mail-queue.php`, for a global administrator):
+ * send ONE held message (sendOneHeld()), or delete one (removeByHand()).
+ * There is no "send all held": every release is one message, by one press.
+ * listed() is what the page shows, and it never reads a body.
+ *
  * THE STATES
  *   queued   waiting to be tried, not before `nextAttemptAt`.
  *   sending  a run has taken it: `stage` is 'claimed', then 'handing-over'
@@ -70,7 +76,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/592
  * -----------------------------------------------------------------------------
  */
@@ -1201,6 +1207,32 @@ final class MailQueue
     }
 
     /**
+     * 🔀 TAKE ONE NAMED HELD MESSAGE, FOR A PERSON: 'held' (whatever the
+     * reason) -> 'sending' (stage 'claimed'), for the one row with this
+     * number and no other. This is the claim behind "send this one".
+     *
+     * ONE ROW, BY ITS NUMBER, is the point. The statement names the row and
+     * has no way to take a second: there is no "send all held", and none can
+     * be made out of this by leaving something off.
+     *
+     * @return array{token: string, rows: list<array<string, mixed>>}
+     */
+    private static function claimOneHeld(mysqli $db, int $queueId): array
+    {
+        $token = bin2hex(random_bytes(16));
+        $stmt  = $db->prepare(
+            "UPDATE tblMailQueue SET status = 'sending', stage = 'claimed', holdReason = '', claimToken = ?, claimedAt = UTC_TIMESTAMP(), statusAt = UTC_TIMESTAMP() "
+            . "WHERE queueID = ? AND status = 'held' AND " . self::STILL_WANTED
+        );
+        $stmt->bind_param('si', $token, $queueId);
+        $stmt->execute();
+        $taken = (int) $stmt->affected_rows;
+        $stmt->close();
+
+        return ['token' => $token, 'rows' => $taken > 0 ? self::claimedRows($db, $token) : []];
+    }
+
+    /**
      * 🔀 JUST BEFORE THE MAIL SERVER IS GIVEN THE MESSAGE: stage 'claimed'
      * -> 'handing-over', and the attempt is counted.
      *
@@ -1403,7 +1435,8 @@ final class MailQueue
      * WHAT THIS DOES NOT DO: write a line in the send log for each message
      * (the send log has just been put back too; the reason is on the row),
      * or release anything. A held message is failed after the holding
-     * period; releasing one by hand is the next package's page.
+     * period, unless a global administrator sends it again or deletes it on
+     * the e-mail page (sendOneHeld(), removeByHand()).
      *
      * @return int How many messages were held.
      */
@@ -1513,6 +1546,20 @@ final class MailQueue
      */
     private static function send(mysqli $db, int $maxMessages, float $seconds, array &$out): void
     {
+        // 🩺 While certificate checking is off, or one certificate is
+        //    accepted: ask the SMTP mailbox's mail server, once, whether its
+        //    certificate would pass the full check now. If it would,
+        //    checking has just gone back on. Asked here, before anything is
+        //    claimed, so that a queue with nothing in it still finds out at
+        //    every run.
+        //    FIRST, AND WHATEVER ROUTE IS IN USE. It used to come after the
+        //    "can the route send?" test below, and only when SMTP was the
+        //    route in use. With Microsoft 365 or Google chosen, "off" then
+        //    never lapsed by itself, although it was still in force for a
+        //    "Send test" through the SMTP mailbox. While checking is on
+        //    (nearly always) this reads one setting and contacts nobody.
+        MailRoutes::recheckCertificate($db);
+
         // 🧭 Nothing is tried while the route is not set up: every message
         //    would be refused before a connection was made. Mail waits.
         if (Mailer::canSend() === false) {
@@ -1521,8 +1568,26 @@ final class MailQueue
             return;
         }
 
+        // 🔓 A message is held "for the certificate" only while the SMTP
+        //    mailbox carries the mail. With another route in use, anything
+        //    still held for it goes back into the queue here, to go by that
+        //    route. (Normally a change of route has already released it:
+        //    see MailRoutes::onRecord(). This covers a route changed
+        //    straight in the database with a "Send test" made before
+        //    anything read the record. Without it such a message would stay
+        //    held for a fault that no longer applies, and nothing would
+        //    ever send it.)
+        if (MailRoutes::chosenRoute() !== MailRoutes::SMTP) {
+            self::releaseHeldForCertificate($db);
+        }
+
         $began   = hrtime(true);
         $started = 0;
+        // What stands in the way of mail NOW. A fault on record for the
+        // SMTP mailbox is "nothing" here while another route is in use:
+        // MailRoutes::standingProblem() says why. Everything below that
+        // stops or holds mail asks this, and so does not need to ask which
+        // route is in use.
         $problem = MailRoutes::standingProblem($db);
 
         // 🔐 A refused sign-in is about the MAILBOX, not about any message.
@@ -1661,6 +1726,11 @@ final class MailQueue
      *
      * @param array<string, mixed> $row   One row from claim().
      * @param string               $token The claim's mark.
+     * @param array{onlyCertificate?: string} $how For ONE message a global
+     *        administrator is sending past a failed certificate check: the
+     *        fingerprint of the certificate they were shown. Passed on to
+     *        MailRoutes::sendSmtp() untouched. Only sendOneHeld() gives it;
+     *        a run of the queue never does.
      *
      * @return string What became of it: 'sent', 'queued', 'held', 'failed'
      *                or 'expired'; or 'stop-queued' or 'stop-held', which
@@ -1668,7 +1738,7 @@ final class MailQueue
      *                try nothing more: what went wrong would go wrong for
      *                every message alike.
      */
-    public static function handle(mysqli $db, array $row, string $token): string
+    public static function handle(mysqli $db, array $row, string $token, array $how = []): string
     {
         // A claim's mark is 32 hexadecimal characters that this class made.
         // Anything else is not a claim, and nothing is done with it.
@@ -1741,7 +1811,7 @@ final class MailQueue
         }
 
         // 4. Hand it to the mail route.
-        $answer = Mailer::deliverQueued($row, $html, $text, $paths);
+        $answer = Mailer::deliverQueued($row, $html, $text, $paths, $how);
         $stage  = (string) $answer['stage'];
         $words  = (string) $answer['words'];
 
@@ -1842,6 +1912,248 @@ final class MailQueue
     }
 
     // =========================================================================
+    // 🧑 By a person: send one held message, delete one, list what waits (M4)
+    // =========================================================================
+
+    /**
+     * 🧑 SEND ONE HELD MESSAGE NOW, because a global administrator pressed
+     * the button for that message. The page has checked the form's token and
+     * that the person is a global administrator; this method does not.
+     *
+     * TWO KINDS OF PRESS, and they are kept apart:
+     *   - `$onlyCertificate` given: "send this one with the check skipped".
+     *     Only for a message held because the certificate failed. The
+     *     connection accepts exactly that certificate (the one the page
+     *     showed) and no other. Nothing stored changes, the fault stays on
+     *     record, and every other message stays held. ONE EXCEPTION: the
+     *     server shows another certificate because its certificate has been
+     *     put right. The fault is then cleared, and this message goes back
+     *     into the queue with the rest (see the end of this method).
+     *   - `$onlyCertificate` empty: "send it again", for a message held
+     *     because nobody can tell whether it went (interrupted,
+     *     unknown-if-sent, restored). It is sent the ordinary way, under the
+     *     installation's own certificate rule. The PERSON it is for may get
+     *     a second copy; the page says so before the button can be pressed.
+     *     Refused while a fault with the route is on record: nothing could
+     *     go, and the message would only change what it is held for.
+     *
+     * THE SAME LIMITS AS A RUN OF THE JOB: the one-run-at-a-time lock (so
+     * the hourly limit is not spent twice), the hourly limit itself, the
+     * use-by moment, and "nothing older than the longest wait is sent".
+     *
+     * WHAT IT CANNOT DO: rule out a second copy (see the file header), or
+     * send a message that has grown too old: that one is failed, in words.
+     *
+     * @return array{done: string, words: string} done: 'not-tried' (nothing
+     *         was changed), or what handle() answered: 'sent', 'held',
+     *         'queued', 'failed' or 'expired'. words: what happened, for the
+     *         person, in plain words. It can hold what the mail server said,
+     *         which can name an e-mail address: show it to a global
+     *         administrator only.
+     */
+    public static function sendOneHeld(mysqli $db, int $queueId, string $onlyCertificate = ''): array
+    {
+        $not  = static fn (string $words): array => ['done' => 'not-tried', 'words' => $words];
+        $lock = $db->query("SELECT GET_LOCK(CONCAT('portal-mail-queue:', SHA1(DATABASE())), 0) AS got");
+        $got  = (int) ($lock->fetch_assoc()['got'] ?? 0);
+        $lock->free();
+        if ($got !== 1) {
+            return $not('The mail job is working through the queue at this moment, so nothing was tried. Try again in a minute.');
+        }
+        try {
+            $read = $db->prepare('SELECT status, holdReason, priority, recipientCount FROM tblMailQueue WHERE queueID = ?');
+            $read->bind_param('i', $queueId);
+            $read->execute();
+            $row = $read->get_result()->fetch_assoc();
+            $read->close();
+            if ($row === null || (string) $row['status'] !== 'held') {
+                return $not('That message is no longer held: it has been sent, deleted or dealt with since this page was shown. Nothing was changed.');
+            }
+            $forCertificate = (string) $row['holdReason'] === self::HELD_CERTIFICATE;
+            if ($onlyCertificate !== '' && $forCertificate === false) {
+                return $not('That message is not held because of the certificate, so it cannot be sent with the check skipped. Nothing was changed.');
+            }
+            if ($onlyCertificate === '' && $forCertificate === true) {
+                return $not('That message is held because the mail server\'s certificate failed its check. It goes by itself once the certificate passes; to send it sooner, use "Send this one with the check skipped". Nothing was changed.');
+            }
+            if (Mailer::canSend() === false) {
+                return $not('No mail route is set up to send it through. Nothing was changed.');
+            }
+            if ($onlyCertificate === '') {
+                $standing = MailRoutes::standingProblem($db);
+                if ($standing['problem'] !== '') {
+                    return $not('Nothing can be sent at the moment: ' . ($standing['problem'] === MailRoutes::PROBLEM_CERTIFICATE
+                        ? 'the mail server\'s certificate is failing its check'
+                        : 'the mail server has refused the mailbox\'s user name and password') . '. Put that right first. Nothing was changed.');
+                }
+            }
+            // ⏳ The hourly limit, as a run applies it.
+            $urgent = (int) $row['priority'] <= self::URGENT;
+            $never  = MailRoutes::neverFits((int) $row['recipientCount'], $urgent);
+            if ($never !== '') {
+                return $not($never . ' Nothing was changed.');
+            }
+            $room = MailRoutes::roomLeft($db, $urgent);
+            if ($room !== null && (int) $row['recipientCount'] > $room) {
+                return $not('The hourly limit has no room for it yet, so nothing was tried. Try again later, or raise the limit at "SMTP mailbox" on this page.');
+            }
+
+            $claim = self::claimOneHeld($db, $queueId);
+            if ($claim['rows'] === []) {
+                return $not('That message could not be taken: its use-by moment has passed, or it was dealt with a moment ago. Nothing was sent.');
+            }
+            $what = self::handle($db, $claim['rows'][0], $claim['token'], $onlyCertificate === '' ? [] : ['onlyCertificate' => $onlyCertificate]);
+            $what = str_starts_with($what, 'stop-') === true ? substr($what, 5) : $what;
+
+            // A certificate fault on record: whatever this attempt left
+            // waiting is held with the rest, exactly as a run does, so that
+            // it can only ever go once the certificate passes.
+            $now = MailRoutes::standingProblem($db);
+            if ($now['problem'] === MailRoutes::PROBLEM_CERTIFICATE) {
+                self::holdAllForCertificate($db, $now['words']);
+                $what = $what === 'queued' ? 'held' : $what;
+            } elseif ($onlyCertificate !== '' && $what === 'held') {
+                // 🩺 The message was refused past the check, and yet no
+                //    certificate fault is on record any more. The usual
+                //    cause: the mail server now shows a certificate that
+                //    PASSES the full check, in place of the one the page
+                //    showed. It has been put right (MailRoutes::noteResult()
+                //    asked, and cleared the fault). The other cause is
+                //    somebody changing the mail settings at that moment.
+                //    Either way the others that were held have been
+                //    released, and this one, which was being sent at the
+                //    time, missed that and was held again just above.
+                //    Without this it would stay held for a fault that no
+                //    longer exists, and nothing would ever send it.
+                self::releaseHeldForCertificate($db);
+                $back = ' This message is back in the queue with the others that were held. They go at the mail job\'s next run, or press "Send waiting mail now".';
+
+                return ['done' => 'queued', 'words' => MailRoutes::passedAfterRefusal() === true
+                    ? 'Not sent with the check skipped, because that is no longer needed: the mail server now shows a certificate that passes the full check, '
+                        . 'not the one this page showed you. The certificate fault is off the record.' . $back
+                    : 'Not sent with the check skipped: the certificate fault went off the record while it was being tried (the mail settings were changed a moment ago).' . $back];
+            }
+
+            $after = $db->prepare('SELECT lastError FROM tblMailQueue WHERE queueID = ?');
+            $after->bind_param('i', $queueId);
+            $after->execute();
+            $said = (string) ($after->get_result()->fetch_assoc()['lastError'] ?? '');
+            $after->close();
+
+            return ['done' => $what, 'words' => match ($what) {
+                'sent'    => 'The mail server accepted the message.',
+                'held'    => 'Not sent. The message is still held. ' . $said,
+                'failed'  => 'Not sent, and it will not be tried again. ' . $said,
+                'expired' => 'Not sent: its use-by moment passed before it could go.',
+                default   => 'Not sent this time. It is waiting and will be tried again by the mail job. ' . $said,
+            }];
+        } finally {
+            try {
+                $db->query("DO RELEASE_LOCK(CONCAT('portal-mail-queue:', SHA1(DATABASE())))");
+            } catch (\Throwable $ignored) {
+                // The database has gone, and gives the lock up by itself.
+            }
+        }
+    }
+
+    /**
+     * 🔀 DELETE ONE MESSAGE BECAUSE A GLOBAL ADMINISTRATOR SAID SO. Any row
+     * that a run is not holding at this moment: waiting, held, failed or
+     * expired. The page has checked who is asking; this method does not.
+     *
+     * A message that had not reached its end (waiting or held) gets its line
+     * in the send log, and the record it came from is told it did not go,
+     * BEFORE the row is deleted, as an erasure does it: a giving statement's
+     * record would otherwise say "waiting" for ever. A failed or expired one
+     * has had both already.
+     *
+     * WHAT IT CANNOT DO: delete a message a run is sending at this moment
+     * (it answers null, and the page says to try again), or take back one
+     * that has gone.
+     *
+     * @return array{queueID: int, status: string, subject: string}|null What
+     *         was deleted, for the activity log (never an address, never the
+     *         body). Null when nothing was deleted.
+     */
+    public static function removeByHand(mysqli $db, int $queueId): ?array
+    {
+        $read = $db->prepare("SELECT queueID, siteID, status, toRecipients, subject, attachmentCount, origin FROM tblMailQueue WHERE queueID = ? AND status <> 'sending'");
+        $read->bind_param('i', $queueId);
+        $read->execute();
+        $row = $read->get_result()->fetch_assoc();
+        $read->close();
+        if ($row === null) {
+            return null;
+        }
+        // The state it must STILL be in when it is deleted, as fixed text.
+        $status = (string) $row['status'];
+        $from   = ['queued' => "status = 'queued'", 'held' => "status = 'held'", 'failed' => "status = 'failed'", 'expired' => "status = 'expired'"][$status] ?? null;
+        if ($from === null) {
+            return null;
+        }
+        $wasWaiting = $status === 'queued' || $status === 'held';
+        if ($wasWaiting === true) {
+            self::tellOrigin($db, (string) $row['origin'], (string) $row['toRecipients'], false);
+        }
+        if (self::remove($db, $queueId, $from) === false) {
+            return null; // a run took it in the instant between: it is that run's now
+        }
+        if ($wasWaiting === true) {
+            Mailer::logQueueEvent($row, 'failed', 'removed-by-hand', 'Not sent: a global administrator deleted it from the mail queue before it could go.');
+        }
+
+        return ['queueID' => $queueId, 'status' => $status, 'subject' => (string) $row['subject']];
+    }
+
+    /**
+     * 📋 What is in the queue, for the page that lists it. NEVER A BODY: the
+     * two body columns are not named in the statement, so nothing that
+     * prints a row of this can print one. (A body can hold a password-reset
+     * link, which is as good as the account.)
+     *
+     * Still to go first, then what has been given up on. Among what is still
+     * to go: a held password reset first (its link is running out), then the
+     * most urgent, then the oldest.
+     *
+     * `lastError` is in it, and can hold what the mail server said, which
+     * can name an e-mail address or the mailbox: the page shows it to a
+     * global administrator only.
+     *
+     * @param int|null $siteId One organisation's messages only; null for
+     *                         every organisation's (a global administrator).
+     * @param int      $most   No more rows than this.
+     *
+     * @return list<array<string, mixed>> Each row also has `secondsLeft`
+     *         (until its use-by moment; null when it has none; 0 or less
+     *         when it has passed), and `tooOld` (true when it is older than
+     *         the longest wait for its organisation, so it can never be
+     *         sent, whoever asks).
+     */
+    public static function listed(mysqli $db, ?int $siteId, int $most = 200): array
+    {
+        $all  = $siteId === null ? 1 : 0;
+        $site = $siteId ?? 0;
+        $stmt = $db->prepare(
+            'SELECT queueID, siteID, priority, status, holdReason, lastStage, lastError, attempts, toRecipients, recipientCount, attachmentCount, subject, origin, '
+            . 'createdAt, statusAt, nextAttemptAt, expiresAt, TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), expiresAt) AS secondsLeft, '
+            . 'TIMESTAMPDIFF(SECOND, createdAt, UTC_TIMESTAMP()) AS ageSeconds '
+            . 'FROM tblMailQueue WHERE (? = 1 OR siteID = ?) '
+            . "ORDER BY (status IN ('failed', 'expired')), (status = 'held' AND origin LIKE 'reset:%') DESC, priority, createdAt, queueID LIMIT ?"
+        );
+        $stmt->bind_param('iii', $all, $site, $most);
+        $stmt->execute();
+        $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        foreach ($rows as &$row) {
+            $n             = self::numbers($db, $row['siteID'] === null ? null : (int) $row['siteID']);
+            $row['tooOld'] = (int) $row['ageSeconds'] >= $n['maxAgeHours'] * 3600;
+        }
+        unset($row);
+
+        return $rows;
+    }
+
+    // =========================================================================
     // 🔎 Reading
     // =========================================================================
 
@@ -1902,15 +2214,18 @@ final class MailQueue
      * every sending page acts on, so the line and the behaviour cannot
      * disagree. (This used to keep a 30-minute rule of its own, and called
      * waiting mail with no job a warning.) Numbers and the route's own facts
-     * only: never an address, a subject or a body.
+     * only: never an address, a subject, a body or A PERSON'S NAME. This
+     * line is read by every organisation's administrator and by an outside
+     * monitor.
      *
      * @param string $zone         The time zone to show moments in.
      * @param bool   $routeIsSetUp Whether a mail route is set up (the health
      *                             page's "Email" line has already asked).
      *
      * @return array{state: string, label: string, detail: string}|null Null
-     *         when there is nothing to say: no mail route is set up, and
-     *         nothing is in the queue.
+     *         when there is nothing to say: no mail route is set up,
+     *         nothing is in the queue, and the certificate is checked in
+     *         full.
      */
     public static function health(mysqli $db, string $zone, bool $routeIsSetUp): ?array
     {
@@ -1926,13 +2241,41 @@ final class MailQueue
         }
         $waiting = $counts['queued'] + $counts['sending'];
         $numbers = $waiting . ' waiting, ' . $counts['held'] . ' held, ' . $counts['failed'] . ' failed.';
+        // ⚠️ Certificate checking is off, or one certificate is accepted
+        //    (package M4). Said in EVERY line below while it is so, and it
+        //    turns a line that would be green into a warning: this line is
+        //    what an outside monitor reads. The words are
+        //    MailRoutes::standingWarning()'s, read from what is stored, so
+        //    they are here whatever route is in use and whether or not that
+        //    route is set up.
+        //    WITH NOBODY NAMED (`publicLine`): what is in force and the
+        //    date only. This line is read by every organisation's
+        //    administrator and by whoever holds the monitor's token, the
+        //    outside monitoring service included. It used to name the
+        //    global administrator who switched checking off; the e-mail
+        //    page and the admin dashboard still do, for a global
+        //    administrator.
+        $unchecked = MailRoutes::standingWarning($db, $zone);
+        $alsoSay   = $unchecked === null ? '' : ' ' . $unchecked['publicLine'];
         if ($routeIsSetUp === false) {
+            if ($unchecked !== null) {
+                return [
+                    'state'  => 'warn',
+                    'label'  => $unchecked['headline'],
+                    'detail' => $unchecked['publicLine'] . (array_sum($counts) === 0 ? '' : ' Mail is in the queue and no mail route is set up to send it: see the Email line. ' . $numbers),
+                ];
+            }
+
             return array_sum($counts) === 0 ? null : [
                 'state'  => 'warn',
                 'label'  => $waiting . ' waiting',
                 'detail' => 'Mail is in the queue and no mail route is set up to send it: see the Email line. ' . $numbers,
             ];
         }
+        // What stands in the way of mail NOW: nothing, for a fault a "Send
+        // test" found on the SMTP mailbox while another route is in use.
+        // This line used to go red for that, although every message was
+        // going out by the other route.
         $problem = MailRoutes::standingProblem($db);
         $notes   = self::numberProblems($db);
 
@@ -1957,7 +2300,8 @@ final class MailQueue
                 'label'  => 'Mail is held',
                 'detail' => 'The mail server\'s certificate failed its check, so NOTHING is being sent and every message is held. '
                     . $problem['words'] . ' First seen ' . self::shown($problem['since'], $zone) . ', last seen ' . self::shown($problem['seenAt'], $zone) . '. '
-                    . $numbers . ' Held mail goes by itself once the certificate passes the check; a held message is kept for a limited time. ' . $ranText,
+                    . $numbers . ' Held mail goes by itself once the certificate passes the check; a held message is kept for a limited time. '
+                    . 'A global administrator can see the certificate, and the ways past the check, at Admin → Integrations → Email. ' . $ranText . $alsoSay,
             ];
         }
         if ($problem['problem'] === MailRoutes::PROBLEM_SIGN_IN) {
@@ -1966,7 +2310,7 @@ final class MailQueue
                 'label'  => 'Mail is waiting',
                 'detail' => 'The mail server refused the mailbox\'s user name and password, so NOTHING is being sent and mail is waiting. '
                     . $problem['words'] . ' First seen ' . self::shown($problem['since'], $zone) . '. ' . $numbers
-                    . ' The portal does not keep offering a refused password. Put it right at Admin → Integrations → Email (saving the settings, or a Send test that is accepted, starts mail again). ' . $ranText,
+                    . ' The portal does not keep offering a refused password. Put it right at Admin → Integrations → Email (saving the settings, or a Send test that is accepted, starts mail again). ' . $ranText . $alsoSay,
             ];
         }
         if ($running === false && $waiting > 0) {
@@ -1976,11 +2320,14 @@ final class MailQueue
                 'state'  => 'crit',
                 'label'  => $waiting . ' waiting, no job',
                 'detail' => $waiting . ' message' . ($waiting === 1 ? ' is' : 's are') . ' waiting in the mail queue and will NOT be sent: the scheduled job that sends waiting mail is not running. '
-                    . $ranText . ' ' . $numbers . ($notes === [] ? '' : ' ' . implode(' ', $notes)),
+                    . $ranText . ' ' . $numbers . ($notes === [] ? '' : ' ' . implode(' ', $notes)) . $alsoSay,
             ];
         }
 
         $warnings = $notes;
+        if ($unchecked !== null) {
+            array_unshift($warnings, $unchecked['publicLine']);
+        }
         // Mail that has been tried and did not go. Only the STEP it stopped
         // at is shown, never the mail server's own words, which can name an
         // e-mail address.
@@ -1997,12 +2344,15 @@ final class MailQueue
             // to add the job BEFORE mail starts to wait.
             $warnings[] = $ranText;
         }
-        if ((int) $state['encryptionFailures'] >= MailRoutes::ENCRYPTION_FAILURES_WORTH_SAYING) {
+        // (The count is the SMTP mailbox's, so it is said only while that
+        //  mailbox carries the mail: tests of it made under another route
+        //  count too, and are nothing to warn a monitor about.)
+        if (MailRoutes::chosenRoute() === MailRoutes::SMTP && (int) $state['encryptionFailures'] >= MailRoutes::ENCRYPTION_FAILURES_WORTH_SAYING) {
             $warnings[] = 'Switching encryption on with the mail server has failed ' . (int) $state['encryptionFailures']
                 . ' times in a row. If this continues, check the mail server\'s certificate.';
         }
         if ($warnings !== []) {
-            return ['state' => 'warn', 'label' => $waiting . ' waiting', 'detail' => implode(' ', $warnings) . ' ' . $numbers];
+            return ['state' => 'warn', 'label' => $unchecked === null ? $waiting . ' waiting' : $unchecked['headline'], 'detail' => implode(' ', $warnings) . ' ' . $numbers];
         }
 
         return ['state' => 'ok', 'label' => $waiting . ' waiting', 'detail' => $ranText . ' ' . $numbers];

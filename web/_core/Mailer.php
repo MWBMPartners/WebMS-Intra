@@ -789,13 +789,19 @@ class Mailer
      *
      * @param array<string, mixed> $row   The queue row (see MailQueue::claim()).
      * @param list<string>         $files Paths of the stored copies to attach.
+     * @param array{onlyCertificate?: string} $how For ONE message a global
+     *        administrator is sending past a failed certificate check: the
+     *        fingerprint of the certificate they were shown (see
+     *        MailRoutes::sendSmtp()). SMTP ONLY. The Microsoft 365 and
+     *        Google routes have no way past a failed check, so with this
+     *        given and one of them in use, nothing is sent.
      *
      * @return array<string, mixed> As MailRoutes::sendSmtp() returns. For the
      *         Microsoft 365 and Google routes, which answer only yes or no,
      *         `next` is 'sent' or 'later', and those routes write their own
      *         line in the send log.
      */
-    public static function deliverQueued(array $row, string $html, string $text, array $files): array
+    public static function deliverQueued(array $row, string $html, string $text, array $files, array $how = []): array
     {
         $to     = array_values(array_filter(array_map('trim', explode(',', (string) $row['toRecipients'])), static fn (string $a): bool => $a !== ''));
         $route  = self::route();
@@ -811,7 +817,15 @@ class Mailer
         if ($route === self::ROUTE_SMTP) {
             return MailRoutes::sendSmtp($to, (string) $row['subject'], $text, $html, $files, [
                 'messageId' => (string) $row['messageID'], 'date' => (int) $row['createdEpoch'], 'repeatSafe' => (int) $row['repeatSafe'] === 1,
-            ]) + ['ownLog' => false];
+            ] + (isset($how['onlyCertificate']) === true ? ['onlyCertificate' => (string) $how['onlyCertificate']] : [])) + ['ownLog' => false];
+        }
+        if (isset($how['onlyCertificate']) === true) {
+            // 🚫 Asked to go past a certificate check on a route that has no
+            //    way past one. Held, and nothing is tried. (The page does not
+            //    offer the button for these routes; this is the same rule at
+            //    the last possible moment.)
+            return ['next' => MailRoutes::NEXT_HOLD_CERTIFICATE, 'reason' => 'certificate', 'stage' => 'TLS', 'ownLog' => false,
+                'words' => 'Not sent: ' . self::ROUTES[$route] . ' has no way past a failed certificate check. Nothing was tried.'] + $answer;
         }
         try {
             $sent = $route === self::ROUTE_GOOGLE

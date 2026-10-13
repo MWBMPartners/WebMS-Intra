@@ -9,6 +9,9 @@
  *   - Role check (requires Admin or Root Admin)
  *   - Three extra refusals that only a GLOBAL administrator can pass, and one
  *     that nobody passes (see the note at the top of the save section below)
+ *   - Settings that have a page of their own are refused here, for everybody:
+ *     the giving-records rule, how organisations are told apart, and the mail
+ *     server's name and certificate setting (each is explained where it runs)
  *   - Secrets (rows whose isSensitive mark is on) are stored encrypted, and
  *     an edit can never take the mark off (#597; see "SECRETS" below)
  *   - INSERT (new) or UPDATE (existing) row in tblSettings
@@ -45,6 +48,7 @@ use Portal\Core\Auth;
 use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
 use Portal\Core\MailQueue;
+use Portal\Core\MailRoutes;
 use Portal\Core\Router;
 use Portal\Core\SecretSettings;
 use Portal\Core\Site;
@@ -348,6 +352,30 @@ if ($settingId > 0) {
             $_SESSION['user_id'] ?? null
         );
         $_SESSION['flash_msg']  = Site::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
+    // 🔒 Nor are the mail server's name and the two certificate rows changed
+    //    here (#592), by anybody, a global administrator included. They are
+    //    changed on the e-mail page (Admin, Integrations, Email), which asks
+    //    for the mailbox's password again when the name changes, and shows a
+    //    warning and asks for a confirmation before certificate checking is
+    //    changed. WHAT WAS WRONG: this page changed them with neither. With
+    //    checking off, a name changed here sent the next message, and the
+    //    stored password, to the new server. See
+    //    MailRoutes::lockedInGeneralEditor().
+    //    It sits BEFORE the portal-wide refusal below, so that an
+    //    organisation's administrator is told where the setting IS changed,
+    //    and not only that they may not change it.
+    if (MailRoutes::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" is changed on the e-mail page (Admin, Integrations, Email) and nowhere else',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = MailRoutes::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();
@@ -668,6 +696,26 @@ if ($settingId > 0) {
             $_SESSION['user_id'] ?? null
         );
         $_SESSION['flash_msg']  = Site::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
+    // 🔒 Nor may the mail server's name or either certificate row be ADDED
+    //    here (#592). This branch only ever writes a row for the current
+    //    organisation, and nothing reads an organisation's own row of these
+    //    (one mail route serves every organisation), so it would only
+    //    mislead whoever found it. It also covers an installation whose own
+    //    row has gone missing: the row is then put back by the e-mail page
+    //    or the database upgrade, not typed in here with no warning. See
+    //    MailRoutes::lockedInGeneralEditor().
+    if (MailRoutes::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsInsertRefused',
+            'Refused: "' . $settingKey . '" is set on the e-mail page (Admin, Integrations, Email) and nowhere else',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = MailRoutes::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();

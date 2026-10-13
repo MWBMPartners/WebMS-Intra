@@ -38,6 +38,12 @@
  *                     rule is what makes it safe to have an unchecked mode in
  *                     the code at all.
  * In every mode encryption is TLS 1.2 or later; there is no mode without it.
+ * THERE IS NO FOURTH MODE for "the certificate is not checked"
+ * (`SendOptions::certificateNotChecked()`, 13 October 2026). That is built
+ * from two of these three: a "read-certificate" connection reads what the
+ * server shows, and a "one-certificate" connection then accepts exactly that.
+ * See `SmtpTransport::connect()`. So "one-certificate" is still the only
+ * mode that writes without the full check.
  *
  * 🪪 HOW A FAILED HANDSHAKE IS SORTED (see `startEncryption()`). The
  * certificate is blamed ONLY when PHP says in so many words that it refused

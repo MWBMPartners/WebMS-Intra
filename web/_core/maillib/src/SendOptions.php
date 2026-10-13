@@ -4,30 +4,51 @@
  * -----------------------------------------------------------------------------
  * SendOptions — how one particular send is to be made 🎛️
  * -----------------------------------------------------------------------------
- * There are exactly two ways to send, and both are encrypted:
+ * There are exactly three ways to send, and all three are encrypted:
  *
  *   1. `checked()` — the normal way. The mail server's certificate must be
  *      valid, be for the server's name, and trace back to an authority the
  *      machine trusts.
- *   2. `onlyThisCertificate($fingerprint)` — for ONE send, accept the single
- *      certificate whose fingerprint is given, and no other. This is for the
- *      case where a person has looked at a certificate that failed the normal
- *      check (expired, say) and decided to send through it anyway.
+ *   2. `onlyThisCertificate($fingerprint)` — accept the single certificate
+ *      whose fingerprint is given, and no other. This is for the case where a
+ *      person has looked at a certificate that failed the normal check
+ *      (expired, say) and decided to send through it anyway.
+ *   3. `certificateNotChecked()` — the certificate is NOT judged at all. For
+ *      an application whose administrator has deliberately switched checking
+ *      off while a mail server's certificate is being put right.
  *
- * 🔒 WHAT IS DELIBERATELY NOT HERE: any way to say "accept whatever certificate
- * turns up", and any way to send without encryption. The second way names one
- * certificate by its SHA-256 fingerprint, which nobody else can present, so it
- * cannot be stretched into "accept anything": an empty value, a short one or a
- * pattern is refused when the object is made.
+ * 🔓 WHAT THE THIRD WAY GIVES UP, said plainly. With it, this library cannot
+ * tell the mail server from an impostor. Somebody on the network path can show
+ * a certificate of their own, and the mailbox's user name and password, and
+ * every message, then go to them. Nothing in this library can prevent that
+ * once the check is not made: that is what the check is for. It was left out
+ * on purpose until 13 October 2026 and added by the owner's decision.
  *
- * It applies to one call of `send()`. A connection opened for a named
- * certificate is closed before any message that did not ask for it.
+ * 🔒 WHAT IT STILL KEEPS, and how it is built. It is NOT a connection with
+ * the check switched off. Each new connection is made in two steps:
+ *   - the certificate is READ on a connection that can write nothing once
+ *     encryption is on (`CertificateReader`), and
+ *   - the sending connection then accepts exactly THAT certificate, by its
+ *     fingerprint, the same way as the second way above.
+ * So everything the second way demands still holds: encryption, TLS 1.2 or
+ * later, no sign-in line before encryption is on, and a server that offers no
+ * encryption is told nothing. And there is still only ONE place in the
+ * library where a connection is made without the full check and may write:
+ * the "one certificate" mode of `Connection`.
+ * REJECTED: a fourth mode of `Connection` with no check at all. It would have
+ * been a second door that must be kept locked in every other respect, for
+ * ever, to save one connection.
+ *
+ * WHAT IS STILL NOT HERE: any way to send without encryption.
+ *
+ * It applies to one call of `send()`. A connection opened under one of these
+ * rules is closed before any message that asked for another.
  *
  * @package   MWBM\Mail
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.1.0
+ * @version   0.2.0
  * -----------------------------------------------------------------------------
  */
 
@@ -38,11 +59,16 @@ namespace MWBM\Mail;
 final class SendOptions
 {
     /**
-     * @param string $onlyCertificateSha256 Empty for a checked send; otherwise the 64 lower-case
-     *                                      hexadecimal characters of the one certificate to accept.
+     * @param string $onlyCertificateSha256 Empty unless ONE certificate is to be accepted; then the 64
+     *                                      lower-case hexadecimal characters of that certificate.
+     * @param bool   $notChecked            True for the third way: read the certificate, then accept
+     *                                      exactly the one that was read. Never true together with a
+     *                                      fingerprint.
      */
-    private function __construct(public readonly string $onlyCertificateSha256)
-    {
+    private function __construct(
+        public readonly string $onlyCertificateSha256,
+        public readonly bool $notChecked = false,
+    ) {
     }
 
     /** The normal send: the certificate is fully checked. */
@@ -65,6 +91,16 @@ final class SendOptions
             );
         }
         return new self($fingerprint);
+    }
+
+    /**
+     * 🔓 Send without judging the certificate. Read the header of this file
+     * before using it: an impostor on the network path can then read the
+     * mailbox's password and every message.
+     */
+    public static function certificateNotChecked(): self
+    {
+        return new self('', true);
     }
 
     /** True only for 64 lower-case hexadecimal characters: a whole SHA-256 value. */
