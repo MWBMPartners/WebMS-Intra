@@ -6,6 +6,116 @@
 
 ---
 
+## LATER ON 26 OCTOBER 2026 — X3, X7 and X8 done; the lost WF report recovered; what the checks found
+
+**Two more of the owner's answers, 26 October (question tool; settled):**
+5. **`codeql.yml` KEEPS its `continue-on-error`, and the WORDING is corrected instead.** The package cuts these from
+   six to one; the one that stays is deliberate, because GitHub's paid Code Scanning is not enabled here and the
+   CodeQL upload is refused without it. Removing the flag would turn the job red on every pull request for a billing
+   reason, not a code one. So the sentence "No `continue-on-error` anywhere" in the owner's approval page and in this
+   file is UNTRUE and must be replaced with one naming the file that keeps it and why. **Still to do.**
+6. **All nine new test jobs become required status checks** on `main`, `beta` and `alpha`, and `Psalm` is removed.
+   The assistant cannot read or change branch rules (`tools/audit-required-checks.py` quietly returns success without
+   admin scope), so it PREPARES the exact job names and `gh` commands as a checklist and **the owner runs them**.
+   **Still to do.**
+
+### Landed on the working branch
+
+| What | Commit | Notes |
+| --- | --- | --- |
+| X3 (#610) held texts | `00fa9ad` | See the earlier block. The clock-change window fault found while landing it. |
+| X7 (#623) QR pictures | `1dce495` | Two commits joined (`c8c6044`, `a7cbbe7`) plus documents. |
+
+**X7's story is worth reading before touching anything that draws or fetches a picture.** Two pages made the SAME
+mistake — building a `chart.googleapis.com` address — and it was invisible on one and live on the other. On
+`auth/2fa/setup.php` the portal's own page rule refused the image, so the box was simply empty: broken but nothing
+left the browser. On `calendar/public-landing.php`, which writes its own `<head>` and sends no such rule, the picture
+really loaded and every view sent the event's address and the visitor's IP to Google. **When judging whether a page
+can make an outside request, check whether it includes `templates/header.php`.** The first independent check found
+that page; the second proved the leak gone by serving the page with every network function in PHP disabled.
+
+**Both of my own fixes in X7 were caught being wrong by the checks, and both in the same way: an untrue comment.** My
+first fix said the address was printed "either way" when it actually sat inside the test for the picture, so a failed
+drawing hid both. Worth remembering as a habit: when you add a guard, check every promise already written near it.
+
+### Built and checked, NOT yet landed
+
+| Package | Branch / commit | State |
+| --- | --- | --- |
+| **X6** (#625) | `ro-x6-build`, `808c794` + `2b53dae` + uncommitted | One check (NOT CLEAN, one real problem) and TWO fix rounds. Round 1: my Worship fix learned the replacement token only from its own answer, so two presses before the first reply shared a token and the console moved one slide for two presses, silently — the very fault #625 is about, in the page I had just fixed. Round 2: serialising the commands made a HANG far worse than before (a refused request rejects and is reported; one that never answers never rejects, so every later press waited for ever while the slide view kept refreshing and the page looked alive — three presses reached the portal 0 times and said nothing). Closed with a 10-second `AbortController` deadline, and `refreshToken()` now reads the portal's own `<meta name="csrf-token">` instead of pattern-matching the page's script text, which was picking the right one of two matches by page ordering rather than by design. **Verification of round 2 was running when this was written.** |
+| **X8** (#610 found 1) | `ro-x8-build`, `a202098` | Built and tested, NOT independently checked. `Sms::whyNotThisPerson()` now returns a REASON and two translators give the words, so `send()` can ask the same question `sendHeld()` asks without a second copy of the rule. Asked BEFORE holding, and of every kind including `NEVER_HELD`. 115 of 115 on MySQL 8.0.36 (up from 106: part M's eight checks and L1b), 8 planted faults all caught. **Not run on 8.4.11.** Document lines wait in `rollout-X8--build-evidence/DOC-ENTRIES.md`. |
+
+**X8's two self-inflicted faults, both found by its own new test and both of which would have recorded something
+untrue:** a refused text was stamped with a "sent at" time, which the Recent-messages list shows (`record()` already
+had a switch for this and it was not being passed); and a text for a DELETED account stopped the whole run on
+`fk_sms_user`, because the gate found "no account" and then wrote a record naming somebody no longer in `tblUsers` —
+that key is `ON DELETE SET NULL`, so the record now names no person.
+
+**Two existing checks in the held-texts test changed, both because behaviour really changed and neither made weaker.**
+H8 used to expect a person who was NEVER a member to have their text held and judged two days later; it is now refused
+as it is sent, so H8 asserts BOTH paths. L9 counts the sentences the class can record and had 13 written in; there are
+now 17.
+
+### WF — the lost report is recovered, and it is NOT CLEAN
+
+`.claude-work/resume/rollout-WF--check-RECOVERED.md`. Five real problems, none in the code that uploads or publishes.
+I verified two of them myself against the files rather than taking them on trust:
+
+1. **A real deploy can reach a customer's server before any dry run is read.** The guide says "merge nothing until the
+   dry run has been read", but `auto-merge-alpha.yml` merges alpha pull requests by itself and then runs
+   `gh workflow run deploy.yml --ref alpha` **with no inputs**, so `dry_run` takes its default `false`. CONFIRMED by
+   reading both files. The owner must close or draft open alpha pull requests, or switch auto-merge off, before setting
+   `SFTP_ENABLED` to `true`.
+2. **The required status checks** — the owner's answer 6 above.
+3. **`codeql.yml` keeps `continue-on-error`** — the owner's answer 5 above. CONFIRMED: six on the branch today, exactly
+   one at the package's tip.
+4. **Almost no merge into `alpha` will build an installation zip**, although "built on every merge" was approved:
+   `package.yml` triggers only on `push`, and GitHub starts no run for a push attributed to its own token. Fix is one
+   `gh workflow run package.yml --ref alpha` beside the existing deploy bridge; a manual run never publishes.
+5. **The guide tells the owner to look for "Making directory …" in the dry run and `lftp` never prints those words**
+   (it prints `mkdir -p <address>`), so its absence would read as a fault.
+
+Also in its "Found": four documents still describe the deleted `release.yml` and hand tagging, which meets this
+project's "untrue message" test and the fix round should decide.
+
+### FOUND by the checks, not fixed, each owed an issue
+
+- **Eight handlers have the same spent-token fault as the Worship console, all pre-existing.** Worst:
+  `geo/w3w-suggest.php` with `_core/partials/location-map-assets.php` (one POST per 400 ms of typing), and
+  `auth/account/webauthn.php` (two POSTs per click, so passkey registration may never have completed for anybody).
+  Then `geo/lookup.php`, `worship/plan-reorder.php`, `livechat/api/prompt-publish.php`,
+  `noticeboard/api/{save,upload}.php`, `tours/api/complete.php`, `documents/api/update.php`. The house convention
+  (`ApiAuth::requireWrite()` + `ApiResponse` → `meta.csrfToken`) already solves it and two callers do it right. Worth
+  one issue and an audit check.
+- **`calendar/public-landing.php` builds its address from `$_SERVER['HTTP_HOST']`**, so a forged Host makes the printed
+  address AND the QR picture point at a host the visitor chose. Not new, not worsened by #623. `PortalAddress` would fix
+  the printed address, the picture and `og:url` together.
+- **`tools/site-addresses-selftest.php` matches app switches with a pattern blind to a name holding an underscore**
+  (line 780), so it never reaches the service-plans or reading-plans pages.
+- **Three faults neither X6 tool catches:** a session-wide nonce (passes 88 of 88 — nothing would catch that
+  regression), an unclosed HTML comment, and `setAttribute('onclick')` from a script file.
+
+### Still to pick up, in order
+
+1. **X6:** land it once the round-2 verification is back.
+2. **X4 (#622):** its check was cut off on 14 October and never wrote a verdict; a fresh checker is now running it
+   **against the landed tree**, because X7 changed `tools/two-step-selftest.php` (now 90 checks) and X4's own log
+   recorded that test failing there. Its patch applies cleanly to `claude/alpha-wip`.
+3. **X8:** its one independent check, then join with its document lines.
+4. **WF:** the fix round for the five problems above, plus the owner's checklist for the branch rules.
+5. **#626** (erasure blanks the visitor's address, browser name, headers and session facts on activity records).
+6. **HIST** last, just before the pull request.
+
+### The machine
+
+Containers started and removed by name with their data this session: `x3land-mysql80`, `x6worship-mysql80`,
+`x7final-mysql8036`, `x7final-mysql8411`, `x6final-mysql8036`, `x6final-mysql8411`, `x6final2-*`, `x8build-mysql8036`,
+`x7fix2-mysql80`, `x7fix2b-mysql80`. Left-behind volumes 0 before and 0 after, every time. No other project's
+container or volume touched; no `prune` ever run.
+
+**THE PUSH IS STILL BLOCKED** by this machine's permission rules. Everything above is committed locally and nothing
+has reached GitHub.
+
 ## WHERE THINGS ARE, 26 OCTOBER 2026 — the session of 14 October was cut off mid-flight; what was recovered
 
 **Read this before anything else: work stopped abruptly on 14 October 2026 at about 01:52.** Three builders had written
