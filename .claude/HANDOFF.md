@@ -1,10 +1,87 @@
 # Handoff — branch clean-up, full audit, documentation refresh
 
-**Updated:** 2026-10-12 (kept current as the work happens, so it can be picked up at any point).
+**Updated:** 2026-10-26 (kept current as the work happens, so it can be picked up at any point).
 **Working branch:** `claude/alpha-wip` — the single work-in-progress branch.
 **Target:** one pull request into `alpha` at the end. No stacked pull requests.
 
 ---
+
+## WHERE THINGS ARE, 26 OCTOBER 2026 — the session of 14 October was cut off mid-flight; what was recovered
+
+**Read this before anything else: work stopped abruptly on 14 October 2026 at about 01:52.** Three builders had written
+their reports but never committed, and their changes were sitting UNCOMMITTED in their checkouts for twelve days. Nothing
+was lost. The first thing this session did was commit each one on its own branch, before touching anything else. What the
+gap means in practice: no background agent from that session survives, so every "running" line in the 14 October table
+below is stale — read this block instead.
+
+**The branch is synced.** `origin/alpha` had six Dependabot updates to `github/codeql-action` (v4.37.9 to v4.39.1, in
+`codeql.yml` and `php-static-analysis.yml`). **The owner chose a MERGE, not a rebase** (26 October, question tool): a
+rebase would rewrite all 492 commits on this branch and every commit number quoted in this file, `CHANGELOG.md` and the
+GitHub issues would stop matching, 20 worktree branches would be orphaned, and it would then need a forced push the owner
+reserves. The merge is clean and `actions: read` survived it. **The one history rewrite this branch gets is still the HIST
+task, once, just before the pull request.** Do not rebase this branch.
+
+**THE PUSH IS BLOCKED, and nothing in this session has reached GitHub.** `git push origin claude/alpha-wip` was refused by
+this machine's own permission rules, not by git or by GitHub. Every commit below is local only. The owner (or an
+interactive session) must run the push, or allow it. **Say so in any report: this work is committed, not pushed.**
+
+### THE OWNER'S ANSWERS, 26 OCTOBER 2026 (question tool; settled, do not ask again)
+
+1. **Sync by merging `origin/alpha`, not rebasing** (above).
+2. **The Worship, Present form-token fault is built INSIDE package X6.** X6's builder found it in the browser and left it
+   alone as outside its brief. Every control on that page (Prev, Next, Blank, Black, Show, the keys) worked exactly ONCE
+   and was then silently refused: the page takes one form token when drawn, the portal replaces the token each time it
+   accepts one, and `web/_apps/worship/api/advance.php` never handed the replacement back, so every later press was
+   answered 400 "csrf" with nothing shown to the operator. It was proved on the base commit with three plain requests
+   (200, 400, 400), so neither the browser nor X6's change plays any part — it was simply hidden while the page's script
+   was refused altogether. Built this session; see "X6" below.
+3. **#626: when a person is erased, the visitor's address, browser name, headers and session facts on their activity
+   records are blanked too — before roll-out.** Its own package, not yet started.
+4. **#610 found 1: a text sent AT ONCE is asked whether the account or organisation is switched off — before roll-out.**
+   Today only a HELD text is asked again when it comes due, and of the three callers only the prayer chain's own choice of
+   a partner asks. The rule is already written and tested as `Sms::whyNotThisPerson()`, so the work is to ask it in
+   `Sms::send()`. Its own package, not yet started.
+
+### WHAT LANDED THIS SESSION
+
+**X3 (#610, texts held for quiet hours) is COMMITTED on the working branch as `00fa9ad`** — three commits from
+`ro-x3-build` joined (`261c3b9` the build, `c006f11` the fixes after its check, `8eb831e` the last round of words and
+tests, which this session committed from the checkout), with the documentation lines from its `DOC-ENTRIES.md`
+(`CHANGELOG.md`, `FEATURES.md`, `DEV_NOTES.md`, `docs/INSTALL.md`, `.claude/CLAUDE.md`, `.OpenAI/CONTEXT.md`). Two
+independent checks and a fix round after each; Codex has not seen it.
+
+**ONE FAULT FOUND WHILE LANDING IT, in the test, and worth remembering.** On the merged tree the test failed 2 checks of
+103 where it had passed 106 of 106 in the builder's own checkout. Part K asks PHP's time-zone data for the next
+clock-change night in each direction and had a **twelve-month window**. This session ran on 26 October 2026, the day after
+Britain put its clocks back, so London's next "clocks go back" night is 31 October 2027 — five days outside the window.
+The test found no "back" night and reported a fault in code that was correct. Proved from PHP's own data and kept:
+over 366 days London has 0 back and 1 forward; over 732 days, 1 back and 2 forward. `clockChanges()` now takes the window
+as an argument and part K asks for **two years**; `ordinarySaturday()` keeps the shorter window on purpose (it only looks
+400 days ahead) and the comment says why. **This is the project's own time-zone trap in a new guise — a test that passes
+in one month and not another — so look for it in any other test that searches a fixed window from "now".** Then on the
+landed tree: held-texts 106 of 106 exit 0, mail-queue 155 of 155, all 30 audit checks exit 0, `php -l` clean. Evidence:
+`.claude-work/resume/x3-landing-evidence/`.
+
+### WHAT IS BUILT BUT NOT YET LANDED (each committed on its own branch, none pushed)
+
+| Package | Branch and commit | State, and what it still needs |
+| --- | --- | --- |
+| **X7** (#623, the QR pictures) | `ro-x7-build`, `c8c6044` | **Built and committed this session from the checkout.** The fault is real and proved: `QrEncoder` wrote the fifteen format marks BACK TO FRONT, so no reader could read any picture the portal ever drew; with the one line corrected, a strict reader written for this work and macOS's own reader read every size. The two-step set-up page also built a `chart.googleapis.com` address that carried the person's authenticator key to another website, and the portal's own page rule then refused the image, so the page was broken and leaky at once; it now draws its own picture with `Qr::dataUri()` and `Totp::getQrUrl()` is removed. New test `tools/qr-selftest.php` (67 checks, or 76 with `--with-qrencode`), new test-only reader `tools/qr-test-reader.php`, 23 kept qrencode fixtures. 34 planted faults caught, 9 more in `two-step-selftest.php`. **STILL OWED: the final two-step self-test runs on MySQL 8.0.36 and 8.4.11 (the builder was cut off before them), then ONE independent check, then join.** |
+| **X6** (#625, scripts the browser refused) | `ro-x6-build`, `808c794` plus the Worship fix | **Built and committed this session from the checkout (50 files).** 97 inline scripts and handlers in 63 files carried no nonce, so the browser refused them and the buttons did nothing. New check `check_inline_scripts_have_nonce.py` (self-test 52 of 52; 97 findings on the base tree, exit 0 on this one) with a 20-file exemption list explained line by line; new test `tools/page-scripts-selftest.php` (88 of 88 on this tree, 34 of 88 on the base, as it must be). Proved in a real browser against two throwaway portals side by side: 50 rows, none of the 47 feature rows works on the base, all work here. Two faults only a browser could find: the passkey dialog built before Bootstrap existed (fixed), and the Worship, Present token (the owner put it in this package; built this session). **STILL OWED: the final browser pass, the library-fallback proof, the other house tests, MySQL 8.4.11, then ONE independent check, then join.** |
+
+### WHAT NEEDS PICKING UP, in order
+
+1. **X7:** the two final self-test runs, then its one independent check, then join. Shares no file with X6, so the two may run side by side (owner, 12 October).
+2. **X6:** finish its owed proofs (the Worship rows included), then its one independent check, then join.
+3. **X4 (#622, the activity log's session facts):** built as `af719e3` on `ro-x4-build`; **its full independent check was cut off at 01:47 on 14 October, mid-way through the migration test, and never wrote a verdict.** Its working log (`rollout-X4--check.md`) is detailed and records real findings already: one-table restores from an OLDER backup do not hold; of 14 planted faults of its own the new test caught 9, and the five it missed are named; on the landing tree the new test fails one check (71 of 72) and `two-step-selftest.php` fails one (83 of 84), both because they read pages that have since changed. **Treat the check as unfinished: re-run its last part and get a verdict before any fix round.**
+4. **WF (the one change to GitHub's workflow files):** the package is `177527b`, `3aaa875`, `9b39f7c` on `ro-wf-build`; what it changes is `git diff aab9add 9b39f7c`. **Its one check FINISHED and is NOT CLEAN: five real problems** — two in the owner's guide, one that zips are almost never built on `alpha` (every pull request into alpha is set to merge by itself and such a merge starts no run, so a version rise there will not build a zip), one old weakness kept, and one list that needs the owner's yes. **The checker's full report was in its final message to the coordinator and that message is LOST with the 14 October session.** Its working log and the whole evidence folder survive (`rollout-WF--check.md`, `rollout-WF--check-evidence/`, start at `00-WHAT-IS-IN-THIS-FOLDER.txt`); `70-the-guide-against-the-files.txt` holds the guide findings. **Recover the five problems from the evidence before fixing anything, and do not assume there were only five.**
+5. **Two new packages from the owner's answers above:** the `Sms::send()` gate (#610 found 1) and the erasure of activity-record session facts (#626). Neither is started.
+6. **HIST** stays last, just before the pull request, exactly as agreed on 13 October.
+
+### THE MACHINE, left clean
+
+Containers this session started and removed by name with their data: `x3land-mysql80`, `x6worship-mysql80`. Left-behind
+volumes: 0 before, 0 after. No other project's container or volume was touched.
 
 ## Read this first — where we are right now
 
