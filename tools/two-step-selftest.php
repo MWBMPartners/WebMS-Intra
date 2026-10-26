@@ -24,7 +24,13 @@
  * codes come from the portal's own `Totp` class, standing in for an
  * authenticator app.
  *
- *   A. Switching on: a wrong code changes nothing and says so; so does the
+ *   A. The set-up page: it carries a QR picture the portal drew itself,
+ *      written into the page, and asks no other website for one (#623);
+ *      reading the picture back gives the address an authenticator app
+ *      needs, and the key in it is the key shown underneath in groups of
+ *      four; the key is in no web address, no log and no other part of the
+ *      page; and the browser is told not to keep the page.
+ *      Switching on: a wrong code changes nothing and says so; so does the
  *      RIGHT code on a form without the page's own token; the right one
  *      answers with eight codes; the database holds only fingerprints; the
  *      page is not shown a second time, whatever is in the address; and no
@@ -33,7 +39,8 @@
  *   B. Nobody else is shown them: another account, a visitor who is not
  *      signed in, the same person in a second browser, a form that names
  *      somebody else's account, and a browser that has given the password
- *      but not the code.
+ *      but not the code. (And with a long organisation name the picture
+ *      still reads back: the address is then over 240 bytes.)
  *   C. A backup code signs the person in when no authenticator code is
  *      given: once, and only once; typed in small letters too; a wrong one
  *      does not; using one is written to the activity log; an authenticator
@@ -77,7 +84,8 @@
  *   interrupted) and at the END.
  * - It changes two portal-wide settings for the run (`portal.trustedProxies`
  *   and `portal.trustedProxyHeader`, so that each part has a visitor address
- *   of its own) and puts each back exactly. For part I it adds one trigger,
+ *   of its own), and a third for one check (`auth.totpIssuer`, the name an
+ *   authenticator app shows), and puts each back exactly. For part I it adds one trigger,
  *   `selftest_two_step_refuse`, which refuses backup codes for two of its
  *   own accounts only, and drops it. So do not run it at the same moment as
  *   another test on the same database.
@@ -96,10 +104,13 @@
  *
  * WHAT THIS CANNOT PROVE
  * ----------------------
- * - A real authenticator app, or scanning the picture on the set-up page.
- *   The codes here are worked out by the portal's own class from the key
- *   read off the page. (The picture is asked of another site and is not
- *   fetched here; see the report beside #613 on whether it can appear.)
+ * - A real authenticator app, or a camera scanning the picture on the
+ *   set-up page. The picture IS read back here, by the test-only reader in
+ *   `tools/qr-test-reader.php` (proved on another program's pictures by
+ *   `tools/qr-selftest.php`), from the drawing commands in the page. That
+ *   proves the picture is a true QR code holding the right address. It does
+ *   not prove that any one app accepts it. The codes here are worked out by
+ *   the portal's own class from the key read off the page.
  * - How any page LOOKS, or that a script on it RUNS. No browser is used: the
  *   pages' text is read. Part H proves which files a page asks for, not
  *   that it is drawn well. Check F15 proves the Account form carries the
@@ -135,21 +146,25 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/613
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/623
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 84;
+const EXPECTED_CHECKS = 90;
 
 function refuse(string $why): never
 {
     echo "REFUSED — {$why}. Nothing more was checked, and this run fails.\n";
     exit(1);
 }
+
+// The test-only QR reader (#623). It reads the picture on the set-up page back.
+require __DIR__ . DIRECTORY_SEPARATOR . 'qr-test-reader.php';
 
 $dbName = (string) getenv('SELFTEST_DB_NAME');
 if (str_starts_with($dbName, 'selftest_') === false) {
@@ -490,10 +505,79 @@ function nth(array $codes, int $n): string
     return (string) ($codes[$n] ?? '');
 }
 
-/** The key for the authenticator app drawn on the set-up page (32 characters, A-Z and 2-7), or ''. */
+/**
+ * The key for the authenticator app drawn on the set-up page (32 characters,
+ * A-Z and 2-7), or ''. Since #623 the page shows it in eight groups of four,
+ * each group in an element of its own, with no space character between them.
+ * A key drawn any other way is "no key", so every check that needs one fails.
+ */
 function keyOn(string $html): string
 {
-    return preg_match('#<code[^>]*>\s*([A-Z2-7]{32})\s*</code>#', $html, $m) === 1 ? $m[1] : '';
+    return preg_match('#<code[^>]*\bid="totpKey"[^>]*>((?:<span class="mx-1">[A-Z2-7]{4}</span><wbr>){8})</code>#', $html, $m) === 1 ? (string) preg_replace('#<[^>]+>#', '', $m[1]) : '';
+}
+
+/**
+ * The pictures on a page: every `<img>`, with where each comes from.
+ *
+ * @return array{written:list<string>, own:list<string>, outside:list<string>}
+ *         written  pictures written into the page itself ("data:" addresses)
+ *         own      addresses on this server (they begin with one "/")
+ *         outside  anything else: another website
+ */
+function picturesOn(string $html): array
+{
+    $found = ['written' => [], 'own' => [], 'outside' => []];
+    preg_match_all('#<img\b[^>]*>#', $html, $tags);
+    foreach ($tags[0] as $tag) {
+        $src = preg_match('#\bsrc="([^"]*)"#', $tag, $m) === 1 ? html_entity_decode($m[1], ENT_QUOTES, 'UTF-8') : '';
+        if (str_starts_with($src, 'data:') === true) {
+            $found['written'][] = $src;
+        } elseif (str_starts_with($src, '/') === true && str_starts_with($src, '//') === false) {
+            $found['own'][] = $src;
+        } else {
+            $found['outside'][] = $src;
+        }
+    }
+
+    return $found;
+}
+
+/**
+ * Read the QR picture written into a set-up page back, with the test-only
+ * reader. It insists on the clear border of four squares.
+ *
+ * @return array{text:string, why:string, svg:string} The text in the picture
+ *         ('' when it could not be read, with the reason in `why`), and the
+ *         picture's own SVG text.
+ */
+function pictureRead(string $html): array
+{
+    $written = picturesOn($html)['written'];
+    if (count($written) !== 1 || str_starts_with($written[0], 'data:image/svg+xml;base64,') === false) {
+        return ['text' => '', 'why' => count($written) . ' picture(s) written into the page, or not an SVG', 'svg' => ''];
+    }
+    $svg = base64_decode(substr($written[0], strlen('data:image/svg+xml;base64,')), true);
+    if ($svg === false) {
+        return ['text' => '', 'why' => 'the picture is not base64', 'svg' => ''];
+    }
+    try {
+        return ['text' => QrTestReader::readPicture(['mime' => 'image/svg+xml', 'bytes' => $svg])['text'], 'why' => '', 'svg' => $svg];
+    } catch (\Throwable $e) {
+        return ['text' => '', 'why' => $e->getMessage(), 'svg' => $svg];
+    }
+}
+
+/** The parts of an authenticator address: its label (decoded) and what it asks for. */
+function addressParts(string $address): array
+{
+    if (str_starts_with($address, 'otpauth://totp/') === false) {
+        return ['label' => '', 'asks' => []];
+    }
+    $rest  = substr($address, strlen('otpauth://totp/'));
+    $label = rawurldecode((string) strstr($rest . '?', '?', true));
+    parse_str((string) substr((string) strstr($rest, '?'), 1), $asks);
+
+    return ['label' => $label, 'asks' => $asks];
 }
 
 /** The 6-digit code an authenticator app would show now for this key (the portal's own arithmetic). */
@@ -950,6 +1034,57 @@ $control = records('anna', 'TotpDisableFailed');
 $setup = req($annaJar, 'GET', '/auth/2fa/setup', null, $at);
 ok('A2 the key is the same when the page is opened again (the person\'s app may already hold it)', keyOn($setup['body']) === $key && $key !== '', 'first ' . ($key === '' ? '(none)' : 'shown') . ', then ' . (keyOn($setup['body']) === $key ? 'the same' : 'a different one or none'));
 
+// 🔳 The picture for the authenticator app (#623). The page used to ask
+//    another website to draw it, which the page's own rule refuses (and
+//    which would have sent the key to that website). It must now be drawn by
+//    the portal and written into the page.
+$pictures = picturesOn($setup['body']);
+$rule     = preg_match('/^Content-Security-Policy:.*$/mi', $setup['head'], $m) === 1 ? $m[0] : '';
+// A picture asked of another website that has anything to do with a QR code
+// or with the key. (The page's top bar asks gravatar.com for the person's
+// own photograph; that is not this test's business and is left alone.)
+$qrElsewhere = array_values(array_filter($pictures['outside'], static fn (string $u): bool => preg_match('#qr|chart|otpauth|secret#i', $u) === 1 || ($key !== '' && stripos($u, $key) !== false)));
+ok('A2b the set-up page carries ONE picture written into the page itself, asks no other website for a QR picture, and its own rule still refuses pictures from other websites (so one could not appear anyway)',
+    count($pictures['written']) === 1 && str_starts_with((string) ($pictures['written'][0] ?? ''), 'data:image/svg+xml;base64,') === true && $qrElsewhere === []
+    && preg_match('#googleapis\.com/chart|chart\.googleapis|qrserver|[?&](chl|cht)=#i', $setup['body']) !== 1 && preg_match('#(src|href|data)="[^"]*/qr\?#', $setup['body']) !== 1
+    && str_contains($rule, "img-src 'self' data:;") === true,
+    'written into the page: ' . count($pictures['written']) . '; QR pictures asked of another website: ' . implode(' ', array_map(static fn (string $u): string => mb_substr($u, 0, 60), $qrElsewhere)) . '; rule: ' . (preg_match("/img-src[^;]*;/", $rule, $m) === 1 ? $m[0] : '(none)'));
+$picture = pictureRead($setup['body']);
+$parts   = addressParts($picture['text']);
+ok('A2c reading the picture back gives an authenticator address whose key is the key the page shows in words, for this person\'s own e-mail address, six digits every thirty seconds',
+    $key !== '' && ($parts['asks']['secret'] ?? '') === $key && str_ends_with($parts['label'], ':anna.twostep@selftest.invalid') === true && ($parts['asks']['issuer'] ?? '') !== ''
+    && str_starts_with($parts['label'], (string) ($parts['asks']['issuer'] ?? '?') . ':') === true && ($parts['asks']['digits'] ?? '') === '6' && ($parts['asks']['period'] ?? '') === '30' && ($parts['asks']['algorithm'] ?? '') === 'SHA1',
+    $picture['why'] !== '' ? 'the picture could not be read: ' . $picture['why'] : 'key in the picture ' . ((($parts['asks']['secret'] ?? '') === $key) ? 'the same' : 'DIFFERENT or missing') . '; label ends with the e-mail address: ' . (str_ends_with($parts['label'], ':anna.twostep@selftest.invalid') === true ? 'yes' : 'no'));
+// Everything on the page EXCEPT the picture and the key's own box. The key
+// must be in neither: not in the alt text, not in a hidden field, not in a
+// link. (The box is found by keyOn(), which insists on eight groups of four.)
+// The key is looked for in ANY shape: run together, or its groups of four
+// parted by spaces, dashes or tags. The whole page is the control: there the
+// same search must find it, in its box.
+$rest     = (string) preg_replace('#<code[^>]*\bid="totpKey"[^>]*>.*?</code>#s', '', str_replace((string) ($pictures['written'][0] ?? '(none)'), '', $setup['body']));
+$anyShape = '#' . implode('(?:<[^>]*>|[^A-Za-z0-9<])*', str_split($key === '' ? 'no key was found' : $key, 4)) . '#i';
+$alt      = preg_match('#<img\b[^>]*\bsrc="data:[^>]*\balt="([^"]*)"#', $setup['body'], $m) === 1 ? $m[1] : '(none)';
+ok('A2d the key is shown under the picture in eight groups of four and nowhere else on the page: not in the picture\'s alt text, not in its SVG as words, not in any link, form or hidden field; and the page says typing it is the other way',
+    $key !== '' && strlen($rest) < strlen($setup['body']) && preg_match($anyShape, $setup['body']) === 1 && preg_match($anyShape, $rest) !== 1 && stripos($rest, 'otpauth') === false
+    && $alt === 'QR code to scan with your authenticator app' && $picture['svg'] !== '' && preg_match($anyShape, $picture['svg']) !== 1 && stripos($picture['svg'], 'otpauth') === false
+    && str_contains($setup['body'], 'Cannot scan it? Type this key into the app instead:') === true,
+    'alt text: "' . $alt . '"; key elsewhere on the page: ' . (preg_match($anyShape, $rest) === 1 ? 'YES' : 'no') . '; control, key found in its box: ' . (preg_match($anyShape, $setup['body']) === 1 ? 'yes' : 'NO'));
+// Nowhere on the server either. Activity records keep a copy of the session,
+// error records keep the web address that was asked for, and the session
+// keeps the key itself (encrypted). "otpauth" is looked for as well as the
+// key, in case the address were ever kept in a form that hides the key.
+// The control: this browser's session DOES hold the key under its name, so
+// the right places are being looked in. (A2d already proved that nothing on
+// the page builds a web address with the key in it. This test's own server
+// keeps no list of the addresses it is asked for, so that cannot be read.)
+$left     = leftReadable([$key, 'otpauth']);
+$inErrors = (int) one("SELECT COUNT(*) AS n FROM tblErrors WHERE (userID BETWEEN 922000 AND 922999 OR visitorIP LIKE '198.51.100.%') AND (CONCAT_WS('\n', errorTitle, errorDetail, requestURL, requestHeaders) LIKE ? OR CONCAT_WS('\n', errorTitle, errorDetail, requestURL, requestHeaders) LIKE '%otpauth%')", 's', ['%' . $key . '%'])['n'];
+$session  = sessionFile($annaJar) === '' ? '' : (string) file_get_contents(sessionFile($annaJar));
+ok('A2e the key and the authenticator address are in no activity record, no error record (those keep the web address asked for), no log, and in the session only in a form that cannot be read',
+    $key !== '' && $left === [] && $inErrors === 0 && str_contains($session, 'totp_setup_secret|') === true && stripos($session, $key) === false,
+    'left in: ' . implode('; ', array_slice($left, 0, 5)) . '; error records: ' . $inErrors . '; control (her session holds the key under its name): ' . (str_contains($session, 'totp_setup_secret|') === true ? 'yes' : 'NO'));
+ok('A2f the set-up page tells the browser not to keep it (said by the page itself: this server adds no such header of its own)', preg_match('/^Cache-Control:.*\bno-store\b/mi', $setup['head']) === 1, trim((string) (preg_match('/^Cache-Control:.*$/mi', $setup['head'], $cc) === 1 ? $cc[0] : 'no Cache-Control header')));
+
 $wrong = req($annaJar, 'POST', '/auth/2fa/setup', ['csrf_token' => token($setup['body']), 'code' => wrongAppCode($key)], $at);
 $again = req($annaJar, 'GET', '/auth/2fa/setup', null, $at);
 $isOn  = (int) one('SELECT totpEnabled FROM tblUsers WHERE userID = ?', 'i', [PEOPLE['anna']])['totpEnabled'];
@@ -1021,6 +1156,21 @@ $benPage          = req($benJar, 'GET', '/auth/2fa/setup?complete=1', null, ip(2
 ok('B1 another account that adds "?complete=1" gets its own set-up page, with a key of its own and none of the first person\'s codes',
     $benIn['status'] === 302 && $benPage['status'] === 200 && keyOn($benPage['body']) !== '' && keyOn($benPage['body']) !== $key && codesOn($benPage['body']) === [] && array_filter($annaCodes, static fn (string $c): bool => str_contains($benPage['body'], $c) === true) === [],
     describe($benPage));
+// An organisation with a long name: the address in the picture is then well
+// over the 213 bytes at which the old drawing code stopped with an error.
+$nameBefore = one("SELECT settingValue FROM tblSettings WHERE settingKey = 'auth.totpIssuer' AND siteID IS NULL");
+$longName   = 'The Parish Church of Saint Mary the Virgin and All Saints, Little Wittenham-on-Thames';
+setting('auth.totpIssuer', $longName);
+$benLong  = req($benJar, 'GET', '/auth/2fa/setup', null, ip(21));
+$longRead = pictureRead($benLong['body']);
+$longAsks = addressParts($longRead['text']);
+if ($nameBefore !== null) {
+    setting('auth.totpIssuer', (string) $nameBefore['settingValue']); // back at once; the clean-up puts back the exact row as well
+}
+ok('B1b with a long organisation name the picture still reads back: an address of ' . strlen($longRead['text']) . ' bytes (over 240), the same key as the page shows, the long name whole',
+    $benLong['status'] === 200 && strlen($longRead['text']) > 240 && keyOn($benLong['body']) !== '' && ($longAsks['asks']['secret'] ?? '') === keyOn($benLong['body']) && keyOn($benLong['body']) === keyOn($benPage['body'])
+    && ($longAsks['asks']['issuer'] ?? '') === $longName && $longAsks['label'] === $longName . ':ben.twostep@selftest.invalid',
+    $longRead['why'] !== '' ? 'the picture could not be read: ' . $longRead['why'] : strlen($longRead['text']) . ' bytes; issuer read: ' . mb_substr((string) ($longAsks['asks']['issuer'] ?? '(none)'), 0, 40));
 $nobody = req(newJar(), 'GET', '/auth/2fa/setup?complete=1', null, ip(22));
 ok('B2 a visitor who is not signed in is sent to sign in, and is shown nothing', $nobody['status'] === 302 && str_starts_with($nobody['location'], '/login') === true && codesOn($nobody['body']) === [], describe($nobody));
 $annaTwo = signInWithApp('anna', $key, ip(23));
@@ -1480,7 +1630,7 @@ $settingsBack = true;
 foreach ($before as $settingKey => $row) {
     $settingsBack = $settingsBack && (one('SELECT settingID, settingValue, isSensitive FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [(string) $settingKey]) === $row);
 }
-ok('clean-up: the made-up accounts, their codes and records and the trigger are gone, and both settings are as they were', $left === 0 && $settingsBack === true, 'rows left: ' . $left . '; settings back: ' . ($settingsBack === true ? 'yes' : 'no'));
+ok('clean-up: the made-up accounts, their codes and records and the trigger are gone, and every setting it changed is as it was', $left === 0 && $settingsBack === true, 'rows left: ' . $left . '; settings back: ' . ($settingsBack === true ? 'yes' : 'no'));
 ok('clean-up: every server is stopped and the scratch folder is deleted', count(array_filter($allPorts, 'portAnswers')) === 0 && file_exists($child) === false);
 
 echo "\n{$pass} passed, {$fail} failed, " . ($pass + $fail) . ' ran of ' . EXPECTED_CHECKS . " expected.\n";

@@ -26,8 +26,11 @@ ApiAuth::requireRead('noticeboard:read');
 // host-site snapshot and could wrongly 403 a valid bearer request.
 
 $data = (string) ($_GET['data'] ?? '');
-// 📏 QrEncoder tops out around version-10 byte-mode capacity (~250 chars) with
-//    no explicit throw on overflow; cap conservatively so we fail loudly.
+// 📏 A link to a notice is short. 300 bytes is far more than one needs and far
+//    less than Qr can draw (2,331 bytes at the usual level, since #623), so
+//    anything longer is refused here in the API's own way and Qr's own
+//    refusal is never reached. (This comment used to say the encoder stopped
+//    near 250 characters without refusing. It stopped at 213 with an error.)
 if ($data === '' || strlen($data) > 300) {
     ApiResponse::error('Missing or oversized data parameter', 422);
 }

@@ -28,6 +28,7 @@
 declare(strict_types=1);
 
 use Portal\Core\EventVisibility;
+use Portal\Core\Qr;
 use Portal\Core\Settings;
 use Portal\Core\Site;
 
@@ -128,7 +129,35 @@ $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' :
 $host   = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
 $publicUrl = $scheme . '://' . $host . '/e/' . urlencode((string) $event['eventSlug']);
 $rsvpUrl   = Site::url('calendar/event') . '?slug=' . urlencode((string) $event['eventSlug']);
-$qrSrc     = 'https://chart.googleapis.com/chart?cht=qr&chs=200x200&choe=UTF-8&chl=' . urlencode($publicUrl);
+// 📱 THE PICTURE IS DRAWN HERE, BY THE PORTAL (#623).
+//    This line used to build a chart.googleapis.com address and show it in
+//    an <img>. That sent this event's public address, and the IP address of
+//    every single visitor, to Google -- on a page that needs no sign-in, so
+//    for anybody who opened the link. Unlike the two-step set-up page, where
+//    the same mistake was hidden because the portal's page rule refused the
+//    image, THIS page writes its own <head> and sends no such rule, so the
+//    picture really did load and the request really was made.
+//    Qr draws it instead, written straight into the page. Nothing leaves the
+//    server. Found by the independent check of #623.
+//    If the drawing fails, the PICTURE is left out and the address is still
+//    printed underneath in words, so nobody loses anything they cannot copy
+//    (see the block itself). Only the kind of fault is logged, never the
+//    address: a fault's own words can quote it, and a visitor chooses part
+//    of it.
+//    DRAWN ONLY IF THE PAGE WILL SHOW IT. With the setting switched off the
+//    portal used to draw a picture and throw it away on every single
+//    request, and a visitor sending a very long Host header could make it
+//    attempt one, and write a line in the log, on a page that was not going
+//    to show a picture at all. Both found by the check of the fix round.
+$qrSrc = '';
+if ($showQr === true) {
+    try {
+        $qrSrc = Qr::dataUri($publicUrl, ['size' => 200, 'ecc' => 'M']);
+    } catch (\Throwable $problem) {
+        error_log('public-landing: the event QR picture could not be drawn: ' . get_class($problem));
+        $qrSrc = '';
+    }
+}
 
 $eventNameSafe = htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8');
 ?><!DOCTYPE html>
@@ -223,8 +252,20 @@ $eventNameSafe = htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF
     <?php if ($showQr === true): ?>
         <div class="info-card qr-block">
             <h2>Share this event</h2>
-            <p class="small">Anyone with a phone camera can scan to open this page.</p>
-            <img src="<?php echo htmlspecialchars($qrSrc, ENT_QUOTES, 'UTF-8'); ?>" alt="QR code linking to <?php echo $eventNameSafe; ?>" loading="lazy">
+            <?php if ($qrSrc !== ''): ?>
+                <p class="small">Anyone with a phone camera can scan to open this page.</p>
+                <img src="<?php echo htmlspecialchars($qrSrc, ENT_QUOTES, 'UTF-8'); ?>" alt="QR code linking to <?php echo $eventNameSafe; ?>">
+            <?php endif; ?>
+            <?php
+            // 📋 THE ADDRESS IS PRINTED WHETHER OR NOT THERE IS A PICTURE.
+            //    It used to sit inside the test for the picture, so when the
+            //    drawing failed the address went with it and the block said
+            //    "Share this event" and nothing else -- while the comment by
+            //    the drawing promised the address was there "either way".
+            //    That was an untrue comment of exactly the kind this work is
+            //    about, and the independent check of the fix round caught it.
+            //    A visitor who cannot scan can still copy the address.
+            ?>
             <p class="small" style="word-break:break-all; margin-top:1rem;"><?php echo htmlspecialchars($publicUrl, ENT_QUOTES, 'UTF-8'); ?></p>
         </div>
     <?php endif; ?>

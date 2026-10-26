@@ -2,6 +2,35 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — the portal's QR codes could not be read, and one of them sent a key to another website (#623)**
+  - **What an administrator should know after upgrading**
+    1. **Every QR picture the portal has ever drawn was unreadable.** The fifteen squares that tell a reader which
+       error-correction level and mask pattern a picture uses were written back to front, so no reader got as far as the
+       data. Nothing reported it, because a wrong picture is still a picture: it draws, it has the right shape, and no
+       page fails. **Reprint anything you printed from the portal that carries a QR code** — asset labels, noticeboard
+       share codes, event posters — because none of the old ones can be scanned.
+    2. **The two-step sign-in page now shows a QR code at all.** It used to ask Google to draw one, which the portal's
+       own page rule then refused, so the box was simply empty. It draws its own now, with the key printed underneath in
+       groups of four so it can be typed by hand.
+    3. **That page was also sending the authenticator key to Google.** The address it built carried the key, so anyone
+       setting up two-step sign-in had their key sent to another website. **If you want to be cautious, ask people who
+       set up two-step sign-in before this upgrade to remove it and set it up again** — they will get a fresh key. The
+       old picture never appeared, so in practice nobody completed the set-up from it, but the key was still sent.
+    4. **The public event page was doing the same thing, and there it really did happen.** The page behind a public event
+       link (`/e/...`) asked Google to draw its share code. That page sends no page rule of its own, so the picture
+       loaded on every view, sending the event's address and each visitor's IP address to Google. It draws its own now.
+       Nothing the portal shows asks another website for a QR picture any more.
+    5. **QR codes now work at every size and correction level**, refuse politely instead of stopping with an error when
+       the text is too long (the limit is now 2,331 bytes rather than 213), have the clear border readers need, and no
+       longer come back blank as a small PNG.
+  - **What changed in the code**: `web/_core/QrEncoder.php` (rewritten), `web/_core/Qr.php` (clear border, compact
+    drawing, `dataUri()`, `longestText()`), `web/_apps/auth/2fa/setup.php`, `web/_apps/calendar/public-landing.php`,
+    `web/_core/Totp.php` (`getQrUrl()` removed), comment corrections in `web/_apps/noticeboard/api/qr.php` and
+    `web/_core/Barcode.php`, and the new tests `tools/qr-selftest.php` and `tools/qr-test-reader.php` with 23 kept
+    fixture pictures.
+  - **Still to do, raised as its own issue:** the public event page builds its address from the request's host, so a
+    forged request can make the printed address and the picture point somewhere else. It is not new and not made worse
+    by this change.
 - **Fixed — a text message held for quiet hours is now sent when they end, or recorded as not sent (#610)**
   - **What an administrator should know after upgrading**
     1. **What was wrong.** A text that is not urgent is not sent to a person who is inside their Sabbath quiet hours. The

@@ -7,8 +7,9 @@
  * A signed-in person does two things here, both for their OWN account only:
  *
  *   1. Switches two-factor authentication on. The page shows a key for their
- *      authenticator app; they type the 6-digit code the app shows; the page
- *      switches it on and shows eight backup codes.
+ *      authenticator app, as a QR picture to scan and as letters to type; they
+ *      type the 6-digit code the app shows; the page switches it on and shows
+ *      eight backup codes.
  *   2. Makes a new set of backup codes (the form is on the Account page and
  *      posts here with action=new_backup_codes). The old set stops working.
  *
@@ -48,8 +49,38 @@
  * between would carry them. Encrypting them in the session would have hidden
  * them from the log but not from the holder of the cookie.
  *
+ * THE PICTURE FOR THE AUTHENTICATOR APP (#623, 14 October 2026)
+ * ------------------------------------------------------------
+ * The page said "Scan this QR code" above a picture that could never appear.
+ * It asked another website (chart.googleapis.com) to draw it. The portal's own
+ * rule for pages (`img-src 'self' data:`) refuses a picture from another
+ * website, so the browser never asked. Had the rule allowed it, every
+ * person's secret key would have been sent to that website inside the
+ * picture's address. So the only way to set up an app was to type the 32
+ * letters of the key by hand.
+ *
+ * Now the portal draws the picture itself (`Portal\Core\Qr`, the one place a
+ * QR picture is made) and writes it INTO this page as a `data:` address. The
+ * key therefore travels in this page and nowhere else. Under the picture the
+ * key is shown in groups of four letters, for a person who cannot scan (for
+ * one, somebody setting up the app on the same phone they are reading this
+ * on).
+ *
+ * TRIED AND REJECTED: `<img src="/qr?content=...">`, the way other pages show
+ * a QR picture. The key would then be in a web address, and web addresses are
+ * written into server logs and browser histories. Also rejected: allowing the
+ * outside website in the page's rule. That is the leak described above.
+ *
+ * THE KEY MUST NEVER BE: in a web address; in a log; in the session in
+ * readable form (see below); in the picture's alt text; or handed to
+ * `Qr::resolveContent()`, which can send what it is given to an outside
+ * service.
+ *
  * WHAT THIS CANNOT DO
  * -------------------
+ * - It cannot make an authenticator app accept the picture. The picture is
+ *   read back by a test (`tools/two-step-selftest.php`), but no test here
+ *   holds a phone up to a screen.
  * - It cannot show a set of codes twice. If the answer is lost on the way
  *   (a dropped connection, a second click on the button), the codes are
  *   made and nobody has seen them. The person makes a new set from Account.
@@ -63,9 +94,10 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.10.1
+ * @version   0.10.2
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/92
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/613
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/623
  * -----------------------------------------------------------------------------
  */
 
@@ -74,6 +106,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Qr;
 use Portal\Core\RateLimiter;
 use Portal\Core\Site;
 use Portal\Core\Totp;
@@ -368,8 +401,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$secret = '';
-$qrUrl  = '';
+$secret       = '';
+$secretGroups = []; // the key in groups of four letters, for the page
+$qrPicture    = ''; // the QR picture as a "data:" address, or '' when it could not be drawn
 if ($shownCodes === []) {
     // 🔍 Already on, and nothing to show: back to Account. This is every
     //    plain visit to this page once it is on, with or without
@@ -399,7 +433,29 @@ if ($shownCodes === []) {
     $issuer = App::settings('auth.totpIssuer') ?? 'WebMS Portal';
     $email  = $user['emailAddress'] ?? '';
     $uri    = Totp::getUri($secret, $email, $issuer);
-    $qrUrl  = Totp::getQrUrl($uri, 250);
+
+    // 🔳 The picture an authenticator app scans. It holds $uri, which holds
+    //    the key, so it is drawn HERE and written into this page as a "data:"
+    //    address (see the header for why never an address such as /qr?...).
+    //    $uri is used on this one line and is never logged, kept or shown.
+    //    Level M is the usual level: a screen has no scratches to correct.
+    try {
+        $qrPicture = Qr::dataUri($uri, ['size' => 250, 'ecc' => 'M']);
+    } catch (\Throwable $problem) {
+        // The address was too long to draw (an organisation name of over two
+        // thousand letters), or the drawing failed. The page still works: it
+        // shows the key to type, and says there is no picture. Only the kind
+        // of fault is logged, because its words could quote the address.
+        $qrPicture = '';
+        error_log('auth/2fa/setup: the QR picture could not be drawn for account ' . $userId . ' (' . get_class($problem) . ')');
+    }
+    $secretGroups = str_split($secret, 4);
+
+    // 🚫 The browser must not keep this page either: it shows the key the
+    //    person's sign-in will depend on. PHP usually says this by itself for
+    //    a signed-in page, but a host can switch that off.
+    header('Cache-Control: no-store, max-age=0');
+    header('Pragma: no-cache');
 }
 
 // 📨 A message this page left for itself before sending the person back
@@ -481,13 +537,30 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="row g-4">
         <div class="col-12 col-md-6">
             <div class="card">
-                <div class="card-header"><h2 class="h5 mb-0">Step 1: Scan QR Code</h2></div>
+                <div class="card-header"><h2 class="h5 mb-0">Step 1: Add the key to your authenticator app</h2></div>
                 <div class="card-body text-center">
-                    <p>Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.):</p>
-                    <img src="<?php echo htmlspecialchars($qrUrl, ENT_QUOTES, 'UTF-8'); ?>"
-                         alt="TOTP QR Code" class="img-fluid mb-3" width="250" height="250">
-                    <p class="small text-muted">Or enter this key manually:</p>
-                    <code class="d-block p-2 bg-body-tertiary rounded user-select-all"><?php echo htmlspecialchars($secret, ENT_QUOTES, 'UTF-8'); ?></code>
+                    <?php if ($qrPicture !== ''): ?>
+                        <p>Scan this picture with your authenticator app (Google Authenticator, Microsoft Authenticator, Authy and others):</p>
+                        <?php // The picture is drawn by the portal and written into the page (a "data:" address), so
+                              // the key inside it goes nowhere else. The alt text says what the picture is FOR and
+                              // must never hold the key: alt text is read aloud and copied about freely. ?>
+                        <img src="<?php echo htmlspecialchars($qrPicture, ENT_QUOTES, 'UTF-8'); ?>"
+                             alt="QR code to scan with your authenticator app" class="img-fluid mb-3" width="250" height="250">
+                        <p class="small text-muted">Cannot scan it? Type this key into the app instead:</p>
+                    <?php else: ?>
+                        <p>The picture to scan could not be drawn, so type this key into your authenticator app (Google Authenticator, Microsoft Authenticator, Authy and others):</p>
+                    <?php endif; ?>
+                    <?php // The key in groups of four, so that 32 letters can be typed without losing the place.
+                          // The gap between groups is a margin, NOT a space character, so a key that is selected
+                          // and copied is the 32 letters and nothing else, ready to paste into an app. The <wbr>
+                          // after each group lets a narrow screen break the line there; it adds no character.
+                          // NOT RUN IN A BROWSER: the page's text was read by the test, not looked at. ?>
+                    <code class="d-block p-2 bg-body-tertiary rounded user-select-all" id="totpKey"><?php
+                        foreach ($secretGroups as $group) {
+                            echo '<span class="mx-1">' . htmlspecialchars($group, ENT_QUOTES, 'UTF-8') . '</span><wbr>';
+                        }
+                    ?></code>
+                    <p class="small text-muted mt-2 mb-0">The key is 32 letters and digits, shown here in groups of four.</p>
                 </div>
             </div>
         </div>

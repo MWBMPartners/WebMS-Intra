@@ -85,7 +85,15 @@ class Totp
     /* ---------------------------------------------------------------------- */
 
     /**
-     * Build an otpauth:// URI for QR code generation.
+     * Build the otpauth:// address an authenticator app reads from a QR
+     * picture. It HOLDS THE KEY: never log it, never put it in a web address,
+     * and draw its picture only with `Qr::dataUri()` (written into the page).
+     *
+     * There used to be a getQrUrl() below this, which built an address asking
+     * chart.googleapis.com to draw the picture. It was removed on 14 October
+     * 2026 (#623): that address carried the key to another website, and the
+     * portal's own rule for pages refused the picture anyway, so it never
+     * appeared. Do not bring it back; `Portal\Core\Qr` draws the picture.
      */
     public static function getUri(string $base32Secret, string $email, string $issuer): string
     {
@@ -99,15 +107,6 @@ class Totp
         ]);
 
         return 'otpauth://totp/' . $label . '?' . $params;
-    }
-
-    /**
-     * Generate a URL for a QR code image (uses Google Charts API).
-     */
-    public static function getQrUrl(string $uri, int $size = 200): string
-    {
-        return 'https://chart.googleapis.com/chart?chs=' . $size . 'x' . $size
-            . '&cht=qr&chl=' . urlencode($uri) . '&choe=UTF-8';
     }
 
     /* ---------------------------------------------------------------------- */

@@ -995,11 +995,12 @@ class Barcode
     // #############################################################################
 
     /**
-     * Render an SVG from a module bit string. One `<rect>` per `1` module
-     * — mirrors `Qr::renderSvg()`'s own "simple over clever" approach
-     * rather than merging adjacent bars into wider rects; Code 128's
-     * 48-char cap keeps the total module count (and so the rect count)
-     * comfortably bounded either way.
+     * Render an SVG from a module bit string. One `<rect>` per `1` module,
+     * "simple over clever", rather than merging adjacent bars into wider
+     * rects; Code 128's 48-char cap keeps the total module count (and so the
+     * rect count) comfortably bounded either way. (`Qr::renderSvg()` drew
+     * this way too until #623. It now joins runs, because a QR picture has
+     * far more squares than a barcode has bars.)
      */
     private static function renderSvg(
         string $bits,

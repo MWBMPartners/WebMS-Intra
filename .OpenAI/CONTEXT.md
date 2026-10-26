@@ -472,6 +472,24 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     "the job ran in the last 15 minutes" and no more. Test: `tools/held-
     texts-selftest.php`, which reads the Notification preferences page.
 
+    **The portal's own QR pictures (#623).** `Portal\Core\Qr` is the ONE
+    place a QR picture is made (`QrEncoder` is its own helper); nothing
+    under `web/` may ask another website to draw one, and
+    `Totp::getQrUrl()`, which sent the authenticator key to
+    `chart.googleapis.com`, is removed and must not come back. A picture
+    of anything secret is shown with `Qr::dataUri()`, written into the
+    page: a picture fetched from an address puts the text in that address,
+    and addresses reach server logs and browser histories. The format
+    marks were written back to front until 14 October 2026, so every
+    picture the portal had ever drawn was unreadable by every reader and
+    nothing noticed, because a wrong picture still draws — only reading
+    one back catches it. Two pages made the same outside-request mistake
+    and it was invisible on one and live on the other: a page that writes
+    its own `<head>` (such as `calendar/public-landing.php`) sends no page
+    rule, so its outside request really happens. Tests: `tools/qr-
+    selftest.php` with `tools/qr-test-reader.php`, which is proved against
+    `qrencode`'s own pictures before it is pointed at ours.
+
     **Two-factor authentication (#613).** `auth/2fa/setup.php` is the ONE place
     backup codes are made, and it shows them only in the answer to the request
     that made them: never put a code, or the authenticator key, readable in

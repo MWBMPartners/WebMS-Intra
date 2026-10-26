@@ -6224,6 +6224,34 @@ client; PHPMailer as a second engine) come after the first roll-out, by the owne
   in the test (`SAYS`). Change a page or a sentence and the test together.
 - **What it cannot do** is listed at the top of `Sms.php`.
 
+## The portal's own QR pictures (#623)
+
+- **One place.** `Portal\Core\Qr` is the only place a QR picture is made, and `Portal\Core\QrEncoder` is its own
+  helper. Nothing under `web/` asks another website to draw one. The owner means to hand the drawing to their separate
+  CueRCode project later, so keeping it to one file is what makes that a one-file change.
+- **The fault that hid for months.** `QrEncoder` wrote the fifteen format marks — the squares naming the
+  error-correction level and the mask — back to front. ISO/IEC 18004 figure 25 gives the order. A reader reads those
+  marks before anything else, so it never reached the data, and EVERY picture the portal drew was unreadable by every
+  reader. Nothing caught it because a wrong picture is still a picture: it draws, it is the right shape, and no code
+  path fails. Only reading a picture back catches this, which is why `tools/qr-test-reader.php` exists.
+- **Never put a secret in a web address.** `Qr::dataUri()` writes the picture into the page, and that is the only way to
+  show a picture of something secret. A picture fetched from `/qr?content=...` puts the text in a web address, and web
+  addresses end up in server logs and browser histories. `Totp::getQrUrl()` built a `chart.googleapis.com` address
+  carrying the person's authenticator key; it is removed, and must not come back.
+- **A page that writes its own `<head>` sends no page rule.** The two-step set-up page and the public event page made
+  the same mistake, and it was INVISIBLE on one and live on the other: the portal's rule refused the image on the
+  two-step page, so nothing appeared, while `calendar/public-landing.php` sends no such rule and the request to Google
+  really was made on every view. When judging whether an outside request can happen, check whether that page includes
+  `templates/header.php`.
+- **Tests.** `tools/qr-selftest.php` (67 checks, or 76 with `--with-qrencode`) reads every picture back with
+  `tools/qr-test-reader.php`, a reader written only for the tests, and compares against 23 kept `qrencode` pictures in
+  `tools/fixtures/qr/`. The reader was proved against 316 `qrencode` pictures first, at every size and level and at the
+  exact edge of each, before it was pointed at our own drawing — otherwise it could simply have agreed with our own
+  mistake. The independent check went further and derived the standard's BCH format and version values by hand.
+- **What is NOT proved:** `qrencode` is not installed on every machine (so `--with-qrencode` may not run), PHP 8.4 was
+  not available for the check, and nobody has scanned a printed label with a real camera.
+- **Where gd is missing** the drawing falls back to SVG, and every caller sends the `mime` it is given back.
+
 ## MS365 Graph email via a shared mailbox (gap #234, migration 176)
 
 ### What was already there vs what #234 actually needed

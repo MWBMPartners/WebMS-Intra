@@ -1036,7 +1036,7 @@ setting seeds.
 | App | Issue | Migration | Status |
 |---|---|---|---|
 | Reading Plans (Bible-in-a-year, chronological, streak counter) | #265 | 084 | ✅ |
-| QR generator + CueRCode adapter slot | #275 | 085 | ✅ (CueRCode hash empty pending its public API) |
+| QR generator + CueRCode adapter slot (`Portal\Core\Qr` is the one place a picture is made; readable at every size 1-40 and level L/M/Q/H since #623, when the format marks were found written back to front and every picture the portal had drawn was unreadable) | #275, #623 | 085 | ✅ (CueRCode hash empty pending its public API) |
 | Invite-based onboarding (SHA-256 hashed tokens, public acceptance route) | #239 | 086 | ✅ |
 | One-click offboarding (7-step atomic revocation + 7-day rehire window). Switching an account off, offboarding it or erasing it ends its open sessions on the person's next request (12 October 2026) | #240 | 087 | ✅ |
 
