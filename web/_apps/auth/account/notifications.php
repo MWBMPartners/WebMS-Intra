@@ -45,6 +45,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\MailQueue;
 use Portal\Core\Site;
 use Portal\Core\WebPush;
 
@@ -343,9 +344,39 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
             //    until quiet hours end. No e-mail is: nothing in the portal
             //    holds e-mail for quiet hours, and the owner (Salem874)
             //    decided on 12 October 2026 that the mail queue will not
-            //    either. What quiet hours do stop is a text message that is
-            //    not urgent (Sms::send()), and nothing sends that message
-            //    afterwards. The words below say exactly that.
+            //    either. What quiet hours do hold is a text message that is
+            //    not urgent (Sms::send()).
+            //
+            //    WHAT BECOMES OF A HELD TEXT changed with #610. Until then
+            //    nothing sent it afterwards, and this sentence said "it is
+            //    not sent afterwards either". Now the scheduled job sends it
+            //    once the person's quiet hours have ended, unless its use-by
+            //    moment has passed (Sms::sendHeld()). ONLY THE JOB does
+            //    that, so the sentence asks whether the job is running
+            //    (MailQueue::jobIsRunning(), the one place that says) and
+            //    says what is true on THIS installation. REJECTED: saying
+            //    "sent afterwards" everywhere. With no job running that
+            //    would be the same untrue promise the old record made.
+            //
+            //    WHAT THE JOB'S ANSWER MEANS, AND WHAT IT DOES NOT.
+            //    jobIsRunning() says only that the job has run in the last
+            //    15 minutes. When it has not, the sentence used to say "On
+            //    this portal it is not sent afterwards either". The second
+            //    check showed that untrue for a job that runs once an hour,
+            //    a job that is late, and a job set up the next day: each
+            //    sent the held texts at its next call. So that half now says
+            //    what is known (the job has not run lately) and what a held
+            //    text needs (the job to run before the text is two days
+            //    old), and promises nothing either way.
+            //
+            //    WHAT IS NEVER HELD: a critical alert (the code that confirms
+            //    a number is sent as one) and an emergency notice. The owner
+            //    decided the second on 13 October 2026, "Never hold an
+            //    emergency text"; the list is Sms::NEVER_HELD. The example of
+            //    an out-of-date text used to be "a notice about that same
+            //    morning", which is exactly the kind that is no longer held.
+            //    tools/held-texts-selftest.php reads these lines in both
+            //    states of the job: change the two together.
             //
             //    NO EXCEPTION. #514 part 9 was first built to hold its own
             //    notice (imported events waiting for approval) during quiet
@@ -358,8 +389,20 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
             <p class="small text-muted">
                 E-mail from the portal is not held back during Sabbath quiet hours:
                 it is sent as usual. Quiet hours apply to text messages. While they
-                are active, a text message that is not urgent is not sent to you, and
-                it is not sent afterwards either.
+                are active, a text message that is not urgent is not sent to you.
+                <?php if (MailQueue::jobIsRunning($mysqli) === true): ?>
+                    It is kept, and sent once your quiet hours have ended, unless by
+                    then it is too old to be worth sending (nothing waits more than
+                    two days).
+                <?php else: ?>
+                    It is kept. Whether it is sent afterwards depends on the portal's
+                    scheduled job, which has not run in the last 15 minutes: the text
+                    is sent only if that job runs before the text is two days old. An
+                    administrator can check that the job is set up.
+                <?php endif; ?>
+                Three things are never held and are sent at once, whatever the hour:
+                a critical alert, an emergency notice, and the code that confirms
+                your number.
             </p>
             <div class="form-check">
                 <input class="form-check-input" type="radio" name="sabbathHonour" id="sabInherit" value="inherit" <?php echo $sabbathHonour === 'inherit' ? 'checked' : ''; ?>>

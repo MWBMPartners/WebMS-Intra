@@ -2,6 +2,59 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — a text message held for quiet hours is now sent when they end, or recorded as not sent (#610)**
+  - **What an administrator should know after upgrading**
+    1. **What was wrong.** A text that is not urgent is not sent to a person who is inside their Sabbath quiet hours. The
+       portal recorded such a text as "queued" and then never looked at it again: it was dropped, while its record said it
+       was waiting.
+    2. **What happens now.** The text is kept. The scheduled job you already run for the mail queue (`/cron/mail-queue`)
+       sends it once that person's quiet hours have ended. **Nothing new has to be added to the hosting company's
+       scheduler.**
+    3. **If you have not set that job up, a held text is still never sent.** Its record is corrected to "not sent" the next
+       time the portal handles any text, instead of reading "queued" for ever. **A job that runs less often than every 15
+       minutes still sends held texts**, as long as it runs before they are two days old. The portal can only tell whether
+       the job has run in the last 15 minutes. When it has not, the Notification preferences page and the broadcast page
+       say exactly that, and what a held text needs in order to be sent; they do not say it will not be sent.
+    4. **Three kinds of text are NEVER held: a critical alert, the code that confirms a number, and an emergency notice.**
+       Each is sent at once, whatever the hour. **The emergency notice is new** (the owner's decision of 13 October 2026):
+       until now it was stopped for a person in their quiet hours like any other text. If you send an emergency broadcast
+       on a Friday evening, everybody who asked for emergency texts gets it then.
+    5. **A text that would be too old is not sent late.** Each held text has a use-by moment. A rota change, a newsletter
+       digest and a prayer request keep for 48 hours, and nothing is ever sent more than 48 hours after it was written. A
+       text past its use-by moment is recorded as "Not sent: quiet hours", with the reason.
+    6. **Texts that were already recorded as "queued" before this upgrade are NOT sent.** They may be months old. The
+       database upgrade (migration 219) records each as not sent. You do not need to do anything, and no burst of old
+       texts goes out.
+    7. **The daily limit still holds**, and a held text is counted, and costed, on the day it is really sent. If the day's
+       limit is reached, a held text waits for the next day, as long as its use-by moment allows. At most 20 held texts go
+       in one run of the job (every five minutes), so a large broadcast held for quiet hours goes out over a while, not
+       all at once.
+    8. **What is true of the person when the text comes due decides.** It is not sent if their account has been switched
+       off or deleted, if they have changed their number or it is no longer confirmed, or if they have stopped that kind of
+       text. Where the portal serves several organisations it is also not sent if the person is not a member of that
+       organisation, or if the organisation has been switched off. The record says which. If they switch quiet hours off
+       for themselves, a held text goes at the job's next run.
+    9. **The broadcast page says "held", not "skipped".** After a broadcast it tells you how many texts were sent, how
+       many are held for quiet hours (and that the portal sends those itself, so the broadcast must not be sent again),
+       and how many were skipped. If the scheduled job has not run in the last 15 minutes it says so, and to look at
+       Recent messages before sending again.
+    10. **The list of recent texts shows the moment a text was handed over**, not the moment it was written, so a text
+        held on a Friday and sent on the Saturday reads as sent on the Saturday.
+    11. **After a backup is restored, texts that come back "held" are recorded as not sent.** The portal cannot tell
+        whether they went after the backup was taken, and a second text costs money. The restore says how many.
+    12. **The scheduled job's answer has seven more numbers**, each with a name that begins `texts` (`textsSent`,
+        `textsNotSent` and so on). The status word and the numbers that were there before are unchanged. A monitor that
+        reads the answer does not need changing. The answer can come a few seconds later than before when held texts are
+        due.
+    13. **Never twice comes first.** If the job is cut off while handing a text to the provider, nobody can tell whether
+        it went. That text is recorded as "not known whether it was sent" and is not sent again.
+  - **What changed in the code**: `web/_core/Sms.php` (holding, `sendHeld()`, the claim, who may still be sent a text),
+    `web/_apps/cron/mail-queue.php` (the second step), `web/_core/DbBackup.php` (a restore records held texts as not
+    sent), migration `219_held_texts.sql` and the install script (two columns and a key on `tblSmsMessage`), the sentences
+    on Account, Notification preferences, on Account, SMS, and on Admin, SMS (the broadcast page and the list of recent
+    texts), one sentence of the guide `/help/calendar-imports`, and the new test `tools/held-texts-selftest.php`.
+  - **Not done here (tabled by the owner in #610):** holding e-mail or push for quiet hours, and letting each person
+    choose which kinds of message wait.
 - **Changed — an event's coordinator can send "We're live", and only a signed-in person's device can ask for notices (#612)**
   - **What an administrator should know after upgrading**
     - **Coordinators can now send "We're live".** An event coordinator who is not an administrator sees the button on

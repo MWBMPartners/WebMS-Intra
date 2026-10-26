@@ -306,6 +306,8 @@ portal's own address with a few words after it: `/admin/settings/organisation` m
    Notes, and use your browser's "Find" to look for **what an administrator must do after upgrading**. That
    entry, about the mail queue, applies to a new installation too. The portal's Help has the same, under Admin
    Guide, "The mail queue: mail that cannot go at once".
+   **The `/cron/mail-queue` job also sends text messages that were held because the person was inside their
+   Sabbath quiet hours. Without it, a held text is never sent** — its record is corrected to "not sent" instead.
 7. **Add the people** who will use the portal: Admin, then User Management.
 
 The installer has locked itself. It cannot be run again by anybody who only has the portal's address.

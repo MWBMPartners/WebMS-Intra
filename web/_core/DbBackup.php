@@ -2960,6 +2960,13 @@ class DbBackup
                 $warnings[] = $heldMail;
             }
 
+            // 📱 The same for text messages that came back HELD for quiet
+            //    hours (#610): see holdRestoredTexts().
+            $heldTexts = $this->holdRestoredTexts($order, $dryRun);
+            if ($heldTexts !== '') {
+                $warnings[] = $heldTexts;
+            }
+
             if ($dryRun === true) {
                 // 🎭 THE REHEARSAL ENDS HERE, BY UNDOING EVERYTHING. A rehearsal
                 //    that failed to undo would be a restore nobody asked for,
@@ -3134,6 +3141,60 @@ class DbBackup
             . ($dryRun === true ? 'would be' : ($held === 1 ? 'has been' : 'have been')) . ' HELD, and will not be sent by '
             . ($held === 1 ? 'itself' : 'themselves') . ': the portal cannot tell whether ' . ($held === 1 ? 'it has' : 'they have')
             . ' been sent since, and sending again could mean a second copy. The health page counts held mail.';
+    }
+
+    /**
+     * 📱 At the end of a restore: text messages that came back HELD for
+     * quiet hours are recorded as NOT SENT (#610).
+     *
+     * WHY. Since #610 a text held because the person was in their Sabbath
+     * quiet hours is sent by the scheduled job once those have ended. A text
+     * that was held when the snapshot was taken is in the snapshot as
+     * "held". If it went afterwards, putting the snapshot back brings its
+     * row back as "held", and the job would send it a SECOND time, to
+     * somebody's phone and at the customer's cost. Nobody can tell from the
+     * restored rows which of them went. It is the same trap as waiting mail
+     * (holdRestoredMail() above). Mail is held for a person to release; no
+     * page releases a text, so each is recorded as not sent, with the
+     * reason. Sms::holdRestored() holds the statement, with every other
+     * statement that moves a held text.
+     *
+     * Called INSIDE the restore's transaction, after the tables are back,
+     * exactly as holdRestoredMail() is: a rehearsal ("check only") undoes it
+     * with everything else, and a restore that is stopped changes nothing.
+     * Only when the table of text messages was among the tables just put
+     * back: what is held NOW was otherwise not touched by the restore. If
+     * the statement fails it THROWS, and the restore is stopped and undone:
+     * a restore that left texts able to go twice would be worse than no
+     * restore.
+     *
+     * WHAT THIS CANNOT DO: say which of those texts really went, or send
+     * one that did not. A text that was held and had NOT gone is lost with
+     * the rest, and its record says why.
+     *
+     * @param list<string> $restored The tables just put back.
+     * @param bool         $dryRun   True in a rehearsal: only the wording changes.
+     *
+     * @return string A sentence for the person when any text was changed; '' otherwise.
+     */
+    private function holdRestoredTexts(array $restored, bool $dryRun): string
+    {
+        if (in_array('tblSmsMessage', $restored, true) === false) {
+            return '';
+        }
+        // This class is also loaded BY ITSELF (see holdRestoredMail()).
+        // Sms::holdRestored() needs nothing but the connection it is given.
+        if (class_exists(Sms::class) === false) {
+            require_once __DIR__ . DIRECTORY_SEPARATOR . 'Sms.php';
+        }
+        $moved = Sms::holdRestored($this->db);
+        if ($moved < 1) {
+            return '';
+        }
+
+        return $moved . ' text message' . ($moved === 1 ? '' : 's') . ' that ' . ($moved === 1 ? 'was' : 'were') . ' held for quiet hours when this snapshot was taken '
+            . ($dryRun === true ? 'would be' : ($moved === 1 ? 'has been' : 'have been')) . ' recorded as NOT SENT, and will not be sent: the portal cannot tell whether '
+            . ($moved === 1 ? 'it has' : 'they have') . ' been sent since, and sending again could mean a second text on somebody\'s phone.';
     }
 
     /**
@@ -3420,6 +3481,12 @@ class DbBackup
             //    stands.
             $heldMail = $this->holdRestoredMail([$table], false);
 
+            // 📱 This one CAN run: the table of text messages may be put
+            //    back by itself, because no other table points at it. A text
+            //    that came back held for quiet hours is recorded as not
+            //    sent (#610): see holdRestoredTexts().
+            $heldTexts = $this->holdRestoredTexts([$table], false);
+
             $atCommit = true;
             if ($this->db->commit() === false) {
                 throw new RuntimeException('The database would not make the restore permanent.');
@@ -3437,6 +3504,9 @@ class DbBackup
             if ($heldMail !== '') {
                 // In `notice`, which the page already shows: no new key for a page to forget.
                 $result['notice'] = trim(($result['notice'] ?? '') . ' ' . $heldMail);
+            }
+            if ($heldTexts !== '') {
+                $result['notice'] = trim(($result['notice'] ?? '') . ' ' . $heldTexts);
             }
 
             return $result;

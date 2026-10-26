@@ -298,8 +298,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p class="mb-0">
         <strong>Nothing is held for quiet hours.</strong> The e-mail and the push notification are sent like every
         other e-mail and push message of the portal, whether or not the person is in their Sabbath quiet hours.
-        (Quiet hours still stop a text message that is not urgent.) Your own device's settings decide whether a push
-        notification makes a sound.
+        (Quiet hours still hold back a text message that is not urgent while they last; the Notification preferences
+        page says what becomes of it afterwards.) Your own device's settings decide whether a push notification makes
+        a sound.
     </p>
 </section>
 

@@ -10,6 +10,20 @@
  * first, within the hourly limit) and clears up. It is meant to be called
  * every five minutes by the hosting company's scheduler.
  *
+ * A SECOND STEP: TEXT MESSAGES HELD FOR QUIET HOURS (#610). After the mail
+ * step, the same call does one run of Portal\Core\Sms::sendHeld(): a text
+ * that was held because the person was in their Sabbath quiet hours is sent
+ * once those have ended, or recorded as not sent when it is no longer worth
+ * sending. It is here, and not at an address of its own, so that nothing new
+ * has to be added to the hosting company's scheduler: an installation that
+ * already runs this job for its mail gets the texts with it.
+ * The two steps are kept apart. The texts step has its own time limit (eight
+ * seconds, and no more than 20 texts a run), its own lock, its own numbers in
+ * the answer (each name begins "texts") and its own line in the activity
+ * log. It runs whatever the mail step did (finished, found another run busy,
+ * or stopped with a fault), and a fault in it is caught here: it can never
+ * change the mail step's answer.
+ *
  * The addresses below are examples only; use the portal's own.
  *
  *   curl -fsS -H "Authorization: Bearer <TOKEN>" "https://<your-portal>/cron/mail-queue"
@@ -48,8 +62,21 @@
  *   {"status":"ok", "sent":…, "waiting":…, "held":…, "failed":…, …}
  *   {"status":"busy", …}       another run holds the lock; nothing was done
  *   {"status":"forbidden"}     HTTP 403: no token, a wrong one, or none set
- *   {"status":"error"}         HTTP 500: the run stopped; the reason is in
- *                              the server's error log
+ *   {"status":"error", …}      HTTP 500: the mail run stopped; the reason is
+ *                              in the server's error log
+ * The status word and the numbers beside it are the MAIL step's, as they
+ * always were. Every answer but "forbidden" also carries the texts step's
+ * own numbers, each under a name that begins "texts":
+ *   "textsRan":…, "textsSent":…, "textsFailed":…, "textsNotSent":…,
+ *   "textsLeft":…, "textsNotReady":…, "textsError":…
+ * (what each means is at Sms::sendHeld(), without the "texts").
+ * TWO THINGS WERE TRIED FIRST AND REJECTED. A second line of JSON for the
+ * texts step: a scheduler, a monitor and the self-tests all read the answer
+ * as ONE JSON document, and a second line breaks that. And one "texts"
+ * entry holding the seven numbers: everything beside the status word has
+ * always been a plain number, tools/mail-queue-selftest.php holds the
+ * answer to that ("NUMBERS ONLY"), and whatever reads the answer may rely
+ * on it too.
  *
  * WHAT IT CANNOT DO
  *   - It does not run while the portal is in maintenance mode: like every
@@ -83,6 +110,7 @@ use Portal\Core\App;
 use Portal\Core\Logger;
 use Portal\Core\MailQueue;
 use Portal\Core\MailRoutes;
+use Portal\Core\Sms;
 
 // 🙈 Never print a PHP warning into the answer: it is read by a machine, and
 //    a warning would both break the JSON and could carry text from a message.
@@ -131,16 +159,25 @@ if ($configured === '' || hash_equals($configured, $given) === false) {
 }
 
 // -----------------------------------------------------------------------------
-// 🏃 One run.
+// 🏃 One run: the mail step, then the held texts step.
 // -----------------------------------------------------------------------------
 // A scheduler that hangs up early (its own time limit) must not end the run
 // in the middle of handing a message over. The time limit is raised where the
 // host allows it; where it does not, the run's own 20-second rule still holds.
+// (120 seconds covers both steps: the mail step starts nothing new after 20
+// seconds and the texts step nothing after 8, and one hand-over is given up on
+// after about 50 seconds for mail and 15 for a text.)
 ignore_user_abort(true);
 if (function_exists('set_time_limit') === true) {
     @set_time_limit(120);
 }
 
+// ✉️ THE MAIL STEP. Its outcome is kept, not printed yet: the texts step runs
+//    whatever happened here. (The page used to print and leave as soon as the
+//    mail run had stopped with a fault or found another run busy. Left like
+//    that, the texts would have been skipped on every such call.)
+$mailStopped = false;
+$numbers     = [];
 try {
     // 🕰️ The scheduler really called, with the right token: say so, BEFORE
     //    the run, so that it is on record even when this run finds another
@@ -152,15 +189,50 @@ try {
     // a message is encrypted before it ever reaches a statement, so it
     // cannot be in one. Kept short all the same.
     error_log('Mail queue job: the run stopped: ' . get_class($problem) . ': ' . mb_substr($problem->getMessage(), 0, 300));
+    $mailStopped = true;
+}
+
+// 📱 THE HELD TEXTS STEP (#610). Sms::sendHeld() catches its own faults and
+//    answers with numbers. The try here is for what it cannot catch (its
+//    class file missing from a half-finished upload, for one), so that the
+//    mail step's answer below is printed whatever happens. Until it has
+//    answered, the numbers say "stopped by a fault".
+$texts = ['ran' => 0, 'sent' => 0, 'failed' => 0, 'notSent' => 0, 'left' => 0, 'notReady' => 0, 'error' => 1];
+try {
+    $texts = Sms::sendHeld(App::db(), 20, 8.0);
+    // 📝 Its own activity line, and only when something happened. Numbers
+    //    only: never a number, a name or any part of a text.
+    if ($texts['sent'] + $texts['failed'] + $texts['notSent'] > 0) {
+        Logger::activity(
+            'HeldTextsRun',
+            'Held texts: ' . $texts['sent'] . ' sent after quiet hours, ' . $texts['failed'] . ' refused by the provider, '
+            . $texts['notSent'] . ' recorded as not sent, ' . $texts['left'] . ' still held'
+        );
+    }
+} catch (\Throwable $problem) {
+    // The class name only: see Sms::sendHeld() on why a fault's own words
+    // are not written down.
+    error_log('Mail queue job: the held texts step stopped: ' . get_class($problem));
+}
+
+// 🔢 The texts step's numbers, each under its own name ("sent" becomes
+//    "textsSent"), so that they sit beside the mail step's numbers without
+//    being taken for them: see WHAT IT PRINTS in the file header.
+$textNumbers = [];
+foreach ($texts as $what => $howMany) {
+    $textNumbers['texts' . ucfirst((string) $what)] = (int) $howMany;
+}
+
+if ($mailStopped === true) {
     http_response_code(500);
-    echo json_encode(['status' => 'error']);
+    echo json_encode(['status' => 'error'] + $textNumbers);
     exit();
 }
 
 if ($numbers['ran'] === 0) {
     // Not an error: the other run is doing the work. HTTP 200, so that a
     // scheduler which reports every failure does not report this.
-    echo json_encode(['status' => 'busy'] + $numbers);
+    echo json_encode(['status' => 'busy'] + $numbers + $textNumbers);
     exit();
 }
 
@@ -173,5 +245,5 @@ if ($numbers['sent'] + $numbers['held'] + $numbers['failed'] + $numbers['expired
         . $numbers['expired'] . ' expired, ' . $numbers['removed'] . ' old rows removed'
     );
 }
-echo json_encode(['status' => 'ok'] + $numbers);
+echo json_encode(['status' => 'ok'] + $numbers + $textNumbers);
 exit();

@@ -2,26 +2,121 @@
 // Path: _core/Sms.php
 /**
  * -----------------------------------------------------------------------------
- * SMS dispatch + provider abstraction 📱
+ * Text messages (SMS): sending, holding for quiet hours, and the provider 📱
  * -----------------------------------------------------------------------------
- * Send time-critical SMS via a pluggable provider (Twilio, MessageBird, AWS
- * SNS). Enforces per-user verification, per-category opt-in, per-site daily
- * cap, and Sabbath quiet-hours deferral for non-critical categories.
+ * Sends a text through the provider the installation has chosen (Twilio,
+ * MessageBird or AWS SNS), and records every text in tblSmsMessage, sent or
+ * not, so the cost and the history can be read afterwards.
  *
  *   sms.provider = twilio | messagebird | aws
  *
- * Critical-alerting integration: Logger::criticalAlert() / wherever the
- * critical pipeline lives can call Sms::sendCategory() to fan out to all
- * verified subscribers of a category, capped + cost-tracked.
+ * Text messages cost the customer money and land on people's phones. So:
+ *   - nothing is sent while texts are switched off (`sms.enabled`);
+ *   - nothing is sent once the day's limit is reached (`sms.dailyCap`);
+ *   - a text that is not urgent is NOT sent to a person who is inside
+ *     their Sabbath quiet hours. It is HELD, and sent once those quiet
+ *     hours have ended, or recorded as not sent when it is no longer worth
+ *     sending. See "A TEXT HELD FOR QUIET HOURS" below.
+ *   - TWO KINDS ARE NEVER HELD (NEVER_HELD): a critical alert, which
+ *     includes the code that confirms a number, and an emergency notice.
+ *     The owner (Salem874) decided the second on 13 October 2026: "Never
+ *     hold an emergency text." It was first built as a held kind with two
+ *     hours to live; a notice about this morning that arrives tomorrow
+ *     evening, or not at all, is not what an emergency notice is for.
+ *
+ * A TEXT HELD FOR QUIET HOURS (#610)
+ *   Until 13 October 2026 a held text was recorded as "queued" with the
+ *   reason "quiet-hours", and NOTHING EVER LOOKED AT THE ROW AGAIN: the text
+ *   was dropped while its record said it was waiting. Now:
+ *
+ *   held      send() records it as status 'queued' with HELD_REASON in
+ *             `errorMsg`, an empty `sentAt` (it has not been sent) and a
+ *             use-by moment in `heldUseBy`.
+ *   sent      sendHeld(), which the scheduled job calls
+ *             (`_apps/cron/mail-queue.php`), asks Sabbath, the same code that
+ *             decided to hold it, whether the person's quiet hours have
+ *             ended. When they have, it takes the row in ONE statement,
+ *             hands the text to the provider, and records what the provider
+ *             said. A row is taken once and never taken again.
+ *   not sent  a held text whose use-by moment has passed is recorded as
+ *             'failed', with the reason in plain words that begin "Not
+ *             sent: quiet hours". So is a text held before this was built
+ *             (it has no use-by moment), and one whose person should not
+ *             get it when it comes due: their account has been switched
+ *             off, they have changed their number, or they have stopped
+ *             texts of that kind. WHERE THERE ARE SEVERAL ORGANISATIONS
+ *             two more things are asked: that the person is a member of
+ *             the organisation, and that it has not been switched off.
+ *             With one organisation neither is asked (see
+ *             whyNotThisPerson() for why).
+ *
+ *   NEVER TWICE comes before "always delivered". If a run is ended while it
+ *   is handing a text to the provider, nobody can tell whether the text
+ *   went. That text is recorded as "not known whether it was sent" and is
+ *   NOT sent again: a missed text costs less than a second one.
+ *
+ * TIMES
+ *   `heldUseBy` and `claimedAt` are MOMENTS IN UTC, written by the
+ *   database's own clock (`UTC_TIMESTAMP()`) in the statement that stores
+ *   them, and every length is a number of exact seconds added by the
+ *   database. "Is this person in their quiet hours?" is asked of Sabbath for
+ *   a moment read from that same clock (nowOnDatabaseClock()), both when a
+ *   text is held and when it is sent. Sabbath works its window out on a
+ *   clock in the zone the Sabbath settings name, so the answer stays right
+ *   on the two nights a year the clocks change.
+ *   `createdAt` and `sentAt` are older than all this and are written by the
+ *   database server's OWN clock (not UTC), as they always were: every row
+ *   from before migration 219 holds them that way. The daily limit counts a
+ *   day on that clock.
+ *
+ * WHAT THIS CANNOT DO
+ *   - Send a held text while no scheduled job is running. Only the job
+ *     (`/cron/mail-queue`) sends held texts. With no job a held text waits
+ *     until its use-by moment and is then recorded as not sent, the next
+ *     time the portal handles any text. A text that a run had taken, when
+ *     that run died and no run followed, is recorded then as well, as "not
+ *     known whether it was sent". (This note used to say only the first
+ *     half, and until the fix round of 13 October 2026 only the job
+ *     recorded the second: with no job such a text read "queued" for
+ *     ever.) Until the portal handles another text, or the job runs, both
+ *     go on reading "queued".
+ *   - Ask, of a text sent AT ONCE, whether the person's account or
+ *     organisation has been switched off. Who a text goes to is chosen by
+ *     its caller, in three places: sendCategory() here, the prayer chain,
+ *     and the account page for its code. ONE of them asks: when the prayer
+ *     chain chooses a partner by itself it takes only an account that is
+ *     switched on, with a live membership (PrayerChain::eligiblePartners()).
+ *     A partner chosen by hand, a broadcast, and the code are not asked.
+ *     (This note used to say none of the three asks.) Only a HELD text is
+ *     asked again, by this class, when it comes due (whyNotThisPerson()).
+ *   - Know whether a text was DELIVERED, only whether the provider took it.
+ *   - Read a text. Whether a late text is still true is judged from its
+ *     KIND (see HELD_USE_WITHIN), or from a use-by moment its caller gives.
+ *     A text typed by an administrator and sent as a kind that "keeps" is
+ *     sent late even if its own words were about that morning.
+ *   - Give each organisation its own quiet hours. Sabbath reads one window
+ *     from the settings of the request in hand, and those settings are
+ *     saved for the whole installation.
+ *   - Stop the day's limit being passed by one text when two things send
+ *     at the same moment: two ordinary requests, or a run of the job and an
+ *     ordinary request. Only two RUNS OF THE JOB cannot do it, because they
+ *     share a lock. (This note used to name the two requests only.)
  *
  * @package   Portal\Core
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/272
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/610
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
 namespace Portal\Core;
+
+use mysqli;
 
 class Sms
 {
@@ -36,43 +131,206 @@ class Sms
         'prayer_assignment',
     ];
 
+    // =========================================================================
+    // 🕯️ A text held for quiet hours: its mark, its use-by moment, its words
+    // =========================================================================
+
     /**
-     * Send to one recipient. Returns true on provider accept; records a
-     * row in tblSmsMessage either way for cost + audit.
+     * @var string The mark of a HELD text: status 'queued' with exactly this
+     *      in `errorMsg`. Texts held before migration 219 carry it too,
+     *      which is how they are found and recorded as not sent.
      */
-    public static function send(int $siteId, string $number, string $body, string $category = 'general', ?int $userId = null): bool
+    public const HELD_REASON = 'quiet-hours';
+
+    /**
+     * 🚨 THE KINDS OF TEXT THAT QUIET HOURS NEVER HOLD. Each is sent at
+     * once, whatever the hour, to a person who has asked for that kind.
+     *
+     *   critical_alerts  as it always was. The code that confirms a number
+     *                    is sent as this kind, and runs out in ten minutes.
+     *   emergency_comms  the owner's decision of 13 October 2026 (Salem874):
+     *                    "Never hold an emergency text." See the file header.
+     *
+     * This list is the ONE place that decides it: send() asks nothing else.
+     * Adding a kind here means people get it during their quiet hours, so
+     * it is a decision for the owner, not a tidy-up.
+     *
+     * @var list<string>
+     */
+    public const NEVER_HELD = ['critical_alerts', 'emergency_comms'];
+
+    /**
+     * ⏳ HOW LONG A HELD TEXT STAYS WORTH SENDING, by its kind, in exact
+     * seconds from the moment it was held. A caller that knows better gives
+     * its own use-by moment to send().
+     *
+     * Quiet hours last about a day, so a held text arrives up to a day late.
+     * Every kind listed here KEEPS that long (a prayer request to pray for,
+     * a newsletter digest, a change to a rota on a named day). It is sent
+     * when the quiet hours end, and never more than 48 hours after it was
+     * written: the same "nothing older than 48 hours is sent" the owner
+     * (Salem874) chose for e-mail on 12 October 2026.
+     *
+     * The two kinds in NEVER_HELD are not here because they are never held.
+     * ('emergency_comms' was here, with two hours, until the owner decided
+     * it is never held.)
+     *
+     * REJECTED: 48 hours for every kind, listed or not. A kind nobody has
+     * thought about may say something about this morning, and would then
+     * arrive tomorrow evening: see HELD_USE_WITHIN_UNKNOWN.
+     *
+     * @var array<string, int>
+     */
+    private const HELD_USE_WITHIN = [
+        'rota_changes'      => 172800,
+        'newsletter_digest' => 172800,
+        'prayer_assignment' => 172800,
+    ];
+
+    /**
+     * @var int For a kind that is not listed above ('general', or one added
+     *      later and not yet thought about): the portal knows nothing about
+     *      what such a text says, so it is treated as being about NOW. It
+     *      is sent only if the person's quiet hours end within two hours of
+     *      its being written.
+     */
+    private const HELD_USE_WITHIN_UNKNOWN = 7200;
+
+    /**
+     * @var int The longest any held text may wait, whatever its caller
+     *      asked for: 48 hours, in exact seconds. It is what stops a job
+     *      that was away for a week from sending a week of texts when it
+     *      comes back.
+     */
+    public const HELD_NEVER_AFTER = 172800;
+
+    /**
+     * @var int How old a claim must be before the run that made it is taken
+     *      for dead: ten minutes. A provider is given up on after 15
+     *      seconds, so a live run never leaves a claimed row this long.
+     */
+    public const HELD_CLAIM_DEAD_SECONDS = 600;
+
+    // 🗣️ What is written in `errorMsg` when a held text moves on. Plain
+    //    words, because this column is the only place that says WHY. Each
+    //    fits the column (255 characters): the connection is strict, so one
+    //    that did not fit would be an error and not a cut-off sentence.
+    public const SENT_AFTER_HOLD     = 'Held for quiet hours, then sent when they had ended.';
+    public const NOT_SENT_USE_BY     = 'Not sent: quiet hours. It was held, and its use-by moment passed before it could be sent.';
+    public const NOT_SENT_OLD        = 'Not sent: quiet hours. It was held before the portal could send a held text afterwards, so it has no use-by moment and is never sent.';
+    public const NOT_SENT_NOT_KEPT   = 'Not sent: quiet hours. It could not be kept for later: its use-by moment could not be read, or had already passed.';
+    public const NOT_SENT_NO_ROOM    = 'Not sent: quiet hours. It could not be kept for later: the database has not been upgraded to hold a use-by moment.';
+    public const NOT_SENT_PERSON     = 'Not sent: quiet hours. When they ended, the person no longer had an account.';
+    public const NOT_SENT_ACCOUNT_OFF = 'Not sent: quiet hours. When they ended, the person\'s account had been switched off.';
+    // ("was not a member", not "was no longer a member": a person with a
+    // confirmed number and no membership may never have been one.)
+    public const NOT_SENT_NOT_MEMBER = 'Not sent: quiet hours. When they ended, the person was not a member of this organisation.';
+    public const NOT_SENT_ORG_OFF    = 'Not sent: quiet hours. When they ended, the organisation had been switched off.';
+    public const NOT_SENT_NUMBER     = 'Not sent: quiet hours. When they ended, this number was not the person\'s confirmed number for texts.';
+    public const NOT_SENT_OPTED_OUT  = 'Not sent: quiet hours. When they ended, the person no longer wanted texts of this kind.';
+    public const NOT_SENT_RESTORED   = 'Not sent: quiet hours. It came back with a restored backup: it was waiting when the backup was taken and may already have been sent since, so it is not sent again.';
+    public const UNKNOWN_INTERRUPTED = 'Not known whether it was sent: a run of the scheduled job was ended while handing this held text to the provider. It is not sent again.';
+
+    /** @var string What became of the last text given to send(): 'off', 'sent', 'failed', 'held' or 'not-sent'. */
+    private static string $lastOutcome = '';
+
+    /** @var bool Whether this request has already corrected the record of held texts that can no longer go (see send()). */
+    private static bool $settledInRequest = false;
+
+    /**
+     * Send a text to one number, now, or hold it for the person's quiet hours.
+     *
+     * Every text that gets as far as the day's limit is recorded in
+     * tblSmsMessage, whatever becomes of it.
+     *
+     * THE ORDER IS DELIBERATE: switched off, then the day's limit, then quiet
+     * hours. The limit comes first, as it always did: once it is reached
+     * nothing more is taken that day, held or not.
+     *
+     * @param string|null $useBy For a text that ends up HELD: the moment
+     *        after which it must not be sent, as a moment in UTC,
+     *        'Y-m-d H:i:s' (MailQueue::useBy() makes one from a time on a
+     *        clock and a zone). Null uses the length for its kind
+     *        (HELD_USE_WITHIN). It is never later than 48 hours from now.
+     *        A value that cannot be read, or has already passed, means the
+     *        text is NOT kept: it is recorded as not sent. It makes no
+     *        difference to a text that is sent at once.
+     *
+     * @return bool True only when the provider took the text NOW. False for
+     *         a held text too: lastOutcome() tells them apart.
+     */
+    public static function send(int $siteId, string $number, string $body, string $category = 'general', ?int $userId = null, ?string $useBy = null): bool
     {
         $settings = App::settings()['sms'] ?? [];
         if ((string) ($settings['enabled'] ?? '0') !== '1') {
+            self::$lastOutcome = 'off';
+
             return false;
+        }
+
+        // 🧹 Once a request: correct the record of any held text that can no
+        //    longer go, a text that a dead run had taken included. The
+        //    scheduled job does this at every run. It is done here as well
+        //    so that, on an installation with NO job, a text does not go on
+        //    reading "queued" for ever, which was the fault.
+        if (self::$settledInRequest === false) {
+            self::$settledInRequest = true;
+            self::settleHeld(App::db(), 200, false);
         }
 
         // Daily cap — block before the wire to avoid runaway cost.
         if (self::sentTodayCount($siteId) >= (int) ($settings['dailyCap'] ?? 100)) {
             self::record($siteId, $userId, $number, $body, $category, 'failed', null, null, 'daily-cap');
+            self::$lastOutcome = 'failed';
+
             return false;
         }
 
-        // Quiet hours — defer non-critical for users in their Sabbath window.
-        if ($category !== 'critical_alerts' && $userId !== null && Sabbath::isQuietNow($userId) === true) {
-            self::record($siteId, $userId, $number, $body, $category, 'queued', null, null, 'quiet-hours');
+        // 🕯️ Quiet hours: a text is held for a person who is inside theirs,
+        //    unless it is of a kind that is never held (NEVER_HELD: a
+        //    critical alert, an emergency notice). A person who has switched
+        //    quiet hours off for themselves is never "inside" (Sabbath
+        //    decides). The moment asked about comes from the database's
+        //    clock: see nowOnDatabaseClock().
+        if (in_array($category, self::NEVER_HELD, true) === false && $userId !== null && Sabbath::isQuietNow($userId, self::nowOnDatabaseClock(App::db())) === true) {
+            self::$lastOutcome = self::hold($siteId, $userId, $number, $body, $category, $useBy) === true ? 'held' : 'not-sent';
+
             return false;
         }
 
         $provider = (string) ($settings['provider'] ?? 'twilio');
-        $result = self::providerSend($provider, $settings, $number, $body);
+        $result = static::providerSend($provider, $settings, $number, $body);
 
         $status = $result['ok'] === true ? 'sent' : 'failed';
         self::record($siteId, $userId, $number, $body, $category, $status, $result['ref'], $result['costPence'], $result['error']);
+        self::$lastOutcome = $status;
 
         return $result['ok'];
     }
 
     /**
-     * Send to every opted-in, verified subscriber for a category on this site.
-     * Returns ['sent' => N, 'skipped' => N].
+     * What became of the last text given to send(): 'off' (texts are
+     * switched off, nothing recorded), 'sent', 'failed' (the day's limit, or
+     * the provider refused), 'held' (waiting for the person's quiet hours to
+     * end) or 'not-sent' (quiet hours, and it could not be kept for later).
+     * '' before any text has been sent in this request.
      */
-    public static function sendCategory(int $siteId, string $category, string $body): array
+    public static function lastOutcome(): string
+    {
+        return self::$lastOutcome;
+    }
+
+    /**
+     * Send to every opted-in, verified subscriber for a category on this site.
+     *
+     * @param string|null $useBy Passed to send() for each text: see there.
+     *
+     * @return array{sent: int, skipped: int, held: int} `skipped` is every
+     *         text that did not go NOW, as it always was, so it INCLUDES the
+     *         held ones. `held` says how many of those are waiting for the
+     *         person's quiet hours to end.
+     */
+    public static function sendCategory(int $siteId, string $category, string $body, ?string $useBy = null): array
     {
         $db = App::db();
         $stmt = $db->prepare(
@@ -81,32 +339,97 @@ class Sms
         );
         $sent = 0;
         $skipped = 0;
+        $held = 0;
         if ($stmt !== false) {
             $stmt->bind_param('is', $siteId, $category);
             $stmt->execute();
             $rs = $stmt->get_result();
             while ($r = $rs->fetch_assoc()) {
-                $ok = self::send($siteId, (string) $r['phoneNumber'], $body, $category, (int) $r['userID']);
+                $ok = self::send($siteId, (string) $r['phoneNumber'], $body, $category, (int) $r['userID'], $useBy);
                 if ($ok === true) {
                     $sent++;
                 } else {
                     $skipped++;
+                    if (self::$lastOutcome === 'held') {
+                        $held++;
+                    }
                 }
             }
             $stmt->close();
         }
-        return ['sent' => $sent, 'skipped' => $skipped];
+        return ['sent' => $sent, 'skipped' => $skipped, 'held' => $held];
     }
 
     /**
-     * Per-day count of attempted sends for a site (used by the daily cap).
+     * 🗣️ What the broadcast page tells the administrator when a broadcast
+     * has been handed to sendCategory(): how many texts went, how many are
+     * held, and how many were skipped.
+     *
+     * It is here, and not in the page, so that it can be tested
+     * (tools/held-texts-selftest.php), because a wrong sentence here costs
+     * money: the page used to say "N sent, M skipped" with the held texts
+     * counted as skipped. That was true while a held text was never sent.
+     * Since #610 it is sent when the person's quiet hours end, and an
+     * administrator told "skipped" may well send the broadcast again, so
+     * that people get it twice.
+     *
+     * Only the scheduled job sends a held text, and ALL THIS CAN KNOW is
+     * whether that job has run in the last 15 minutes
+     * (MailQueue::jobIsRunning() means that and no more).
+     *   - It has: the sentence says the portal sends the held texts itself,
+     *     so the broadcast must not be sent again.
+     *   - It has not: the sentence says so, says what a held text needs in
+     *     order to be sent, and says where to look before sending again. It
+     *     does NOT say the texts will not be sent. A job that runs once an
+     *     hour, a job that is late, and a job set up tomorrow all send them,
+     *     as long as they run before the texts are two days old.
+     * REJECTED, and built first: "(and NOT going to be sent afterwards,
+     * because the portal's scheduled job is not running)". The second
+     * check ran exactly those three cases, and each time the job's next
+     * call handed every held text over. An administrator told "not going
+     * to be sent" may send the broadcast again, and people get two texts:
+     * the very thing this sentence exists to stop.
+     *
+     * @param array{sent?: int, skipped?: int, held?: int} $result       What sendCategory() answered.
+     * @param bool                                         $jobIsRunning MailQueue::jobIsRunning(): whether the job has run in the last 15 minutes.
+     */
+    public static function broadcastSummary(array $result, bool $jobIsRunning): string
+    {
+        $sent    = (int) ($result['sent'] ?? 0);
+        $held    = (int) ($result['held'] ?? 0);
+        // `skipped` has always been "did not go now", so it includes the held.
+        $skipped = max(0, (int) ($result['skipped'] ?? 0) - $held);
+        $words   = 'Broadcast complete: ' . $sent . ' sent';
+        if ($held > 0) {
+            $words .= ', ' . $held . ' held for quiet hours';
+            $words .= $jobIsRunning === true
+                ? ' (the portal sends ' . ($held === 1 ? 'it' : 'them') . ' itself when the person\'s quiet hours end, so do not send the broadcast again)'
+                : ' (the portal\'s scheduled job, which sends ' . ($held === 1 ? 'it' : 'them') . ', has not run in the last 15 minutes:'
+                    . ' a held text is sent only if that job runs before the text is two days old,'
+                    . ' so look at Recent messages before sending the broadcast again)';
+        }
+
+        return $words . ', ' . $skipped . ' skipped.';
+    }
+
+    /**
+     * How many texts this organisation has SENT today (used by the daily cap).
+     *
+     * Counted by the moment a text was sent (`sentAt`), not the moment it
+     * was written (`createdAt`). For a text sent at once the two are the
+     * same. For a text held yesterday and sent today they are not, and it
+     * used to be counted against yesterday: a morning of held texts would
+     * then have gone out on top of today's full limit.
+     *
+     * "Today" is a day on the database server's own clock, as it always
+     * was, because `sentAt` is written by that clock.
      */
     public static function sentTodayCount(int $siteId): int
     {
         $db = App::db();
         $stmt = $db->prepare(
             'SELECT COUNT(*) FROM tblSmsMessage WHERE siteID = ? '
-            . 'AND status IN ("sent","delivered") AND DATE(createdAt) = CURDATE()'
+            . "AND status IN ('sent','delivered') AND DATE(COALESCE(sentAt, createdAt)) = CURDATE()"
         );
         if ($stmt === false) {
             return 0;
@@ -120,14 +443,18 @@ class Sms
     }
 
     /**
-     * Per-day cost rollup, in pence.
+     * What this organisation's texts have cost so far this month, in pence.
+     *
+     * By the moment each text was sent, for the reason given at
+     * sentTodayCount(): a text held on the last day of a month and sent on
+     * the first costs money in the month it went.
      */
     public static function monthSpendPence(int $siteId): int
     {
         $db = App::db();
         $stmt = $db->prepare(
             'SELECT COALESCE(SUM(costPence), 0) FROM tblSmsMessage '
-            . 'WHERE siteID = ? AND createdAt >= DATE_FORMAT(NOW(), "%Y-%m-01")'
+            . "WHERE siteID = ? AND COALESCE(sentAt, createdAt) >= DATE_FORMAT(NOW(), '%Y-%m-01')"
         );
         if ($stmt === false) {
             return 0;
@@ -205,13 +532,22 @@ class Sms
         return $cleaned;
     }
 
-    private static function record(int $siteId, ?int $userId, string $number, string $body, string $category, string $status, ?string $providerRef, ?int $costPence, ?string $error): void
+    /**
+     * Write one text's row.
+     *
+     * @param bool $stampSentAt False for a text that was stopped by quiet
+     *        hours: its "sent at" is left empty, because it was not sent.
+     *        (Every other row has always been given the moment it was
+     *        recorded, the day's-limit refusal included; that is left as it
+     *        was.)
+     */
+    private static function record(int $siteId, ?int $userId, string $number, string $body, string $category, string $status, ?string $providerRef, ?int $costPence, ?string $error, bool $stampSentAt = true): void
     {
         $db = App::db();
         $stmt = $db->prepare(
             'INSERT INTO tblSmsMessage (siteID, recipientUserID, recipientNumber, body, category, status, '
             . ' provider, providerRef, costPence, errorMsg, sentAt) '
-            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ' . ($stampSentAt === true ? 'NOW()' : 'NULL') . ')'
         );
         if ($stmt === false) {
             return;
@@ -225,12 +561,635 @@ class Sms
         $stmt->close();
     }
 
+    // =========================================================================
+    // 🕯️ Held for quiet hours: holding, and sending afterwards (#610)
+    // =========================================================================
+
+    /**
+     * 🕰️ This moment, as seconds since 1970, from the DATABASE's clock.
+     *
+     * "Is this person in their quiet hours?" is asked for this moment, both
+     * when a text is held and when it is sent, so one clock decides
+     * everything about a held text: the use-by moment is the database's
+     * too. UNIX_TIMESTAMP() with nothing in the brackets is an exact moment
+     * and does not depend on the connection's time zone. REJECTED:
+     * UNIX_TIMESTAMP(NOW()), which reads a time on a clock back into a
+     * moment and is an hour out, for an hour, on the night the clocks go
+     * back.
+     *
+     * If the database cannot be asked, PHP's clock is used: a text is never
+     * stopped, or let through, because a clock could not be read.
+     */
+    private static function nowOnDatabaseClock(mysqli $db): int
+    {
+        try {
+            $result = $db->query('SELECT UNIX_TIMESTAMP() AS nowEpoch');
+            $now    = (int) ($result->fetch_assoc()['nowEpoch'] ?? 0);
+            $result->free();
+            if ($now > 0) {
+                return $now;
+            }
+        } catch (\Throwable $ignored) {
+            // See above.
+        }
+
+        return time();
+    }
+
+    /**
+     * 🕯️ HOLD a text for a person who is inside their quiet hours.
+     *
+     * The use-by moment is worked out by the database, as "now plus a number
+     * of exact seconds", in the statement that stores it. REJECTED: working
+     * it out in PHP and storing the text. On the night the clocks change
+     * that is an hour out wherever PHP is set to a zone that changes.
+     *
+     * @return bool True when it is held. False when it could not be kept
+     *         for later; it is then recorded as not sent, with the reason.
+     */
+    private static function hold(int $siteId, int $userId, string $number, string $body, string $category, ?string $useBy): bool
+    {
+        $db     = App::db();
+        $within = self::HELD_USE_WITHIN[$category] ?? self::HELD_USE_WITHIN_UNKNOWN;
+
+        if ($useBy !== null) {
+            // The caller's own use-by moment. How long is left until it, by
+            // the database's clock? Text that is not a moment (which is what
+            // MailQueue::useBy() answers when it cannot work one out) leaves
+            // nothing to count, and a date that does not exist counts as
+            // empty: either way the text is not kept. Kept without its
+            // use-by moment, a "starts in an hour" text could go out a day
+            // after the start.
+            $left = null;
+            if (preg_match('/\A\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\z/', $useBy) === 1) {
+                $stmt = $db->prepare('SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), ?) AS secondsLeft');
+                $stmt->bind_param('s', $useBy);
+                $stmt->execute();
+                $left = $stmt->get_result()->fetch_assoc()['secondsLeft'] ?? null;
+                $stmt->close();
+            }
+            if ($left === null || (int) $left <= 0) {
+                self::record($siteId, $userId, $number, $body, $category, 'failed', null, null, self::NOT_SENT_NOT_KEPT, false);
+
+                return false;
+            }
+            $within = (int) $left;
+        }
+        $within = min($within, self::HELD_NEVER_AFTER);
+
+        try {
+            $stmt = $db->prepare(
+                'INSERT INTO tblSmsMessage (siteID, recipientUserID, recipientNumber, body, category, status, provider, errorMsg, sentAt, heldUseBy) '
+                . "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, NULL, UTC_TIMESTAMP() + INTERVAL ? SECOND)"
+            );
+            $provider = (string) (App::settings()['sms']['provider'] ?? 'twilio');
+            $reason   = self::HELD_REASON;
+            $stmt->bind_param('iisssssi', $siteId, $userId, $number, $body, $category, $provider, $reason, $within);
+            $stmt->execute();
+            $stmt->close();
+        } catch (\mysqli_sql_exception $problem) {
+            // 1054 is "unknown column": the new files are in place and the
+            // database has not been upgraded yet (migration 219), so there
+            // is nowhere to keep a use-by moment. The text is NOT held
+            // without one. It is recorded as not sent, in the columns the
+            // table has always had. Any other fault is passed on, as a
+            // failed record always was.
+            if ((int) $problem->getCode() !== 1054) {
+                throw $problem;
+            }
+            self::record($siteId, $userId, $number, $body, $category, 'failed', null, null, self::NOT_SENT_NO_ROOM, false);
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * 🔀 CORRECT THE RECORD of every held text that can no longer be sent.
+     *
+     *   taken more than ten minutes
+     *   ago and never finished       -> "not known whether it was sent"
+     *                                   (UNKNOWN_INTERRUPTED).
+     *   held, with no use-by moment  -> not sent (NOT_SENT_OLD). It was held
+     *                                   before migration 219, or came back
+     *                                   with a backup older than that.
+     *   held, past its use-by moment -> not sent (NOT_SENT_USE_BY).
+     *
+     * NOTHING HERE SENDS. Each row is found by an ordinary read and then
+     * changed by its own number, in a statement that asks the same question
+     * again, so a row that has moved on in between is left alone.
+     *
+     * ALL THREE, FOR EVERY CALLER. Until the fix round of 13 October 2026
+     * only the scheduled job settled a text that a dead run had taken. On an
+     * installation whose job never ran again such a text read "queued" for
+     * ever: the same untrue record this whole change exists to end. Ten
+     * minutes is far longer than a live run ever leaves a text taken, so
+     * settling it from an ordinary request cannot cut across a run.
+     *
+     * REJECTED: one UPDATE for each kind ("... WHERE heldUseBy <= now"). It
+     * is shorter, and it locks the stretch of the index it reads as well as
+     * the rows. send() can be called inside its caller's own transaction;
+     * two such requests at the same moment, each going on to store a held
+     * text of its own, could then each wait for the other, and the database
+     * ends one of them, undoing whatever that caller was in the middle of.
+     * Changing rows by number takes a lock on those rows only, and nearly
+     * always there are none.
+     *
+     * @param int  $most        The most rows of each kind to change.
+     * @param bool $throwFaults True from the job's run, which reports a
+     *                          fault itself. False from send(), where a
+     *                          fault is swallowed: correcting an old record
+     *                          must never stop a text that is being sent
+     *                          now.
+     *
+     * @return int How many rows were changed.
+     */
+    private static function settleHeld(mysqli $db, int $most, bool $throwFaults): int
+    {
+        // Each kind: which rows (fixed text written here, never a value from
+        // outside), the words to record, and whether `sentAt` is emptied.
+        // It is emptied on a row from before migration 219: the old code
+        // stamped it when it HELD the text, which never went.
+        $kinds = [
+            [
+                'claimedAt IS NOT NULL AND claimedAt <= UTC_TIMESTAMP() - INTERVAL ' . self::HELD_CLAIM_DEAD_SECONDS . ' SECOND',
+                self::UNKNOWN_INTERRUPTED,
+                false,
+            ],
+            ['claimedAt IS NULL AND heldUseBy IS NULL', self::NOT_SENT_OLD, true],
+            ['claimedAt IS NULL AND heldUseBy <= UTC_TIMESTAMP()', self::NOT_SENT_USE_BY, false],
+        ];
+
+        $held    = self::HELD_REASON;
+        $changed = 0;
+        try {
+            foreach ($kinds as [$which, $words, $emptySentAt]) {
+                $find = $db->prepare("SELECT messageID FROM tblSmsMessage WHERE status = 'queued' AND errorMsg = ? AND " . $which . ' ORDER BY messageID LIMIT ?');
+                $find->bind_param('si', $held, $most);
+                $find->execute();
+                $ids = array_column($find->get_result()->fetch_all(MYSQLI_ASSOC), 'messageID');
+                $find->close();
+                if ($ids === []) {
+                    continue;
+                }
+                $move = $db->prepare(
+                    "UPDATE tblSmsMessage SET status = 'failed', errorMsg = ?" . ($emptySentAt === true ? ', sentAt = NULL' : '')
+                    . " WHERE messageID = ? AND status = 'queued' AND errorMsg = ? AND " . $which
+                );
+                foreach ($ids as $id) {
+                    $id = (int) $id;
+                    $move->bind_param('sis', $words, $id, $held);
+                    $move->execute();
+                    $changed += (int) $move->affected_rows;
+                }
+                $move->close();
+            }
+        } catch (\Throwable $problem) {
+            if ($throwFaults === true) {
+                throw $problem; // the job's run reports it: see sendHeld()
+            }
+        }
+
+        return $changed;
+    }
+
+    /**
+     * 🏃 ONE RUN OF THE HELD TEXTS: correct the record of those that can no
+     * longer go, then send those whose person's quiet hours have ended.
+     * Called by the scheduled job (`_apps/cron/mail-queue.php`) after its
+     * mail step, and by nothing else.
+     *
+     * FOR EACH HELD TEXT, IN THE ORDER THEY WERE HELD
+     *   1. No account any more -> not sent.
+     *   2. Still inside their quiet hours (Sabbath, asked for this moment)
+     *      -> left alone. Nothing is changed, so the next run asks again.
+     *   3. The account has been switched off; or, where there are several
+     *      organisations, the person is not a member of that one, or it
+     *      has been switched off (whyNotThisPerson()) -> not sent.
+     *   4. The number is no longer the person's confirmed number for texts
+     *      in that organisation, or they have stopped texts of this kind
+     *      (whyNoLongerWanted()) -> not sent. A day has passed; what is
+     *      true of the person NOW decides, in 3 and in 4.
+     *   5. The organisation's limit for today is reached -> left alone, to
+     *      go on a later day if its use-by moment allows.
+     *   6. THE CLAIM: the row is taken in one statement (claimHeld()). Only
+     *      one run can take it.
+     *   7. The provider is given the text, and what it said is recorded.
+     *
+     * IT NEVER THROWS, so it can never stop the mail step it runs beside.
+     * A fault is counted in `error` and written to the server's error log
+     * as a class name and a number, never as words: a database's own
+     * message can quote the value it choked on.
+     *
+     * NEVER A FLOOD: at most `$most` texts are handed over in one run, no
+     * new one is started after `$seconds`, and the day's limit holds.
+     *
+     * WHAT IT CANNOT DO: say whether a text went when the run is ended
+     * between the claim and the provider's answer. Such a row is found by a
+     * later run and recorded as "not known whether it was sent"; it is not
+     * sent again.
+     *
+     * @param int   $most    The most texts to hand to the provider.
+     * @param float $seconds No new text is started after this long.
+     *
+     * @return array{ran: int, sent: int, failed: int, notSent: int, left: int, notReady: int, error: int}
+     *         NUMBERS ONLY, because the job prints this: `ran` (1, or 0 when
+     *         another run held the lock), `sent`, `failed` (the provider
+     *         refused), `notSent` (recorded as not sent, or as not known),
+     *         `left` (still held when the run ended; not counted, so 0, when
+     *         another run held the lock), `notReady` (1 when the database
+     *         has not been upgraded to hold a use-by moment) and `error` (1
+     *         when the run was stopped by a fault).
+     */
+    public static function sendHeld(mysqli $db, int $most = 20, float $seconds = 8.0): array
+    {
+        $out      = ['ran' => 0, 'sent' => 0, 'failed' => 0, 'notSent' => 0, 'left' => 0, 'notReady' => 0, 'error' => 0];
+        $deadline = microtime(true) + $seconds;
+        $locked   = false;
+
+        try {
+            // 🔒 One run at a time. The claim below is safe without this;
+            //    what the lock adds is that two runs cannot both spend the
+            //    same room in the day's limit. It belongs to this database
+            //    connection and is given up by the database if the run dies.
+            $lock = $db->query("SELECT GET_LOCK(CONCAT('portal-held-texts:', SHA1(DATABASE())), 0) AS got");
+            $got  = (int) ($lock->fetch_assoc()['got'] ?? 0);
+            $lock->free();
+            if ($got !== 1) {
+                return $out;
+            }
+            $locked     = true;
+            $out['ran'] = 1;
+
+            $out['notSent'] += self::settleHeld($db, 500, true);
+
+            // 📴 Texts switched off since: nothing is sent. What is held
+            //    waits, and is recorded as not sent when its use-by passes.
+            $settings = App::settings()['sms'] ?? [];
+            if ((string) ($settings['enabled'] ?? '0') === '1') {
+                self::sendDue($db, $settings, $most, $deadline, $out);
+            }
+        } catch (\Throwable $problem) {
+            if ($problem instanceof \mysqli_sql_exception && (int) $problem->getCode() === 1054) {
+                // "Unknown column": the files are new and migration 219 has
+                // not run. Nothing can be held yet either (see hold()), so
+                // there is nothing to do, and nothing worth an error line
+                // every five minutes.
+                $out['notReady'] = 1;
+            } else {
+                $out['error'] = 1;
+                error_log('Held texts: the run was stopped: ' . get_class($problem) . ' (' . (int) $problem->getCode() . ')');
+            }
+        } finally {
+            // Whatever happened in a run that held the lock: say what is
+            // left, and give the lock up. If the database has gone neither
+            // can be done, and it gives the lock up by itself when the
+            // connection ends. (A run that did not get the lock has already
+            // answered above: PHP works out what a `return` gives back
+            // BEFORE this block runs, so nothing here could change it.)
+            if ($locked === true) {
+                try {
+                    $held = self::HELD_REASON;
+                    $stmt = $db->prepare("SELECT COUNT(*) AS n FROM tblSmsMessage WHERE status = 'queued' AND errorMsg = ?");
+                    $stmt->bind_param('s', $held);
+                    $stmt->execute();
+                    $out['left'] = (int) ($stmt->get_result()->fetch_assoc()['n'] ?? 0);
+                    $stmt->close();
+                } catch (\Throwable $ignored) {
+                    // See above.
+                }
+                try {
+                    $db->query("DO RELEASE_LOCK(CONCAT('portal-held-texts:', SHA1(DATABASE())))");
+                } catch (\Throwable $ignored) {
+                    // See above.
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * The sending part of a run: see sendHeld() for the order of the seven
+     * steps. Public only so that the self-test can run two of these at
+     * the same moment WITHOUT the one-run-at-a-time lock, which is the only
+     * way to prove that the claim alone stops a second copy.
+     *
+     * @param array<string, mixed> $settings The `sms` settings.
+     * @param float                $deadline No new text is started after
+     *                                       this moment (microtime(true)).
+     * @param array<string, int>   $out      The run's numbers, added to.
+     */
+    public static function sendDue(mysqli $db, array $settings, int $most, float $deadline, array &$out): void
+    {
+        $cap      = (int) ($settings['dailyCap'] ?? 100);
+        $provider = (string) ($settings['provider'] ?? 'twilio');
+        $held     = self::HELD_REASON;
+        $after    = 0;
+        /** @var array<int, bool> $quiet Whether each person is still in their quiet hours: asked once a run. */
+        $quiet = [];
+        /** @var array<int, bool> $full The organisations whose limit for today this run found reached. */
+        $full = [];
+
+        while (true) {
+            // The held texts that could still go, a page at a time, oldest
+            // first. Read without taking anything: the claim comes later,
+            // for one row, once every other question has been answered.
+            $stmt = $db->prepare(
+                'SELECT messageID, siteID, recipientUserID, recipientNumber, body, category FROM tblSmsMessage '
+                . "WHERE status = 'queued' AND errorMsg = ? AND claimedAt IS NULL AND heldUseBy > UTC_TIMESTAMP() AND messageID > ? "
+                . 'ORDER BY messageID LIMIT 50'
+            );
+            $stmt->bind_param('si', $held, $after);
+            $stmt->execute();
+            $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            $stmt->close();
+            if ($rows === []) {
+                return;
+            }
+
+            foreach ($rows as $row) {
+                if ($out['sent'] + $out['failed'] >= $most || microtime(true) >= $deadline) {
+                    return;
+                }
+                $id     = (int) $row['messageID'];
+                $after  = $id;
+                $siteId = (int) $row['siteID'];
+
+                // 1. The account has gone (the link empties this column).
+                if ($row['recipientUserID'] === null) {
+                    $out['notSent'] += self::settleOne($db, $id, self::NOT_SENT_PERSON);
+                    continue;
+                }
+                $userId = (int) $row['recipientUserID'];
+
+                // 2. Still in their quiet hours? The same question, of the
+                //    same code, that held it. A person who has since
+                //    switched quiet hours off is no longer "inside".
+                if (isset($quiet[$userId]) === false) {
+                    $quiet[$userId] = Sabbath::isQuietNow($userId, self::nowOnDatabaseClock($db));
+                }
+                if ($quiet[$userId] === true) {
+                    continue;
+                }
+
+                // 3. May this person still be sent this organisation's text?
+                //    The account, the membership and the organisation, as
+                //    they stand now. (Until the fix round of 13 October 2026
+                //    this was not asked: a person whose account had been
+                //    switched off while a text waited was still sent it.)
+                $why = self::whyNotThisPerson($db, $siteId, $userId);
+                if ($why !== '') {
+                    $out['notSent'] += self::settleOne($db, $id, $why);
+                    continue;
+                }
+
+                // 4. Is the number still theirs, and do they still want it?
+                $why = self::whyNoLongerWanted($db, $siteId, $userId, (string) $row['recipientNumber'], (string) $row['category']);
+                if ($why !== '') {
+                    $out['notSent'] += self::settleOne($db, $id, $why);
+                    continue;
+                }
+
+                // 5. Today's limit, counted again before every text.
+                if (isset($full[$siteId]) === true) {
+                    continue;
+                }
+                if (self::sentTodayCount($siteId) >= $cap) {
+                    $full[$siteId] = true;
+                    continue;
+                }
+
+                // 6. The claim. Not ours: another run took it, or its
+                //    use-by moment passed this very second.
+                if (self::claimHeld($db, $id) === false) {
+                    continue;
+                }
+
+                // 7. Hand it over, and write down what the provider said.
+                $result = static::providerSend($provider, $settings, (string) $row['recipientNumber'], (string) $row['body']);
+                self::finishHeld($db, $id, $provider, $result);
+                $out[$result['ok'] === true ? 'sent' : 'failed']++;
+            }
+        }
+    }
+
+    /**
+     * 🔀 THE CLAIM: a held text is taken by filling in `claimedAt`, in ONE
+     * statement that only succeeds while the row is still held, untaken and
+     * inside its use-by moment.
+     *
+     * The database gives a row to one statement only, so two runs at the
+     * same moment can never both take it. REJECTED: reading the row and
+     * then marking it. Two runs then read it before either has marked it,
+     * and both send it.
+     *
+     * A claim is NEVER undone. Whatever happens after it, the text is not
+     * offered to a run again.
+     *
+     * @return bool True when this run now holds the text.
+     */
+    private static function claimHeld(mysqli $db, int $messageId): bool
+    {
+        $held = self::HELD_REASON;
+        $stmt = $db->prepare(
+            'UPDATE tblSmsMessage SET claimedAt = UTC_TIMESTAMP() '
+            . "WHERE messageID = ? AND status = 'queued' AND errorMsg = ? AND claimedAt IS NULL AND heldUseBy IS NOT NULL AND heldUseBy > UTC_TIMESTAMP()"
+        );
+        $stmt->bind_param('is', $messageId, $held);
+        $stmt->execute();
+        $mine = $stmt->affected_rows === 1;
+        $stmt->close();
+
+        return $mine;
+    }
+
+    /**
+     * 🔀 AFTER THE PROVIDER ANSWERED: a claimed text becomes 'sent' or
+     * 'failed'. `sentAt` is the moment it really went, on the database
+     * server's own clock like every other row's, which is what the day's
+     * limit and the month's cost count by.
+     *
+     * A text the provider refused is NOT tried again: a refusal is often a
+     * time-out, and nobody can tell whether a text that timed out went.
+     *
+     * @param array{ok: bool, ref: string|null, costPence: int|null, error: string|null} $result
+     */
+    private static function finishHeld(mysqli $db, int $messageId, string $provider, array $result): void
+    {
+        $status = $result['ok'] === true ? 'sent' : 'failed';
+        $words  = $result['ok'] === true
+            ? self::SENT_AFTER_HOLD
+            : mb_substr('Held for quiet hours, then refused by the provider: ' . (string) ($result['error'] ?? 'no reason given'), 0, 255);
+        $ref    = $result['ref'] === null ? null : mb_substr((string) $result['ref'], 0, 100);
+        $cost   = $result['costPence'];
+        $held   = self::HELD_REASON;
+        $stmt   = $db->prepare(
+            'UPDATE tblSmsMessage SET status = ?, provider = ?, providerRef = ?, costPence = ?, errorMsg = ?, sentAt = NOW() '
+            . "WHERE messageID = ? AND status = 'queued' AND errorMsg = ? AND claimedAt IS NOT NULL"
+        );
+        $stmt->bind_param('sssisis', $status, $provider, $ref, $cost, $words, $messageId, $held);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    /**
+     * 🔀 ONE held text recorded as not sent, with the reason. Only while it
+     * is still held and untaken.
+     *
+     * @return int 1 when the row was changed, 0 when it had already moved on.
+     */
+    private static function settleOne(mysqli $db, int $messageId, string $words): int
+    {
+        $held = self::HELD_REASON;
+        $stmt = $db->prepare(
+            "UPDATE tblSmsMessage SET status = 'failed', errorMsg = ? WHERE messageID = ? AND status = 'queued' AND errorMsg = ? AND claimedAt IS NULL"
+        );
+        $stmt->bind_param('sis', $words, $messageId, $held);
+        $stmt->execute();
+        $changed = (int) $stmt->affected_rows;
+        $stmt->close();
+
+        return $changed;
+    }
+
+    /**
+     * May this person still be sent this organisation's text? Asked when
+     * their quiet hours have ended, up to two days after it was written.
+     *
+     * A text can carry something private (a prayer-chain text carries the
+     * subject of somebody's prayer request). A person whose account was
+     * switched off while it waited, who has left the organisation, or whose
+     * organisation has been switched off, must not be sent it.
+     *
+     * THE RULE IS NOT WRITTEN HERE.
+     *   - With SEVERAL organisations it is Site::isOwnOrganisation(), the
+     *     one list of "your organisations" that the membership gate uses on
+     *     every page (SiteGate): the account is switched on, the
+     *     organisation is switched on, and the person is a member of it or
+     *     a global administrator. Whoever could open that organisation's
+     *     pages can be sent its text, and nobody else.
+     *   - With ONE organisation that gate guards nothing, and a person need
+     *     have no membership row at all. The one question left is the one
+     *     sign-in asks: is the account switched on?
+     * The reads below choose the WORDS when the answer is no. They decide
+     * nothing, apart from the account's own switch, which both rules share.
+     * REJECTED: asking tblUserSites directly. It would refuse every text on
+     * an installation with one organisation, where nobody has such a row,
+     * and a global administrator everywhere.
+     *
+     * It THROWS when Site cannot ask its question. The run then stops with
+     * the text still held and untaken, and the next run asks again: a text
+     * is not sent on a guess.
+     *
+     * WHAT IT CANNOT DO: this is asked of a HELD text only. A text sent at
+     * once is sent to whoever its caller chose (see the file header).
+     *
+     * @return string '' when the text may go; otherwise the words to record.
+     */
+    private static function whyNotThisPerson(mysqli $db, int $siteId, int $userId): string
+    {
+        $stmt = $db->prepare(
+            'SELECT U.isActive AS accountOn, (SELECT S.isActive FROM tblSites S WHERE S.siteID = ? LIMIT 1) AS organisationOn '
+            . 'FROM tblUsers U WHERE U.userID = ? LIMIT 1'
+        );
+        $stmt->bind_param('ii', $siteId, $userId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null) {
+            return self::NOT_SENT_PERSON;
+        }
+        if ((int) $row['accountOn'] !== 1) {
+            return self::NOT_SENT_ACCOUNT_OFF;
+        }
+        if (Site::isMultisiteEnabled() === false || Site::isOwnOrganisation($userId, $siteId, $db) === true) {
+            return '';
+        }
+
+        return (int) ($row['organisationOn'] ?? 0) !== 1 ? self::NOT_SENT_ORG_OFF : self::NOT_SENT_NOT_MEMBER;
+    }
+
+    /**
+     * Should a held text still go to this number, for this person? Asked
+     * when their quiet hours have ended, which is up to two days after the
+     * text was written.
+     *
+     * A held text goes only to a number that is, AT THAT MOMENT, the
+     * person's confirmed number for texts in that organisation. A person
+     * who changed or removed their number while a text waited must not have
+     * it sent to the old one: that number may be somebody else's by now.
+     * And for the kinds a person opts in to (CATEGORIES), only while they
+     * are still opted in.
+     *
+     * @return string '' when it should go; otherwise the words to record.
+     */
+    private static function whyNoLongerWanted(mysqli $db, int $siteId, int $userId, string $number, string $category): string
+    {
+        $stmt = $db->prepare('SELECT phoneNumber, isVerified, FIND_IN_SET(?, categories) AS wantsKind FROM tblUserSmsPreference WHERE siteID = ? AND userID = ? LIMIT 1');
+        $stmt->bind_param('sii', $category, $siteId, $userId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null || (int) $row['isVerified'] !== 1 || (string) $row['phoneNumber'] !== $number) {
+            return self::NOT_SENT_NUMBER;
+        }
+        if (in_array($category, self::CATEGORIES, true) === true && (int) $row['wantsKind'] < 1) {
+            return self::NOT_SENT_OPTED_OUT;
+        }
+
+        return '';
+    }
+
+    /**
+     * 🔀 EVERY HELD TEXT THAT CAME BACK WITH A RESTORED BACKUP is recorded
+     * as not sent, and none is sent by itself.
+     *
+     * WHY. A text that was held when a backup was taken is in the backup as
+     * "held". If it was sent afterwards, putting the backup back brings its
+     * row back as "held", and the job would send it a SECOND time. Nobody
+     * can tell from the restored rows which of them went. The mail queue
+     * has the same trap (MailQueue::holdRestored()); there a message is held
+     * for a person, and here, where no page releases a text, it is recorded
+     * as not sent.
+     *
+     * DbBackup calls this at the end of a restore, inside the restore's own
+     * transaction, so a rehearsal ("check only") undoes it with everything
+     * else. It THROWS when the statement fails: the restore is then stopped
+     * and undone, which is better than a restore that leaves texts able to
+     * go twice. It needs nothing but the connection it is given, and names
+     * only columns the table has had since it was made, so it works
+     * whatever the age of the backup.
+     *
+     * @return int How many texts were recorded as not sent.
+     */
+    public static function holdRestored(mysqli $db): int
+    {
+        $words = self::NOT_SENT_RESTORED;
+        $held  = self::HELD_REASON;
+        $stmt  = $db->prepare("UPDATE tblSmsMessage SET status = 'failed', errorMsg = ? WHERE status = 'queued' AND errorMsg = ?");
+        $stmt->bind_param('ss', $words, $held);
+        $stmt->execute();
+        $moved = (int) $stmt->affected_rows;
+        $stmt->close();
+
+        return $moved;
+    }
+
     /**
      * Dispatch to the configured provider. Each provider returns
      * ['ok' => bool, 'ref' => string|null, 'costPence' => int|null,
      *  'error' => string|null] so the caller can persist a uniform row.
+     *
+     * `protected`, and called as `static::providerSend()`, so that
+     * tools/held-texts-selftest.php can extend this class and put a
+     * recorder here: that is how the test sends no real text. Nothing in
+     * the portal extends this class.
      */
-    private static function providerSend(string $provider, array $settings, string $number, string $body): array
+    protected static function providerSend(string $provider, array $settings, string $number, string $body): array
     {
         switch ($provider) {
             case 'twilio':

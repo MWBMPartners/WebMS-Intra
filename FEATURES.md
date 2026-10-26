@@ -1051,7 +1051,7 @@ setting seeds.
 | Zoom (OAuth, meeting creation from calendar, webhook HMAC) | #274 | 092 | ✅ |
 | Newsletter (composer with auto-pulled content blocks, provider abstraction → MailerMatt slot) | #269 | 093 | ✅ |
 | Giving (tithe log, Gift Aid digital declaration, HMRC schedule CSV, year-end PDF; online give-online checkout added later, see "PayPal payment adapter" section below; treasurer bulk year-end statements added later, see "Giving — Bulk year-end statements" section below) | #266 | 094 | ✅ |
-| SMS (Twilio + MessageBird + SigV4-signed AWS SNS; verification + per-category opt-in + Sabbath quiet hours) | #272 | 095 | ✅ |
+| SMS (Twilio + MessageBird + SigV4-signed AWS SNS; verification + per-category opt-in + Sabbath quiet hours: a text that is not a critical alert or an emergency notice is held and sent by `/cron/mail-queue` when they end, or recorded as not sent once its use-by moment has passed, #610) | #272, #610 | 095, 219 | ✅ |
 | Projects (public fundraising page, pledge thermometer, captcha-gated anonymous pledges; member "Pay now" pledge checkout added later, see "PayPal payment adapter" section below) | #267 | 096 | ✅ |
 | Payments (Stripe Checkout + PayPal Orders v2 + v1 HMAC/verified webhooks + refund; side-effects into Giving/Projects — PayPal + online checkout UI added later, see "PayPal payment adapter" section below) | #268 | 097 | ✅ |
 

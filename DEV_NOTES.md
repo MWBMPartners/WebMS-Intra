@@ -6181,6 +6181,49 @@ client; PHPMailer as a second engine) come after the first roll-out, by the owne
 
 ---
 
+## Text messages held for quiet hours (#610)
+
+- **One place.** `Portal\Core\Sms` holds every statement that moves a held text. `send()` holds; `sendHeld()` (called only
+  by `web/_apps/cron/mail-queue.php`, after the mail step) sends or settles; `holdRestored()` is what a restore calls.
+- **What is never held** is `Sms::NEVER_HELD`: `critical_alerts` and `emergency_comms` (the owner, 13 October 2026). That
+  list is the one place that decides it. Adding a kind to it is a decision for the owner.
+- **The states of a held text**, all in `tblSmsMessage`: held is `status = 'queued'` with `errorMsg = 'quiet-hours'`
+  (`Sms::HELD_REASON`), an empty `sentAt` and a `heldUseBy`; taken is the same with `claimedAt` filled in; then `sent`, or
+  `failed` with plain words in `errorMsg` (the `Sms::NOT_SENT_*` sentences, `SENT_AFTER_HOLD`, `UNKNOWN_INTERRUPTED`). No
+  new status word was added.
+- **The claim** is one statement that fills `claimedAt` only while the row is held, untaken and inside its use-by moment. A
+  claim is never undone. A row a dead run took is recorded as "not known whether it was sent" after ten minutes, by the job
+  or by the next text the portal handles.
+- **Who may still be sent a held text** is asked when it comes due, in `Sms::whyNotThisPerson()`. The rule is not written
+  there: with several organisations it is `Site::isOwnOrganisation()` (the list the membership gate uses); with one
+  organisation, where nobody needs a membership row, it is whether the account is switched on. If Site cannot answer, the
+  run stops with the text still held and untaken: a text is not sent on a guess. **A text sent at once is not asked** (its
+  caller chose the person; only the prayer chain's own choice of a partner asks). The owner decided on 26 October 2026 that
+  this gap is closed in `Sms::send()` before roll-out; until that lands, it stands.
+- **Times.** `heldUseBy` and `claimedAt` are moments in UTC from `UTC_TIMESTAMP()`. `createdAt` and `sentAt` are still the
+  database server's own clock, and the daily limit's "day" is a day on that clock. "Is the person in their quiet hours?" is
+  asked of `Sabbath` for a moment read from the database (`SELECT UNIX_TIMESTAMP()`), when holding and when sending.
+- **Use-by lengths** are in `Sms::HELD_USE_WITHIN` (48 hours for the kinds listed) and `HELD_USE_WITHIN_UNKNOWN` (two hours
+  for a kind the portal does not know); a caller can give its own as the sixth argument of `send()` (a moment in UTC, as
+  `MailQueue::useBy()` makes one). `HELD_NEVER_AFTER` (48 hours) is the ceiling.
+- **The job page's answer** stays one JSON document of a status word and plain numbers; the texts step's numbers are the
+  entries whose names begin `texts`. `tools/mail-queue-selftest.php` holds the answer to "numbers only".
+- **The broadcast page's sentence** is built by `Sms::broadcastSummary()`, so that it can be tested. `skipped` in what
+  `sendCategory()` answers still includes the held texts; the sentence takes them out. `MailQueue::jobIsRunning()` means
+  "the job ran in the last 15 minutes" and no more, so neither that sentence nor the preferences page ever says a held text
+  will NOT be sent. That wording was built the other way first ("and NOT going to be sent afterwards"), and the second
+  check proved it untrue in three ordinary cases: a job that runs hourly, a job running late, and a job set up the next
+  day each handed the held texts over at its next call. An administrator told the texts would not be sent sends the
+  broadcast again, and people get two texts — the very thing the sentence exists to stop.
+- **Database not upgraded yet:** `send()` records the text as not sent (it is never held without a use-by moment) and
+  `sendHeld()` answers `notReady`.
+- **Test:** `tools/held-texts-selftest.php` (106 checks; MySQL 8.0.36 and 8.4.11). It sets the database's own clock for its
+  connection (`SET timestamp`) and puts a recorder where the provider is by extending the class (`providerSend()` is
+  `protected` for that reason). It reads the real lines of the Notification preferences page in both states of the job, and
+  the sentences on Account, SMS and the broadcast page; and it holds every sentence the class records to a copy written out
+  in the test (`SAYS`). Change a page or a sentence and the test together.
+- **What it cannot do** is listed at the top of `Sms.php`.
+
 ## MS365 Graph email via a shared mailbox (gap #234, migration 176)
 
 ### What was already there vs what #234 actually needed

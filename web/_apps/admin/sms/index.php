@@ -42,7 +42,7 @@ $monthSpend  = Sms::monthSpendPence($siteId);
 
 $recent = [];
 $stmt = $db->prepare(
-    'SELECT m.messageID, m.recipientNumber, m.body, m.category, m.status, m.costPence, m.createdAt, '
+    'SELECT m.messageID, m.recipientNumber, m.body, m.category, m.status, m.costPence, m.createdAt, m.sentAt, '
     . '       u.fullName '
     . 'FROM tblSmsMessage m LEFT JOIN tblUsers u ON u.userID = m.recipientUserID '
     . 'WHERE m.siteID = ? ORDER BY m.createdAt DESC LIMIT 50'
@@ -166,8 +166,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         default            => 'secondary',
                     };
                 ?>
+                    <?php
+                    // 🕰️ The moment shown is the moment the text was HANDED
+                    //    OVER (`sentAt`) when it has one, and the moment it
+                    //    was written otherwise. It used to be the moment it
+                    //    was written, always: a text held on a Friday evening
+                    //    and sent on the Saturday then read "sent" beside
+                    //    Friday's time. A text that was NEVER handed to the
+                    //    provider has no "sent at", so it still shows when it
+                    //    was written: one that is still held, and one
+                    //    recorded as not sent. A held text that the provider
+                    //    then REFUSED was handed over: it shows that moment,
+                    //    beside "failed". (This note used to say every unsent
+                    //    text shows when it was written.)
+                    //    WHAT THIS CANNOT DO: both moments are on the
+                    //    database server's own clock, not the organisation's.
+                    $shownAt = (string) ($m['sentAt'] ?? $m['createdAt']);
+                    ?>
                     <div class="row py-1 border-bottom small">
-                        <div class="col-md-2 text-muted"><?php echo htmlspecialchars(date('d/m H:i', (int) strtotime((string) $m['createdAt'])), ENT_QUOTES, 'UTF-8'); ?></div>
+                        <div class="col-md-2 text-muted"><?php echo htmlspecialchars(date('d/m H:i', (int) strtotime($shownAt)), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-3"><?php echo htmlspecialchars((string) ($m['fullName'] ?? $m['recipientNumber']), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-2"><span class="badge bg-light text-dark"><?php echo htmlspecialchars((string) $m['category'], ENT_QUOTES, 'UTF-8'); ?></span></div>
                         <div class="col-md-3 text-truncate" title="<?php echo htmlspecialchars((string) $m['body'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(mb_substr((string) $m['body'], 0, 80), ENT_QUOTES, 'UTF-8'); ?></div>

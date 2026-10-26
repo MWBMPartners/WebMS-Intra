@@ -453,6 +453,25 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     `Captcha::closedNotice()` itself. An address that is recorded or sent goes
     through `Logger::withoutJobToken()`.
 
+    **Text messages held for quiet hours (#610).** `Portal\Core\Sms` holds
+    every statement that moves a held text; `sendHeld()` is called only by
+    `/cron/mail-queue`, after the mail step, and can never stop it.
+    `Sms::NEVER_HELD` is the ONE list of what quiet hours never hold (a
+    critical alert, an emergency notice: the owner, 13 October 2026). A
+    held text is `status = 'queued'` with `errorMsg = 'quiet-hours'` and a
+    use-by moment (`heldUseBy`, UTC); it is taken once, by filling
+    `claimedAt` in one statement, and a claim is never undone. Never twice
+    comes before always delivered. A text with no use-by moment is never
+    sent. When a held text comes due, `Sms::whyNotThisPerson()` asks
+    `Site::isOwnOrganisation()` whether the person may still be sent it:
+    do not write a second membership test. The job page's answer stays a
+    status word and plain numbers (the texts step's begin `texts`). A
+    restore calls `Sms::holdRestored()`. The broadcast page's sentence is
+    `Sms::broadcastSummary()`, and neither it nor the preferences page may
+    say a held text will NOT be sent: `MailQueue::jobIsRunning()` means
+    "the job ran in the last 15 minutes" and no more. Test: `tools/held-
+    texts-selftest.php`, which reads the Notification preferences page.
+
     **Two-factor authentication (#613).** `auth/2fa/setup.php` is the ONE place
     backup codes are made, and it shows them only in the answer to the request
     that made them: never put a code, or the authenticator key, readable in

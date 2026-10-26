@@ -4665,6 +4665,12 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 -- =============================================================================
 -- SMS notifications (migration 095, #272)
 -- =============================================================================
+-- Migration 219 (#610) added `heldUseBy`, `claimedAt` and `idx_sms_held`, for
+-- a text held because the person is in their quiet hours. The two new
+-- columns are moments in UTC; `createdAt` and `sentAt` are the database
+-- server's own clock, as they always were. A text is held as status
+-- 'queued' with 'quiet-hours' in `errorMsg` and a use-by moment; see
+-- web/_core/Sms.php for what moves it on.
 
 CREATE TABLE IF NOT EXISTS `tblSmsMessage` (
     `messageID`        INT          NOT NULL AUTO_INCREMENT,
@@ -4680,9 +4686,12 @@ CREATE TABLE IF NOT EXISTS `tblSmsMessage` (
     `errorMsg`         VARCHAR(255) DEFAULT NULL,
     `sentAt`           DATETIME     DEFAULT NULL,
     `createdAt`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `heldUseBy`        DATETIME     DEFAULT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): a text HELD for quiet hours is never sent at or after it. Empty for a text that was never held, and for one held before migration 219, which is never sent. (createdAt and sentAt beside it are the database server''s own clock, not UTC.)',
+    `claimedAt`        DATETIME     DEFAULT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when a run of the scheduled job took this HELD text to hand it to the provider. Filled in once, in one statement, so two runs cannot both send it. Empty for a text that was never held or never taken.',
     PRIMARY KEY (`messageID`),
     KEY `idx_sms_site_date` (`siteID`, `createdAt`),
     KEY `idx_sms_user`      (`recipientUserID`),
+    KEY `idx_sms_held`      (`status`, `heldUseBy`),
     CONSTRAINT `fk_sms_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`),
     CONSTRAINT `fk_sms_user` FOREIGN KEY (`recipientUserID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -10178,4 +10187,11 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- waiting for approval. Its one table, tblExternalApprovalNotices, is above,
 -- straight after tblExternalEventApprovals.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('218_external_approval_notices.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- Migration 219 (#610): a text held for quiet hours can be sent afterwards.
+-- Its two columns and its key are written inline in tblSmsMessage above. Its
+-- other step, which records texts held before it as not sent, has nothing to
+-- do in a new database and is in the migration only.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('219_held_texts.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

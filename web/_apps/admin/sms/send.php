@@ -13,6 +13,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\MailQueue;
 use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\Sms;
@@ -47,8 +48,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $body = mb_substr($body, 0, 480);
     }
     $result = Sms::sendCategory($siteId, $category, $body);
-    Logger::activity('SmsBroadcast', 'Broadcast to ' . $category . ': ' . $result['sent'] . ' sent', $userId);
-    $_SESSION['flash_msg']  = sprintf('Broadcast complete: %d sent, %d skipped.', (int) $result['sent'], (int) $result['skipped']);
+    Logger::activity('SmsBroadcast', 'Broadcast to ' . $category . ': ' . $result['sent'] . ' sent, ' . (int) ($result['held'] ?? 0) . ' held for quiet hours', $userId);
+    // 🗣️ The sentence used to be "N sent, M skipped", with the held texts
+    //    counted as skipped. Since #610 a held text is sent when the person's
+    //    quiet hours end, so "skipped" invited a second broadcast and two
+    //    texts on people's phones. The words are built, and tested, in
+    //    Sms::broadcastSummary(). What becomes of a held text depends on
+    //    the scheduled job, and all the page can know is whether that job
+    //    has run in the last 15 minutes: see there for what it says, and
+    //    does not say, when it has not.
+    $_SESSION['flash_msg']  = Sms::broadcastSummary($result, MailQueue::jobIsRunning(App::db()));
     $_SESSION['flash_type'] = 'success';
     header('Location: ' . Site::url('admin/sms'));
     exit();
@@ -63,7 +72,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 ?>
 
 <h1 class="mb-3"><i class="fa-solid fa-bullhorn me-2"></i>Broadcast SMS</h1>
-<p class="text-secondary">Sends to every verified, opted-in subscriber for the selected category. Sabbath quiet hours defer non-critical messages.</p>
+<?php
+// 🗣️ This used to end "Sabbath quiet hours defer non-critical messages". Two
+//    kinds are never held (Sms::NEVER_HELD): a critical alert, and since the
+//    owner's decision of 13 October 2026 an emergency notice, which is the
+//    kind this form offers first. What becomes of a held text is said in the
+//    line shown after sending, because it depends on the scheduled job.
+?>
+<p class="text-secondary">
+    Sends to every verified, opted-in subscriber for the selected category. Critical alerts and emergency comms
+    are sent at once, whatever the hour. Any other kind is held back for a person who is in their Sabbath quiet
+    hours; the line shown after sending says how many were held and what becomes of them.
+</p>
 
 <form method="post" class="card">
     <div class="card-body row g-3">

@@ -137,7 +137,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <label class="form-check-label" for="cat_<?php echo $c; ?>"><?php echo htmlspecialchars(str_replace('_', ' ', $c), ENT_QUOTES, 'UTF-8'); ?></label>
                     </div>
                 <?php endforeach; ?>
-                <p class="small text-muted mt-2">Critical alerts ignore quiet hours; other categories defer during your Sabbath window.</p>
+                <?php
+                // 🗣️ This used to read "Critical alerts ignore quiet hours;
+                //    other categories defer during your Sabbath window". Since
+                //    13 October 2026 an emergency notice is never held either
+                //    (the owner's decision; the list is Sms::NEVER_HELD), and
+                //    "defer" said nothing of what happens afterwards. That
+                //    depends on the installation, so it is said in ONE place,
+                //    the Notification preferences page, and linked from here.
+                ?>
+                <p class="small text-muted mt-2">
+                    Critical alerts and emergency comms are sent at once, whatever the hour.
+                    The other kinds are held back while you are in your Sabbath quiet hours; the
+                    <a href="<?php echo htmlspecialchars(Site::url('account/notifications'), ENT_QUOTES, 'UTF-8'); ?>">Notification preferences</a>
+                    page says what becomes of them afterwards.
+                </p>
                 <button class="btn btn-primary btn-sm mt-2" type="submit">Save preferences</button>
             </form>
         </div>
