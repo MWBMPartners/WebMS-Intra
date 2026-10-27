@@ -121,9 +121,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 && Auth::userRequires2fa($loggedInUserId) === true
                 && Auth::deviceIsTrusted($loggedInUserId) === false
             ) {
-                $_SESSION['2fa_user_id']   = $loggedInUserId;
-                $_SESSION['login_redirect'] = Auth::safeRedirectUrl($_GET['redirect'] ?? Site::url(''));
+                // 🛡️ Take the sign-in away FIRST (see the matching comment in
+                //    Auth.php's two callbacks). This built login_redirect before the
+                //    unset(), and Auth::safeRedirectUrl() TOOK `string $url` at the
+                //    time (it takes `mixed` now, by the same fix), so
+                //    POSTing to /login?redirect[]=x threw a TypeError with user_id
+                //    already set by loginLocal() — leaving a session signed in
+                //    without the second factor, on nothing but the password. That is
+                //    what two-factor is for, so this ordering is load-bearing.
+                $_SESSION['2fa_user_id'] = $loggedInUserId;
                 unset($_SESSION['user_id'], $_SESSION['2fa_passed']);
+                $_SESSION['login_redirect'] = Auth::safeRedirectUrl($_GET['redirect'] ?? Site::url(''));
                 header('Location: ' . Site::url('auth/2fa/verify'), true, 302);
                 exit();
             }

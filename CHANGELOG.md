@@ -2,6 +2,34 @@
 
 
 ## [Unreleased] (alpha)
+- **Security — three ways past sign-in, found by the end-of-queue review and closed (#B2 follow-up)**
+  - **What an administrator should know.** Two-factor authentication could be skipped, and a visitor could be
+    signed into somebody else's account. Nothing needs doing on an installation beyond upgrading; no setting
+    changes. Nobody is known to have been affected — no portal was live when these were found.
+  - **Microsoft and Google sign-in skipped two-factor entirely on 1.4.0.** The two callbacks signed the person
+    in and never asked whether they had two-factor switched on, so anyone controlling their Microsoft or Google
+    account — or able to have one assert their e-mail address, since accounts are linked by e-mail — signed
+    straight in. The gate was added on this branch earlier (#B2); 1.4.0 does not have it.
+  - **An OAuth callback was accepted when no sign-in had been started.** The guard compared the stored
+    one-time value with the one in the address, and both defaulted to empty, so an address carrying an empty
+    one passed. That let somebody fetch a sign-in code for their OWN account and hand a visitor a link that
+    signed that visitor in as them — so anything the visitor then typed went into an account somebody else
+    controls. It now refuses unless a sign-in really is in progress.
+  - **The second factor could be skipped by sending a list where an address was expected.** Each of the four
+    two-factor gates worked out where to send the person BEFORE it took the sign-in away. A request chooses
+    the TYPE of what it sends as well as the value, so `?redirect[]=x` made that step fail part way, the
+    sign-in was never removed, and the next page load saw somebody signed in who had never been asked for a
+    code. **On the ordinary password form this needed nothing but the person's password**, which is the one
+    thing two-factor exists to survive; it was reproduced on the old code before being fixed. The passkey
+    path was the quietest: it answered "Authentication failed." and signed the person in anyway.
+  - **How it is kept shut.** Every gate now takes the sign-in away first, and the shared address-checking
+    helper refuses anything that is not a piece of text instead of failing. Two checks guard it, because
+    neither covers it alone: three new checks in the two-step self-test (which fail on the old code), and a
+    new `tools/audit-checks/check_2fa_gate_order.py`, which reads the shape of all four gates — proved
+    necessary because reversing the order alone is invisible to the self-test.
+  - **Found by** an automated review by a second system (OpenAI Codex) of the sign-in files, as part of the
+    planned end-of-queue security pass. It reported the callbacks; the password path, the passkey path and
+    the missing gate on 1.4.0 were found by following its lead and by the independent check of the first fix.
 - **Security — an erasure now reaches every activity record a person has (#626, part two)**
   - **What an administrator should know after upgrading**
     1. **What was still wrong after part one.** An erasure finds a person's records by one column, and the portal

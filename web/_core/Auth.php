@@ -1118,18 +1118,42 @@ class Auth
      * @see https://cheatsheetseries.owasp.org/cheatsheets/Unvalidated_Redirects_and_Forwards_Cheat_Sheet.html
      * @see https://url.spec.whatwg.org/#concept-basic-url-parser  (tabs and line breaks are removed)
      *
-     * @param string      $url      The raw redirect URL (typically from $_GET['redirect'])
+     * WHY IT TAKES `mixed` RATHER THAN `string`
+     * Every caller hands this method a value the REQUEST chose, and a request
+     * chooses the TYPE as well as the value. Five callers pass
+     * `$_GET['redirect']`, where `?redirect[]=x` makes PHP hand over an ARRAY;
+     * `_apps/auth/login/webauthn.php` passes `$input['redirect']` out of the
+     * posted JSON, where the type is chosen just as freely. While this was
+     * declared `string $url`, such a value threw a TypeError inside the caller,
+     * and on the two-factor gates the request died with the session half built —
+     * found by the Codex review of 27 October 2026, and a fifth gate found after
+     * it by the independent check, precisely because a search for
+     * `safeRedirectUrl($_GET[` cannot see a JSON body. All of those gates were
+     * reordered so a throw there is harmless, but a method whose whole job is to
+     * make untrusted input safe should not be the thing that explodes on it.
+     * Anything that is not a string is treated exactly like a refused address:
+     * the caller gets the fallback. Do not narrow this back to `string`.
+     *
+     * @param mixed       $url      The raw redirect address, normally from
+     *                              `$_GET['redirect']`. Anything that is not a
+     *                              string is refused rather than throwing.
      * @param string|null $fallback Where to go when the address is refused.
      *                              Null (the usual case) means this
      *                              organisation's own front page.
      *
      * @return string A safe redirect URL
      */
-    public static function safeRedirectUrl(string $url, ?string $fallback = null): string
+    public static function safeRedirectUrl(mixed $url, ?string $fallback = null): string
     {
         // 🏠 A default value in the list of parameters must be fixed text, so
         //    the organisation's front page is worked out here instead.
         $fallback ??= Site::url('');
+
+        // 🚫 Not a string at all (an array from `?redirect[]=x`, or a number):
+        //    refuse it the same way a bad address is refused.
+        if (is_string($url) === false) {
+            return $fallback;
+        }
 
         // 🔍 Decode the URL to catch encoded bypass attempts (%2F, %5C, etc.)
         $decoded = rawurldecode($url);
@@ -1324,7 +1348,26 @@ class Auth
         }
 
         /* ----------------------- 1. Validate OAuth state ------------------- */
-        if (isset($_GET['state']) === false || hash_equals($_SESSION['oauth_state'] ?? '', $_GET['state'] ?? '') === false) {
+        // 🛡️ The STORED state must exist and be non-empty before anything is
+        //    compared. This used to be `hash_equals($_SESSION['oauth_state'] ?? '',
+        //    $_GET['state'] ?? '')`, and an empty `?state=` therefore PASSED when no
+        //    sign-in had been started at all: `isset()` is true for an empty string
+        //    and `hash_equals('', '')` is true. That let somebody fetch an
+        //    authorization code for THEIR OWN account and hand a visitor a callback
+        //    address carrying it, signing that visitor into the attacker's account —
+        //    with no credential of the victim's needed. Found by the Codex review,
+        //    27 October 2026. The GUARD'S LOGIC was reproduced against real PHP
+        //    before it was changed; no live Microsoft or Google sign-in was ever
+        //    run, here or in the check, because nothing in this repository can
+        //    get a real authorization code.
+        //    `is_string()` is here because `?state[]=x` would otherwise reach
+        //    hash_equals() as an array and throw.
+        $storedState = (string) ($_SESSION['oauth_state'] ?? '');
+        if ($storedState === ''
+            || isset($_GET['state']) === false
+            || is_string($_GET['state']) === false
+            || hash_equals($storedState, $_GET['state']) === false
+        ) {
             Logger::errorPlatform('Auth', 'Error', 'OAUTH_STATE', 'Invalid OAuth state parameter', '');
             self::oauthError('Invalid OAuth state. Please try signing in again.');
         }
@@ -1470,9 +1513,18 @@ class Auth
         // target. The verify handler promotes `2fa_user_id` back to
         // `user_id` on a successful challenge.
         if (self::userRequires2fa($userId) === true && self::deviceIsTrusted($userId) === false) {
-            $_SESSION['2fa_user_id']    = $userId;
-            $_SESSION['login_redirect'] = self::safeRedirectUrl($_GET['redirect'] ?? '/');
+            // 🛡️ TAKE THE SIGN-IN AWAY FIRST, then work out where to send them.
+            //    This used to build `login_redirect` BEFORE the unset(), and
+            //    safeRedirectUrl() WAS declared `string $url` at the time (it takes
+            //    `mixed` now, as part of the same fix): `?redirect[]=x` on the
+            //    callback made it throw a TypeError with `user_id` still in the
+            //    session. PHP writes the session at shutdown, so the next request saw
+            //    a fully signed-in person who had never passed the second factor —
+            //    exactly the hole this gate exists to close. Order matters more than
+            //    tidiness here; do not move the unset() back down.
+            $_SESSION['2fa_user_id'] = $userId;
             unset($_SESSION['user_id'], $_SESSION['2fa_passed']);
+            $_SESSION['login_redirect'] = self::safeRedirectUrl($_GET['redirect'] ?? '/');
             Logger::activity('LoginMS365Pending2fa', 'MS365 login pending 2FA challenge', $userId);
             header('Location: ' . Site::url('auth/2fa/verify'), true, 302);
             exit();
@@ -1559,7 +1611,26 @@ class Auth
         }
 
         /* ----------------------- 1. Validate OAuth state ------------------- */
-        if (isset($_GET['state']) === false || hash_equals($_SESSION['oauth_state'] ?? '', $_GET['state'] ?? '') === false) {
+        // 🛡️ The STORED state must exist and be non-empty before anything is
+        //    compared. This used to be `hash_equals($_SESSION['oauth_state'] ?? '',
+        //    $_GET['state'] ?? '')`, and an empty `?state=` therefore PASSED when no
+        //    sign-in had been started at all: `isset()` is true for an empty string
+        //    and `hash_equals('', '')` is true. That let somebody fetch an
+        //    authorization code for THEIR OWN account and hand a visitor a callback
+        //    address carrying it, signing that visitor into the attacker's account —
+        //    with no credential of the victim's needed. Found by the Codex review,
+        //    27 October 2026. The GUARD'S LOGIC was reproduced against real PHP
+        //    before it was changed; no live Microsoft or Google sign-in was ever
+        //    run, here or in the check, because nothing in this repository can
+        //    get a real authorization code.
+        //    `is_string()` is here because `?state[]=x` would otherwise reach
+        //    hash_equals() as an array and throw.
+        $storedState = (string) ($_SESSION['oauth_state'] ?? '');
+        if ($storedState === ''
+            || isset($_GET['state']) === false
+            || is_string($_GET['state']) === false
+            || hash_equals($storedState, $_GET['state']) === false
+        ) {
             Logger::errorPlatform('Auth', 'Error', 'OAUTH_STATE', 'Invalid Google OAuth state parameter', '');
             self::oauthError('Invalid OAuth state. Please try signing in again.');
         }
@@ -1698,9 +1769,18 @@ class Auth
         // gate EXACTLY: same session keys, same unset() pair, same
         // deviceIsTrusted() bypass, same redirect target.
         if (self::userRequires2fa($userId) === true && self::deviceIsTrusted($userId) === false) {
-            $_SESSION['2fa_user_id']    = $userId;
-            $_SESSION['login_redirect'] = self::safeRedirectUrl($_GET['redirect'] ?? '/');
+            // 🛡️ TAKE THE SIGN-IN AWAY FIRST, then work out where to send them.
+            //    This used to build `login_redirect` BEFORE the unset(), and
+            //    safeRedirectUrl() WAS declared `string $url` at the time (it takes
+            //    `mixed` now, as part of the same fix): `?redirect[]=x` on the
+            //    callback made it throw a TypeError with `user_id` still in the
+            //    session. PHP writes the session at shutdown, so the next request saw
+            //    a fully signed-in person who had never passed the second factor —
+            //    exactly the hole this gate exists to close. Order matters more than
+            //    tidiness here; do not move the unset() back down.
+            $_SESSION['2fa_user_id'] = $userId;
             unset($_SESSION['user_id'], $_SESSION['2fa_passed']);
+            $_SESSION['login_redirect'] = self::safeRedirectUrl($_GET['redirect'] ?? '/');
             Logger::activity('LoginGooglePending2fa', 'Google login pending 2FA challenge', $userId);
             header('Location: ' . Site::url('auth/2fa/verify'), true, 302);
             exit();

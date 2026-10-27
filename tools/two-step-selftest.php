@@ -155,7 +155,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 90;
+const EXPECTED_CHECKS = 93;
 
 function refuse(string $why): never
 {
@@ -1620,6 +1620,40 @@ $coldPage  = req($coldJar, 'GET', $cold['location'] === '' ? '/auth/2fa/setup' :
 ok('J3 a code sent when no key is waiting switches nothing on, and the page says it has made a new key to add to the app',
     $cold['status'] === 302 && $cold['location'] === '/auth/2fa/setup' && str_starts_with(said($coldPage), 'warning: This page had been open too long, so it has made a new key') === true && keyOn($coldPage['body']) !== ''
     && (int) one('SELECT totpEnabled FROM tblUsers WHERE userID = ?', 'i', [PEOPLE['kim']])['totpEnabled'] === 0, describe($cold) . '; the page then said: ' . said($coldPage));
+
+// =============================================================================
+// Z. A list sent as the address to come back to does not sign anybody in
+// =============================================================================
+// WHY THIS IS HERE. Until 27 October 2026 all four two-step gates worked out
+// where to send the person BEFORE they took the sign-in away, and
+// Auth::safeRedirectUrl() was declared `string $url`. A request chooses the
+// TYPE of what it sends as well as the value, so `?redirect[]=x` handed PHP an
+// array, the call threw, the unset() never ran, and PHP wrote the session at
+// shutdown - leaving somebody fully signed in who was never asked for a code.
+// On this path that needed nothing but the person's password, which is the one
+// thing two-step sign-in exists to survive. Found by the Codex review of the
+// sign-in files, and reproduced live on the old code: the browser really was
+// signed in.
+//
+// Z1 and Z2 fail if the gates go back to the old order AND safeRedirectUrl() is
+// narrowed to `string` again. They do NOT fail if only the ordering is reversed,
+// because the `mixed` signature stops the throw - that half is held by
+// tools/audit-checks/check_2fa_gate_order.py instead. Both are needed, and this
+// comment is here so nobody removes one believing the other covers it.
+// Same family as C11 above ("a list sent where a code is expected").
+head('Z. A list sent as the address to come back to does not sign anybody in');
+
+$zJar  = newJar();
+$zForm = req($zJar, 'GET', '/login', null, ip(90));
+$zIn   = req($zJar, 'POST', '/login?redirect%5B%5D=x', ['csrf_token' => token($zForm['body']), 'username' => login('anna'), 'password' => $password], ip(90));
+ok('Z1 the password form posted to /login?redirect[]=x leaves nobody signed in', signedIn($zJar, ip(90)) === false, describe($zIn));
+ok('Z2 and it still sends the person to the code page', $zIn['status'] === 302 && $zIn['location'] === '/auth/2fa/verify', describe($zIn));
+
+$yJar  = newJar();
+$yForm = req($yJar, 'GET', '/login', null, ip(91));
+$yIn   = req($yJar, 'POST', '/login?redirect=%2Faccount', ['csrf_token' => token($yForm['body']), 'username' => login('anna'), 'password' => $password], ip(91));
+$yDone = codeStep($yJar, ip(91), ['code' => appCode($key)]);
+ok('Z3 control: an ordinary ?redirect= still carries the person there after the code', $yIn['location'] === '/auth/2fa/verify' && $yDone['status'] === 302 && $yDone['location'] === '/account' && signedIn($yJar, ip(91)) === true, describe($yIn) . ' then ' . describe($yDone));
 
 // =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');

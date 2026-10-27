@@ -126,13 +126,6 @@ if ($action === 'auth_verify') {
             // 🌐 Set active site ID for multi-site context
             Auth::initSessionSite($webauthnUserId, $mysqli);
 
-            // 🛡️ Route through Auth::safeRedirectUrl() (security-review
-            // follow-up) — the previous inline check missed backslash/scheme
-            // tricks that the shared helper rejects, so a value like
-            // "/\evil.com" (browsers normalise "/\" → "//") slipped through as
-            // a protocol-relative open redirect. The password + SSO paths
-            // already use safeRedirectUrl(); this brings WebAuthn to parity.
-            $redirect = Auth::safeRedirectUrl($input['redirect'] ?? Site::url(''));
 
             // ------------------------------------------------------------
             // 🔐 2FA gate (#B2)
@@ -149,18 +142,45 @@ if ($action === 'auth_verify') {
             // silent full bypass of 2FA. Mirrors the password login path
             // (`_apps/auth/login/index.php`) EXACTLY: same session keys
             // (`2fa_user_id`, `login_redirect`), same unset() pair, same
-            // deviceIsTrusted() "remembered device" bypass. The response
+            // deviceIsTrusted() "remembered device" bypass — and, since
+            // 27 October 2026, the same ORDER as well: the unset() comes
+            // before the address is worked out. It did not before, which is
+            // what the note below is about. The response
             // shape stays `{success, redirect}` — the login page's JS
             // already just follows `redirect`, so no front-end change is
             // needed to route it to the 2FA challenge instead of home.
+            //
+            // 🛡️ TAKE THE SIGN-IN AWAY FIRST, and work out the address AFTER.
+            //    Until 27 October 2026 the address was worked out ABOVE this
+            //    gate, and `Auth::safeRedirectUrl()` was declared `string $url`.
+            //    `$input` is the posted JSON, so the CALLER chooses the type:
+            //    `{"redirect":["x"]}` made that call throw a TypeError while
+            //    `$_SESSION['user_id']` was already set. The `catch (\Throwable)`
+            //    at the foot of this block swallowed it and answered
+            //    "Authentication failed." — so somebody holding a passkey for a
+            //    two-factor account was told they had FAILED while being left
+            //    signed in, with the second factor never asked for. The quietest
+            //    of the five places this shape appeared, and the last found: a
+            //    search for `safeRedirectUrl($_GET[` cannot see a JSON body.
             if (Auth::userRequires2fa($webauthnUserId) === true && Auth::deviceIsTrusted($webauthnUserId) === false) {
-                $_SESSION['2fa_user_id']    = $webauthnUserId;
-                $_SESSION['login_redirect'] = $redirect;
+                $_SESSION['2fa_user_id'] = $webauthnUserId;
                 unset($_SESSION['user_id'], $_SESSION['2fa_passed']);
+                $_SESSION['login_redirect'] = Auth::safeRedirectUrl($input['redirect'] ?? Site::url(''));
                 Logger::activity('LoginWebAuthnPending2fa', 'Passkey login pending 2FA challenge: ' . ($row['friendlyName'] ?? 'Passkey'));
                 echo json_encode(['success' => true, 'redirect' => Site::url('auth/2fa/verify')]);
                 exit();
             }
+
+            // 🛡️ Route through Auth::safeRedirectUrl() (security-review
+            // follow-up) — the previous inline check missed backslash/scheme
+            // tricks that the shared helper rejects, so a value like
+            // "/\evil.com" (browsers normalise "/\" → "//") slipped through as
+            // a protocol-relative open redirect. The password + SSO paths
+            // already use safeRedirectUrl(); this brings WebAuthn to parity.
+            // Worked out HERE, below the two-factor gate, so that nothing which
+            // touches caller-chosen input can run while this session still holds
+            // an identity it has not finished earning.
+            $redirect = Auth::safeRedirectUrl($input['redirect'] ?? Site::url(''));
 
             Logger::activity('LoginWebAuthn', 'User logged in via passkey: ' . ($row['friendlyName'] ?? 'Passkey'));
 

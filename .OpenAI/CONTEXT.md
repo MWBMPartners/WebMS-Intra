@@ -556,6 +556,35 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     the database would still make sense beside it. Tests: `tools/backup-
     restore-selftest.php`, `tools/backup-page-selftest.php`.
 
+    **Every two-factor gate takes the sign-in away FIRST (27 October 2026).**
+    There are FOUR gates that demote a session to "waiting for a code" — the two
+    sign-in callbacks in `Auth.php`, `_apps/auth/login/index.php` and
+    `_apps/auth/login/webauthn.php` — and in each,
+    `unset($_SESSION['user_id'], $_SESSION['2fa_passed'])` comes BEFORE anything
+    else, `login_redirect` included. All four had it the other way round: a
+    request chooses the TYPE of what it sends as well as the value, so
+    `?redirect[]=x` made `Auth::safeRedirectUrl()` throw while `user_id` was
+    still set, PHP wrote the session at shutdown, and the next request saw
+    somebody signed in who was never asked for a code. **On the password form
+    that needed nothing but the person's password.** `Auth::safeRedirectUrl()`
+    therefore takes `mixed` and refuses a non-string with the fallback: never
+    narrow it back to `string`, and never put a call that can throw between
+    granting an identity and the check that earns it. A gate found by searching
+    for `$_GET` will be missed — the passkey path reads the posted JSON. Checks,
+    and BOTH are needed because neither catches the other's half:
+    `tools/audit-checks/check_2fa_gate_order.py` (the order) and section Z of
+    `tools/two-step-selftest.php` (the behaviour). Reversing the order alone is
+    invisible to the self-test; that was measured, not assumed.
+
+    **An OAuth `state` must be a non-empty STORED value (27 October 2026).**
+    Both callbacks compared `$_SESSION['oauth_state'] ?? ''` with
+    `$_GET['state'] ?? ''`, so an address carrying an empty `state=` passed when
+    no sign-in had been started: `hash_equals('', '')` is true. That signed a
+    visitor into whoever's authorization code was supplied. The stored value is
+    now required to be non-empty before anything is compared, and a non-string
+    is refused so `?state[]=x` cannot reach `hash_equals()`. Do not simplify
+    that condition back.
+
     **Two-factor authentication (#613).** `auth/2fa/setup.php` is the ONE place
     backup codes are made, and it shows them only in the answer to the request
     that made them: never put a code, or the authenticator key, readable in
