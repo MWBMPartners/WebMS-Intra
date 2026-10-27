@@ -231,6 +231,23 @@ final class FeedImporter
         //    zero means "no limit", which is what a command line gives.
         //    The "only when too low, never lowered, and not on a host that
         //    has switched the function off" logic now lives in TimeLimit (#563).
+        // 🧯 EVERYTHING FROM HERE TO THE CLAIM IS INSIDE A GUARD TOO.
+        //    This block used to sit OUTSIDE the try below, under a docblock
+        //    promising that this method NEVER throws — and it does real work:
+        //    it reads the calendar's row, asks whether it was refreshed a
+        //    moment ago, claims it, and asks the database the time. Any of
+        //    those can throw (a lock wait timing out is the ordinary case),
+        //    and the exception went straight past the handler to the caller.
+        //    The scheduled job would then stop on the first awkward calendar
+        //    and silently refresh none of the others, which is the exact thing
+        //    that docblock exists to prevent. Found by the Codex review,
+        //    27 October 2026.
+        //
+        //    It is a SEPARATE guard rather than a bigger one, because the
+        //    handler below needs $feed and $runStart and neither exists yet.
+        $claimed = false;
+        $siteId  = 0;
+        try {
         TimeLimit::atLeast(self::PER_FEED_SECONDS + 20);
 
         $feed = self::feedRow($db, $feedId);
@@ -264,7 +281,54 @@ final class FeedImporter
         //    the removal rule compares a value PHP writes against a value the
         //    database wrote — a few seconds the wrong way round there would
         //    mean an event the refresh had just seen looking unseen.
+        $claimed  = true;
         $runStart = self::databaseNowUtc($db);
+        } catch (\Throwable $problem) {
+            // 🧯 Nothing gets out of here either. The message names the KIND of
+            //    fault and nothing else, for the same reason as the handler
+            //    below: an exception's own words can carry a piece of the
+            //    calendar, a column value or the address.
+            self::rollBackQuietly($db);
+
+            // Only release a lease this refresh actually took. Releasing one
+            // unconditionally would hand another refresh's claim away, which
+            // is a fault in its own right (see the lease note on claim()).
+            if ($claimed === true) {
+                self::releaseLeaseQuietly($db, $feedId);
+            }
+
+            // 🏷️ THE FAULT MUST BE RECORDED AGAINST ITS OWN ORGANISATION, and
+            //    the commonest way to get here is the calendar's own row
+            //    failing to read — so $siteId is still 0. Ask for just that one
+            //    number, with its own guard: it names no column that a fault in
+            //    reading the full row would involve, so it answers when the
+            //    bigger read does not. If even this fails there is nothing left
+            //    to go on and 0 is recorded, which is visibly "not known"
+            //    rather than a wrong organisation.
+            if ($siteId === 0) {
+                try {
+                    $find = $db->prepare('SELECT siteID FROM tblExternalFeeds WHERE feedID = ?');
+                    if ($find !== false) {
+                        $find->bind_param('i', $feedId);
+                        $find->execute();
+                        $found = $find->get_result()->fetch_assoc();
+                        $find->close();
+                        $siteId = (int) ($found['siteID'] ?? 0);
+                    }
+                } catch (\Throwable $ignored) {
+                    $siteId = 0;
+                }
+            }
+
+            self::logProblem($siteId, $feedId, $problem, 'FeedRefreshThrew');
+
+            return [
+                'outcome'    => 'failed',
+                'message'    => 'The refresh could not be started (' . self::shortClassName($problem)
+                              . '). No events were changed.',
+                'newPending' => 0,
+            ];
+        }
 
         try {
             return self::afterClaim($db, $feed, $trigger, $byUserId, $started, $runStart);
@@ -608,8 +672,25 @@ final class FeedImporter
      *     point at are still there to join to.
      *   * The neutral series rows the importer made. They are recognised by
      *     the `imp-` address the importer gives them AND by being one of this
-     *     calendar's own events' series, so a series somebody made by hand can
-     *     never be caught by this even if they happened to name it that way.
+     *     calendar's own events' series.
+     *
+     *     THAT IS NOT QUITE THE GUARANTEE IT READS AS, and this used to claim
+     *     a series made by hand "can never be caught by this even if they
+     *     happened to name it that way". It can, by one route: the importer
+     *     ADOPTS any series whose address already matches the one it is about
+     *     to use (see seriesIdFor()), without asking who made it. A hand-made
+     *     series carrying that exact address therefore becomes one of this
+     *     calendar's own events' series — and then both tests are satisfied
+     *     and it is deleted with the calendar.
+     *
+     *     The address is `imp-` plus 16 characters of a SHA-256 of the
+     *     calendar's number and the event's own identifier, so hitting it by
+     *     accident is not a realistic worry; somebody would have to be told
+     *     the value. It is written down because an overstated guarantee is
+     *     worse than none, and because the proper fix — recording which
+     *     series the importer created, so adoption can refuse the rest —
+     *     needs a new column and so a migration. Found by the Codex review,
+     *     27 October 2026.
      *
      * @return bool True when a calendar of that organisation was deleted.
      */

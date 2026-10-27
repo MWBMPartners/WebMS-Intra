@@ -2887,6 +2887,21 @@ try {
     // happens when it cannot keep that promise. Before the fix the job died on
     // the first such calendar, printed no summary and abandoned the rest — the
     // exact opposite of the promise written beside it.
+    //
+    // NOTE, 27 October 2026. This plants its fault by renaming a column, so the
+    // calendar's own row cannot be read. That used to escape refreshOne()
+    // altogether and be caught by the JOB's net in cron/import-feeds.php, which
+    // is what recorded 'FeedRefreshThrew'. refreshOne() now guards that work
+    // itself — the Codex review pointed out that it was doing real database
+    // work OUTSIDE its try, under a docblock promising it never throws — and
+    // records the same code against the same organisation, so every check below
+    // still reads exactly as it did and still passes.
+    //
+    // What that costs: the job's own net is no longer reached by this plant,
+    // because the gap it was reached through is closed. The net is still there
+    // and still right to keep; it is simply harder to exercise. If you need to
+    // prove it fires, you now have to break something refreshOne() cannot
+    // guard, not something it can.
     $mysqli->query('DELETE FROM tblErrors');
     foreach ($jobFeeds as $feedId) {
         fi_makeDue($feedId);
