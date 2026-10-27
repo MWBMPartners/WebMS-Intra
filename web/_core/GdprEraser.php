@@ -732,6 +732,87 @@ class GdprEraser
             //    the only place left that can. An account that names nobody
             //    should not still be counted as an administrator.
             //
+            // 🧾 THE ACTIVITY LOG (#626, 27 October 2026; the owner's
+            //    decision, taken before roll-out).
+            //
+            //    Until this entry existed, an erasure emptied ONLY the account
+            //    number on a person's activity records — because the written
+            //    list marks this table "unlink", and the derived route gives
+            //    such a table one instruction per ACCOUNT column and empties
+            //    nothing else. Everything that makes the record identify a
+            //    person stayed: the address the request came from, the
+            //    browser's name, the request's headers, the fingerprint of the
+            //    browser session, and the short list of facts about the
+            //    session — which held the very account number the erasure had
+            //    just emptied in the column beside it. An address and a
+            //    browser name together identify a household; the headers can
+            //    hold far more than that.
+            //
+            //    The written list named all five as what makes this table
+            //    personal, so the portal was not doing what its own list said.
+            //
+            //    WHY A HAND-WRITTEN ENTRY. `nullCols` is the only way to empty
+            //    a column that is not itself a link to an account, and the
+            //    derived route never sets it. A hand-written entry wins over
+            //    the derived one for the whole table, so this one must keep
+            //    doing everything the derived one did: it matches on `userID`
+            //    and processEntry() always empties the matched column too, so
+            //    the link is still cut.
+            //
+            //    WHAT IS NOT TOUCHED. The record itself stays — what happened,
+            //    when, and under which organisation. That is the point of
+            //    keeping an activity log at all. Only rows carrying THIS
+            //    person's number are changed; a row about somebody else is
+            //    not read.
+            //
+            //    ⚠️ WHAT THIS DOES NOT REACH, AND SO #626 IS NOT CLOSED BY IT.
+            //    An instruction matches ONE COLUMN: here `userID`. But
+            //    Logger::activity() takes the account number as an OPTIONAL
+            //    third argument, and 279 of the 582 calls under web/ leave it
+            //    out — including Auth.php's own 'LoginLocal' line, which runs
+            //    after the session already holds the account. Those records
+            //    have an EMPTY userID column and session facts that say
+            //    `"userID": <the person>`, beside their address, browser name,
+            //    headers and fingerprint. **An erasure never reaches them.**
+            //
+            //    So do not read this instruction as "the activity log is
+            //    dealt with". It deals with the records that name the person
+            //    in the column; the ordinary sign-in record is not one of
+            //    them. Closing the rest means matching on something else —
+            //    the fingerprint is the candidate — and that carries two
+            //    traps: the fingerprints must be collected BEFORE this
+            //    instruction empties them, and a shared kiosk means one
+            //    fingerprint is not proof of one person, which is exactly how
+            //    this eraser has wiped other people's records before. It is
+            //    the owner's decision and is written up on #626.
+            //
+            //    Section 17 of tools/gdpr-eraser-selftest.php pins the gap
+            //    with a check that ASSERTS it, so nobody can record it as
+            //    correct behaviour. An earlier draft of that section did.
+            //
+            //    THE ONE THING THIS COSTS, said plainly. The monthly sign-ins
+            //    figure (admin/reports/data.php) links a password sign-in to
+            //    the code page through `sessionID`. With the fingerprint gone,
+            //    an erased person's password-and-code sign-ins count twice in
+            //    that figure. That cost was already written down in that file
+            //    as though this change had been made — the comment said the
+            //    eraser blanked `sessionID` and it did not — so the figure's
+            //    own notes have described this behaviour all along. Keeping
+            //    the fingerprint to protect a count, on records that are
+            //    supposed to stop identifying somebody, is the wrong way
+            //    round.
+            //
+            //    Tried and rejected: adding these five to the written list's
+            //    `columns` and hoping the derived route would deal with them.
+            //    It does not — it only looks there for columns that ARE
+            //    account numbers, which is why all five were named in the
+            //    list and still left alone for months.
+            ['table' => 'tblActivityLogs', 'userCol' => 'userID', 'action' => 'anonymise',
+             'nullCols' => ['requestHeaders', 'sessionID', 'visitorIP', 'userAgent', 'sessionDataSnapshot'],
+             'reason' => 'the record of what happened is kept for running and repairing the portal; everything that could '
+                 . 'point it back at the person is removed: the account number, the address the request came from, the '
+                 . 'browser\'s name, the request\'s headers, the session\'s fingerprint and the facts about the session'],
+
             // 📅 `calendarToken` and `notifyPrefs` are cleared since the same
             //    day. The token is the key inside the person's private
             //    calendar-feed address, and the feed looks an account up by

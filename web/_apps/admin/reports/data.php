@@ -113,8 +113,16 @@ switch ($report) {
         //      it. LoginLocal does not, because Logger is not given the user
         //      number there. The link is then lost for that person: each of
         //      their password-and-code sign-ins counts twice, and an abandoned
-        //      one with a recorded wrong code counts once. Checked on the test
-        //      database by applying that UPDATE by hand.
+        //      one with a recorded wrong code counts once.
+        //      ⚠️ THIS SENTENCE WAS NOT TRUE WHEN IT WAS WRITTEN, and it is
+        //      now. Until #626 (27 October 2026) the eraser emptied ONLY
+        //      `userID` on a person's activity records: the fingerprint, the
+        //      address, the browser name, the headers and the session facts
+        //      all stayed. Whoever wrote this had applied the UPDATE to a
+        //      test database BY HAND and measured what it did to this figure
+        //      — which is why the consequence described here is right while
+        //      the claim about the eraser was wrong. The eraser now does it,
+        //      so the double count above is real. Do not "correct" it back.
         //    - Signing up through an invitation signs the person in but
         //      writes no activity row, so it is not counted.
         //    - A sign-in counts under the organisation that was active when

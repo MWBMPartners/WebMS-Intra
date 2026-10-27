@@ -259,13 +259,36 @@ class Logger
      * change SESSION_FACTS_FORMAT, and make migration 220's test for "a copy
      * written by this list" accept both.
      *
-     * WHAT THIS CANNOT DO. It does not make an erasure complete. When a
-     * person is erased, GdprEraser empties `userID` on their activity
-     * records and nothing else on them, so the account NUMBER written here
-     * stays (and so does the fingerprint). That gap is older than #622: the
-     * whole-session copy stayed in the same way, with the person's name and
-     * e-mail address in it. It is written up beside #622 and not changed
-     * here.
+     * WHAT THIS CANNOT DO, AND IT IS THE IMPORTANT PART (#626, 27 October
+     * 2026). An erasure now empties the address, the browser name, the
+     * headers, the fingerprint AND this list of facts — but ONLY on records
+     * whose `userID` COLUMN holds the person's number, because that is what
+     * it matches on (`UPDATE ... WHERE userID = ?`).
+     *
+     * **This method is where that gap bites.** `activity()` takes the account
+     * number as an OPTIONAL third argument, and 279 of the 582 calls under
+     * `web/` leave it out — Auth.php's own 'LoginLocal' line among them,
+     * which runs AFTER $_SESSION holds the account. On such a record the
+     * userID column is empty while the facts written here say
+     * `"userID": <the person>`. An erasure never reaches it, so the person's
+     * address, browser name, headers and account number all survive it.
+     *
+     * So: **issue #626's acceptance criterion is not met**, and saying it is
+     * would be the worst outcome, because an incomplete erasure that looks
+     * complete is what #626 was reported for. Closing it means matching on
+     * something other than the userID column — the fingerprint is the
+     * obvious candidate, with two traps written up in the issue (collect the
+     * fingerprints BEFORE the instruction empties them, and a shared kiosk
+     * means one fingerprint is not proof of one person). That is a decision
+     * for the owner and is not built here.
+     *
+     * The gap is older than #622: the whole-session copy stayed in the same
+     * way, with the person's name and e-mail address in it.
+     *
+     * PINNED BY A TEST: section 17 of tools/gdpr-eraser-selftest.php asserts
+     * this gap on purpose, and says so, so that nothing can quietly record it
+     * as correct behaviour again. An earlier draft of that section did
+     * exactly that.
      *
      * @return array{format: string, signedIn: bool, userID: int|null, organisationID: int|null, waitingForCodeUserID: int|null, kioskUserID: int|null}|null
      */

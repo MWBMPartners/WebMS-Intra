@@ -226,10 +226,10 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 225;
+const EXPECTED_CHECKS = 230;
 
 // The headings that must all be reached for a pass.
-const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16'];
+const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17'];
 
 // 🗺️ The made-up people and requests. Every number is 920000 or higher, far
 //    above anything the fresh-install script seeds.
@@ -276,6 +276,11 @@ const REQ_L       = 940084;
 const REQ_M       = 940085;
 const REQ_N       = 940086;
 const REQ_O       = 940087;
+// #626 (27 October 2026), section 17: the activity log's details. The numbers
+// are well clear of every other person's: the first draft reused 920091, which
+// section 14 already had, and the run stopped on a duplicate account.
+const P_LOG   = 920201; // erased in section 17
+const REQ_LOG = 940201;
 const SITE_G1     = 3;      // "tax gifts only" (the default rule), in Europe/London
 const SITE_G2     = 4;      // "every gift", in Pacific/Auckland
 const SITE_K      = 12;     // section 16: "tax gifts only", in Pacific/Kiritimati, fourteen hours AHEAD of UTC
@@ -4582,5 +4587,147 @@ ge_ok('KEPT UNTIL TODAY AT THE LAST PLACE ON EARTH IS NOT CLEARED, though in Kir
     && $askedK === 'not-due' && $keptKNow['fullName'] === 'Kiri Ahead' && $keptKNow['address'] === '9 Dateline Drive' && $keptKNow['clearedAt'] === null
     && (int) ge_row($q['gift'])['donorID'] === P_Q && ge_row($q['declaration'])['address'] === '9 Dateline Drive',
     json_encode(['state' => $stateK, 'the clearing said' => $askedK, 'kept row' => $keptKNow, 'Kiritimati\'s own date' => $ownK]));
+
+// =============================================================================
+ge_section('17', 'The activity log: an erased person\'s records keep what happened and lose everything that points at them (#626, 27 October 2026)');
+// =============================================================================
+// WHAT THIS IS FOR. The written list names six columns as what makes this
+// table personal, and until #626 the erasure emptied one of them. Everything
+// else stayed: the address the request came from, the browser's name, the
+// request's headers, the fingerprint of the browser session, and the short
+// list of facts about the session — which held the very account number the
+// erasure had just emptied in the column beside it. An address and a browser
+// name together identify a household.
+//
+// The coverage test (tools/gdpr-coverage-selftest.php) proves the INSTRUCTION
+// is there and cannot be hidden. This proves the statement it builds actually
+// runs on a database, and that it touches nothing it should not: a record of
+// somebody else's, and a record written when nobody was signed in.
+//
+// WHAT IS KEPT ON PURPOSE: what happened, when, and which organisation it
+// happened under. That is the whole reason for keeping an activity log, and
+// those three say nothing about who the person was.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+ge_user(P_LOG, 'Ray Record', 'ray.record@selftest.invalid');
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+
+// Three of the person's own records and two that must not be touched.
+$logInsert = static function (?int $user, string $type, string $description, ?string $session, ?string $ip, ?string $agent, ?string $facts, ?string $headers): int {
+    ge_q(
+        'INSERT INTO tblActivityLogs (siteID, userID, activityType, activityDescription, sessionID, visitorIP, userAgent, sessionDataSnapshot, requestHeaders) '
+        . 'VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'isssssss',
+        [$user, $type, $description, $session, $ip, $agent, $facts, $headers]
+    );
+    // The connection is a global that ge_q() reaches for; a closure does not
+    // see it, so the new row's number is asked for in SQL rather than read off
+    // the connection object. The first draft read $mysqli->insert_id here, got
+    // null, and every check in this section failed with "null" for every row.
+    return (int) (ge_one('SELECT LAST_INSERT_ID() AS n')['n'] ?? 0);
+};
+$fingerprint = 'sha256:' . str_repeat('a', 64);
+$facts       = '{"format":"facts-1","signedIn":true,"userID":' . P_LOG . ',"organisationID":1}';
+$logFull   = $logInsert(P_LOG, 'LoginLocal', 'Ray signed in', $fingerprint, '203.0.113.9', 'Mozilla/5.0 (Ray\'s laptop)', $facts, '{"Accept-Language":"en-GB","Referer":"/dashboard"}');
+$logSparse = $logInsert(P_LOG, 'ExpenseSubmitted', 'Ray sent in a claim', $fingerprint, '203.0.113.9', null, null, null);
+$logNoSess = $logInsert(P_LOG, 'PasswordChanged', 'Ray changed their password', null, '198.51.100.4', 'curl/8.4.0', null, null);
+// Somebody else's record, with the SAME fingerprint and address — two people
+// behind one router, or a shared machine. It must survive untouched: this is
+// the shape that caught an earlier erasure wiping other people's names.
+$logOther  = $logInsert(D, 'LoginLocal', 'Dee signed in', $fingerprint, '203.0.113.9', 'Mozilla/5.0 (Dee\'s laptop)', '{"format":"facts-1","signedIn":true,"userID":' . D . '}', '{"Accept-Language":"en-GB"}');
+// A record written when nobody really was signed in: no session of any kind,
+// so nothing on it can be matched to anybody. Genuinely not this person's.
+$logAnon   = $logInsert(null, 'LoginFailed', 'a wrong password', null, '203.0.113.9', 'Mozilla/5.0 (Ray\'s laptop)', null, '{"Accept-Language":"en-GB"}');
+// ───── THE KNOWN LIMIT (#626, second half not built) ─────
+// A record of the ERASED PERSON'S OWN, written while they were signed in, whose
+// `userID` COLUMN is empty because the call did not pass the number — and whose
+// session facts name them all the same. Logger::activity() takes the number as
+// an optional third argument and 279 of the 582 calls under web/ leave it out,
+// Auth.php's own 'LoginLocal' line among them, which runs AFTER the session
+// holds the account. So this is the ordinary shape of a sign-in record, not an
+// odd one.
+$logFactsOnly = $logInsert(null, 'LoginLocal', 'Ray signed in, by a call that passed no account number', $fingerprint, '203.0.113.9', 'Mozilla/5.0 (Ray\'s laptop)', $facts, '{"Accept-Language":"en-GB","Referer":"/dashboard"}');
+
+$readLog = static fn (int $id): ?array => ge_one(
+    'SELECT userID, activityType, activityDescription, sessionID, visitorIP, userAgent, sessionDataSnapshot, requestHeaders, siteID, timestamp '
+    . 'FROM tblActivityLogs WHERE logID = ?',
+    'i',
+    [$id]
+);
+$otherBefore     = $readLog($logOther);
+$anonBefore      = $readLog($logAnon);
+$factsOnlyBefore = $readLog($logFactsOnly);
+
+ge_request(REQ_LOG, P_LOG, 'ray.record@selftest.invalid', 'Ray Record', 'processing');
+$resultLog = ge_execute(REQ_LOG, P_LOG);
+
+$full   = $readLog($logFull);
+$sparse = $readLog($logSparse);
+$noSess = $readLog($logNoSess);
+
+// Everything that points at the person is empty. Written out column by column
+// rather than as a loop, so a failure says which one was left behind.
+$emptied = static fn (?array $row): bool => is_array($row) === true
+    && $row['userID'] === null
+    && $row['sessionID'] === null
+    && $row['visitorIP'] === null
+    && $row['userAgent'] === null
+    && $row['sessionDataSnapshot'] === null
+    && $row['requestHeaders'] === null;
+
+ge_ok('THE ERASED PERSON\'S ACTIVITY RECORDS LOSE EVERY DETAIL THAT POINTS AT THEM: the account number, the address the request came from, the browser\'s name, the request\'s headers, the session\'s fingerprint and the facts about the session are all empty, on a record that held all six and on two that held only some',
+    is_array($resultLog) === true && $resultLog['failed'] === 0
+    && $emptied($full) === true && $emptied($sparse) === true && $emptied($noSess) === true,
+    json_encode(['the run' => is_array($resultLog) === true ? ['failed' => $resultLog['failed'], 'steps' => $resultLog['steps'] ?? null] : (string) $resultLog,
+        'held all six' => $full, 'held some' => $sparse, 'no session' => $noSess]));
+
+ge_ok('AND THE RECORD OF WHAT HAPPENED IS KEPT: the kind of activity, its description, the moment and the organisation are all exactly as they were, so the log still serves running and repairing the portal',
+    is_array($full) === true
+    && $full['activityType'] === 'LoginLocal' && $full['activityDescription'] === 'Ray signed in'
+    && (int) $full['siteID'] === 1
+    && is_array($sparse) === true && $sparse['activityType'] === 'ExpenseSubmitted'
+    && is_array($noSess) === true && $noSess['activityType'] === 'PasswordChanged',
+    json_encode(['held all six' => $full, 'held some' => $sparse, 'no session' => $noSess]));
+
+ge_ok('SOMEBODY ELSE\'S RECORD IS NOT TOUCHED, although it carries the SAME session fingerprint and the SAME address as the erased person\'s: every column of it is as it was',
+    ge_same($otherBefore, $readLog($logOther)) === true,
+    json_encode(['before' => $otherBefore, 'after' => $readLog($logOther)]));
+
+ge_ok('A RECORD WRITTEN WITH NO SESSION AT ALL IS NOT TOUCHED EITHER: it has no account number and no session, so nothing on it can be matched to anybody',
+    ge_same($anonBefore, $readLog($logAnon)) === true,
+    json_encode(['before' => $anonBefore, 'after' => $readLog($logAnon)]));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE KNOWN LIMIT, PINNED SO IT CANNOT BE MISTAKEN FOR CORRECT BEHAVIOUR.
+//
+// This check asserts a GAP, not a guarantee. It exists because the first
+// version of this section asserted the opposite: it seeded a row with an empty
+// `userID` column, called it "written when nobody was signed in", and passed —
+// so the test agreed that leaving the person's details on their own records was
+// right. In this portal an empty `userID` COLUMN does not mean nobody was
+// signed in. The independent check of 27 October 2026 found that.
+//
+// WHAT IS STILL WRONG, said plainly: an erasure matches `WHERE userID = ?`, so
+// it reaches only the records whose userID column holds the number. On every
+// record written by a call that passed no number — the ordinary shape of a
+// sign-in record — the address, the browser name, the headers, the fingerprint
+// AND the session facts naming the person all survive the erasure. **Issue
+// #626's acceptance criterion is therefore not met**, and the second half is a
+// decision for the owner (match on the fingerprint, with the two traps written
+// up in the issue, or accept the limit in writing).
+//
+// WHEN THAT IS BUILT, THIS CHECK MUST FAIL, and that is the point: it is the
+// tripwire that makes somebody come back here. Replace it then with the
+// opposite assertion — do not simply delete it.
+// ─────────────────────────────────────────────────────────────────────────────
+$factsOnlyAfter = $readLog($logFactsOnly);
+ge_ok('THE KNOWN LIMIT (#626, not closed): a record of the person\'s OWN, written by a call that passed no account number, is NOT cleared — its address, browser name, headers, fingerprint and the session facts naming them all survive the erasure. This check asserts a GAP. When the second half of #626 lands it MUST fail, and must then be replaced by the opposite assertion, not deleted',
+    ge_same($factsOnlyBefore, $factsOnlyAfter) === true
+    && is_array($factsOnlyAfter) === true
+    && $factsOnlyAfter['userID'] === null
+    && is_string($factsOnlyAfter['sessionDataSnapshot']) === true
+    && str_contains((string) $factsOnlyAfter['sessionDataSnapshot'], '"userID":' . P_LOG) === true
+    && $factsOnlyAfter['visitorIP'] === '203.0.113.9',
+    json_encode(['before' => $factsOnlyBefore, 'after' => $factsOnlyAfter,
+        'what this means' => 'if this check FAILED, the gap may have been closed — read the comment above it before changing anything']));
 
 ge_finish();

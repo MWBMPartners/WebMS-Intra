@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 60;
+const EXPECTED_CHECKS = 63;
 
 $failures = 0;
 $passes   = 0;
@@ -602,6 +602,177 @@ check(
     'no instruction empties a second person column "in passing": each such column has to be matched on in its own right',
     $emptiedInPassing === [],
     implode('; ', $emptiedInPassing) . ' -- give that column an instruction of its own'
+);
+
+// -----------------------------------------------------------------------------
+// 8b. A COLUMN THE WRITTEN LIST NAMES AND NOTHING EMPTIES (#626, 27 October
+//     2026).
+//
+//     The check above asks about columns that hold an ACCOUNT NUMBER. This one
+//     asks about the rest: a column the written list names as what makes a
+//     table personal, which is not an account number, on a table the list
+//     promises to "unlink". Such a column has to be emptied by some
+//     instruction, or the table keeps pointing at the person after the
+//     erasure.
+//
+//     THIS IS WHAT #626 WAS. Six columns were named for the activity log and
+//     only one, `userID`, was ever emptied. The address the request came from,
+//     the browser's name, the headers, the session's fingerprint and the facts
+//     about the session all stayed — and the facts held the account number
+//     that had just been emptied beside them. Nothing noticed for months,
+//     because every check here was about account numbers.
+//
+//     THE PINNED LIST BELOW IS NOT AN EXCUSE LIST. It is the 35 tables that
+//     were in that state on the day this check was written. They are pinned by
+//     name so that:
+//       - a table NOT on the list must be clean, so this check fails the
+//         moment somebody adds a column to the written list and empties
+//         nothing, or takes the emptying away again from the activity log;
+//       - the 35 cannot be forgotten. They are written up as their own issue,
+//         and the owner decides each: empty it, or say in the written list
+//         that it is deliberately kept and why.
+//     Nothing may be ADDED to this list. Taking a table off it is the work.
+//
+//     Some of the 35 are explained and some look like the same fault as #626.
+//     `tblUsers`' two image columns are emptied by eraseProfileImages() once
+//     the file itself is dealt with, which is deliberate (emptying them here
+//     would lose the only record of where the file is). `tblErrors` holding an
+//     address, a browser name and headers is #626 over again on another table.
+//     A `notes` column is a judgement: free text somebody typed about a person
+//     may be the record the organisation must keep. None of that is settled
+//     here, and this check does not pretend to settle it.
+//
+//     Tables dealt with by a dedicated step or by the last step are left out:
+//     their columns are emptied by code of their own, which section 10 checks.
+// -----------------------------------------------------------------------------
+$leftBehindOnPurpose = [
+    'tblAssetEventAssignments'    => ['notes'],
+    'tblAssetIdentifiers'         => ['notes'],
+    'tblAssetLicenseAssignments'  => ['notes'],
+    'tblAssetLoans'               => ['notes'],
+    'tblAssetStocktakeItems'      => ['notes'],
+    'tblAssetStocktakes'          => ['notes'],
+    'tblAttendanceSessions'       => ['sessionID', 'notes'],
+    'tblAuditTrail'               => ['ipAddress'],
+    'tblCareVisit'                => ['notes'],
+    'tblCountSessions'            => ['notes'],
+    'tblDecisionMoments'          => ['notes'],
+    'tblErrors'                   => ['visitorIP', 'userAgent', 'requestHeaders'],
+    'tblEventAttendance'          => ['notes'],
+    'tblEventOccurrenceOverrides' => ['notes'],
+    'tblEventRSVPInvites'         => ['email', 'displayName'],
+    'tblKidCheckins'              => ['pickupName'],
+    'tblKidProfiles'              => ['fullName', 'dateOfBirth', 'allergies', 'medicalNotes'],
+    'tblLiveChatMessages'         => ['displayName', 'senderIP'],
+    'tblNoticeboardUploads'       => ['storedName'],
+    'tblResourceBooking'          => ['notes'],
+    'tblRotaSlot'                 => ['notes'],
+    'tblSalvationCards'           => ['fullName', 'email', 'phone', 'address', 'notes'],
+    'tblServicePlanItem'          => ['notes'],
+    'tblServicePlans'             => ['notes'],
+    'tblSmallGroupMeetings'       => ['notes'],
+    'tblSmallGroups'              => ['postcode', 'latitude', 'longitude', 'what3words'],
+    'tblUsers'                    => ['avatarPath', 'displayPhoto'],
+    'tblVenueAgreements'          => ['notes'],
+    'tblVenueBookings'            => ['notes'],
+    'tblVenueInvoicePayments'     => ['notes'],
+    'tblVenueInvoices'            => ['notes'],
+    'tblVenueUsageTypeWindows'    => ['note'],
+    'tblVenues'                   => ['postcode', 'latitude', 'longitude', 'what3words', 'caretakerName', 'caretakerPhone', 'notes'],
+    'tblVisitorContact'           => ['summary'],
+    'tblWorkflowActions'          => ['comment'],
+];
+
+// What each instruction deals with, per table: the column it matches on (which
+// processEntry() always empties for a table other than tblUsers), every column
+// in `nullCols`, and every column `overrides` gives a new value.
+$dealtWith = [];
+foreach ($instructions as $instruction) {
+    $table = (string) ($instruction['table'] ?? '');
+    $dealtWith[$table][] = (string) ($instruction['userCol'] ?? '');
+    foreach ((array) ($instruction['nullCols'] ?? []) as $column) {
+        $dealtWith[$table][] = (string) $column;
+    }
+    foreach (array_keys((array) ($instruction['overrides'] ?? [])) as $column) {
+        $dealtWith[$table][] = (string) $column;
+    }
+}
+
+$leftBehindNow  = [];
+$pinnedAndClean = [];
+foreach ($catalogue as $table => $meta) {
+    $table = (string) $table;
+    if ((string) ($meta['decision'] ?? '') !== 'unlink') {
+        continue;
+    }
+    if (in_array($table, \Portal\Core\GdprEraser::FINAL_STEP_TABLES, true) === true
+        || isset(\Portal\Core\GdprEraser::DEDICATED_STEP_TABLES[$table]) === true
+    ) {
+        continue;
+    }
+
+    $leftHere = [];
+    foreach ((array) ($meta['columns'] ?? []) as $column) {
+        $column = (string) $column;
+        if (in_array($column, $dealtWith[$table] ?? [], true) === true) {
+            continue;
+        }
+        // An account number: the checks above are the ones that judge those.
+        if (in_array($column, $linkColumns, true) === true) {
+            continue;
+        }
+        $leftHere[] = $column;
+    }
+
+    sort($leftHere);
+    $pinned = $leftBehindOnPurpose[$table] ?? null;
+    if ($pinned !== null) {
+        sort($pinned);
+        if ($leftHere === []) {
+            // Good news, and it still has to be said out loud: the pinned list
+            // is now wrong and must shrink.
+            $pinnedAndClean[] = $table;
+            continue;
+        }
+        $extra = array_diff($leftHere, $pinned);
+        if ($extra !== []) {
+            $leftBehindNow[] = $table . ': ' . implode(', ', $extra) . ' (beyond what is pinned for it)';
+        }
+        continue;
+    }
+    if ($leftHere !== []) {
+        $leftBehindNow[] = $table . ': ' . implode(', ', $leftHere);
+    }
+}
+
+check(
+    'no table gains a named column that nothing empties (the activity log is the one #626 fixed)',
+    $leftBehindNow === [],
+    implode('; ', array_slice($leftBehindNow, 0, 6))
+    . ' -- the written list says "unlink" and names this column as what makes the table personal, '
+    . 'so an erasure must empty it. Give its instruction a `nullCols` entry, or change the written '
+    . 'list to say the column is deliberately kept and why. Do NOT add it to $leftBehindOnPurpose.'
+);
+
+check(
+    'the pinned list of tables that leave a column holds no table that is now clean',
+    $pinnedAndClean === [],
+    implode(', ', $pinnedAndClean)
+    . ' -- nothing is left behind on this table any more, so take it off $leftBehindOnPurpose. '
+    . 'A pinned list that is out of date stops this check seeing a fault come back.'
+);
+
+check(
+    'the activity log empties every detail the written list names for it (#626)',
+    ($leftBehindOnPurpose['tblActivityLogs'] ?? null) === null
+    && in_array('tblActivityLogs', $pinnedAndClean, true) === false
+    && count(array_intersect(
+        ['requestHeaders', 'sessionID', 'visitorIP', 'userAgent', 'sessionDataSnapshot'],
+        $dealtWith['tblActivityLogs'] ?? []
+    )) === 5,
+    'the address, browser name, headers, session fingerprint and session facts must all be emptied '
+    . 'on an erased person\'s activity records, and tblActivityLogs must never be pinned as a table '
+    . 'that leaves one. Found: ' . implode(', ', $dealtWith['tblActivityLogs'] ?? ['nothing at all'])
 );
 
 // -----------------------------------------------------------------------------

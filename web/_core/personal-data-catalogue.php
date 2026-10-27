@@ -983,11 +983,27 @@ return [
         // Both are written in one place, Logger::sessionFingerprint() and
         // Logger::sessionFacts(), and migration 220 brought the older rows
         // into line.
-        // WHAT AN ERASURE DOES TO THEM: nothing. It empties `userID` on the
-        // person's records (every table listed without a hand-written
-        // instruction gets only that). The fingerprint and the facts stay, as
-        // the whole-session copy always did. The account number in the facts
-        // then leads only to an account whose details have been removed.
+        // WHAT AN ERASURE DOES TO THEM: empties all six, since #626
+        // (27 October 2026) — **but only on the records whose `userID` COLUMN
+        // holds the person's number.** An instruction matches one column, and
+        // Logger::activity() takes the number as an optional argument that 279
+        // of its 582 callers under web/ leave out. On those records the column
+        // is empty while the session facts name the person, so an erasure
+        // never reaches them: their address, browser name, headers and account
+        // number survive it. **#626 is therefore NOT fully closed**, and the
+        // rest is a decision for the owner, written up on that issue. The
+        // record of WHAT happened, when, and under which organisation is kept
+        // on purpose.
+        //
+        // Until that date it emptied `userID` and nothing else, because a
+        // table listed here without a hand-written instruction gets one
+        // instruction per ACCOUNT column and empties nothing else. All five
+        // of the others were named here and left in place for months: the
+        // facts even held the account number that had just been emptied in
+        // the column beside them. This comment said "nothing", truthfully,
+        // and nothing acted on it. The instruction is now hand-written in
+        // GdprEraser::catalogue(), and three checks in
+        // tools/gdpr-coverage-selftest.php fail if it is taken away or hidden.
         'reason'   => 'Kept for running and repairing the portal. The record stays;'
                     . ' the link to the person is cut, so it can no longer be traced'
                     . ' back to them',
