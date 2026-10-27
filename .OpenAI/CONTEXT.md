@@ -788,6 +788,25 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
       after an alpha merge; anything else that should happen on such a merge needs a line there too.
     *(`.claude/CLAUDE.md` → "Monitor and fix the pull-request security checks".)*
 
+23. **Erasure and the activity log (#626, 27 October 2026).** `GdprEraser::catalogue()` holds a HAND-WRITTEN
+    instruction for `tblActivityLogs`, and it must stay hand-written: the derived route
+    (`fromPersonalDataCatalogue()`) only ever empties columns that hold an account number, so the address, the
+    browser's name, the headers, the session's fingerprint and the session facts would be left behind again. A
+    hand-written entry WINS over the derived one for a table, so any entry you write must keep doing everything the
+    derived one did.
+    - **#626 is NOT fully closed and the commit says so.** An instruction matches ONE COLUMN. `Logger::activity()`
+      takes the account number as an optional third argument and 279 of its 582 callers under `web/` leave it out,
+      `Auth.php`'s own `LoginLocal` line included — which runs after the session already holds the account. Those
+      records have an empty `userID` column and session facts naming the person, and an erasure never reaches them.
+      Closing the rest needs a decision: collect the fingerprints BEFORE the instruction empties them, and remember
+      a shared kiosk means one fingerprint is not proof of one person.
+    - **Section 17 of `tools/gdpr-eraser-selftest.php` ASSERTS that gap**, with a comment saying it is a gap, and
+      MUST fail when the gap is closed. Its first draft asserted the opposite and passed — an empty `userID`
+      COLUMN is not the same as "nobody was signed in".
+    - The pinned list `$leftBehindOnPurpose` in `tools/gdpr-coverage-selftest.php` names the 35 tables still in
+      that state (#635): **nothing may be added to it** — taking a table off it is the work.
+    *(`.claude/CLAUDE.md` → the erasure bullet.)*
+
 ## A few more things worth knowing
 
 - **Branches are meant to be promoted through four steps on the way to

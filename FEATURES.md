@@ -961,6 +961,13 @@ another repo, ever**.
 - Per-user language preference.
 - Date/time format settings (#69).
 
+- Erasure clears the details on a person's activity records (#626): the account number, the address the
+  request came from, the browser's name, the request's headers, the session's fingerprint and the facts about
+  the session. What happened, when and under which organisation is kept, and nobody else's record is touched.
+  **Not complete:** it reaches only the records that carry the account number in its own column, and 279 of the
+  582 places that write a record do not pass it — an ordinary sign-in record among them. The rest of #626 is
+  open and needs a decision.
+
 ### 🚀 CI/CD ✅
 
 - 3-branch SFTP deploy (alpha / beta / main) via `lftp`, SSH-key with password fallback.

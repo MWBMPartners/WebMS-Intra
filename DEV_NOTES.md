@@ -1525,6 +1525,34 @@ taken** — so pushing one blocks the name the automatic release wanted.
 
 ---
 
+**The activity log and erasure (#626, 27 October 2026).** `tblActivityLogs` is marked "unlink" in
+`web/_core/personal-data-catalogue.php` and names six columns. The derived route in
+`GdprEraser::fromPersonalDataCatalogue()` builds one instruction per column that holds an ACCOUNT NUMBER and
+empties nothing else, so five of the six were named in the list and left in place for months. The fix is a
+HAND-WRITTEN instruction in `GdprEraser::catalogue()` with those five in `nullCols` — the only way to empty a
+column that is not itself a link to an account. A hand-written entry wins over the derived one for the whole
+table, so it must keep doing everything the derived one did; it matches on `userID`, and `processEntry()`
+always empties the matched column too.
+
+Three checks in `tools/gdpr-coverage-selftest.php` hold it: one fails when any "unlink" table gains a named
+column that nothing empties, one fails when the pinned list of 35 known leavers holds a table that is now
+clean, and one is about this table by name so it cannot be hidden by pinning it. Section 17 of
+`tools/gdpr-eraser-selftest.php` proves the statement runs on a real database and touches neither somebody
+else's record nor one written when nobody was signed in.
+
+**The pinned list is not an excuse list.** Nothing may be added to it; taking a table off it is the work.
+`tblErrors` on it (an address, a browser name, headers) is #626 over again.
+
+**#626 IS NOT CLOSED BY THIS, and the reason is worth understanding before writing any erasure instruction.**
+An instruction matches ONE COLUMN. `Logger::activity()` takes the account number as an optional third argument
+and 279 of its 582 callers under `web/` leave it out, `Auth.php`'s own `LoginLocal` line included — which runs
+after `$_SESSION` already holds the account. Such a record has an empty `userID` column and session facts saying
+`"userID": <the person>`. An erasure never reaches it. Closing the rest means matching on the fingerprint, with
+two traps: collect the fingerprints BEFORE the instruction empties them, and a shared kiosk means one fingerprint
+is not proof of one person — which is how this eraser has wiped other people's records before. Owner's decision.
+Section 17 of the eraser self-test ASSERTS the gap, with a comment saying so, because an earlier draft of that
+section asserted the opposite and passed.
+
 ## Coding Conventions
 
 These are enforced across the codebase. Follow them in all new code.

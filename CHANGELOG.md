@@ -2,6 +2,41 @@
 
 
 ## [Unreleased] (alpha)
+- **Security — erasing a person now clears the details left on their activity records (#626)**
+  - **What an administrator should know after upgrading**
+    1. **What was left behind.** When somebody was erased, the portal emptied the account number on their
+       activity records and nothing else. The address the request came from, the browser's name, the request's
+       headers, the fingerprint of the browser session and the short list of facts about the session all stayed —
+       and the facts held the very account number that had just been emptied in the column beside them. An
+       address and a browser name together identify a household; the headers can hold more than that. So an
+       erasure left records that still pointed at the person.
+    2. **What happens now, and what it does NOT yet reach.** All six are emptied on that person's own records —
+       **but only on the records that carry their account number in its own column.** The portal writes an activity
+       record either way: of the 582 places that write one, 279 do not pass the account number, including the line
+       that records an ordinary password sign-in. On those records the column is empty while the list of session
+       facts still names the person, beside their address, browser name and headers, and an erasure does not reach
+       them. **So this is a real improvement and not a complete job**, and saying otherwise would be the worst
+       outcome: an incomplete erasure that looks complete is what #626 was reported for. Closing the rest needs a
+       decision — matching on the session's fingerprint instead, which carries its own risks (a shared machine
+       means one fingerprint is not proof of one person) — and that decision is recorded on #626.
+    3. **What is kept, on purpose.** What happened, when, and which organisation it happened under. That is
+       the reason for keeping an activity log at all, and none of it says who the person was.
+    4. **Nobody else is touched.** Only records carrying that person's account number are changed. A record
+       of somebody else's is not read, even when it carries the same session fingerprint and the same address —
+       two people behind one router, or a shared machine. Nor is a record written with no session at all.
+    5. **One figure changes.** The monthly sign-ins report links a password sign-in to the code page through
+       the session fingerprint. With the fingerprint gone, an erased person's password-and-code sign-ins count
+       twice in that figure. That cost was already written down in the report's own notes as though this change
+       had been made; it is now true. Keeping a fingerprint to protect a count, on records meant to stop
+       identifying somebody, is the wrong way round.
+    6. **Records erased before this upgrade are not revisited.** This changes what an erasure does from now
+       on. An erasure already carried out left those details in place and nothing here goes back for them.
+  - **Found and NOT fixed here:** 35 other tables the written list marks "unlink" name a column that no erasure
+    instruction empties (#635) — `tblErrors` holds an address, a browser name and headers, which is this same
+    fault on another table. They are pinned by name in `tools/gdpr-coverage-selftest.php` so they cannot be
+    forgotten, and each is the owner's decision. **At least one of the 35 is only a mis-measurement:**
+    `tblUsers`' two image columns ARE emptied, by the erasure's own picture step, once the file itself is dealt
+    with — the measurement cannot see code that does not use an instruction. The issue says so.
 - **Changed — the automatic checks and the installation zip: most self-tests now run on a pull request, and a zip is built by itself (#499)**
   - **What this changes for anybody working on the portal**
     1. **Most self-tests now run on every pull request**, where before this nearly all of them ran nowhere but a
