@@ -614,7 +614,13 @@ When making changes:
 On EVERY PR you touch, actively monitor GitHub's own automated checks — the
 `pr-security.yml` "PR Security Checks" bot comment (route-target-missing,
 MariaDB-only DDL, migration idempotency, SQL column drift, schema/seed parity,
-etc.), CodeQL, Psalm, static-security, actionlint, and the migration harness —
+etc.), CodeQL, static-security, actionlint, the migration harness, and the
+self-test jobs added by #499 (`portal-selftests.yml`, `mail-selftests.yml`,
+`calendar-selftests.yml` on every pull request; `backup-selftest.yml` and
+`e2e-migrations.yml` only when a pull request touches the files they are
+about) — **Psalm is gone**, removed on 13 October 2026 because it analysed
+nothing and still reported success; with it gone no code-analysis check here
+can turn a run red (#618) —
 and **fix any real issue each surfaces**, not only the hard PHP-lint gate. These
 checks are non-blocking heuristics but a flagged item is treated as actionable:
 resolve it correctly (e.g. a route pointing at a missing handler → build the

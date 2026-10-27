@@ -763,6 +763,31 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     the design before refining it again. This does not relax the final check before a commit.
     *(`.claude/CLAUDE.md` → "Working with the owner".)*
 
+22. **What the automatic checks are now (#499, 27 October 2026).** On every pull request: `pr-security.yml` (the hard
+    gate — `php -l` on every file, a secrets scan, and most of the scripts in `tools/audit-checks/`),
+    `php-static-analysis.yml` (`php -l` again, as its own required check), `codeql.yml`, and the self-test jobs
+    `portal-selftests.yml`, `mail-selftests.yml` and `calendar-selftests.yml`. On a pull request that touches the
+    files they are about, and only then: `backup-selftest.yml` and `e2e-migrations.yml`.
+    - **Psalm is gone** (13 October 2026). It installed itself, failed to find an autoloader, swallowed the failure,
+      wrote an empty report and went green. A check that cannot fail is worse than none, because it looks like a
+      pass. Do not bring it back in that shape. With it gone, **no code-analysis check in this repository can turn a
+      run red**: `codeql.yml` still reads the JavaScript but keeps `continue-on-error`, because GitHub's Code
+      Scanning is not switched on here and the upload half of that step would fail on every pull request. The owner
+      chose on 26 October 2026 to keep it and say so plainly rather than hide it. Tracked as #618.
+    - **A path-filtered check must never be made a required status check.** GitHub has no "required only when it
+      runs", so the branch rule waits for a report that never comes and the pull request can never merge. The same
+      goes for anything in `package.yml`, which has no `pull_request` trigger at all. A checklist naming three such
+      checks was written for the owner on 26 October and caught by its independent check the next day.
+    - **Not every test runs automatically.** `tools/page-scripts-selftest.php`, `tools/qr-selftest.php` and seven of
+      the 32 scripts in `tools/audit-checks/` are named in no workflow — two of those seven being the tripwires added
+      for #625 and #622. A tripwire nothing runs is a comment. Tracked as #637.
+    - **Installation zips and releases are automatic** (`package.yml`): a merge into `main` publishes the release, a
+      merge into `rc` a pre-release, and a merge into `alpha` or `beta` keeps the zip as a download on the run.
+      **Pushing a `v*` tag by hand publishes nothing and still takes the name.** `release.yml` is deleted. A merge
+      GitHub makes by itself raises no event, so `auto-merge-alpha.yml` starts both `deploy.yml` and `package.yml`
+      after an alpha merge; anything else that should happen on such a merge needs a line there too.
+    *(`.claude/CLAUDE.md` → "Monitor and fix the pull-request security checks".)*
+
 ## A few more things worth knowing
 
 - **Branches are meant to be promoted through four steps on the way to
