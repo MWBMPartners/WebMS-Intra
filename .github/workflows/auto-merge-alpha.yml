@@ -20,11 +20,14 @@
 # --------------
 # Squash merge (`--squash`). Change to `--merge` or `--rebase` if preferred.
 #
-# DEPLOY DISPATCH BRIDGE
-# ----------------------
+# THE TWO DISPATCH BRIDGES
+# ------------------------
 # GitHub suppresses workflow triggers for pushes attributed to GITHUB_TOKEN
 # (anti-recursion). After auto-merge lands on alpha, this workflow explicitly
-# dispatches deploy.yml so the alpha environment updates.
+# dispatches deploy.yml so the alpha environment updates, AND package.yml so
+# the merge gets its installation zip. Anything else that is supposed to
+# happen on a merge into alpha needs a line here too — nothing that listens
+# for a push to alpha will ever hear these merges.
 # =============================================================================
 
 name: Auto-Merge Alpha PRs
@@ -82,6 +85,44 @@ jobs:
               MERGED)
                 echo "PR #$PR_NUMBER merged — dispatching deploy.yml on alpha"
                 gh workflow run deploy.yml --repo "$REPO" --ref alpha
+                # And the installation zip, for the same reason (#499, added
+                # 27 October 2026 by the workflow package's fix round). The
+                # owner approved "a zip built on every merge into alpha and
+                # beta", and package.yml listens for a push to alpha — but
+                # the merge above is GitHub's own, so no push event is ever
+                # raised and that listener never hears it. Without this line
+                # alpha would almost never build a zip: the proof is that
+                # version-bump.yml raises the version on every push to alpha
+                # that touches web/ or the change log, and in the branch's
+                # whole history it has done so twice.
+                #
+                # A dispatched run BUILDS AND CHECKS ONLY. It cannot publish
+                # anything: package.yml's publish job asks for a push to main
+                # or rc (package.yml, the "if:" on the publish job), and a
+                # dispatch is neither. The zip is kept as a download on the
+                # run, which is exactly what alpha is meant to get.
+                #
+                # Why the failure is swallowed: "gh workflow run" finds a
+                # workflow by its file name, and only once that file is on
+                # the DEFAULT branch. Until package.yml reaches main this
+                # line fails every time, and under "set -e" that would turn
+                # this job RED on every alpha merge for a reason that is not
+                # a fault — which teaches people to ignore a red bridge job,
+                # and the next real failure with it. So it says what happened
+                # in a warning and carries on.
+                #
+                # To be exact about what swallowing it does NOT protect, since
+                # the first version of this comment said otherwise: the deploy
+                # dispatch above has already been accepted by GitHub by the
+                # time this line runs, so a failure here could not have
+                # undone or lost it. The guard is about the red mark, not
+                # about the deploy.
+                #
+                # Do not quietly drop this guard once package.yml is on main:
+                # the same thing happens again if the file is renamed.
+                if ! gh workflow run package.yml --repo "$REPO" --ref alpha; then
+                  echo "::warning::Could not start package.yml on alpha, so this merge has no installation zip. Expected until package.yml is on the default branch; after that, check the file name."
+                fi
                 exit 0
                 ;;
               CLOSED)

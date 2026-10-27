@@ -9,10 +9,12 @@
 # (web/_install/index.php:360-466) — not the historical "apply the
 # migration chain to an empty DB first" order.
 #
-# Six phases, and three data checks (described after them). 1 to 4 start from
-# TODAY's install script. 5 and 6 are the only
-# ones that upgrade a database built by an older release, which is where
-# #553, #554 and #555 hid for months.
+# Seven phases, and three data checks (described after them). 1 to 4 start
+# from TODAY's install script. 5, 6 and 7 are the only ones that start from a
+# database built by an older release: 5 and 6 upgrade one, which is where
+# #553, #554 and #555 hid for months, and 7 runs the installer's "carry on"
+# over one. (This line said "Six phases" above a list of seven from the day
+# phase 7 was added until 13 October 2026.)
 #   1. full_schema fresh-install — wipe the DB, load web/_sql/full_schema.sql
 #      directly (the consolidated fresh-install path). Any SQL error is a
 #      hard failure.
@@ -113,9 +115,9 @@
 # And three DATA checks, between phases 4 and 5. Migration 210 holds one
 # statement that changes stored data: it empties an attendance session's
 # pointer to an event that no longer exists. The install script holds the same
-# statement. The six phases compare the shape of the database and its seeded
+# statement. The phases compare the shape of the database and its seeded
 # rows; none of them puts a row in that table, so a version of the statement
-# that emptied EVERY pointer passed all six.
+# that emptied EVERY pointer passed all six there were at the time.
 #   - check_dead_pointer_cleanup, run twice: once with migration 210 and once
 #     with the install script. Each plants three sessions and looks at every
 #     column of every session afterwards.

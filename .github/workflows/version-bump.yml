@@ -18,8 +18,21 @@
 #                     - starts with "feat("       -> MINOR (x.Y.0)
 #                     - everything else           -> PATCH (x.y.Z)
 #
-# Production releases are NOT auto-bumped — tag manually via `git tag vX.Y.Z`
-# on main, which fires release.yml.
+# The number is never raised on main, or on rc (the release-candidate branch,
+# which does not exist yet), by this file: each carries whatever number
+# arrives with the merge, normally the one beta had. Nobody tags a release by
+# hand any more (owner, 13 October 2026): package.yml names a release after
+# that number, v<number> on main and v<number>-rc.N on rc, and makes the tag
+# itself, only when publishing is switched on. If main receives a change
+# under web/ while the number is still that of the last live release,
+# package.yml stops and says the version number was not raised. (Until
+# 14 October 2026 this said a production release was tagged by hand, with
+# `git tag vX.Y.Z` on main.)
+#
+# THE ZIP OF A MERGE CARRIES THE NUMBER FROM BEFORE THIS FILE'S RISE. The
+# commit made below is pushed with GitHub's built-in token, and GitHub starts
+# no workflow for such a push, so package.yml builds the merged commit and
+# not this one. package.yml's header says why that was left so.
 #
 # SOURCE OF TRUTH
 # ---------------

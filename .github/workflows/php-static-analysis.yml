@@ -1,152 +1,44 @@
 # =============================================================================
 # PHP Static Analysis
 # =============================================================================
-# CodeQL doesn't natively support PHP, so we run Psalm (Vimeo) as a
-# parallel job. Psalm catches:
-#   - Type errors caught only at runtime by stricter analysis
-#   - Null-pointer / undefined-array-key issues
-#   - Security taint patterns (Psalm's @psalm-taint-* annotations)
-#   - Unused code paths
+# One job: `php -l` on every PHP file under web/. A syntax error turns it red.
 #
-# Findings are uploaded as a SARIF artifact and shown in the PR's
-# "Files changed" tab via the Code Scanning UI.
+# THE PSALM JOB THAT USED TO BE HERE WAS REMOVED on 13 October 2026 (owner's
+# decision: "Remove it"). It analysed nothing: it installed Psalm in a
+# temporary folder, Psalm stopped with "Could not find any composer
+# autoloaders", the step swallowed that with "|| true", wrote an empty report,
+# uploaded it, and the job went green. A check that cannot fail is worse than
+# no check, because it looks like a pass. Do not bring it back in that shape:
+# a Psalm job is worth having only once it really reads the code, and then it
+# must be able to fail.
+#
+# THE NAMES ARE KEPT ON PURPOSE. The workflow is still called "PHP Static
+# Analysis" and the job "PHP -l lint", although only the lint is left. A
+# branch rule that requires a check finds it by the job's name, and a rule
+# that names a check no workflow produces leaves every pull request waiting
+# for ever (repo-config-audit.yml exists to catch exactly that). Whether a
+# rule names this job could not be looked up when this was written, so
+# nothing was renamed. Rename only after checking the branch rules.
+#
+# The two permissions Psalm's report upload needed (security-events: write
+# and actions: read) went with it. This job only reads the checked-out code.
 # =============================================================================
 
 name: "PHP Static Analysis"
 
 on:
   push:
-    branches: [main, beta, alpha]
+    # "rc" is the release-candidate branch, between beta and main (owner,
+    # 13 October 2026; see package.yml). It does not exist yet: naming it
+    # early changes nothing until somebody makes it.
+    branches: [main, rc, beta, alpha]
   pull_request:
-    branches: [main, beta, alpha]
+    branches: [main, rc, beta, alpha]
 
 permissions:
   contents: read
-  security-events: write
-  # The SARIF upload step below asks GitHub about its own workflow run
-  # before it uploads anything. On a PRIVATE repository that needs this
-  # permission; without it the step stops with "Resource not accessible by
-  # integration" (seen on 14 September 2026, while the repository was
-  # private). A public repository does not need it.
-  # What this does NOT fix: on a private repository the upload itself also
-  # needs GitHub's paid "Code Security" add-on. Without it the upload is
-  # refused with "Code Security must be enabled", as CodeQL's uploads were
-  # while the repository was private. This line clears the first obstacle
-  # only.
-  # It gives read-only access to this repository's Actions data (such as
-  # workflow runs and their logs, artifacts and caches); it cannot change
-  # anything.
-  # codeql.yml already carries the same line.
-  actions: read
 
 jobs:
-  psalm:
-    name: Psalm
-    runs-on: ubuntu-latest
-    continue-on-error: true  # Don't block PR merges on Psalm hints during initial rollout
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7.0.1
-
-      - name: Setup PHP 8.4
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.4'
-          extensions: mysqli, openssl, sodium, curl, mbstring
-          tools: composer:v2
-
-      # Install Psalm via Composer in a temp dir so we don't need a
-      # repo-level composer.json (that's tracked in #145).
-      #
-      # --ignore-platform-req=php+ bypasses Psalm 5's upper-bound PHP
-      # requirement (~8.3). Psalm itself runs fine on PHP 8.4; the
-      # upper bound is just untested-by-upstream, not actually broken.
-      # When Psalm 6 stabilises with native 8.4+ support, drop the flag
-      # and bump the constraint to ^6.
-      - name: Install Psalm
-        run: |
-          mkdir -p /tmp/psalm-install && cd /tmp/psalm-install
-          composer require --dev vimeo/psalm:^5 \
-            --ignore-platform-req=php+ \
-            --no-interaction --no-progress
-
-      - name: Generate psalm.xml if missing
-        run: |
-          if [ ! -f psalm.xml ]; then
-            cat > psalm.xml <<'EOF'
-          <?xml version="1.0"?>
-          <psalm
-              errorLevel="6"
-              findUnusedBaselineEntry="false"
-              findUnusedCode="false"
-              resolveFromConfigFile="true"
-              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-              xmlns="https://getpsalm.org/schema/config"
-              xsi:schemaLocation="https://getpsalm.org/schema/config vendor/vimeo/psalm/config.xsd"
-          >
-              <projectFiles>
-                  <directory name="web/_core" />
-                  <directory name="web/_apps" />
-                  <directory name="web/public_html" />
-                  <directory name="web/_install" />
-                  <ignoreFiles>
-                      <directory name="web/_libraries" />
-                      <directory name="web/_vendor" />
-                      <directory name="web/_uploads" />
-                  </ignoreFiles>
-              </projectFiles>
-          </psalm>
-          EOF
-          fi
-
-      - name: Run Psalm
-        run: |
-          /tmp/psalm-install/vendor/bin/psalm \
-            --output-format=github \
-            --report=psalm.sarif \
-            --no-cache || true
-          # Always produce a SARIF file so the upload step doesn't fail
-          # — even an empty-runs SARIF is valid input for code-scanning.
-          if [ ! -f psalm.sarif ]; then
-            cat > psalm.sarif <<'EOF'
-          {
-            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
-            "version": "2.1.0",
-            "runs": [{
-              "tool": { "driver": { "name": "Psalm", "informationUri": "https://psalm.dev" } },
-              "results": []
-            }]
-          }
-          EOF
-          fi
-
-      - name: Upload SARIF to GitHub Security
-        # Allowed to fail (added in #463/#464). Two different refusals can
-        # hit this upload, and they are easy to confuse:
-        #   1. "Resource not accessible by integration": the step could not
-        #      look up its own workflow run. That was a missing permission,
-        #      fixed by "actions: read" at the top of this file on 21
-        #      September 2026. This comment used to blame code scanning for
-        #      it, which was wrong.
-        #   2. "Code Security must be enabled": on a PRIVATE repository the
-        #      upload itself needs GitHub's paid Code Security add-on. This is
-        #      what refused CodeQL's uploads while the repository was private;
-        #      this upload never got that far, because refusal 1 stopped it
-        #      first.
-        # The job-level continue-on-error above keeps the WORKFLOW green, but
-        # the Psalm JOB's own check still shows red without this step-level
-        # flag. Psalm is advisory; the "PHP -l lint" job below is the one
-        # here allowed to turn the run red (it is not a required check, so
-        # it does not block a merge). Remove this line once code scanning is
-        # permanently available, so genuine upload failures show red again.
-        continue-on-error: true
-        if: always() && hashFiles('psalm.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4.39.1
-        with:
-          sarif_file: psalm.sarif
-          category: psalm
-
   lint:
     name: PHP -l lint
     runs-on: ubuntu-latest

@@ -7,8 +7,10 @@
 # @package   WebMS-Intra (development tooling — never deployed; only web/ is)
 # @author    Salem874
 # @copyright MWBM Partners Ltd (t/a MWservices). All Rights Reserved.
-# @version   1.1.0 (12 October 2026, issue #500, roll-out package F7; second
-#            version, after the independent check of the first)
+# @version   1.2.0 (13 October 2026: section 7 gained the cases of the "refuse
+#            everything" file in the two folders that are not uploaded, 7.11a
+#            to 7.11q, and section 9 one more, 9.5b; before it, 1.1.0 of
+#            12 October 2026, issue #500, roll-out package F7)
 #
 # RUN IT
 #   bash tools/deploy/resolve-settings-selftest.sh
@@ -55,7 +57,8 @@
 # a different reason: an empty code folder means the checkout is incomplete.
 #
 # PORTABILITY: plain bash 3.2 or later; env, mktemp, grep, sed, sort, tr, cp,
-# find, ln, mkdir, rm, cat.
+# find, ln, mkdir, rm, cat; and, for one check (7.11q), sha256sum or shasum,
+# whichever the machine has.
 # Most checks compare text inside bash itself rather than starting grep, because
 # starting a few thousand small programs made one run take a minute on a Mac.
 # -----------------------------------------------------------------------------
@@ -556,6 +559,79 @@ fresh_tree; rm "$T/_libraries/dompdf/VERSION.txt"; printf 'x\n' > "$T/_libraries
 fresh_tree; rm "$T/public_html/index.php"; tree; expect_refused '7.9 the staff pages have no index.php' tree-web-incomplete
 fresh_tree; rm "$T/public_html/.htaccess"; tree; expect_refused '7.10 the staff pages have no .htaccess' tree-web-incomplete
 fresh_tree; printf 'x\n' > "$T/_includes/helper.php"; tree; expect_refused '7.11 a real file in a folder that is not uploaded' tree-placeholder-has-files
+
+# ---- The "refuse everything" file in the two folders that are not uploaded.
+# Since 13 October 2026 web/_includes and web/_functions each hold the one
+# .htaccess every private folder holds. The script's first rule ("anything but
+# .gitkeep is refused") therefore refused every deploy of the real code, and
+# nothing here noticed, because every tree in this section was made up and
+# none held that file. So these cases use the REPOSITORY'S OWN two files,
+# read from beside this script: if they ever stop being the text the script
+# holds, 7.11a fails here instead of on the next deploy.
+REAL_WEB="$HERE/../../web"
+GUARD="$REAL_WEB/_includes/.htaccess"
+if [[ -f "$GUARD" && -f "$REAL_WEB/_functions/.htaccess" ]]; then
+    fresh_tree; cp "$GUARD" "$T/_includes/.htaccess"; cp "$REAL_WEB/_functions/.htaccess" "$T/_functions/.htaccess"; tree
+    expect_ok "7.11a the repository's own \"refuse everything\" file, in both folders, is accepted" 'TREE OK'
+    fresh_tree; cp "$GUARD" "$T/_functions/.htaccess"; tree
+    expect_ok '7.11b in one of the two only: accepted' 'TREE OK'
+
+    # A changed one, six ways. Each must be refused for that reason alone.
+    fresh_tree; { cat "$GUARD"; printf 'x'; } > "$T/_includes/.htaccess"; tree
+    expect_refused '7.11c one byte added at the end' tree-placeholder-htaccess-differs
+    says '7.11c the reason names the file' 'web/_includes/.htaccess is not, byte for byte'
+    # The same length, so this one is caught by the text and not by the size.
+    fresh_tree; sed 's/Require all denied/Require all DENIED/' "$GUARD" > "$T/_functions/.htaccess"; tree
+    expect_refused '7.11d its one rule changed, the length kept' tree-placeholder-htaccess-differs
+    if [[ "$(cat "$T/_functions/.htaccess")" != "$(cat "$GUARD")" && "$(wc -c < "$T/_functions/.htaccess")" -eq "$(wc -c < "$GUARD")" ]]; then
+        pass '7.11d (that case really was a change of text with the length kept)'
+    else
+        fail '7.11d (that case really was a change of text with the length kept)'
+    fi
+    fresh_tree; while IFS= read -r line; do printf '%s\r\n' "$line"; done < "$GUARD" > "$T/_includes/.htaccess"; tree
+    expect_refused '7.11e the same text with Windows line ends' tree-placeholder-htaccess-differs
+    # bash drops a zero byte when it reads a file into a variable, so the right
+    # text with zero bytes ADDED would compare as equal: the script asks the
+    # size first. This case is the reason it does.
+    fresh_tree; { cat "$GUARD"; printf '\0\0'; } > "$T/_includes/.htaccess"; tree
+    expect_refused '7.11f the right text with two zero bytes added (bash cannot see them; the size can)' tree-placeholder-htaccess-differs
+    fresh_tree; tr '=' '\0' < "$GUARD" > "$T/_includes/.htaccess"; tree
+    expect_refused '7.11g zero bytes in place of other bytes, the length kept' tree-placeholder-htaccess-differs
+    fresh_tree; : > "$T/_includes/.htaccess"; tree
+    expect_refused '7.11h an empty .htaccess' tree-placeholder-htaccess-differs
+    fresh_tree; printf 'Require all granted\n' > "$T/_functions/.htaccess"; tree
+    expect_refused '7.11i another .htaccess altogether' tree-placeholder-htaccess-differs
+    fresh_tree; ln -s "$GUARD" "$T/_includes/.htaccess"; tree
+    expect_refused '7.11j a link to the right file is not the right file' tree-placeholder-htaccess-differs
+    fresh_tree; mkdir "$T/_includes/.htaccess"; tree
+    expect_refused '7.11k a FOLDER of that name' tree-placeholder-htaccess-differs
+
+    # Nothing else was let in with it.
+    fresh_tree; cp "$GUARD" "$T/_includes/.htaccess"; printf 'x\n' > "$T/_includes/helper.php"; tree
+    expect_refused '7.11l the right file and a stray file beside it: the stray file is still refused' tree-placeholder-has-files
+    fresh_tree; mkdir "$T/_functions/sub"; cp "$GUARD" "$T/_functions/sub/.htaccess"; tree
+    expect_refused '7.11m the right file one folder down is a stray file' tree-placeholder-has-files
+    fresh_tree; ln -s "$GUARD" "$T/_functions/notes.txt"; tree
+    expect_refused '7.11n a link under another name is refused (it used not to be looked at)' tree-placeholder-has-files
+    fresh_tree; printf 'x\n' > "$T/_includes/.htaccess"; printf 'x\n' > "$T/_includes/helper.php"; tree
+    expect_refused '7.11o a changed file and a stray file: both reasons' 'tree-placeholder-has-files tree-placeholder-htaccess-differs'
+    fresh_tree; mkdir "$T/_includes/empty-folder"; cp "$GUARD" "$T/_includes/.htaccess"; tree
+    expect_ok '7.11p an empty folder inside is not a file (as before)' 'TREE OK'
+
+    # The package checker pins the same file by checksum. The two must mean
+    # the same file, or one of them is out of date.
+    if command -v sha256sum > /dev/null 2>&1; then SUM="$(sha256sum "$GUARD")"; elif command -v shasum > /dev/null 2>&1; then SUM="$(shasum -a 256 "$GUARD")"; else SUM=''; fi
+    SUM="${SUM%% *}"
+    if [[ "${#SUM}" -eq 64 ]] && grep -q "\"$SUM\"" "$HERE/../package/check-package.py" 2>/dev/null; then
+        pass '7.11q the file this script accepts has the checksum tools/package/check-package.py holds'
+    else
+        RC=0; OUT="checksum worked out here: ${SUM:-none (no sha256sum and no shasum on this machine)}"
+        fail '7.11q the file this script accepts has the checksum tools/package/check-package.py holds'
+    fi
+else
+    RC=0; OUT="looked for $GUARD"
+    fail "7.11a-q the repository's own \"refuse everything\" files were not found beside this self-test, so none of these cases ran"
+fi
 fresh_tree; rm "$T/.channel"; tree; expect_refused '7.12 no channel file' tree-channel-file
 fresh_tree; tree beta; expect_refused '7.13 the channel file names another channel' tree-channel-file
 fresh_tree; printf 'alpha\nlive\n' > "$T/.channel"; tree; expect_refused '7.14 a channel file with two lines' tree-channel-file
@@ -759,6 +835,10 @@ KEEP_PLAN=0
 expect_ok '9.4 "resolve" runs with only tr, find, rm and cat within reach' 'RESOLVED'
 plan_is   '9.4 and wrote a new plan over the old one' DEPLOY_CHANNEL live
 T="$GOOD"; tree; expect_ok '9.5 "tree" runs with only those four' 'TREE OK'
+# The same with the "refuse everything" file to be compared: no fifth program.
+T="$WORK/tree-with-guard/web"; mkdir -p "$WORK/tree-with-guard"; cp -R "$GOOD" "$T"
+cp "$HERE/../../web/_includes/.htaccess" "$T/_includes/.htaccess"; cp "$HERE/../../web/_functions/.htaccess" "$T/_functions/.htaccess"
+tree; expect_ok '9.5b "tree" compares the "refuse everything" file with only those four' 'TREE OK'
 holds; remote alpha --listing "$L"; expect_ok '9.6 "remote" runs with only those four' 'REMOTE OK'
 RUN_PATH="$PATH"
 

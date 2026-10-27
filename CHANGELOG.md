@@ -2,6 +2,47 @@
 
 
 ## [Unreleased] (alpha)
+- **Changed — the automatic checks and the installation zip: most self-tests now run on a pull request, and a zip is built by itself (#499)**
+  - **What this changes for anybody working on the portal**
+    1. **Most self-tests now run on every pull request**, where before this nearly all of them ran nowhere but a
+       developer's machine, so a change could break one and nobody would know until somebody happened to run it.
+       Ten checks run on every pull request: four jobs of self-tests that need only PHP or a database (the database
+       one twice, for MySQL 8.0.36 and 8.4.11), four of mail tests (two PHP versions by two MySQL versions), and the
+       calendar tests, which already ran. **Two more run only when a pull request touches the files they are about**
+       (the backup tests, and the migration harness). **Not every self-test is covered even so:** the page-scripts
+       test (#625) and the QR test (#623) are named in no workflow at all, and neither are seven of the 32 scripts
+       in `tools/audit-checks/` — including the two tripwires added this week. That gap is #637; do not read
+       this entry as "everything is checked now".
+    2. **Installation zips are built by themselves.** A merge into `main` publishes the release — `package.yml` works
+       out the version, makes the tag and uploads the zip with its checksum. A merge into `rc` (a branch that does not
+       exist yet) publishes a pre-release. A merge into `alpha` or `beta` builds and checks a zip and keeps it as a
+       download on the run. **Pushing a `v*` tag by hand publishes nothing any more**, and the tag still counts as
+       taken. `release.yml`, which used to do that, is gone. Publishing waits on a repository variable, so nothing is
+       published until that is switched on.
+    3. **A merge GitHub makes by itself now gets its zip.** Pull requests into `alpha` are merged by GitHub's own
+       token, and GitHub raises no event for such a push — so `package.yml`, which listens for a push to `alpha`,
+       would almost never have run there. `auto-merge-alpha.yml` now starts it, beside the deploy it already started.
+       Anything else that should happen on a merge into `alpha` needs a line there too.
+    4. **The Psalm job is gone.** It analysed nothing and still reported success, which looks exactly like a pass.
+       With it gone, no code-analysis check in this repository can turn a run red: CodeQL still reads the JavaScript
+       but keeps `continue-on-error`, because Code Scanning is not switched on and the half of that step which uploads
+       its findings would fail on every pull request. The owner chose to keep it that way and say so plainly.
+    5. **The deploy was rewritten** around one setting-resolving script with its own self-test, and it refuses a
+       folder that does not look like the channel's own.
+  - **Two things only the owner can do, and until they are done this is not finished.** Which checks a branch
+    *requires* is a GitHub setting kept outside the repository: the deleted `Psalm` check must be taken off the
+    required list for `main`, `beta` and `alpha`, or every pull request into those branches waits for ever, and the
+    nine new test jobs have to be made required or a red test will not stop a merge. The automatic audit cannot catch
+    this, because it returns success when GitHub refuses to answer. **Be careful which names are required:** three
+    of them can never report on a pull request (the package build has no pull-request trigger; the backup tests and
+    the migration harness are limited to the files they are about), and requiring any of those would leave every
+    pull request waiting for ever — the same trap as the removed check. The checklist prepared for the owner names
+    the ten that are safe and the six that are not.
+
+    And the first run of the new deploy on each channel is one dry run started by hand — which needs automatic
+    merges into `alpha` held back first, because on that branch nobody chooses the moment.
+  - **None of it has run on GitHub.** Workflow files only run there. What was checked here: `actionlint` on every
+    file, each step's commands run by hand against a made-up repository, and the deploy and package self-tests.
 - **Fixed — a text is no longer sent to somebody who should not be sent one, and a restore of one table refuses three tables (#610, #622)**
   - **What an administrator should know after upgrading**
     1. **A text now checks the person before it goes.** The portal used to ask "may this person still be sent a

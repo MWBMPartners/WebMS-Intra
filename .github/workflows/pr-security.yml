@@ -7,8 +7,11 @@
 # PURPOSE
 # -------
 # Defence-in-depth security gate that runs on every PR targeting alpha,
-# beta, or main. Each step is non-blocking (continues on failure) EXCEPT
-# the PHP lint step and the account-change guard, which are hard gates.
+# beta, or main. Each step is non-blocking EXCEPT the PHP lint step and the
+# account-change guard, which are hard gates. "Non-blocking" is done by the
+# step's own script, which reports what it found and ends with a success
+# status; NO STEP HERE USES continue-on-error (the three that did lost it on
+# 13 October 2026: see the note above "Install gitleaks CLI").
 # (Codex catch-up A3, 20 September 2026: the account-change guard used to
 # run only inside the non-blocking heuristic step below, with its own
 # exit code thrown away by "|| true" — so a real finding could never fail
@@ -65,6 +68,30 @@
 #                                                       Reported in the PR comment only; a
 #                                                       crash or a missing file gets its own
 #                                                       section there, never silence.
+#  24. What the portal's own backup can carry        — every column type and link in the
+#                                                       install script, and the snapshot
+#                                                       format against its two schema files
+#                                                       (#577). Its OWN step, like 23, and
+#                                                       reported in the PR comment only; the
+#                                                       workflow that turns red on a backup
+#                                                       fault is backup-selftest.yml.
+#
+# Six more checks joined the heuristic scan on 13 October 2026 (owner's
+# approvals of 12 and 13 October). All six are reported in the PR comment
+# only, and each is numbered after the older check it sits beside:
+#  10e. Addresses written without the address builder — a bare "/page", which drops the
+#                                                       organisation's part of the address
+#                                                       (#536)
+#  10f. A web address of ours built in                 — every address must be a setting (#500)
+#  10g. Files a package may not hold                   — what git holds under web/, against
+#                                                       the installation package's own rules
+#                                                       (#499)
+#  10h. Addresses written out that nothing answers     — a link, a form or a redirect to an
+#                                                       address the portal does not register
+#  12b. A secret stored as readable text in a seed     — a seeded secret must be empty, and no
+#                                                       seed may overwrite a stored one (#497)
+#  14b. A document naming a table that does not exist — the guides under docs/ against
+#                                                       full_schema.sql
 #
 # These are HEURISTICS — false positives are expected. Review the findings,
 # don't blindly fail the merge.
@@ -108,8 +135,12 @@
 # forgets the rule is caught before it merges rather than found by a leak.
 # Check 23 (#552) runs as its OWN step, not inside the heuristic scan
 # above, so it is never skipped by that step's early exit — checks 9-22
-# above ARE skipped whenever a pull request changes no PHP file under
-# web/, a real gap tracked as #556 and not fixed here. MySQL 8.4, as it is
+# above ARE skipped whenever a pull request changes neither a PHP file
+# under web/ nor anything under web/_sql/. (Until #556 they were skipped
+# on any pull request with no PHP change, so a pull request holding only
+# a migration had none of the SQL checks run on it. And since 13 October
+# 2026 a pull request that changes only documents runs the two checks
+# that read documents, 10f and 14b, and no other.) MySQL 8.4, as it is
 # set up out of the box, refuses a link between tables (a foreign key)
 # whose target is an ordinary index rather than a primary or unique key,
 # while MySQL 8.0 allows it. Three such links reached this project
@@ -124,8 +155,12 @@ name: PR Security Checks
 
 on:
   pull_request:
+    # "rc" is the release-candidate branch, between beta and main (owner,
+    # 13 October 2026; see package.yml). It does not exist yet: naming it
+    # early changes nothing until somebody makes it.
     branches:
       - main
+      - rc
       - beta
       - alpha
 
@@ -152,6 +187,7 @@ jobs:
       # 1) PHP lint — HARD GATE
       # =====================================================================
       - name: PHP lint (hard gate)
+        id: php_lint
         run: |
           echo "::group::PHP syntax check"
           find ./web -type f -name "*.php" \
@@ -169,23 +205,65 @@ jobs:
       # The gitleaks CLI itself is MIT-licensed and free to use directly.
       # Bonus: this also avoids the deprecated Node.js 20 warning that
       # the action emits.
+      #
+      # WHICH VERSION, AND WHAT VOUCHES FOR IT (13 October 2026). 8.30.1,
+      # the version the installation package's own search was proved with,
+      # checked against the publisher's own checksum for the one file this
+      # step downloads (the line for gitleaks_8.30.1_linux_x64.tar.gz in
+      # gitleaks_8.30.1_checksums.txt on that release's page). It used to be
+      # 8.21.2 with no checksum at all, so whatever that address served was
+      # run. package.yml and portal-selftests.yml install the same version
+      # by the same checksum: CHANGE ALL THREE TOGETHER.
+      #
+      # NO continue-on-error, HERE OR ANYWHERE IN THIS FILE. This step, the
+      # scan below it and the heuristic scan each carried that key until
+      # 13 October 2026. What it did for this step is now done in the open:
+      # a download that fails, a checksum that does not match, or a program
+      # that is not the version asked for no longer makes the step "fail
+      # but carry on". The step says so in an error line, records
+      # installed=no, and ends with a success status, and the job's summary
+      # then says in words that NOTHING SEARCHED THIS PULL REQUEST FOR
+      # SECRETS. The pull request is not blocked by it, exactly as before:
+      # nothing about gitleaks has ever blocked a merge here.
+      # WHAT WAS REJECTED: simply deleting the key. A failed download would
+      # then have turned the whole job red, and the heuristic scan below
+      # (which runs only while every earlier step has succeeded) would have
+      # been skipped with it, on the word of somebody else's server.
+      # The commands run inside ( … ) with "stop at the first failure"
+      # switched on in there only, so the first one that fails ends the
+      # group and nothing after it runs: a file whose checksum does not
+      # match is never unpacked.
       # =====================================================================
       - name: Install gitleaks CLI
         id: install_gitleaks
-        continue-on-error: true
         run: |
-          set -e
-          VERSION="8.21.2"
+          set +e
+          VERSION="8.30.1"
+          SHA256="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
           URL="https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
-          curl -fsSL "$URL" -o /tmp/gitleaks.tgz
-          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
-          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
-          gitleaks version
+          (
+            set -e
+            curl -fsSL "$URL" -o /tmp/gitleaks.tgz
+            echo "${SHA256}  /tmp/gitleaks.tgz" | sha256sum -c -
+            tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
+            sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+            INSTALLED="$(gitleaks version)"
+            echo "gitleaks says it is version ${INSTALLED}"
+            [[ "$INSTALLED" == "$VERSION" || "$INSTALLED" == "v$VERSION" ]]
+          )
+          INSTALL_RC=$?
+          if [[ "$INSTALL_RC" -eq 0 ]]; then
+            echo "installed=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "installed=no" >> "$GITHUB_OUTPUT"
+            echo "::error::gitleaks ${VERSION} was NOT installed: the download failed, or its checksum did not match, or the program is not the version asked for (the lines above say which). THE SEARCH FOR SECRETS DID NOT RUN on this pull request."
+          fi
 
+      # No continue-on-error: with `set +e` and no `exit`, this step ends
+      # with a success status whatever gitleaks found, as it always did.
       - name: Scan for committed secrets (gitleaks)
         id: gitleaks
-        continue-on-error: true
-        if: steps.install_gitleaks.outcome == 'success'
+        if: steps.install_gitleaks.outputs.installed == 'yes'
         run: |
           set +e
           # `detect` scans the working tree + commits since the PR base.
@@ -217,10 +295,14 @@ jobs:
 
       # =====================================================================
       # 3-8) Custom heuristic grep checks
+      #
+      # No continue-on-error (removed 13 October 2026; it changed nothing):
+      # the script starts with `set +e`, leaves early only with `exit 0`,
+      # and its last command cannot fail, so this step ends with a success
+      # status whatever any check in it does.
       # =====================================================================
       - name: Heuristic anti-pattern scan
         id: heuristics
-        continue-on-error: true
         run: |
           set +e
           REPORT=/tmp/security-report.md
@@ -230,15 +312,40 @@ jobs:
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
           HEAD_SHA="${{ github.sha }}"
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'web/**/*.php' 2>/dev/null || true)
+          # SQL files too (#556). Checks 9 to 22 below read the whole
+          # repository, web/_sql/ included, and never look at $CHANGED. So
+          # leaving early on "no PHP file changed" skipped the migration
+          # checks on exactly the pull requests that change only a
+          # migration. $CHANGED itself stays PHP-only on purpose: checks 3
+          # to 8 grep the files it names for PHP mistakes, and do nothing
+          # when it is empty.
+          CHANGED_SQL=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'web/_sql/**' 2>/dev/null || true)
+          # Documents too (13 October 2026). Two blocks below read documents:
+          # 10f (a web address of ours, in any text file) and 14b (a document
+          # under docs/ that names a table that does not exist). A pull
+          # request that changed ONLY documents used to leave early here, so
+          # 14b never ran on the one kind of change it is for. Such a pull
+          # request now runs THOSE TWO BLOCKS AND NO OTHER: every other check
+          # below reads PHP or SQL, which it did not change. Nothing else
+          # about when this scan runs has changed. "A document" is a file
+          # whose name ends in .md, anywhere in the repository.
+          CHANGED_DOCS=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- '*.md' 2>/dev/null || true)
 
-          if [[ -z "$CHANGED" ]]; then
-            echo "No PHP files changed in web/ — skipping heuristic checks"
+          # WHAT THE SCAN DID is written down as "scope" (none, documents or
+          # all), so that the comment and the summary further down can say
+          # only what happened instead of guessing it from a count.
+          if [[ -z "$CHANGED" && -z "$CHANGED_SQL" && -z "$CHANGED_DOCS" ]]; then
+            echo "No PHP or SQL file under web/ and no document changed — skipping heuristic checks"
             echo "no_changes=true" >> "$GITHUB_OUTPUT"
+            echo "scope=none" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo "Scanning these PHP files changed in this PR:"
-          echo "$CHANGED"
+          echo "${CHANGED:-(none)}"
+          echo
+          echo "SQL files changed in this PR (they make the whole-repository checks run):"
+          echo "${CHANGED_SQL:-(none)}"
           echo
 
           HITS=0
@@ -257,6 +364,63 @@ jobs:
               HITS=$((HITS + 1))
             fi
           }
+
+          # The two blocks that read documents. They are written here, as
+          # functions, because they are run from two places: by themselves
+          # on a pull request that changed only documents (just below), and
+          # in their usual places among the other checks on every other one.
+          # Their wiring is explained beside 10e, further down.
+
+          # 10f) A web address of ours built into the product (#500). Every
+          #      address must come from a setting, the installer, or a GitHub
+          #      secret or variable. --strict also fails while the list of
+          #      lines waiting for an approved change holds anything, and the
+          #      check fails by itself on an entry of that list whose line is
+          #      gone. Exit 0 pass; 1 fail.
+          block_10f_an_address_of_ours() {
+            local out rc
+            out=$(python3 tools/audit-checks/check_no_hardcoded_domains.py --strict 2>&1)
+            rc=$?
+            if [[ "$rc" -eq 1 ]] && echo "$out" | grep -a -q '^Result: FAIL\. The check reached its end\.$'; then
+              add_section "A web address of ours is built in, or the list of lines waiting for a change is out of date (every address must be a setting)" "$out"
+            elif [[ "$rc" -ne 0 ]]; then
+              add_section "check_no_hardcoded_domains.py did not finish (exit code $rc): its findings, if any, are unknown" "${out:-(the script printed nothing at all)}"
+            fi
+          }
+
+          # 14b) A document under docs/ that names a table that does not
+          #      exist. Somebody following a guide to the letter then runs a
+          #      query against a table that is not there. Wired exactly like
+          #      check 9 below: without --strict (not passed here) the script
+          #      exits 0 with or without findings and prints a bullet for each
+          #      one, so any other exit code means it did not finish (2 is its
+          #      own refusal: no table, or no document, could be read).
+          block_14b_documents_naming_tables() {
+            local out rc
+            out=$(python3 tools/audit-checks/check_docs_table_refs.py 2>&1)
+            rc=$?
+            if [[ "$rc" -ne 0 ]]; then
+              add_section "check_docs_table_refs.py did not finish (exit code $rc): its findings, if any, are unknown" "${out:-(the script printed nothing at all)}"
+            elif echo "$out" | grep -a -q '•'; then
+              add_section "Documents naming a table that does not exist" "$out"
+            fi
+          }
+
+          # A pull request that changed only documents: those two, and stop.
+          if [[ -z "$CHANGED" && -z "$CHANGED_SQL" ]]; then
+            echo "Only documents changed in this PR, so only the two checks that read documents run (10f and 14b):"
+            echo "$CHANGED_DOCS"
+            echo
+            block_10f_an_address_of_ours
+            block_14b_documents_naming_tables
+            echo "hits=$HITS" >> "$GITHUB_OUTPUT"
+            echo "scope=documents" >> "$GITHUB_OUTPUT"
+            echo "Total finding sections: $HITS"
+            if [[ -s "$REPORT" ]]; then
+              cat "$REPORT"
+            fi
+            exit 0
+          fi
 
           # ---- 3) SQL injection heuristic --------------------------------
           # mysqli->query or mysqli_query with string interpolation of $_GET/POST/REQUEST/COOKIE
@@ -389,6 +553,77 @@ jobs:
             add_section "Personal data with no decision recorded (erasure and download would both miss it)" "$PDATA"
           fi
 
+          # 10e to 10h, 12b and 14b joined on 13 October 2026. All six are
+          #      REPORT-ONLY: each puts what it found in the comment and
+          #      blocks nothing. They are wired like check 9 above (the exit
+          #      code is kept, and a run that did not finish gets its own
+          #      heading), NOT like the "look for a bullet" blocks around
+          #      them, for two reasons seen by running them:
+          #        - 10e prints bullets on a CLEAN run as well (the four lines
+          #          allowed to stay bare, each with its reason), so "a bullet
+          #          means a finding" would have put a false finding in every
+          #          comment;
+          #        - a check that stops on an error prints a traceback and no
+          #          bullet, which that shape reads as a clean run.
+          #      So each one's verdict is its EXIT CODE, and a failing exit
+          #      code counts as "findings" only when the output also holds
+          #      the line that check prints at the end of a finished run.
+          #      Anything else that is not 0 is headed "did not finish".
+          #      `set +e` at the top of this step means a failing check does
+          #      not stop it, so none of these needs "|| true".
+          #      WHAT THESE CANNOT DO: run on a pull request that changes
+          #      neither a PHP file under web/ nor anything under web/_sql/.
+          #      This whole step leaves early on such a pull request (see the
+          #      top of it), so a change to a script file or a workflow alone
+          #      is not read by any of them here. A change to documents alone
+          #      is read by 10f and 14b, the two that read documents, and by
+          #      no other.
+
+          # 10e) Addresses written without the address builder (#536): a bare
+          #      "/page" drops the organisation's part of the address, so it
+          #      lands on the default organisation. Exit 0 clean; 1 a bare
+          #      address, or something the check could not read in full.
+          SITEADDR=$(python3 tools/audit-checks/check_site_aware_addresses.py 2>&1)
+          SITEADDR_RC=$?
+          if [[ "$SITEADDR_RC" -eq 1 ]] && echo "$SITEADDR" | grep -a -q '^FAILED .* see above\.$'; then
+            add_section "Addresses written without the address builder (they drop the organisation's part of the address), or a place the check could not read" "$SITEADDR"
+          elif [[ "$SITEADDR_RC" -ne 0 ]]; then
+            add_section "check_site_aware_addresses.py did not finish (exit code $SITEADDR_RC): its findings, if any, are unknown" "${SITEADDR:-(the script printed nothing at all)}"
+          fi
+
+          # 10f) A web address of ours built into the product (#500): the
+          #      function near the top of this step.
+          block_10f_an_address_of_ours
+
+          # 10g) Files an installation package may not hold (#499). Reads what
+          #      git holds under web/ at this commit and applies the package's
+          #      own rules about names, kinds, places and contents, with its
+          #      deny list. It builds nothing, so the guards that need a built
+          #      package (the search for secrets among them) do not run here.
+          #      Exit 0 pass; 1 fail. A finished run's LAST line says "the run
+          #      reached its end".
+          PKGTREE=$(python3 tools/package/check-package.py --tree web 2>&1)
+          PKGTREE_RC=$?
+          if [[ "$PKGTREE_RC" -eq 1 ]] && echo "$PKGTREE" | tail -n 1 | grep -a -q 'the run reached its end'; then
+            add_section "Files under web/ that an installation package may not hold" "$PKGTREE"
+          elif [[ "$PKGTREE_RC" -ne 0 ]]; then
+            add_section "check-package.py --tree web did not finish (exit code $PKGTREE_RC): its findings, if any, are unknown" "${PKGTREE:-(the script printed nothing at all)}"
+          fi
+
+          # 10h) Addresses written out whole that nothing answers: a link, a
+          #      form or a redirect to an address the portal does not
+          #      register. The mistake is in what a page points AT, so every
+          #      file can exist and every address be registered while the
+          #      link still leads nowhere. Exit 0 clean; 1 a finding or a
+          #      problem.
+          REGADDR=$(python3 tools/audit-checks/check_registered_addresses.py 2>&1)
+          REGADDR_RC=$?
+          if [[ "$REGADDR_RC" -eq 1 ]] && echo "$REGADDR" | grep -a -q '^FAILED .* see above\.$'; then
+            add_section "Addresses written out that nothing answers (the link, form or redirect leads nowhere)" "$REGADDR"
+          elif [[ "$REGADDR_RC" -ne 0 ]]; then
+            add_section "check_registered_addresses.py did not finish (exit code $REGADDR_RC): its findings, if any, are unknown" "${REGADDR:-(the script printed nothing at all)}"
+          fi
+
           # 11) Settings key consistency (catches the class #203/#208 were
           #     filed under; both turned out to be FP but this script
           #     walks the entire schema so it won't repeat the agent's miss)
@@ -404,6 +639,20 @@ jobs:
             add_section "full_schema.sql parity gaps (migration seeds/marks missing from fresh-install schema)" "$PARITY"
           fi
 
+          # 12b) A secret stored as readable text in the install script or a
+          #      migration (#497). A seeded secret must be empty, and no seed
+          #      may overwrite a stored one when it is run again. Wired like
+          #      10e above. With --strict: exit 0 nothing found; 1 a finding
+          #      (and it then prints its count line), or a file it could not
+          #      read (no count line, so that is headed "did not finish").
+          SEEDS=$(python3 tools/audit-checks/check_sensitive_seeds.py --strict 2>&1)
+          SEEDS_RC=$?
+          if [[ "$SEEDS_RC" -eq 1 ]] && echo "$SEEDS" | grep -a -q '^check_sensitive_seeds: read .* finding(s)\.$'; then
+            add_section "A secret stored as readable text in a seed, or a seed that would overwrite a stored secret" "$SEEDS"
+          elif [[ "$SEEDS_RC" -ne 0 ]]; then
+            add_section "check_sensitive_seeds.py did not finish (exit code $SEEDS_RC): its findings, if any, are unknown" "${SEEDS:-(the script printed nothing at all)}"
+          fi
+
           # 13) MariaDB-only DDL syntax (#<fix-issue> — MySQL 8 rejects with error 1064)
           MARIADB=$(python3 tools/audit-checks/check_mariadb_only_ddl.py 2>&1 | tail -n +3 || true)
           if echo "$MARIADB" | grep -q '•'; then
@@ -417,6 +666,10 @@ jobs:
           if echo "$PHP_TABLE_REFS" | grep -q '•'; then
             add_section "PHP references to tables not in full_schema.sql" "$PHP_TABLE_REFS"
           fi
+
+          # 14b) A document under docs/ that names a table that does not
+          #      exist: the function near the top of this step.
+          block_14b_documents_naming_tables
 
           # 15) mysqli bind_param() arity (#433 — catches an uncaught
           #     ValueError on PHP 8 when the type-string length doesn't
@@ -502,6 +755,7 @@ jobs:
           fi
 
           echo "hits=$HITS" >> "$GITHUB_OUTPUT"
+          echo "scope=all" >> "$GITHUB_OUTPUT"
           echo "Total finding sections: $HITS"
 
           if [[ -s "$REPORT" ]]; then
@@ -513,13 +767,16 @@ jobs:
       #     key (#552). Deliberately its OWN step, not folded into the
       #     "Heuristic anti-pattern scan" step above: that step exits
       #     early — skipping checks 9-22 — on a pull request that changes
-      #     no PHP file under web/ (see its "if [[ -z "$CHANGED" ]]"
-      #     block). A bad link between tables is most often introduced by
-      #     a migration with no PHP change at all, so putting this check
-      #     behind that same early exit would skip it on exactly the pull
-      #     requests it matters most for (the owner approved "every pull
-      #     request" for this one specifically). This step never looks at
-      #     which files changed.
+      #     neither a PHP file under web/ nor anything under web/_sql/
+      #     (see the two "if" blocks near its top that end in "exit 0";
+      #     until #556 it left on any pull request with no PHP change).
+      #     A bad link between tables is most often introduced by a
+      #     migration with no PHP change at all. That early exit no longer
+      #     skips such a pull request, but this check stays out of its
+      #     reach all the same, so that no later change to it can skip
+      #     this one (the owner approved "every pull request" for this
+      #     one specifically). This step never looks at which files
+      #     changed.
       #
       #     Wired the same way as check 9 above, and for the same reason:
       #     the exit code is kept and none of the output is thrown away.
@@ -536,8 +793,11 @@ jobs:
       # with `set +e` and never ends with an explicit non-zero `exit`, so
       # this step always finishes with a success status on its own —
       # proved by running it against a crashing copy of the script and a
-      # missing-schema tree, both under GitHub's own default shell
-      # (`bash -eo pipefail`), and both still ending the step at exit 0.
+      # missing-schema tree, and both still ended the step at exit 0. (This
+      # used to say that was done "under GitHub's own default shell
+      # (`bash -eo pipefail`)". That is the shell for a step that NAMES
+      # bash; with no shell named, as in this file, GitHub uses `bash -e`.
+      # On 13 October 2026 the step's lines were run again under both.)
       #
       # `if: ${{ !cancelled() }}` — added in fix round 1 of the workflow
       # package (25 September 2026). Without it this step used GitHub's
@@ -592,15 +852,87 @@ jobs:
           fi
 
       # =====================================================================
+      # Check 24 (#577): can the portal's own backup carry every column and
+      # link in the install script, and does a snapshot obey its two schema
+      # files? Report-only, like check 23, and for the same reason it runs on
+      # every pull request even after an earlier step failed: the fault this
+      # exists for was caused by a new column in a table nobody thought of as
+      # part of the backup, in a pull request that changed no backup code.
+      #
+      # The script's exit codes: 0 nothing found; 1 something found (and it
+      # then prints a line saying how many problems); 2 it could not read a
+      # file it needs. Anything else is reported as "did not finish", so a
+      # crash can never be read as a clean run. That includes exit code 1
+      # WITHOUT that line, which is what Python itself gives a script that
+      # stopped on an error: its traceback is not a list of findings and is
+      # not headed as one.
+      #
+      # No continue-on-error: the script below starts with `set +e` and never
+      # ends with a non-zero `exit`, so this step always finishes with a
+      # success status. (The workflow that turns RED on a backup fault is
+      # backup-selftest.yml; this step only puts the finding in the comment.)
+      # =====================================================================
+      - name: Backup column-type check (#577, check 24 — runs on every PR, even if an earlier step failed)
+        id: check24
+        if: ${{ !cancelled() }}
+        run: |
+          set +e
+          REPORT=/tmp/security-report-check24.md
+          : > "$REPORT"
+          HITS=0
+
+          BACKUP_TYPES=$(python3 tools/audit-checks/check_backup_column_types.py --strict 2>&1)
+          BACKUP_RC=$?
+          if [[ "$BACKUP_RC" -eq 1 ]] && echo "$BACKUP_TYPES" | grep -a -q "problem(s) with what the portal's own backup can carry"; then
+            {
+              echo "### Columns or links the portal's own backup cannot carry, or a snapshot format that no longer matches its schema"
+              echo
+              echo '```'
+              echo "$BACKUP_TYPES"
+              echo '```'
+              echo
+            } >> "$REPORT"
+            HITS=1
+          elif [[ "$BACKUP_RC" -ne 0 ]]; then
+            {
+              echo "### check_backup_column_types.py did not finish (exit code $BACKUP_RC): its findings, if any, are unknown"
+              echo
+              echo '```'
+              echo "${BACKUP_TYPES:-(the script printed nothing at all)}"
+              echo '```'
+              echo
+            } >> "$REPORT"
+            HITS=1
+          fi
+
+          echo "hits=$HITS" >> "$GITHUB_OUTPUT"
+          echo "check 24 finding sections: $HITS"
+          echo "$BACKUP_TYPES" | tail -3
+          if [[ -s "$REPORT" ]]; then
+            cat "$REPORT"
+          fi
+
+      # =====================================================================
       # Post a single summary comment back to the PR
       #
       # Runs whenever there is anything to say: either the heuristic step
-      # (checks 9-22) actually ran (it skips itself, and so skips this
-      # comment too, on a pull request with no changed PHP file — that gap
-      # is #556, unchanged here), OR check 23 above found something —
-      # check 23 runs on every PR, even after an earlier step failed (see
-      # its own `if:` above), so it can have a finding even when the
-      # heuristic step skipped itself entirely.
+      # (checks 9-22) did not leave early (it leaves early, and so skips
+      # this comment too, on a pull request that changes no PHP or SQL file
+      # under web/ and no document), OR check 23 or check 24
+      # above found something — both run on every PR, even after an earlier
+      # step failed (see their own `if:` above), so either can have a
+      # finding even when the heuristic step skipped itself entirely. Check
+      # 24 is tested with `== '1'` for the reason given below for check 23.
+      #
+      # IT SAYS ONLY WHAT HAPPENED (13 October 2026). This comment used to
+      # open with "No heuristic findings on the files changed in this PR"
+      # whenever the count was 0, and the count is also 0 when the scan
+      # NEVER RAN: after a failed PHP lint the scan is skipped, while this
+      # step, which runs always, still posted that line. A check that did
+      # not run had been reported as a pass. The scan's own outcome, and
+      # the "scope" it wrote down, now decide the first lines: "did not
+      # run", "left early", "only the two checks that read documents ran",
+      # or nothing extra when every check ran.
       #
       # `steps.check23.outputs.hits == '1'`, not `!= '0'` — tightened in fix
       # round 1 of the workflow package (25 September 2026). Check 23's own
@@ -615,27 +947,52 @@ jobs:
       # misread as "has findings".
       # =====================================================================
       - name: Post findings to PR
-        if: always() && (steps.heuristics.outputs.no_changes != 'true' || steps.check23.outputs.hits == '1')
+        if: always() && (steps.heuristics.outputs.no_changes != 'true' || steps.check23.outputs.hits == '1' || steps.check24.outputs.hits == '1')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           HEURISTIC_HITS: ${{ steps.heuristics.outputs.hits }}
+          HEURISTIC_OUTCOME: ${{ steps.heuristics.outcome }}
+          HEURISTIC_SCOPE: ${{ steps.heuristics.outputs.scope }}
           CHECK23_HITS: ${{ steps.check23.outputs.hits }}
+          CHECK24_HITS: ${{ steps.check24.outputs.hits }}
         run: |
           REPORT=/tmp/security-report.md
           REPORT23=/tmp/security-report-check23.md
+          REPORT24=/tmp/security-report-check24.md
           COMMENT=/tmp/comment.md
 
           # Total findings = the heuristic step's count (0 if it skipped
-          # itself) plus check 23's own count (it always ran).
-          HITS=$(( ${HEURISTIC_HITS:-0} + ${CHECK23_HITS:-0} ))
+          # itself) plus check 23's and check 24's own counts (they always
+          # ran).
+          HITS=$(( ${HEURISTIC_HITS:-0} + ${CHECK23_HITS:-0} + ${CHECK24_HITS:-0} ))
+
+          # What the heuristic scan did, in words. Empty when every check in
+          # it ran, which is the only case where "no findings" is the whole
+          # truth. "success" is the one outcome that means the step ran:
+          # anything else (skipped, cancelled, failure) means it did not
+          # reach its end.
+          SCAN_WORDS=""
+          if [[ "$HEURISTIC_OUTCOME" != "success" ]]; then
+            SCAN_WORDS="🛑 **The heuristic scan (checks 3 to 22) DID NOT RUN on this pull request.** An earlier step of the job failed, or the run was cancelled: open the run to see which. Nothing in this comment says anything about those checks."
+          elif [[ "$HEURISTIC_SCOPE" == "none" ]]; then
+            SCAN_WORDS="ℹ️ The heuristic scan (checks 3 to 22) left early: this pull request changes no PHP or SQL file under \`web/\` and no document, so none of those checks ran."
+          elif [[ "$HEURISTIC_SCOPE" == "documents" ]]; then
+            SCAN_WORDS="ℹ️ Only documents changed in this pull request, so only the two checks that read documents ran (10f, a web address of ours; 14b, a document naming a table that does not exist). The other heuristic checks did not run."
+          fi
 
           {
             echo "## PR Security Checks"
             echo
-            if [[ "$HITS" == "0" ]]; then
+            if [[ -n "$SCAN_WORDS" ]]; then
+              echo "$SCAN_WORDS"
+              echo
+            fi
+            if [[ "$HITS" == "0" && -z "$SCAN_WORDS" ]]; then
               echo "✅ No heuristic findings on the files changed in this PR."
+            elif [[ "$HITS" == "0" ]]; then
+              echo "✅ The checks that did run found nothing."
             else
               echo "⚠️ **${HITS} category(ies) of findings** — these are heuristics, please review each:"
               echo
@@ -644,6 +1001,9 @@ jobs:
               fi
               if [[ -s "$REPORT23" ]]; then
                 cat "$REPORT23"
+              fi
+              if [[ -s "$REPORT24" ]]; then
+                cat "$REPORT24"
               fi
             fi
             echo
@@ -656,7 +1016,7 @@ jobs:
       # Account-change guard — HARD GATE (Codex catch-up A3, 20 September 2026)
       #
       # Step 21 above runs the same check for the PR comment, but inside a
-      # step that continues on error and with its exit code thrown away
+      # step that never fails and with its exit code thrown away
       # ("|| true"), so a real finding could never fail the build — even
       # though the check documents itself as always-blocking. This step runs
       # it again with the exit code honoured. It sits after the comment is
@@ -677,13 +1037,27 @@ jobs:
           {
             echo "### PR Security Checks"
             echo
-            echo "- PHP lint: passed (hard gate)"
+            # Each line says what its step's own outcome was. "PHP lint" used
+            # to be printed as "passed" whatever had happened, and this step
+            # runs always, so a failed lint was summed up as a pass.
+            echo "- PHP lint: ${{ steps.php_lint.outcome }} (hard gate)"
             echo "- Account-change guard: ${{ steps.account_guard.outcome }} (hard gate)"
-            echo "- gitleaks: see step output / artifact"
-            if [[ "${{ steps.heuristics.outputs.no_changes }}" == "true" ]]; then
-              echo "- Heuristic scans (checks 9-22): no PHP files changed in web/ — skipped"
+            if [[ "${{ steps.install_gitleaks.outputs.installed }}" == "yes" ]]; then
+              echo "- gitleaks: see step output / artifact"
+            elif [[ "${{ steps.install_gitleaks.outcome }}" == "success" ]]; then
+              echo "- gitleaks: NOT RUN. It could not be installed (see the step \"Install gitleaks CLI\"), so nothing searched this pull request for secrets."
+            else
+              echo "- gitleaks: NOT RUN. The step that installs it did not run (it was ${{ steps.install_gitleaks.outcome }}: an earlier step failed, or the run was cancelled), so nothing searched this pull request for secrets."
+            fi
+            if [[ "${{ steps.heuristics.outcome }}" != "success" ]]; then
+              echo "- Heuristic scans (checks 3-22): DID NOT RUN (the step was ${{ steps.heuristics.outcome }}: an earlier step failed, or the run was cancelled)"
+            elif [[ "${{ steps.heuristics.outputs.no_changes }}" == "true" ]]; then
+              echo "- Heuristic scans (checks 9-22): no PHP or SQL file under web/ and no document changed — skipped"
+            elif [[ "${{ steps.heuristics.outputs.scope }}" == "documents" ]]; then
+              echo "- Heuristic scans: only documents changed, so only the two checks that read documents ran (10f and 14b): ${{ steps.heuristics.outputs.hits }} finding category(ies). The other checks did not run."
             else
               echo "- Heuristic scans (checks 9-22): ${{ steps.heuristics.outputs.hits }} finding category(ies)"
             fi
             echo "- Foreign-key target check (#552, check 23): ${{ steps.check23.outputs.hits }} finding section(s) — runs on every pull request, even when an earlier step failed (blank only if the run was cancelled)"
+            echo "- Backup column-type check (#577, check 24): ${{ steps.check24.outputs.hits }} finding section(s) — runs on every pull request, even when an earlier step failed (blank only if the run was cancelled)"
           } >> "$GITHUB_STEP_SUMMARY"

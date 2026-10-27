@@ -20,11 +20,9 @@
 # Author:    MWBM Partners Ltd (t/a MWservices)
 # Copyright: 2026-present MWBM Partners Ltd (t/a MWservices). All Rights Reserved.
 
-# The deploy workflow. Workflow files need the owner's yes before they are
-# changed; these four lines go with the approved rewrite of the deploy (#500).
-# The first three are examples in the file's heading; the fourth is the live
-# health check, which calls our own installation's address.
-.github/workflows/deploy.yml  4f43ac94f48f28da5a4df2ebdd44d0a0beb6f062fa5f3127cefbc41e251c1309  heading example (live folder); waits for the approved deploy rewrite
-.github/workflows/deploy.yml  40a1f96ef0d1bbcfb514f68c970827d2d8edd1d3d2ee911d9498f6c7ee9158c2  heading example (beta folder); waits for the approved deploy rewrite
-.github/workflows/deploy.yml  ec5b29735d29bbaf436c7b90573f53a74e62fb1ba9226454ce0d6dc8980fc399  heading example (dev folder); waits for the approved deploy rewrite
-.github/workflows/deploy.yml  4eefb1a2e12dc2061c23c121fae9cf3037a57e7ed2d093112a8ea8e44c75030e  the live health check's address; waits for the approved deploy rewrite
+# NOTHING IS WAITING. The last four entries were for the deploy workflow:
+# three examples in its heading and the live health check, which called our
+# own installation's address. They left this list on 13 October 2026, in the
+# change that followed the approved rewrite of the deploy (#500): the rewrite
+# removed all four lines, and the check then failed on each entry as stale,
+# which is how an entry is meant to leave (see above).

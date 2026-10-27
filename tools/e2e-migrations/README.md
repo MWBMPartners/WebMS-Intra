@@ -1,6 +1,6 @@
 # End-to-end migration test (#248)
 
-Runs `web/_sql/` against a real, throwaway MySQL and checks three things:
+Runs `web/_sql/` against a real, throwaway MySQL and checks four things:
 
 1. **A new install works** (phases 1 to 4): `full_schema.sql` loads, and every
    numbered migration then replays on top of it without an error, which is
@@ -17,6 +17,11 @@ Runs `web/_sql/` against a real, throwaway MySQL and checks three things:
    4 and 5): migration 210 and the install script each empty only a pointer to
    an event that is gone, and both stop, changing nothing, when the events
    table itself is missing.
+4. **The installer's "carry on with what is there" keeps each organisation's
+   time zone on an older database** (phase 7, #604). That choice loads
+   today's install script over the database and then every migration,
+   whichever have run. Phases 1 to 6 could not see a fault on that path: none
+   of them takes it over a database whose two time-zone places differ.
 
 Which MySQL it runs on comes from `E2E_MYSQL_VERSION`: always an exact version
 such as 8.0.36 or 8.4.11, and 8.0.36 when nothing is given. The pull-request
@@ -39,9 +44,15 @@ confirmed (see #475).
 | **5. Upgrade from the last release** | Builds the last release's database from that release's own `web/_sql/` (its install script, then its own migrations). Then runs this checkout's pending migrations the way the Migrator does: in order, **stopping at the first failure**. | The upgrade does not stop, and the result equals a fresh install (the rule is below). |
 | **6. Upgrade from the oldest install script** | Checks the frozen install script of 6 March 2026 in `fixtures/` against its checksum, loads it, and upgrades it the same way. That file holds March's 19 base tables only, so this is "March's base tables, then today's copies of migrations 007 onwards". | The file's body is untouched, and then the same as phase 5. |
 
-Phases 1 to 4 and the data checks stop the run at the first failure. Phases 5
-and 6 both always run, because they start from different databases and one
-failing says nothing about the other; the run fails if either does.
+| **7. The installer's "carry on" over an older database** | Builds an older database: the frozen install script of 6 March 2026, then this checkout's migrations up to 216, so it has the old `site.timezone` setting and the old `eventTimezone` column and has never seen migration 217. Sets its two time-zone places apart (the installation's setting says Auckland while its organisation's row says UTC; a second organisation's row says New York and its own setting Paris). Then loads today's install script over it and replays every migration, as the installer's "carry on" does. | Each organisation's row holds the zone its pages were showing (Auckland, then Paris); the old setting and the old column are gone; the mark is there; and the same path a second time changes nothing. |
+
+Phases 1 to 4 and the data checks stop the run at the first failure. Phases 5,
+6 and 7 all always run, because they start from different databases and one
+failing says nothing about the others; the run fails if any of them does.
+
+**What phase 7 cannot show:** the installer's own pages. It runs the SQL
+their "carry on" step runs, through the `mysql` command-line client, as the
+other phases do.
 
 ### What "the last release" means
 
@@ -207,7 +218,7 @@ delete: an exception that is no longer true must not stay in the list.
 Needs `docker`, `docker compose`, `git` and bash 4 or newer.
 
 ```bash
-tools/e2e-migrations/run.sh                # all six phases and the data checks, on MySQL 8.0.36
+tools/e2e-migrations/run.sh                # all seven phases and the data checks, on MySQL 8.0.36
 E2E_MYSQL_VERSION=8.4.11 tools/e2e-migrations/run.sh   # the same, on MySQL 8.4.11
 E2E_BASE_REF=<commit, tag or branch> tools/e2e-migrations/run.sh   # phase 5 starts from there
 tools/e2e-migrations/run.sh --skip-stale   # phase 4 without its catching-up half
@@ -221,7 +232,8 @@ with other work.
 
 A passing run looked like this on 12 October 2026 (the numbers grow with every
 migration; lines of `1` and password warnings from the `mysql` client are left
-out):
+out). Phase 7 was added the next day: its lines come after phase 6's and are
+not in this sample.
 
 ```text
 ═════ Phase 1: full_schema fresh-install ═════
@@ -336,6 +348,9 @@ script plus the replay.
   `tblMigrations` once and **stops at the first failure**, as
   `Migrator::runAll()` does. #555 is exactly "the upgrade stops and nothing
   after it runs", so a runner that carries on would hide it.
+- **Phase 7** builds its older database with the `mysql` client, one
+  migration file at a time, stopping before 217; then it loads
+  `full_schema.sql` and calls `replay_all_migrations()`, twice over.
 - **Phase 5** takes the last release's `web/_sql/` out of git with
   `git archive` into a temporary folder. Nothing in the checkout is changed.
 - The comparison in phase 2 is `compare_replay_with_install_script_alone()`

@@ -1,0 +1,1016 @@
+# =============================================================================
+# WebMS-Intra — Build installation package
+#
+# Placed on 13 October 2026, after the owner (Salem874) had read the text and
+# said yes. It took the place of release.yml, which was deleted in the same
+# commit: both fired on the same tag and would have raced to create the same
+# Release. release.yml had never attached a file to a Release.
+#
+# REWORKED ON 14 OCTOBER 2026, on the owner's decision of 13 October that
+# zips are made by themselves, with no tag pushed by a person. The owner
+# decided WHAT it does (set out under PURPOSE); the text below was written to
+# that decision afterwards.
+#
+# Copyright (c) 2026 MWBM Partners Ltd. All rights reserved.
+# Proprietary. Unauthorised copying, modification or distribution prohibited.
+#
+# PURPOSE (#499)
+# --------------
+# Builds the zip a customer downloads to install or upgrade the portal,
+# whenever one of four branches receives a merge:
+#
+#   main    The live package. The run names it v<number> (the number in
+#           web/_core/version.php) and, if publishing is switched on, makes
+#           that tag and a GitHub Release with the zip attached.
+#   rc      A release candidate. "rc" is a branch between beta and main, for
+#           packaging only: nothing deploys from it and nothing raises its
+#           number. The run names it v<number>-rc.N and, if publishing is
+#           switched on, makes that tag and a Release marked as a PRE-RELEASE,
+#           so that "Latest" under Releases is always a live one.
+#   beta,   Built and checked, and kept as a download on the run (the run's
+#   alpha   page, "Artifacts", "installation-package"). NEVER put under
+#           Releases. On a public repository anybody signed in to GitHub can
+#           download it, and GitHub removes it after 90 days; the owner knows.
+#
+#   A manual run ("Run workflow") on any of the four builds and checks only.
+#   It never publishes and never makes a tag.
+#
+# THE rc BRANCH DOES NOT EXIST YET, and nothing here creates it. Until
+# somebody makes it, the rules for it simply never apply. MAKING THE BRANCH
+# IS ITSELF A PUSH TO IT: a run starts at once for the commit it was made
+# from, and with publishing on that commit becomes a candidate. So it should
+# be made while publishing is off, or from the commit meant as the first
+# candidate.
+#
+# All the logic of the package itself is in tools/package/build.sh and
+# tools/package/check-package.py, which run the same on a developer's
+# machine. This file decides the channel word and the name, calls them, and
+# publishes.
+#
+# HOW A RELEASE IS NAMED (the function name_the_release, further down)
+#   main: v<number>.
+#     - No such tag yet: this commit becomes that release.
+#     - The tag is already on this very commit: nothing is made twice. If its
+#       Release is there too, the run says so and ends green. If only the tag
+#       is there (an earlier run stopped half way), the Release is made for it.
+#     - The tag is on another commit and nothing under web/ differs from it (a
+#       merge that changed only documents, say): there is nothing new to
+#       release. The zip is built without a release name and kept on the run,
+#       the run says so, and it ends green.
+#     - The tag is on another commit and web/ DOES differ: the run STOPS and
+#       says the version number was not raised.
+#   rc: v<number>-rc.N, N being one more than the highest -rc. tag that number
+#     already has (after rc.1 and rc.3 comes rc.4: a gap is never filled). If
+#     a candidate tag of that number is already on this very commit, that is
+#     this commit's candidate and no new number is taken, so running a run
+#     again never makes a second candidate out of the same commit.
+#     A candidate carries the channel word "beta": the portal has no channel
+#     of its own for candidates, and none is added. (Guard G9 in
+#     check-package.py already allowed a -rc tag with the word beta.)
+#   A tag is never moved, and a Release that exists is never replaced. (Until
+#   this rework, a run for a tag that already had a Release replaced its two
+#   files, with a warning. Nothing does that now.)
+#
+# THE NUMBER ON AN alpha OR beta ZIP IS THE MERGED COMMIT'S, NOT THE RAISED ONE
+#   version-bump.yml raises the number after a push to alpha or beta that
+#   changed anything under web/, or CHANGELOG.md, in a commit of its own.
+#   That commit is pushed with GitHub's built-in token, and GitHub starts no
+#   workflow for such a push, so no build follows it. The build that does run
+#   is the one the merge's own push started: it builds the commit that was
+#   merged, which still carries the number from before the rise. So after
+#   such a push the branch is one number ahead of its zip. The zip's name
+#   carries the commit (webms-intra-<number>-<channel>-<commit>.zip), and
+#   every such run says this in its summary.
+#   WHY IT IS NOT BUILT AFTER THE RISE. Two ways were looked at and set aside:
+#     - version-bump.yml starting this file once it has pushed the rise (the
+#       way auto-merge-alpha.yml starts the deploy), or GitHub starting this
+#       file when version-bump.yml finishes. As far as GitHub's documentation
+#       says (not looked up again for this, and not tested), both start a run
+#       only when the file is on the DEFAULT branch, main. This file reaches
+#       alpha and beta long before it reaches main, and the owner wants even
+#       the first run to be automatic. Both would also build nothing for a
+#       push that raises no number.
+#     - Building "whatever the branch's tip is by then", as deploy.yml checks
+#       out. Whether the rise has landed by then is a race: the same merge
+#       would carry one number on one day and the next number on another.
+#   A zip that always carries the merged commit, and says so, was judged
+#   better than one that usually carries the raised number.
+#
+# SAFETY, IN ORDER OF IMPORTANCE
+#   1. build.sh puts no zip in its output folder unless check-package.py
+#      passed on the folder and then on the zip.
+#   2. The job that downloads outside code and builds can only READ the
+#      repository. Only the separate publish job can write. That job takes no
+#      FILE from the repository: it has no checkout, only git's own record of
+#      the commits and tags (a "bare" copy, which has no working files, so
+#      nothing from the repository can be run there). It checks the zip
+#      against the checksum the build job reported, reads the changelog out
+#      of that checked zip, and uploads. WHAT it may publish, and under which
+#      name, it works out for itself: from GitHub's own word for what started
+#      the run (github.ref and github.sha) and from that record. The build
+#      job's word for the tag and the zip's name is only COMPARED with it and
+#      must agree. The build job runs outside code, and if that code were
+#      ever to lie about the tag, the job that can write must not follow it.
+#   3. Publishing has its own switch: the repository variable
+#      PACKAGE_PUBLISH_ENABLED must be exactly 'true' (small letters; 'TRUE'
+#      and 'True' are OFF). The switch is read ONCE, by one step of the
+#      publish job, which says which way it is and hands that one answer to
+#      every later step. So the words and the deeds cannot disagree, and a
+#      green run with nothing published is never taken for a release. With it
+#      off, a run for main or rc builds, keeps the download on the run, makes
+#      no tag, and says what it would have published.
+#   4. WHO MAKES A TAG. This point used to read: "This workflow never creates
+#      a tag. Tagging stays a person's act." The owner changed that on
+#      13 October 2026: zips are to be made by themselves, with no tag pushed
+#      by a person. What stands in its place: ONLY the publish job makes a
+#      tag; only for a push to main or rc; only with publishing switched on;
+#      only on the commit GitHub named for the run; and only a tag that does
+#      not exist yet. It never moves one and never deletes one.
+#   5. Publishing is refused for anything but a push to main or rc, inside
+#      the publish job itself, whatever started the run. The rule on the job
+#      (its "if:") keeps other runs away from it; the job's first step asks
+#      again, in bash, where a name means exactly its letters.
+#   6. No step is allowed to fail quietly: there is no continue-on-error.
+#   7. The one outside action (the PHP set-up) is named by its commit, not by
+#      a tag its publisher can move.
+#
+# A TAG PUSHED BY HAND (v1.5.0, v1.5.0-beta.1 and the like)
+#   Until this rework it built and published: a -beta tag on beta put a beta
+#   zip under Releases, which the owner does not want. Now it starts a run
+#   that stops in its first step after the checkout, in red, and says why:
+#   nothing is built and nothing is published. The tag itself is left where
+#   it is, and it COUNTS from then on: a hand-made v1.5.0-rc.7 makes the next
+#   candidate rc.8, and a hand-made v1.5.0 on the wrong commit makes the next
+#   run for main stop with "the version number was not raised".
+#   (The tags this file makes are pushed with GitHub's built-in token, which
+#   starts no run. If they are ever pushed with another kind of token, each
+#   would start a run here that stops with that message.)
+#
+# TWO MERGES CLOSE TOGETHER (the "concurrency" rule below)
+#   Runs started by a push to main wait for one another, and so do those for
+#   rc: the second starts only when the first has finished, build and publish
+#   both, so it sees the tag the first one made and takes the next number.
+#   If a third arrives while the second is still waiting, GitHub drops the
+#   waiting one and keeps the newest; the newest commit holds the dropped
+#   one's changes. If two runs did ever reach for the same name, git refuses
+#   the second one's tag ("already exists") and that run stops with nothing
+#   published. Every other run (alpha, beta, a manual run, a tag pushed by
+#   hand) never waits and is never dropped: it takes no number.
+#
+# WHAT THIS CANNOT DO
+#   - With publishing OFF nothing remembers a name, because no tag is made:
+#     the next run for the same number takes the same name, so two runs'
+#     downloads can share a file name and differ inside (VERSION.txt in each
+#     names its commit), and "the version number was not raised" is not
+#     noticed.
+#   - It does not make a Release for a tag that sits on ANOTHER commit, even
+#     if that tag never had one.
+#   - It does not stop a candidate for a number that is already live; it only
+#     warns. Such a candidate stops later, on main, unless web/ is unchanged.
+#   - Running an old run again publishes that old commit, if its number was
+#     never published.
+#   - A merge made with GitHub's built-in token (auto-merge-alpha.yml merges
+#     that way) starts no run here, as it starts none anywhere.
+#
+# WHERE THIS DIFFERS FROM THE OUTLINE IN THE ROLL-OUT PLAN (section 5, W2):
+# two jobs instead of one; the zip is checked a third time just before
+# upload; the version-against-tag test is guard G9 in check-package.py, not a
+# step; gitleaks is installed by a checksum-pinned download; the publish job
+# has no checkout and takes nothing on the build job's word but the checksum.
+# (The owner was shown these differences before the file was first placed.
+# Since the rework the plan's outline is further off still: it had a person
+# push the tag.)
+#
+# NO SWITCH LETS A PACKAGE THROUGH WITHOUT A GUARD. The build has one allow
+# switch left (--allow-no-gitleaks, for a machine without that program) and
+# this file never gives it: gitleaks is installed below, and a build that
+# cannot find it stops. The older switch for a missing installation guide was
+# removed on 13 October 2026, and so was the tick box that gave it.
+#
+# NOT PROVED ANYWHERE YET: nothing in this file has run on GitHub. Every
+# script below was run by hand on a developer's Mac, against a made-up
+# repository and a stand-in for the gh program. Only GitHub can show: whether
+# its built-in token may push a tag, signed in the way the publish job signs
+# git in (and what happens where the repository has rules about tags); that
+# the checkout brings every tag; that runs for one branch really wait for one
+# another; whether a run started again reads the switch afresh; the two
+# upload and download actions; and the first run on each branch. Keep
+# publishing OFF until a run for main or rc has ended green and said what it
+# would have published.
+# =============================================================================
+
+name: Build installation package
+
+on:
+  push:
+    # Every merge into one of the four. "rc" does not exist yet: naming it
+    # early changes nothing until somebody makes the branch.
+    branches: [main, rc, beta, alpha]
+    # A tag pushed by a person publishes nothing any more. It is listed here
+    # only so that such a push gets a run that says so, instead of silence.
+    tags: ['v*']
+  workflow_dispatch:      # build and check only: the zip is kept on the run, nothing is published
+
+# Runs started by a push to main share one queue, and so do those for rc: see
+# "TWO MERGES CLOSE TOGETHER" above. Everything else gets a group of its own
+# (the run's number), so it never waits and is never dropped. A manual run on
+# main or rc is kept OUT of the queue on purpose: joining it would let a
+# manual run push a waiting release out.
+concurrency:
+  group: package-${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/rc') && github.ref || github.run_id }}
+  cancel-in-progress: false   # never abandon a release half made
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and check the package
+    runs-on: ubuntu-latest
+    # What the publish job is told. It uses the checksum, and it COMPARES the
+    # tag and the zip's name with what it works out for itself; it never acts
+    # on them. The channel word is not handed over at all.
+    outputs:
+      tag: ${{ steps.decide.outputs.tag }}
+      zip: ${{ steps.build.outputs.zip }}
+      sha256: ${{ steps.build.outputs.sha256 }}
+
+    steps:
+      # Full history, every branch and every tag: naming a release needs to
+      # see the tags that exist. "fetch-depth: 0" is documented to bring the
+      # tags with it; that has not been seen on GitHub yet. If the tags ever
+      # did not arrive, the two jobs would disagree about the name and
+      # nothing would be published. The sign-in token is not left in the
+      # folder, so nothing that runs later in this job can use it.
+      # The WHOLE repository is checked out, not only tools/package/: the
+      # checker's domain guard reads its list of names from
+      # tools/audit-checks/check_no_hardcoded_domains.py, and fails the build
+      # if that file is not there.
+      - name: Checkout with full history
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # This step comes BEFORE anything is downloaded, so that a run with
+      # nothing to build (a tag pushed by hand, a version number that was not
+      # raised) stops within seconds.
+      #
+      # EVENT and REF are judged together, as one text. REF is the full name
+      # (refs/heads/main, refs/tags/v1.5.0), never the short one: a TAG
+      # somebody named "main" has the short name "main" too, and must not be
+      # taken for the branch.
+      #
+      # This job only READS. What it decides here names the zip; the publish
+      # job works the same answer out again for itself and compares.
+      - name: Decide the commit, the channel word and the name
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # ---- THE ONE RULE FOR THE NAME OF A RELEASE ----------------------
+          # This function is in this file TWICE, word for word: in the build
+          # job's naming step and in the publish job's first step. The publish
+          # job cannot borrow it from the build job, because it takes no file
+          # from the repository. CHANGE BOTH TOGETHER. If the two ever
+          # disagree, the publish job's comparison fails and nothing is
+          # published.
+          # It reads only git's own record, never a file on disk: the number
+          # from version.php AT the commit (read the way build.sh reads it),
+          # and the tags that exist. $1 is "main" or "rc"; $2 is the commit.
+          # It sets NUMBER, TAG, TAG_COMMIT and STATE. STATE is one of:
+          #   new          no such tag yet
+          #   same-commit  the tag is already on this very commit
+          #   same-web     main only: the tag is on another commit, where web/ is the same
+          #   not-raised   main only: the tag is on another commit, where web/ differs
+          name_the_release() {
+            local kind="$1" commit="$2" text tags one n highest here web_here web_there
+            NUMBER=""; TAG=""; TAG_COMMIT=""; STATE=""
+            if ! text="$(git show "${commit}:web/_core/version.php")"; then
+              echo "::error::Could not read web/_core/version.php at commit ${commit}. No release can be named."
+              return 1
+            fi
+            NUMBER="$(sed -n "s/^return '\([^']*\)';.*/\1/p" <<< "$text")"
+            if [[ ! "$NUMBER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::web/_core/version.php at commit ${commit} does not hold one plain version number (a line like: return '1.5.0';). It gave '${NUMBER}'. No release can be named."
+              return 1
+            fi
+            case "$kind" in
+              main)
+                TAG="v${NUMBER}"
+                # "^{commit}" follows a tag that carries a message to the commit it names.
+                if ! TAG_COMMIT="$(git rev-parse --quiet --verify "refs/tags/${TAG}^{commit}")"; then
+                  TAG_COMMIT=""
+                  STATE="new"
+                elif [[ "$TAG_COMMIT" == "$commit" ]]; then
+                  STATE="same-commit"
+                else
+                  # "<commit>:web" is git's fingerprint of the whole web/
+                  # folder at that commit: equal fingerprints, equal folders.
+                  web_here="$(git rev-parse --verify "${commit}:web")"
+                  if web_there="$(git rev-parse --quiet --verify "${TAG_COMMIT}:web")" && [[ "$web_there" == "$web_here" ]]; then
+                    STATE="same-web"
+                  else
+                    STATE="not-raised"
+                  fi
+                fi
+                ;;
+              rc)
+                highest=0
+                here=""
+                tags="$(git tag --list "v${NUMBER}-rc.*")"
+                while IFS= read -r one; do
+                  n="${one#"v${NUMBER}-rc."}"
+                  # Only a plain whole number counts: rc.2 does; rc.02 and rc.2b do not.
+                  [[ "$one" == "v${NUMBER}-rc."* && "$n" =~ ^(0|[1-9][0-9]*)$ ]] || continue
+                  if (( n > highest )); then
+                    highest="$n"
+                  fi
+                  if [[ "$(git rev-parse --quiet --verify "refs/tags/${one}^{commit}")" == "$commit" ]]; then
+                    if [[ -z "$here" ]] || (( n > here )); then
+                      here="$n"
+                    fi
+                  fi
+                done <<< "$tags"
+                if [[ -n "$here" ]]; then
+                  TAG="v${NUMBER}-rc.${here}"
+                  TAG_COMMIT="$commit"
+                  STATE="same-commit"
+                else
+                  TAG="v${NUMBER}-rc.$(( highest + 1 ))"
+                  STATE="new"
+                fi
+                ;;
+              *)
+                echo "::error::A release is named only for main or rc, not for '${kind}'."
+                return 1
+                ;;
+            esac
+            return 0
+          }
+          # ---- END OF THE ONE RULE ----------------------------------------
+
+          if [[ ! "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::GitHub's word for the commit of this run is not a commit's full name: '$SHA'."
+            exit 1
+          fi
+          COMMIT="$SHA"
+          NUMBER=""; TAG=""; TAG_COMMIT=""; STATE=""
+          case "$EVENT $REF" in
+            "push refs/heads/main")               CHANNEL="live";  KIND="main" ;;
+            "push refs/heads/rc")                 CHANNEL="beta";  KIND="rc" ;;
+            "push refs/heads/beta")               CHANNEL="beta";  KIND="" ;;
+            "push refs/heads/alpha")              CHANNEL="alpha"; KIND="" ;;
+            "workflow_dispatch refs/heads/main")  CHANNEL="live";  KIND="" ;;
+            "workflow_dispatch refs/heads/rc")    CHANNEL="beta";  KIND="" ;;
+            "workflow_dispatch refs/heads/beta")  CHANNEL="beta";  KIND="" ;;
+            "workflow_dispatch refs/heads/alpha") CHANNEL="alpha"; KIND="" ;;
+            "push refs/tags/"*)
+              echo "::error::The tag ${REF#refs/tags/} was pushed by a person. By the owner's decision of 13 October 2026 this workflow makes the tags itself (v<number> on main, v<number>-rc.N on rc), and a tag pushed by hand publishes nothing. Nothing was built. The tag was left where it is, and it counts from now on: see 'A TAG PUSHED BY HAND' at the top of package.yml before leaving it there."
+              exit 1
+              ;;
+            *)
+              echo "::error::A package is built for the BRANCH main, rc, beta or alpha: by a push to it, or by a manual run started from it. This run was started by '$EVENT' of '$REF'."
+              exit 1
+              ;;
+          esac
+          BRANCH="${REF#refs/heads/}"
+
+          if [[ -n "$KIND" ]]; then
+            name_the_release "$KIND" "$SHA"
+            if [[ "$KIND" == "main" ]]; then
+              WHAT="the live release"
+            else
+              WHAT="the release candidate"
+            fi
+            case "$STATE" in
+              new)
+                WORDS="This commit is to be ${WHAT} ${TAG}. Whether it is published is the next job's decision: only with the switch PACKAGE_PUBLISH_ENABLED on. Either way the zip is kept on this run."
+                ;;
+              same-commit)
+                WORDS="The tag ${TAG} is already on this very commit, so no new name is taken. If its Release is there too, nothing is done; if it is not, the next job makes it (only with publishing switched on). The zip is kept on this run."
+                ;;
+              same-web)
+                WORDS="Nothing new to release: ${TAG} is already the tag of commit ${TAG_COMMIT:0:12}, and nothing under web/ differs between that commit and this one. The zip of this commit is built without a release name and kept on this run. Nothing is published."
+                # Built as an unnamed package: a second, different file called
+                # after the release must never exist.
+                TAG=""
+                ;;
+              not-raised)
+                echo "::error::The version number was not raised. web/_core/version.php on main says ${NUMBER}, and the tag ${TAG} is already on commit ${TAG_COMMIT:0:12}, where the web/ folder is not the same as this commit's (${SHA:0:12}). A tag is never moved and a Release is never replaced, so nothing is built and nothing is published. Raise the number in web/_core/version.php and merge again. (Nothing raises it on main by itself; it normally arrives already raised, from beta. If somebody pushed ${TAG} by hand onto the wrong commit, that tag is what is in the way.)"
+                exit 1
+                ;;
+              *)
+                echo "::error::The naming rule gave a state this step does not know: '${STATE}'."
+                exit 1
+                ;;
+            esac
+            # A candidate for a number that is already live is allowed, but it
+            # is almost certainly a number somebody forgot to raise.
+            if [[ "$KIND" == "rc" ]] && git rev-parse --quiet --verify "refs/tags/v${NUMBER}^{commit}" > /dev/null; then
+              echo "::warning::v${NUMBER} is already a live tag, so ${TAG} is a candidate for a number that was already released. When it reaches main the run there will stop with 'the version number was not raised', unless nothing under web/ has changed."
+            fi
+          elif [[ "$EVENT" == "push" ]]; then
+            WORDS="Nothing is published from ${BRANCH}: this zip is only a download on this run. It was built from the commit that was merged, and carries that commit's version number. If the merge changed anything under web/, or CHANGELOG.md, version-bump.yml raises the number straight afterwards in a commit of its own, and GitHub starts no build for that commit: so ${BRANCH} then reads one number higher than this zip."
+          else
+            WORDS="A manual run never publishes and never makes a tag. The zip is built without a release name and kept on this run."
+          fi
+
+          echo "Commit $COMMIT, channel $CHANNEL, name '${TAG:-none}'"
+          echo "::notice::${WORDS}"
+          {
+            echo "commit=$COMMIT"
+            echo "channel=$CHANNEL"
+            echo "tag=$TAG"
+            echo "words=$WORDS"
+          } >> "$GITHUB_OUTPUT"
+
+      # The portal is written for PHP 8.4 and later; the runner's own PHP is
+      # older and would report new syntax as mistakes. This is the one action
+      # here that GitHub does not publish itself, and it runs in the job that
+      # makes the zip, so it is named by its COMMIT: a tag such as "v2" can be
+      # moved by its publisher to different code without this file changing.
+      # The commit below is release 2.40.0 (8 October 2026), which is also
+      # what "v2" pointed at on 12 October 2026. To move to a newer release:
+      # read its changes, then replace the commit and this comment together.
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      # THE VERSION THE PACKAGE CHECKER WAS PROVED WITH: 8.30.1 (13 October
+      # 2026, on a developer's Mac). With it, and with no allow switch:
+      #   - it REPORTS the made-up private key the checker shows it first,
+      #     alone and again among the cut-up pieces (guard G5 refuses a search
+      #     that cannot find that);
+      #   - it reads tools/package/gitleaks-settings.toml, which lets ONE find
+      #     through, the placeholder YOUR_TOKEN in the scheduled-job command of
+      #     the Help and the release notes;
+      #   - it finds nothing else in a real package.
+      # An earlier draft of this step installed 8.21.2, the version
+      # pr-security.yml then installed for its own search of the repository.
+      # None of the three was ever proved with 8.21.2, so no package was ever
+      # to be searched with it; pr-security.yml moved to 8.30.1 in the same
+      # commit that placed this file.
+      #
+      # THE CHECKSUM BELOW is the publisher's own, for the one file this step
+      # downloads: the line for gitleaks_8.30.1_linux_x64.tar.gz in
+      # gitleaks_8.30.1_checksums.txt on the release page of gitleaks 8.30.1,
+      # read on 13 October 2026. Whoever placed this file also downloaded the
+      # archive and worked the checksum out again: the two agreed. (The text
+      # this file was placed from carried a placeholder instead, because
+      # nothing could be fetched where it was written, and a guessed checksum
+      # is worse than none.) pr-security.yml and portal-selftests.yml install
+      # the same version by the same checksum: CHANGE ALL THREE TOGETHER.
+      # The test below it stays: if the checksum is ever replaced by something
+      # that is not 64 characters of a checksum, the build stops with a
+      # message instead of downloading a program nothing vouches for.
+      #
+      # STILL NOT PROVED: that the Linux build of 8.30.1 does the three things
+      # above (the proof was the macOS build; of the Linux one it is known
+      # only that it starts and says it is 8.30.1), and anything on GitHub.
+      # The first run here is that proof. If one of the three things above
+      # does not hold, the build STOPS at G5 and says which. If it cannot be
+      # installed the build stops too: a package nobody searched for secrets
+      # must not be made.
+      - name: Install gitleaks (the program that searches for secrets)
+        run: |
+          set -euo pipefail
+          VERSION="8.30.1"
+          SHA256="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+          if [[ ! "$SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::The checksum of gitleaks ${VERSION} is not 64 characters of a checksum (see the comment above this step). No package is built without the search for secrets."
+            exit 1
+          fi
+          curl -fsSL -o "$RUNNER_TEMP/gitleaks.tgz" "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          echo "${SHA256}  $RUNNER_TEMP/gitleaks.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP" gitleaks
+          sudo mv "$RUNNER_TEMP/gitleaks" /usr/local/bin/gitleaks
+          # The program must say it is the version asked for.
+          INSTALLED="$(gitleaks version)"
+          echo "gitleaks says it is version ${INSTALLED}"
+          [[ "$INSTALLED" == "$VERSION" || "$INSTALLED" == "v$VERSION" ]] || { echo "::error::Asked for gitleaks ${VERSION}, got '${INSTALLED}'."; exit 1; }
+
+      # Whether the name suits the channel word (no suffix on live; -beta or
+      # -rc on beta) and agrees with version.php is checked by guard G9.
+      # Neither build.sh nor the checker looks the name up among git's tags,
+      # which is what lets a package be named for a tag that the publish job
+      # has not made yet.
+      - name: Build the package (it checks the folder, then the zip)
+        id: build
+        env:
+          COMMIT: ${{ steps.decide.outputs.commit }}
+          CHANNEL: ${{ steps.decide.outputs.channel }}
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          set -euo pipefail
+          EXTRA=()
+          if [[ -n "$TAG" ]]; then
+            EXTRA+=(--tag "$TAG")
+          fi
+          bash tools/package/build.sh "$COMMIT" "$CHANNEL" "$RUNNER_TEMP/package" "${EXTRA[@]}"
+          # Exactly one zip must have been made.
+          shopt -s nullglob
+          ZIPS=("$RUNNER_TEMP"/package/webms-intra-*.zip)
+          if [[ "${#ZIPS[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one zip in the output folder; found ${#ZIPS[@]}."
+            exit 1
+          fi
+          {
+            echo "zip=$(basename "${ZIPS[0]}")"
+            echo "sha256=$(cut -d' ' -f1 "${ZIPS[0]}.sha256")"
+          } >> "$GITHUB_OUTPUT"
+
+      # The same checks again, on the very file about to be uploaded, so that
+      # nothing between the build and the upload can have changed it unseen.
+      - name: Check the zip once more, just before it is uploaded
+        env:
+          COMMIT: ${{ steps.decide.outputs.commit }}
+          CHANNEL: ${{ steps.decide.outputs.channel }}
+          TAG: ${{ steps.decide.outputs.tag }}
+          ZIP: ${{ steps.build.outputs.zip }}
+        run: |
+          set -euo pipefail
+          EXTRA=()
+          if [[ -n "$TAG" ]]; then
+            EXTRA+=(--tag "$TAG")
+          fi
+          # The result is kept in a file and the exit code read directly, not
+          # through a pipe.
+          CODE=0
+          python3 tools/package/check-package.py "$RUNNER_TEMP/package/$ZIP" --commit "$COMMIT" --channel "$CHANNEL" "${EXTRA[@]}" > "$RUNNER_TEMP/check.txt" 2>&1 || CODE=$?
+          cat "$RUNNER_TEMP/check.txt"
+          if [[ "$CODE" -ne 0 ]]; then
+            exit "$CODE"
+          fi
+          # A crash must not look like a pass: the checker's last line must be
+          # a PASS line saying it reached its end, as well as the exit code.
+          LAST="$(tail -n 1 "$RUNNER_TEMP/check.txt")"
+          if [[ "$LAST" != "PASS"*"the run reached its end." ]]; then
+            echo "::error::check-package.py exited 0 but its last line is not a PASS line that says it reached its end."
+            exit 1
+          fi
+
+      # This is the download the owner meant by "only accessible via GitHub
+      # Actions": the run's page, "Artifacts", "installation-package". A run
+      # started by a merge asks for 90 days, the time the owner was told
+      # GitHub keeps such a download (if the repository's own limit is
+      # shorter, that limit wins); a manual run asks for 14.
+      - name: Keep the zip and its checksum as a download on this run
+        uses: actions/upload-artifact@v7
+        with:
+          name: installation-package
+          path: |
+            ${{ runner.temp }}/package/${{ steps.build.outputs.zip }}
+            ${{ runner.temp }}/package/${{ steps.build.outputs.zip }}.sha256
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'push' && 90 || 14 }}
+
+      # The run's summary page says in words what was made and what was not,
+      # so that nobody has to read a log to find out. On alpha and beta this
+      # is also where the run says which version number the zip carries, and
+      # why it is not the raised one.
+      - name: Say plainly what this run made
+        env:
+          ZIP: ${{ steps.build.outputs.zip }}
+          SHA256: ${{ steps.build.outputs.sha256 }}
+          COMMIT: ${{ steps.decide.outputs.commit }}
+          CHANNEL: ${{ steps.decide.outputs.channel }}
+          WORDS: ${{ steps.decide.outputs.words }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Installation package"
+            echo
+            echo "- File: \`${ZIP}\`"
+            echo "- Checksum (SHA-256): \`${SHA256}\`"
+            echo "- Built from commit \`${COMMIT}\`, with the channel word \`${CHANNEL}\`."
+            echo "- To download it: this run's page, \"Artifacts\", \`installation-package\`."
+            echo
+            echo "${WORDS}"
+          } > "$RUNNER_TEMP/summary.md"
+          cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/summary.md"
+
+  publish:
+    name: Publish the package
+    needs: build
+    # Only a push to main or rc reaches this job. A run for alpha or beta, a
+    # manual run and a tag pushed by hand never do. GitHub compares these
+    # names without minding capitals, so the job's first step asks again in
+    # bash, where "main" means exactly those four letters.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/rc')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # to make the tag and the Release and attach the two files; nothing else here writes
+    env:
+      # The one thing taken on the build job's word. Nothing else can supply
+      # it: this job has no copy of the repository to build from again.
+      SHA256: ${{ needs.build.outputs.sha256 }}
+
+    # NOTE: this job has NO checkout step, on purpose. It can write to the
+    # repository, so no file from the repository is put in its folder. Its
+    # first step fetches git's own record of the commits and tags into a bare
+    # copy, which has no working files.
+
+    steps:
+      # WHAT THIS JOB MAY PUBLISH, AND UNDER WHICH NAME. The branch is read
+      # from github.ref and the commit from github.sha, which GitHub sets
+      # from the push that started the run and no step can change. The name
+      # follows from them by the one rule (the function below, the same text
+      # as in the build job), read from a record this job fetched itself. The
+      # zip's name follows from the tag (a named package is always
+      # webms-intra-<the tag without its v>.zip; check-package.py refuses any
+      # other name), and the pre-release mark follows from the branch. The
+      # build job's own word for the tag and the zip's name is compared with
+      # these and must agree; if it does not, nothing is published.
+      # Before this was corrected, the tag, the channel and the zip's name all
+      # came from the build job, so a build job gone wrong could have pointed
+      # this job at another Release.
+      #
+      # This step runs with publishing off as well. It only reads, and a run
+      # that ends green with publishing off has then shown that the fetch and
+      # the naming work, before anybody switches publishing on.
+      - name: Work out what may be published, from GitHub's own word and not the build job's
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          BUILT_TAG: ${{ needs.build.outputs.tag }}
+          BUILT_ZIP: ${{ needs.build.outputs.zip }}
+        run: |
+          set -euo pipefail
+
+          # git signs in with the run's own token. It is handed over through
+          # the environment, so it is in no file and on no command line, and
+          # GitHub is told to keep the form it takes here out of the log.
+          # (actions/checkout signs in the same way, but writes it to a file.)
+          sign_git_in() {
+            local header
+            header="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+            echo "::add-mask::${header}"
+            export GIT_TERMINAL_PROMPT=0
+            export GIT_CONFIG_COUNT=1
+            export GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader"
+            export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${header}"
+          }
+
+          # ---- THE ONE RULE FOR THE NAME OF A RELEASE ----------------------
+          # This function is in this file TWICE, word for word: in the build
+          # job's naming step and in the publish job's first step. The publish
+          # job cannot borrow it from the build job, because it takes no file
+          # from the repository. CHANGE BOTH TOGETHER. If the two ever
+          # disagree, the publish job's comparison fails and nothing is
+          # published.
+          # It reads only git's own record, never a file on disk: the number
+          # from version.php AT the commit (read the way build.sh reads it),
+          # and the tags that exist. $1 is "main" or "rc"; $2 is the commit.
+          # It sets NUMBER, TAG, TAG_COMMIT and STATE. STATE is one of:
+          #   new          no such tag yet
+          #   same-commit  the tag is already on this very commit
+          #   same-web     main only: the tag is on another commit, where web/ is the same
+          #   not-raised   main only: the tag is on another commit, where web/ differs
+          name_the_release() {
+            local kind="$1" commit="$2" text tags one n highest here web_here web_there
+            NUMBER=""; TAG=""; TAG_COMMIT=""; STATE=""
+            if ! text="$(git show "${commit}:web/_core/version.php")"; then
+              echo "::error::Could not read web/_core/version.php at commit ${commit}. No release can be named."
+              return 1
+            fi
+            NUMBER="$(sed -n "s/^return '\([^']*\)';.*/\1/p" <<< "$text")"
+            if [[ ! "$NUMBER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::web/_core/version.php at commit ${commit} does not hold one plain version number (a line like: return '1.5.0';). It gave '${NUMBER}'. No release can be named."
+              return 1
+            fi
+            case "$kind" in
+              main)
+                TAG="v${NUMBER}"
+                # "^{commit}" follows a tag that carries a message to the commit it names.
+                if ! TAG_COMMIT="$(git rev-parse --quiet --verify "refs/tags/${TAG}^{commit}")"; then
+                  TAG_COMMIT=""
+                  STATE="new"
+                elif [[ "$TAG_COMMIT" == "$commit" ]]; then
+                  STATE="same-commit"
+                else
+                  # "<commit>:web" is git's fingerprint of the whole web/
+                  # folder at that commit: equal fingerprints, equal folders.
+                  web_here="$(git rev-parse --verify "${commit}:web")"
+                  if web_there="$(git rev-parse --quiet --verify "${TAG_COMMIT}:web")" && [[ "$web_there" == "$web_here" ]]; then
+                    STATE="same-web"
+                  else
+                    STATE="not-raised"
+                  fi
+                fi
+                ;;
+              rc)
+                highest=0
+                here=""
+                tags="$(git tag --list "v${NUMBER}-rc.*")"
+                while IFS= read -r one; do
+                  n="${one#"v${NUMBER}-rc."}"
+                  # Only a plain whole number counts: rc.2 does; rc.02 and rc.2b do not.
+                  [[ "$one" == "v${NUMBER}-rc."* && "$n" =~ ^(0|[1-9][0-9]*)$ ]] || continue
+                  if (( n > highest )); then
+                    highest="$n"
+                  fi
+                  if [[ "$(git rev-parse --quiet --verify "refs/tags/${one}^{commit}")" == "$commit" ]]; then
+                    if [[ -z "$here" ]] || (( n > here )); then
+                      here="$n"
+                    fi
+                  fi
+                done <<< "$tags"
+                if [[ -n "$here" ]]; then
+                  TAG="v${NUMBER}-rc.${here}"
+                  TAG_COMMIT="$commit"
+                  STATE="same-commit"
+                else
+                  TAG="v${NUMBER}-rc.$(( highest + 1 ))"
+                  STATE="new"
+                fi
+                ;;
+              *)
+                echo "::error::A release is named only for main or rc, not for '${kind}'."
+                return 1
+                ;;
+            esac
+            return 0
+          }
+          # ---- END OF THE ONE RULE ----------------------------------------
+
+          # THE REFUSAL (owner, 13 October 2026): nothing but a push to main
+          # or rc is ever published, whatever started the run.
+          if [[ "$EVENT" != "push" ]]; then
+            echo "::error::Publishing is refused for anything but a push to the branch main or rc. This run was started by '$EVENT' of '$REF'. Nothing is published."
+            exit 1
+          fi
+          case "$REF" in
+            refs/heads/main) BRANCH="main"; PRERELEASE="no" ;;
+            refs/heads/rc)   BRANCH="rc";   PRERELEASE="yes" ;;
+            *)
+              echo "::error::Publishing is refused for anything but a push to the branch main or rc. This run was started by '$EVENT' of '$REF'. Nothing is published."
+              exit 1
+              ;;
+          esac
+          if [[ ! "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::GitHub's word for the commit of this run is not a commit's full name: '$SHA'. Nothing is published."
+            exit 1
+          fi
+
+          # git's own record of the branch and of every tag, in a bare copy:
+          # no working files are written.
+          sign_git_in
+          git -c init.defaultBranch=main init --quiet --bare "$RUNNER_TEMP/record.git"
+          cd "$RUNNER_TEMP/record.git"
+          git fetch --quiet --no-tags "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}" "+refs/tags/*:refs/tags/*"
+          # The commit must still be on the branch GitHub named.
+          if ! git cat-file -e "${SHA}^{commit}" 2> /dev/null || ! git merge-base --is-ancestor "$SHA" "refs/remotes/origin/${BRANCH}"; then
+            echo "::error::The commit of this run (${SHA:0:12}) is not on the branch ${BRANCH} as GitHub holds it now. Nothing is published."
+            exit 1
+          fi
+
+          name_the_release "$BRANCH" "$SHA"
+          case "$STATE" in
+            new | same-commit)
+              EXPECTED_TAG="$TAG"
+              ;;
+            same-web)
+              EXPECTED_TAG=""
+              ;;
+            not-raised)
+              echo "::error::The version number was not raised: ${TAG} is already on commit ${TAG_COMMIT:0:12}, where the web/ folder is not the same as this commit's (${SHA:0:12}). Nothing is published."
+              exit 1
+              ;;
+            *)
+              echo "::error::The naming rule gave a state this step does not know: '${STATE}'. Nothing is published."
+              exit 1
+              ;;
+          esac
+          if [[ "$BUILT_TAG" != "$EXPECTED_TAG" ]]; then
+            echo "::error::The build job named its package '${BUILT_TAG:-(no release name)}', but by this job's own reckoning it should be '${EXPECTED_TAG:-(no release name)}'. Either a tag was made or removed while the run was going, or the build job is not to be believed. Nothing is published. To try again, run ALL the jobs again, not only this one."
+            exit 1
+          fi
+          ZIP=""
+          if [[ -n "$EXPECTED_TAG" ]]; then
+            ZIP="webms-intra-${TAG#v}.zip"
+            if [[ "$BUILT_ZIP" != "$ZIP" ]]; then
+              echo "::error::The build job says it built '$BUILT_ZIP', but the package for $TAG is called $ZIP. Nothing is published."
+              exit 1
+            fi
+            if [[ ! "$SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "::error::The build job did not report a checksum for the zip. Nothing is published."
+              exit 1
+            fi
+          fi
+          echo "Branch $BRANCH, commit ${SHA:0:12}, tag $TAG ($STATE), package '${ZIP:-none}', pre-release: $PRERELEASE"
+          {
+            echo "tag=$TAG"
+            echo "zip=$ZIP"
+            echo "prerelease=$PRERELEASE"
+            echo "state=$STATE"
+            echo "tag_commit=${TAG_COMMIT:0:12}"
+          } >> "$GITHUB_OUTPUT"
+
+      # THE ONE DECISION about publishing. It is made here, once, in bash,
+      # where 'true' means exactly those four small letters. Every later step
+      # asks this step's answer (steps.switch.outputs.publish) and never reads
+      # the variable itself. Before this was corrected the later steps each
+      # compared the variable in GitHub's own way, which ignores capitals, so
+      # with 'TRUE' they published while this step said "NOTHING was released".
+      #
+      # The answer is "yes" only when all three hold: the switch is on, there
+      # is something new to release, and no Release for that tag exists.
+      # The gh program says "release not found" when there is none. Any other
+      # failure (no network, no permission) is NOT taken for "there is none":
+      # the step stops, because guessing either way could publish twice or
+      # hide a fault.
+      - name: Decide once whether this run publishes, and say so
+        id: switch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH: ${{ vars.PACKAGE_PUBLISH_ENABLED }}
+          TAG: ${{ steps.decide.outputs.tag }}
+          STATE: ${{ steps.decide.outputs.state }}
+          TAG_COMMIT: ${{ steps.decide.outputs.tag_commit }}
+        run: |
+          set -euo pipefail
+          say() {
+            echo "::notice::$1"
+            printf '%s\n\n' "$1" >> "$GITHUB_STEP_SUMMARY"
+          }
+          if [[ "$PUBLISH" != "true" ]]; then
+            case "$STATE" in
+              new)         WOULD="it would have made the tag $TAG and a Release for it" ;;
+              same-commit) WOULD="it would have made the Release for the tag $TAG, which is already on this commit, unless that Release is already there" ;;
+              *)           WOULD="it would have published nothing all the same, because $TAG is already the tag of commit $TAG_COMMIT and nothing under web/ differs" ;;
+            esac
+            echo "publish=no" >> "$GITHUB_OUTPUT"
+            say "Publishing is OFF (the repository variable PACKAGE_PUBLISH_ENABLED is not exactly 'true'). The package was built and checked and is kept as a download on this run. NOTHING was released and no tag was made. With publishing on, $WOULD."
+            exit 0
+          fi
+          if [[ "$STATE" == "same-web" ]]; then
+            echo "publish=no" >> "$GITHUB_OUTPUT"
+            say "Publishing is on, and there is nothing new to release: $TAG is already the tag of commit $TAG_COMMIT, and nothing under web/ differs between that commit and this one. NOTHING was released."
+            exit 0
+          fi
+          CODE=0
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName > "$RUNNER_TEMP/release-view.txt" 2>&1 || CODE=$?
+          if [[ "$CODE" -eq 0 ]]; then
+            if [[ "$STATE" == "same-commit" ]]; then
+              echo "publish=no" >> "$GITHUB_OUTPUT"
+              say "Publishing is on, and $TAG is already published: the tag is on this very commit and its Release exists. A Release that exists is never replaced. NOTHING was done."
+              exit 0
+            fi
+            echo "::error::A Release called $TAG exists, although no tag of that name did when this run looked. This workflow never replaces a Release, so nothing is published. Look at that Release by hand (it may be a draft somebody left)."
+            exit 1
+          fi
+          if ! grep -q "release not found" "$RUNNER_TEMP/release-view.txt"; then
+            cat "$RUNNER_TEMP/release-view.txt"
+            echo "::error::Could not find out whether a Release for $TAG exists (the gh program's own words are above). Nothing is published, rather than guessing."
+            exit 1
+          fi
+          echo "publish=yes" >> "$GITHUB_OUTPUT"
+          if [[ "$STATE" == "new" ]]; then
+            say "Publishing is ON: the tag $TAG will be made on this commit, and the package attached to a new Release for it."
+          else
+            say "Publishing is ON: the tag $TAG is already on this commit and has no Release yet, so the Release will be made for it."
+          fi
+
+      - name: Fetch the zip the build job checked
+        if: steps.switch.outputs.publish == 'yes'
+        uses: actions/download-artifact@v8
+        with:
+          name: installation-package
+          path: ${{ runner.temp }}/package
+
+      # The checksum comes from the build job's own report, not from the file
+      # that travelled with the zip, so the two cannot have been changed together.
+      - name: Check the zip is the one the build job checked
+        if: steps.switch.outputs.publish == 'yes'
+        env:
+          ZIP: ${{ steps.decide.outputs.zip }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/package"
+          echo "${SHA256}  ${ZIP}" | sha256sum -c -
+          sha256sum -c "${ZIP}.sha256"
+
+      # Every "## [version] …" section of CHANGELOG.md for this version, as
+      # release.yml did. Unlike release.yml, a missing section is said out loud.
+      # The changelog is read out of the zip that has just been checked: it is
+      # git's own copy at the commit of this run (guard G1 proved that). Python
+      # is started with -I and from an empty folder, so it cannot pick up a
+      # file of somebody else's as one of its own modules.
+      - name: Write the release notes
+        if: steps.switch.outputs.publish == 'yes'
+        env:
+          TAG: ${{ steps.decide.outputs.tag }}
+          ZIP: ${{ steps.decide.outputs.zip }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          mkdir "$RUNNER_TEMP/notes"
+          cd "$RUNNER_TEMP/notes"
+          unzip -p "$RUNNER_TEMP/package/$ZIP" CHANGELOG.md > changelog.md
+          python3 -I - "$VERSION" changelog.md > notes.md <<'PYEOF'
+          import re
+          import sys
+
+          version, changelog = sys.argv[1], sys.argv[2]
+          # A release candidate (1.5.0-rc.1) is described by the section for 1.5.0.
+          number = version.split('-')[0]
+          with open(changelog, encoding='utf-8') as handle:
+              content = handle.read()
+          pattern = r'## \[' + re.escape(number) + r'\][^\n]*\n(?:(?!^## \[).*\n?)*'
+          sections = re.findall(pattern, content, flags=re.MULTILINE)
+          if sections:
+              print('\n'.join(section.rstrip() for section in sections))
+          else:
+              print(f'Release {version}')
+              print(f'::warning::CHANGELOG.md has no section for {number}; the release notes say only "Release {version}".', file=sys.stderr)
+          PYEOF
+          # Where somebody who has just downloaded the zip starts. The guide
+          # is inside it (guard G10 refuses a package without one).
+          {
+            echo
+            echo "---"
+            echo "To install or to upgrade, read \`INSTALL.md\`, which is inside \`${ZIP}\`. It needs a hosting panel's file manager and nothing else."
+            echo
+            echo "Checksum (SHA-256) of \`${ZIP}\`: \`${SHA256}\`"
+            echo "To check a download: \`sha256sum -c ${ZIP}.sha256\`"
+          } >> notes.md
+          cat notes.md
+
+      # THE ONLY STEP THAT WRITES TO THE REPOSITORY. It runs last, after the
+      # zip has been checked and the notes written, so that a fault earlier on
+      # leaves no tag behind.
+      #
+      # THE TAG is made by a plain push of "this commit, as this tag". git
+      # refuses that push when a tag of that name is already on another
+      # commit; nothing here forces it, so a tag can never be moved. If the
+      # push is refused the step stops and nothing is published.
+      #
+      # THE RELEASE is made with the gh program, not a third-party action: it
+      # is what release.yml already used, and it is one fewer outside thing to
+      # trust. "--verify-tag" makes gh stop if the tag is not there, instead
+      # of making one of its own on whatever the default branch holds. A
+      # release candidate is marked as a pre-release, so "Latest" is always a
+      # live one. There is no "attach to a Release that already exists" any
+      # more: the deciding step above answers "no" in that case.
+      #
+      # IF THE TAG IS MADE AND THE RELEASE THEN FAILS, the tag stays (it is
+      # never deleted). Running the jobs again finds it on this very commit
+      # and makes the Release for it.
+      - name: Make the tag if it is new, then the Release
+        if: steps.switch.outputs.publish == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          TAG: ${{ steps.decide.outputs.tag }}
+          ZIP: ${{ steps.decide.outputs.zip }}
+          PRERELEASE: ${{ steps.decide.outputs.prerelease }}
+          STATE: ${{ steps.decide.outputs.state }}
+        run: |
+          set -euo pipefail
+
+          # The same sign-in as in this job's first step (see the note there).
+          sign_git_in() {
+            local header
+            header="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+            echo "::add-mask::${header}"
+            export GIT_TERMINAL_PROMPT=0
+            export GIT_CONFIG_COUNT=1
+            export GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader"
+            export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${header}"
+          }
+
+          gh --version
+          if [[ "$STATE" == "new" ]]; then
+            sign_git_in
+            CODE=0
+            git -C "$RUNNER_TEMP/record.git" push "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" "${SHA}:refs/tags/${TAG}" || CODE=$?
+            if [[ "$CODE" -ne 0 ]]; then
+              echo "::error::The tag $TAG could not be made (git's own words are above). If it says the tag already exists, another run made it while this one was working. Nothing was published by this run. To try again, run ALL the jobs again, not only this one: the name is worked out afresh."
+              exit 1
+            fi
+            echo "::notice::Made the tag $TAG on commit ${SHA:0:12}."
+          fi
+          cd "$RUNNER_TEMP/package"
+          ARGS=(release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "WebMS Intra $TAG" --notes-file "$RUNNER_TEMP/notes/notes.md" --verify-tag)
+          if [[ "$PRERELEASE" == "yes" ]]; then
+            ARGS+=(--prerelease)
+          fi
+          gh "${ARGS[@]}" "$ZIP" "${ZIP}.sha256"
+          if [[ "$PRERELEASE" == "yes" ]]; then
+            DONE="Published $ZIP as the release candidate $TAG, marked as a pre-release."
+          else
+            DONE="Published $ZIP as the live release $TAG."
+          fi
+          echo "::notice::${DONE}"
+          printf '%s\n' "$DONE" >> "$GITHUB_STEP_SUMMARY"

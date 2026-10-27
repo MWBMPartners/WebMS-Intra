@@ -11,21 +11,52 @@
 # side by side: MySQL 8.0.36 and MySQL 8.4.11 (owner's decision, 24
 # September 2026, because MySQL 8.4 refuses some links between tables that
 # MySQL 8.0 allows — #552). Which MySQL 8 line production itself runs is
-# not confirmed — that is #475. The harness now mirrors
-# the real installer flow: (1) load web/_sql/full_schema.sql fresh, (2)
-# replay every numbered migration over that DB ignoring tblMigrations —
-# exactly like web/_install/index.php:399-466 — asserting it's a clean
-# no-op, (3) replay the same chain again to prove idempotency, then (4)
-# separately replay the tblMigrations-respecting chain from an empty DB
-# (models Portal\Core\Migrator on a pre-full_schema install), including the
-# stale-DB half/half catch-up split. See tools/e2e-migrations/README.md for
-# the full phase breakdown.
+# not confirmed — that is #475. The harness has seven phases and three
+# data checks: (1) load web/_sql/full_schema.sql fresh; (2) replay every
+# numbered migration over that DB ignoring tblMigrations, as the
+# installer does, and check the replay leaves the database as the
+# install script made it, apart from five differences named in run.sh;
+# (3) replay the same chain again, then load full_schema.sql a second
+# time over the same database, which must change nothing; (4) load
+# full_schema.sql into an empty database, forget that the newest half
+# of the migrations ran, and let them catch up the way
+# Portal\Core\Migrator would; then the data checks: plant three
+# attendance sessions and see that migration 210, and then the install
+# script, each empty only the pointer at a deleted event and change no
+# other column of any session, and that both stop, changing nothing,
+# when the events table itself is missing; (5) build the last release's
+# database (the main branch) and upgrade it with this checkout's
+# migrations; (6) the same from the frozen install script of 6 March
+# 2026, whose body is first checked against a checksum; (7) the
+# installer's "carry on with what is there" choice over an OLDER database
+# whose two time-zone places differ (#604): March's install script taken
+# up to migration 216, then today's install script and every migration
+# over it. Each organisation must keep the time zone its pages were
+# showing, and a second pass must change nothing. Phases 5 and 6 must end
+# up equal to a fresh install, apart from the differences named in
+# run.sh. The header of run.sh has the full breakdown.
 #
-# Phases 1-3 hard-fail on any SQL error or schema drift; phase 4's
-# migration failures are hard, but its count comparison against phase 1 is
-# a warning, not a failure — check_schema_seed_parity.py (wired into
-# pr-security.yml) is the actual gate for seed parity at the SQL-source
-# level.
+# Phases 1 to 4 and the data checks stop the run at the first failure.
+# Phases 5, 6 and 7 all always run, because each starts from a different
+# database and one failing says nothing about the others; the run then
+# fails if any of them did.
+#
+# A named difference that is NOT seen fails the run, with a message
+# saying which line of run.sh to delete. That will happen once, on
+# purpose, in phase 5 the day this work reaches main (the
+# auth.password.minLength line in KNOWN_P5_VALUE_DIFFERENCES).
+#
+# Every phase hard-fails on a SQL error. Phases 1-4 compare counts of
+# tables, columns and indexes (a different count of recorded migrations
+# in phase 2 is a warning only — check_schema_seed_parity.py, wired into
+# pr-security.yml, is the gate for that). Phase 2 also compares the
+# install script alone with the install script plus the replay, and
+# phases 5 and 6 compare an upgraded database with a fresh install: every
+# column, index, link, address and setting value, by name.
+#
+# Phase 5 needs the main branch, and the checkout below fetches one
+# commit only, so run.sh fetches origin/main itself. If that fails the
+# phase FAILS; it never skips.
 # =============================================================================
 
 name: E2E Migrations
@@ -39,7 +70,10 @@ on:
   #    clean on MySQL 8. Regressions are caught early by check_mariadb_only_ddl
   #    + check_migration_idempotency in pr-security.yml.
   push:
-    branches: [main, beta, alpha]
+    # "rc" is the release-candidate branch, between beta and main (owner,
+    # 13 October 2026; see package.yml). It does not exist yet: naming it
+    # early changes nothing until somebody makes it.
+    branches: [main, rc, beta, alpha]
     paths:
       - 'web/_sql/**'
       - 'tools/e2e-migrations/**'
@@ -81,7 +115,7 @@ jobs:
 
       # ubuntu-latest ships Docker + the docker compose plugin pre-installed,
       # so no separate setup step is needed before running the harness.
-      - name: Run E2E migration harness (all four phases) on MySQL ${{ matrix.mysql }}
+      - name: Run E2E migration harness (all seven phases) on MySQL ${{ matrix.mysql }}
         env:
           E2E_MYSQL_VERSION: ${{ matrix.mysql }}
         run: bash tools/e2e-migrations/run.sh

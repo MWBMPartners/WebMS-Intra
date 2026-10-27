@@ -266,36 +266,39 @@ WebMS Intra uses a **three-branch SFTP deployment model** modelled on the
 iHymns pipeline. Only `web/` is synced; the active branch decides which
 public web root the upload lands in.
 
-| Branch  | Channel    | Public dir on server  | Auto-bump rule           |
-| ------- | ---------- | --------------------- | ------------------------ |
-| `alpha` | alpha/dev  | `public_html_dev/`    | PATCH (always)           |
-| `beta`  | beta       | `public_html_beta/`   | Conventional Commits     |
-| `main`  | production | `public_html/`        | none — tag `v*` manually |
+| Branch  | Channel    | Where it lands on the server                     | Auto-bump rule       |
+| ------- | ---------- | ------------------------------------------------ | -------------------- |
+| `alpha` | alpha/dev  | its own folder, named by `SFTP_PATH_ALPHA_DIR`    | PATCH (always)       |
+| `beta`  | beta       | its own folder, named by `SFTP_PATH_BETA_DIR`     | Conventional Commits |
+| `main`  | production | its own folder, named by `SFTP_PATH_LIVE_DIR`     | none on `main`       |
 
-### Remote layout (shared base)
+### Remote layout: one folder per channel (rewritten by the workflow package, #499)
 
-All three branches share **one** remote base directory on DreamHost. Per
-branch, `web/public_html/` mirrors to a different sibling; everything else
-inside `web/` (`_core/`, `_vendor/`, `_sql/`, `_lang/`, `_install/`,
-`_includes/`, `_functions/`) goes to the shared base from every branch —
-**last push wins for shared code**.
+Each channel has a folder of its own, named by `SFTP_PATH_ALPHA_DIR`,
+`SFTP_PATH_BETA_DIR` or `SFTP_PATH_LIVE_DIR` inside the base folder
+`SFTP_PATH_ROOT_DIR`. **Point the channel's web address at `admin_html` inside its
+folder.**
 
 ```text
-SFTP_BASE_PATH/
-├── _core/                 ← from web/_core/         (all branches)
-├── _apps/                 ← from web/_apps/         (all branches, #159)
-├── _vendor/               ← from web/_vendor/       (all branches)
-├── _sql/                  ← from web/_sql/          (all branches)
-├── _lang/                 ← from web/_lang/         (all branches)
-├── _install/              ← from web/_install/      (all branches)
-├── _auth_keys/            ← server-managed (excluded from sync)
-├── _libraries/dompdf/     ← fetched at deploy time by tools/download-dompdf.sh
-├── _uploads/              ← server-managed (excluded from sync)
-├── _backups/              ← server-managed (excluded from sync)
-├── public_html/           ← from web/public_html/  (main branch)
-├── public_html_beta/      ← from web/public_html/  (beta branch)
-└── public_html_dev/       ← from web/public_html/  (alpha branch)
+SFTP_PATH_ROOT_DIR/
+└── <the channel's folder>/
+    ├── admin_html/            ← from web/public_html/
+    ├── _apps/                 ← from web/_apps/      (#159)
+    ├── _core/                 ← from web/_core/
+    ├── _install/  _lang/  _sql/  _vendor/
+    ├── _libraries/dompdf/     ← fetched at deploy time by tools/download-dompdf.sh
+    ├── _auth_keys/            ← created once if missing, then never touched
+    ├── _uploads/              ← the same
+    └── _backups/              ← the same
 ```
+
+**THIS REPLACED A SHARED BASE, and that is the point of the change.** All three
+channels used to share one base folder: only `web/public_html/` went to a sibling of
+its own (`public_html/`, `public_html_beta/`, `public_html_dev/`) and every code
+folder went to the shared base **from every branch — last push wins**. So deploying
+alpha overwrote live's `_core`. Nothing warned anybody; it was simply how it worked.
+Each channel now has its own copy of everything, and the deploy refuses a folder that
+does not look like that channel's own.
 
 ### Workflows
 
@@ -307,14 +310,57 @@ SFTP_BASE_PATH/
   on main blocks the bot's direct push). Appends per-branch sections to
   `CHANGELOG.md` from commit messages since the last `v*` tag. Entries
   propagate to main via the normal beta → main merge.
-- `release.yml` — push of any `v*` tag. Creates a GitHub Release from
-  `CHANGELOG.md`; tags containing `-beta` or `-rc` are marked pre-release.
+- `package.yml` — merge into `alpha`, `beta`, `rc` or `main`, or a manual
+  run. Builds the installation zip and checks it. For `main` it publishes a
+  GitHub Release, for `rc` a pre-release; for `alpha` and `beta` the zip is
+  only a download on the run. A manual run never publishes, whatever the
+  branch. **It replaced `release.yml`**, which made a Release when somebody
+  pushed a `v*` tag by hand; such a push now gets a run that says it
+  published nothing, rather than silence. Publishing waits on a repository
+  variable, so nothing is published until that is switched on.
 - `auto-merge-alpha.yml` — PR opened or synchronised against `alpha`. Enables
-  GitHub native auto-merge and dispatches `deploy.yml` after merge. The
-  bridge is required here because GitHub's *native* auto-merge IS attributed
-  to `GITHUB_TOKEN`, which doesn't trigger downstream workflows. Manual UI
-  merges on `beta` and `main` don't need a bridge — the `push:` event from
-  a human-attributed merge fires normally.
+  GitHub native auto-merge, then dispatches BOTH `deploy.yml` and
+  `package.yml` after the merge. The bridge is required here because GitHub's
+  *native* auto-merge IS attributed to `GITHUB_TOKEN`, which doesn't trigger
+  downstream workflows. Manual UI merges on `beta` and `main` don't need a
+  bridge — the `push:` event from a human-attributed merge fires normally.
+  **Anything new that is supposed to happen on a merge into `alpha` needs a
+  line here too.** The package bridge was missed when `package.yml` was
+  written (found by its independent check, 14 October 2026, added 27
+  October): `package.yml` listens for a push to `alpha`, that push never
+  happens, and the proof is that `version-bump.yml` — which fires on the same
+  event — has raised the version on `alpha` twice in the branch's whole
+  history. The bridge's failure is deliberately swallowed with a warning,
+  because `gh workflow run` cannot find a workflow until its file is on the
+  default branch, and a hard failure there would lose the deploy dispatch.
+- `portal-selftests.yml`, `mail-selftests.yml`, `calendar-selftests.yml` — every
+  pull request, with no path filter, which is why these are the ones that can be
+  made required status checks. The self-tests that need only PHP run in one job;
+  the rest run against a real MySQL, on 8.0.36 and 8.4.11. Before this, most
+  self-tests ran nowhere but a developer's machine.
+- `backup-selftest.yml`, `e2e-migrations.yml` — a pull request **that touches the
+  files they are about**. They still run and a red one is still visible, but
+  **a path-filtered check must never be made required**: GitHub has no "required
+  only when it runs", so the branch rule would wait for a report that never comes.
+  `package.yml` has no `pull_request` trigger at all, so the same goes for its
+  jobs. (The first draft of the owner's required-checks checklist named all three
+  and would have locked `main`, `beta` and `alpha`; its independent check caught
+  it on 27 October 2026.)
+- **Not every test runs automatically**, and nothing in the workflows says so:
+  `tools/page-scripts-selftest.php` (#625), `tools/qr-selftest.php` (#623) and
+  seven of the 32 scripts in `tools/audit-checks/` are named in no workflow. Two of
+  those seven are the tripwires added for #625 and #622. Tracked as #637.
+- **The Psalm job was removed** (13 October 2026). It installed Psalm in a
+  temporary folder, Psalm stopped with "Could not find any composer
+  autoloaders", the step swallowed that with `|| true`, wrote an empty report
+  and went green. A check that cannot fail is worse than none, because it
+  looks like a pass. The names "PHP Static Analysis" and "PHP -l lint" were
+  kept on purpose: a branch rule finds a required check by its job name.
+  With Psalm gone, **no code-analysis check in this repository can turn a run
+  red** — `codeql.yml` still runs but keeps `continue-on-error: true`,
+  because Code Scanning is not switched on and the upload half of that step
+  would fail on every pull request. The owner chose on 26 October 2026 to
+  keep it that way and say so plainly rather than hide it.
 - `pr-security.yml` — runs on every PR against alpha/beta/main. PHP lint
   (hard gate), gitleaks secrets scan, heuristic anti-pattern scan (checks
   9-22), and — as its own step, so it is never skipped by the heuristic
@@ -368,12 +414,16 @@ issue #557.
 2. Open a PR against `alpha` → auto-merge fires once checks pass.
 3. When `alpha` is stable, open a PR from `alpha` → `beta` for wider testing.
 4. When `beta` is stable, open a PR from `beta` → `main` for production.
-5. Tag a release on `main`:
+5. **Nothing more to do: the merge into `main` publishes the release.**
+   `package.yml` works out the version from `web/_core/version.php`, makes the
+   tag itself and publishes `webms-intra-<version>.zip` with its checksum.
+   Pushing a `v*` tag by hand publishes nothing any more, and the tag still
+   counts as taken, so do not do it. If the run is red because "The version
+   number was not raised", raise the number and merge again.
 
-```bash
-git tag -a v0.9.0 -m "Release notes summary"
-git push origin v0.9.0   # fires release.yml
-```
+   A release candidate works the same way on the `rc` branch, which does not
+   exist yet: a merge there publishes `v<version>-rc.<n>` marked as a
+   pre-release.
 
 ### Manual Deploy Override
 
@@ -444,7 +494,31 @@ gh secret set SFTP_PASSWORD                       # prompts (avoids password in 
 
 ---
 
-### 3b. The two front doors — the settings this will need (#493, NOT YET LIVE)
+### 3b. The two front doors — SUPERSEDED, and SIX OF ITS SETTING NAMES ARE RETIRED (#493; see the warning)
+
+> ⚠️ **READ THIS BEFORE FOLLOWING ANYTHING IN THIS SECTION. Added 27 October 2026.**
+>
+> This describes an arrangement that was planned and then replaced by the workflow
+> package (#499). **Six of the setting names below are retired**: nothing reads
+> `SFTP_PATH_LIVE_ADMIN_DIR`, `SFTP_PATH_LIVE_PUBLIC_DIR`, `SFTP_PATH_BETA_ADMIN_DIR`,
+> `SFTP_PATH_BETA_PUBLIC_DIR`, `SFTP_PATH_ALPHA_ADMIN_DIR` or
+> `SFTP_PATH_ALPHA_PUBLIC_DIR`, and each one still set only produces a warning line in
+> every run. `SFTP_PATH_ROOT_DIR` is still real; the per-channel folder settings are now
+> `SFTP_PATH_ALPHA_DIR`, `SFTP_PATH_BETA_DIR` and `SFTP_PATH_LIVE_DIR`, one folder per
+> channel holding BOTH `admin_html` and the code folders. There is no separate public
+> website folder any more.
+>
+> **In particular, do NOT follow the "what to do on the server" table further down**,
+> which tells you to delete `public_html/`, `public_html_beta/` and `public_html_dev/`.
+> It was written for a migration that never happened in this shape. Deleting a live
+> channel's folder on the strength of it would take the site down.
+>
+> What is true is in the owner's guide,
+> `.claude-work/resume/rollout-WF--build-evidence/DEPLOY-SET-UP-AND-FIRST-RUN.md`, and in
+> "Remote layout: one folder per channel" above. **Rewriting this section properly is
+> tracked as #637**; it is left here, marked, rather than deleted, because the
+> reasoning in it about why both folders must share a parent is still why the current
+> layout is shaped as it is.
 
 > ⚠️ **Do not set these yet.** The deployment does not read them until the work
 > on #493 lands. They are written down here now so the change can be planned,
@@ -1433,18 +1507,21 @@ Examples: `v0.1.0`, `v0.2.0`, `v1.0.0`
 
 ### Release Checklist
 
-1. Ensure all changes are committed and pushed to `main`
-2. Verify the dev site works correctly
-3. Run pending SQL migrations on production (if any)
-4. Tag the release:
+**Do not tag by hand.** This list used to end with `git tag -a` and `git push origin
+v0.3.0`. Since #499 `package.yml` makes the tag and publishes the release itself on a
+merge into `main`, and **a tag pushed by hand publishes nothing while still counting as
+taken** — so pushing one blocks the name the automatic release wanted.
 
-```bash
-git tag -a v0.3.0 -m "Directory restructure"
-git push origin v0.3.0
-```
-
-5. Monitor the GitHub Actions deploy
-6. Verify the production health check: `https://portal.millrdsdacambridge.uk/health`
+1. Ensure all changes are committed and merged to `main`
+2. Verify the beta site works correctly
+3. Raise the number in `web/_core/version.php` if the merge from `beta` has not already
+   brought it up — a run that finds the number already released ends red saying so
+4. Run pending SQL migrations on the live database (if any)
+5. Merge `beta` into `main`. That merge builds the zip, makes the tag and publishes the
+   Release, and separately starts the deploy
+6. Monitor both runs in GitHub Actions
+7. Verify the live health check at `<the customer's address>/health` (the address comes
+   from `ADMIN_BASE_URL_LIVE`; there is no built-in one)
 
 ---
 

@@ -25,14 +25,17 @@
  *      would run loose and look fine.
  *   F  The judge (DbServer::judgeStrictness) gives the right verdict for a
  *      list of settings, with no database involved.
- *   B  THE INSTALLER'S CONNECTION, got by loading the real
- *      web/_install/index.php and calling its own installGetDb(): it runs
- *      under the setting the portal asks for, the install script loads through
- *      it, and four bad values are each REFUSED: a text too long, a number too
- *      large, nothing given for a column that must have a value, and a value
- *      not on a column's list of choices.
- *   S  THE INSTALLER'S STEP 2, by sending it the form: it accepts this loose
- *      server, which it only does when its test connection came out strict.
+ *   B  THE INSTALLER'S CONNECTION, got by asking for the web folder's own
+ *      entry page, which hands the request to the real installer (see "HOW
+ *      THE INSTALLER IS REACHED" below), and then calling the installer's own
+ *      installGetDb(): it runs under the setting the portal asks for, the
+ *      install script loads through it, and four bad values are each
+ *      REFUSED: a text too long, a number too large, nothing given for a
+ *      column that must have a value, and a value not on a column's list of
+ *      choices.
+ *   S  THE INSTALLER'S STEP 2, by sending it the form as a visitor who has
+ *      typed the ownership code: it accepts this loose server, which it only
+ *      does when its test connection came out strict.
  *   C  THE PORTAL'S OWN START-UP (web/_core/bootstrap.php, in a separate PHP
  *      process): the same four are refused, the health check says "Strict",
  *      and nothing is written to the error log.
@@ -70,8 +73,34 @@
  *      "strict, but not the exact setting". The health check and Server
  *      Information must show that shorter list, the one really in force.
  *
+ * HOW THE INSTALLER IS REACHED (changed 13 October 2026)
+ * ----------------------------------------------------
+ * This test used to load web/_install/index.php directly. Since the installer
+ * work of 13 October 2026 (#499, #500) the installer REFUSES that: it lets
+ * itself be reached in one way only, by the web folder's own index.php
+ * handing the request over when there is no database login yet, and it acts
+ * on no form until the visitor has typed the ownership code it wrote into a
+ * file. From that day every part of this test that touches the installer
+ * failed, for a reason that had nothing to do with strictness, and the test
+ * stopped early. It now does what a person's browser does:
+ *   - every installer request asks for the scratch copy's
+ *     public_html/index.php, which hands it to the installer;
+ *   - before step 2's form is sent, the first page is asked for (the
+ *     installer writes its code file and its form's token), then the code is
+ *     READ FROM THAT FILE, with the installer's own reader, and sent to the
+ *     installer's own form. Step 2 is sent in the session that was let in.
+ *     Parts S and E1 are each let in as a new visitor (see
+ *     sm_installerLetIn() for why one session for both gave a wrong answer).
+ * Nothing is put into the session by this test for the installer, and the
+ * installer itself is not changed. tools/installer-selftest.php is the test
+ * of the code and the gate; here they are only passed through honestly.
+ *
  * WHAT IT CANNOT PROVE
  * --------------------
+ * - Part B calls installGetDb() on a first visit, before any code is typed.
+ *   That function hands out the connection and does not ask about the code
+ *   (the installer's form handling does), so nothing about strictness is
+ *   lost; but it is not how step 3 would come to call it.
  * - That a page reached through a web server behaves the same. Part C loads
  *   the start-up file from the command line. Parts P and E1 load the portal's
  *   entry page from the command line too, so the router does run, but no web
@@ -125,7 +154,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/587
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/593
  * -----------------------------------------------------------------------------
@@ -134,7 +163,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const SM_EXPECTED_CHECKS = 128;
+const SM_EXPECTED_CHECKS = 134;
 
 /** The line a child process prints its findings on. */
 const SM_RESULT_MARK = 'SELFTEST-RESULT:';
@@ -308,73 +337,156 @@ if (($argv[1] ?? '') === '--child') {
         $smPage['finished'] = true;
         exit(0);
     } elseif ($smKind === 'installer-connection') {
-        // 🧙 Load the real wizard for its functions. It draws its first page,
-        //    which is thrown away; nothing has been sent to it.
+        // 🧙 The real wizard, for its own installGetDb(), reached the ONE way
+        //    it lets itself be reached: the web folder's entry page finds no
+        //    database login and hands the request over. That page stops the
+        //    process when the wizard is done, so the work is done as PHP
+        //    shuts down, when the wizard's functions exist.
+        //
+        //    This used to say `require …/_install/index.php`. The wizard
+        //    looks at which file loaded it, and since 13 October 2026 it
+        //    answers "the website is pointed at the wrong folder" to any
+        //    file that is not in a web folder of its own installation.
+        //    `reached` below is false when that happens, so that refusal can
+        //    never again be mistaken for "no connection".
         $_SERVER['REQUEST_METHOD'] = 'GET';
-        ob_start();
-        require $smWeb . DIRECTORY_SEPARATOR . '_install' . DIRECTORY_SEPARATOR . 'index.php';
-        ob_end_clean();
-
-        // What step 2 keeps for the later steps, and nothing else.
-        $_SESSION['install_db'] = sm_creds();
-        $smDb = installGetDb();
-        $smOut['connection'] = $smDb !== null;
-        if ($smDb !== null) {
-            $smOut['mode']       = sm_mode($smDb);
-            $smOut['charset']    = $smDb->character_set_name();
-            $smOut['strictness'] = \Portal\Core\DbServer::strictness($smDb);
-
-            if ((string) getenv('SELFTEST_LOAD_SCHEMA') === '1') {
-                // 🏗️ The install script, through the installer's connection,
-                //    the same way step 3 sends it: the whole file in one go.
-                $smOut['schemaError'] = '';
+        register_shutdown_function(static function (): void {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+            $smOut = ['reached' => defined('INSTALL_WEB_FOLDER') === true && INSTALL_WEB_FOLDER !== null && function_exists('installGetDb') === true];
+            if ($smOut['reached'] === true) {
                 try {
-                    $smDb->multi_query((string) file_get_contents($smWeb . DIRECTORY_SEPARATOR . '_sql' . DIRECTORY_SEPARATOR . 'full_schema.sql'));
-                    do {
-                        $smResult = $smDb->store_result();
-                        if ($smResult !== false) {
-                            $smResult->free();
+                    // What step 2 keeps for the later steps, and nothing else.
+                    $_SESSION['install_db'] = sm_creds();
+                    $smDb = installGetDb();
+                    $smOut['connection'] = $smDb !== null;
+                    if ($smDb !== null) {
+                        $smOut['mode']       = sm_mode($smDb);
+                        $smOut['charset']    = $smDb->character_set_name();
+                        $smOut['strictness'] = \Portal\Core\DbServer::strictness($smDb);
+
+                        if ((string) getenv('SELFTEST_LOAD_SCHEMA') === '1') {
+                            // 🏗️ The install script, through the installer's connection,
+                            //    the same way step 3 sends it: the whole file in one go.
+                            $smOut['schemaError'] = '';
+                            try {
+                                $smDb->multi_query((string) file_get_contents(INSTALL_SQL . DIRECTORY_SEPARATOR . 'full_schema.sql'));
+                                do {
+                                    $smResult = $smDb->store_result();
+                                    if ($smResult !== false) {
+                                        $smResult->free();
+                                    }
+                                } while ($smDb->more_results() === true && $smDb->next_result());
+                            } catch (mysqli_sql_exception $e) {
+                                $smOut['schemaError'] = $e->getCode() . ': ' . $e->getMessage();
+                            }
+                            // Read on a NEW plain connection: after a refusal part way
+                            // through, the installer's own may still hold unread answers.
+                            $smCreds = sm_creds();
+                            $smCount = new mysqli($smCreds['host'], $smCreds['user'], $smCreds['pass'], $smCreds['name'], $smCreds['port']);
+                            $smOut['tables'] = (int) $smCount->query('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()')->fetch_row()[0];
+                            $smCount->close();
                         }
-                    } while ($smDb->more_results() === true && $smDb->next_result());
-                } catch (mysqli_sql_exception $e) {
-                    $smOut['schemaError'] = $e->getCode() . ': ' . $e->getMessage();
+                        if (($smOut['schemaError'] ?? '') === '') {
+                            $smOut['four'] = sm_tryFour($smDb, (string) getenv('SELFTEST_PROBE_TABLE'));
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    // Nothing may be thrown out of a shutdown function: PHP would
+                    // print it in its own words and the findings would be lost.
+                    $smOut['stopped'] = get_class($e) . ': ' . $e->getMessage();
                 }
-                // Read on a NEW plain connection: after a refusal part way
-                // through, the installer's own may still hold unread answers.
-                $smCreds = sm_creds();
-                $smCount = new mysqli($smCreds['host'], $smCreds['user'], $smCreds['pass'], $smCreds['name'], $smCreds['port']);
-                $smOut['tables'] = (int) $smCount->query('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()')->fetch_row()[0];
-                $smCount->close();
             }
-            if (($smOut['schemaError'] ?? '') === '') {
-                $smOut['four'] = sm_tryFour($smDb, (string) getenv('SELFTEST_PROBE_TABLE'));
+            echo "\n" . SM_RESULT_MARK . json_encode($smOut) . "\n";
+        });
+        ob_start();
+        require $smWeb . DIRECTORY_SEPARATOR . 'public_html' . DIRECTORY_SEPARATOR . 'index.php';
+        exit(0);
+    } elseif ($smKind === 'installer-visit') {
+        // 👋 A first visit, as a browser makes it: the installer writes its
+        //    code file, starts a session and draws the page that asks for the
+        //    code. What a browser would keep is handed back: the session's
+        //    number (its cookie) and the token the form carries.
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        register_shutdown_function(static function (): void {
+            $html = '';
+            while (ob_get_level() > 0) {
+                $html = (string) ob_get_clean() . $html;
             }
-        }
-    } elseif ($smKind === 'installer-step2') {
-        // 📮 Send step 2 its form. On success the wizard redirects and stops
-        //    the process itself, so the findings are printed as PHP shuts down.
-        $smCreds = sm_creds();
+            echo "\n" . SM_RESULT_MARK . json_encode([
+                'reached'      => defined('INSTALL_WEB_FOLDER') === true && INSTALL_WEB_FOLDER !== null,
+                'askedForCode' => str_contains($html, 'name="owner_code"'),
+                'letIn'        => function_exists('installOwnerPassed') === true && installOwnerPassed() === true,
+                'session'      => (string) session_id(),
+                'token'        => is_string($_SESSION['install_form_token'] ?? null) === true ? $_SESSION['install_form_token'] : '',
+            ]) . "\n";
+        });
+        ob_start();
+        require $smWeb . DIRECTORY_SEPARATOR . 'public_html' . DIRECTORY_SEPARATOR . 'index.php';
+        exit(0);
+    } elseif ($smKind === 'installer-code') {
+        // 🔑 Type the ownership code. It is read from the file the installer
+        //    wrote, with the installer's own reader (which waits for the
+        //    writer's lock), exactly as a person opens the file and copies
+        //    it; then it goes to the installer's own form, in the session of
+        //    the first visit, with that form's token. On the right code the
+        //    installer gives the session a new number and stops the process.
+        require_once $smWeb . DIRECTORY_SEPARATOR . '_install' . DIRECTORY_SEPARATOR . 'owner_code.php';
+        $smCode = installCodeRead($smWeb . DIRECTORY_SEPARATOR . '_auth_keys');
+        session_id((string) getenv('SELFTEST_SESSION'));
         $_SERVER['REQUEST_METHOD'] = 'POST';
         $_POST = [
-            'action'  => 'db_config',
-            'step'    => '2',
-            'db_host' => $smCreds['host'],
-            'db_user' => $smCreds['user'],
-            'db_pass' => $smCreds['pass'],
-            'db_name' => (string) getenv('SELFTEST_STEP2_DB'),
-            'db_port' => (string) $smCreds['port'],
+            'action'        => 'owner_code',
+            'owner_code'    => (string) ($smCode['code'] ?? ''),
+            'install_token' => (string) getenv('SELFTEST_TOKEN'),
+        ];
+        register_shutdown_function(static function () use ($smCode): void {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+            echo "\n" . SM_RESULT_MARK . json_encode([
+                'codeRead' => $smCode !== null,
+                'letIn'    => function_exists('installOwnerPassed') === true && installOwnerPassed() === true,
+                'session'  => (string) session_id(),
+                'error'    => (string) ($GLOBALS['error'] ?? ''),
+            ]) . "\n";
+        });
+        ob_start();
+        require $smWeb . DIRECTORY_SEPARATOR . 'public_html' . DIRECTORY_SEPARATOR . 'index.php';
+        exit(0);
+    } elseif ($smKind === 'installer-step2') {
+        // 📮 Send step 2 its form, in the session that was let in, with the
+        //    form's token. On success the wizard redirects and stops the
+        //    process itself, so the findings are printed as PHP shuts down.
+        //    `letIn` says whether the installer still counted this visitor as
+        //    let in: if not, it acted on nothing, and "no error" would mean
+        //    nothing.
+        $smCreds = sm_creds();
+        session_id((string) getenv('SELFTEST_SESSION'));
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_POST = [
+            'action'        => 'db_config',
+            'step'          => '2',
+            'install_token' => (string) getenv('SELFTEST_TOKEN'),
+            'db_host'       => $smCreds['host'],
+            'db_user'       => $smCreds['user'],
+            'db_pass'       => $smCreds['pass'],
+            'db_name'       => (string) getenv('SELFTEST_STEP2_DB'),
+            'db_port'       => (string) $smCreds['port'],
         ];
         register_shutdown_function(static function (): void {
             while (ob_get_level() > 0) {
                 ob_end_clean();
             }
             echo "\n" . SM_RESULT_MARK . json_encode([
+                'letIn'       => function_exists('installOwnerPassed') === true && installOwnerPassed() === true,
                 'keptDetails' => isset($_SESSION['install_db']),
                 'error'       => (string) ($GLOBALS['error'] ?? ''),
             ]) . "\n";
         });
         ob_start();
-        require $smWeb . DIRECTORY_SEPARATOR . '_install' . DIRECTORY_SEPARATOR . 'index.php';
+        require $smWeb . DIRECTORY_SEPARATOR . 'public_html' . DIRECTORY_SEPARATOR . 'index.php';
         exit(0);
     } else {
         echo "unknown child kind\n";
@@ -721,6 +833,44 @@ foreach ([
     sm_check('the judge says "' . $smVerdict . '" for ' . $smLabel, $smJudged['state'] === $smVerdict, 'said ' . $smJudged['state']);
 }
 
+/**
+ * 🔑 Be let in to the installer the way a person is: ask for its first page,
+ * then type the code it wrote into its file. Two checks.
+ *
+ * Each call is a NEW visitor with a new session, on purpose. Part E1 sends
+ * step 2 a second time and looks at whether the installer KEPT the database
+ * details it was given; in the session part S used, the details of part S's
+ * accepted database are still there, so a refusal that kept nothing would
+ * look as if it had kept something. (The first version of this repair used
+ * one session for both and failed on exactly that, on its first run.)
+ *
+ * @param string $for Which part is asking, for the check's wording.
+ *
+ * @return array{SELFTEST_SESSION: string, SELFTEST_TOKEN: string} What a
+ *         browser would carry to the next request: the session's number and
+ *         the form's token. Handed to the step-2 child as it stands.
+ */
+function sm_installerLetIn(string $for): array
+{
+    $run   = sm_child('installer-visit');
+    $visit = $run['found'];
+    sm_check(
+        'for ' . $for . ': a first visit reached the installer through the web folder\'s own entry page, and was asked for the ownership code',
+        ($visit['reached'] ?? false) === true && ($visit['askedForCode'] ?? false) === true && ($visit['letIn'] ?? true) === false
+            && strlen((string) ($visit['token'] ?? '')) === 64 && (string) ($visit['session'] ?? '') !== '',
+        sm_tail($run)
+    );
+    $run   = sm_child('installer-code', ['SELFTEST_SESSION' => (string) ($visit['session'] ?? ''), 'SELFTEST_TOKEN' => (string) ($visit['token'] ?? '')]);
+    $typed = $run['found'];
+    sm_check(
+        'for ' . $for . ': the code in the file the installer wrote, typed into its own form, let this visitor in',
+        ($typed['codeRead'] ?? false) === true && ($typed['letIn'] ?? false) === true && (string) ($typed['session'] ?? '') !== '',
+        (string) ($typed['error'] ?? '') !== '' ? (string) $typed['error'] : sm_tail($run)
+    );
+
+    return ['SELFTEST_SESSION' => (string) ($typed['session'] ?? ''), 'SELFTEST_TOKEN' => (string) ($visit['token'] ?? '')];
+}
+
 // ---- Parts B and C as functions: part R runs both a second time ----------------
 
 /**
@@ -737,7 +887,8 @@ function sm_installerConnectionChecks(string $suffix, bool $loadSchema): void
     $table = sm_probeTable($smPlain, $suffix);
     $run   = sm_child('installer-connection', ['SELFTEST_PROBE_TABLE' => $table, 'SELFTEST_LOAD_SCHEMA' => $loadSchema === true ? '1' : '0']);
     $found = $run['found'];
-    sm_check('the installer handed over a connection', ($found['connection'] ?? false) === true, sm_tail($run));
+    sm_check('the installer was reached through the web folder\'s own entry page (it refuses any other way in)', ($found['reached'] ?? false) === true, sm_tail($run));
+    sm_check('the installer handed over a connection', ($found['connection'] ?? false) === true, (string) ($found['stopped'] ?? sm_tail($run)));
     sm_check('it runs under the setting the portal asks for, and nothing else', sm_sameWords((string) ($found['mode'] ?? ''), $smExpected), 'running under [' . ($found['mode'] ?? '?') . ']');
     sm_check('it talks utf8mb4', ($found['charset'] ?? '') === 'utf8mb4', 'talks ' . ($found['charset'] ?? '?'));
     sm_check('DbServer judges it "ok"', ($found['strictness']['state'] ?? '') === 'ok', (string) ($found['strictness']['headline'] ?? '?'));
@@ -844,9 +995,13 @@ sm_installerConnectionChecks('b', true);
 
 // ---- Part S: the installer's step 2 ---------------------------------------------
 echo "\nPart S — the installer's step 2 accepts this loose server (its test connection came out strict)\n";
-$smRun   = sm_child('installer-step2', ['SELFTEST_STEP2_DB' => $smStep2Name]);
+// 🔑 Be let in first, as a person is: see "HOW THE INSTALLER IS REACHED" at the
+//    top.
+$smLetIn = sm_installerLetIn('part S');
+
+$smRun   = sm_child('installer-step2', $smLetIn + ['SELFTEST_STEP2_DB' => $smStep2Name]);
 $smFound = $smRun['found'];
-sm_check('step 2 answered', $smFound !== null, sm_tail($smRun));
+sm_check('step 2 answered, to a visitor it still counted as let in', $smFound !== null && ($smFound['letIn'] ?? false) === true, sm_tail($smRun));
 sm_check('step 2 raised no error', ($smFound['error'] ?? 'none read') === '', (string) ($smFound['error'] ?? 'none read'));
 sm_check('step 2 kept the connection details for the next step', ($smFound['keptDetails'] ?? false) === true);
 $smPlain->query('DROP DATABASE IF EXISTS `' . $smStep2Name . '`');
@@ -1003,11 +1158,17 @@ sm_check('and a "What this portal asks for" row shows the setting that was refus
 
 $smTable = sm_probeTable($smPlain, 'e1i');
 $smRun   = sm_child('installer-connection', ['SELFTEST_PROBE_TABLE' => $smTable]);
-sm_check('the installer hands over NO connection', is_array($smRun['found']) === true && $smRun['found']['connection'] === false, sm_tail($smRun));
+// "No connection" counts only from an installer that was really reached: the
+// refusal of a file that is not in a web folder also hands over nothing.
+sm_check('the installer, reached through the entry page, hands over NO connection', is_array($smRun['found']) === true && ($smRun['found']['reached'] ?? false) === true && ($smRun['found']['connection'] ?? null) === false, sm_tail($smRun));
 sm_check('so the installer stored nothing', sm_stored($smPlain, $smTable) === []);
-$smRun   = sm_child('installer-step2', ['SELFTEST_STEP2_DB' => $smStep2Name]);
+// A new visitor, let in afresh, so that nothing is in the session from part S.
+$smLetIn = sm_installerLetIn('part E1');
+$smRun   = sm_child('installer-step2', $smLetIn + ['SELFTEST_STEP2_DB' => $smStep2Name]);
 $smFound = $smRun['found'];
-sm_check('the installer\'s step 2 stops and says the database is not strict', str_starts_with((string) ($smFound['error'] ?? ''), 'NOT strict') === true, (string) ($smFound['error'] ?? sm_tail($smRun)));
+// Still let in, so the refusal below is step 2's own answer about the
+// database, and not the gate turning away a visitor it did not know.
+sm_check('the installer\'s step 2 stops and says the database is not strict', ($smFound['letIn'] ?? false) === true && str_starts_with((string) ($smFound['error'] ?? ''), 'NOT strict') === true, (string) ($smFound['error'] ?? sm_tail($smRun)));
 sm_check('step 2 kept no connection details for a later step to use', ($smFound['keptDetails'] ?? true) === false);
 sm_check('step 2 did not go on to create the database', (int) $smPlain->query("SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = '" . $smStep2Name . "'")->fetch_row()[0] === 0);
 
@@ -1050,7 +1211,7 @@ sm_check('its "Strictness setting" row shows the shorter list the connection rea
 $smTable = sm_probeTable($smPlain, 'e2i');
 $smRun   = sm_child('installer-connection', ['SELFTEST_PROBE_TABLE' => $smTable]);
 $smFound = $smRun['found'];
-sm_check('the installer still hands over a connection (a warning never blocks)', ($smFound['connection'] ?? false) === true, sm_tail($smRun));
+sm_check('the installer still hands over a connection (a warning never blocks)', ($smFound['reached'] ?? false) === true && ($smFound['connection'] ?? false) === true, (string) ($smFound['stopped'] ?? sm_tail($smRun)));
 sm_checkRefused('installer on the shorter list', $smFound['four'] ?? null, $smPlain, $smTable);
 
 // ---- The end ---------------------------------------------------------------------------------

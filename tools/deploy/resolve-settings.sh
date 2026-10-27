@@ -6,8 +6,10 @@
 # @package   WebMS-Intra (development tooling — never deployed; only web/ is)
 # @author    Salem874
 # @copyright MWBM Partners Ltd (t/a MWservices). All Rights Reserved.
-# @version   1.1.0 (12 October 2026, issue #500, roll-out package F7; second
-#            version, after the independent check of the first)
+# @version   1.2.0 (13 October 2026: the "tree" question accepts the one
+#            "refuse everything" file in the two folders that are not uploaded;
+#            before it, 1.1.0 of 12 October 2026, issue #500, roll-out package
+#            F7, the second version, after the independent check of the first)
 #
 # WHY THIS EXISTS
 # The deploy uploads with deletion: a file that is not in the repository is
@@ -31,8 +33,9 @@
 #
 #   tree     --web-dir <folder> --channel <live|beta|alpha>
 #       Checks the local web/ folder just before upload: every entry is one this
-#       script knows what to do with, and no folder that is mirrored with
-#       deletion is empty. Connects to nothing.
+#       script knows what to do with, no folder that is mirrored with deletion
+#       is empty, and the two folders that are NOT uploaded hold nothing but
+#       .gitkeep and the "refuse everything" file. Connects to nothing.
 #
 #   remote   --channel <live|beta|alpha> --listing <file> [--fetched <file>]
 #            [--adopt-existing true]
@@ -131,13 +134,69 @@ STAFF_WEB_DIR_DEFAULT='admin_html'
 REPO_WEB_FOLDER='public_html'                 # the staff pages; goes to <channel>/<staff web folder>/
 CODE_FOLDERS='_apps _core _install _lang _sql _vendor _libraries'   # each goes to <channel>/<same name>/, with deletion
 KEPT_FOLDERS='_auth_keys _uploads _backups'   # the server's own: created if missing, never uploaded to, never deleted from
-PLACEHOLDER_FOLDERS='_includes _functions'    # hold only .gitkeep; not deployed, and refused if a real file appears
+PLACEHOLDER_FOLDERS='_includes _functions'    # not deployed; may hold .gitkeep and the "refuse everything" file below, and nothing else
 OTHER_NOT_DEPLOYED='private_html public_html_landing public_html_redir'  # kept in the repository by the owner's choice (14 September 2026); never deployed
 TOP_FILES='CHANGELOG.md .channel'             # single files placed in the channel's folder
 # The three web folders the OLD shared layout kept side by side in one folder
 # (the deploy workflow before this script named exactly these). They matter
 # only to the "remote" question, which must recognise an old-layout portal.
 OLD_LAYOUT_WEB_FOLDERS='public_html public_html_beta public_html_dev'
+
+# 🚫 THE "REFUSE EVERYTHING" FILE, byte for byte.
+# Since 13 October 2026 every private folder in web/ holds one .htaccess that
+# tells the web server to hand out nothing from it (the installer work, #499
+# and #500). That includes the two placeholder folders, which until then held
+# .gitkeep only. This script's rule for those two folders was "anything but
+# .gitkeep is refused", so from that day it refused EVERY deploy, before
+# connecting to anything. Found the first time the rule met the real code.
+#
+# The rule now lets in exactly one more thing: a file called .htaccess, at the
+# top of the placeholder folder, that is THIS text and nothing else. A changed
+# one is refused, and so is any other file, because that folder is never
+# uploaded: a rule somebody writes there would never reach a server, and the
+# old refusal exists to say so out loud.
+#
+# WHY THE TEXT IS HERE AND NOT A CHECKSUM. tools/package/check-package.py pins
+# the same file by its SHA-256. A checksum needs a program to work it out
+# (sha256sum on one machine, shasum on another), and this script starts only
+# tr, find, rm and cat: see PORTABILITY above. Comparing text needs none. The
+# self-test ties the two together: it checks that the repository's own copies
+# are accepted, and that their checksum is the one check-package.py holds.
+#
+# WHEN THE FILE IS CHANGED ON PURPOSE (in all its folders, and in
+# ALLOWED_HTACCESS in check-package.py): put the new text here, between the two
+# marker lines, exactly. The self-test fails until the three agree.
+#
+# "read -d ''" reads up to a byte that never comes, so it takes the whole
+# text, last line break included, and then reports "end of input" as a
+# failure: hence "|| true". ($(cat <<...) was not used: the bash a Mac ships
+# cannot read an apostrophe inside it.)
+IFS= read -r -d '' REFUSE_EVERYTHING_TEXT <<'REFUSE_EVERYTHING_END' || true
+# =============================================================================
+# Refuse every request for anything in this folder.
+#
+# Nothing here is ever meant to be fetched by a browser: the portal's own code
+# reads these files from disk. On a correct installation this folder sits
+# OUTSIDE the web folder and this file is never consulted. It matters only when
+# a hosting panel is pointed at the wrong folder (the one that holds _core,
+# instead of the web folder inside it): without it the web server would then
+# hand out these files to anybody who asked.
+#
+# The same file, byte for byte, sits in _apps, _core, _functions, _includes,
+# _lang, _sql and _vendor, and the installation package copies it into
+# _libraries. The installer writes it into _auth_keys, _uploads and _backups
+# when an installation is finished, and the upgrade page puts it back there
+# whenever it is missing.
+#
+# WHAT IT CANNOT DO: it is read only by Apache 2.4 or later (and servers that
+# follow its rules files) with rules files switched on for this folder. On any
+# other web server it does nothing, and the folder must be kept out of reach
+# by where it is. An installation made before October 2026 does not have it in
+# _auth_keys, _uploads or _backups until its upgrade page has been opened once.
+# =============================================================================
+Require all denied
+REFUSE_EVERYTHING_END
+readonly REFUSE_EVERYTHING_TEXT
 
 CHANNELS='LIVE BETA ALPHA'
 
@@ -668,6 +727,24 @@ names_channel_file_in_code() {
     return 1
 }
 
+# Is $1 the "refuse everything" file, byte for byte? Returns 0 for yes.
+# A link is not: what it points at can change without this folder changing.
+# The size is asked first, of find, in bytes. That is not for speed: bash
+# cannot hold a zero byte in a variable and drops it, so a file with zero
+# bytes ADDED to the right text would compare as equal. With the size equal
+# too, every byte has to be the same.
+# WHAT IT CANNOT DO: say anything about a file's owner or permissions.
+is_the_refuse_everything_file() {
+    local file="$1" got=''
+    if [[ -L "$file" || ! -f "$file" ]]; then return 1; fi
+    if [[ -z "$(find "$file" -type f -size "${#REFUSE_EVERYTHING_TEXT}c" -print)" ]]; then return 1; fi
+    # The "x" keeps the line breaks at the end, which $( ) would otherwise
+    # take off. A newer bash warns when it drops a zero byte; the warning is
+    # not wanted in a deploy's log, and the comparison below says no anyway.
+    { got="$(cat "$file"; printf x)"; } 2>/dev/null
+    [[ "$got" == "${REFUSE_EVERYTHING_TEXT}x" ]]
+}
+
 # =============================================================================
 # ❓ Question 2: tree — is the local web/ folder safe to mirror from?
 # Each code folder is mirrored on its own, so a deletion can only ever happen
@@ -676,7 +753,7 @@ names_channel_file_in_code() {
 # a silent miss into a refusal.
 # =============================================================================
 do_tree() {
-    local dir="$OPT_WEBDIR" entry name f has_reader=0
+    local dir="$OPT_WEBDIR" entry name f has_reader=0 guard found stray
     case "$OPT_CHANNEL" in
         live|beta|alpha) : ;;
         *) usage_error '--channel must be live, beta or alpha' ;;
@@ -722,10 +799,27 @@ do_tree() {
     done
 
     # --- The placeholder folders are not uploaded. If a real file ever appears
-    #     in one, somebody expects it on the server, and it would not arrive. ---
+    #     in one, somebody expects it on the server, and it would not arrive.
+    #     Two things may be there: .gitkeep, and the "refuse everything" file
+    #     (see REFUSE_EVERYTHING_TEXT, near the top). Everything else that is
+    #     not a folder is refused: another file, a file in a folder below, a
+    #     link. This used to look at ordinary files only ("find -type f"), so a
+    #     link was not seen at all; it is now. ---
     for name in $PLACEHOLDER_FOLDERS; do
-        if [[ -d "$dir/$name" && -n "$(find "$dir/$name" -type f ! -name .gitkeep -print -quit)" ]]; then
-            refuse tree-placeholder-has-files "web/$name now holds a real file, but that folder is not uploaded. Move $name from PLACEHOLDER_FOLDERS to CODE_FOLDERS in tools/deploy/resolve-settings.sh, or move the file."
+        if [[ ! -d "$dir/$name" ]]; then continue; fi
+        guard="$dir/$name/.htaccess"
+        stray=0
+        # Each name is compared here, in bash, and not by a pattern handed to
+        # find: a folder name with a "[" or a "*" in it would be read as a
+        # pattern there.
+        while IFS= read -r found; do
+            if [[ "$found" != "$guard" ]]; then stray=1; fi
+        done < <(find "$dir/$name" ! -type d ! -name .gitkeep -print)
+        if [[ "$stray" -eq 1 ]]; then
+            refuse tree-placeholder-has-files "web/$name holds something besides .gitkeep and the \"refuse everything\" file, but that folder is not uploaded. Move $name from PLACEHOLDER_FOLDERS to CODE_FOLDERS in tools/deploy/resolve-settings.sh, or move the file."
+        fi
+        if [[ -e "$guard" || -L "$guard" ]] && ! is_the_refuse_everything_file "$guard"; then
+            refuse tree-placeholder-htaccess-differs "web/$name/.htaccess is not, byte for byte, the \"refuse everything\" file this script knows (or it is a link, or not a file). That folder is not uploaded, so a rule written there would never reach the server. If the \"refuse everything\" file was changed on purpose in all its folders, put its new text in REFUSE_EVERYTHING_TEXT in tools/deploy/resolve-settings.sh."
         fi
     done
 

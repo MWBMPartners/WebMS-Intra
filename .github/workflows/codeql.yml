@@ -3,8 +3,10 @@
 # =============================================================================
 # Runs GitHub's CodeQL static analyser on every PR and weekly on `main`.
 # Targets the JavaScript/TypeScript surface of the repo — that's what
-# CodeQL natively supports for our stack. PHP static analysis is handled
-# in php-static-analysis.yml using Psalm.
+# CodeQL natively supports for our stack. Nothing analyses the PHP in that
+# way: php-static-analysis.yml only checks every PHP file's syntax. (This
+# said "handled in php-static-analysis.yml using Psalm" until 13 October
+# 2026. That job analysed nothing and still went green, so it was removed.)
 #
 # Scans:
 #   - web/public_html/assets/js/   (portal.js, etc.)
@@ -19,9 +21,12 @@ name: "CodeQL"
 
 on:
   push:
-    branches: [main, beta, alpha]
+    # "rc" is the release-candidate branch, between beta and main (owner,
+    # 13 October 2026; see package.yml). It does not exist yet: naming it
+    # early changes nothing until somebody makes it.
+    branches: [main, rc, beta, alpha]
   pull_request:
-    branches: [main, beta, alpha]
+    branches: [main, rc, beta, alpha]
   schedule:
     # Weekly Monday 09:00 UTC re-scan to catch new advisories that match
     # already-shipped code.

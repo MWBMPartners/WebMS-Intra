@@ -1,0 +1,739 @@
+# =============================================================================
+# WebMS-Intra — Portal self-tests
+#
+# Copyright (c) 2026 MWBM Partners Ltd. All rights reserved.
+# Proprietary. Unauthorised copying, modification or distribution prohibited.
+#
+# PURPOSE
+# -------
+# Runs every self-test that no other workflow runs, on every pull request and
+# on every push to a release branch. Until 13 October 2026 these were run by
+# hand, when somebody remembered: that is how the test of the giving records'
+# name-clearing went stale without anyone noticing (owner's approvals of 11,
+# 12 and 13 October 2026).
+#
+# WHY A FILE OF ITS OWN. Some of these tests may turn out to need adjusting
+# for GitHub's machines (a slower clock, other time-zone data, another build
+# of a program). In a workflow of their own, a test that misbehaves there can
+# never stop the older checks: the calendar tests, the mail tests, the backup
+# tests, the database upgrade test and the security checks each keep their own
+# file and their own result.
+#
+# FOUR JOBS
+#   1. PHP only            thirteen tests that need no database, and two that
+#                          need no PHP either: the deploy script's self-test
+#                          and the self-test of check 15 (bash and Python)
+#   2. PHP 8.5             the one test that needs PHP 8.5
+#   3. The package         the installation package's own self-test
+#   4. On a database       twenty-two tests, run twice: MySQL 8.0.36 and 8.4.11
+#
+# Almost every test is `tools/<name>-selftest.php` (the package's and the
+# deploy script's are shell scripts, check 15's is Python). Each is given
+# what its own header says it needs: a database of its own, ports, a scratch
+# folder, a second database server, a stand-in server. READ A TEST'S HEADER
+# BEFORE CHANGING ITS STEP.
+#
+# A FAILING TEST TURNS ITS JOB RED, AND HOW THAT IS MADE SURE OF
+# --------------------------------------------------------------
+#   - Nothing here uses continue-on-error.
+#   - No test's output goes through a pipe, and no test is followed by
+#     "|| true". Each test is the LAST command of its step, so the step ends
+#     with the test's own exit code.
+#   - `defaults.run.shell: bash` below. When a workflow NAMES bash, GitHub
+#     runs each step with `bash --noprofile --norc -eo pipefail`, so a pipe
+#     somebody adds later reports the program that failed, not the last one.
+#     (With no shell named GitHub uses `bash -e`, without that.)
+# Each test step runs while the job has not been cancelled and what it needs
+# was set up, so one failure cannot hide another test's result.
+#
+# WHAT THIS CANNOT PROVE
+# ----------------------
+# MariaDB; real Apache (each page test's router only imitates
+# web/public_html/.htaccess); a browser; a real hosting account. See each
+# test's own "WHAT THIS CANNOT PROVE".
+#
+# NOT YET RUN ON GITHUB when this was written. Each step's own lines were run
+# by hand on a developer's Mac with PHP 8.4, on MySQL 8.0.36 and on 8.4.11,
+# EXCEPT: the two steps that need the internet (the library fingerprints and
+# the package's self-test), which were not run at all; the safe-fetch test,
+# which was run with every connection outside the machine refused, so its
+# network parts were skipped; the installer's one check that needs a second
+# server; and the last step of the database job, whose test had not arrived.
+# The first run on a pull request is the first proof of the rest:
+# GitHub's own machines, their service containers, their memory (the main
+# database server held about 1.7 GB when it had eighteen databases; it has
+# twenty now), their clock, their time-zone data and their speed.
+# =============================================================================
+
+name: Portal Self-Tests
+
+on:
+  pull_request:
+    # "rc" is the release-candidate branch, between beta and main (owner,
+    # 13 October 2026; see package.yml). It does not exist yet: naming it
+    # early changes nothing until somebody makes it.
+    branches: [main, rc, beta, alpha]
+  push:
+    branches: [main, rc, beta, alpha]
+  # Lets the check be started by hand from the Actions page. GitHub only
+  # offers this once the file is on the default branch.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Naming the shell is what switches `pipefail` on. See "A FAILING TEST TURNS
+# ITS JOB RED" above before changing or removing this.
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: portal-selftests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ===========================================================================
+  # 1️⃣ Tests that need PHP only: no database
+  # ===========================================================================
+  php_only:
+    name: Self-tests that need PHP only
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup PHP 8.4
+        id: php
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mysqli, openssl, sodium, curl, mbstring, intl
+          coverage: none
+
+      - name: Erasure coverage self-test
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/gdpr-coverage-selftest.php
+
+      - name: Giving retention self-test
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/giving-retention-selftest.php
+
+      - name: Database server versions self-test
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/db-server-selftest.php
+
+      - name: Roles self-test
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/roles-selftest.php
+
+      - name: Memberships self-test
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/memberships-selftest.php
+
+      - name: Account guard self-test
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/account-guard-selftest.php
+
+      - name: Attendance access self-test
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/attendance-access-selftest.php
+
+      - name: Anonymous check-ins self-test
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/anon-checkins-selftest.php
+
+      - name: Report builder self-test
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/report-builder-selftest.php
+
+      # Case 7 keeps one processor busy for about two seconds on purpose.
+      - name: Time limit self-test
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/time-limit-selftest.php
+
+      - name: Web push self-test
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/webpush-selftest.php
+
+      # 🌐 Starts its own small servers on 127.0.0.1 (ports 9053 and 9054, its
+      #    defaults, named here so this file says what is used) and needs the
+      #    openssl program for its certificate part. With a network it also
+      #    asks a name server about a few public names and makes one
+      #    connection to a public website, to prove that a real name is held
+      #    to its real addresses. Without one those parts print SKIPPED and
+      #    the test still passes; on this machine they run.
+      - name: Safe fetch self-test
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        env:
+          SAFEFETCH_SELFTEST_PORT: '9053'
+          SAFEFETCH_SELFTEST_TLS_PORT: '9054'
+        run: php tools/safefetch-selftest.php
+
+      # 🚚 The deploy script's own self-test (tools/deploy/resolve-settings.sh
+      #    is what deploy.yml calls to decide where files go and to refuse a
+      #    server folder it does not recognise). It needs no PHP, no database
+      #    and no network: it builds made-up folders in a scratch place and
+      #    connects to nothing. Under a minute on a developer's Mac.
+      #    It sat in no workflow until 14 October 2026, so a change to the
+      #    deploy script could break it unseen.
+      #    Run on a Mac, and once on Linux (an ubuntu:24.04 container with no
+      #    network, whose find and sed are the kind GitHub's machines have):
+      #    386 checks passed on both. Not yet run on GitHub itself.
+      - name: Deploy settings self-test
+        if: ${{ !cancelled() }}
+        run: bash tools/deploy/resolve-settings-selftest.sh
+
+      # 🔢 The self-test of check 15 (the check that counts the values handed
+      #    to a prepared statement against its question marks). pr-security.yml
+      #    runs the check itself; this proves the check still catches what it
+      #    should, and still lets through the spread-out list it was taught on
+      #    13 October 2026. Python only; under a second.
+      - name: Check 15 self-test (values against question marks)
+        if: ${{ !cancelled() }}
+        run: python3 tools/audit-checks/check_bind_param_arity.py --self-test
+
+      # 🌐 NEEDS THE INTERNET, by design: it downloads each library the pages
+      #    load from a public address and checks its fingerprint. A file it
+      #    cannot download is "NOT CHECKED" and the test FAILS, because a
+      #    check that did not run has proved nothing. So this step can turn
+      #    red on a day one of those addresses is unreachable, with nothing
+      #    wrong in the portal: run it again before looking further.
+      - name: Library fingerprints self-test (needs the internet)
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/cdn-sri-selftest.php
+
+  # ===========================================================================
+  # 2️⃣ The one test that needs PHP 8.5
+  #
+  # tools/static-calls-selftest.php checks the check that looks for calls to
+  # methods that do not exist. One of its made-up files uses a form PHP 8.5
+  # brought in, and the test first makes sure every one of them is valid PHP,
+  # so on 8.4 it fails for a reason that has nothing to do with the check. Its
+  # section 11 also needs python3 and bash, which the runner has.
+  # ===========================================================================
+  static_calls:
+    name: Static-calls self-test (PHP 8.5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup PHP 8.5
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+
+      - name: Static-calls self-test
+        run: php tools/static-calls-selftest.php
+
+  # ===========================================================================
+  # 3️⃣ The installation package's own self-test (#499)
+  #
+  # tools/package/package-selftest.sh proves that the build and its guards
+  # REFUSE what they must refuse, by planting faults and watching each fail
+  # for its own reason: some twenty-five whole builds, so it is not quick (14
+  # minutes on a developer's Mac).
+  #
+  #   - NEEDS THE INTERNET: every build fetches the PDF library and the
+  #     fallback copies of the page libraries, and checks each against its
+  #     checksum.
+  #   - Needs the REAL gitleaks. Without it the self-test puts a stand-in in
+  #     its place and still passes, saying loudly that such a run proves
+  #     nothing about what the real program finds. So it is installed here,
+  #     the same version by the same checksum as package.yml and
+  #     pr-security.yml install (CHANGE ALL THREE TOGETHER), and this job
+  #     stops if it cannot be.
+  #   - The whole history is checked out, because that is how the self-test
+  #     has always been run: it makes scratch copies of this repository and
+  #     builds scratch commits in them. Nothing in this checkout is changed.
+  #   - Three of its cases send a signal to a running build. A shell that
+  #     was told to ignore that signal passes the order on, and the self-test
+  #     then prints those cases as SKIPPED and says how many. Whether
+  #     GitHub's machines do that is not known yet: read the last lines of
+  #     the first run.
+  # ===========================================================================
+  package:
+    name: Installation package self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout with full history
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      # See package.yml, "Install gitleaks", for where the checksum comes
+      # from. A file whose checksum does not match is never unpacked.
+      - name: Install gitleaks (the program that searches for secrets)
+        run: |
+          set -euo pipefail
+          VERSION="8.30.1"
+          SHA256="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+          curl -fsSL -o "$RUNNER_TEMP/gitleaks.tgz" "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          echo "${SHA256}  $RUNNER_TEMP/gitleaks.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP" gitleaks
+          sudo mv "$RUNNER_TEMP/gitleaks" /usr/local/bin/gitleaks
+          # The program must say it is the version asked for.
+          INSTALLED="$(gitleaks version)"
+          echo "gitleaks says it is version ${INSTALLED}"
+          [[ "$INSTALLED" == "$VERSION" || "$INSTALLED" == "v$VERSION" ]] || { echo "::error::Asked for gitleaks ${VERSION}, got '${INSTALLED}'."; exit 1; }
+
+      # The self-test's last line always says "reached the end"; its exit
+      # code is 0 only when every case was ok.
+      - name: Package self-test (planted faults against the build and its guards)
+        run: bash tools/package/package-selftest.sh
+
+  # ===========================================================================
+  # 4️⃣ Tests that need a database, on MySQL 8.0.36 and on 8.4.11
+  #
+  # THE THREE THROWAWAY DATABASE SERVERS. GitHub starts them beside the job
+  # (the `services:` block) and removes them when the job ends. Their data
+  # lives only in memory (`--tmpfs`), and the machine itself is thrown away
+  # after the job, so nothing is kept anywhere.
+  #   mysql         port 33306. Every test but one uses this server, and each
+  #                 test gets a DATABASE of its own in it, built from
+  #                 web/_sql/full_schema.sql alone, as calendar-selftests.yml
+  #                 does it. Several tests empty or change the tables they
+  #                 use, so none may share.
+  #   mysql_second  port 33307. Only for the installer's test: one of its
+  #                 checks (W09) is "the same database name on ANOTHER
+  #                 server", which cannot be asked of one server. Without a
+  #                 second server that check is not run.
+  #   mysql_loose   port 33308. Only for the strict-mode test, which needs a
+  #                 server whose OWN setting is loose (it refuses a strict
+  #                 one, because its control could then show nothing) and
+  #                 changes that server's setting while it runs. A server of
+  #                 its own, so that no other test ever meets either. A
+  #                 service container cannot be started with
+  #                 `--sql-mode=""`, so the first step below sets the same
+  #                 thing on the running server (SET GLOBAL sql_mode = '').
+  #
+  # THE STEPS RUN ONE AFTER ANOTHER, AND THAT MATTERS: the upgrade pages'
+  # test counts every statement the whole server runs, so nothing else may
+  # use that server at the same moment. Steps of one job never overlap.
+  #
+  # Every database's name starts with `selftest_`: several tests refuse any
+  # other, and one refuses a server that holds any other.
+  #
+  # THE LAST FIVE STEPS are tests that arrived with other pieces of work on
+  # the same day as this file. Four were read, and each is given what its own
+  # header asks for. The fifth, the activity log's, did not exist yet: its
+  # step is written from its brief (a database, the web server, a scratch
+  # folder). CHECK ITS HEADER when it lands and change its step to match.
+  #
+  # NODE.JS. Three tests here run a page's own script in Node.js: the site
+  # addresses' test needs it for its full run, and the live chat and the
+  # go-live tests use it when it is there (without it they still pass, and
+  # their last line says the page's script was NOT run). This job does not
+  # install Node.js: it relies on the one GitHub's Ubuntu machines come
+  # with. The first step below prints its version, or says in a warning
+  # that it is missing, so that a run can be read without guessing.
+  # ===========================================================================
+  database:
+    name: Self-tests on a database (MySQL ${{ matrix.mysql }})
+    runs-on: ubuntu-latest
+    # The seventeen tests that existed when this was written took about ten
+    # minutes together on a busy developer's Mac.
+    timeout-minutes: 60
+    strategy:
+      # One version failing must not hide the other's result.
+      fail-fast: false
+      matrix:
+        mysql: ['8.0.36', '8.4.11']
+
+    # 🗄️ The passwords are not secrets: these servers exist only inside this
+    # one job.
+    services:
+      mysql:
+        image: mysql:${{ matrix.mysql }}
+        env:
+          MYSQL_ROOT_PASSWORD: selftest-root
+        ports:
+          - 33306:3306
+        # The health check asks over TCP on purpose. While the image is
+        # setting itself up it runs a temporary server that accepts no
+        # network connections, so a TCP answer means the real server is up.
+        options: >-
+          --tmpfs /var/lib/mysql
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --protocol=TCP -uroot -pselftest-root"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=60
+      mysql_second:
+        image: mysql:${{ matrix.mysql }}
+        env:
+          MYSQL_ROOT_PASSWORD: selftest-root
+        ports:
+          - 33307:3306
+        options: >-
+          --tmpfs /var/lib/mysql
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --protocol=TCP -uroot -pselftest-root"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=60
+      mysql_loose:
+        image: mysql:${{ matrix.mysql }}
+        env:
+          MYSQL_ROOT_PASSWORD: selftest-root
+        ports:
+          - 33308:3306
+        options: >-
+          --tmpfs /var/lib/mysql
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --protocol=TCP -uroot -pselftest-root"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=60
+
+    env:
+      SELFTEST_DB_HOST: 127.0.0.1
+      SELFTEST_DB_PORT: '33306'
+      SELFTEST_DB_USER: root
+      SELFTEST_DB_PASS: selftest-root
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      # intl: the safe-fetch code converts a non-English host name with it.
+      - name: Setup PHP 8.4
+        id: php
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mysqli, openssl, sodium, curl, mbstring, intl
+          coverage: none
+
+      # 🧱 Wait for each server to answer a SIGNED-IN query, not just a ping
+      #    (the same reason as wait_for_mysql() in
+      #    tools/e2e-migrations/run.sh); make the third one loose; then one
+      #    database per test, each from full_schema.sql. The installer's test
+      #    and the strict-mode test make their own databases and are not in
+      #    the list.
+      # 🔎 Not a test and never a failure: it only writes down what this
+      #    machine has, because three tests behave differently without
+      #    Node.js (see "NODE.JS" above) and one needs python3.
+      - name: What this machine has (PHP, Node.js, Python)
+        run: |
+          php --version
+          python3 --version
+          if command -v node > /dev/null; then
+            echo "Node.js $(node --version)"
+          else
+            echo "::warning::Node.js is NOT on this machine. The site addresses' test will fail without it, and the live chat and go-live tests will pass with the page's script NOT run."
+          fi
+
+      - name: Prepare the three servers and build twenty throwaway databases
+        id: databases
+        env:
+          MYSQL_CID: ${{ job.services.mysql.id }}
+          SECOND_CID: ${{ job.services.mysql_second.id }}
+          LOOSE_CID: ${{ job.services.mysql_loose.id }}
+        run: |
+          ask() {
+            # $1 = a container, the rest = what to hand the mysql program.
+            local container="$1"
+            shift
+            docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$container" mysql -uroot -h 127.0.0.1 --protocol=TCP "$@"
+          }
+          for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
+            for i in $(seq 1 90); do
+              if ask "$container" -e 'SELECT 1' >/dev/null 2>&1; then
+                break
+              fi
+              if [ "$i" -eq 90 ]; then
+                echo "::error::A MySQL server did not accept a signed-in query within 90 seconds"
+                docker logs "$container" 2>&1 | tail -30
+                exit 1
+              fi
+              sleep 1
+            done
+          done
+          ask "$LOOSE_CID" -e "SET GLOBAL sql_mode = ''"
+          for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
+            ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
+          done
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog; do
+            ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
+            ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
+            echo "built ${db}"
+          done
+
+      # -----------------------------------------------------------------------
+      # Tests that use a database and no web server
+      # -----------------------------------------------------------------------
+      - name: App switch self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_appswitch
+        run: php -d memory_limit=512M tools/app-switch-selftest.php
+
+      - name: Expense rules self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_expenserules
+        run: php -d memory_limit=512M tools/expense-rules-selftest.php
+
+      - name: Expense withdrawal self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_expensewithdraw
+        run: php -d memory_limit=512M tools/expense-withdraw-selftest.php
+
+      - name: My volunteering self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_myvolunteering
+        run: php -d memory_limit=512M tools/my-volunteering-selftest.php
+
+      # 🧹 The erasure routine. It plants a failure with a trigger (root may)
+      #    and makes a folder read-only to stop a file being deleted, which
+      #    is why it must not run as the system's administrator: the runner's
+      #    own account is an ordinary one.
+      - name: Erasure self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_gdpreraser
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/gdpr-eraser
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/gdpr-eraser-selftest.php
+
+      # -----------------------------------------------------------------------
+      # 🖥️ Tests that drive the real pages through PHP's built-in web server
+      #
+      # Each copies web/ into a NEW folder of its own under the folder named
+      # here and deletes only that. Each refuses a folder that holds the
+      # repository, so each is given an empty one under the runner's
+      # temporary space. The ports are each test's own default, named so that
+      # this file says what is used; where a header says "and the next one"
+      # (or the next seven), those are left free as well.
+      # -----------------------------------------------------------------------
+      - name: Several organisations self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_sitemodes
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/site-modes
+          SELFTEST_WEB_PORT: '9461'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/site-modes-selftest.php
+
+      - name: Release channel self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_channel
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/channel
+          SELFTEST_WEB_PORT: '9590'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/channel-selftest.php
+
+      # Part D runs the domain check, so it needs python3.
+      - name: Portal address self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_portaladdress
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/portal-address
+          SELFTEST_WEB_PORT: '9660'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/portal-address-selftest.php
+
+      # Needs python3 (it runs the bare-address check) and, for the full run
+      # this is, Node.js. The runner has both.
+      - name: Site addresses self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_siteaddresses
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/site-addresses
+          SELFTEST_WEB_PORT: '9650'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/site-addresses-selftest.php
+
+      - name: Erasure pages self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_erasurepages
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/erasure-pages
+          SELFTEST_WEB_PORT: '9071'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/erasure-pages-selftest.php
+
+      - name: Access pages self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_accesspages
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/access-pages
+          SELFTEST_WEB_PORT: '9068'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/access-pages-selftest.php
+
+      # Its stand-in mail server takes the mail port, and the port after
+      # that must be free too. Part K makes a trigger and reads the
+      # server's own record of who is waiting for a lock; root may do both.
+      - name: Secret settings self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_settingssecrets
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/settings-secrets
+          SELFTEST_WEB_PORT: '9640'
+          SELFTEST_MAIL_PORT: '9641'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/settings-secrets-selftest.php
+
+      # The SEVEN ports after the mail port must be free as well (part N),
+      # and the server must know time zones by name (part S): the image
+      # loads those tables while it sets itself up.
+      - name: Sign-in limits self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_signinlimits
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/sign-in-limits
+          SELFTEST_WEB_PORT: '9520'
+          SELFTEST_MAIL_PORT: '9521'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/sign-in-limits-selftest.php
+
+      # Its calendar server takes the port after the web port.
+      - name: Time zones self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_timezones
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/time-zones
+          SELFTEST_WEB_PORT: '9861'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/time-zones-selftest.php
+
+      # 🔢 It switches the server's own log of every statement on, counts,
+      #    and switches it back: root may. See "THE STEPS RUN ONE AFTER
+      #    ANOTHER" above.
+      - name: Upgrade pages self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_upgradepages
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/upgrade-pages
+          SELFTEST_WEB_PORT: '9850'
+          SELFTEST_WEB_PORT_2: '9851'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/upgrade-pages-selftest.php
+
+      # 🏗️ The installer's test makes three databases of its own on the main
+      #    server and one on the second, and drops exactly those. It takes
+      #    the web port and the next one. It must not run as the system's
+      #    administrator (three checks make a folder read-only, which does
+      #    not stop that account): the runner's own account is an ordinary
+      #    one.
+      - name: Installer self-test (with its second database server)
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_PORT_2: '33307'
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/installer
+          SELFTEST_WEB_PORT: '9750'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/installer-selftest.php
+
+      # 🔓 On the loose server, port 33308. It makes its own two databases
+      #    there (the name given and the same with `_step2` on the end),
+      #    refuses if either exists, and drops both.
+      - name: Strict mode self-test (on the server whose own setting is loose)
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_PORT: '33308'
+          SELFTEST_DB_NAME: selftest_strict
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/db-strict-mode
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/db-strict-mode-selftest.php
+
+      # -----------------------------------------------------------------------
+      # 📬 The five tests that arrived with other work on the same day
+      # -----------------------------------------------------------------------
+      # The SEVEN ports after the web port must be free as well (part D). It
+      # makes a trigger for a moment; root may. It takes a minute or two on
+      # purpose: every backup code is a slow fingerprint.
+      - name: Two-step sign-in self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_twostep
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/two-step
+          SELFTEST_WEB_PORT: '9740'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/two-step-selftest.php
+
+      # Its own default port is the installer's; it is given another so that
+      # this file never names one port twice. Part E runs the page's own
+      # script in Node.js: see "NODE.JS" above.
+      - name: Live chat moderation self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_livechat
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/live-chat-moderation
+          SELFTEST_WEB_PORT: '9760'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/live-chat-moderation-selftest.php
+
+      # It takes the web port and the one after it (a second server, with
+      # workers, in part I), and stops its servers by their own process
+      # numbers (PHP's posix_kill, which the PHP set-up has). Two small parts
+      # run in Node.js: see "NODE.JS" above. Its own default port sits
+      # beside the installer's, so it is given another pair.
+      - name: Go-live button self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_golive
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/go-live-button
+          SELFTEST_WEB_PORT: '9762'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/go-live-button-selftest.php
+
+      # 📱 A database of its own and NOTHING ELSE: no web server and no port.
+      #    SELFTEST_WEB_DIR must NOT be given to this one. In the other tests
+      #    it names an empty scratch folder; here it means "test THIS copy of
+      #    web/ instead of the repository's", so an empty folder would have
+      #    it test nothing. (The first draft of this step, written before the
+      #    test existed, gave it one.) No real text is sent: the provider is
+      #    a recorder inside the test. It drops two columns for a moment,
+      #    takes a backup of its whole database and puts it back; root may.
+      - name: Held texts self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_heldtexts
+        run: php -d memory_limit=512M tools/held-texts-selftest.php
+
+      # This test did not exist yet when this step was written (issue 622).
+      # Its brief says: a database, the web server, a scratch folder. CHECK
+      # ITS HEADER and give it whatever else it asks for.
+      - name: Activity log self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_activitylog
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/activity-log
+          SELFTEST_WEB_PORT: '9770'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/activity-log-selftest.php

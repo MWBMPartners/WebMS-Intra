@@ -1,0 +1,213 @@
+# =============================================================================
+# WebMS-Intra — Mail self-tests
+#
+# Copyright (c) 2026 MWBM Partners Ltd. All rights reserved.
+# Proprietary. Unauthorised copying, modification or distribution prohibited.
+#
+# PURPOSE
+# -------
+# Runs the self-tests of the portal's own mail library and of everything that
+# sends through it (#592) on every pull request, so they no longer depend on
+# somebody remembering to run them by hand. A file of its own, so that no
+# other workflow has to change when a mail test does (owner's decision,
+# 12 October 2026).
+#
+#   tools/maillib/tests/run.php            the mail library by itself, against
+#                                          its own stand-in mail servers on
+#                                          this machine; needs PHP with
+#                                          OpenSSL, and Python 3 for one
+#                                          independent check. No database.
+#   tools/mail-pages-selftest.php          the SMTP route on the real pages; a
+#                                          database, and PHP's built-in web
+#                                          server on this machine
+#   tools/mail-queue-selftest.php          the mail queue and its scheduled
+#                                          job; a database, the built-in web
+#                                          server, `php-cgi` beside `php`, and
+#                                          Python 3
+#   tools/mail-queue-pages-selftest.php    the queue's page and the three ways
+#                                          past a failed certificate check; a
+#                                          database, the built-in web server,
+#                                          and one more port for a stand-in
+#                                          that answers as Microsoft 365
+#
+# No real mail leaves the machine: every test sends to a stand-in server that
+# it starts itself on 127.0.0.1 and stops when it ends.
+#
+# WHICH VERSIONS
+# --------------
+# Four jobs side by side: PHP 8.4 and 8.5, each on MySQL 8.0.36 and 8.4.11.
+# The mail plan (section 6) wrote this file for the two PHP versions on
+# MySQL 8.0.36; the notes of the packages that built the queue asked for both
+# MySQL versions. This is both lists together. fail-fast is off, so one
+# failing never cancels the others: every answer is wanted.
+#
+# THE THROWAWAY DATABASE
+# ----------------------
+# As calendar-selftests.yml does it: GitHub starts ONE MySQL container beside
+# the job and removes it when the job ends; its data lives only in memory
+# (`--tmpfs`). Each of the three tests that need a database gets a DATABASE of
+# its own, built from web/_sql/full_schema.sql alone, because each refuses to
+# share one. Two of them need the server to know time zones by name: the
+# image loads those tables while it sets itself up, before it accepts a
+# connection over the network, so they are there by the time the first step
+# below gets its answer. The queue's test makes a trigger for a moment and
+# drops it; the job signs in as root, which may.
+#
+# WHY EVERY TEST RUNS EVEN WHEN AN EARLIER ONE FAILED
+# ---------------------------------------------------
+# Each test step runs while the job has not been cancelled and what it needs
+# was set up, so one failure cannot hide another test's result. A failing
+# test still turns this job red: nothing here uses continue-on-error, and no
+# test's output goes through a pipe, so the step ends with the test's own
+# exit code.
+#
+# WHAT THIS CANNOT PROVE
+# ----------------------
+# A real mail server, Microsoft 365 or Google (the stand-ins only imitate
+# them); MariaDB; real Apache (each page test's router only imitates
+# web/public_html/.htaccess); how a page looks in a browser. See each test's
+# own "WHAT THIS CANNOT PROVE". NOT YET RUN ON GITHUB when this was written.
+# Three things about GitHub's machines could not be tried beforehand: that
+# the PHP set-up puts `php-cgi` beside `php` (the queue's test refuses to
+# start without it, and says so); that Python 3 is on the path; and how the
+# timing-sensitive parts behave on a slower machine.
+# =============================================================================
+
+name: Mail Self-Tests
+
+on:
+  pull_request:
+    # "rc" is the release-candidate branch, between beta and main (owner,
+    # 13 October 2026; see package.yml). It does not exist yet: naming it
+    # early changes nothing until somebody makes it.
+    branches: [main, rc, beta, alpha]
+  # Lets the check be started by hand from the Actions page. GitHub only
+  # offers this once the file is on the default branch.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mail-selftests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  selftests:
+    name: Mail self-tests (PHP ${{ matrix.php }}, MySQL ${{ matrix.mysql }})
+    runs-on: ubuntu-latest
+    # One job took about ten minutes on a busy developer's Mac, six of them
+    # in the queue's test.
+    timeout-minutes: 45
+    strategy:
+      # One version failing must not hide another's result.
+      fail-fast: false
+      matrix:
+        php: ['8.4', '8.5']
+        mysql: ['8.0.36', '8.4.11']
+
+    # 🗄️ The throwaway database. The password is not a secret: this
+    # database exists only inside this one job.
+    services:
+      mysql:
+        image: mysql:${{ matrix.mysql }}
+        env:
+          MYSQL_ROOT_PASSWORD: selftest-root
+        ports:
+          - 33306:3306
+        # The health check asks over TCP on purpose. While the image is
+        # setting itself up it runs a temporary server that accepts no
+        # network connections, so a TCP answer means the real server is up.
+        options: >-
+          --tmpfs /var/lib/mysql
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --protocol=TCP -uroot -pselftest-root"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=60
+
+    env:
+      SELFTEST_DB_HOST: 127.0.0.1
+      SELFTEST_DB_PORT: '33306'
+      SELFTEST_DB_USER: root
+      SELFTEST_DB_PASS: selftest-root
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup PHP ${{ matrix.php }}
+        id: php
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mysqli, openssl, sodium, curl, mbstring, intl
+          coverage: none
+
+      # 🧱 One database per test, each from full_schema.sql. The first loop
+      #    waits for a SIGNED-IN query, not just a ping (the same reason as
+      #    wait_for_mysql() in tools/e2e-migrations/run.sh).
+      - name: Build three throwaway databases from full_schema.sql
+        id: databases
+        env:
+          MYSQL_CID: ${{ job.services.mysql.id }}
+        run: |
+          for i in $(seq 1 90); do
+            if docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e 'SELECT 1' >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$i" -eq 90 ]; then
+              echo "::error::MySQL did not accept a signed-in query within 90 seconds"
+              docker logs "$MYSQL_CID" 2>&1 | tail -30
+              exit 1
+            fi
+            sleep 1
+          done
+          docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e 'SELECT VERSION(), @@collation_server'
+          for db in selftest_mailpages selftest_mailqueue selftest_mailqueuepages; do
+            docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE ${db}"
+            docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP "${db}" < web/_sql/full_schema.sql > /dev/null
+            echo "built ${db}"
+          done
+
+      - name: Mail library self-test (PHP only, its own stand-in mail servers)
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php -d memory_limit=512M tools/maillib/tests/run.php
+
+      # 📮 Each page test copies web/ into a NEW folder of its own under the
+      #    folder named here, and deletes only that. It refuses a folder that
+      #    holds the repository, so each is given an empty one under the
+      #    runner's temporary space. The ports are named so that this file
+      #    says what is used; they are each test's own defaults.
+      - name: Mail pages self-test (the SMTP route on the real pages)
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_mailpages
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/mail-pages-web
+          SELFTEST_WEB_PORT: '9580'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/mail-pages-selftest.php
+
+      - name: Mail queue self-test (the queue and its scheduled job)
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_mailqueue
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/mail-queue-web
+          SELFTEST_WEB_PORT: '9585'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/mail-queue-selftest.php
+
+      # The web port and the one after it (the stand-in that answers as
+      # Microsoft 365) must both be free; the queue test's server, on 9585,
+      # has stopped by now.
+      - name: Mail queue pages self-test (the queue's page and the certificate flow)
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_mailqueuepages
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/mail-queue-pages-web
+          SELFTEST_WEB_PORT: '9800'
+          SELFTEST_MAIL_PORT: '9801'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/mail-queue-pages-selftest.php

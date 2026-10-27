@@ -968,7 +968,22 @@ another repo, ever**.
 - `dry_run` `workflow_dispatch` input on `deploy.yml` for preview-mode deploys (#107 — mostly done; residual: server-side `--delete` deletion-log/audit monitor).
 - `gitleaks` CLI for secret scanning (free MIT binary, not the licensed action).
 - Repo config audit workflow (#108).
-- `version-bump.yml`, `changelog.yml`, `release.yml`, `auto-merge-alpha.yml`.
+- `version-bump.yml`, `changelog.yml`, `auto-merge-alpha.yml`.
+- Installation zips built by themselves (#499): `package.yml` builds and checks
+  one on every merge into `alpha`, `beta`, `rc` or `main`, and publishes a
+  GitHub Release for `rc` (pre-release) and `main`. Nobody pushes a tag any
+  more — a tag pushed by hand publishes nothing. `release.yml`, which did that,
+  is gone. Publishing stays off until a repository variable switches it on, and
+  none of this has yet run on GitHub.
+- Most self-tests run on every pull request (`portal-selftests.yml`,
+  `mail-selftests.yml`, `calendar-selftests.yml`), the database ones against both
+  MySQL 8.0.36 and 8.4.11. Two run only when a pull request touches the files they
+  are about: the backup tests (`backup-selftest.yml`) and the migration harness
+  (`e2e-migrations.yml`). A few self-tests and seven of the checks in
+  `tools/audit-checks/` still run nowhere automatically — tracked as #637, so this
+  is "most", not "every".
+- The Psalm job is gone: it analysed nothing and still reported success, which
+  looks exactly like a pass. `php -l` on every file remains the hard gate.
 
 ### 🧱 Stack baseline
 

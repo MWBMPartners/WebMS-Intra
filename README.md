@@ -286,14 +286,24 @@ php -S localhost:8080 -t public_html
 CI/CD via GitHub Actions syncs `web/` to DreamHost over **SFTP** (SSH key
 preferred, password fallback) on a three-branch model:
 
-| Branch  | Channel    | Public dir on server  | Auto-bump rule           |
-| ------- | ---------- | --------------------- | ------------------------ |
-| `alpha` | alpha/dev  | `public_html_dev/`    | PATCH (always)           |
-| `beta`  | beta       | `public_html_beta/`   | Conventional Commits     |
-| `main`  | production | `public_html/`        | none — tag `v*` manually |
+| Branch  | Channel    | Where it lands on the server                     | Auto-bump rule       |
+| ------- | ---------- | ------------------------------------------------ | -------------------- |
+| `alpha` | alpha/dev  | its own folder, named by `SFTP_PATH_ALPHA_DIR`    | PATCH (always)       |
+| `beta`  | beta       | its own folder, named by `SFTP_PATH_BETA_DIR`     | Conventional Commits |
+| `main`  | production | its own folder, named by `SFTP_PATH_LIVE_DIR`     | none on `main`       |
 
-Everything else inside `web/` (`_core/`, `_vendor/`, `_sql/`, `_lang/`,
-`_install/`) deploys to the shared remote base from every branch.
+**A merge into `main` publishes the release by itself** — `package.yml` works out the
+version, makes the tag and uploads the installation zip. Nobody pushes a `v*` tag any
+more, and a tag pushed by hand publishes nothing.
+
+Each channel now has a folder of its own, and the web address points at `admin_html`
+inside it. The three channels no longer share one base folder, so a deploy of one cannot
+overwrite another's code — which the old shared layout did, last push winning.
+
+Inside a channel's folder the deploy makes `admin_html` (the staff pages) and the code
+folders (`_apps`, `_core`, `_install`, `_lang`, `_sql`, `_vendor`, `_libraries`), and
+creates `_auth_keys`, `_uploads` and `_backups` once if they are missing, never touching
+them again.
 
 Workflows in `.github/workflows/`:
 
@@ -301,11 +311,25 @@ Workflows in `.github/workflows/`:
 - `version-bump.yml` — raises the version number in `web/_core/version.php`
   on pushes to `alpha` or `beta`
 - `changelog.yml` — appends commit-message entries to CHANGELOG.md
-- `release.yml` — creates a GitHub Release on `v*` tag push
-- `auto-merge-alpha.yml` — enables auto-merge on PRs whose base is `alpha`
+- `package.yml` — builds the installation zip by itself on every merge into a
+  release branch, and publishes a GitHub Release for `main` and `rc`. It
+  replaced `release.yml`, which made a Release only when somebody pushed a
+  `v*` tag by hand; pushing a tag now publishes nothing
+- `auto-merge-alpha.yml` — enables auto-merge on PRs whose base is `alpha`,
+  then starts `deploy.yml` and `package.yml` itself. GitHub raises no event
+  for a merge it makes with its own token, so nothing that listens for a push
+  to `alpha` would otherwise hear these merges
 - `pr-security.yml` — the hard gate. Checks every PHP file for syntax errors,
-  scans for committed secrets, and runs all eleven checks in
-  `tools/audit-checks/`
+  scans for committed secrets, and runs most of the checks in
+  `tools/audit-checks/`. **Seven of the 32 are named in no workflow at all**
+  and run only when somebody runs them by hand, two of them tripwires added
+  this week (#625's inline-script check and #622's session-identifier check);
+  that gap is tracked as #637. Count from the workflow rather than
+  trusting a number written here — an earlier version of this line said "all
+  eleven", which was both stale and untrue
+- `portal-selftests.yml`, `mail-selftests.yml`, `calendar-selftests.yml`,
+  `backup-selftest.yml` — the repository's own self-tests, on every pull
+  request. Some need only PHP; the rest run against a real MySQL
 - `e2e-migrations.yml` — loads the database from scratch and replays every
   change on top, against a real MySQL 8.0, to prove nothing breaks on upgrade
 - `codeql.yml`, `php-static-analysis.yml`, `lint.yml`, `repo-config-audit.yml`

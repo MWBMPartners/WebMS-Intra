@@ -4,56 +4,108 @@
 # Copyright (c) 2026 MWBM Partners Ltd. All rights reserved.
 # Proprietary. Unauthorised copying, modification or distribution prohibited.
 #
-# PURPOSE
-# -------
-# Multi-branch SFTP deployment to DreamHost. Mirrors the iHymns deployment
-# model, adapted for the WebMS-Intra web/ + public_html layout.
+# WHAT THIS DOES
+# --------------
+# Uploads the portal to a server over SFTP when one of the three release
+# branches changes. Each branch is one release channel, and EVERY CHANNEL IS A
+# COMPLETE, SEPARATE INSTALLATION in its own folder: its own code, its own
+# database login and encryption key (_auth_keys/), its own uploads and backups.
+# Nothing is shared between channels, so a deploy of one cannot change what
+# another runs. (Owner's decision, 13 September 2026. Before it, all three
+# channels shared one copy of the code and one database.)
 #
-# CHANNEL MODEL
-# -------------
-# Three branches map to three web roots on a SINGLE shared remote base:
+#   branch main   ->  the "live" channel
+#   branch beta   ->  the "beta" channel
+#   branch alpha  ->  the "alpha" channel
 #
-#   main   -> web/public_html/  ->  <base>/public_html/        (production)
-#   beta   -> web/public_html/  ->  <base>/public_html_beta/   (beta)
-#   alpha  -> web/public_html/  ->  <base>/public_html_dev/    (alpha / dev)
+# The channel comes from the branch and from nothing else. There is no way to
+# send one branch's files to another channel's folder. To redeploy live, run
+# this workflow from main.
 #
-# Everything else inside web/ (_core/, _vendor/, _sql/, _includes/, _functions/)
-# uploads to the SHARED <base>/ directory on every branch. Whichever branch
-# pushed last wins for shared code — protect main with branch rules if this
-# matters for your workflow.
+# WHERE THINGS GO, INSIDE ONE CHANNEL'S FOLDER
 #
-# Excluded from every upload (server-managed):
-#   _auth_keys/  _uploads/  _backups/  _libraries/  .DS_Store
+#   <base folder>/<channel folder>/
+#     .channel          one word (live, beta or alpha); written by this workflow,
+#                       read by the portal to know which channel it is
+#     CHANGELOG.md      for the release-notes page
+#     <staff web folder>/   <- web/public_html/   (point the staff address here)
+#     _apps/ _core/ _install/ _lang/ _sql/ _vendor/ _libraries/   <- the same folders in web/
+#     _auth_keys/ _uploads/ _backups/   the server's own: created if missing,
+#                                       never uploaded to, never deleted from
 #
-# SECRETS REQUIRED
-# ----------------
-#   SFTP_HOST          DreamHost SFTP server (e.g. iad1-shared-XXX.dreamhost.com)
-#   SFTP_USER          DreamHost SFTP user
-#   SFTP_LIVE_PATH     Absolute remote path for the main branch's public_html
-#                      (e.g. /home/USER/portal.millrdsdacambridge.uk/public_html)
-#   SFTP_BETA_PATH     Absolute remote path for the beta branch's public_html_beta
-#                      (e.g. /home/USER/portal.millrdsdacambridge.uk/public_html_beta)
-#   SFTP_DEV_PATH      Absolute remote path for the alpha branch's public_html_dev
-#                      (e.g. /home/USER/portal.millrdsdacambridge.uk/public_html_dev)
+# Each folder is mirrored ON ITS OWN, with deletion: a file removed from the
+# repository is removed from that folder on the server. web/ is never mirrored
+# as a whole, so a deletion can only ever happen inside a folder the repository
+# owns completely. Anything else in the channel's folder is simply never
+# touched; it is not protected by a list that could have a typing mistake in it.
 #
-# Optional secrets:
-#   SFTP_PORT          Defaults to 22 if missing or non-numeric
-#   SFTP_KEY           SSH private key (preferred over password)
-#   SFTP_PASSWORD      Fallback password used only when SFTP_KEY is empty
+# WHO DECIDES
+# -----------
+# Every decision about WHERE files go and WHICH login is used is made by
+# tools/deploy/resolve-settings.sh, which is proved by
+# tools/deploy/resolve-settings-selftest.sh. This file only calls it, and stops
+# on any refusal before it connects to anything. Read that script's header for
+# the rules; they are not repeated here, so the two cannot drift apart.
 #
-# Shared assets (_core/, _vendor/, _sql/, _includes/, _functions/, _libraries/dompdf/)
-# upload to the PARENT directory of whichever per-branch path applies — so all
-# three branches typically share one parent (the iHymns model). If you want full
-# isolation, point the three paths at different parents.
+# SETTINGS (repository secrets unless marked "variable")
+# ------------------------------------------------------
+#   Shared login          SFTP_HOST  SFTP_USER  SFTP_KEY or SFTP_PASSWORD  SFTP_PORT
+#   Shared base folder    SFTP_PATH_ROOT_DIR        a full path, e.g. /home/deployer
+#   One folder each       SFTP_PATH_LIVE_DIR  SFTP_PATH_BETA_DIR  SFTP_PATH_ALPHA_DIR
+#                         a folder NAME inside the base folder, e.g. portal.example.org
+#                         (all three are needed on every run)
+#   Optional, per channel (<X> = LIVE, BETA or ALPHA):
+#     its own login       SFTP_HOST_<X>  SFTP_USER_<X>  SFTP_KEY_<X> or
+#                         SFTP_PASSWORD_<X>  SFTP_PORT_<X>
+#                         ALL OR NOTHING: if any one is set, host, user and key
+#                         or password must all be the channel's own. Nothing is
+#                         borrowed from the shared login.
+#     its own base folder SFTP_PATH_<X>_ROOT_DIR
+#   Variables             SFTP_ENABLED          must be true, or nothing is connected to.
+#                                               (GitHub's own test, on the job below,
+#                                               ignores capitals; the script's does not.
+#                                               So TRUE starts the job, and the script
+#                                               then refuses before any connection.)
+#                         ADMIN_BASE_URL_LIVE / _BETA / _ALPHA
+#                                               the staff address of each channel,
+#                                               e.g. https://portal.example.org.
+#                                               Empty = the health check is skipped,
+#                                               with a warning. No address is ever
+#                                               written in this file.
 #
-# VARIABLES
-# ---------
-#   vars.SFTP_ENABLED  Must be 'true' to enable deployment (kill switch)
+# Hosting is the customer's choice: one login for every channel, a login per
+# channel, or a server per channel. No hosting company is assumed.
+#
+# Never create ORGANISATION-level secrets with any of these names. A secret set
+# on the repository hides an organisation one of the same name, and deleting the
+# repository one makes a deploy fall back to the organisation's value without
+# any sign that it did. The summary of each run says which setting supplied
+# each value; read it.
 #
 # COMMIT FLAGS
 # ------------
 #   [skip ci]      Skip this workflow entirely
-#   [deploy all]   Force full sync regardless of change detection
+#   [deploy all]   Deploy even when change detection finds nothing new in web/
+#
+# FIRST USE ON A SERVER
+# ---------------------
+# Run it by hand with "dry run" ticked and read what it says it would upload and
+# delete. A dry run creates nothing, so the channel's folder must already exist
+# (make it, empty, in the hosting panel); a real run creates it when missing.
+# If the channel's folder already holds a portal from the old shared layout,
+# tick "adopt existing folder" as well, once. The tick is accepted only for a
+# folder that holds a portal and nothing else; the script's header says what
+# to do about any other folder.
+#
+# WHILE A DEPLOY RUNS, AND IF ONE STOPS PART WAY
+# ----------------------------------------------
+# The staff pages and the seven code folders are uploaded one after another.
+# From the first of those uploads to the last, the channel is PART OLD AND PART
+# NEW, and a page may show an error. No order of the folders avoids that. If a
+# run stops part way, the channel stays in that state until a run finishes: run
+# this workflow again by hand from the same branch (a manual run always
+# uploads). The channel file is uploaded first, so the folder already says
+# whose it is and the second run is let in.
 # =============================================================================
 
 name: Deploy via SFTP
@@ -69,21 +121,29 @@ on:
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
     inputs:
-      target:
-        description: "Override deploy target (alpha / beta / main). Use 'auto' to deploy the current branch."
-        required: false
-        type: choice
-        default: "auto"
-        options:
-          - "auto"
-          - alpha
-          - beta
-          - main
       dry_run:
-        description: "Dry run — print what would be uploaded / DELETED on the server, without making any changes. Safe to run before structurally-significant deploys (see #107)."
+        description: "Dry run: show what would be uploaded and what would be DELETED on the server. Nothing is uploaded, deleted or created. The channel's folder must already exist."
         required: false
         type: boolean
         default: false
+      adopt_existing_folder:
+        description: "Tick ONCE, and only when the channel's folder already holds a portal with no channel file (the first deploy after changing over from the old shared layout). It says: yes, that portal is this channel. It is refused for a folder that holds anything besides a portal."
+        required: false
+        type: boolean
+        default: false
+
+# One deploy per channel at a time. A deploy that is RUNNING is never cancelled
+# by a newer one: a mirror with deletion that is stopped half way leaves files
+# deleted and their replacements not yet uploaded.
+# A deploy that is still WAITING can be cancelled: by GitHub's documentation, if
+# a third run starts while one runs and one waits, the one that was waiting is
+# cancelled and the newest waits in its place. (Not tried here; nothing has been
+# run on GitHub.) That loses no files, because every run uploads the branch's
+# newest commit, but the cancelled run shows as cancelled, and the run that
+# replaced it decides for itself whether anything in web/ changed.
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -93,14 +153,12 @@ jobs:
     runs-on: ubuntu-latest
     if: vars.SFTP_ENABLED == 'true'
 
-    # Shared lftp exclude flags. Patterns with wildcards are single-quoted in
-    # YAML so they pass through the shell as literal regexes for lftp.
     env:
-      # 🧪 Dry-run mode (manual dispatch only): lftp prints what it WOULD do,
-      # including which server-side files would be DELETED by --delete, but
-      # makes no changes. Threaded into every `mirror` invocation below. See
-      # https://lftp.yar.ru/lftp-man.html → "mirror --dry-run". Issue #107.
+      # Dry-run mode (manual runs only): lftp prints what it WOULD upload and
+      # delete and changes nothing. Put into every "mirror" below.
       LFTP_DRYRUN_FLAG: ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+      # Files that are never uploaded, wherever they turn up. Each pattern is
+      # matched against the path inside the folder being mirrored.
       LFTP_EXCLUDES: >-
         --exclude ^\.DS_Store$
         --exclude ^Thumbs\.db$
@@ -120,84 +178,106 @@ jobs:
         --exclude \.swp$
         --exclude \.swo$
         --exclude ~$
-      # NOTE: _libraries/ is INTENTIONALLY not excluded — dompdf is fetched
-      # at build time by tools/download-dompdf.sh into web/_libraries/dompdf/
-      # and needs to ride along with the shared upload. The shared mirror runs
-      # without --delete, so any other server-managed contents of _libraries/
-      # are preserved.
-      WEB_ROOT_EXCLUDES: >-
-        --exclude ^_auth_keys/
-        --exclude ^_uploads/
-        --exclude ^_backups/
-        --exclude ^public_html/
-        --exclude ^public_html_dev/
-        --exclude ^public_html_beta/
-        --exclude ^public_html_landing/
-        --exclude ^public_html_redir/
-        --exclude ^private_html/
 
     steps:
-      # -- Checkout code --
       - name: Checkout code
         uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ github.ref_name }}
 
-      # -- Resolve target channel + remote paths --
-      # Each branch maps to its own full remote path secret (iHymns model).
-      # The shared upload target is dirname(per-branch path), so when all three
-      # share one parent the shared _core/_vendor/_sql land in the same place.
-      - name: Determine target channel
-        id: target
+      # ------------------------------------------------------------------
+      # Decide where everything goes. CONNECTS TO NOTHING.
+      # A step can read a secret only if it is named here, so every setting
+      # the script knows about is listed, whichever channel is being deployed:
+      # the script checks all three channels on every run, so that no two can
+      # be sent to one place.
+      # The script prints which SETTING supplied each value, never the value.
+      # The resolved host, user and folders go only into a file in the
+      # runner's temporary folder, which the clean-up step removes.
+      # ------------------------------------------------------------------
+      - name: Resolve settings (connects to nothing)
+        id: plan
         env:
-          LIVE_PATH: ${{ secrets.SFTP_LIVE_PATH }}
-          BETA_PATH: ${{ secrets.SFTP_BETA_PATH }}
-          DEV_PATH:  ${{ secrets.SFTP_DEV_PATH }}
+          BRANCH: ${{ github.ref_name }}
+          SFTP_ENABLED: ${{ vars.SFTP_ENABLED }}
+          ADMIN_BASE_URL_LIVE: ${{ vars.ADMIN_BASE_URL_LIVE }}
+          ADMIN_BASE_URL_BETA: ${{ vars.ADMIN_BASE_URL_BETA }}
+          ADMIN_BASE_URL_ALPHA: ${{ vars.ADMIN_BASE_URL_ALPHA }}
+          # The shared login and base folder.
+          SFTP_HOST: ${{ secrets.SFTP_HOST }}
+          SFTP_USER: ${{ secrets.SFTP_USER }}
+          SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
+          SFTP_KEY: ${{ secrets.SFTP_KEY }}
+          SFTP_PORT: ${{ secrets.SFTP_PORT }}
+          SFTP_PATH_ROOT_DIR: ${{ secrets.SFTP_PATH_ROOT_DIR }}
+          # One folder name per channel.
+          SFTP_PATH_LIVE_DIR: ${{ secrets.SFTP_PATH_LIVE_DIR }}
+          SFTP_PATH_BETA_DIR: ${{ secrets.SFTP_PATH_BETA_DIR }}
+          SFTP_PATH_ALPHA_DIR: ${{ secrets.SFTP_PATH_ALPHA_DIR }}
+          # Optional: a channel's own login and its own base folder.
+          SFTP_HOST_LIVE: ${{ secrets.SFTP_HOST_LIVE }}
+          SFTP_USER_LIVE: ${{ secrets.SFTP_USER_LIVE }}
+          SFTP_PASSWORD_LIVE: ${{ secrets.SFTP_PASSWORD_LIVE }}
+          SFTP_KEY_LIVE: ${{ secrets.SFTP_KEY_LIVE }}
+          SFTP_PORT_LIVE: ${{ secrets.SFTP_PORT_LIVE }}
+          SFTP_PATH_LIVE_ROOT_DIR: ${{ secrets.SFTP_PATH_LIVE_ROOT_DIR }}
+          SFTP_HOST_BETA: ${{ secrets.SFTP_HOST_BETA }}
+          SFTP_USER_BETA: ${{ secrets.SFTP_USER_BETA }}
+          SFTP_PASSWORD_BETA: ${{ secrets.SFTP_PASSWORD_BETA }}
+          SFTP_KEY_BETA: ${{ secrets.SFTP_KEY_BETA }}
+          SFTP_PORT_BETA: ${{ secrets.SFTP_PORT_BETA }}
+          SFTP_PATH_BETA_ROOT_DIR: ${{ secrets.SFTP_PATH_BETA_ROOT_DIR }}
+          SFTP_HOST_ALPHA: ${{ secrets.SFTP_HOST_ALPHA }}
+          SFTP_USER_ALPHA: ${{ secrets.SFTP_USER_ALPHA }}
+          SFTP_PASSWORD_ALPHA: ${{ secrets.SFTP_PASSWORD_ALPHA }}
+          SFTP_KEY_ALPHA: ${{ secrets.SFTP_KEY_ALPHA }}
+          SFTP_PORT_ALPHA: ${{ secrets.SFTP_PORT_ALPHA }}
+          SFTP_PATH_ALPHA_ROOT_DIR: ${{ secrets.SFTP_PATH_ALPHA_ROOT_DIR }}
+          # Settings from the two earlier schemes. Nothing reads them; they
+          # are listed only so the script can WARN that one is still set.
+          SFTP_LIVE_PATH: ${{ secrets.SFTP_LIVE_PATH }}
+          SFTP_BETA_PATH: ${{ secrets.SFTP_BETA_PATH }}
+          SFTP_DEV_PATH: ${{ secrets.SFTP_DEV_PATH }}
+          SFTP_PATH_LIVE_ADMIN_DIR: ${{ secrets.SFTP_PATH_LIVE_ADMIN_DIR }}
+          SFTP_PATH_LIVE_PUBLIC_DIR: ${{ secrets.SFTP_PATH_LIVE_PUBLIC_DIR }}
+          SFTP_PATH_BETA_ADMIN_DIR: ${{ secrets.SFTP_PATH_BETA_ADMIN_DIR }}
+          SFTP_PATH_BETA_PUBLIC_DIR: ${{ secrets.SFTP_PATH_BETA_PUBLIC_DIR }}
+          SFTP_PATH_ALPHA_ADMIN_DIR: ${{ secrets.SFTP_PATH_ALPHA_ADMIN_DIR }}
+          SFTP_PATH_ALPHA_PUBLIC_DIR: ${{ secrets.SFTP_PATH_ALPHA_PUBLIC_DIR }}
         run: |
-          MANUAL_TARGET="${{ github.event.inputs.target }}"
-          if [[ -n "$MANUAL_TARGET" && "$MANUAL_TARGET" != "auto" ]]; then
-            CHANNEL="$MANUAL_TARGET"
-            echo "Manual dispatch override: $CHANNEL"
-          else
-            CHANNEL="${{ github.ref_name }}"
-          fi
+          # shellcheck disable=SC2154  # the DEPLOY_ names come from the plan file read below
+          set -euo pipefail
+          PLAN="$RUNNER_TEMP/deploy-plan.env"
+          # "pipefail" above makes this line fail when the script refuses, even
+          # though its output is also being copied to a file for the summary.
+          bash tools/deploy/resolve-settings.sh resolve --branch "$BRANCH" --plan-file "$PLAN" \
+            | tee "$RUNNER_TEMP/deploy-account.txt"
+          # shellcheck source=/dev/null
+          source "$PLAN"
+          # GitHub hides a value that exactly equals a secret. A path BUILT from
+          # two secrets is not one, so it is hidden here by hand, before anything
+          # can print it.
+          echo "::add-mask::$DEPLOY_CHANNEL_ROOT"
+          echo "::add-mask::$DEPLOY_REMOTE_WEB"
+          # The host and the user as the script tidied them (a pasted secret
+          # often ends in a line break, and then the tidied value is not the
+          # stored one). A dry run prints both in every address it lists.
+          echo "::add-mask::$DEPLOY_HOST"
+          echo "::add-mask::$DEPLOY_USER"
+          # Only words that are not secret leave this step: the channel, how to
+          # sign in, the NAME of the setting to sign in with, and the staff
+          # address (a variable, so already public).
+          {
+            echo "channel=$DEPLOY_CHANNEL"
+            echo "signin=$DEPLOY_SIGNIN"
+            echo "signin_setting=$DEPLOY_SIGNIN_SETTING"
+            echo "health_base=$DEPLOY_HEALTH_BASE"
+            echo "health_env=$DEPLOY_HEALTH_ENV"
+            echo "health_setting=$DEPLOY_HEALTH_SETTING"
+          } >> "$GITHUB_OUTPUT"
 
-          case "$CHANNEL" in
-            main)
-              REMOTE_PUBLIC="$LIVE_PATH"
-              echo "channel=live" >> "$GITHUB_OUTPUT"
-              ;;
-            beta)
-              REMOTE_PUBLIC="$BETA_PATH"
-              echo "channel=beta" >> "$GITHUB_OUTPUT"
-              ;;
-            alpha)
-              REMOTE_PUBLIC="$DEV_PATH"
-              echo "channel=alpha" >> "$GITHUB_OUTPUT"
-              ;;
-            *)
-              echo "::error::Unknown channel: $CHANNEL"
-              exit 1
-              ;;
-          esac
-
-          if [[ -z "$REMOTE_PUBLIC" ]]; then
-            echo "::error::SFTP path secret for channel '$CHANNEL' is empty (set SFTP_LIVE_PATH / SFTP_BETA_PATH / SFTP_DEV_PATH)"
-            exit 1
-          fi
-
-          # Strip trailing slash for tidy paths
-          REMOTE_PUBLIC="${REMOTE_PUBLIC%/}"
-          REMOTE_SHARED="$(dirname "$REMOTE_PUBLIC")"
-
-          echo "remote_public=$REMOTE_PUBLIC" >> "$GITHUB_OUTPUT"
-          echo "remote_shared=$REMOTE_SHARED" >> "$GITHUB_OUTPUT"
-
-          echo "  public path: $REMOTE_PUBLIC"
-          echo "  shared path: $REMOTE_SHARED"
-
-      # -- Lint PHP (every file) — blocks deploy on syntax errors --
+      # A syntax error in any PHP file stops the deploy.
       - name: Lint PHP
         run: |
           echo "::group::PHP lint"
@@ -208,9 +288,11 @@ jobs:
           | xargs -0 -n1 -P4 php -l
           echo "::endgroup::"
 
-      # -- Change detection (skip deploy when nothing relevant changed) --
+      # Skip the upload when nothing in web/ changed. A manual run always deploys.
       - name: Detect deployable changes
         id: changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           COMMIT_MSG=$(git log -1 --pretty=format:"%s")
           if echo "$COMMIT_MSG" | grep -q "\[deploy all\]"; then
@@ -219,9 +301,8 @@ jobs:
             exit 0
           fi
 
-          # workflow_dispatch always deploys
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "Manual dispatch — deploying"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "Manual run: deploying"
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -231,7 +312,7 @@ jobs:
             | sort -u || true)
 
           if [[ -z "$CHANGED" ]]; then
-            echo "No deployable changes in web/ — skipping"
+            echo "No deployable changes in web/: skipping"
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
           else
             echo "Changed files:"
@@ -239,202 +320,348 @@ jobs:
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # -- Fetch pinned dompdf into web/_libraries/dompdf/ so it gets uploaded
-      #    as part of the shared web/ sync. Skips if already present at the
-      #    pinned version. See tools/download-dompdf.sh for the pin.
+      # The PDF library is not kept in the repository; it is fetched, at a
+      # pinned version, into web/_libraries/dompdf/ and uploaded with _libraries.
       - name: Fetch dompdf (pinned)
         if: steps.changes.outputs.has_changes == 'true'
         run: bash tools/download-dompdf.sh
 
-      # -- Copy CHANGELOG.md into web/ so /admin/release-notes can find it.
-      #    Repo source-of-truth stays at the root; this is a build-time copy.
-      - name: Stage CHANGELOG.md for shared upload
+      # Two files that exist only for the upload: a copy of the change log for
+      # the release-notes page, and the one-word channel file.
+      - name: Stage the change log and the channel file
         if: steps.changes.outputs.has_changes == 'true'
-        run: cp CHANGELOG.md web/CHANGELOG.md
+        env:
+          CHANNEL: ${{ steps.plan.outputs.channel }}
+        run: |
+          set -euo pipefail
+          cp CHANGELOG.md web/CHANGELOG.md
+          printf '%s\n' "$CHANNEL" > web/.channel
 
-      # -- Install lftp --
+      # Still connecting to nothing: is web/ safe to mirror from? Refuses a
+      # top-level entry nobody listed, an empty code folder (a sign that the
+      # checkout is incomplete), a half-fetched PDF library, and code too old
+      # to read the channel file.
+      - name: Check the web folder (connects to nothing)
+        if: steps.changes.outputs.has_changes == 'true'
+        env:
+          CHANNEL: ${{ steps.plan.outputs.channel }}
+        run: bash tools/deploy/resolve-settings.sh tree --web-dir web --channel "$CHANNEL"
+
       - name: Install lftp
         if: steps.changes.outputs.has_changes == 'true'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq lftp
 
-      # -- Resolve SFTP port (default 22 on missing / non-numeric) --
-      - name: Resolve SFTP port
-        if: steps.changes.outputs.has_changes == 'true'
-        id: port
+      # Write the key to disk only when the plan says to sign in with one. The
+      # plan names WHICH key (the shared one, or the channel's own); the value
+      # is read here and nowhere else. Only the four key names are accepted.
+      - name: Stage SSH key
+        if: steps.changes.outputs.has_changes == 'true' && steps.plan.outputs.signin == 'key'
         env:
-          RAW_PORT: ${{ secrets.SFTP_PORT }}
-        run: |
-          TRIMMED=$(echo "$RAW_PORT" | tr -d '[:space:]')
-          if [[ "$TRIMMED" =~ ^[0-9]+$ ]] && [[ "$TRIMMED" -ge 1 ]] && [[ "$TRIMMED" -le 65535 ]]; then
-            echo "port=$TRIMMED" >> "$GITHUB_OUTPUT"
-          else
-            echo "port=22" >> "$GITHUB_OUTPUT"
-          fi
-
-      # -- Choose auth method: SSH key preferred, password fallback --
-      - name: Choose auth method
-        if: steps.changes.outputs.has_changes == 'true'
-        id: auth
-        env:
+          KEY_SETTING: ${{ steps.plan.outputs.signin_setting }}
           SFTP_KEY: ${{ secrets.SFTP_KEY }}
-          SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
+          SFTP_KEY_LIVE: ${{ secrets.SFTP_KEY_LIVE }}
+          SFTP_KEY_BETA: ${{ secrets.SFTP_KEY_BETA }}
+          SFTP_KEY_ALPHA: ${{ secrets.SFTP_KEY_ALPHA }}
         run: |
-          if [[ -n "$SFTP_KEY" ]]; then
-            echo "method=key" >> "$GITHUB_OUTPUT"
-          elif [[ -n "$SFTP_PASSWORD" ]]; then
-            echo "method=password" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::Neither SFTP_KEY nor SFTP_PASSWORD is configured"
+          set -euo pipefail
+          case "$KEY_SETTING" in
+            SFTP_KEY|SFTP_KEY_LIVE|SFTP_KEY_BETA|SFTP_KEY_ALPHA) ;;
+            *) echo "::error::The plan names a key setting this step does not know. Nothing was connected to."; exit 1 ;;
+          esac
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          ( umask 077; printf '%s\n' "${!KEY_SETTING}" > ~/.ssh/deploy_key )
+          # Can the key be used without anybody typing anything? Asked here,
+          # before connecting, because the upload program's own answer to a key
+          # that needs a passphrase is "Login incorrect", which sends people
+          # looking in the wrong place. (Tried with the real programs.)
+          if ! ssh-keygen -y -P '' -f ~/.ssh/deploy_key > /dev/null 2>&1; then
+            rm -f ~/.ssh/deploy_key
+            echo "::error::The key in $KEY_SETTING cannot be used: it is not a complete private key, or it was saved with Windows line ends, or it is protected by a passphrase. A deploy cannot type a passphrase. Make a key without one for deploys, or clear the key so the password is used. Nothing was connected to."
             exit 1
           fi
 
-      # -- Stage SSH key on disk if we'll use key auth --
-      - name: Stage SSH key
-        if: steps.changes.outputs.has_changes == 'true' && steps.auth.outputs.method == 'key'
+      # ------------------------------------------------------------------
+      # The upload. One step, in a fixed order, and it stops at the first
+      # thing that goes wrong:
+      #   1. LOOK at the channel's folder. Nothing is created yet.
+      #   2. fetch its channel file if it has one, and let the script judge
+      #      whose folder it is. A "no" ends the run with nothing changed.
+      #   3. the channel file
+      #   4. the three folders the server keeps for itself, if any is missing
+      #   5. the staff pages
+      #   6. the code folders, one at a time
+      #   7. the change log
+      # Why the channel file goes first: if the run stops afterwards, the
+      # folder already says which channel it is, and the next run is let in.
+      # The order of 5 and 6 does not make a deploy safe part way through:
+      # see "WHILE A DEPLOY RUNS" at the top of this file. (An earlier draft
+      # said new staff pages work with old code behind them. They need not.)
+      # ------------------------------------------------------------------
+      - name: Upload to the channel's own folder
+        if: steps.changes.outputs.has_changes == 'true'
         env:
-          SFTP_KEY: ${{ secrets.SFTP_KEY }}
+          ADOPT: ${{ github.event.inputs.adopt_existing_folder }}
+          SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
+          SFTP_PASSWORD_LIVE: ${{ secrets.SFTP_PASSWORD_LIVE }}
+          SFTP_PASSWORD_BETA: ${{ secrets.SFTP_PASSWORD_BETA }}
+          SFTP_PASSWORD_ALPHA: ${{ secrets.SFTP_PASSWORD_ALPHA }}
         run: |
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          echo "$SFTP_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
+          # shellcheck disable=SC2154  # the DEPLOY_ names come from the plan file read below
+          set -euo pipefail
+          # shellcheck source=/dev/null
+          source "$RUNNER_TEMP/deploy-plan.env"
+          # Stop here, with a message, if any of these is somehow empty: an
+          # empty folder name in a mirror with deletion must never be possible.
+          : "${DEPLOY_HOST:?}" "${DEPLOY_USER:?}" "${DEPLOY_PORT:?}" "${DEPLOY_SIGNIN:?}" "${DEPLOY_SIGNIN_SETTING:?}"
+          : "${DEPLOY_CHANNEL:?}" "${DEPLOY_CHANNEL_ROOT:?}" "${DEPLOY_REMOTE_WEB:?}" "${DEPLOY_LOCAL_WEB:?}"
+          : "${DEPLOY_CODE_FOLDERS:?}" "${DEPLOY_KEPT_FOLDERS:?}"
+          ROOT="$DEPLOY_CHANNEL_ROOT"
+          DRY="${LFTP_DRYRUN_FLAG:-}"
+          if [[ "$DEPLOY_REMOTE_WEB" != "$ROOT"/?* ]]; then
+            echo "::error::The staff web folder is not inside the channel's folder. Nothing was connected to."; exit 1
+          fi
 
-      # ========================================================================
-      # 1) Upload web/public_html/  ->  <base>/<public_dir>/   (per branch)
-      # ========================================================================
+          SFTP_PASS=''
+          if [[ "$DEPLOY_SIGNIN" == 'password' ]]; then
+            case "$DEPLOY_SIGNIN_SETTING" in
+              SFTP_PASSWORD|SFTP_PASSWORD_LIVE|SFTP_PASSWORD_BETA|SFTP_PASSWORD_ALPHA) SFTP_PASS="${!DEPLOY_SIGNIN_SETTING}" ;;
+              *) echo "::error::The plan names a password setting this step does not know. Nothing was connected to."; exit 1 ;;
+            esac
+          fi
 
-      - name: Deploy public_html via SFTP (SSH key)
-        if: steps.changes.outputs.has_changes == 'true' && steps.auth.outputs.method == 'key'
-        env:
-          SFTP_HOST: ${{ secrets.SFTP_HOST }}
-          SFTP_USER: ${{ secrets.SFTP_USER }}
-          SFTP_PORT: ${{ steps.port.outputs.port }}
-          REMOTE:    ${{ steps.target.outputs.remote_public }}
+          # The ONE way lftp is run, whichever way the plan says to sign in.
+          # $1 = lftp commands, separated by ";". Every lftp call in this file
+          # goes through here.
+          # The commands go into a file that only this account can read, so
+          # nothing about the server is on lftp's command line. THE PASSWORD IS
+          # NOT IN THAT FILE EITHER: lftp is told to take it from its own
+          # environment ("--env-password" reads LFTP_PASSWORD), which is set
+          # for that one program only. It used to be handed over as
+          # "-u user,password": lftp then printed it, part of it altered, inside
+          # every address a dry run listed, and it sat on the command line.
+          # A key sign-in gives an EMPTY password ("-u user,"), so lftp never
+          # stops to ask for one; without that, a key could not sign in at all.
+          LFTP_CMDS="$RUNNER_TEMP/lftp_cmds.txt"
+          run_lftp() {
+            if [[ "$DEPLOY_SIGNIN" == 'key' ]]; then
+              ( umask 077; printf '%s\n' \
+                "set sftp:connect-program \"ssh -o StrictHostKeyChecking=no -i $HOME/.ssh/deploy_key -p $DEPLOY_PORT\"" \
+                "open -u $DEPLOY_USER, sftp://$DEPLOY_HOST:$DEPLOY_PORT" \
+                "$1" "bye" > "$LFTP_CMDS" )
+              lftp -f "$LFTP_CMDS"
+            else
+              ( umask 077; printf '%s\n' \
+                "set sftp:auto-confirm yes" \
+                "set ssl:verify-certificate no" \
+                "open -u $DEPLOY_USER --env-password sftp://$DEPLOY_HOST:$DEPLOY_PORT" \
+                "$1" "bye" > "$LFTP_CMDS" )
+              LFTP_PASSWORD="$SFTP_PASS" lftp -f "$LFTP_CMDS"
+            fi
+          }
+
+          if [[ -n "$DRY" ]]; then
+            echo "DRY RUN: nothing is uploaded, nothing is deleted and nothing is created."
+          fi
+
+          echo "::group::1. Look at the channel's folder (read only; nothing is created)"
+          # "set cmd:fail-exit yes" makes lftp stop, with a failing exit code,
+          # at the first command that fails.
+          if run_lftp "set cmd:fail-exit yes; cls -1 -a $ROOT/" > "$RUNNER_TEMP/remote-listing.txt"; then
+            echo "The folder is there and was listed."
+          elif [[ -n "$DRY" ]]; then
+            echo "::error::The channel's folder could not be listed. Either it does not exist yet, or the sign-in failed, or this login may not read it (the message above says which). A dry run creates nothing, so it stops here. For a new channel: make the folder, empty, in the hosting panel and run the dry run again; or run without \"dry run\", which creates it."
+            exit 1
+          else
+            echo "The folder could not be listed. Trying to create it: that succeeds only when it is not there yet."
+            # Plain "mkdir": without -p, so the base folder must already exist
+            # (a mistyped base folder is not quietly built), and it fails on a
+            # folder that is already there. So success means one thing only:
+            # the folder did not exist, and is now there and empty.
+            if ! run_lftp "set cmd:fail-exit yes; mkdir $ROOT"; then
+              echo "::error::The channel's folder could not be listed and could not be created. The sign-in failed, or the base folder does not exist, or the folder is there but this login may not read it (the messages above say which). Nothing was uploaded."
+              exit 1
+            fi
+            echo "The folder did not exist. It was created, empty."
+            run_lftp "set cmd:fail-exit yes; cls -1 -a $ROOT/" > "$RUNNER_TEMP/remote-listing.txt"
+          fi
+          echo "::endgroup::"
+
+          echo "::group::2. Whose folder is this? (read only)"
+          rm -f "$RUNNER_TEMP/remote-channel.txt"
+          echo "(A 'no such file' message on the next line is normal on a first deploy.)"
+          # "|| true": a missing channel file is the ordinary case on a first
+          # deploy, and the script below is what judges it. It refuses when the
+          # listing shows a channel file that did not arrive.
+          run_lftp "get $ROOT/.channel -o $RUNNER_TEMP/remote-channel.txt" || true
+          # The script says yes to three kinds of folder only: one whose channel
+          # file names this channel; an empty one; and a portal with no channel
+          # file and nothing else in it, when "adopt existing folder" was
+          # ticked. Everything else is refused, and nothing has been created.
+          bash tools/deploy/resolve-settings.sh remote --channel "$DEPLOY_CHANNEL" \
+            --listing "$RUNNER_TEMP/remote-listing.txt" \
+            --fetched "$RUNNER_TEMP/remote-channel.txt" \
+            --adopt-existing "${ADOPT:-false}"
+          echo "::endgroup::"
+
+          echo "::group::3. The channel file"
+          if [[ -z "$DRY" ]]; then
+            run_lftp "set cmd:fail-exit yes; put web/.channel -o $ROOT/.channel"
+          else
+            echo "Dry run: not uploaded."
+          fi
+          echo "::endgroup::"
+
+          echo "::group::4. Folders the server keeps for itself (made only when missing; never uploaded to, never deleted from)"
+          for d in $DEPLOY_KEPT_FOLDERS; do
+            # The listing from part 1 says which are there already. A name in
+            # it may be a full path and may end with a folder or link mark.
+            if grep -q -x -E "(.*/)?${d}[/@]?" "$RUNNER_TEMP/remote-listing.txt"; then
+              echo "$d is there already: left exactly as it is."
+            elif [[ -n "$DRY" ]]; then
+              echo "Dry run: $d is missing; a real run would create it, empty."
+            else
+              # Plain "mkdir" with fail-exit: if it cannot be made, the run
+              # stops. ("mkdir -p" was tried: with fail-exit it reports a
+              # failure for a folder that already exists.)
+              run_lftp "set cmd:fail-exit yes; mkdir $ROOT/$d"
+              echo "$d was missing: created, empty."
+            fi
+          done
+          echo "::endgroup::"
+
+          echo "::group::5. The staff pages (deletions happen inside the staff web folder only)"
+          # .well-known/ holds what the hosting company puts there to renew the
+          # address's certificate. It is not in the repository, so it is
+          # excluded, or the mirror would delete it.
+          run_lftp "set cmd:fail-exit yes; mirror --reverse --delete $DRY --verbose --only-newer --no-empty-dirs $LFTP_EXCLUDES --exclude ^\.well-known/ $DEPLOY_LOCAL_WEB/ $DEPLOY_REMOTE_WEB/"
+          echo "::endgroup::"
+
+          for f in $DEPLOY_CODE_FOLDERS; do
+            echo "::group::6. Code folder $f (deletions happen inside $f only)"
+            if [[ ! -d "web/$f" ]]; then
+              echo "::error::web/$f is missing; stopping before it is mirrored."; exit 1
+            fi
+            run_lftp "set cmd:fail-exit yes; mirror --reverse --delete $DRY --verbose --only-newer --no-empty-dirs $LFTP_EXCLUDES web/$f/ $ROOT/$f/"
+            echo "::endgroup::"
+          done
+
+          echo "::group::7. The change log"
+          if [[ -z "$DRY" ]]; then
+            run_lftp "set cmd:fail-exit yes; put web/CHANGELOG.md -o $ROOT/CHANGELOG.md"
+          else
+            echo "Dry run: not uploaded."
+          fi
+          echo "::endgroup::"
+
+      # Always, even after a failure: remove the key, the plan, the scratch
+      # files and lftp's own record of what it transferred.
+      - name: Clean up the key and the plan
+        if: always()
         run: |
-          REMOTE_DIR="${REMOTE%/}/"
-          [[ -n "${LFTP_DRYRUN_FLAG}" ]] && echo "🧪 DRY RUN — no changes will be made"
-          echo "Deploying web/public_html/ -> $REMOTE_DIR"
-          cat > /tmp/lftp_public.txt <<LFTP_EOF
-          set sftp:connect-program "ssh -o StrictHostKeyChecking=no -i $HOME/.ssh/deploy_key -p ${SFTP_PORT}"
-          open sftp://${SFTP_USER}@${SFTP_HOST}:${SFTP_PORT}
-          mirror --reverse --delete ${LFTP_DRYRUN_FLAG} --verbose --only-newer --no-empty-dirs $LFTP_EXCLUDES web/public_html/ ${REMOTE_DIR}
-          bye
-          LFTP_EOF
-          lftp -f /tmp/lftp_public.txt
+          rm -f ~/.ssh/deploy_key \
+            ~/.local/share/lftp/transfer_log \
+            "$RUNNER_TEMP/deploy-plan.env" \
+            "$RUNNER_TEMP/lftp_cmds.txt" \
+            "$RUNNER_TEMP/remote-listing.txt" \
+            "$RUNNER_TEMP/remote-channel.txt"
 
-      - name: Deploy public_html via SFTP (password)
-        if: steps.changes.outputs.has_changes == 'true' && steps.auth.outputs.method == 'password'
-        env:
-          SFTP_HOST: ${{ secrets.SFTP_HOST }}
-          SFTP_USER: ${{ secrets.SFTP_USER }}
-          SFTP_PASS: ${{ secrets.SFTP_PASSWORD }}
-          SFTP_PORT: ${{ steps.port.outputs.port }}
-          REMOTE:    ${{ steps.target.outputs.remote_public }}
-        run: |
-          REMOTE_DIR="${REMOTE%/}/"
-          [[ -n "${LFTP_DRYRUN_FLAG}" ]] && echo "🧪 DRY RUN — no changes will be made"
-          echo "Deploying web/public_html/ -> $REMOTE_DIR"
-          lftp -u "${SFTP_USER},${SFTP_PASS}" \
-            -e "set sftp:auto-confirm yes; set ssl:verify-certificate no; \
-                mirror --reverse --delete ${LFTP_DRYRUN_FLAG} --verbose --only-newer --no-empty-dirs \
-                $LFTP_EXCLUDES \
-                web/public_html/ ${REMOTE_DIR}; bye" \
-            "sftp://${SFTP_HOST}:${SFTP_PORT}"
-
-      # ========================================================================
-      # 2) Upload everything else in web/  ->  <REMOTE_SHARED>/   (shared)
-      #
-      #    Excluded entirely (server-managed or per-branch — see envs above):
-      #      _auth_keys/  _uploads/  _backups/      ← server-managed contents
-      #      public_html/  public_html_dev/  public_html_beta/
-      #      public_html_landing/  public_html_redir/  private_html/
-      #
-      #    Uses --delete: the repo is the source of truth for the shared
-      #    dirs (_core/, _vendor/, _sql/, _includes/, _functions/,
-      #    _libraries/dompdf/). Removing a file from the repo removes it
-      #    from the server on next deploy. The excludes ensure server-only
-      #    state (credentials, uploads, backups, other web roots) is
-      #    NEVER touched.
-      #
-      #    Before mirroring, mkd -p creates _auth_keys/, _uploads/,
-      #    _backups/ on the server if they don't exist yet — so the app
-      #    has writable target dirs without ever uploading their contents.
-      # ========================================================================
-
-      - name: Deploy shared web/ via SFTP (SSH key)
-        if: steps.changes.outputs.has_changes == 'true' && steps.auth.outputs.method == 'key'
-        env:
-          SFTP_HOST: ${{ secrets.SFTP_HOST }}
-          SFTP_USER: ${{ secrets.SFTP_USER }}
-          SFTP_PORT: ${{ steps.port.outputs.port }}
-          REMOTE:    ${{ steps.target.outputs.remote_shared }}
-        run: |
-          REMOTE_DIR="${REMOTE%/}/"
-          [[ -n "${LFTP_DRYRUN_FLAG}" ]] && echo "🧪 DRY RUN — no changes will be made (mkdir steps still execute and are harmless)"
-          echo "Deploying shared web/ (core, vendor, sql, _includes, _functions, _libraries/dompdf) -> $REMOTE_DIR"
-          cat > /tmp/lftp_shared.txt <<LFTP_EOF
-          set sftp:connect-program "ssh -o StrictHostKeyChecking=no -i $HOME/.ssh/deploy_key -p ${SFTP_PORT}"
-          open sftp://${SFTP_USER}@${SFTP_HOST}:${SFTP_PORT}
-          mkdir -p -f ${REMOTE_DIR}_auth_keys
-          mkdir -p -f ${REMOTE_DIR}_uploads
-          mkdir -p -f ${REMOTE_DIR}_backups
-          mirror --reverse --delete ${LFTP_DRYRUN_FLAG} --verbose --only-newer --no-empty-dirs $LFTP_EXCLUDES $WEB_ROOT_EXCLUDES web/ ${REMOTE_DIR}
-          bye
-          LFTP_EOF
-          lftp -f /tmp/lftp_shared.txt
-
-      - name: Deploy shared web/ via SFTP (password)
-        if: steps.changes.outputs.has_changes == 'true' && steps.auth.outputs.method == 'password'
-        env:
-          SFTP_HOST: ${{ secrets.SFTP_HOST }}
-          SFTP_USER: ${{ secrets.SFTP_USER }}
-          SFTP_PASS: ${{ secrets.SFTP_PASSWORD }}
-          SFTP_PORT: ${{ steps.port.outputs.port }}
-          REMOTE:    ${{ steps.target.outputs.remote_shared }}
-        run: |
-          REMOTE_DIR="${REMOTE%/}/"
-          [[ -n "${LFTP_DRYRUN_FLAG}" ]] && echo "🧪 DRY RUN — no changes will be made (mkdir steps still execute and are harmless)"
-          echo "Deploying shared web/ (core, vendor, sql, _includes, _functions, _libraries/dompdf) -> $REMOTE_DIR"
-          lftp -u "${SFTP_USER},${SFTP_PASS}" \
-            -e "set sftp:auto-confirm yes; set ssl:verify-certificate no; \
-                mkdir -p -f ${REMOTE_DIR}_auth_keys; \
-                mkdir -p -f ${REMOTE_DIR}_uploads; \
-                mkdir -p -f ${REMOTE_DIR}_backups; \
-                mirror --reverse --delete ${LFTP_DRYRUN_FLAG} --verbose --only-newer --no-empty-dirs \
-                $LFTP_EXCLUDES $WEB_ROOT_EXCLUDES \
-                web/ ${REMOTE_DIR}; bye" \
-            "sftp://${SFTP_HOST}:${SFTP_PORT}"
-
-      # -- Wipe SSH key from disk --
-      - name: Clean up SSH key
-        if: always() && steps.auth.outputs.method == 'key'
-        run: rm -f ~/.ssh/deploy_key
-
-      # ========================================================================
-      # Health check (post-deploy probe). Non-blocking: a 404 / non-2xx is
-      # logged but doesn't fail the run, since dev/beta channels may not have
-      # the health route mapped during early bring-up.
-      # ========================================================================
-
+      # ------------------------------------------------------------------
+      # Health check. Asks the channel's own staff address which channel it
+      # thinks it is. This is the only proof that the ADDRESS is pointed at
+      # the folder that was just uploaded to, and that the portal read its
+      # channel file.
+      # The address comes from the ADMIN_BASE_URL_<CHANNEL> variable. When that
+      # is empty the check is skipped with a warning. No address is built in.
+      # Not run in a dry run: nothing was uploaded, so there is nothing new to ask.
+      # ------------------------------------------------------------------
       - name: Health check
-        if: steps.changes.outputs.has_changes == 'true' && steps.target.outputs.channel == 'live'
+        id: health
+        if: steps.changes.outputs.has_changes == 'true' && github.event.inputs.dry_run != 'true'
+        env:
+          HEALTH_BASE: ${{ steps.plan.outputs.health_base }}
+          HEALTH_ENV: ${{ steps.plan.outputs.health_env }}
+          HEALTH_SETTING: ${{ steps.plan.outputs.health_setting }}
+          CHANNEL: ${{ steps.plan.outputs.channel }}
         run: |
-          curl -fsSL --max-time 15 "https://portal.millrdsdacambridge.uk/health" \
-            || echo "::warning::Health endpoint did not return 2xx — investigate after deploy"
+          set -euo pipefail
+          if [[ -z "$HEALTH_BASE" ]]; then
+            echo "::warning::Health check skipped: the variable $HEALTH_SETTING is not set. Nothing has confirmed that the staff address is serving the $CHANNEL channel's folder."
+            echo "result=skipped, because $HEALTH_SETTING is not set" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
-      # ========================================================================
-      # Summary
-      # ========================================================================
+          # Up to three tries: straight after an upload a server may answer
+          # from old code for a moment. curl reports 000 when nothing answered.
+          CODE='000'
+          for TRY in 1 2 3; do
+            CODE="$(curl -sS --max-time 15 -o "$RUNNER_TEMP/health.json" -w '%{http_code}' "$HEALTH_BASE/health" || true)"
+            if [[ "$CODE" =~ ^[1-5][0-9][0-9]$ ]]; then break; fi
+            echo "No answer on try $TRY; waiting five seconds."
+            sleep 5
+          done
+          if ! [[ "$CODE" =~ ^[1-5][0-9][0-9]$ ]]; then
+            echo "::error::The staff address in $HEALTH_SETTING did not answer. The files were uploaded; check that the address exists and points at the channel's staff web folder."
+            exit 1
+          fi
+
+          if ! jq -e 'type == "object" and has("status")' "$RUNNER_TEMP/health.json" > /dev/null 2>&1; then
+            # No health report means nothing has shown WHICH folder this address
+            # serves, so the check fails. An earlier draft let an answer of 200
+            # pass with a warning, as "not installed yet"; but any other website
+            # at that address answers 200 as well, and this check is the only
+            # proof that the address is pointed at the folder just uploaded to.
+            # The cost, said plainly: the first deploy to a channel that has
+            # never been installed ends red here, although its upload is complete.
+            echo "::error::The address in $HEALTH_SETTING answered with code $CODE but not with a health report, so nothing shows that it serves the $CHANNEL channel's folder. The files WERE uploaded. If this channel has never been installed, that is the expected answer: open the address, run the installer, then run this workflow again by hand. Otherwise the address is pointed at another folder or another website: check where it points in the hosting panel."
+            exit 1
+          fi
+
+          GOT_ENV="$(jq -r '.env // ""' "$RUNNER_TEMP/health.json")"
+          GOT_SOURCE="$(jq -r '.channelSource // ""' "$RUNNER_TEMP/health.json")"
+          GOT_STATUS="$(jq -r '.status // ""' "$RUNNER_TEMP/health.json")"
+          # What a server sends back is printed only when it is a plain short word.
+          if ! [[ "$GOT_ENV" =~ ^[a-z]{1,12}$ ]]; then GOT_ENV='(nothing readable)'; fi
+          if ! [[ "$GOT_SOURCE" =~ ^[a-z]{1,12}$ ]]; then GOT_SOURCE='(nothing readable)'; fi
+
+          if [[ "$GOT_ENV" != "$HEALTH_ENV" ]]; then
+            echo "::error::The address in $HEALTH_SETTING is serving a portal that says it is '$GOT_ENV'; the $CHANNEL channel must say '$HEALTH_ENV'. The address is pointed at a different folder from the one just uploaded to."
+            exit 1
+          fi
+          if [[ "$GOT_SOURCE" != 'file' ]]; then
+            echo "::error::The portal at the address in $HEALTH_SETTING did not decide its channel from the channel file (it says '$GOT_SOURCE'). Either the file was not read, or the server sets the channel some other way."
+            exit 1
+          fi
+          if [[ "$GOT_STATUS" != 'ok' ]]; then
+            echo "::warning::The right folder is being served, but the portal reports that it is not fully healthy (usually the database). Open the admin health page."
+            echo "result=the right channel is served, but the portal reports a problem" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "The address is serving the $CHANNEL channel, and the portal read its channel file."
+          echo "result=passed" >> "$GITHUB_OUTPUT"
 
       - name: Deployment summary
         if: steps.changes.outputs.has_changes == 'true'
+        env:
+          BRANCH: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+          HEALTH_RESULT: ${{ steps.health.outputs.result }}
         run: |
           {
-            echo "### Deployment complete"
-            echo "- Branch: \`${{ github.ref_name }}\`"
-            echo "- Channel: \`${{ steps.target.outputs.channel }}\`"
-            echo "- Public dir: \`${{ steps.target.outputs.public_dir }}/\`"
-            echo "- Auth: ${{ steps.auth.outputs.method }}"
-            echo "- Commit: ${{ github.sha }}"
+            if [[ "$DRY_RUN" == 'true' ]]; then
+              echo "### Dry run complete: nothing was uploaded or deleted"
+            else
+              echo "### Deployment complete"
+            fi
+            echo "- Branch: \`$BRANCH\`"
+            echo "- Commit: $COMMIT"
+            echo "- Health check: ${HEALTH_RESULT:-not run (dry run)}"
+            echo
+            echo "Which setting supplied each value (names only, never the values):"
+            echo
+            echo '```text'
+            cat "$RUNNER_TEMP/deploy-account.txt"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Skip summary

@@ -1,0 +1,237 @@
+# =============================================================================
+# WebMS-Intra — Backup and restore self-tests
+#
+# Copyright (c) 2026 MWBM Partners Ltd. All rights reserved.
+# Proprietary. Unauthorised copying, modification or distribution prohibited.
+#
+# PURPOSE
+# -------
+# The portal's own backup stood between customers and losing their data, and
+# nothing tested a real restore until three faults were found by hand on
+# 12 October 2026 (#577, #578, #579). One of them was caused by a new column
+# in a table nobody thought of as part of the backup. So these run whenever
+# the backup code OR the database script changes:
+#
+#   tools/restore-order-selftest.php            the order tables go back in;
+#                                               needs PHP only
+#   tools/audit-checks/check_backup_column_types.py
+#                                               every column type and link in
+#                                               the install script against
+#                                               what the backup can carry, and
+#                                               the snapshot format against its
+#                                               two schema files; needs Python
+#                                               only. Run twice: once for real,
+#                                               once with --self-test, which
+#                                               proves each rule fires
+#   tools/backup-restore-selftest.php           real snapshots and restores of
+#                                               a real database, every value
+#                                               of every table compared
+#   tools/backup-page-selftest.php              the backup, freshness, health
+#                                               and upgrade pages, driven
+#                                               through PHP's built-in server
+#
+# BOTH MySQL VERSIONS, AND A USER WITH RIGHTS ON ONE DATABASE ONLY
+# ---------------------------------------------------------------
+# The job runs once on MySQL 8.0.36 and once on 8.4.11. Each test gets a
+# database of its own and a database user who may touch that database and
+# nothing else, which is what a shared host gives a customer: several proofs
+# are about what such a user is allowed to do.
+#
+# The container's data lives only in memory (--tmpfs) and the machine is
+# thrown away after the job, so nothing is kept anywhere.
+#
+# A FAILING TEST TURNS ITS STEP RED, AND HOW THAT IS MADE SURE OF
+# ---------------------------------------------------------------
+# Nothing here uses continue-on-error. Each test's output goes through `tee`
+# so that it shows in the log as it happens, and a pipe normally reports the
+# LAST program's result: `tee` succeeding would hide a test that failed. A
+# self-test that fails a proof still prints "REACHED THE END" and ends with
+# exit code 1, so checking for that line does not catch it either. The first
+# version of this file had exactly that fault: the independent check ran a
+# step's own lines on a failing run's output and got exit code 0.
+#
+# Two things now stop it, either of which is enough:
+#   1. `defaults.run.shell: bash` below. When a workflow NAMES bash, GitHub
+#      runs each step with `bash --noprofile --norc -eo pipefail`, and
+#      `pipefail` makes a pipe report the failing program. (With no shell
+#      named GitHub uses `bash -e`, without it.)
+#   2. Each of the three piped steps also says `set -o pipefail` itself, so
+#      the step stays right if somebody later removes the block above.
+# Each test step ALSO still checks for the line the test prints when it
+# reaches its end, because a test that stopped early with exit code 0 would
+# otherwise look like one that passed.
+#
+# Proved on the fix round's machine by running each step's own lines, under
+# both shells, on the saved output of a failing run, of a passing run, and of
+# a run that stopped early with exit code 0. Not yet run on GitHub.
+#
+# WHAT THIS CANNOT PROVE
+# ----------------------
+# MariaDB; any real shared host's memory, time or packet limits; real Apache
+# (the page test's router only imitates web/public_html/.htaccess); how the
+# pages look in a browser. See each test's own "WHAT THIS CANNOT".
+# =============================================================================
+
+name: Backup Self-Tests
+
+on:
+  pull_request:
+    # "rc" is the release-candidate branch, between beta and main (owner,
+    # 13 October 2026; see package.yml). It does not exist yet: naming it
+    # early changes nothing until somebody makes it.
+    branches: [main, rc, beta, alpha]
+    paths:
+      - 'web/_core/DbBackup.php'
+      - 'web/_core/data/backup-*.schema.json'
+      - 'web/_core/TimeLimit.php'
+      - 'web/_core/Maintenance.php'
+      - 'web/_apps/admin/maintenance/backup.php'
+      - 'web/_apps/admin/maintenance/backup-check.php'
+      - 'web/_apps/cron/_backup-freshness.php'
+      - 'web/_apps/cron/_health-probes.php'
+      - 'web/_install/upgrade.php'
+      - 'web/_sql/**'
+      - 'tools/backup-restore-selftest.php'
+      - 'tools/backup-page-selftest.php'
+      - 'tools/restore-order-selftest.php'
+      - 'tools/audit-checks/check_backup_column_types.py'
+      - 'tools/audit-checks/check_giving_retention_data.py'
+      - 'tools/audit-checks/fixtures/backup_column_types/**'
+      - 'tools/audit-checks/fixtures/backup_format/**'
+      - '.github/workflows/backup-selftest.yml'
+  # Lets the check be started by hand from the Actions page. GitHub only
+  # offers this once the file is on the default branch.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Naming the shell is what switches `pipefail` on. See "A FAILING TEST TURNS
+# ITS STEP RED" above before changing or removing this.
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: backup-selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  selftests:
+    name: Backup self-tests (MySQL ${{ matrix.mysql }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      # One version failing must not hide the other's result.
+      fail-fast: false
+      matrix:
+        mysql: ['8.0.36', '8.4.11']
+
+    # 🗄️ The throwaway database server. The passwords are not secrets: this
+    # server exists only inside this one job.
+    services:
+      mysql:
+        image: mysql:${{ matrix.mysql }}
+        env:
+          MYSQL_ROOT_PASSWORD: selftest-root
+        ports:
+          - 33306:3306
+        # The health check asks over TCP on purpose. While the image is
+        # setting itself up it runs a temporary server that accepts no
+        # network connections, so a TCP answer means the real server is up.
+        options: >-
+          --tmpfs /var/lib/mysql
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --protocol=TCP -uroot -pselftest-root"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=60
+
+    env:
+      SELFTEST_DB_HOST: 127.0.0.1
+      SELFTEST_DB_PORT: '33306'
+      SELFTEST_DB_PASS: selftest-user
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup PHP 8.4
+        id: php
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mysqli, openssl, sodium, curl, mbstring
+          coverage: none
+
+      # 🧱 One database per test, each from full_schema.sql, and for each a
+      #    user with rights on that database only. The first loop waits for a
+      #    SIGNED-IN query, not just a ping.
+      - name: Build two throwaway databases, each with a one-database user
+        id: databases
+        env:
+          MYSQL_CID: ${{ job.services.mysql.id }}
+          MYSQL_PWD_ROOT: selftest-root
+        run: |
+          for i in $(seq 1 90); do
+            if docker exec -e MYSQL_PWD="$MYSQL_PWD_ROOT" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e 'SELECT 1' >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$i" -eq 90 ]; then
+              echo "::error::MySQL did not accept a signed-in query within 90 seconds"
+              docker logs "$MYSQL_CID" 2>&1 | tail -30
+              exit 1
+            fi
+            sleep 1
+          done
+          docker exec -e MYSQL_PWD="$MYSQL_PWD_ROOT" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e 'SELECT VERSION(), @@collation_server'
+          for name in class pages; do
+            docker exec -e MYSQL_PWD="$MYSQL_PWD_ROOT" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e "
+              CREATE DATABASE selftest_backup_${name};
+              CREATE USER 'backup_${name}'@'%' IDENTIFIED BY '${SELFTEST_DB_PASS}';
+              GRANT ALL PRIVILEGES ON selftest_backup_${name}.* TO 'backup_${name}'@'%';"
+            docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -ubackup_${name} -h 127.0.0.1 --protocol=TCP "selftest_backup_${name}" < web/_sql/full_schema.sql > /dev/null
+            echo "built selftest_backup_${name}"
+          done
+
+      - name: Restore ordering self-test (PHP only)
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/restore-order-selftest.php
+
+      - name: Column types, links and snapshot format (Python only)
+        if: ${{ !cancelled() }}
+        run: python3 tools/audit-checks/check_backup_column_types.py --strict
+
+      - name: The same check, proving each of its rules fires
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python3 tools/audit-checks/check_backup_column_types.py --self-test | tee /tmp/column-check-selftest.txt
+          grep -q '^SELF-TEST REACHED THE END$' /tmp/column-check-selftest.txt
+
+      # The test runs with no memory limit of its own; proof 5 starts the
+      # class again in a separate process under 32 MB, which is the point.
+      # Proof 20 writes one row of about 50 MB, sized from the server's own
+      # largest message (64 MB on both images as shipped).
+      - name: Backup and restore self-test (real snapshots, every value compared)
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_backup_class
+          SELFTEST_DB_USER: backup_class
+        run: |
+          set -o pipefail
+          php -d memory_limit=-1 tools/backup-restore-selftest.php | tee /tmp/backup-restore-selftest.txt
+          grep -q '^REACHED THE END$' /tmp/backup-restore-selftest.txt
+
+      # The page test makes its scratch copy of web/ inside its own new
+      # folder under the runner's temporary space, and deletes only that.
+      - name: Backup pages self-test (the real pages, through PHP's built-in server)
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_backup_pages
+          SELFTEST_DB_USER: backup_pages
+          SELFTEST_WEB_PORT: '9480'
+          SELFTEST_WEB_DIR: ${{ runner.temp }}
+        run: |
+          set -o pipefail
+          php -d memory_limit=-1 tools/backup-page-selftest.php | tee /tmp/backup-page-selftest.txt
+          grep -q '^REACHED THE END$' /tmp/backup-page-selftest.txt
