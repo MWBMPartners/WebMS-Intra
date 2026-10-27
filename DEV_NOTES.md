@@ -6330,6 +6330,57 @@ client; PHPMailer as a second engine) come after the first roll-out, by the owne
 - Tests: `tools/activity-log-selftest.php` (77 checks); `tools/e2e-migrations/run.sh` phases 1 and 7, with a coda at
   the end of phase 7 for the one case where "no backup code exists" and "the log is empty" disagree.
 
+## Who may be sent a text, and when that is asked (#610, follow-up)
+
+- **One rule, asked at two moments.** `Sms::whyNotThisPerson()` is the only place that decides whether a person may be
+  sent a text. It answers a REASON (`''`, `no-account`, `account-off`, `not-member`, `org-off`), and two translators turn
+  that into words: `heldPersonWords()` for a held text coming due (the `NOT_SENT_*` sentences, "When they ended, …")
+  and `atOncePersonWords()` for a text refused as it is sent (the `AT_ONCE_*` sentences, present tense, no mention of
+  quiet hours). It used to return the sentences themselves, which is why only a held text could use it. **Never write
+  the reason into the record**: an administrator would read `account-off`.
+- **JUDGE A PERSON AT THE MOMENT THEIR TEXT WOULD GO.** `send()` asks AFTER the decision to hold, so only a text about
+  to go is asked; a held text is asked by `sendHeld()` when it comes due. This was built the other way round first, on
+  the stated grounds that holding would "only put off recording the same answer by up to two days" — which is FALSE,
+  because the held path asks when the text comes due, not when it was written. The independent check measured the cost:
+  an account switched off on the Friday and back on by the Saturday had its text refused outright, where the portal had
+  previously held it and then delivered it. Part M9 of the test is that case.
+- **Asked of every kind**, the `NEVER_HELD` ones included, and skipped only when no person is named (the caller chose
+  the number and there is no account to judge).
+- **A refused text has no "sent at"**, because it was never handed over; the list of recent texts shows that column.
+  **And `record()` keeps the row but drops the NAME when the database refuses one who has gone** (`fk_sms_user` is
+  `ON DELETE SET NULL`). That rescue lives in `record()` and nowhere else, because it is the one place that writes such
+  a row. It matters for a narrow but real window: a broadcast holding an account number it read moments before the
+  account was deleted. There is no such thing as a stored number with no person — `tblUserSmsPreference.userID` is NOT
+  NULL and cascades.
+- **What it still cannot do:** say whether the number is still that person's. That is `whyNoLongerWanted()`, asked only
+  of a held text, where up to two days have passed.
+- Test: `tools/held-texts-selftest.php`, 117 checks on MySQL 8.0.36 and 8.4.11.
+
+## Tables a one-table restore refuses (#622 follow-up)
+
+- **`DbBackup::WHOLE_DATABASE_ONLY` is the ONE list**, with a plain-words reason beside each name;
+  `isWholeDatabaseOnly()` is the one comparison and `wholeDatabaseOnlyReason()` the one place the words are built. The
+  Backup page asks both — to leave the three out of its per-table buttons, and to turn a posted request away before the
+  portal is closed — and keeps no copy of the names.
+- **The comparison ignores capital letters on purpose**: whether MySQL treats two spellings as one table is a server
+  setting (`lower_case_table_names`) and differs between a Linux host and a developer's Mac. Being stricter than the
+  server is safe; being looser is not.
+- **The test before adding a fourth table:** if this table alone went back to how it was, would the rest of the
+  database still make sense beside it? If the answer depends on what has happened SINCE the snapshot — an upgrade, a
+  code being spent, a counter moving on — it belongs on the list.
+- **Why these three, measured rather than argued.** `tblMigrations` alone makes the portal believe a finished upgrade
+  is still waiting, so it closes itself and runs that upgrade again: that destroyed a two-factor backup code made after
+  migration 220 (1 then 0, on both MySQL versions). `tblTotpBackupCodes` alone brought two spent codes back usable, and
+  usable they stayed. `tblSettings` alone brought back a row migration 217 had deleted, and the re-run overwrote an
+  organisation's time zone chosen after that upgrade.
+- **A whole-database restore is untouched** and still puts all three back value for value; it is the supported route.
+- **Refused before anything happens:** measured at not one database statement and no file opened. Asked with a snapshot
+  name that does not exist, the answer still names the TABLE — which is how the page test proves the ordering, after
+  its earlier check was found to claim that proof without making it.
+- **One consequence, recorded not worked around:** a `tblSettings` snapshot from before migration 187 now has no
+  realistic way back, because the whole restore already refused those snapshots and mending the file by hand would mean
+  recomputing its SHA-256 in `_manifest.json`.
+
 ## MS365 Graph email via a shared mailbox (gap #234, migration 176)
 
 ### What was already there vs what #234 actually needed

@@ -84,7 +84,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.4.0
+ * @version   1.4.1
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/227
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/495
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/578
@@ -293,6 +293,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $action    = '';
         } elseif ($action === 'restore_table' && DbBackup::isTableName($table) === false) {
             $flash     = 'Missing or invalid table name. Nothing was changed.';
+            $flashType = 'danger';
+            $action    = '';
+        } elseif ($action === 'restore_table' && DbBackup::isWholeDatabaseOnly($table) === true) {
+            // 🚫 One of the tables that only make sense put back beside the
+            //    rest of the database. DbBackup::restoreTable() refuses it
+            //    too, and that refusal is the real guard — this one is here so
+            //    the portal is not CLOSED to everybody for an action that was
+            //    never going to run. (The buttons below leave these tables
+            //    out, so reaching here means a posted request, not a press.)
+            //
+            //    Both the words and the list come from DbBackup: the page
+            //    keeps no copy of either, or the two could drift apart and the
+            //    page would promise something the class does not do.
+            $flash     = (string) DbBackup::wholeDatabaseOnlyReason((string) $table);
             $flashType = 'danger';
             $action    = '';
         }
@@ -611,6 +625,16 @@ $csrf = Auth::csrfToken();
                 </button>
             </form>
             <h3 class="h6">Per-table</h3>
+            <?php // 📣 Said once, above the list, rather than on each of the three rows: an administrator needs to know WHY the button is missing and what to press instead, and three copies of that sentence in a long list would be read by nobody. ?>
+            <p class="text-muted small mb-2">
+                A few tables can only be put back by &ldquo;Restore ALL tables&rdquo; above:
+                <?php echo htmlspecialchars(implode(', ', array_keys(DbBackup::WHOLE_DATABASE_ONLY)), ENT_QUOTES, 'UTF-8'); ?>.
+                They keep track of things the rest of the database has moved on from &mdash; which
+                database upgrades have run, which sign-in codes have been used &mdash; so putting
+                one of them back on its own would leave the rest of the database out of step with
+                it. They are still saved in the snapshot, and a whole-snapshot restore puts them
+                back.
+            </p>
             <div class="portal-data-list">
                 <?php foreach ((array) ($inspectManifest['tables'] ?? []) as $tableName => $meta): ?>
                     <div class="row py-1 align-items-center border-bottom">
@@ -618,6 +642,10 @@ $csrf = Auth::csrfToken();
                         <div class="col-md-2"><?php echo (int) ($meta['rows'] ?? 0); ?> rows</div>
                         <div class="col-md-3 small text-muted"><?php echo htmlspecialchars(substr((string) ($meta['sha256'] ?? ''), 0, 12), ENT_QUOTES, 'UTF-8'); ?>…</div>
                         <div class="col-md-3 text-end">
+                            <?php // 🚫 No "Restore" button for a table that only makes sense put back beside the rest of the database: DbBackup::restoreTable() would refuse it, and offering a button that always fails is a trap. The row STAYS in the list, with its rows and checksum, because the table IS in the snapshot and hiding it would read as "not saved". The list of names is DbBackup's, never a copy kept here. ?>
+                            <?php if (DbBackup::isWholeDatabaseOnly((string) $tableName) === true): ?>
+                                <span class="text-muted small">Whole-snapshot restore only — see above</span>
+                            <?php else: ?>
                             <form method="post" class="d-inline"
       data-confirm="Restore only <?php echo htmlspecialchars((string) $tableName, ENT_QUOTES, 'UTF-8'); ?>? The table is emptied and filled again from the snapshot. If anything goes wrong, it is left as it was."
       data-confirm-destructive="true">
@@ -627,6 +655,7 @@ $csrf = Auth::csrfToken();
                                 <input type="hidden" name="table" value="<?php echo htmlspecialchars((string) $tableName, ENT_QUOTES, 'UTF-8'); ?>">
                                 <button type="submit" class="btn btn-outline-warning btn-sm">Restore</button>
                             </form>
+                            <?php endif; ?>
                         </div>
                     </div>
                 <?php endforeach; ?>

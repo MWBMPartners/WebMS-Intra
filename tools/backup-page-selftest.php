@@ -65,6 +65,11 @@
  *      and the health page say the same. Pressing the second button runs the
  *      migration, says it ran without a way back and records that. With the
  *      rows mended, nothing is said any more.
+ *   J. The three tables a ONE-table restore refuses by name (they only make
+ *      sense put back beside the rest of the database): the snapshot's page
+ *      still lists them but offers no Restore button for them, says above the
+ *      list which button does put them back, and a request posted past the
+ *      missing button is refused in words WITHOUT closing the portal.
  *
  * "IDENTICAL AFTERWARDS" IS CHECKED BY AN INDEPENDENT READER. The comparison
  * is `brs_fingerprint()` from tools/backup-restore-selftest.php: every value
@@ -109,7 +114,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.2.0
+ * @version   1.3.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/578
  * -----------------------------------------------------------------------------
  */
@@ -949,6 +954,84 @@ $said = bps_message(bps_press($jar['root'], ['action' => 'snapshot_now'])['body'
 brs_check(str_starts_with($said, '[success] Snapshot created:') === true && str_contains($said, 'CANNOT') === false, 'with the rows mended, "Run snapshot now" says nothing of the kind', $said);
 $health = bps_text(bps_request($jar['root'], 'GET', '/admin/maintenance/health')['body']);
 brs_check(str_contains($health, 'cannot be put back whole') === false, 'and neither does the health page: the newest snapshot is one that can be put back', substr($health, (int) strpos($health, 'Backups'), 300));
+
+// =============================================================================
+// J. The three tables the one-table restore refuses, on the real page
+// =============================================================================
+// The class refuses them (proof 26 of tools/backup-restore-selftest.php). This
+// is about the PAGE: that it does not offer a button that is going to be
+// refused, that it still shows the three tables as part of the snapshot, and
+// that a request posted past the missing button is turned away WITHOUT closing
+// the portal to everybody for an action that was never going to run.
+echo "\nJ. Tables that only a whole-snapshot restore may put back\n";
+$newest = (string) basename(dirname((string) (array_slice(glob($backups . '/upgrade-*/_manifest.json') ?: [], -1)[0] ?? '')));
+if (brs_check($newest !== '', 'there is a finished snapshot to inspect') === true) {
+    $page  = bps_request($jar['root'], 'GET', '/admin/maintenance/backup?inspect=' . $newest)['body'];
+    $words = bps_text($page);
+    // The WHOLE name of the class on purpose: this file has no `use` line for
+    // it, and a short name would only fail when this line ran.
+    $only  = array_keys(\Portal\Core\DbBackup::WHOLE_DATABASE_ONLY);
+    foreach ($only as $table) {
+        brs_check(
+            str_contains($page, '<code>' . $table . '</code>') === true,
+            'the snapshot\'s page still LISTS ' . $table . ' (it is in the snapshot; hiding the row would read as "not saved")'
+        );
+        brs_check(
+            str_contains($page, 'name="table" value="' . $table . '"') === false,
+            'and offers no Restore button for ' . $table
+        );
+    }
+    brs_check(
+        str_contains($page, 'name="table" value="tblTasks"') === true,
+        'while an ordinary table still has its Restore button'
+    );
+    brs_check(
+        str_contains($words, implode(', ', $only)) === true && str_contains($words, 'Restore ALL tables') === true,
+        'and one line above the list names the three and says which button does put them back',
+        substr($words, max(0, (int) strpos($words, 'Per-table') - 40), 420)
+    );
+
+    // A request posted past the missing button. The log is settled first, so
+    // "nothing was written to the activity log" is about these presses only.
+    bps_settle();
+    $stateBefore = brs_fingerprint();
+    foreach ($only as $table) {
+        $said = bps_message(bps_press($jar['root'], ['action' => 'restore_table', 'name' => $newest, 'table' => $table])['body']);
+        brs_check(
+            str_starts_with($said, '[danger] ' . $table . ' cannot be put back on its own.') === true
+            && str_contains($said, 'Restore ALL tables') === true,
+            'a posted request for ' . $table . ' is refused in words that name it and say what to press instead',
+            $said
+        );
+        // WHAT THIS CHECK CAN AND CANNOT SEE. Asking whether the portal is
+        // open AFTERWARDS does not prove it was never closed: a close
+        // followed by a reopen leaves nothing behind (the helper puts the
+        // setting back, tblSettings.updatedAt has no ON UPDATE, and settling
+        // wipes the maintenance message). Its words used to claim it proved
+        // the ordering, and the independent check showed it passing with the
+        // refusal moved to AFTER the close. So the words now say only what
+        // is seen, and the check below proves the ordering a different way.
+        brs_check(
+            bps_portalIsOpen() === true,
+            'and the portal is open afterwards (this alone does not prove it was never closed -- see the next check)',
+            'portal.maintenance.active = ' . bps_setting('portal.maintenance.active')
+        );
+        // THE ORDERING, PROVED: name a snapshot that does not exist. If the
+        // guard ran after the page had taken hold of the snapshot, the answer
+        // would complain about the snapshot; it names the TABLE instead, so
+        // the refusal comes before anything that touches a snapshot -- and
+        // before the portal is closed, which happens later still.
+        $saidNoSnapshot = bps_message(bps_press($jar['root'], ['action' => 'restore_table', 'name' => 'there-is-no-such-snapshot', 'table' => $table])['body']);
+        brs_check(
+            str_starts_with($saidNoSnapshot, '[danger] ' . $table . ' cannot be put back on its own.') === true,
+            'and the refusal comes before the snapshot is touched at all: asked with a snapshot name that does not exist, the answer still names the table',
+            $saidNoSnapshot
+        );
+        brs_check(bps_newLines() === [], 'and nothing was written to the activity log, as for any other refused request', brs_say(array_keys(bps_newLines())));
+    }
+    bps_settle();
+    brs_checkSame($stateBefore, 'the database is identical after all three refusals');
+}
 
 // =============================================================================
 $failed = Brs::$proofOk === false;

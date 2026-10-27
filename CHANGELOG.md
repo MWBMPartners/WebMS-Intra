@@ -2,6 +2,32 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — a text is no longer sent to somebody who should not be sent one, and a restore of one table refuses three tables (#610, #622)**
+  - **What an administrator should know after upgrading**
+    1. **A text now checks the person before it goes.** The portal used to ask "may this person still be sent a
+       text?" only about a text it had HELD for somebody's Sabbath quiet hours, at the moment that text came due. A
+       text sent straight away was never asked — so a broadcast, or a prayer-chain text, still went to somebody whose
+       account had been switched off, or who had been removed from the organisation, for as long as their number was
+       on file. Every text is now asked, including a critical alert, an emergency notice and the code that confirms a
+       number.
+    2. **A person is judged at the moment their text would go.** A text going now is judged now; a text held for quiet
+       hours is judged when it comes due, which can be up to two days later and can give a different answer. So
+       somebody suspended on the Friday and reinstated on the Saturday still receives a text that was held in between
+       — the portal behaves as it did before in that case, deliberately.
+    3. **Nobody who should get a text stops getting one.** A global administrator with no membership row still does;
+       an installation with one organisation never asks about membership at all; and confirming your own number is
+       unaffected.
+    4. **A restore of ONE table now refuses `tblMigrations`, `tblTotpBackupCodes` and `tblSettings`.** Admin,
+       Maintenance, Backup used to accept any table. Putting back only the backup codes brought already-used sign-in
+       codes back to life; putting back only the migrations record or the settings made a database upgrade that had
+       already run look as though it were still waiting, so the portal closed itself and ran that upgrade again over
+       data it had already changed — which was measured destroying a two-factor backup code made after the upgrade,
+       and overwriting a time zone chosen after it. Those three are now refused before anything is read or emptied,
+       with a message naming the table and pointing at "Restore ALL tables", and the page no longer offers a button
+       for them. **A whole-database restore is unchanged and is still the supported way to put all three back.**
+    5. **One thing you can no longer do:** a snapshot of `tblSettings` taken before migration 187 now has no route
+       back through the portal. A whole-database restore already refused those snapshots; the single-table route that
+       was the way round it is now closed too.
 - **Security — the activity log no longer stores a person's sign-in identifier or a copy of their session (#622)**
   - **What an administrator should know after upgrading**
     1. **What was wrong.** Every activity record kept the browser session's identifier — which IS the sign-in cookie —

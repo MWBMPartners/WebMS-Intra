@@ -116,7 +116,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   2.2.0
+ * @version   2.3.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/472
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/577
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/578
@@ -281,6 +281,91 @@ class DbBackup
 
     private const IDENTIFIER = '/\A[A-Za-z_][A-Za-z0-9_]*\z/';
 
+    /**
+     * 🚫 Tables that may ONLY be put back as part of a whole-database restore.
+     *
+     * WHY THERE IS A LIST AT ALL. The "restore one table" button empties one
+     * table and fills it from a snapshot. That is safe when the table's rows
+     * stand on their own. It is NOT safe when the REST OF THE DATABASE has
+     * moved on in a way that only makes sense beside the old contents of that
+     * one table. Nothing above this list can see that: the check just before
+     * it tests the SHAPE OF THE NAME (see IDENTIFIER), and the check below it
+     * tests whether other tables POINT AT this one. Neither knows what a table
+     * MEANS. These three mean something, and an independent check of the
+     * restore on 26 October 2026 watched two of them lose real data:
+     *
+     *   • tblMigrations — the record of which database upgrades have run.
+     *     Put an older copy back and the portal believes an upgrade it has
+     *     already done is still waiting, so the Upgrade page runs it AGAIN
+     *     over data that upgrade already changed. Proved, not guessed: the
+     *     check restored this table alone from an older snapshot and a
+     *     two-factor backup code made after the upgrade was DELETED (one row
+     *     became none). Nothing warned anybody; the restore said "success".
+     *
+     *   • tblTotpBackupCodes — the single-use codes for signing in without a
+     *     phone. Every code is spent by being marked used. Put an older copy
+     *     back and codes somebody has already used are alive again, so a code
+     *     read off a screenshot or an old printout signs that person in. The
+     *     same check restored this table alone and watched two spent codes
+     *     come back usable, and usable they stayed.
+     *
+     *   • tblSettings — every setting the portal runs on, the recorded
+     *     database version among them, and the marks migrations leave behind.
+     *     An older copy brings back the old version number, which again makes
+     *     upgrades that have run look as though they have not; it also
+     *     replaces secrets, mail settings and the portal's open-or-closed
+     *     state wholesale. IT TOO WAS WATCHED FAILING, twice: restoring this
+     *     table alone brought back a settings row migration 217 had deleted,
+     *     and the re-run that followed OVERWROTE AN ORGANISATION'S TIME ZONE
+     *     chosen after that upgrade (Asia/Tokyo became Pacific/Auckland) --
+     *     real loss of work done since the snapshot. The independent check
+     *     reproduced it. (This note used to say the table was here "as a
+     *     judgement, not from a watched failure", which was already untrue
+     *     when it was written: the measurement is in that round's own
+     *     evidence. It matters because this sentence is what a future reader
+     *     uses to decide whether the table has to stay on the list.) It also
+     *     carries the same "a migration has not run" trap as tblMigrations,
+     *     because Maintenance::recordVersion() keeps the version here.
+     *
+     * THE TEST FOR ADDING A TABLE. Ask: if this table alone went back to how
+     * it was, would the rest of the database still make sense beside it? If
+     * the answer depends on what has happened SINCE the snapshot — an upgrade,
+     * a code being spent, a counter moving on — the table belongs here.
+     *
+     * WHAT IS STILL ALLOWED, deliberately. A WHOLE-database restore puts all
+     * three back and is untouched by this list. That is the right tool: it
+     * puts every table back to the same moment, so nothing is left out of
+     * step. Refusing these tables in restoreAll() as well was considered and
+     * REJECTED — it would make the pre-upgrade snapshot impossible to undo,
+     * which is the one thing it exists for.
+     *
+     * Rejected alternative: a warning on the button instead of a refusal. An
+     * administrator presses that button when something has already gone
+     * wrong, in a hurry, and the damage is silent and cannot be undone — the
+     * restore itself reports success. A refusal that names the right tool is
+     * worth more than a warning nobody reads.
+     *
+     * This list lives HERE and nowhere else. The backup page asks
+     * isWholeDatabaseOnly() both to hide the button and to refuse a posted
+     * request, and names the tables from array_keys() of this very list; it
+     * never keeps its own copy of these names.
+     *
+     * The value beside each name is the ONE SENTENCE an administrator is shown
+     * when they ask for that table on its own, in the plainest words it can be
+     * put in. It lives here rather than in the message builder so that adding a
+     * table means writing its reason in the same breath: a shared, vaguer
+     * sentence was written first and REJECTED, because "this table keeps track
+     * of things the rest of the database has moved on from" is true of all
+     * three and tells the reader nothing about the one in front of them.
+     *
+     * @var array<string, string>
+     */
+    public const WHOLE_DATABASE_ONLY = [
+        'tblMigrations'      => 'It is the record of which database upgrades have already run. Putting an older copy back makes the portal believe an upgrade it has already done is still waiting, so it closes itself to everyone and runs that upgrade again over data the upgrade has already changed.',
+        'tblTotpBackupCodes' => 'It is the single-use codes for signing in without a phone, and a code is spent by being marked used. Putting an older copy back would make codes that have already been used work again, so a code from an old printout or screenshot would let someone in.',
+        'tblSettings'        => 'It holds every setting the portal runs on, including the database version it believes it is on and the marks upgrades leave behind. Putting an older copy back makes upgrades that have run look as though they have not, and replaces mail settings, secrets and the portal\'s open-or-closed state with whatever they were when the snapshot was taken.',
+    ];
+
     private mysqli $db;
     private string $backupsRoot;
 
@@ -327,6 +412,63 @@ class DbBackup
     public static function isTableName(mixed $name): bool
     {
         return is_string($name) === true && preg_match(self::IDENTIFIER, $name) === 1;
+    }
+
+    /**
+     * Is this one of the tables that may only be put back as part of a whole
+     * database? The ONE place WHOLE_DATABASE_ONLY is compared against a name;
+     * see that constant for why each table is on it.
+     *
+     * The comparison IGNORES CAPITAL LETTERS on purpose. Whether MySQL treats
+     * two table names that differ only in capitals as the same table is a
+     * SERVER setting (lower_case_table_names), and it differs between a Linux
+     * shared host and a developer's Mac. A case-sensitive comparison here
+     * would let "tblmigrations" past the guard on a server where that is the
+     * very same table. Being stricter than the server is safe; being looser is
+     * not.
+     *
+     * Anything that is not a plain string is refused, as in isTableName(): a
+     * browser can send `table[]=x`, which arrives as a list.
+     */
+    public static function isWholeDatabaseOnly(mixed $table): bool
+    {
+        if (is_string($table) === false) {
+            return false;
+        }
+        foreach (array_keys(self::WHOLE_DATABASE_ONLY) as $onlyWhole) {
+            if (strcasecmp($table, (string) $onlyWhole) === 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The words shown when one of those tables is asked for on its own. Kept
+     * beside the list so the page and the class say exactly the same thing,
+     * and so there is one place to improve the wording.
+     *
+     * It must say three things, because an administrator reading it is usually
+     * mid-emergency: that nothing has been changed, what could have gone wrong,
+     * and which button to press instead.
+     */
+    public static function wholeDatabaseOnlyReason(string $table): string
+    {
+        // The name is matched ignoring capitals, as isWholeDatabaseOnly() does,
+        // so the words never come back empty for a name that guard refused.
+        $why = '';
+        foreach (self::WHOLE_DATABASE_ONLY as $onlyWhole => $sentence) {
+            if (strcasecmp($table, (string) $onlyWhole) === 0) {
+                $why = $sentence;
+                break;
+            }
+        }
+
+        return $table . ' cannot be put back on its own. ' . ($why === '' ? '' : $why . ' ')
+             . 'Use "Restore ALL tables" instead: that puts every table back to the same moment, '
+             . 'so nothing is left out of step, and it is the supported way to put this table back. '
+             . 'Nothing has been changed.';
     }
 
     /**
@@ -2719,8 +2861,14 @@ class DbBackup
      *     pointers emptied, by the database's own rule for the link. That is
      *     counted and reported (`other_tables_changed`, and a warning); see
      *     outsideTables().
-     *   • Put back rows the database now calls duplicates (a snapshot from
-     *     before migration 187): that can only go back table by table.
+     *   • Put back rows the database now calls duplicates. That can only go
+     *     back table by table (restoreTable()). The case this was written for
+     *     — a snapshot of tblSettings from before migration 187 — can no
+     *     longer be done at all: since 26 October 2026 tblSettings is on
+     *     WHOLE_DATABASE_ONLY, so a one-table restore of it is refused.
+     *     Recovering such a snapshot now means mending the duplicate rows in
+     *     the snapshot's own file first. Said plainly because the old wording
+     *     promised a way out that is no longer there.
      *   • Put back, unchanged, a pointer at a row that is not in the snapshot.
      *     Where the link's own rule allows it the pointer is emptied, counted
      *     and reported (`pointers_emptied`); otherwise the restore is refused.
@@ -3207,6 +3355,12 @@ class DbBackup
      * delete the linked rows in those other tables too; restoreAll() handles
      * those, in an order that keeps the links intact.
      *
+     * And only for a table that MEANS something on its own: the tables on
+     * WHOLE_DATABASE_ONLY are refused by name before anything is read or
+     * emptied, because putting one of them back by itself leaves the rest of
+     * the database out of step with it. A whole-database restore still puts
+     * all of them back and is the supported way to do it.
+     *
      * Unlike restoreAll(), rows the database refuses as duplicates are counted
      * and left out rather than stopping the restore (see below), which is why
      * this writes one row per statement.
@@ -3255,6 +3409,21 @@ class DbBackup
         //    build a filesystem path or put into SQL.
         if (preg_match(self::IDENTIFIER, $table) !== 1) {
             return $fail('Invalid table identifier: ' . $table);
+        }
+
+        // 🚫 Refuse the three tables that only make sense put back beside the
+        //    rest of the database (WHOLE_DATABASE_ONLY says why each is on the
+        //    list, and what to ask before adding a fourth).
+        //
+        //    THE POSITION OF THIS CHECK IS THE POINT. It is above every read of
+        //    the snapshot and far above emptyTable(), so a refused table costs
+        //    nothing at all: no file is opened, no transaction is started and
+        //    no row is touched. Moving it below the emptying would turn the
+        //    guard into the very thing it exists to stop. The check just above
+        //    tests only the SHAPE of the name; it can never notice what a table
+        //    means.
+        if (self::isWholeDatabaseOnly($table) === true) {
+            return $fail(self::wholeDatabaseOnlyReason($table));
         }
 
         $opened = $this->openSnapshot($snapshotPath);
@@ -3344,6 +3513,18 @@ class DbBackup
 
             $rows = $this->rows($dir, $table, $format);
 
+            // 🚫 NOTHING BELOW HERE CAN RUN TODAY, and it is kept on purpose.
+            //    Since tblSettings went onto WHOLE_DATABASE_ONLY (26 October
+            //    2026) this method refuses that table at its very top, so the
+            //    sort can never be reached. It is kept because taking it out
+            //    would silently bring back the fault it was written to fix:
+            //    if tblSettings is ever taken off that list, whichever copy of
+            //    a duplicate row happened to be listed first would win again.
+            //    The duplicate-row handling further down is NOT dead — it
+            //    applies to any table — and is proved on tblRoutes in proof 17
+            //    of tools/backup-restore-selftest.php. This sort, by contrast,
+            //    is not exercised by anything any more.
+            //
             // 📑 A snapshot of the settings table taken before migration 187
             //    contains duplicate portal-wide rows. Only one of each can go
             //    back in, so the order they are offered in decides which one

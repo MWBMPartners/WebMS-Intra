@@ -80,15 +80,17 @@
  *     recorded the second: with no job such a text read "queued" for
  *     ever.) Until the portal handles another text, or the job runs, both
  *     go on reading "queued".
- *   - Ask, of a text sent AT ONCE, whether the person's account or
- *     organisation has been switched off. Who a text goes to is chosen by
- *     its caller, in three places: sendCategory() here, the prayer chain,
- *     and the account page for its code. ONE of them asks: when the prayer
- *     chain chooses a partner by itself it takes only an account that is
- *     switched on, with a live membership (PrayerChain::eligiblePartners()).
- *     A partner chosen by hand, a broadcast, and the code are not asked.
- *     (This note used to say none of the three asks.) Only a HELD text is
- *     asked again, by this class, when it comes due (whyNotThisPerson()).
+ *   - Know whether the NUMBER still belongs to the person, for a text sent
+ *     at once. That is whyNoLongerWanted(), and it is asked only of a held
+ *     text, where up to two days have passed and the number may have moved
+ *     on. A text sent now goes to the number its caller has just read.
+ *
+ *   THIS LIST USED TO SAY the class could not ask, of a text sent AT ONCE,
+ *   whether the person's account or organisation had been switched off. It
+ *   asks now (#610, the owner's decision of 26 October 2026): send() puts the
+ *   same question as sendHeld(), through whyNotThisPerson(), to every text
+ *   that names a person. A person is judged at the moment their text would
+ *   go -- now for a text going now, and when it comes due for a held one.
  *   - Know whether a text was DELIVERED, only whether the provider took it.
  *   - Read a text. Whether a late text is still true is judged from its
  *     KIND (see HELD_USE_WITHIN), or from a use-by moment its caller gives.
@@ -228,6 +230,20 @@ class Sms
     public const NOT_SENT_ORG_OFF    = 'Not sent: quiet hours. When they ended, the organisation had been switched off.';
     public const NOT_SENT_NUMBER     = 'Not sent: quiet hours. When they ended, this number was not the person\'s confirmed number for texts.';
     public const NOT_SENT_OPTED_OUT  = 'Not sent: quiet hours. When they ended, the person no longer wanted texts of this kind.';
+    // 🚫 THE SAME FOUR REASONS, FOR A TEXT THAT IS SENT AT ONCE (#610).
+    //    The NOT_SENT_* sentences above are written for a HELD text coming
+    //    due, so each begins "Not sent: quiet hours." and says "When they
+    //    ended, ...". A text that was never held has no quiet hours to speak
+    //    of and no "when they ended": using those words would record
+    //    something untrue. These say the same four things in the present
+    //    tense. whyNotThisPerson() decides WHICH of the four applies; these
+    //    only put it into words, so there is still exactly one place that
+    //    decides who may be sent a text.
+    public const AT_ONCE_PERSON      = 'Not sent: the person no longer has an account.';
+    public const AT_ONCE_ACCOUNT_OFF = 'Not sent: the person\'s account has been switched off.';
+    public const AT_ONCE_NOT_MEMBER  = 'Not sent: the person is not a member of this organisation.';
+    public const AT_ONCE_ORG_OFF     = 'Not sent: the organisation has been switched off.';
+
     public const NOT_SENT_RESTORED   = 'Not sent: quiet hours. It came back with a restored backup: it was waiting when the backup was taken and may already have been sent since, so it is not sent again.';
     public const UNKNOWN_INTERRUPTED = 'Not known whether it was sent: a run of the scheduled job was ended while handing this held text to the provider. It is not sent again.';
 
@@ -279,8 +295,14 @@ class Sms
         }
 
         // Daily cap — block before the wire to avoid runaway cost.
+        //   The last argument is false: this text was never handed to the
+        //   provider, so it has no "sent at". It used to be stamped with one,
+        //   which the list of recent texts then showed as if it were a sending
+        //   time -- and that list's own comment says such a row cannot exist.
+        //   Found by the independent check of this package, in a line this
+        //   package did not write.
         if (self::sentTodayCount($siteId) >= (int) ($settings['dailyCap'] ?? 100)) {
-            self::record($siteId, $userId, $number, $body, $category, 'failed', null, null, 'daily-cap');
+            self::record($siteId, $userId, $number, $body, $category, 'failed', null, null, 'daily-cap', false);
             self::$lastOutcome = 'failed';
 
             return false;
@@ -298,6 +320,87 @@ class Sms
             return false;
         }
 
+        // 🚫 MAY THIS PERSON BE SENT THIS ORGANISATION'S TEXT, NOW?
+        //    Asked here, AFTER the decision to hold, so it is asked only of a
+        //    text that is about to go. A text that has been held is asked the
+        //    same question by sendHeld() when it comes DUE, which is the more
+        //    accurate moment, and this must not pre-empt it.
+        //
+        //    THIS WAS BUILT THE OTHER WAY ROUND FIRST, and the reason given
+        //    was wrong. The comment said holding a text for somebody who may
+        //    not be sent one "would only put off recording the same answer by
+        //    up to two days". It would not: the held path asks when the text
+        //    comes due, not when it was written. The independent check ran the
+        //    case and measured the cost -- an account switched off on the
+        //    Friday evening and switched back on the Saturday morning. With
+        //    the question asked first, the text was refused outright. With it
+        //    asked here, the text is held on Friday, the person is asked again
+        //    on Saturday when it comes due, they are allowed by then, and the
+        //    text IS delivered. The first order silently lost a text that the
+        //    portal used to deliver. A suspension lifted inside two days is an
+        //    ordinary thing, not a strange one.
+        //
+        //    SO THE RULE IS: judge a person at the moment their text would go.
+        //    For a text going now, that is here. For a held text, that is when
+        //    it comes due. Both ask the same one question
+        //    (whyNotThisPerson()); only the words differ.
+        //
+        //    WHY IT IS ASKED AT ALL (#610, the owner's decision of 26 October
+        //    2026). Until now only a HELD text was asked. A text sent AT ONCE
+        //    was never asked, so a broadcast or a prayer-chain text could go
+        //    to somebody whose account had been switched off, or who had been
+        //    removed from the organisation, for as long as their number sat in
+        //    the preferences table. Of the three callers only the prayer
+        //    chain's own choice of a partner asked anything.
+        //
+        //    IT IS THE SAME RULE, NOT A SECOND COPY. whyNotThisPerson() is the
+        //    one place that decides; only the words differ (AT_ONCE_* rather
+        //    than the NOT_SENT_* sentences, which are written for a held text
+        //    coming due).
+        //
+        //    WITH NO PERSON NAMED there is nobody to ask about: a caller that
+        //    gives only a number has chosen the number itself, and the portal
+        //    has no account to judge. Such a text is sent as before.
+        //
+        //    THIS APPLIES TO EVERY KIND. The NEVER_HELD kinds (a critical
+        //    alert, an emergency notice, the code that confirms a number) are
+        //    never held, so they always reach this line, and a person whose
+        //    account has been switched off is not sent one.
+        //
+        //    WHAT IT COSTS: one lookup per text, and a second for the
+        //    membership where there are several organisations. Measured by the
+        //    independent check at 0.079 ms and 0.090 ms on MySQL 8.0.36 --
+        //    about 68 ms on a 400-recipient broadcast, against 400 calls to
+        //    the provider.
+        //
+        //    WHAT IT CANNOT DO: it cannot tell whether the number still
+        //    belongs to that person. That is whyNoLongerWanted(), and it is
+        //    asked only of a held text, where up to two days have passed. A
+        //    text sent now goes to the number its caller has just read.
+        if ($userId !== null) {
+            $why = self::whyNotThisPerson(App::db(), $siteId, $userId);
+            if ($why !== '') {
+                // No "sent at": it was never handed to the provider. And no
+                // person named when the account has gone, because the record
+                // points at tblUsers (fk_sms_user, ON DELETE SET NULL).
+                self::record(
+                    $siteId,
+                    $why === 'no-account' ? null : $userId,
+                    $number,
+                    $body,
+                    $category,
+                    'failed',
+                    null,
+                    null,
+                    self::atOncePersonWords($why),
+                    false
+                );
+                self::$lastOutcome = 'not-sent';
+
+                return false;
+            }
+        }
+
         $provider = (string) ($settings['provider'] ?? 'twilio');
         $result = static::providerSend($provider, $settings, $number, $body);
 
@@ -312,7 +415,10 @@ class Sms
      * What became of the last text given to send(): 'off' (texts are
      * switched off, nothing recorded), 'sent', 'failed' (the day's limit, or
      * the provider refused), 'held' (waiting for the person's quiet hours to
-     * end) or 'not-sent' (quiet hours, and it could not be kept for later).
+     * end) or 'not-sent' -- which now means either of two things: the person
+     * may not be sent this organisation's text at all (their account or the
+     * organisation is switched off, or they are not a member: see send()), or
+     * it was quiet hours and the text could not be kept for later.
      * '' before any text has been sent in this request.
      */
     public static function lastOutcome(): string
@@ -557,7 +663,53 @@ class Sms
             'iissssssis',
             $siteId, $userId, $number, $body, $category, $status, $provider, $providerRef, $costPence, $error
         );
-        $stmt->execute();
+
+        // 🧯 IF THE PERSON HAS GONE, KEEP THE RECORD AND DROP THE NAME.
+        //    This row points at tblUsers (fk_sms_user), so naming somebody who
+        //    has been deleted is REFUSED by the database -- and because this
+        //    class reports errors as exceptions, that refusal used to end the
+        //    whole request. One deleted account could therefore stop a
+        //    broadcast part way through, losing every text after it.
+        //    The key is ON DELETE SET NULL, so an empty person is exactly what
+        //    the database expects for a record of somebody who is no longer
+        //    there. The number, the words, the kind and the reason all still
+        //    matter and are all still kept.
+        //    IT IS DONE HERE, AND ONLY HERE, because this is the one place
+        //    that writes such a row: every caller is covered at once and none
+        //    has to remember. Checking first would cost a question of the
+        //    database for every text ever sent, to guard against something
+        //    that almost never happens; this costs nothing until it does.
+        //    REJECTED: letting the caller decide. send()'s own gate does name
+        //    no person when it knows the account has gone, but it is not the
+        //    only caller, and the daily-limit refusal above it reached this
+        //    line first with a name the database would not accept.
+        try {
+            $stmt->execute();
+        } catch (\mysqli_sql_exception $refused) {
+            // 1452 is "a row that does not exist is named". Anything else is
+            // not this problem and must not be swallowed.
+            if ($refused->getCode() !== 1452 || $userId === null) {
+                $stmt->close();
+
+                throw $refused;
+            }
+            $stmt->close();
+            $stmt = $db->prepare(
+                'INSERT INTO tblSmsMessage (siteID, recipientUserID, recipientNumber, body, category, status, '
+                . ' provider, providerRef, costPence, errorMsg, sentAt) '
+                . 'VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ' . ($stampSentAt === true ? 'NOW()' : 'NULL') . ')'
+            );
+            if ($stmt === false) {
+                return;
+            }
+            // Nine values, the person left out: site, number, body, kind,
+            // status, provider, reference, cost (a number), reason.
+            $stmt->bind_param(
+                'issssssis',
+                $siteId, $number, $body, $category, $status, $provider, $providerRef, $costPence, $error
+            );
+            $stmt->execute();
+        }
         $stmt->close();
     }
 
@@ -941,7 +1093,7 @@ class Sms
                 //    switched off while a text waited was still sent it.)
                 $why = self::whyNotThisPerson($db, $siteId, $userId);
                 if ($why !== '') {
-                    $out['notSent'] += self::settleOne($db, $id, $why);
+                    $out['notSent'] += self::settleOne($db, $id, self::heldPersonWords($why));
                     continue;
                 }
 
@@ -1083,10 +1235,24 @@ class Sms
      * the text still held and untaken, and the next run asks again: a text
      * is not sent on a guess.
      *
-     * WHAT IT CANNOT DO: this is asked of a HELD text only. A text sent at
-     * once is sent to whoever its caller chose (see the file header).
+     * IT IS ASKED AT BOTH MOMENTS since #610's follow-up: by sendHeld() when
+     * a held text comes due, and by send() for a text about to go now. The
+     * answer can differ between those two moments -- an account switched off
+     * on the Friday and back on by the Saturday -- which is why each asks at
+     * the moment its own text would go, and why this is not asked when a text
+     * is merely being held. (This note used to say "a HELD text only".)
      *
-     * @return string '' when the text may go; otherwise the words to record.
+     * WHAT IT CANNOT DO: say whether the NUMBER is still the person's. That
+     * is whyNoLongerWanted(), and only a held text is asked it.
+     *
+     * @return string '' when the text may go. Otherwise a REASON, one of
+     *                'no-account', 'account-off', 'not-member' or 'org-off'
+     *                -- NOT the words to record. Put it through
+     *                heldPersonWords() or atOncePersonWords() to get those.
+     *                It used to return the words, which is why those two
+     *                exist, and why writing this value straight into the
+     *                record would put "account-off" in front of an
+     *                administrator.
      */
     private static function whyNotThisPerson(mysqli $db, int $siteId, int $userId): string
     {
@@ -1100,16 +1266,54 @@ class Sms
         $stmt->close();
 
         if ($row === null) {
-            return self::NOT_SENT_PERSON;
+            return 'no-account';
         }
         if ((int) $row['accountOn'] !== 1) {
-            return self::NOT_SENT_ACCOUNT_OFF;
+            return 'account-off';
         }
         if (Site::isMultisiteEnabled() === false || Site::isOwnOrganisation($userId, $siteId, $db) === true) {
             return '';
         }
 
-        return (int) ($row['organisationOn'] ?? 0) !== 1 ? self::NOT_SENT_ORG_OFF : self::NOT_SENT_NOT_MEMBER;
+        return (int) ($row['organisationOn'] ?? 0) !== 1 ? 'org-off' : 'not-member';
+    }
+
+    /**
+     * The words to record for a HELD text that may no longer go to its
+     * person, from the reason whyNotThisPerson() gave.
+     *
+     * WHY THIS IS SEPARATE FROM THE REASON. Until #610's follow-up,
+     * whyNotThisPerson() returned the words themselves, which meant only a
+     * held text could use it: every sentence says "When they ended, ...".
+     * send() now asks the same question for a text it is about to send at
+     * once, and needed the same four reasons in different words. Splitting
+     * "which reason" from "what to write" let send() reuse the rule instead
+     * of a second copy of it, which is what this project forbids.
+     */
+    private static function heldPersonWords(string $reason): string
+    {
+        return match ($reason) {
+            'no-account'  => self::NOT_SENT_PERSON,
+            'account-off' => self::NOT_SENT_ACCOUNT_OFF,
+            'not-member'  => self::NOT_SENT_NOT_MEMBER,
+            'org-off'     => self::NOT_SENT_ORG_OFF,
+            default       => '',
+        };
+    }
+
+    /**
+     * The same four reasons in the words for a text sent AT ONCE: no quiet
+     * hours, and no "when they ended". See AT_ONCE_* above.
+     */
+    private static function atOncePersonWords(string $reason): string
+    {
+        return match ($reason) {
+            'no-account'  => self::AT_ONCE_PERSON,
+            'account-off' => self::AT_ONCE_ACCOUNT_OFF,
+            'not-member'  => self::AT_ONCE_NOT_MEMBER,
+            'org-off'     => self::AT_ONCE_ORG_OFF,
+            default       => '',
+        };
     }
 
     /**

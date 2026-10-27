@@ -534,6 +534,28 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     the database rather than believing the cleaner, and refuses to search
     the log for an empty text.
 
+    **Who may be sent a text, and a one-table restore (#610, #622).**
+    `Sms::whyNotThisPerson()` is the ONE place that decides whether a
+    person may be sent a text, asked at BOTH moments — by `send()` for a
+    text going now (AFTER the decision to hold, never before) and by
+    `sendHeld()` when a held text comes due. It answers a REASON, and
+    `heldPersonWords()` / `atOncePersonWords()` put that reason into the
+    right words; never record the reason itself. JUDGE A PERSON AT THE
+    MOMENT THEIR TEXT WOULD GO: asking before the hold was built first and
+    silently refused a text for anybody suspended and reinstated inside
+    two days. A refused text carries no "sent at", and `record()` is the
+    ONE place that keeps the row and drops the NAME when the database
+    refuses a person who has gone. Test: `tools/held-texts-selftest.php`.
+    **`DbBackup::WHOLE_DATABASE_ONLY` is the ONE list of tables a restore
+    of ONE table refuses** (`tblMigrations`, `tblTotpBackupCodes`,
+    `tblSettings`), compared only by `isWholeDatabaseOnly()` and worded
+    only by `wholeDatabaseOnlyReason()`, ignoring capitals because
+    `lower_case_table_names` is a server setting; the Backup page asks
+    both and keeps no copy. A WHOLE-database restore is untouched and is
+    the supported route. Before adding a table, ask whether the rest of
+    the database would still make sense beside it. Tests: `tools/backup-
+    restore-selftest.php`, `tools/backup-page-selftest.php`.
+
     **Two-factor authentication (#613).** `auth/2fa/setup.php` is the ONE place
     backup codes are made, and it shows them only in the answer to the request
     that made them: never put a code, or the authenticator key, readable in

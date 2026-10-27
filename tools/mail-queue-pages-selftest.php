@@ -637,21 +637,46 @@ function askForLink(string $ip, string $email): array
 }
 
 /** Everything about an answer that a stranger could compare, with the parts that differ on every request taken out. */
+/**
+ * 🎭 TAKE THE ONE-OFF SCRIPT NUMBER OUT BEFORE COMPARING TWO ANSWERS.
+ *
+ * Since #625 every answer carries a fresh `nonce` -- 32 hex characters from
+ * App::cspNonce() -- in its Content-Security-Policy header and on every script
+ * written into the page. It is MEANT to differ on every answer; that is what
+ * makes it worth having. So two answers to the same request are never byte for
+ * byte alike any more, and the checks that ask "is the person shown the same
+ * thing whatever became of the e-mail?" began failing on the difference rather
+ * than on anything a person could see. Those checks exist to prove the portal
+ * does not reveal whether an address has an account, so a false failure there
+ * is worse than noise: it hides the thing being guarded.
+ *
+ * The pattern is deliberately narrow -- only `nonce-<hex>` and
+ * `nonce="<hex>"` -- rather than blanking every 32-character hex string,
+ * which would also blank an identifier or a checksum that a check may want to
+ * compare.
+ */
+function withoutTheNonce(string $text): string
+{
+    $text = (string) preg_replace('/nonce-[0-9a-f]{32}/', 'nonce-(one-off)', $text);
+
+    return (string) preg_replace('/nonce="[0-9a-f]{32}"/', 'nonce="(one-off)"', $text);
+}
+
 function shape(array $answer): string
 {
     $lines = array_filter((array) preg_split('/\R/', trim($answer['head'])), static fn (string $line): bool => stripos($line, 'Date:') !== 0);
     $lines = array_map(static fn (string $line): string => stripos($line, 'Set-Cookie:') === 0 ? 'Set-Cookie: (a cookie)' : $line, $lines);
     sort($lines);
 
-    return implode("\n", $lines) . "\n\n" . trim($answer['body']);
+    return withoutTheNonce(implode("\n", $lines) . "\n\n" . trim($answer['body']));
 }
 
-/** The page a person lands on after asking for a link, with its form token taken out. */
+/** The page a person lands on after asking for a link, with its form token and its one-off script number taken out. */
 function landing(array $sent, string $ip): string
 {
     $page = req((string) $sent['jar'], 'GET', $sent['location'] === '' ? '/forgot-password' : $sent['location'], null, $ip);
 
-    return $page['status'] . "\n" . preg_replace('/[0-9a-f]{64}/', '(token)', $page['body']);
+    return $page['status'] . "\n" . withoutTheNonce((string) preg_replace('/[0-9a-f]{64}/', '(token)', $page['body']));
 }
 
 // -----------------------------------------------------------------------------

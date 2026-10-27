@@ -109,6 +109,11 @@
  *   23  An undo the database does not confirm: the connection is closed, the
  *       result says so, and nothing has changed. The same when the
  *       connection's own settings cannot be put back after a restore
+ *   26  The three tables a ONE-table restore refuses by name, because putting
+ *       one of them back by itself leaves the rest of the database out of step
+ *       with it: the refusal, that it happens before anything is read or
+ *       emptied, that a table NOT on the list still goes back, and that a
+ *       whole-database restore still puts all three back
  *   24  A value that is not on its column's list of choices: the snapshot is
  *       taken and SAYS it cannot be put back whole, naming the table, the
  *       column and how many; mended, a new snapshot goes back exactly
@@ -132,7 +137,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.2.0
+ * @version   1.3.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/577
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/578
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/579
@@ -174,6 +179,11 @@ const BRS_FIXTURE_TABLES = [
     'tblAttendanceSessions'     => 'sessionID',
     'tblSettings'               => 'settingID',
     'tblActivityLogs'           => 'logID',
+    // Proof 26's own rows. tblTotpBackupCodes is listed BEFORE tblUsers only
+    // for tidiness; brs_tidy() switches the link checks off, so the order of
+    // this list does not matter.
+    'tblTotpBackupCodes'        => 'codeID',
+    'tblUsers'                  => 'userID',
 ];
 
 /** Scratch tables, children before parents. `brs_types_copy` has no `tbl` prefix ON PURPOSE: the backup leaves it alone. */
@@ -1795,7 +1805,9 @@ function brs_proof16(): void
 function brs_proof17(): void
 {
     brs_addSelfPointingRows();
-    // A setting somebody edited. Its leftover twin is planted in the file below.
+    // A setting somebody edited, so the snapshot holds one. (Its leftover twin
+    // used to be planted in the file here; that case moved to tblRoutes below
+    // when tblSettings stopped being allowed on its own.)
     brs_sql("INSERT INTO tblSettings (settingID, siteID, settingKey, settingValue, defaultValue, isSensitive, updatedAt) "
           . "VALUES (970010, NULL, 'brs.selftest.setting', 'edited by an administrator', 'the default', 0, '2026-01-02 00:00:00')");
     $before = brs_fingerprint();
@@ -1826,42 +1838,58 @@ function brs_proof17(): void
         brs_checkSame($before, 'every value of every table is as it was');
     }
 
-    // A snapshot from before "no two settings the same" holds a duplicate. It
-    // must be left out and counted, and the row somebody edited must be the
-    // one that survives.
-    $copy  = Brs::$root . '/p17/with-a-duplicate-setting';
+    // tblSettings is no longer allowed on its own (see proof 26), so this
+    // duplicate-row case USED to be done on it and had to move. The table now
+    // used, tblRoutes, is the same shape of problem: a unique key on one
+    // column (routeKey) that a snapshot taken before that key existed can
+    // break twice over.
+    $answer = $backup->restoreTable($taken['directory'], 'tblSettings');
+    brs_check(
+        $answer['success'] === false && str_contains((string) ($answer['error'] ?? ''), 'cannot be put back on its own') === true,
+        'tblSettings on its own is refused now (proof 26 has the whole story; this check is here so proof 17 cannot quietly start passing again if the guard goes)',
+        brs_say($answer)
+    );
+
+    // A snapshot from before a "no two rows the same" rule holds a duplicate.
+    // It must be left out and counted, and the row that was already in the
+    // table must be the one that survives.
+    $copy  = Brs::$root . '/p17/with-a-duplicate-route';
     brs_copyFolder($taken['directory'], $copy);
-    $file  = $copy . '/tblSettings.jsonl';
+    $file  = $copy . '/tblRoutes.jsonl';
     $lines = file($file, FILE_IGNORE_NEW_LINES);
     $head  = json_decode($lines[0], true);
     $at    = array_flip($head['columns']);
-    $twin  = null;
+    $first = null;
     foreach ($lines as $line) {
         $row = json_decode($line, true);
-        if (is_array($row) === true && array_is_list($row) === true && $row[$at['settingID']] === '970010') {
-            $twin = $row;
+        if (is_array($row) === true && array_is_list($row) === true) {
+            $first = $row;
+            break;
         }
     }
-    if (brs_check($twin !== null, 'the edited setting is in the snapshot file') === false) {
+    if (brs_check($first !== null, 'the snapshot file holds at least one address') === false) {
         return;
     }
-    $twin[$at['settingID']]    = '970011';
-    $twin[$at['settingValue']] = 'the default';
-    array_pop($lines);
+    // The twin: a different identity number, the SAME routeKey. Added at the
+    // END of the file, so the real row is offered first and the twin is the
+    // one the database turns away.
+    $twin = $first;
+    $twin[$at['routeID']] = '970020';
+    array_pop($lines);                       // the file's own "end" line
     $lines[] = json_encode($twin, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     $lines[] = json_encode(['end' => true, 'rows' => count($lines) - 1]);
     $text    = implode("\n", $lines) . "\n";
     file_put_contents($file, $text);
-    brs_remanifest($copy, 'tblSettings', hash('sha256', $text), count($lines) - 2);
+    brs_remanifest($copy, 'tblRoutes', hash('sha256', $text), count($lines) - 2);
 
-    brs_sql("UPDATE tblSettings SET settingValue = 'changed after the snapshot' WHERE settingID = 970010");
-    $result = $backup->restoreTable($copy, 'tblSettings');
+    brs_sql("UPDATE tblRoutes SET targetFile = 'changed/after/the/snapshot.php' WHERE routeID = " . (int) $first[$at['routeID']]);
+    $result = $backup->restoreTable($copy, 'tblRoutes');
     brs_check(
         $result['success'] === true && ($result['skipped_duplicates'] ?? 0) === 1,
-        'tblSettings is put back with one duplicate row left out and counted',
+        'a table is put back with one duplicate row left out and counted',
         brs_say($result)
     );
-    brs_checkSame($before, 'and the row that survived is the edited one: every value of every table is as it was');
+    brs_checkSame($before, 'and the row that survived is the one the snapshot really held: every value of every table is as it was');
 
     // A single-table restore that fails must leave the table as it was.
     $bad = Brs::$root . '/p17/planted-bad-task';
@@ -2808,6 +2836,168 @@ function brs_proof25(): void
     }
 }
 
+/**
+ * 26 — the three tables a ONE-table restore refuses by name (#X9, the owner's
+ * decision of 26 October 2026).
+ *
+ * WHY THIS PROOF EXISTS. restoreTable() used to check two things about a table
+ * and nothing else: that its NAME is shaped like an identifier, and that no
+ * other table points at it. Neither can see what a table MEANS. An independent
+ * check of the restore ran it and watched real damage:
+ *
+ *   • tblTotpBackupCodes put back on its own brought already-used sign-in
+ *     codes back to life, and they stayed usable.
+ *   • tblMigrations put back on its own made the portal believe an upgrade it
+ *     had already done was still waiting, so the upgrade ran again over data
+ *     it had already changed. The checker saw that delete a two-factor backup
+ *     code made after the upgrade.
+ *
+ * WHAT IS CHECKED HERE, and why each check is not enough on its own:
+ *   1. Each of the three is refused, and the words name the table and the
+ *      button to press instead.
+ *   2. The refusal comes BEFORE anything is read or emptied. "Nothing
+ *      changed" would NOT prove that by itself — the database undoes a
+ *      failed restore, so a refusal placed after the emptying also leaves
+ *      nothing changed. So the proof is that the SAME refusal comes back for
+ *      a path that is not a snapshot at all: the guard cannot have read a
+ *      file, let alone emptied a table. The row counts are checked too.
+ *   3. Capital letters do not matter. Whether MySQL treats two names that
+ *      differ only in capitals as one table is a server setting that differs
+ *      between a shared host and a developer's machine.
+ *   4. A table NOT on the list goes back exactly as before: the guard must
+ *      not have narrowed the button it was built to keep.
+ *   5. A WHOLE-database restore still puts all three back, exactly. That is
+ *      the supported way, and the refusal above is worthless if the way out
+ *      it recommends does not work.
+ *   6. Every name on the list is a real table in this database. A typo in the
+ *      constant would guard nothing at all and nothing else would notice.
+ */
+function brs_proof26(): void
+{
+    $backup = brs_backup('p26');
+
+    // 🧱 A made-up account with two unused sign-in codes. No real person, and
+    //    the "codes" are not codes: nothing here is ever hashed or printed.
+    brs_sql(
+        "INSERT INTO tblUsers (userID, emailAddress) VALUES (970031, 'brs-selftest@example.invalid')",
+        "INSERT INTO tblTotpBackupCodes (codeID, userID, codeHash, isUsed) VALUES "
+        . "(970031, 970031, 'not-a-real-hash-1', 0), (970032, 970031, 'not-a-real-hash-2', 0)",
+        "INSERT INTO tblSettings (settingID, siteID, settingKey, settingValue, defaultValue, isSensitive, updatedAt) "
+        . "VALUES (970030, NULL, 'brs.selftest.x9', 'as it was when the snapshot was taken', 'the default', 0, '2026-01-02 00:00:00')"
+    );
+    brs_addSelfPointingRows();
+    $before = brs_fingerprint();
+
+    $taken = $backup->snapshot('proof 26');
+    if (brs_check($taken['success'] === true, 'a snapshot is taken', brs_say($taken)) === false) {
+        return;
+    }
+    $dir = (string) $taken['directory'];
+
+    // 📋 The list itself: exactly the three tables, each with its own words,
+    //    and each name a table this database really has. A name misspelt in
+    //    the constant would guard nothing, and nothing else here would notice.
+    $list = DbBackup::WHOLE_DATABASE_ONLY;
+    brs_check(
+        array_keys($list) === ['tblMigrations', 'tblTotpBackupCodes', 'tblSettings'],
+        'the list of tables that may only go back with the whole database is exactly the three it should be',
+        brs_say(array_keys($list))
+    );
+    // The tables this database really has, asked for ONCE and compared in PHP:
+    // no name is ever put into a statement, so there is nothing to escape.
+    $real = array_column(Brs::$writer->query('SHOW TABLES')->fetch_all(), 0);
+    $missing  = [];
+    $wordless = [];
+    foreach ($list as $table => $why) {
+        if (in_array((string) $table, $real, true) === false) {
+            $missing[] = (string) $table;
+        }
+        if (trim((string) $why) === '') {
+            $wordless[] = (string) $table;
+        }
+    }
+    brs_check($missing === [], 'every name on the list is a real table in this database (a typo would guard nothing)', brs_say($missing));
+    brs_check($wordless === [], 'and each has its own sentence saying why, so the refusal is not vague', brs_say($wordless));
+
+    // 🧨 Damage of exactly the kind the checker found: the codes are spent,
+    //    a setting is changed, and the record of an upgrade is removed.
+    brs_sql(
+        "UPDATE tblTotpBackupCodes SET isUsed = 1, usedAt = '2026-10-26 09:00:00' WHERE userID = 970031",
+        "UPDATE tblSettings SET settingValue = 'changed after the snapshot' WHERE settingID = 970030",
+        "DELETE FROM tblMigrations WHERE filename = '217_one_time_zone_answer.sql'"
+    );
+    $damaged  = brs_fingerprint();
+    $spentNow = static fn (): int => (int) Brs::$writer->query('SELECT COUNT(*) FROM tblTotpBackupCodes WHERE userID = 970031 AND isUsed = 1')->fetch_row()[0];
+    brs_check($spentNow() === 2, 'both sign-in codes are now spent, and a setting and an upgrade record have been changed', 'spent: ' . $spentNow());
+
+    // 1 & 2. Each table is refused, in words, and nothing is touched.
+    $notASnapshot = Brs::$root . '/p26/not-a-snapshot-at-all';
+    mkdir($notASnapshot, 0750, true);
+    foreach (array_keys($list) as $table) {
+        $rowsBefore = (int) Brs::$writer->query('SELECT COUNT(*) FROM `' . $table . '`')->fetch_row()[0];
+        $answer     = $backup->restoreTable($dir, (string) $table);
+        brs_check(
+            $answer['success'] === false
+            && str_contains((string) ($answer['error'] ?? ''), $table . ' cannot be put back on its own') === true
+            && str_contains((string) ($answer['error'] ?? ''), 'Restore ALL tables') === true
+            && str_contains((string) ($answer['error'] ?? ''), 'Nothing has been changed') === true,
+            $table . ' on its own is refused, and the words name the table, the button to press instead, and say nothing was changed',
+            brs_say($answer)
+        );
+        brs_check(
+            (int) ($answer['rows_restored'] ?? -1) === 0
+            && (int) Brs::$writer->query('SELECT COUNT(*) FROM `' . $table . '`')->fetch_row()[0] === $rowsBefore,
+            'and ' . $table . ' still holds every row it held',
+            brs_say($answer)
+        );
+        // The decisive one: a path that is no snapshot. If the guard sat lower
+        // down, the answer would be about the missing manifest instead, which
+        // would mean the snapshot had been opened before the table was judged.
+        $answer = $backup->restoreTable($notASnapshot, (string) $table);
+        brs_check(
+            $answer['success'] === false
+            && str_contains((string) ($answer['error'] ?? ''), $table . ' cannot be put back on its own') === true,
+            'asked with a path that is not a snapshot at all, ' . $table . ' is refused for WHAT IT IS, not for the missing file: so the guard runs before anything is read or emptied',
+            brs_say($answer)
+        );
+    }
+    brs_checkSame($damaged, 'after all those refusals the database is exactly as the damage left it');
+    brs_check($spentNow() === 2, 'the two spent sign-in codes are still spent: no code was brought back to life', 'spent: ' . $spentNow());
+
+    // 3. Capital letters.
+    foreach (['tblmigrations', 'TBLTOTPBACKUPCODES', 'TblSettings'] as $oddly) {
+        $answer = $backup->restoreTable($dir, $oddly);
+        brs_check(
+            $answer['success'] === false && str_contains((string) ($answer['error'] ?? ''), 'cannot be put back on its own') === true,
+            'written as "' . $oddly . '" it is refused just the same (whether capitals matter is a server setting, so being stricter than the server is the safe side)',
+            brs_say($answer)
+        );
+    }
+    brs_check(DbBackup::isWholeDatabaseOnly(['tblSettings']) === false, 'a list sent in place of a name is not mistaken for one of them (a browser can send table[]=x)');
+    brs_check(DbBackup::isWholeDatabaseOnly('tblTasks') === false, 'and an ordinary table is not on the list');
+
+    // 4. A table that is NOT on the list still goes back, exactly as before.
+    brs_damageSelfPointingRows();
+    $answer = $backup->restoreTable($dir, 'tblTasks');
+    brs_check($answer['success'] === true, 'a table that is NOT on the list still goes back on its own, self-pointing rows and all', brs_say($answer));
+    $now = brs_fingerprint();
+    brs_check(($now['tblTasks'] ?? '') === ($before['tblTasks'] ?? ''), 'and tblTasks is exactly as it was', 'tblTasks differs');
+
+    // 5. The whole-database restore, the way out the refusal recommends, still
+    //    puts all three back exactly. Without this the refusal would be a dead
+    //    end rather than a redirection.
+    $whole = $backup->restoreAll($dir, false);
+    brs_check($whole['success'] === true, 'the WHOLE-database restore still runs', brs_say($whole));
+    brs_checkSame($before, 'and every value of every table is as it was when the snapshot was taken, the three refused tables included');
+    brs_check(
+        $spentNow() === 0
+        && (string) Brs::$writer->query('SELECT settingValue FROM tblSettings WHERE settingID = 970030')->fetch_row()[0] === 'as it was when the snapshot was taken'
+        && (int) Brs::$writer->query("SELECT COUNT(*) FROM tblMigrations WHERE filename = '217_one_time_zone_answer.sql'")->fetch_row()[0] === 1,
+        'named one by one: the sign-in codes, the setting and the upgrade record are all back as the snapshot held them',
+        'spent: ' . $spentNow()
+    );
+}
+
 mkdir(Brs::$root, 0750, true);
 Brs::$root    = (string) realpath(Brs::$root);
 // The scratch folder holds whole copies of the database, so it is removed
@@ -2839,6 +3029,7 @@ $proofs = [
     23 => ['An undo the database does not confirm closes the connection, and the result says so', 'brs_proof23', false],
     24 => ['A value not on its column\'s list of choices: the snapshot says at once that it cannot be put back whole', 'brs_proof24', false],
     25 => ['A snapshot taken before migration 217 goes back onto a database that has run it (#604)', 'brs_proof25', false],
+    26 => ['Three tables a one-table restore refuses by name, and a whole restore still puts back', 'brs_proof26', false],
     // These four need the large table, so they run together at the end.
     5  => ['A large table under a fixed memory limit (#579)', 'brs_proof5', true],
     7  => ['A snapshot that fails or is killed is never counted as a backup', 'brs_proof7', true],

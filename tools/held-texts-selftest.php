@@ -175,7 +175,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 106;
+const EXPECTED_CHECKS = 117;
 
 /** What a child process prints before its findings, so they can be found in whatever else it printed. */
 const RESULT_MARK = '@@held-texts-selftest@@';
@@ -490,6 +490,12 @@ const SAYS = [
     'NOT_SENT_NUMBER'      => 'Not sent: quiet hours. When they ended, this number was not the person\'s confirmed number for texts.',
     'NOT_SENT_OPTED_OUT'   => 'Not sent: quiet hours. When they ended, the person no longer wanted texts of this kind.',
     'NOT_SENT_RESTORED'    => 'Not sent: quiet hours. It came back with a restored backup: it was waiting when the backup was taken and may already have been sent since, so it is not sent again.',
+    // The same four reasons as the NOT_SENT_* ones above, in the words for a
+    // text sent AT ONCE: no quiet hours, and no "when they ended" (#610).
+    'AT_ONCE_PERSON'       => 'Not sent: the person no longer has an account.',
+    'AT_ONCE_ACCOUNT_OFF'  => 'Not sent: the person\'s account has been switched off.',
+    'AT_ONCE_NOT_MEMBER'   => 'Not sent: the person is not a member of this organisation.',
+    'AT_ONCE_ORG_OFF'      => 'Not sent: the organisation has been switched off.',
     'UNKNOWN_INTERRUPTED'  => 'Not known whether it was sent: a run of the scheduled job was ended while handing this held text to the provider. It is not sent again.',
 ];
 
@@ -1752,11 +1758,25 @@ q('UPDATE tblUsers SET isActive = 0 WHERE userID = ?', 'i', [WHO['offacct']]);
 at($W1 + 60);
 $several = run();
 q('UPDATE tblUsers SET isActive = 1 WHERE userID = ?', 'i', [WHO['offacct']]);
+// THIS CHECK WAS CHANGED TWICE IN ONE DAY, which is worth recording. When
+// send() asked the person question BEFORE holding, a person who was never a
+// member was refused as the text was sent, in the present-tense words, and
+// this check was rewritten to say so. That order was then found to be wrong
+// (it lost a text for anybody suspended and reinstated inside two days: see
+// M9), so the question moved to after the hold -- and these texts are all
+// written INSIDE quiet hours, so every one of them is held and every refusal
+// happens on the held path again, in the "when they ended" words. The lesson
+// is not about this check: it is that moving a question between two moments
+// changes what is true, and every test that reads those words has to be read
+// again. Nothing here is loosened; all four refusals are still asserted
+// word for word.
 ok(
-    'H8 with SEVERAL organisations, a text goes only to somebody who could open that organisation\'s pages: a member and a global administrator are sent theirs; a person who left while it waited, and one who was never a member, are not, each recorded as "was not a member of this organisation"; and a member whose account was switched off is recorded as that',
+    'H8 with SEVERAL organisations, a text goes only to somebody who could open that organisation\'s pages: a member and a global administrator are sent theirs; and because these are all written inside quiet hours, each refusal happens when the text comes DUE -- somebody who left while it waited, somebody who was never a member, and somebody whose account was switched off, each in the "when they ended" words',
     handed($H8['member']) === 1 && handed($H8['global']) === 1 && handed($H8['leaver']) === 0 && handed($H8['follow']) === 0 && handed($H8['offacct']) === 0
-        && story(rowOf($H8['leaver'])) === ['failed', SAYS['NOT_SENT_NOT_MEMBER'], null, null] && story(rowOf($H8['follow'])) === ['failed', SAYS['NOT_SENT_NOT_MEMBER'], null, null]
-        && story(rowOf($H8['offacct'])) === ['failed', SAYS['NOT_SENT_ACCOUNT_OFF'], null, null] && $several['sent'] === 2 && $several['notSent'] === 3,
+        && story(rowOf($H8['leaver'])) === ['failed', SAYS['NOT_SENT_NOT_MEMBER'], null, null]
+        && story(rowOf($H8['follow'])) === ['failed', SAYS['NOT_SENT_NOT_MEMBER'], null, null]
+        && story(rowOf($H8['offacct'])) === ['failed', SAYS['NOT_SENT_ACCOUNT_OFF'], null, null]
+        && $several['sent'] === 2 && $several['notSent'] === 3,
     json_encode([$several, array_map(static fn (string $body): array => story(rowOf($body)), $H8)])
 );
 
@@ -2179,6 +2199,16 @@ ok(
     count($said) === 13 && $tooLong === [] && $notPlain === [],
     count($said) . ' sentences; too long: ' . json_encode($tooLong) . '; not beginning with the words: ' . json_encode($notPlain)
 );
+$atOnce = array_filter($words, static fn ($value, string $name): bool => is_string($value) === true && str_starts_with($name, 'AT_ONCE_') === true, ARRAY_FILTER_USE_BOTH);
+$atOnceLong  = array_keys(array_filter($atOnce, static fn (string $value): bool => mb_strlen($value) > 255));
+$atOnceWrong = array_keys(array_filter($atOnce, static fn (string $value): bool => str_starts_with($value, 'Not sent: ') === false || str_contains($value, 'quiet hours') === true));
+ok(
+    'L1b the four sentences for a text sent AT ONCE fit the same column, begin "Not sent: ", and none of them mentions quiet hours (a text that was never held has none), and each is word for word the copy written out in this file',
+    count($atOnce) === 4 && $atOnceLong === [] && $atOnceWrong === []
+        && $atOnce['AT_ONCE_PERSON'] === SAYS['AT_ONCE_PERSON'] && $atOnce['AT_ONCE_ACCOUNT_OFF'] === SAYS['AT_ONCE_ACCOUNT_OFF']
+        && $atOnce['AT_ONCE_NOT_MEMBER'] === SAYS['AT_ONCE_NOT_MEMBER'] && $atOnce['AT_ONCE_ORG_OFF'] === SAYS['AT_ONCE_ORG_OFF'],
+    count($atOnce) . ' sentences; too long: ' . json_encode($atOnceLong) . '; wrongly worded: ' . json_encode($atOnceWrong)
+);
 ok(
     'L2 the sentence migration 219 writes on an old held text is, word for word, the one the class writes',
     str_contains((string) file_get_contents($migration), "'" . Sms::NOT_SENT_OLD . "'") === true,
@@ -2314,8 +2344,8 @@ foreach (SAYS as $name => $words) {
     $inClass[$name] = defined(Sms::class . '::' . $name) === true ? constant(Sms::class . '::' . $name) : null;
 }
 ok(
-    'L9 each of the 13 sentences the class records is, word for word, the one written out in this file: none reworded, none swapped with another',
-    $inClass === SAYS && count(SAYS) === 13 && count(array_unique(SAYS)) === 13,
+    'L9 each of the 17 sentences the class records is, word for word, the one written out in this file: none reworded, none swapped with another (13 for a held text, and since #610\'s follow-up 4 for a text refused at once)',
+    $inClass === SAYS && count(SAYS) === 17 && count(array_unique(SAYS)) === 17,
     json_encode(array_diff_assoc(array_map('strval', $inClass), SAYS))
 );
 
@@ -2342,6 +2372,211 @@ ok(
         && str_contains($accountPage, "<a href=\"<?php echo htmlspecialchars(Site::url('account/notifications'), ENT_QUOTES, 'UTF-8'); ?>\">Notification preferences</a>") === true
         && $broadcastSay === 'Sends to every verified, opted-in subscriber for the selected category. Critical alerts and emergency comms are sent at once, whatever the hour. Any other kind is held back for a person who is in their Sabbath quiet hours; the line shown after sending says how many were held and what becomes of them.',
     'Account, SMS: ' . json_encode($accountSays) . '; the broadcast page: ' . json_encode($broadcastSay)
+);
+
+// =============================================================================
+head('M. A text sent AT ONCE, for somebody who may not be sent one');
+// =============================================================================
+// Until the owner's decision of 26 October 2026 this was never asked. Only a
+// HELD text was asked again when it came due (part H); a text sent at once
+// went to whatever number sat in the preferences table, however long ago its
+// person had been switched off or removed from the organisation. These checks
+// run on a WEDNESDAY, well outside anybody's quiet hours, so nothing here can
+// be held and the only thing being tested is the new question.
+fresh();
+at($wednesday);
+$M1 = 'ZQXT M1 at once, for an account that is switched off';
+q('UPDATE tblUsers SET isActive = 0 WHERE userID = ?', 'i', [WHO['offacct']]);
+[$wentM1, $outM1] = text('offacct', 'rota_changes', $M1);
+q('UPDATE tblUsers SET isActive = 1 WHERE userID = ?', 'i', [WHO['offacct']]);
+ok(
+    'M1 a text sent at once to a person whose ACCOUNT has been switched off is not handed to the provider, is recorded as not sent in its own present-tense sentence, and is NOT held (there is nothing to wait for)',
+    $wentM1 === false && $outM1 === 'not-sent' && handed($M1) === 0
+        && story(rowOf($M1)) === ['failed', SAYS['AT_ONCE_ACCOUNT_OFF'], null, null],
+    json_encode([$wentM1, $outM1, handed($M1), story(rowOf($M1))])
+);
+
+$M2 = 'ZQXT M2 at once, for somebody with no account at all';
+q('DELETE FROM tblUserSmsPreference WHERE userID = ?', 'i', [WHO['gone']]);
+q('INSERT INTO tblUserSmsPreference (siteID, userID, phoneNumber, isVerified, categories) VALUES (?, ?, ?, 1, ?)', 'iiss', [ORG, WHO['gone'], numberOf(WHO['gone']), EVERY_KIND]);
+q('DELETE FROM tblUsers WHERE userID = ?', 'i', [WHO['gone']]);
+[$wentM2, $outM2] = text('gone', 'rota_changes', $M2);
+ok(
+    'M2 a text sent at once for a person who no longer has an account is not sent, says so, and its record NAMES NO PERSON (the record points at the table of people, so naming one who has gone is refused by the database; the number, the words, the kind and the reason are all still kept)',
+    $wentM2 === false && $outM2 === 'not-sent' && handed($M2) === 0
+        && story(rowOf($M2)) === ['failed', SAYS['AT_ONCE_PERSON'], null, null]
+        && rowOf($M2)['recipientUserID'] === null
+        && (string) rowOf($M2)['recipientNumber'] === numberOf(WHO['gone'])
+        && (string) rowOf($M2)['category'] === 'rota_changes',
+    json_encode([$wentM2, $outM2, handed($M2), story(rowOf($M2)), rowOf($M2)['recipientUserID'] ?? 'null'])
+);
+
+// The kinds that are NEVER held are asked this question too: a switched-off
+// account should not be sent a critical alert either.
+fresh();
+at($wednesday);
+$M3 = 'ZQXT M3 a critical alert for an account that is switched off';
+q('UPDATE tblUsers SET isActive = 0 WHERE userID = ?', 'i', [WHO['offacct']]);
+[$wentM3, $outM3] = text('offacct', 'critical_alerts', $M3);
+$M3b = 'ZQXT M3b an emergency notice for the same switched-off account';
+[$wentM3b] = text('offacct', 'emergency_comms', $M3b);
+q('UPDATE tblUsers SET isActive = 1 WHERE userID = ?', 'i', [WHO['offacct']]);
+ok(
+    'M3 the kinds that are NEVER held are asked the same question: a critical alert and an emergency notice for a switched-off account are both refused, not sent at once',
+    $wentM3 === false && $outM3 === 'not-sent' && handed($M3) === 0 && $wentM3b === false && handed($M3b) === 0
+        && story(rowOf($M3)) === ['failed', SAYS['AT_ONCE_ACCOUNT_OFF'], null, null]
+        && story(rowOf($M3b)) === ['failed', SAYS['AT_ONCE_ACCOUNT_OFF'], null, null],
+    json_encode([$wentM3, $outM3, $wentM3b, story(rowOf($M3)), story(rowOf($M3b))])
+);
+
+// A caller that names NO person has chosen the number itself: there is no
+// account to judge, and such a text goes exactly as it did before.
+fresh();
+at($wednesday);
+$M4 = 'ZQXT M4 at once, with no person named';
+(new ReflectionProperty(Sms::class, 'settledInRequest'))->setValue(null, false);
+newProcess();
+$wentM4 = RecordingSms::send(ORG, '+447700900777', $M4, 'rota_changes', null);
+ok(
+    'M4 a text with NO person named is still sent: the caller chose the number, and the portal has no account to ask about',
+    $wentM4 === true && RecordingSms::lastOutcome() === 'sent' && handed($M4) === 1,
+    json_encode([$wentM4, RecordingSms::lastOutcome(), handed($M4), story(rowOf($M4))])
+);
+
+// A person in good standing is unaffected: the question must refuse nobody it
+// should not. This is the check that would fail if the new gate were too tight.
+$M5 = 'ZQXT M5 at once, for a person in good standing';
+[$wentM5, $outM5] = text('follow', 'rota_changes', $M5);
+ok(
+    'M5 a person whose account is on is sent their text exactly as before: the new question refuses nobody it should not',
+    $wentM5 === true && $outM5 === 'sent' && handed($M5) === 1 && story(rowOf($M5))[0] === 'sent',
+    json_encode([$wentM5, $outM5, handed($M5), story(rowOf($M5))])
+);
+
+// SEVERAL organisations: the membership questions are asked at once too.
+fresh(['multi' => 'true']);
+foreach (['member', 'leaver'] as $what) {
+    q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [WHO[$what], ORG]);
+}
+at($wednesday);
+q('UPDATE tblUserSites SET isActive = 0 WHERE userID = ? AND siteID = ?', 'ii', [WHO['leaver'], ORG]);
+$M6 = ['member' => 'ZQXT M6 at once, for a member', 'leaver' => 'ZQXT M6 at once, for somebody who has left',
+    'follow' => 'ZQXT M6 at once, for somebody who was never a member', 'global' => 'ZQXT M6 at once, for a global administrator'];
+$sentM6 = [];
+foreach ($M6 as $what => $body) {
+    [$sentM6[$what]] = text($what, 'rota_changes', $body);
+}
+ok(
+    'M6 with SEVERAL organisations the same two membership questions are asked of a text sent at once: a member and a global administrator are sent theirs; somebody who has left, and somebody who was never a member, are refused and recorded as not a member of this organisation',
+    $sentM6['member'] === true && $sentM6['global'] === true && $sentM6['leaver'] === false && $sentM6['follow'] === false
+        && handed($M6['member']) === 1 && handed($M6['global']) === 1 && handed($M6['leaver']) === 0 && handed($M6['follow']) === 0
+        && story(rowOf($M6['leaver'])) === ['failed', SAYS['AT_ONCE_NOT_MEMBER'], null, null]
+        && story(rowOf($M6['follow'])) === ['failed', SAYS['AT_ONCE_NOT_MEMBER'], null, null],
+    json_encode([$sentM6, array_map(static fn (string $body): array => story(rowOf($body)), $M6)])
+);
+
+$M7 = 'ZQXT M7 at once, for a member of an organisation that is switched off';
+q('UPDATE tblSites SET isActive = 0 WHERE siteID = ?', 'i', [ORG]);
+[$wentM7, $outM7] = text('member', 'rota_changes', $M7);
+q('UPDATE tblSites SET isActive = 1 WHERE siteID = ?', 'i', [ORG]);
+ok(
+    'M7 with several organisations, a text sent at once for a member of an organisation that has been switched off is refused, and says which of the two reasons it was',
+    $wentM7 === false && $outM7 === 'not-sent' && handed($M7) === 0
+        && story(rowOf($M7)) === ['failed', SAYS['AT_ONCE_ORG_OFF'], null, null],
+    json_encode([$wentM7, $outM7, story(rowOf($M7))])
+);
+
+// THE ORDER: A PERSON IS JUDGED AT THE MOMENT THEIR TEXT WOULD GO.
+// This was built the other way round first -- the question asked before the
+// hold -- on the stated grounds that holding a text for somebody who may not
+// be sent one "would only put off recording the same answer by up to two
+// days". That reason was WRONG: the held path asks when the text comes DUE,
+// not when it was written, so the two moments can give different answers. The
+// independent check measured what the first order cost, and M9 below is that
+// case. So: a text going NOW is judged now; a HELD text is judged when it
+// comes due, by the same one question in different words.
+fresh();
+at($FRI20);
+$M8 = 'ZQXT M8 inside quiet hours, for an account that is switched off';
+q('UPDATE tblUsers SET isActive = 0 WHERE userID = ?', 'i', [WHO['offacct']]);
+[$wentM8, $outM8] = text('offacct', 'rota_changes', $M8);
+$heldM8 = (int) one("SELECT COUNT(*) AS n FROM tblSmsMessage WHERE status = 'queued' AND body = ?", 's', [$M8])['n'];
+at($W1 + 60);
+$dueM8 = run();
+q('UPDATE tblUsers SET isActive = 1 WHERE userID = ?', 'i', [WHO['offacct']]);
+ok(
+    'M8 inside quiet hours the text is HELD even for a switched-off account, because the question belongs at the moment it would go; when it comes due the account is still off, so it is recorded as not sent in the "when they ended" words, never handed over',
+    $wentM8 === false && $outM8 === 'held' && $heldM8 === 1 && handed($M8) === 0
+        && story(rowOf($M8)) === ['failed', SAYS['NOT_SENT_ACCOUNT_OFF'], null, null]
+        && $dueM8['notSent'] === 1,
+    json_encode([$wentM8, $outM8, $heldM8, handed($M8), story(rowOf($M8)), $dueM8])
+);
+
+// THE CASE THE FIRST ORDER LOST. A suspension lifted inside two days is an
+// ordinary thing. Asking before the hold refused this text outright; asking
+// when it comes due delivers it, which is what the portal did before #610's
+// follow-up and must go on doing.
+fresh();
+at($FRI20);
+$M9 = 'ZQXT M9 held on the Friday, the account switched back on by the Saturday';
+q('UPDATE tblUsers SET isActive = 0 WHERE userID = ?', 'i', [WHO['offacct']]);
+[$wentM9, $outM9] = text('offacct', 'rota_changes', $M9);
+$heldM9 = (int) one("SELECT COUNT(*) AS n FROM tblSmsMessage WHERE status = 'queued' AND body = ?", 's', [$M9])['n'];
+q('UPDATE tblUsers SET isActive = 1 WHERE userID = ?', 'i', [WHO['offacct']]);
+at($W1 + 60);
+$dueM9 = run();
+ok(
+    'M9 a text held while the account was switched off IS SENT when the quiet hours end, if the account has been switched back on by then: the question is asked again at the moment it would go, and the answer has changed',
+    $wentM9 === false && $outM9 === 'held' && $heldM9 === 1
+        && handed($M9) === 1 && $dueM9['sent'] === 1 && $dueM9['notSent'] === 0
+        && story(rowOf($M9))[0] === 'sent' && story(rowOf($M9))[1] === SAYS['SENT_AFTER_HOLD'],
+    json_encode([$wentM9, $outM9, $heldM9, handed($M9), $dueM9, story(rowOf($M9))])
+);
+
+// THE DAY'S LIMIT IS REACHED AND THE ACCOUNT HAS GONE. That refusal is
+// written before anything asks about the person, so it is the one place that
+// used to name somebody the database would not accept -- which ended the whole
+// request, and with it a broadcast part way through. It also used to stamp a
+// "sent at" on a text nobody had sent. Both found by the independent check, in
+// a line this package did not write.
+fresh(['cap' => 0]);
+at($wednesday);
+$M10 = 'ZQXT M10 the day\'s limit is reached and the account has gone';
+// NO PREFERENCE ROW IS LEFT BEHIND, and that is worth writing down, because
+// the first version of this check tried to make one. tblUserSmsPreference's
+// userID is NOT NULL and its key cascades, so deleting the account takes the
+// preference row with it: there is no such thing as a stored number with no
+// person. What CAN still happen is a caller holding an account number it read
+// a moment ago -- a broadcast part way through its list when the account is
+// deleted -- which is exactly how send() is reached with a person who has
+// gone. So this gives send() the number and the old account number directly,
+// as the real caller would.
+if ((int) one('SELECT COUNT(*) AS n FROM tblUsers WHERE userID = ?', 'i', [WHO['gone']])['n'] === 0) {
+    $addPerson(WHO['gone']);
+}
+$keptNumber = numberOf(WHO['gone']);
+q('DELETE FROM tblUsers WHERE userID = ?', 'i', [WHO['gone']]);
+$crashedM10 = false;
+try {
+    // Named, so the record would carry the person -- which is the point: the
+    // database will not accept a name that has gone, and record() has to keep
+    // the row and drop the name instead of ending the request.
+    (new ReflectionProperty(Sms::class, 'settledInRequest'))->setValue(null, false);
+    newProcess();
+    $wentM10 = RecordingSms::send(ORG, $keptNumber, $M10, 'rota_changes', WHO['gone']);
+    $outM10  = RecordingSms::lastOutcome();
+} catch (\Throwable $stopped) {
+    $crashedM10 = get_class($stopped) . ': ' . $stopped->getMessage();
+    $wentM10 = null;
+    $outM10  = null;
+}
+ok(
+    'M10 with the day\'s limit reached and the account deleted, the text is recorded as refused by the limit WITHOUT ending the request: the record names no person (the database would refuse one who has gone) and carries no "sent at", because nothing was ever handed over',
+    $crashedM10 === false && $wentM10 === false && $outM10 === 'failed' && handed($M10) === 0
+        && story(rowOf($M10)) === ['failed', 'daily-cap', null, null]
+        && rowOf($M10)['recipientUserID'] === null
+        && (string) rowOf($M10)['recipientNumber'] === $keptNumber,
+    json_encode([$crashedM10, $wentM10, $outM10, story(rowOf($M10)), rowOf($M10)['recipientUserID'] ?? 'null'])
 );
 
 // =============================================================================
