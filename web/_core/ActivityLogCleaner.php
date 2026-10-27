@@ -514,8 +514,29 @@ final class ActivityLogCleaner
         $written = [];
         $type    = self::KEY_LINE_TYPE;
         foreach ($accounts as $account => $siteId) {
-            // The account must still exist, and must not have its record yet.
-            $stmt = $db->prepare('SELECT totpEnabled, totpSecret FROM tblUsers WHERE userID = ?');
+            // The account must still exist, must NOT have been erased, and must
+            // not have its record yet.
+            //
+            // 🛡️ "NOT erased" is the part that was missing until 27 October
+            //    2026, and it mattered: an erased account still HAS a row in
+            //    tblUsers — emptied, not deleted — so asking only whether the
+            //    row exists let this write a BRAND-NEW activity record naming
+            //    somebody who had asked to be forgotten. Their erasure ran
+            //    before that record existed, so it could never have cleared it,
+            //    and linkAccounts()'s clearing step only looks at records whose
+            //    account column is empty, so it would not touch this one
+            //    either. The erasure would have been quietly undone, one record
+            //    at a time. linkAccounts() guards against exactly this a few
+            //    hundred lines below; this sibling path did not. Found by the
+            //    Codex review of this file.
+            //
+            //    The same one definition the whole portal uses, so the two
+            //    places cannot drift apart. An erased person needs no warning
+            //    anyway: the key the warning is about went with their erasure.
+            $stmt = $db->prepare(
+                'SELECT totpEnabled, totpSecret FROM tblUsers u WHERE userID = ? '
+                . 'AND NOT (' . GdprEraser::emptiedAccountSql('u') . ')'
+            );
             $stmt->bind_param('i', $account);
             $stmt->execute();
             $user = $stmt->get_result()->fetch_assoc();
@@ -737,10 +758,17 @@ final class ActivityLogCleaner
      * whole-session copy called it `user_id`, which is the session key itself.
      * **Only those two.** `waitingForCodeUserID` / `2fa_user_id` is somebody
      * part way through their second step, and `kioskUserID` / `kiosk_user_id`
-     * is the machine's own account: neither is "this record is that person's".
+     * is **a real member's account** — the one a shared kiosk has been handed
+     * to by a PIN, NOT the machine's own, which is what this said until
+     * 27 October 2026 and what the note a hundred lines above already corrected
+     * once. Neither answers "this record is that person's": the second-step one
+     * because they are not signed in yet, the kiosk one because a kiosk session
+     * outlives the person at it.
      *
-     * A copy that is not well-formed is read with a pattern instead, as
-     * accountOfReadableKey() does and for the same reason.
+     * A copy that is not well-formed is read at its TOP LEVEL ONLY, by
+     * topLevelAccountInCopy(). It used to be one pattern over the whole text,
+     * which picked an account out of a NESTED object and attached the record to
+     * the wrong person.
      */
     private static function accountInCopy(string $copy): ?int
     {
@@ -748,10 +776,95 @@ final class ActivityLogCleaner
         if (is_array($session) === true) {
             $whose = $session['userID'] ?? $session['user_id'] ?? null;
         } else {
-            $whose = preg_match('/"user_?ID"\s*:\s*"?([0-9]{1,10})"?[,}]/i', $copy, $m) === 1 ? $m[1] : null;
+            // 🔍 A CUT-SHORT copy, which json_decode() cannot read. Look for the
+            //    account by hand — but only where the session itself would have
+            //    put it, at the TOP level of the object.
+            //
+            //    This used to be one pattern searched over the whole text, and
+            //    it took the FIRST match anywhere, nested objects included. Fed
+            //    `{"nested":{"user_id":42},"user_id":7,"cut":` it answered 42
+            //    when the session belonged to 7. The record would then be
+            //    attached to the wrong person — showing one member's activity in
+            //    another member's own download — and the blanking step that
+            //    follows destroys the copy, so there would be nothing left to
+            //    correct it from. Found by the Codex review of this file,
+            //    27 October 2026, and reproduced before it was changed.
+            //
+            //    Getting the wrong person is worse than getting nobody: a record
+            //    this cannot read is CLEARED instead, which is safe.
+            $whose = self::topLevelAccountInCopy($copy);
         }
         if ((is_int($whose) === true || (is_string($whose) === true && self::isNumber($whose) === true)) && (int) $whose > 0) {
             return (int) $whose;
+        }
+
+        return null;
+    }
+
+    /**
+     * The account named at the TOP LEVEL of a cut-short copy of a session.
+     *
+     * Walks the text tracking how deep in the object we are, skipping over
+     * anything inside quotes (so a key name that appears in a VALUE cannot be
+     * mistaken for the real one), and accepts `"userID"` or `"user_id"` only at
+     * depth 1 — directly inside the outermost `{`, which is where a session
+     * keeps it. Anything nested is ignored.
+     *
+     * @param string $copy The stored copy, which is not valid JSON.
+     *
+     * @return int|null The account, or null when none is found at the top
+     *   level. Null is the safe answer: the caller clears the record instead of
+     *   attaching it to somebody who may be the wrong person.
+     */
+    private static function topLevelAccountInCopy(string $copy): ?int
+    {
+        $depth    = 0;
+        $inString = false;
+        $escaped  = false;
+        $length   = strlen($copy);
+
+        for ($i = 0; $i < $length; $i++) {
+            $ch = $copy[$i];
+
+            if ($inString === true) {
+                if ($escaped === true) {
+                    $escaped = false;
+                    continue;
+                }
+                if ($ch === '\\') {
+                    $escaped = true;
+                    continue;
+                }
+                if ($ch === '"') {
+                    $inString = false;
+                }
+                continue;
+            }
+
+            if ($ch === '"') {
+                // 🔑 A key starts here. Only one directly inside the outermost
+                //    object counts, and only when it is followed by its value.
+                if ($depth === 1
+                    && preg_match(
+                        '/^"(user_?ID)"\s*:\s*"?([0-9]{1,10})"?/i',
+                        substr($copy, $i),
+                        $m
+                    ) === 1
+                ) {
+                    return (int) $m[2] > 0 ? (int) $m[2] : null;
+                }
+                $inString = true;
+                continue;
+            }
+
+            if ($ch === '{' || $ch === '[') {
+                $depth++;
+                continue;
+            }
+            if ($ch === '}' || $ch === ']') {
+                $depth--;
+                continue;
+            }
         }
 
         return null;

@@ -110,7 +110,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 91;
+const EXPECTED_CHECKS = 93;
 
 function refuse(string $why): never
 {
@@ -1849,6 +1849,54 @@ if ($db->multi_query($sql221) === true) {
 ok('…and run a SECOND time it changes nothing, so somebody who has since finished the cleaning is not sent back to the start of it',
     stored(ActivityLogCleaner::THROUGH_KEY) === ActivityLogCleaner::DONE,
     'how far: ' . json_encode(stored(ActivityLogCleaner::THROUGH_KEY)));
+
+// ───── Two faults the Codex review of 27 October 2026 found, NEITHER of which
+// ───── anything here caught: both broken versions passed 91 of 91.
+//
+// 1. A cut-short copy was searched with ONE pattern over the whole text, which
+//    took the FIRST account anywhere — including one inside a NESTED object. A
+//    record would then be attached to the WRONG PERSON, show in that person's
+//    own download, and the blanking step would destroy the only evidence of
+//    whose it really was. The existing cut-short case (row 8 above) has the
+//    account at the top level only, so it passed either way.
+// 2. The key-warning step asked only whether the account ROW EXISTS. An erased
+//    account still has one — emptied, not deleted — so a BRAND-NEW record
+//    naming somebody already forgotten was written. Their erasure ran before
+//    that record existed, and the clearing step only looks at records with an
+//    empty column, so nothing would ever have reached it.
+head('#626 follow-up — a nested account is not mistaken for the real one, and an erased person gets no new record');
+
+// A cut-short copy whose FIRST account is nested inside another object, and
+// whose real one — the session's own — comes afterwards at the top level.
+$nestedCopy = '{"nested":{"user_id":' . PEOPLE['member'] . '},"user_id":' . PEOPLE['second'] . ',"cut sho';
+$nested     = $plant(null, $nestedCopy, 'Al626Nested');
+
+setting(ActivityLogCleaner::THROUGH_KEY, '0');
+$nestedRun = ActivityLogCleaner::run($db);
+$n         = one('SELECT userID, sessionDataSnapshot FROM tblActivityLogs WHERE logID = ?', 'i', [$nested]);
+ok('A CUT-SHORT COPY IS READ AT ITS TOP LEVEL ONLY: the record goes to the account the session itself names, NOT to one buried in a nested object. Getting the wrong person is worse than getting nobody, because the copy is destroyed straight afterwards',
+    is_array($n) === true && (int) $n['userID'] === PEOPLE['second'],
+    'wanted ' . PEOPLE['second'] . ' (top level), must NOT be ' . PEOPLE['member'] . ' (nested); got: ' . json_encode($n));
+
+// An ERASED account that still has an old record holding a readable key. The
+// warning step must write nothing about it: the key went with the erasure, and
+// a new record naming them would undo part of it.
+$erasedKeyed = PEOPLE['codesonly'];                      // tombstoned just above
+q("UPDATE tblUsers SET totpEnabled = 1, totpSecret = 'stored-encrypted-key-of-an-erased-person' WHERE userID = ?", 'i', [$erasedKeyed]);
+$linesWas = (int) one('SELECT COUNT(*) AS n FROM tblActivityLogs WHERE activityType = ?', 's', [ActivityLogCleaner::KEY_LINE_TYPE])['n'];
+$keyedOld = $plant(null, '{"user_id":' . $erasedKeyed . ',"totp_setup_secret":"' . madeUpKey() . '","note":"cut sho', 'Al626ErasedKey');
+
+setting(ActivityLogCleaner::THROUGH_KEY, '0');
+$erasedRun = ActivityLogCleaner::run($db);
+ok('NO NEW RECORD IS WRITTEN ABOUT AN ERASED PERSON, even one whose old records held a readable key: an erased account still HAS a row, so asking only whether the row exists would have quietly undone part of their erasure, one record at a time',
+    (int) one('SELECT COUNT(*) AS n FROM tblActivityLogs WHERE activityType = ? AND userID = ?', 'si', [ActivityLogCleaner::KEY_LINE_TYPE, $erasedKeyed])['n'] === 0
+        && (int) one('SELECT COUNT(*) AS n FROM tblActivityLogs WHERE activityType = ?', 's', [ActivityLogCleaner::KEY_LINE_TYPE])['n'] === $linesWas,
+    'key lines before: ' . $linesWas . ', after: ' . (int) one('SELECT COUNT(*) AS n FROM tblActivityLogs WHERE activityType = ?', 's', [ActivityLogCleaner::KEY_LINE_TYPE])['n']
+        . '; naming the erased account: ' . (int) one('SELECT COUNT(*) AS n FROM tblActivityLogs WHERE activityType = ? AND userID = ?', 'si', [ActivityLogCleaner::KEY_LINE_TYPE, $erasedKeyed])['n']
+        . '; the run: ' . json_encode($erasedRun));
+
+q('UPDATE tblUsers SET totpSecret = NULL, totpEnabled = 0 WHERE userID = ?', 'i', [$erasedKeyed]);
+q('DELETE FROM tblActivityLogs WHERE logID IN (?, ?)', 'ii', [$nested, $keyedOld]);
 
 q('DELETE FROM tblActivityLogs WHERE logID = ?', 'i', [$needsLinking]);
 setting(ActivityLogCleaner::THROUGH_KEY, ActivityLogCleaner::DONE);

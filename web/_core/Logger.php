@@ -247,7 +247,12 @@ class Logger
      *   kioskUserID            the account a shared kiosk has been handed to
      *
      * Each answers "who was this?" for somebody reading the log after
-     * something has gone wrong. Nothing in the portal reads them back.
+     * something has gone wrong. **One thing does read them back**, and only
+     * one: `ActivityLogCleaner` reads `userID` out of an older record to fill
+     * in the account column that record was written without. Nothing else
+     * does, and nothing may start: these are for a person to read, not for the
+     * portal to make decisions on. (This said "nothing in the portal reads
+     * them back" until 27 October 2026, by which time the cleaner did.)
      *
      * EVERY VALUE IS A WHOLE NUMBER, TRUE/FALSE OR NULL, AND THAT IS THE
      * SAFEGUARD. Text never crosses, so a secret that some page keeps under
@@ -276,9 +281,19 @@ class Logger
      *
      * Since 27 October 2026 `activity()` fills the column from the session
      * when the caller names nobody, using THIS list's `userID` and nothing
-     * else. So the column and these facts can never disagree about whose
-     * record it is, and one rule — `WHERE userID = ?` — reaches every record
-     * a person has.
+     * else. One rule — `WHERE userID = ?` — therefore reaches every record of
+     * somebody signed in as themselves.
+     *
+     * **They CAN still differ, deliberately.** A caller that names an account
+     * explicitly keeps it, and the facts go on describing the session the
+     * request came from — so an administrator acting on somebody else's
+     * account gives a record whose column is that other person, and whose
+     * facts are the administrator's session. That is the right answer for both
+     * (the record is ABOUT the member; it HAPPENED in the administrator's
+     * session), and it is why the column is what an erasure matches on. An
+     * earlier version of this note said the two "can never disagree", which
+     * was wrong for every one of the roughly half of callers that pass a
+     * number.
      *
      * **Records written before that** still have the empty column.
      * Portal\Core\ActivityLogCleaner fills them in as it walks the log, in
