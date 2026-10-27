@@ -1139,12 +1139,37 @@ class GdprEraser
     private static function fromPersonalDataCatalogue(array $handWritten): array
     {
         $file = __DIR__ . DIRECTORY_SEPARATOR . 'personal-data-catalogue.php';
+
+        // 🛑 REFUSE, rather than quietly erasing less. Both of these used to
+        //    `return []`, which looks harmless and is not: the written
+        //    instructions would still run, every table that depends on the
+        //    derived route would be left untouched, and the request would be
+        //    recorded as COMPLETED. A person told their data was erased, with
+        //    most of it still there, is the worst outcome this class has.
+        //
+        //    So an erasure stops here instead. The caller turns this into a
+        //    failed step and puts the request back to 'pending_review', which
+        //    is the behaviour for any other reason a run cannot finish — see
+        //    the @throws note on eraseUser(). Found by the Codex review of
+        //    this file, 27 October 2026.
+        //
+        //    catalogueSummary() below is deliberately NOT like this: it only
+        //    counts entries for showing on a page, erases nothing, and a page
+        //    that cannot show a count should not take the portal down.
         if (is_readable($file) === false) {
-            return [];
+            throw new \RuntimeException(
+                'the list of where personal information lives (_core/personal-data-catalogue.php) '
+                . 'could not be read, so an erasure would miss every table that depends on it. '
+                . 'Nothing was erased in this step. Restore that file and run the request again.'
+            );
         }
         $catalogue = require $file;
         if (is_array($catalogue) === false) {
-            return [];
+            throw new \RuntimeException(
+                'the list of where personal information lives (_core/personal-data-catalogue.php) '
+                . 'did not give back a list, so an erasure would miss every table that depends on '
+                . 'it. Nothing was erased in this step.'
+            );
         }
 
         $alreadyHandled = [];

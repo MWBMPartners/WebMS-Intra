@@ -100,8 +100,21 @@ class ApiRouter
             self::dispatchV1($parts);
         }
 
-        // 📋 Need at least: api / appName / action
-        if (count($parts) < 3) {
+        // 📋 EXACTLY three parts: api / appName / action.
+        //
+        //    This said "at least" (`< 3`) until 27 October 2026, and then used
+        //    only parts 1 and 2 — so `/api/events/list/extra` ran the events
+        //    list handler as though the extra part were not there. Nothing
+        //    escaped the api folder (appName and action are each checked against
+        //    `^[a-z0-9\-]+$` below) and no switch was bypassed, so this was
+        //    untidiness rather than a hole: an address outside the documented
+        //    shape was answered instead of refused. Found by the Codex review.
+        //
+        //    Exactly three is safe to require: every legacy api address seeded
+        //    in full_schema.sql has exactly three parts, and the `api/v1/...`
+        //    addresses, which do have more, were already handed to dispatchV1()
+        //    above and never reach this line.
+        if (count($parts) !== 3) {
             ApiResponse::error('Invalid API path', 400);
         }
 

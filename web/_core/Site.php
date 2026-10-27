@@ -360,8 +360,17 @@ class Site
             return $site['logoPath'];
         }
         if ($key === 'favicon') {
-            // faviconPath column may not yet exist on databases that haven't
-            // run migration 037; return null to let the caller fall back.
+            // 🧯 `?? null` is here for tidiness, NOT as protection against the
+            //    column being absent. This comment used to say the column "may
+            //    not yet exist on databases that haven't run migration 037" and
+            //    that returning null let the caller fall back. That was never
+            //    true: loadSiteRow() names faviconPath in its SELECT without
+            //    asking whether it exists, and the connection is strict, so a
+            //    database without that column fails there — long before
+            //    anything reaches this line. Corrected 27 October 2026 after
+            //    the Codex review pointed at the mismatch. Migration 037 is
+            //    184 migrations old, so no real database is in that state; if
+            //    one ever were, the fix belongs in loadSiteRow(), not here.
             return $site['faviconPath'] ?? null;
         }
         if ($key === 'color') {
