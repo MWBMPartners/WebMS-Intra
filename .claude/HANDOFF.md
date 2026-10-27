@@ -80,7 +80,95 @@ release" step is replaced by what really happens. Checks run: actionlint 1.7.12 
 `SHELLCHECK_OPTS=--severity=error` as `lint.yml` sets it, and with no setting on the file I changed, before and
 after); deploy settings self-test 386/386; package self-test 340/340 in 4 min 36 s; all 32 audit checks; `php -l`.
 
-### #626 — BUILT, independent check STILL RUNNING at the time of writing
+### #626 PART ONE — COMMITTED `fd6b8b2` (documents `8bf7967`); its check found the fix was NOT ENOUGH
+
+### #626 PART TWO — COMMITTED `edf56ff`. THE OWNER REJECTED "accept the limit"
+
+**What part one's check found, and it was right.** An erasure matches ONE COLUMN (`userID`). `Logger::activity()`
+took the account number as an OPTIONAL third argument and 279 of its 582 callers under `web/` left it out —
+`Auth.php`'s own `LoginLocal` line among them, which runs AFTER `$_SESSION` holds the account. Those records had an
+empty column and session facts naming the person, so an erasure went straight past them. Part one's instruction was
+therefore real but insufficient, and every sentence implying otherwise was corrected rather than left standing.
+
+**The owner's decision, 27 October 2026 (question tool):** offered "accept the limit, build the rest later", they
+answered *"I dont like your 'accept the limit' proposal. i would rather do this properly now. what would be the best
+'proper' fix now? remember GIRFT"*. So part two fixes the CAUSE.
+
+**THE ANSWER, and it is smaller than any of the three routes I offered.** The fix is in the LOGGER, not the eraser:
+`Logger::activity()` already reads the session to build the facts it stores, then wrote NULL into the column
+anyway. It now fills the column from `sessionFacts()['userID']` when the caller named nobody. `WHERE userID = ?` is
+then correct and the part-one instruction is sufficient. **Rejected on purpose: matching on the session fingerprint**
+(a shared machine or kiosk means one fingerprint is not proof of one person — how this eraser has wiped other
+people's records before, #574) **and matching on the account number inside the stored facts** (no index, and #622
+measured 175 seconds for one statement over 500,000 rows, which a shared host cuts off mid-erasure).
+
+**Three things that make this the GIRFT answer rather than a patch:**
+1. **Two unreported gaps close.** `auth/account/data-export.php` ("what we hold about you") and the "filter by
+   person" list on Admin, Activity both read that column, so a person's own sign-ins were missing from both.
+2. **Nothing is re-attributed.** The 303 callers that pass a number are untouched, and all of them pass the ACTOR
+   (`$actorUserID`, `$userId`) — verified — so filling from the session agrees with them rather than changing what
+   the column means. `waitingForCodeUserID` and `kioskUserID` are never used: neither is the person whose record it is.
+3. **The harmful case is handled.** A naive backfill would UNDO erasures: for somebody already erased the column is
+   empty and the facts still name them. `ActivityLogCleaner::linkAccounts()` CLEARS those records instead, which
+   retroactively finishes erasures that could never reach them. It tests with `GdprEraser::emptiedAccountSql()`, the
+   one definition the portal uses.
+
+**The ordering trap, written down because it is not obvious:** `linkAccounts()` MUST run inside the existing walk
+and BEFORE its blanking step. That step blanks every old whole-session copy, and the copy is the only place a
+pre-#622 record says whose session it was — a separate pass would always arrive to find the evidence gone. That is
+why migration 221 resets `activityLog.cleanedThrough` rather than adding a second marker: one walk, one mark, one button.
+
+Nine files. Checks: activity-log self-test 87/87 (was 77) and eraser 230/230 on MySQL 8.0.36 **and** 8.4.11;
+erasure pages 66/66; coverage 63/63; migration harness ALL PHASES PASSED, 42 ticks; three planted faults each caught
+by the right check, including the one that would undo an erasure; all 32 audit checks; `php -l`; `bash -n`.
+
+**Two harness failures on the way, and NEITHER was a test artefact — both are worth knowing:**
+- My phase-7 plant first carried a RAW session identifier, which also counted towards migration 220's "activity
+  records with an identifier" and made phase 7 say the database was not the one it was about. The record should
+  carry a FINGERPRINT anyway (it stands for a post-#622 record that merely lacks the account column).
+- **Migration 221 writes the cleaner's "how far" row with `0`, and phase 7's migration-220 check expected that row
+  to be ABSENT.** I widened that expectation to `0` rather than changing 221, because `0` means "start at the
+  beginning" and the check exists to catch `all` over a log that still holds old records. **That is me editing
+  somebody else's check so my own package passes, so the checker was asked to judge it specifically.** General
+  lesson: a migration that writes a settings row can break another migration's phase check without either being wrong.
+
+**ITS CHECK WAS NOT CLEAN — four real problems, all fixed, and two of them were tests that proved nothing:**
+
+1. **Migration 221's ONE JOB was covered nowhere.** Every installation that finished the #622 cleaning already
+   holds the mark, so the live path is the "row exists" branch — and phase 7's database has no row while the
+   self-test set the mark by hand. The checker changed the migration to leave an existing mark alone and **the
+   whole harness still passed**; the erasure gap would then have stayed open for ever. Two checks now cover it,
+   including that a second run does not send an administrator back to the start.
+2. **"A kiosk's own account" was untrue.** `kioskUserID` is A REAL MEMBER's account — the one a shared kiosk has
+   been handed to by a PIN (`_apps/assets/kiosk-action.php`), and `sessionFacts()`'s own docblock twenty lines
+   away said so correctly. It is still left out, for the right reason: a kiosk session outlives the person at it,
+   so naming them could blame them for somebody else's action. **A kiosk record therefore still names nobody and
+   an erasure cannot reach it** — the same gap in miniature, left open because what a shared device's record means
+   is the owner's decision. "One rule covers every record there is" is corrected to "every record of somebody
+   signed in as themselves". The CLEANER's half of that rule was also unchecked (the checker made it fall back to
+   `kioskUserID` and everything still passed); it is checked now, as is the pattern branch for a cut-short copy.
+3. **The Upgrade page and health line described only the older job**, so once migration 221 re-armed the walk they
+   told administrators something untrue about what was waiting and gave them no reason to press the button again.
+4. **The data download handed over other people's details.** Records that used to be invisible there are now the
+   actor's, and about two dozen call sites put an invited guest's e-mail address or an outside crew member's name
+   into the free-text description. **OWNER'S DECISION, 27 October 2026 (question tool): leave the description out
+   of the download.** Type, address and time stay. Stripping names out of the text was rejected — pattern-matching
+   free text from ~550 call sites would miss cases while looking as though it had not. Two checks pin it, because
+   the obvious "improvement" is to put it back.
+
+**Counts:** part one's "279 of 582" was inflated by matches inside COMMENTS, including the ones I had just
+written. Two careful counts the same day still disagreed (550/302/248 vs 551/295/256), so the prose says "roughly
+half" and `Logger.php` records how to count. The repository rule is that counts are not written down.
+
+**One judgement to revisit if it ever looks wrong:** phase 7 expected the cleaner's mark row to be ABSENT after
+the installer's "carry on"; migration 221 writes it with 0, so I widened that expectation rather than changing the
+migration. The checker was asked to judge that specifically and agreed. General lesson: a migration that writes a
+settings row can break another migration's phase check without either being wrong.
+
+Final checks: activity-log 91/91 and eraser 230/230 and erasure-pages 66/66 on MySQL 8.0.36 AND 8.4.11; coverage
+65/65; access-pages 293/293; upgrade-pages 95/95; harness ALL PHASES PASSED. Seven planted faults each caught by
+the right check. Documentation from `rollout-626b--DOC-ENTRIES.md` REPLACED part one's entries, which described the
+gap as open.
 
 Worktree `.claude-work/worktrees/e626`, branch `ro-626-build`, uncommitted, cut from `98ab31f`. Five files.
 

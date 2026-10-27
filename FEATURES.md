@@ -961,12 +961,14 @@ another repo, ever**.
 - Per-user language preference.
 - Date/time format settings (#69).
 
-- Erasure clears the details on a person's activity records (#626): the account number, the address the
-  request came from, the browser's name, the request's headers, the session's fingerprint and the facts about
-  the session. What happened, when and under which organisation is kept, and nobody else's record is touched.
-  **Not complete:** it reaches only the records that carry the account number in its own column, and 279 of the
-  582 places that write a record do not pass it — an ordinary sign-in record among them. The rest of #626 is
-  open and needs a decision.
+- Erasure reaches every activity record a person has (#626). Each record names its person in its own column: the
+  portal fills it from the session when the caller names nobody, so the one rule an erasure uses covers every record
+  of somebody signed in as themselves. (Not a record made at a shared kiosk: see the note in DEV_NOTES.)
+  The record of what happened, when and under which organisation is kept; the account number, the visitor's
+  address, the browser's name, the request's headers, the session's fingerprint and the session details go.
+  Records written before the fix are brought into line by the activity-log cleaner (migration 221), or cleared
+  outright where the person has already been erased. A person's own data download and the "filter by person" list
+  work properly for the first time as a result.
 
 ### 🚀 CI/CD ✅
 

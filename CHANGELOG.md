@@ -2,6 +2,44 @@
 
 
 ## [Unreleased] (alpha)
+- **Security — an erasure now reaches every activity record a person has (#626, part two)**
+  - **What an administrator should know after upgrading**
+    1. **What was still wrong after part one.** An erasure finds a person's records by one column, and the portal
+       was not filling it. Of the 582 places that write an activity record, 279 passed no account number — the
+       line that records an ordinary password sign-in among them, which runs after the person is already signed
+       in. Those records held an empty column while the session details beside them named the person, so an
+       erasure went straight past them and left their address, browser name, headers and account number in place.
+    2. **What is fixed, and where.** The fault was that the record did not name its person, so that is what was
+       fixed: the portal now fills the column from the session whenever the caller names nobody. One rule then
+       reaches every record there is. **It was deliberately NOT fixed by making the erasure guess** from the
+       session's fingerprint: a shared machine or a kiosk means one fingerprint is not proof of one person, and
+       guessing that way is how this portal has wiped the wrong person's records before.
+    3. **Two other things quietly come right.** Your own data download ("what we hold about you") and the "filter
+       by person" list on Admin, Activity both read that column, so a person's own sign-ins were missing from
+       both. Nobody had reported it; the same gap caused it.
+    3b. **One thing has deliberately been taken OUT of your own data download** (the owner's decision, 27 October
+       2026). Because records that used to be invisible there are now included, and because about two dozen of the
+       places that write an activity record put ANOTHER PERSON into the free-text description — an invited guest's
+       e-mail address, an outside crew member's name — **the description is no longer part of the download.** What
+       kind of thing happened, the address it came from and when are all still there. Nothing checks what goes
+       into that free text, so it could not be made safe by reading it once; stripping addresses and names out of
+       it was rejected because it would miss cases while looking as though it had not. Found by the independent
+       check of this change, not by anybody being harmed.
+    4. **Records written before the upgrade.** Press **Clean the old records** on the Upgrade page again. It
+       walks the log in pieces, as it did for the earlier change, and now also gives each older record the account
+       its session details name. **The portal is not closed while it runs** and you can stop and come back. Until
+       it has finished, an erasure still cannot reach the records it has not got to. The Upgrade page and the
+       health line both say which of the two jobs is still waiting, and that an unreached record cannot be erased.
+    5. **A record belonging to somebody already erased is CLEARED, not linked.** If the account has been erased,
+       or is no longer there, the address, the browser name, the headers and the session details are removed from
+       the record instead and the column is left empty. Linking it would have tied records back to a person whose
+       erasure had already been carried out — so this finishes the job those erasures could not reach.
+    6. **Nothing already recorded is re-attributed.** The 303 places that do pass an account number are untouched,
+       and a record that already names somebody is never changed. An account part way through its second step, and
+       a kiosk's own account, are never used: neither is the person whose record it is.
+  - **Database:** migration 221. It does one quick thing — it sends the cleaner back through the log — because
+    going through the records itself would be a single statement over the whole activity log, and that was
+    measured at 175 seconds for 500,000 records, long enough for a shared host to cut it off mid-upgrade.
 - **Security — erasing a person now clears the details left on their activity records (#626)**
   - **What an administrator should know after upgrading**
     1. **What was left behind.** When somebody was erased, the portal emptied the account number on their

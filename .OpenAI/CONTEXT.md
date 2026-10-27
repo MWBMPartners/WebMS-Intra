@@ -788,23 +788,22 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
       after an alpha merge; anything else that should happen on such a merge needs a line there too.
     *(`.claude/CLAUDE.md` → "Monitor and fix the pull-request security checks".)*
 
-23. **Erasure and the activity log (#626, 27 October 2026).** `GdprEraser::catalogue()` holds a HAND-WRITTEN
-    instruction for `tblActivityLogs`, and it must stay hand-written: the derived route
-    (`fromPersonalDataCatalogue()`) only ever empties columns that hold an account number, so the address, the
-    browser's name, the headers, the session's fingerprint and the session facts would be left behind again. A
-    hand-written entry WINS over the derived one for a table, so any entry you write must keep doing everything the
-    derived one did.
-    - **#626 is NOT fully closed and the commit says so.** An instruction matches ONE COLUMN. `Logger::activity()`
-      takes the account number as an optional third argument and 279 of its 582 callers under `web/` leave it out,
-      `Auth.php`'s own `LoginLocal` line included — which runs after the session already holds the account. Those
-      records have an empty `userID` column and session facts naming the person, and an erasure never reaches them.
-      Closing the rest needs a decision: collect the fingerprints BEFORE the instruction empties them, and remember
-      a shared kiosk means one fingerprint is not proof of one person.
-    - **Section 17 of `tools/gdpr-eraser-selftest.php` ASSERTS that gap**, with a comment saying it is a gap, and
-      MUST fail when the gap is closed. Its first draft asserted the opposite and passed — an empty `userID`
-      COLUMN is not the same as "nobody was signed in".
-    - The pinned list `$leftBehindOnPurpose` in `tools/gdpr-coverage-selftest.php` names the 35 tables still in
-      that state (#635): **nothing may be added to it** — taking a table off it is the work.
+23. **Erasure and the activity log (#626).** Every activity record must NAME ITS PERSON in `userID`:
+    `Logger::activity()` fills it from `sessionFacts()['userID']` when the caller passes none (never
+    `waitingForCodeUserID`, and never `kioskUserID` — which is a real member's account, not the machine's, and is left
+    out because a kiosk session outlives the person at it; a kiosk record therefore still names nobody). It never
+    overrides an explicit number. That is what makes the ONE
+    hand-written instruction in `GdprEraser::catalogue()` enough — an erasure matches one column. **If you are ever
+    tempted to add a second way of finding a person's activity records, the fault is that something wrote a record
+    without naming them: fix that instead.** Matching on the session fingerprint was rejected because a shared
+    machine means one fingerprint is not proof of one person. Older records are brought into line by
+    `ActivityLogCleaner::linkAccounts()`, which MUST stay inside the existing walk and BEFORE its blanking step (the
+    old whole-session copy is the only place such a record names anybody), and which CLEARS rather than links a
+    record whose account has been erased — linking it would undo that erasure. Migration 221 resets
+    `activityLog.cleanedThrough` to send the cleaner back through the log. The pinned list `$leftBehindOnPurpose` in
+    `tools/gdpr-coverage-selftest.php` names the 35 tables still leaving a named column (#635): nothing may be added
+    to it. Tests: `tools/activity-log-selftest.php`, section 17 of `tools/gdpr-eraser-selftest.php`,
+    `tools/gdpr-coverage-selftest.php`, phases 1 and 7 of the migration harness.
     *(`.claude/CLAUDE.md` → the erasure bullet.)*
 
 ## A few more things worth knowing

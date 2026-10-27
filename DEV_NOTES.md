@@ -1525,33 +1525,54 @@ taken** — so pushing one blocks the name the automatic release wanted.
 
 ---
 
-**The activity log and erasure (#626, 27 October 2026).** `tblActivityLogs` is marked "unlink" in
-`web/_core/personal-data-catalogue.php` and names six columns. The derived route in
-`GdprEraser::fromPersonalDataCatalogue()` builds one instruction per column that holds an ACCOUNT NUMBER and
-empties nothing else, so five of the six were named in the list and left in place for months. The fix is a
-HAND-WRITTEN instruction in `GdprEraser::catalogue()` with those five in `nullCols` — the only way to empty a
-column that is not itself a link to an account. A hand-written entry wins over the derived one for the whole
-table, so it must keep doing everything the derived one did; it matches on `userID`, and `processEntry()`
-always empties the matched column too.
+**The activity log and erasure (#626).** Part one gave `tblActivityLogs` a hand-written instruction in
+`GdprEraser::catalogue()` with five columns in `nullCols`; part two made that instruction sufficient.
 
-Three checks in `tools/gdpr-coverage-selftest.php` hold it: one fails when any "unlink" table gains a named
-column that nothing empties, one fails when the pinned list of 35 known leavers holds a table that is now
-clean, and one is about this table by name so it cannot be hidden by pinning it. Section 17 of
-`tools/gdpr-eraser-selftest.php` proves the statement runs on a real database and touches neither somebody
-else's record nor one written when nobody was signed in.
+**The root cause was not the erasure.** An instruction matches ONE column, `userID`, and `Logger::activity()` took
+the account number as an optional third argument that 279 of its 582 callers under `web/` left out — including
+`Auth.php`'s `LoginLocal` line, which runs AFTER `$_SESSION` holds the account. Such a record had an empty column
+and session facts saying `"userID": <the person>`. The method had the number in its hand and wrote NULL.
 
-**The pinned list is not an excuse list.** Nothing may be added to it; taking a table off it is the work.
-`tblErrors` on it (an address, a browser name, headers) is #626 over again.
+**Rejected: making the erasure chase those records** by matching on the session fingerprint. A shared machine or a
+kiosk means one fingerprint is not proof of one person, and that is exactly how this eraser has wiped other
+people's records before (#574). Matching on the account number inside the stored session facts was also rejected:
+there is no index for it, and the #622 work measured one statement over 500,000 activity rows at 175 seconds,
+which a shared host cuts off mid-erasure.
 
-**#626 IS NOT CLOSED BY THIS, and the reason is worth understanding before writing any erasure instruction.**
-An instruction matches ONE COLUMN. `Logger::activity()` takes the account number as an optional third argument
-and 279 of its 582 callers under `web/` leave it out, `Auth.php`'s own `LoginLocal` line included — which runs
-after `$_SESSION` already holds the account. Such a record has an empty `userID` column and session facts saying
-`"userID": <the person>`. An erasure never reaches it. Closing the rest means matching on the fingerprint, with
-two traps: collect the fingerprints BEFORE the instruction empties them, and a shared kiosk means one fingerprint
-is not proof of one person — which is how this eraser has wiped other people's records before. Owner's decision.
-Section 17 of the eraser self-test ASSERTS the gap, with a comment saying so, because an earlier draft of that
-section asserted the opposite and passed.
+**So the record is made to name its person instead.** `Logger::activity()` fills `userID` from
+`sessionFacts()['userID']` when the caller named nobody — that value only, never `waitingForCodeUserID` (somebody
+part way through their second step) or `kioskUserID`. **That last one is a real member's account**, the one a shared
+kiosk was handed to by a PIN, not "the machine's"; it is left out because a kiosk session outlives the person at it,
+so naming them could blame them for somebody else's action. A kiosk record therefore still names nobody and an
+erasure still cannot reach it — the same gap in miniature, left open because what a shared device's record means is
+the owner's decision. It never overrides a caller that named somebody; all 303
+such calls pass the actor, so it agrees with them rather than changing their meaning.
+
+**Older records: `ActivityLogCleaner::linkAccounts()`, inside the existing walk.** It must run BEFORE the
+blanking step of that same piece, because that step blanks every old whole-session copy and the copy is the only
+place a pre-#622 record says whose session it was — a separate pass would always arrive to find the evidence gone.
+That is why there is one walk, one mark and one button rather than two, and why migration 221 resets
+`activityLog.cleanedThrough` instead of adding a second marker.
+
+**The one way that step could do harm:** filling the column for somebody already erased would undo their erasure.
+So it tests each account with `GdprEraser::emptiedAccountSql()` — the one definition the portal uses — and where
+the account is erased or gone it CLEARS the record's address, browser name, headers, fingerprint and session
+details instead. Planted as a fault, that mistake is caught by
+`tools/activity-log-selftest.php`'s "cleared, not linked" check.
+
+**Two gaps closed without being reported:** `auth/account/data-export.php` and the "filter by person" list on
+Admin, Activity both read `userID`, so a person's own sign-ins were missing from both.
+
+**The person's own download no longer includes the activity log's description** (the owner's decision): the field
+is free text from some 550 call sites and about two dozen put a third party in it, so handing it to the member who
+caused the record would be giving them somebody else's details on request. Two checks in
+`tools/gdpr-coverage-selftest.php` hold it, because the obvious "improvement" is to put it back.
+
+Tests: `tools/activity-log-selftest.php` (the logger's five cases and the cleaner's six, including that it obeys the
+same kiosk and second-step rules as the logger, reads a copy that is cut short, and that migration 221 re-arms the
+walk on a database that already holds the mark — the live path, which nothing covered); section 17 of
+`tools/gdpr-eraser-selftest.php` holds the boundary — the erasure itself must never start reaching records that do
+not name the person; phases 1 and 7 of `tools/e2e-migrations/run.sh` for migration 221.
 
 ## Coding Conventions
 
