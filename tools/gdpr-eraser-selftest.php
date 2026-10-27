@@ -4637,14 +4637,13 @@ $logOther  = $logInsert(D, 'LoginLocal', 'Dee signed in', $fingerprint, '203.0.1
 // A record written when nobody really was signed in: no session of any kind,
 // so nothing on it can be matched to anybody. Genuinely not this person's.
 $logAnon   = $logInsert(null, 'LoginFailed', 'a wrong password', null, '203.0.113.9', 'Mozilla/5.0 (Ray\'s laptop)', null, '{"Accept-Language":"en-GB"}');
-// ───── THE KNOWN LIMIT (#626, second half not built) ─────
-// A record of the ERASED PERSON'S OWN, written while they were signed in, whose
-// `userID` COLUMN is empty because the call did not pass the number — and whose
-// session facts name them all the same. Logger::activity() takes the number as
-// an optional third argument and 279 of the 582 calls under web/ leave it out,
-// Auth.php's own 'LoginLocal' line among them, which runs AFTER the session
-// holds the account. So this is the ordinary shape of a sign-in record, not an
-// odd one.
+// ───── A RECORD IN THE OLD SHAPE (#626) ─────
+// A record of the person's OWN, written while they were signed in, whose
+// `userID` COLUMN is empty because the call passed no number — and whose
+// session facts name them all the same. That was the ordinary shape of a
+// sign-in record until 27 October 2026, when Logger::activity() began filling
+// the column; records written before it still look like this, and the cleaner
+// is what deals with them.
 $logFactsOnly = $logInsert(null, 'LoginLocal', 'Ray signed in, by a call that passed no account number', $fingerprint, '203.0.113.9', 'Mozilla/5.0 (Ray\'s laptop)', $facts, '{"Accept-Language":"en-GB","Referer":"/dashboard"}');
 
 $readLog = static fn (int $id): ?array => ge_one(
@@ -4697,30 +4696,42 @@ ge_ok('A RECORD WRITTEN WITH NO SESSION AT ALL IS NOT TOUCHED EITHER: it has no 
     json_encode(['before' => $anonBefore, 'after' => $readLog($logAnon)]));
 
 // ─────────────────────────────────────────────────────────────────────────────
-// THE KNOWN LIMIT, PINNED SO IT CANNOT BE MISTAKEN FOR CORRECT BEHAVIOUR.
+// A RECORD WRITTEN BEFORE #626: THE ERASURE ALONE DOES NOT REACH IT, AND THAT
+// IS EXPECTED — SOMETHING ELSE FINISHES THE JOB.
 //
-// This check asserts a GAP, not a guarantee. It exists because the first
-// version of this section asserted the opposite: it seeded a row with an empty
-// `userID` column, called it "written when nobody was signed in", and passed —
-// so the test agreed that leaving the person's details on their own records was
-// right. In this portal an empty `userID` COLUMN does not mean nobody was
-// signed in. The independent check of 27 October 2026 found that.
+// An erasure finds a person's records by ONE column, `userID`. Until 27
+// October 2026 Logger::activity() wrote NULL into that column whenever the
+// caller named nobody (roughly half its callers, the ordinary password sign-in
+// among them), while the facts beside it named the person. So an erasure went
+// straight past those records and left the person's address, browser name,
+// headers and account number on them.
 //
-// WHAT IS STILL WRONG, said plainly: an erasure matches `WHERE userID = ?`, so
-// it reaches only the records whose userID column holds the number. On every
-// record written by a call that passed no number — the ordinary shape of a
-// sign-in record — the address, the browser name, the headers, the fingerprint
-// AND the session facts naming the person all survive the erasure. **Issue
-// #626's acceptance criterion is therefore not met**, and the second half is a
-// decision for the owner (match on the fingerprint, with the two traps written
-// up in the issue, or accept the limit in writing).
+// THAT IS FIXED, BUT NOT HERE AND NOT BY THE ERASURE. Two things fixed it, and
+// an earlier draft of this section got the answer wrong in a way worth
+// recording: it treated "empty userID column" as "nobody was signed in" and
+// PASSED, so the test agreed that leaving the person's details on their own
+// records was right. In this portal those are different things.
+//   1. Logger::activity() now fills the column from the session, so every
+//      record written from now on names its person and this instruction
+//      reaches it. Proved in tools/activity-log-selftest.php.
+//   2. Portal\Core\ActivityLogCleaner brings older records into line as it
+//      walks the log in pieces — or, where the person has already been erased,
+//      clears what the record still says about them, which finishes an erasure
+//      that could not reach it. Migration 221 sends it back through the log.
+//      Also proved there, including that it must never RE-LINK an erased
+//      person, which would undo their erasure.
 //
-// WHEN THAT IS BUILT, THIS CHECK MUST FAIL, and that is the point: it is the
-// tripwire that makes somebody come back here. Replace it then with the
-// opposite assertion — do not simply delete it.
+// WHAT THIS CHECK IS FOR, THEN. It holds the boundary: the erasure by itself
+// changes only what names the person, and an older record that names nobody is
+// left for the cleaner rather than guessed at. **If this check ever fails, it
+// means the erasure has started reaching records that do not name the person —
+// which can only be by guessing from a fingerprint or a session copy. Do not
+// make it pass by loosening it: a shared machine means one fingerprint is not
+// proof of one person, and that is how this eraser has wiped other people's
+// records before.**
 // ─────────────────────────────────────────────────────────────────────────────
 $factsOnlyAfter = $readLog($logFactsOnly);
-ge_ok('THE KNOWN LIMIT (#626, not closed): a record of the person\'s OWN, written by a call that passed no account number, is NOT cleared — its address, browser name, headers, fingerprint and the session facts naming them all survive the erasure. This check asserts a GAP. When the second half of #626 lands it MUST fail, and must then be replaced by the opposite assertion, not deleted',
+ge_ok('A RECORD WRITTEN BEFORE #626, naming nobody in its own column, is left exactly as it is by the erasure itself — not guessed at from its fingerprint or its session copy. Those records are brought into line, or cleared, by ActivityLogCleaner (migration 221); the erasure changes only what names the person',
     ge_same($factsOnlyBefore, $factsOnlyAfter) === true
     && is_array($factsOnlyAfter) === true
     && $factsOnlyAfter['userID'] === null
@@ -4728,6 +4739,6 @@ ge_ok('THE KNOWN LIMIT (#626, not closed): a record of the person\'s OWN, writte
     && str_contains((string) $factsOnlyAfter['sessionDataSnapshot'], '"userID":' . P_LOG) === true
     && $factsOnlyAfter['visitorIP'] === '203.0.113.9',
     json_encode(['before' => $factsOnlyBefore, 'after' => $factsOnlyAfter,
-        'what this means' => 'if this check FAILED, the gap may have been closed — read the comment above it before changing anything']));
+        'what this means' => 'if this check FAILED, the erasure has begun reaching records that do not name the person — read the comment above it before changing anything']));
 
 ge_finish();

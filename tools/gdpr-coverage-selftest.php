@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 63;
+const EXPECTED_CHECKS = 65;
 
 $failures = 0;
 $passes   = 0;
@@ -773,6 +773,55 @@ check(
     'the address, browser name, headers, session fingerprint and session facts must all be emptied '
     . 'on an erased person\'s activity records, and tblActivityLogs must never be pinned as a table '
     . 'that leaves one. Found: ' . implode(', ', $dealtWith['tblActivityLogs'] ?? ['nothing at all'])
+);
+
+// -----------------------------------------------------------------------------
+// 8c. THE PERSON'S OWN DOWNLOAD MUST NOT HAND THEM SOMEBODY ELSE'S DETAILS
+//     (#626, the owner's decision, 27 October 2026).
+//
+//     The download of "what we hold about you" is open to any signed-in
+//     member. It reads the activity log by `userID` — and #626 gave every
+//     record the account that caused it, so records that used to be invisible
+//     here (because they carried no account number at all) are now included.
+//
+//     About two dozen of the ~550 places that write an activity record put
+//     ANOTHER PERSON into the free-text description: an invited guest's
+//     e-mail address, an outside crew member's name. Handing those to the
+//     member who caused the record would be giving them somebody else's
+//     personal details on request.
+//
+//     So the description is left out of the download. The kind of activity,
+//     the address it came from and the time all stay. Nothing checks what
+//     goes into that column, so it cannot be made safe by reading it once —
+//     which is also why stripping addresses and names out of the text was
+//     rejected: it would miss cases while looking as though it had not.
+//
+//     This check exists because the obvious "improvement" is to put the
+//     description back.
+// -----------------------------------------------------------------------------
+// Read here rather than using $export, which section 10 loads further down
+// this file: this block runs before that line. (The first draft used $export
+// and died with "preg_match(): Argument #2 must be of type string, null".)
+$exportPage     = __DIR__ . '/../web/_apps/auth/account/data-export.php';
+$exportText     = is_readable($exportPage) === true ? (string) file_get_contents($exportPage) : '';
+$activitySelect = '';
+if (preg_match("/'activityLogs'\s*=>.*?'(SELECT[^']*tblActivityLogs[^']*)'/s", $exportText, $m) === 1) {
+    $activitySelect = $m[1];
+}
+check(
+    'the person\'s own data download does NOT hand over the activity log\'s free-text description, which can name somebody else',
+    $activitySelect !== '' && str_contains($activitySelect, 'activityDescription') === false,
+    $activitySelect === ''
+        ? 'the activity-log query could not be found in data-export.php at all, so this check proves nothing: find it and fix this check'
+        : 'it selects: ' . $activitySelect
+);
+check(
+    'and it still hands over what the record says about the person themselves: the kind of activity, the address and the time',
+    $activitySelect !== ''
+        && str_contains($activitySelect, 'activityType') === true
+        && str_contains($activitySelect, 'visitorIP') === true
+        && str_contains($activitySelect, 'timestamp') === true,
+    'it selects: ' . $activitySelect
 );
 
 // -----------------------------------------------------------------------------

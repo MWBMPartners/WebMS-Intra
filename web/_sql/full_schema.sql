@@ -10236,3 +10236,27 @@ SELECT '220_activity_log_fingerprints.sql'
   FROM DUAL
  WHERE NOT EXISTS (SELECT 1 FROM `tblTotpBackupCodes` LIMIT 1)
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+
+-- 221 — every activity record of a signed-in person names them in its own
+--    column (#626). Recorded here only where NOTHING needs linking: a record
+--    needs it when it names nobody and still holds session details. A fresh
+--    install has no records at all, so there is nothing to do and the record
+--    is written. An older database that has some gets NO record here; the
+--    migration then puts the cleaner's "how far" mark back to the start and
+--    records itself, so the cleaning really happens.
+--    WHY THE TEST IS NOT "IS THE LOG EMPTY": a log can hold plenty of records
+--    and still have nothing to link (every one already names its person), and
+--    a log can hold exactly one record that needs it. Asking the real question
+--    is what makes the two files agree in every case.
+INSERT INTO `tblMigrations` (`filename`)
+SELECT '221_activity_log_account_column.sql'
+  FROM DUAL
+ WHERE NOT EXISTS (
+           SELECT 1 FROM `tblActivityLogs`
+            WHERE `userID` IS NULL
+              AND `sessionDataSnapshot` IS NOT NULL
+              AND `sessionDataSnapshot` <> ''
+            LIMIT 1
+       )
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

@@ -945,17 +945,23 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <p class="mb-2" id="upgrade-old-records-left">
                                 <strong><?php echo number_format((int) $oldRecordsLeft); ?> activity
                                 record<?php echo $oldRecordsLeft === 1 ? ' is' : 's are'; ?> still to be gone through.</strong>
-                                Before this version, every activity record kept the browser session&rsquo;s identifier and a copy of the whole
-                                session. The portal replaces each identifier with a fingerprint that is no use for signing in, and removes each
-                                copy, a few thousand records at a time.
+                                Going through them does two things, a few thousand records at a time. The older job (#622): every record
+                                used to keep the browser session&rsquo;s identifier and a copy of the whole session, and each identifier is
+                                replaced with a fingerprint that is no use for signing in while each copy is removed. The newer one (#626):
+                                each record is given the account it belongs to, which until now was kept only inside those session details
+                                &mdash; so that erasing somebody really reaches all of their records, and so that their own data download and
+                                the &ldquo;filter by person&rdquo; list stop missing their sign-ins.
                             </p>
                             <p class="mb-2" id="upgrade-old-records-meanwhile">
                                 <strong>What is true until none are left:</strong> every record the portal writes now is already safe.
                                 <?php if (count($pending) === 0): ?>
                                     The two-step backup codes made before this version are already gone.
                                 <?php endif; ?>
-                                But an old record that has not been cleaned yet still holds what it held: a session identifier, which may still
-                                be in use, and for some accounts an authenticator key in readable text. So finish this today.
+                                <strong>What is still waiting depends on how long this installation has been running.</strong> A record
+                                written before the earlier version holds what it held: a session identifier, which may still be in use, and for
+                                some accounts an authenticator key in readable text &mdash; that one is urgent. A record written since then
+                                holds nothing unsafe, but does not yet say whose it is, which means <strong>erasing that person would not
+                                reach it</strong>. Either way the job is the same and it is worth finishing.
                                 <?php if (count($pending) === 0): ?>
                                     The portal stays open while it is done.
                                 <?php endif; ?>

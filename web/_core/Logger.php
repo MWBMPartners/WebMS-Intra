@@ -265,30 +265,33 @@ class Logger
      * whose `userID` COLUMN holds the person's number, because that is what
      * it matches on (`UPDATE ... WHERE userID = ?`).
      *
-     * **This method is where that gap bites.** `activity()` takes the account
-     * number as an OPTIONAL third argument, and 279 of the 582 calls under
-     * `web/` leave it out — Auth.php's own 'LoginLocal' line among them,
-     * which runs AFTER $_SESSION holds the account. On such a record the
-     * userID column is empty while the facts written here say
-     * `"userID": <the person>`. An erasure never reaches it, so the person's
-     * address, browser name, headers and account number all survive it.
+     * **THIS METHOD USED TO BE WHERE THAT GAP BIT, AND IT IS NOW CLOSED.**
+     * `activity()` takes the account number as an OPTIONAL third argument,
+     * and roughly half the calls under `web/` leave it out — Auth.php's own
+     * 'LoginLocal' line among them, which runs AFTER $_SESSION holds the
+     * account. Such a record went in with an EMPTY userID column while the
+     * facts written here said `"userID": <the person>`, so an erasure never
+     * reached it and the person's address, browser name, headers and account
+     * number all survived being erased.
      *
-     * So: **issue #626's acceptance criterion is not met**, and saying it is
-     * would be the worst outcome, because an incomplete erasure that looks
-     * complete is what #626 was reported for. Closing it means matching on
-     * something other than the userID column — the fingerprint is the
-     * obvious candidate, with two traps written up in the issue (collect the
-     * fingerprints BEFORE the instruction empties them, and a shared kiosk
-     * means one fingerprint is not proof of one person). That is a decision
-     * for the owner and is not built here.
+     * Since 27 October 2026 `activity()` fills the column from the session
+     * when the caller names nobody, using THIS list's `userID` and nothing
+     * else. So the column and these facts can never disagree about whose
+     * record it is, and one rule — `WHERE userID = ?` — reaches every record
+     * a person has.
      *
-     * The gap is older than #622: the whole-session copy stayed in the same
-     * way, with the person's name and e-mail address in it.
+     * **Records written before that** still have the empty column.
+     * Portal\Core\ActivityLogCleaner fills them in as it walks the log, in
+     * pieces, from the Upgrade page — or, where the account has since been
+     * erased, clears what the record still says about them instead, which
+     * finishes an erasure that could not reach it. Migration 221 is what
+     * sends the cleaner back through the log.
      *
-     * PINNED BY A TEST: section 17 of tools/gdpr-eraser-selftest.php asserts
-     * this gap on purpose, and says so, so that nothing can quietly record it
-     * as correct behaviour again. An earlier draft of that section did
-     * exactly that.
+     * **Do not put the account anywhere but `userID`, and do not make the
+     * column optional again.** Everything that has to find a person's records
+     * reads that column: the erasure, the person's own data download, and the
+     * "filter by person" list on Admin, Activity. The last two were quietly
+     * missing a person's sign-ins for exactly as long as this gap existed.
      *
      * @return array{format: string, signedIn: bool, userID: int|null, organisationID: int|null, waitingForCodeUserID: int|null, kioskUserID: int|null}|null
      */
@@ -357,6 +360,78 @@ class Logger
             $sessionSnap  = $sessionFacts === null ? null : json_encode($sessionFacts);
             if ($sessionSnap === false) {
                 $sessionSnap = null;
+            }
+
+            // 🧍 THE ACCOUNT GOES IN ITS OWN COLUMN, NOT ONLY IN THE FACTS
+            //    (#626, 27 October 2026). This is the whole of the fix; the
+            //    rest of #626 follows from it.
+            //
+            //    WHAT WAS WRONG. `$userId` is an OPTIONAL argument, and
+            //    roughly half the calls to this method under web/ leave it
+            //    out — Auth.php's own 'LoginLocal' line among them, which runs
+            //    AFTER $_SESSION holds the account. Those records went in with
+            //    an EMPTY userID column while the facts written two lines
+            //    above said `"userID": <the person>`. The method had the
+            //    number in its hand and wrote NULL into the column.
+            //
+            //    "Roughly half" rather than a figure, on purpose. Two careful
+            //    counts made on the same day disagreed (550/302/248 against
+            //    551/295/256), because a plain search for the method's name
+            //    also finds it in comments — these comments included. Counting
+            //    it properly means stripping block comments, whole-line `//`
+            //    comments and docblock continuation lines first, then matching
+            //    brackets to find each call's top-level commas. The repository
+            //    rule is that counts are not written down because they go
+            //    stale; count from the code when you need one.
+            //
+            //    WHY THAT MATTERED. An erasure empties a column by matching on
+            //    one: `UPDATE ... WHERE userID = ?`. A record with an empty
+            //    column was never reached, so the person's address, browser
+            //    name, headers, session fingerprint and the facts naming them
+            //    all survived being erased. Two more things were wrong for the
+            //    same reason and nobody had noticed: a person's own data
+            //    download (auth/account/data-export.php) filters on this
+            //    column, so their sign-ins were missing from it; and the
+            //    "filter by person" list on Admin, Activity could not offer
+            //    them either.
+            //
+            //    WHAT IT DOES NOW. When the caller named nobody, the account
+            //    the SESSION says is signed in is used — exactly the value
+            //    `sessionFacts()` has already put in `userID` beside it, so
+            //    the column and the facts can never disagree.
+            //
+            //    WHAT IT DELIBERATELY DOES NOT DO:
+            //    - It never overrides a caller that named somebody. All 303
+            //      such calls pass the ACTOR (`$actorUserID`, `$userId`), so
+            //      this agrees with them rather than changing their meaning,
+            //      and no existing record is re-attributed.
+            //    - It uses ONLY `userID` from the facts.
+            //      `waitingForCodeUserID` is somebody part way through their
+            //      second step, who is not signed in yet.
+            //      `kioskUserID` is **a real member's account**, the one a
+            //      shared kiosk has been handed to by a PIN (see
+            //      sessionFacts() above, and _apps/assets/kiosk-action.php) —
+            //      NOT "the machine's own account", which this comment said
+            //      until the independent check of 27 October 2026 read the
+            //      kiosk code. It is left out all the same, and deliberately:
+            //      a kiosk session outlives the person at it until the idle
+            //      timer clears it, so the account it names is the last
+            //      person to have put their PIN in and not necessarily
+            //      whoever caused this record. Naming them would attribute
+            //      somebody else's action to them, and on an erasure clear
+            //      their details for it.
+            //
+            //      **So a kiosk record still names nobody, and an erasure
+            //      still cannot reach it.** That is a smaller version of the
+            //      gap this change closes, left open on purpose because
+            //      closing it means deciding what a shared device's record
+            //      means — which is the owner's call, not this change's. Do
+            //      not write "one rule now covers every record": it covers
+            //      every record of somebody signed in as themselves.
+            //    - It does nothing when there is no session, so a failed
+            //      sign-in still names nobody.
+            if ($userId === null && $sessionFacts !== null && $sessionFacts['userID'] !== null) {
+                $userId = (int) $sessionFacts['userID'];
             }
 
             // 🌐 Include siteID for multi-site context

@@ -1254,6 +1254,16 @@ if [[ "${P1_220}" != "220 recorded 1 | how far all | backup codes 0 | activity r
 fi
 echo "  ✓ a new database: migration 220 has nothing to do (${P1_220})"
 
+# Migration 221 (#626) on a NEW database: nothing to link. The install script
+# records it, because no record names nobody-with-session-details — there are no
+# records at all. Phase 7 runs the other side of that test.
+P1_221="$(mysql_q "SELECT CONCAT('221 recorded ', (SELECT COUNT(*) FROM tblMigrations WHERE filename = '221_activity_log_account_column.sql'), ' | how far ', COALESCE((SELECT settingValue FROM tblSettings WHERE settingKey = 'activityLog.cleanedThrough' AND siteID IS NULL), '(no row)'));")"
+if [[ "${P1_221}" != "221 recorded 1 | how far all" ]]; then
+    echo "✗ a NEW database must end with migration 221 recorded and the cleaner's mark left at \"all\": there is nothing to link. Found: ${P1_221}" >&2
+    exit 1
+fi
+echo "  ✓ a new database: migration 221 has nothing to link (${P1_221})"
+
 P1_TABLES=$(count_tables)
 P1_COLUMNS=$(count_columns)
 P1_INDEXES=$(count_indexes)
@@ -1723,6 +1733,16 @@ phase7_codes_state() {
                  ' | how far ', COALESCE((SELECT settingValue FROM tblSettings WHERE settingKey = 'activityLog.cleanedThrough' AND siteID IS NULL), '(no row)'));"
 }
 
+# Migration 221's side of the phase (#626), as one line: whether the migration
+# is recorded, how many records name nobody while still holding session details
+# (the ones an erasure cannot reach), and where the cleaner's mark stands.
+phase7_link_state() {
+    mysql_q "SELECT CONCAT(
+                 '221 recorded ', (SELECT COUNT(*) FROM tblMigrations WHERE filename = '221_activity_log_account_column.sql'),
+                 ' | records naming nobody ', (SELECT COUNT(*) FROM tblActivityLogs WHERE userID IS NULL AND sessionDataSnapshot IS NOT NULL AND sessionDataSnapshot <> ''),
+                 ' | how far ', COALESCE((SELECT settingValue FROM tblSettings WHERE settingKey = 'activityLog.cleanedThrough' AND siteID IS NULL), '(no row)'));"
+}
+
 phase7_installer_carry_on_over_an_older_database() {
     echo
     echo "═════ Phase 7: the installer's \"carry on\" over an older database whose two time-zone places differ ═════"
@@ -1766,6 +1786,20 @@ phase7_installer_carry_on_over_an_older_database() {
         echo "✗ phase 7 FAILED — the older database's two time-zone places could not be set apart" >&2
         return 1
     fi
+    # And for migration 221 (#626): a record of a signed-in person that names
+    # NOBODY in its own column, which is how the portal wrote an ordinary
+    # sign-in record until 27 October 2026. The install script must NOT record
+    # 221 over such a database, and the migration must send the cleaner back
+    # through the log by putting its mark at the start.
+    #
+    # Its session mark is a FINGERPRINT, not a raw identifier, on purpose: this
+    # record stands for one written AFTER #622 (so its session details are
+    # already in the named-facts shape) that merely lacks the account column.
+    # Written with a raw identifier it also counted towards migration 220's
+    # "activity records with an identifier", which this phase pins at 2, and
+    # phase 7 failed saying the database was not the one it was about. Do not
+    # change it back.
+    #
     # And for migration 220 (#622): an account with two backup codes, two
     # activity records and one consent row, each holding a session identifier
     # as the portal stored it before, and the log holding a copy of a session.
@@ -1775,11 +1809,20 @@ phase7_installer_carry_on_over_an_older_database() {
                   INSERT INTO tblActivityLogs (userID, activityType, activityDescription, sessionID, sessionDataSnapshot) VALUES
                       (@p7user, 'E2eOld', 'e2e old record one', '0123456789abcdef0123456789abcdef', '{\"user_id\":1,\"totp_backup_codes\":[\"AAAA1111\"]}'),
                       (@p7user, 'E2eOld', 'e2e old record two', '0123456789abcdef0123456789abcdef', '{\"user_id\":1}');
-                  INSERT INTO tblConsentLog (siteID, sessionID, consentType, decision) VALUES (1, 'fedcba9876543210fedcba9876543210', 'cookies', 'accept');" >/dev/null; then
+                  INSERT INTO tblConsentLog (siteID, sessionID, consentType, decision) VALUES (1, 'fedcba9876543210fedcba9876543210', 'cookies', 'accept');
+                  INSERT INTO tblActivityLogs (userID, activityType, activityDescription, sessionID, visitorIP, userAgent, sessionDataSnapshot) VALUES
+                      (NULL, 'E2eOldSignIn', 'e2e a sign-in that named nobody', CONCAT('sha256:', REPEAT('c', 64)), '203.0.113.5', 'e2e-agent', CONCAT('{\"format\":\"facts-1\",\"signedIn\":true,\"userID\":', @p7user, ',\"organisationID\":1}'));" >/dev/null; then
         echo "✗ phase 7 FAILED — the older database could not be given its old backup codes and activity records" >&2
         return 1
     fi
     local before after again
+    local link_before link_after
+    link_before="$(phase7_link_state)" || return 1
+    echo "  the older database: ${link_before}"
+    if [[ "${link_before}" != "221 recorded 0 | records naming nobody 1 | how far (no row)" ]]; then
+        echo "✗ phase 7 FAILED — the older database is not the one this phase is about for migration 221 (it must hold a record that names nobody and no record of the migration). Nothing was proved." >&2
+        return 1
+    fi
     local log_before log_after log_again
     log_before="$(phase7_log_state)" || return 1
     echo "  the older database: ${log_before}"
@@ -1814,13 +1857,28 @@ phase7_installer_carry_on_over_an_older_database() {
     echo "  ✓ each organisation's row holds the zone its pages were showing; the old setting and the old column are gone; the mark is there"
     log_after="$(phase7_log_state)" || return 1
     echo "  afterwards:         ${log_after}"
-    if [[ "${log_after}" != "backup codes 0 | 220 recorded 1 | consent identifiers 0 | activity records with an identifier 2 | how far (no row)" ]]; then
+    # "how far 0" since migration 221 (#626), and NOT "(no row)" as it was
+    # until 27 October 2026: 221 writes that row with 0 where anything needs
+    # linking, which means "the cleaner starts at the beginning". What this
+    # check has always been about is that it must not say "all" over a log that
+    # holds old records, and 0 is the opposite of "all". If this line ever
+    # reads "all" here, the fault 220's message below describes is back.
+    if [[ "${log_after}" != "backup codes 0 | 220 recorded 1 | consent identifiers 0 | activity records with an identifier 2 | how far 0" ]]; then
         echo "✗ phase 7 FAILED — after the installer's \"carry on\", every old backup code must be gone, migration 220 recorded, the consent row a fingerprint, and the activity log NOT marked as clean (its two old records wait for the cleaner). Found: ${log_after}" >&2
         echo "    If the backup codes are still there, the install script recorded migration 220 before it ran, and the migration took the database for already done." >&2
         echo "    If \"how far\" says all, the install script marked a log that holds old records as clean, and nobody would ever be asked to clean it." >&2
         return 1
     fi
     echo "  ✓ every old backup code is gone, migration 220 is recorded, and the old activity records are left for the cleaner, not marked as clean"
+    # Migration 221's side: recorded, and the cleaner sent back to the start.
+    link_after="$(phase7_link_state)" || return 1
+    echo "  afterwards:         ${link_after}"
+    if [[ "${link_after}" != "221 recorded 1 | records naming nobody 1 | how far 0" ]]; then
+        echo "✗ phase 7 FAILED — after the installer's \"carry on\", migration 221 must be recorded AND the cleaner's mark must be back at 0, so it goes through the log and gives that record the account its session details name. Found: ${link_after}" >&2
+        echo "    If \"how far\" is still (no row) or says all, the install script recorded 221 over a database that HAS something to link, so the reset never happened and an erasure can never reach that record." >&2
+        return 1
+    fi
+    echo "  ✓ migration 221 is recorded and the cleaner has been sent back through the log (${link_after})"
     # Somebody makes a new set of backup codes after the upgrade.
     if ! mysql_q "INSERT INTO tblTotpBackupCodes (userID, codeHash) SELECT userID, 'e2e a code made after the upgrade' FROM tblUsers WHERE emailAddress = 'e2e-phase7@example.test';" >/dev/null; then
         echo "✗ phase 7 FAILED — a backup code could not be added after the carry-on" >&2

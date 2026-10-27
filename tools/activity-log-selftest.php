@@ -110,7 +110,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 77;
+const EXPECTED_CHECKS = 91;
 
 function refuse(string $why): never
 {
@@ -147,12 +147,16 @@ if ($port < 1024 || $port > 65535) {
 // The portal's own code, called directly where a page is not the point:
 // the cleaner piece by piece, the migration runner, the backup, a six-digit
 // code. Each file is a class and nothing else.
-foreach (['Logger', 'ActivityLogCleaner', 'Migrator', 'DbBackup', 'Totp'] as $class) {
+// (#626 added Site and GdprEraser: Logger::activity() asks Site which
+// organisation the request is in, and the new block needs the ONE definition
+// of "this account has been emptied by an erasure" rather than a copy of it.)
+foreach (['Logger', 'ActivityLogCleaner', 'Migrator', 'DbBackup', 'Totp', 'Site', 'GdprEraser'] as $class) {
     require $webSrc . $sep . '_core' . $sep . $class . '.php';
 }
 
 use Portal\Core\ActivityLogCleaner;
 use Portal\Core\DbBackup;
+use Portal\Core\GdprEraser;   // #626: TOMBSTONE_NAME, to make an account look erased
 use Portal\Core\Logger;
 use Portal\Core\Migrator;
 use Portal\Core\Totp;
@@ -970,10 +974,11 @@ ok(
 );
 $meanwhile = part($pressed['body'], 'upgrade-old-records-meanwhile');
 ok(
-    'and it says plainly what is true meanwhile: new records are safe, the old backup codes are gone, an old record still holds an identifier that may be in use and perhaps an authenticator key, so finish today',
+    'and it says plainly what is true meanwhile: new records are safe, the old backup codes are gone, an older record still holds an identifier that may be in use and perhaps an authenticator key, AND a newer one does not yet say whose it is — so erasing that person would not reach it. (That last part was missing until 27 October 2026: the page described only the older job, so after migration 221 re-armed the walk it was telling administrators something untrue about what was waiting, and gave them no reason to press the button again.)',
     str_contains($meanwhile, 'every record the portal writes now is already safe') === true && str_contains($meanwhile, 'backup codes made before this version are already gone') === true
         && str_contains($meanwhile, 'session identifier, which may still be in use') === true && str_contains($meanwhile, 'authenticator key in readable text') === true
-        && str_contains($meanwhile, 'finish this today') === true && str_contains($meanwhile, 'portal stays open') === true,
+        && str_contains($meanwhile, 'does not yet say whose it is') === true && str_contains($meanwhile, 'would not') === true
+        && str_contains($meanwhile, 'reach it') === true && str_contains($meanwhile, 'portal stays open') === true,
     $meanwhile
 );
 $leftBefore = (int) ActivityLogCleaner::left($db);
@@ -1692,6 +1697,165 @@ ok(
 
 // =============================================================================
 // 🧹 Clean-up and result
+// =============================================================================
+head('#626 — every record of a signed-in person names them in its own column');
+// =============================================================================
+// WHY THIS MATTERS. An erasure finds a person's records by ONE column,
+// `userID`. Logger::activity() takes the account number as an optional
+// argument and roughly half its callers under web/ leave it out — the line that
+// records an ordinary password sign-in among them, which runs AFTER the
+// session holds the account. Those records went in with an EMPTY column while
+// the facts beside them named the person, so an erasure went straight past
+// them, and they were missing from the person's own data download and from the
+// "filter by person" list as well.
+//
+// The answer was NOT to make the erasure guess from the session fingerprint: a
+// shared machine means one fingerprint is not proof of one person. The record
+// simply has to name its person, so that is what is checked here.
+$GLOBALS['mysqli'] = $db;
+$write = static function (array $session, ?int $passed, string $type): ?array {
+    $_SESSION = $session;
+    Logger::activity($type, AGENT . ' #626', $passed);
+    return one('SELECT userID, sessionDataSnapshot FROM tblActivityLogs WHERE activityType = ? ORDER BY logID DESC LIMIT 1', 's', [$type]);
+};
+$signedIn = ['user_id' => PEOPLE['member'], 'site_id' => 1];
+
+$r = $write($signedIn, null, 'Al626NoNumber');
+ok('THE LOGGER FILLS THE COLUMN when the caller names nobody: the record holds the account the session says is signed in, which is the one case that used to leave it empty',
+    is_array($r) === true && (int) $r['userID'] === PEOPLE['member'], json_encode($r));
+
+$r = $write($signedIn, PEOPLE['admin'], 'Al626Explicit');
+ok('…and it NEVER overrides a caller that named somebody: 303 calls pass an account on purpose, and an explicit number is kept even when the session says somebody else',
+    is_array($r) === true && (int) $r['userID'] === PEOPLE['admin'], json_encode($r));
+
+$r = $write(['2fa_user_id' => PEOPLE['keyed'], 'site_id' => 1], null, 'Al626Pending');
+ok('…and an account part way through its SECOND STEP names nobody: it is not signed in yet, so attributing the record to it would name the wrong person — and on an erasure clear the wrong person\'s details',
+    is_array($r) === true && $r['userID'] === null, json_encode($r));
+
+$r = $write(['kiosk_user_id' => PEOPLE['admin'], 'site_id' => 1], null, 'Al626Kiosk');
+ok('…and a KIOSK session names nobody either. That account is a REAL MEMBER\'s — the one the kiosk was handed to by a PIN — not the machine\'s, as this check wrongly said until 27 October 2026. It is left out because a kiosk session outlives the person at it, so naming them could blame them for somebody else\'s action',
+    is_array($r) === true && $r['userID'] === null, json_encode($r));
+
+$_SESSION = [];
+$r = $write([], null, 'Al626NoSession');
+ok('…and with no session at all it still names nobody, so a failed sign-in is not attributed to anybody',
+    is_array($r) === true && $r['userID'] === null, json_encode($r));
+
+// ───── Records written BEFORE that fix: the cleaner brings them into line ────
+// Four shapes, planted as the portal really wrote them, with the cleaner's
+// "how far" mark put back so it goes through them.
+$plant = static function (?int $userId, ?string $copy, string $type) use ($db): int {
+    q('INSERT INTO tblActivityLogs (siteID, userID, activityType, activityDescription, sessionID, visitorIP, userAgent, requestHeaders, sessionDataSnapshot) '
+        . 'VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)', 'isssssss',
+        [$userId, $type, AGENT . ' #626 old', 'sha256:' . str_repeat('b', 64), '203.0.113.77', AGENT, '{"Accept-Language":"en-GB"}', $copy]);
+    return (int) $db->insert_id;
+};
+$newFacts = static fn (int $who): string => '{"format":"facts-1","signedIn":true,"userID":' . $who . ',"organisationID":1,"waitingForCodeUserID":null,"kioskUserID":null}';
+
+$oldNew   = $plant(null, $newFacts(PEOPLE['member']), 'Al626OldNewFacts');
+$oldWhole = $plant(null, '{"user_id":' . PEOPLE['second'] . ',"site_id":1,"csrf_token":"xyz"}', 'Al626OldWholeCopy');
+$oldNamed = $plant(PEOPLE['admin'], $newFacts(PEOPLE['admin']), 'Al626OldAlreadyNamed');
+// A person who has already been erased: their account carries the three marks
+// GdprEraser::emptiedAccountSql() looks for. Re-linking their records would
+// UNDO the erasure, so the cleaner must clear what the record says instead.
+q('UPDATE tblUsers SET isActive = 0, fullName = ?, emailAddress = ? WHERE userID = ?', 'ssi',
+    [GdprEraser::TOMBSTONE_NAME, 'deleted-99626@example.invalid', PEOPLE['codesonly']]);
+$oldErased = $plant(null, $newFacts(PEOPLE['codesonly']), 'Al626OldErasedPerson');
+
+setting(ActivityLogCleaner::THROUGH_KEY, '0');
+$linkRun = ActivityLogCleaner::run($db);
+$row     = static fn (int $id): ?array => one('SELECT userID, sessionID, visitorIP, userAgent, requestHeaders, sessionDataSnapshot FROM tblActivityLogs WHERE logID = ?', 'i', [$id]);
+
+$a = $row($oldNew);
+ok('AN OLDER RECORD IS GIVEN THE ACCOUNT ITS FACTS NAME, so an erasure can now reach it — and nothing else about the record is disturbed',
+    is_array($a) === true && (int) $a['userID'] === PEOPLE['member'] && $a['visitorIP'] === '203.0.113.77',
+    json_encode(['row' => $a, 'the run' => $linkRun]));
+
+$b = $row($oldWhole);
+ok('…and so is one whose session copy is in the OLD whole-session shape (`user_id`), which only works because the linking happens in the same piece BEFORE that copy is blanked — the other way round the evidence is gone for ever',
+    is_array($b) === true && (int) $b['userID'] === PEOPLE['second'] && $b['sessionDataSnapshot'] === null,
+    json_encode($b));
+
+$c = $row($oldNamed);
+ok('…while a record that ALREADY names somebody is left alone: a filled column is somebody\'s considered answer',
+    is_array($c) === true && (int) $c['userID'] === PEOPLE['admin'], json_encode($c));
+
+$d = $row($oldErased);
+ok('AND A RECORD OF AN ALREADY-ERASED PERSON IS CLEARED, NOT LINKED: the address, the browser name, the headers and the session details go, and the column stays empty. Linking it would have UNDONE their erasure, which is the one way this step could do real harm',
+    is_array($d) === true && $d['userID'] === null && $d['visitorIP'] === null && $d['userAgent'] === null
+        && $d['requestHeaders'] === null && $d['sessionDataSnapshot'] === null && $d['sessionID'] === null,
+    json_encode($d));
+
+ok('…and the run says what it did, in words an administrator can act on: how many were given their account and how many were cleared instead',
+    (int) ($linkRun['linked'] ?? -1) >= 2 && (int) ($linkRun['cleared'] ?? -1) >= 1
+        && str_contains(ActivityLogCleaner::inWords($linkRun), 'given the account they belong to') === true
+        && str_contains(ActivityLogCleaner::inWords($linkRun), 'has been erased') === true,
+    json_encode(['counts' => ['linked' => $linkRun['linked'] ?? null, 'cleared' => $linkRun['cleared'] ?? null], 'words' => ActivityLogCleaner::inWords($linkRun)]));
+
+
+// ───── The cleaner's side of the same two rules, which nothing covered ─────
+// The two checks above exercise the LOGGER only. The independent check of
+// 27 October 2026 made ActivityLogCleaner::accountInCopy() fall back to
+// kioskUserID and 2fa_user_id and every check still passed, so the cleaner
+// could have been given the opposite rule without anybody noticing.
+$kioskOnly = $plant(null, '{"format":"facts-1","signedIn":false,"userID":null,"organisationID":1,"waitingForCodeUserID":null,"kioskUserID":' . PEOPLE['member'] . '}', 'Al626OldKiosk');
+$pendOnly  = $plant(null, '{"format":"facts-1","signedIn":false,"userID":null,"organisationID":1,"waitingForCodeUserID":' . PEOPLE['member'] . ',"kioskUserID":null}', 'Al626OldPending');
+// A copy cut short, which is the only thing the pattern-matching branch of
+// accountInCopy() is for. Nothing reached that branch before.
+$cutCopy   = $plant(null, '{"user_id":' . PEOPLE['member'] . ',"site_id":1,"csrf_to', 'Al626OldCutShort');
+
+setting(ActivityLogCleaner::THROUGH_KEY, '0');
+$secondRun = ActivityLogCleaner::run($db);
+
+$k = $row($kioskOnly);
+$g = $row($pendOnly);
+ok('THE CLEANER OBEYS THE SAME TWO RULES AS THE LOGGER: a record whose session names a member only as a KIOSK account, and one naming somebody only part way through their SECOND STEP, are both left naming nobody — not linked from those numbers',
+    is_array($k) === true && $k['userID'] === null && is_array($g) === true && $g['userID'] === null,
+    json_encode(['kiosk' => $k, 'second step' => $g]));
+
+$c = $row($cutCopy);
+ok('…and a session copy CUT SHORT is still read: the account comes out of the text by pattern where it is not well-formed, which is the branch nothing exercised before',
+    is_array($c) === true && (int) $c['userID'] === PEOPLE['member'], json_encode($c));
+
+// ───── Migration 221 on the database it was really written for ─────
+// Every installation that finished the #622 cleaning ALREADY HOLDS the mark,
+// so the live path is the "row exists" one. Phase 7 of the migration harness
+// has no such row, and this test had been setting the mark by hand — so the
+// one thing migration 221 does was covered nowhere. The independent check
+// changed its `ON DUPLICATE KEY UPDATE` to leave the mark alone and the whole
+// harness still passed: the erasure gap would then have stayed open for ever.
+q("DELETE FROM tblMigrations WHERE filename = '221_activity_log_account_column.sql'");
+setting(ActivityLogCleaner::THROUGH_KEY, ActivityLogCleaner::DONE);
+$needsLinking = $plant(null, $newFacts(PEOPLE['member']), 'Al626For221');
+$sql221 = (string) file_get_contents($webSrc . $sep . '_sql' . $sep . '221_activity_log_account_column.sql');
+if ($db->multi_query($sql221) === true) {
+    while ($db->more_results() === true && $db->next_result() === true) {
+        // each statement's result thrown away; only the rows it left matter
+    }
+}
+ok('MIGRATION 221 PUTS THE MARK BACK even where one is already there saying the log is clean: an installation that finished the earlier cleaning is exactly the one that needs going through again, and the mark is the only thing that sends it',
+    stored(ActivityLogCleaner::THROUGH_KEY) === '0'
+        && (int) one("SELECT COUNT(*) AS n FROM tblMigrations WHERE filename = '221_activity_log_account_column.sql'")['n'] === 1
+        && (int) one("SELECT COUNT(*) AS n FROM tblSettings WHERE settingKey = ? AND siteID IS NULL", 's', [ActivityLogCleaner::THROUGH_KEY])['n'] === 1,
+    'how far: ' . json_encode(stored(ActivityLogCleaner::THROUGH_KEY)));
+
+// …and run twice it must NOT send an administrator back to the beginning.
+setting(ActivityLogCleaner::THROUGH_KEY, ActivityLogCleaner::DONE);
+if ($db->multi_query($sql221) === true) {
+    while ($db->more_results() === true && $db->next_result() === true) {
+        // as above
+    }
+}
+ok('…and run a SECOND time it changes nothing, so somebody who has since finished the cleaning is not sent back to the start of it',
+    stored(ActivityLogCleaner::THROUGH_KEY) === ActivityLogCleaner::DONE,
+    'how far: ' . json_encode(stored(ActivityLogCleaner::THROUGH_KEY)));
+
+q('DELETE FROM tblActivityLogs WHERE logID = ?', 'i', [$needsLinking]);
+setting(ActivityLogCleaner::THROUGH_KEY, ActivityLogCleaner::DONE);
+
+q('UPDATE tblUsers SET isActive = 1, fullName = ?, emailAddress = ? WHERE userID = ?', 'ssi',
+    ['Codes Only', login('codesonly') . '@selftest.invalid', PEOPLE['codesonly']]);
+
 // =============================================================================
 $serverErrors = (string) @file_get_contents($child . $sep . 'php-errors.log');
 ok('the portal wrote nothing to PHP\'s own error log during the run, apart from the one stop this test planted', trim((string) preg_replace('/^.*ActivityLogCleaner stopped:.*planted by the activity log self-test.*$/m', '', $serverErrors)) === '', substr($serverErrors, 0, 600));

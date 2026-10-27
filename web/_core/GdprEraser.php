@@ -765,30 +765,38 @@ class GdprEraser
             //    person's number are changed; a row about somebody else is
             //    not read.
             //
-            //    ⚠️ WHAT THIS DOES NOT REACH, AND SO #626 IS NOT CLOSED BY IT.
-            //    An instruction matches ONE COLUMN: here `userID`. But
-            //    Logger::activity() takes the account number as an OPTIONAL
-            //    third argument, and 279 of the 582 calls under web/ leave it
-            //    out — including Auth.php's own 'LoginLocal' line, which runs
-            //    after the session already holds the account. Those records
-            //    have an EMPTY userID column and session facts that say
-            //    `"userID": <the person>`, beside their address, browser name,
-            //    headers and fingerprint. **An erasure never reaches them.**
+            //    WHY THIS IS ENOUGH, AND WHAT HAD TO BE FIXED ELSEWHERE TO
+            //    MAKE IT SO. An instruction matches ONE COLUMN: here `userID`.
+            //    That was not enough when this was first written, because
+            //    Logger::activity() took the account number as an OPTIONAL
+            //    argument and roughly half its callers left it out — including
+            //    Auth.php's 'LoginLocal' line, which runs after the session
+            //    already holds the account. Those records had an EMPTY userID
+            //    column and session facts saying `"userID": <the person>`, so
+            //    an erasure went straight past them.
             //
-            //    So do not read this instruction as "the activity log is
-            //    dealt with". It deals with the records that name the person
-            //    in the column; the ordinary sign-in record is not one of
-            //    them. Closing the rest means matching on something else —
-            //    the fingerprint is the candidate — and that carries two
-            //    traps: the fingerprints must be collected BEFORE this
-            //    instruction empties them, and a shared kiosk means one
-            //    fingerprint is not proof of one person, which is exactly how
-            //    this eraser has wiped other people's records before. It is
-            //    the owner's decision and is written up on #626.
+            //    The answer was NOT to make the erasure chase them. Matching
+            //    on the session fingerprint would have meant guessing, and a
+            //    shared machine means one fingerprint is not proof of one
+            //    person — which is exactly how this eraser has wiped other
+            //    people's records before. The fault was that the record did
+            //    not name its person, so that is what was fixed:
+            //    Logger::activity() now fills the column from the session,
+            //    and ActivityLogCleaner brings older records into line (or
+            //    clears them, where the person has already been erased).
             //
-            //    Section 17 of tools/gdpr-eraser-selftest.php pins the gap
-            //    with a check that ASSERTS it, so nobody can record it as
-            //    correct behaviour. An earlier draft of that section did.
+            //    So one rule covers every record of somebody signed in as
+            //    themselves, and this instruction is the whole of it. **If
+            //    you are tempted to add a second way of finding a person's
+            //    activity records, the fault is almost certainly that
+            //    something wrote a record without naming them — fix that
+            //    instead.**
+            //
+            //    ONE KIND IS STILL NOT REACHED: a record made at a shared
+            //    kiosk. Its session names the member by `kioskUserID` and
+            //    nothing fills the column from that, because a kiosk session
+            //    outlives the person at it. What a shared device's record
+            //    means is the owner's decision; see Logger::activity().
             //
             //    THE ONE THING THIS COSTS, said plainly. The monthly sign-ins
             //    figure (admin/reports/data.php) links a password sign-in to

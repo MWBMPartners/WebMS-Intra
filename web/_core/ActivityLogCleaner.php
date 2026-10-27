@@ -166,7 +166,7 @@ final class ActivityLogCleaner
     public static function run(mysqli $db, float $budgetSeconds = self::BUDGET_SECONDS): array
     {
         $out = ['ran' => false, 'busy' => false, 'finished' => false, 'pieces' => 0, 'cleaned' => 0, 'left' => null,
-            'keyLines' => 0, 'keysWithoutAccount' => 0, 'slowestPiece' => 0.0, 'error' => ''];
+            'keyLines' => 0, 'keysWithoutAccount' => 0, 'linked' => 0, 'cleared' => 0, 'slowestPiece' => 0.0, 'error' => ''];
         $locked = false;
         try {
             $got    = $db->query('SELECT GET_LOCK(' . self::LOCK_SQL . ', 0) AS got')->fetch_assoc();
@@ -187,6 +187,8 @@ final class ActivityLogCleaner
                 $out['cleaned']            += $piece['cleaned'];
                 $out['keyLines']           += $piece['keyLines'];
                 $out['keysWithoutAccount'] += $piece['keysWithoutAccount'];
+                $out['linked']             += $piece['linked'];
+                $out['cleared']            += $piece['cleared'];
                 $out['finished']            = $piece['finished'];
             } while ($out['finished'] === false && (microtime(true) - $started) < $budgetSeconds);
         } catch (Throwable $e) {
@@ -313,6 +315,23 @@ final class ActivityLogCleaner
                 . ' found whose old records held a readable authenticator key; each now has a record saying so (Admin, Activity Log, type '
                 . self::KEY_LINE_TYPE . ').';
         }
+        // #626: said separately from "cleaned", because these are two
+        // different things happening to a record and an administrator reading
+        // this needs to be able to tell them apart.
+        $linked = (int) ($result['linked'] ?? 0);
+        if ($linked > 0) {
+            $words .= ' ' . ($linked === 1 ? '1 record was' : number_format($linked) . ' records were')
+                . ' given the account they belong to, which had been kept only in the record\'s session details.'
+                . ' Until now an erasure could not reach those records, and they were missing from the person\'s own'
+                . ' data download and from the "filter by person" list.';
+        }
+        $cleared = (int) ($result['cleared'] ?? 0);
+        if ($cleared > 0) {
+            $words .= ' ' . ($cleared === 1 ? '1 record belonged' : number_format($cleared) . ' records belonged')
+                . ' to an account that has been erased, or is no longer there, so the address, the browser name, the'
+                . ' headers and the session details were removed from '
+                . ($cleared === 1 ? 'it' : 'them') . ' instead. That finishes what those erasures could not reach.';
+        }
         $nameless = (int) ($result['keysWithoutAccount'] ?? 0);
         if ($nameless > 0) {
             $words .= ' ' . ($nameless === 1 ? '1 old record' : $nameless . ' old records')
@@ -356,7 +375,7 @@ final class ActivityLogCleaner
      */
     private static function onePiece(mysqli $db): array
     {
-        $out = ['finished' => false, 'cleaned' => 0, 'keyLines' => 0, 'keysWithoutAccount' => 0];
+        $out = ['finished' => false, 'cleaned' => 0, 'keyLines' => 0, 'keysWithoutAccount' => 0, 'linked' => 0, 'cleared' => 0];
 
         // The "how far" row has to exist before it can be taken for writing.
         // Made outside the transaction, and never changed if it is there.
@@ -409,6 +428,15 @@ final class ActivityLogCleaner
             $keys = self::recordKeys($db, $from, $to);
             $out['keyLines']           = $keys['lines'];
             $out['keysWithoutAccount'] = $keys['nameless'];
+
+            // 2b. 🧍 PUT THE ACCOUNT IN ITS OWN COLUMN, OR CLEAR THE ROW
+            //     (#626, 27 October 2026). MUST run before step 3, which
+            //     blanks every old session copy — and the old copy is the only
+            //     place a pre-#622 record says whose session it was. Done the
+            //     other way round, the chance is gone for ever.
+            $links = self::linkAccounts($db, $from, $to);
+            $out['linked']  = $links['linked'];
+            $out['cleared'] = $links['cleared'];
 
             // 3. Fingerprint and blank. Each CASE leaves a value already in
             //    the new form exactly as it is; the WHERE keeps such a record
@@ -559,6 +587,174 @@ final class ActivityLogCleaner
         }
 
         return ($recordAccount !== null && $recordAccount > 0) ? $recordAccount : 0;
+    }
+
+    /**
+     * 🧍 Step 2b of a piece: give each record of a signed-in person the account
+     *     number in its OWN column, or — where that account has been erased or
+     *     is gone — clear what the record still says about them.
+     *
+     * WHY THIS EXISTS (#626). An erasure empties a column by matching on one:
+     * `UPDATE ... WHERE userID = ?`. Until 27 October 2026 `Logger::activity()`
+     * wrote NULL into `userID` whenever the caller named nobody — roughly half its
+     * callers — while the session facts beside it said who the person was.
+     * An erasure never reached those records, so the address, the browser
+     * name, the headers, the fingerprint and the facts all survived it. The
+     * logger now fills the column; this brings the records already written
+     * into line, so that one rule covers every record of somebody signed in
+     * as themselves. (Not "every record there is": see the kiosk note below.)
+     *
+     * TWO ANSWERS, AND THE SECOND IS THE ONE THAT NEEDS CARE:
+     *
+     *   - the account is a real one that has NOT been erased -> put its number
+     *     in the column. The record is now reachable by an erasure, by the
+     *     person's own data download, and by the "filter by person" list.
+     *   - the account has been ERASED, or is not there at all -> clear the
+     *     address, the browser name, the headers, the fingerprint and the
+     *     facts, and leave the column empty.
+     *
+     * **Filling the column for an erased person would UNDO their erasure**, by
+     * tying records back to them that an erasure had been asked to let go of.
+     * It is the one way this method could do real harm, so the test for it is
+     * the one definition the whole portal uses, GdprEraser::emptiedAccountSql().
+     * Clearing instead finishes the job their erasure could not reach — which
+     * is the honest outcome, and the reason this is not simply a backfill.
+     *
+     * WHAT IT NEVER DOES. It never changes a record that already names
+     * somebody: a filled column is somebody's considered answer, and about
+     * half the callers pass one. It never reads an account out of
+     * `waitingForCodeUserID` (somebody part way through their second step,
+     * not signed in yet) or `kioskUserID` — which is **a real member's
+     * account**, the one a shared kiosk has been handed to by a PIN, not
+     * "the machine's own account" as an earlier version of this said. It is
+     * left out because a kiosk session outlives the person at it until the
+     * idle timer clears it, so naming that account could attribute somebody
+     * else's action to them and, on an erasure, clear their details for it.
+     * A kiosk record therefore still names nobody and an erasure still
+     * cannot reach it: the same gap in miniature, left open on purpose
+     * because what a shared device's record means is the owner's decision.
+     * Logger::activity() leaves it out for the same reason, and the two must
+     * stay in step.
+     *
+     * WHY THE ROWS ARE READ INTO PHP rather than matched in SQL: the same
+     * reason recordKeys() gives. A session copy may not be well-formed, and a
+     * database cannot be trusted to read text that may not be. A piece is
+     * bounded (PIECE rows), so the cost is bounded with it.
+     *
+     * Runs inside the piece's transaction, so it is kept or undone with it.
+     *
+     * @return array{linked: int, cleared: int}
+     */
+    private static function linkAccounts(mysqli $db, int $from, int $to): array
+    {
+        $out = ['linked' => 0, 'cleared' => 0];
+
+        // Only records that name nobody and still say something about a
+        // session. Both shapes of copy are read: the new named facts, and the
+        // old whole-session copy that step 3 is about to blank.
+        $stmt = $db->prepare(
+            'SELECT logID, sessionDataSnapshot FROM tblActivityLogs '
+            . 'WHERE logID BETWEEN ? AND ? AND userID IS NULL '
+            . "AND sessionDataSnapshot IS NOT NULL AND sessionDataSnapshot <> ''"
+        );
+        $stmt->bind_param('ii', $from, $to);
+        $stmt->execute();
+        $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        if ($rows === []) {
+            return $out;
+        }
+
+        // logID => the account its copy names.
+        $whose = [];
+        foreach ($rows as $row) {
+            $account = self::accountInCopy((string) $row['sessionDataSnapshot']);
+            if ($account !== null) {
+                $whose[(int) $row['logID']] = $account;
+            }
+        }
+        if ($whose === []) {
+            return $out;
+        }
+
+        // Which of those accounts may be named: it exists AND an erasure has
+        // not emptied it. Asked once for the whole piece.
+        $numbers  = array_values(array_unique($whose));
+        $holes    = implode(', ', array_fill(0, count($numbers), '?'));
+        $nameable = [];
+        $stmt     = $db->prepare(
+            'SELECT userID FROM tblUsers u WHERE userID IN (' . $holes . ') '
+            . 'AND NOT (' . GdprEraser::emptiedAccountSql('u') . ')'
+        );
+        $stmt->bind_param(str_repeat('i', count($numbers)), ...$numbers);
+        $stmt->execute();
+        foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+            $nameable[(int) $row['userID']] = true;
+        }
+        $stmt->close();
+
+        // The records to fill, grouped by account, and the ones to clear.
+        $fill  = []; // account => logIDs
+        $clear = [];
+        foreach ($whose as $logId => $account) {
+            if (isset($nameable[$account]) === true) {
+                $fill[$account][] = $logId;
+                continue;
+            }
+            $clear[] = $logId;
+        }
+
+        foreach ($fill as $account => $logIds) {
+            $holes = implode(', ', array_fill(0, count($logIds), '?'));
+            $stmt  = $db->prepare('UPDATE tblActivityLogs SET userID = ? WHERE userID IS NULL AND logID IN (' . $holes . ')');
+            $values = array_merge([(int) $account], $logIds);
+            $stmt->bind_param(str_repeat('i', count($values)), ...$values);
+            $stmt->execute();
+            $out['linked'] += max(0, (int) $stmt->affected_rows);
+            $stmt->close();
+        }
+
+        if ($clear !== []) {
+            $holes = implode(', ', array_fill(0, count($clear), '?'));
+            $stmt  = $db->prepare(
+                'UPDATE tblActivityLogs SET sessionID = NULL, visitorIP = NULL, userAgent = NULL, '
+                . 'requestHeaders = NULL, sessionDataSnapshot = NULL '
+                . 'WHERE userID IS NULL AND logID IN (' . $holes . ')'
+            );
+            $stmt->bind_param(str_repeat('i', count($clear)), ...$clear);
+            $stmt->execute();
+            $out['cleared'] += max(0, (int) $stmt->affected_rows);
+            $stmt->close();
+        }
+
+        return $out;
+    }
+
+    /**
+     * The account a session copy says was signed in, in either shape, or null.
+     *
+     * The new named facts call it `userID` (Logger::sessionFacts()); the old
+     * whole-session copy called it `user_id`, which is the session key itself.
+     * **Only those two.** `waitingForCodeUserID` / `2fa_user_id` is somebody
+     * part way through their second step, and `kioskUserID` / `kiosk_user_id`
+     * is the machine's own account: neither is "this record is that person's".
+     *
+     * A copy that is not well-formed is read with a pattern instead, as
+     * accountOfReadableKey() does and for the same reason.
+     */
+    private static function accountInCopy(string $copy): ?int
+    {
+        $session = json_decode($copy, true);
+        if (is_array($session) === true) {
+            $whose = $session['userID'] ?? $session['user_id'] ?? null;
+        } else {
+            $whose = preg_match('/"user_?ID"\s*:\s*"?([0-9]{1,10})"?[,}]/i', $copy, $m) === 1 ? $m[1] : null;
+        }
+        if ((is_int($whose) === true || (is_string($whose) === true && self::isNumber($whose) === true)) && (int) $whose > 0) {
+            return (int) $whose;
+        }
+
+        return null;
     }
 
     /* ---------------------------------------------------------------------- */

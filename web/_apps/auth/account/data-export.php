@@ -144,8 +144,29 @@ $payload = [
         'passwordResets' => $fetchUserRows(
             'SELECT resetID, userID, expiresAt, usedAt, createdAt, createdIP FROM tblPasswordResets WHERE userID = ?'
         ),
+        // 🙈 THE DESCRIPTION IS LEFT OUT ON PURPOSE (#626, the owner's decision,
+        //    27 October 2026). This block is a person's own download of what
+        //    the portal holds about them, and any signed-in member may ask for
+        //    it.
+        //
+        //    `activityDescription` is free text written by some 550 different
+        //    places, and about two dozen of them put ANOTHER PERSON into it —
+        //    an invited guest's e-mail address, an outside crew member's name.
+        //    Those records used to be invisible here because they carried no
+        //    account number at all; since #626 gave every record the account
+        //    that caused it, they are this person's records and would be
+        //    handed over with the third party's details in them.
+        //
+        //    Nothing checks what goes into that column, so it cannot be made
+        //    safe by reading it once. Everything else about the record stays:
+        //    what kind of thing happened, from what address, and when.
+        //
+        //    Tried and rejected: stripping e-mail addresses and quoted names
+        //    out of the text. It is pattern-matching against free text from
+        //    550 call sites — it would miss cases while looking as though it
+        //    had not, which is worse than leaving the field out.
         'activityLogs' => $fetchUserRows(
-            'SELECT logID, activityType, activityDescription, visitorIP, timestamp FROM tblActivityLogs WHERE userID = ? ORDER BY timestamp DESC LIMIT 5000'
+            'SELECT logID, activityType, visitorIP, timestamp FROM tblActivityLogs WHERE userID = ? ORDER BY timestamp DESC LIMIT 5000'
         ),
         'expenseClaims' => $fetchUserRows(
             // tblExpenseClaims uses `userID` not `submittedByID`

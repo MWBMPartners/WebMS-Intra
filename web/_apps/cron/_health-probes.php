@@ -622,9 +622,10 @@ function maintenance_health_probes(\mysqli $db): array
                     'state'  => 'warn',
                     'label'  => number_format($oldRecords) . ' to clean',
                     'detail' => number_format($oldRecords) . ($oldRecords === 1 ? ' activity record is' : ' activity records are')
-                        . ' still to be gone through. A record written before this version holds what it held until it is cleaned: a '
-                        . 'session identifier, which may still be in use, and for some accounts an authenticator key in readable text. '
-                        . 'Open Admin, Upgrade and press "Clean the old records" until none are left.',
+                        . ' still to be gone through. What that means depends on the record: an older one holds what it held until it '
+                        . 'is cleaned — a session identifier, which may still be in use, and for some accounts an authenticator key in '
+                        . 'readable text. A newer one holds nothing unsafe but does not yet say whose it is, so ERASING THAT PERSON WOULD '
+                        . 'NOT REACH IT. Open Admin, Upgrade and press "Clean the old records" until none are left.',
                 ];
             }
             $readableKeys = ActivityLogCleaner::accountsWithReadableKey($db);

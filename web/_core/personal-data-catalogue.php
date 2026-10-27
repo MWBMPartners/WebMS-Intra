@@ -984,16 +984,21 @@ return [
         // Logger::sessionFacts(), and migration 220 brought the older rows
         // into line.
         // WHAT AN ERASURE DOES TO THEM: empties all six, since #626
-        // (27 October 2026) — **but only on the records whose `userID` COLUMN
-        // holds the person's number.** An instruction matches one column, and
-        // Logger::activity() takes the number as an optional argument that 279
-        // of its 582 callers under web/ leave out. On those records the column
-        // is empty while the session facts name the person, so an erasure
-        // never reaches them: their address, browser name, headers and account
-        // number survive it. **#626 is therefore NOT fully closed**, and the
-        // rest is a decision for the owner, written up on that issue. The
-        // record of WHAT happened, when, and under which organisation is kept
-        // on purpose.
+        // (27 October 2026). The record of WHAT happened, when, and under
+        // which organisation is kept on purpose.
+        //
+        // It reaches a record by its `userID` COLUMN. That was not enough at
+        // first: Logger::activity() took the number as an optional argument
+        // that roughly half its callers left out, so an ordinary sign-in record
+        // had an empty column while the facts beside it named the person, and
+        // an erasure went past it. The logger now fills the column, and
+        // ActivityLogCleaner brings records written before that into line —
+        // or clears them where the person has already been erased. Migration
+        // 221 sends the cleaner back through the log.
+        //
+        // **So an installation that has not finished that cleaning still has
+        // older records an erasure cannot reach.** The health page says while
+        // any are left.
         //
         // Until that date it emptied `userID` and nothing else, because a
         // table listed here without a hand-written instruction gets one
