@@ -6,7 +6,85 @@
 
 ---
 
-## 27 OCTOBER 2026, LATEST — slices 5 and 6; two owner decisions carried out
+## 27 OCTOBER 2026, LATEST — slices 6 and 7, the advisory created, #634 and #594, and a new owner task
+
+**The owner asked for slices 7-9, the advisories, any other release blockers, then the documentation.**
+Done so far: the advisory, #634 + #594 (committed `6f02719`), #638 disproved, #639 and #640 filed.
+Slice 8 is queued to fire at the 20:07 Codex reset; slice 9's prompt and diff are ready.
+
+### The advisory exists, and re-checking it found two errors in our own notes
+
+**Draft GHSA-9ffj-j5q6-wfm5 created, private and unpublished.** Publishing is left to the owner.
+Re-verifying against `origin/main` rather than trusting the earlier draft found: **`main` is 1.4.1,
+not 1.4.0**, and there is a **fourth route** — the passkey path also never calls `userRequires2fa()`
+(`main:webauthn.php:119`). That fourth one is written up as weaker and arguable, because a passkey
+IS a strong factor, but this branch adds the gate there, so the product's own intent disagrees with
+the released behaviour. **Lesson: re-verify a security claim against the branch it names.**
+
+### Slice 7 produced NO verdict, and still found a real fault
+
+Codex hit its usage limit mid-slice (reset 20:06), after 79,426 tokens. **Slice 7 must be re-run.**
+But it had already run seven experiments, and one pointed at a genuine fault I then measured myself:
+**a length given in days is worked out in the ORGANISATION's zone, not the event's own**, so the
+same calendar file gives 25 hours to a London organisation (right) and 24 to a UTC or New York one.
+Filed as **#639**, not fixed — it needs the event's zone threaded through a 4,500-line parser that is
+itself mid-review. I also checked and was WRONG about one thing: a hand-built `DateInterval('P1D')`
+really is applied by the clock, so the docblock's nominal/exact claim is true as far as it goes.
+
+### #638: cannot reproduce any of the four failures
+
+136/136 and 103/103, three runs, on a freshly created database using the issue's own recipe. The
+likely cause is the trap already recorded here on the same day — **a self-test that stops part way
+leaves rows behind, and later runs fail for THAT reason.** It also explains why a clean worktree at
+HEAD gave "identical" failures: the database was the constant, not the code. Evidence on the issue;
+recommended closing after one more independent run.
+
+### #634 was worse than its issue, and the checks were the valuable part
+
+The real find was on a money page: **the Expenses approvals page builds its export link and its
+approve/reject form from the same token, so exporting broke the next approval and approving broke
+the export link**, silently. Three of the issue's seven "unreachable" judgements were wrong.
+
+**Round 1 was NOT CLEAN with six problems, two of them mine in the worst possible place:**
+- **The tripwire I wrote PASSED BROKEN CODE.** It subtracted one pattern count from another on the
+  strength of a comment that was simply untrue (`Auth::verifyCsrf\s*\(` cannot match
+  `verifyCsrfWithoutSpending(`). A handler with one of each scored zero and was skipped.
+- **It also accepted a handler that merely CALLED `Auth::csrfToken()`** without answering with it —
+  and two real handlers were passing by exactly that accident.
+- **`live-chat-moderation-selftest.php` asserted the OLD FAULT as correct**, so it was green only
+  while the bug lived. Inverted and measured both ways: 63/64 broken, 64/64 fixed.
+Round 2 found one more: the same self-test's header still described the old behaviour, 760 lines
+from the assertion that had been reversed. **Three lessons: a check is not a check until a planted
+fault proves it; a test can encode the bug; and a comment 700 lines away is still a comment.**
+
+**One round-1 finding I did NOT act on, deliberately:** that migration 222 could delete an
+administrator's customised portal-wide template. The ordering is as described, but
+`admin/email-templates/save.php` takes `Site::id()` and writes OVERRIDES only, so no route in the
+product can create that state; the checker's measurement used raw SQL. Comment corrected, exposure
+written down, and round 2 attacked the claim and agreed.
+
+### New from the owner, mid-session: #640, PHP2Shell
+
+**Only install and run on a PHP patched against CVE-2026-109618 / CVE-2026-109619.** Real and very
+recent — patched 21 October 2026, exploitation attempts seen, fixed in **8.5.12 / 8.4.27** (also
+8.3.36 / 8.2.35, below our floor). Researched from php.net's own advisory, which is the page to link.
+**Today the installer accepts any PHP >= 8.4.0, so 8.4.0 passes and is vulnerable, and a running
+portal never checks at all.** Written up to follow `DbServer`'s one-place shape. **The honest limit
+must stay in the product: a version number cannot tell a vendor-patched build from an unpatched one**,
+so the wording is "older than the release that fixed it — check with your host", never "you are
+vulnerable". One decision for the owner: block an install, or warn only (recommended: warn).
+
+### Still owed
+
+- **Slice 7 re-run** (no verdict yet), slice 8 (queued), slice 9 (ready).
+- Documentation sweep groups 3 and 4 — **next**. Verified read-only already: the counts are 105
+  classes / 222 migrations / 228 tables (count tables from a real load, NOT a grep — the grep says
+  234), `robots.php` not `robots.txt`, and all four "names no code has" are genuinely absent.
+  **20 handlers**, not 17, have addresses appearing nowhere in `api-spec.json`.
+- `push-subscribe.js` and `report-builder.js` still drop their replacement token (one call each).
+- Everything carried over from the entry below, unchanged.
+
+## 27 OCTOBER 2026, EARLIER — slices 5 and 6; two owner decisions carried out
 
 **Two decisions taken (question tool, settled):** (a) a snapshot now RECORDS whether it covers the
 whole database; (b) the data download drops the third-party columns only. Both built and committed
@@ -394,192 +472,13 @@ caught by the right check, including the one that matters most — hiding the fa
 
 ---
 
-## LATER ON 26 OCTOBER 2026 — X3, X7 and X8 done; the lost WF report recovered; what the checks found
+## 26 OCTOBER 2026 — moved to the archive
 
-**Two more of the owner's answers, 26 October (question tool; settled):**
-5. **`codeql.yml` KEEPS its `continue-on-error`, and the WORDING is corrected instead.** The package cuts these from
-   six to one; the one that stays is deliberate, because GitHub's paid Code Scanning is not enabled here and the
-   CodeQL upload is refused without it. Removing the flag would turn the job red on every pull request for a billing
-   reason, not a code one. So the sentence "No `continue-on-error` anywhere" in the owner's approval page and in this
-   file is UNTRUE and must be replaced with one naming the file that keeps it and why. **Still to do.**
-6. **All nine new test jobs become required status checks** on `main`, `beta` and `alpha`, and `Psalm` is removed.
-   The assistant cannot read or change branch rules (`tools/audit-required-checks.py` quietly returns success without
-   admin scope), so it PREPARES the exact job names and `gh` commands as a checklist and **the owner runs them**.
-   **Still to do.**
-
-### Landed on the working branch
-
-| What | Commit | Notes |
-| --- | --- | --- |
-| X3 (#610) held texts | `00fa9ad` | See the earlier block. The clock-change window fault found while landing it. |
-| X7 (#623) QR pictures | `1dce495` | Two commits joined (`c8c6044`, `a7cbbe7`) plus documents. |
-
-**X7's story is worth reading before touching anything that draws or fetches a picture.** Two pages made the SAME
-mistake — building a `chart.googleapis.com` address — and it was invisible on one and live on the other. On
-`auth/2fa/setup.php` the portal's own page rule refused the image, so the box was simply empty: broken but nothing
-left the browser. On `calendar/public-landing.php`, which writes its own `<head>` and sends no such rule, the picture
-really loaded and every view sent the event's address and the visitor's IP to Google. **When judging whether a page
-can make an outside request, check whether it includes `templates/header.php`.** The first independent check found
-that page; the second proved the leak gone by serving the page with every network function in PHP disabled.
-
-**Both of my own fixes in X7 were caught being wrong by the checks, and both in the same way: an untrue comment.** My
-first fix said the address was printed "either way" when it actually sat inside the test for the picture, so a failed
-drawing hid both. Worth remembering as a habit: when you add a guard, check every promise already written near it.
-
-### Built and checked, NOT yet landed
-
-| Package | Branch / commit | State |
-| --- | --- | --- |
-| **X6** (#625) | `ro-x6-build`, `808c794` + `2b53dae` + uncommitted | One check (NOT CLEAN, one real problem) and TWO fix rounds. Round 1: my Worship fix learned the replacement token only from its own answer, so two presses before the first reply shared a token and the console moved one slide for two presses, silently — the very fault #625 is about, in the page I had just fixed. Round 2: serialising the commands made a HANG far worse than before (a refused request rejects and is reported; one that never answers never rejects, so every later press waited for ever while the slide view kept refreshing and the page looked alive — three presses reached the portal 0 times and said nothing). Closed with a 10-second `AbortController` deadline, and `refreshToken()` now reads the portal's own `<meta name="csrf-token">` instead of pattern-matching the page's script text, which was picking the right one of two matches by page ordering rather than by design. **Verification of round 2 was running when this was written.** |
-| **X8** (#610 found 1) | `ro-x8-build`, `a202098` | Built and tested, NOT independently checked. `Sms::whyNotThisPerson()` now returns a REASON and two translators give the words, so `send()` can ask the same question `sendHeld()` asks without a second copy of the rule. Asked BEFORE holding, and of every kind including `NEVER_HELD`. 115 of 115 on MySQL 8.0.36 (up from 106: part M's eight checks and L1b), 8 planted faults all caught. **Not run on 8.4.11.** Document lines wait in `rollout-X8--build-evidence/DOC-ENTRIES.md`. |
-
-**X8's two self-inflicted faults, both found by its own new test and both of which would have recorded something
-untrue:** a refused text was stamped with a "sent at" time, which the Recent-messages list shows (`record()` already
-had a switch for this and it was not being passed); and a text for a DELETED account stopped the whole run on
-`fk_sms_user`, because the gate found "no account" and then wrote a record naming somebody no longer in `tblUsers` —
-that key is `ON DELETE SET NULL`, so the record now names no person.
-
-**Two existing checks in the held-texts test changed, both because behaviour really changed and neither made weaker.**
-H8 used to expect a person who was NEVER a member to have their text held and judged two days later; it is now refused
-as it is sent, so H8 asserts BOTH paths. L9 counts the sentences the class can record and had 13 written in; there are
-now 17.
-
-### WF — the lost report is recovered, and it is NOT CLEAN
-
-`.claude-work/resume/rollout-WF--check-RECOVERED.md`. Five real problems, none in the code that uploads or publishes.
-I verified two of them myself against the files rather than taking them on trust:
-
-1. **A real deploy can reach a customer's server before any dry run is read.** The guide says "merge nothing until the
-   dry run has been read", but `auto-merge-alpha.yml` merges alpha pull requests by itself and then runs
-   `gh workflow run deploy.yml --ref alpha` **with no inputs**, so `dry_run` takes its default `false`. CONFIRMED by
-   reading both files. The owner must close or draft open alpha pull requests, or switch auto-merge off, before setting
-   `SFTP_ENABLED` to `true`.
-2. **The required status checks** — the owner's answer 6 above.
-3. **`codeql.yml` keeps `continue-on-error`** — the owner's answer 5 above. CONFIRMED: six on the branch today, exactly
-   one at the package's tip.
-4. **Almost no merge into `alpha` will build an installation zip**, although "built on every merge" was approved:
-   `package.yml` triggers only on `push`, and GitHub starts no run for a push attributed to its own token. Fix is one
-   `gh workflow run package.yml --ref alpha` beside the existing deploy bridge; a manual run never publishes.
-5. **The guide tells the owner to look for "Making directory …" in the dry run and `lftp` never prints those words**
-   (it prints `mkdir -p <address>`), so its absence would read as a fault.
-
-Also in its "Found": four documents still describe the deleted `release.yml` and hand tagging, which meets this
-project's "untrue message" test and the fix round should decide.
-
-### FOUND by the checks, not fixed, each owed an issue
-
-- **Eight handlers have the same spent-token fault as the Worship console, all pre-existing.** Worst:
-  `geo/w3w-suggest.php` with `_core/partials/location-map-assets.php` (one POST per 400 ms of typing), and
-  `auth/account/webauthn.php` (two POSTs per click, so passkey registration may never have completed for anybody).
-  Then `geo/lookup.php`, `worship/plan-reorder.php`, `livechat/api/prompt-publish.php`,
-  `noticeboard/api/{save,upload}.php`, `tours/api/complete.php`, `documents/api/update.php`. The house convention
-  (`ApiAuth::requireWrite()` + `ApiResponse` → `meta.csrfToken`) already solves it and two callers do it right. Worth
-  one issue and an audit check.
-- **`calendar/public-landing.php` builds its address from `$_SERVER['HTTP_HOST']`**, so a forged Host makes the printed
-  address AND the QR picture point at a host the visitor chose. Not new, not worsened by #623. `PortalAddress` would fix
-  the printed address, the picture and `og:url` together.
-- **`tools/site-addresses-selftest.php` matches app switches with a pattern blind to a name holding an underscore**
-  (line 780), so it never reaches the service-plans or reading-plans pages.
-- **Three faults neither X6 tool catches:** a session-wide nonce (passes 88 of 88 — nothing would catch that
-  regression), an unclosed HTML comment, and `setAttribute('onclick')` from a script file.
-
-### Still to pick up, in order
-
-1. **X6:** land it once the round-2 verification is back.
-2. **X4 (#622):** its check was cut off on 14 October and never wrote a verdict; a fresh checker is now running it
-   **against the landed tree**, because X7 changed `tools/two-step-selftest.php` (now 90 checks) and X4's own log
-   recorded that test failing there. Its patch applies cleanly to `claude/alpha-wip`.
-3. **X8:** its one independent check, then join with its document lines.
-4. **WF:** the fix round for the five problems above, plus the owner's checklist for the branch rules.
-5. **#626** (erasure blanks the visitor's address, browser name, headers and session facts on activity records).
-6. **HIST** last, just before the pull request.
-
-### The machine
-
-Containers started and removed by name with their data this session: `x3land-mysql80`, `x6worship-mysql80`,
-`x7final-mysql8036`, `x7final-mysql8411`, `x6final-mysql8036`, `x6final-mysql8411`, `x6final2-*`, `x8build-mysql8036`,
-`x7fix2-mysql80`, `x7fix2b-mysql80`. Left-behind volumes 0 before and 0 after, every time. No other project's
-container or volume touched; no `prune` ever run.
-
-**THE PUSH IS STILL BLOCKED** by this machine's permission rules. Everything above is committed locally and nothing
-has reached GitHub.
-
-## WHERE THINGS ARE, 26 OCTOBER 2026 — the session of 14 October was cut off mid-flight; what was recovered
-
-**Read this before anything else: work stopped abruptly on 14 October 2026 at about 01:52.** Three builders had written
-their reports but never committed, and their changes were sitting UNCOMMITTED in their checkouts for twelve days. Nothing
-was lost. The first thing this session did was commit each one on its own branch, before touching anything else. What the
-gap means in practice: no background agent from that session survives, so every "running" line in the 14 October table
-below is stale — read this block instead.
-
-**The branch is synced.** `origin/alpha` had six Dependabot updates to `github/codeql-action` (v4.37.9 to v4.39.1, in
-`codeql.yml` and `php-static-analysis.yml`). **The owner chose a MERGE, not a rebase** (26 October, question tool): a
-rebase would rewrite all 492 commits on this branch and every commit number quoted in this file, `CHANGELOG.md` and the
-GitHub issues would stop matching, 20 worktree branches would be orphaned, and it would then need a forced push the owner
-reserves. The merge is clean and `actions: read` survived it. **The one history rewrite this branch gets is still the HIST
-task, once, just before the pull request.** Do not rebase this branch.
-
-**THE PUSH IS BLOCKED, and nothing in this session has reached GitHub.** `git push origin claude/alpha-wip` was refused by
-this machine's own permission rules, not by git or by GitHub. Every commit below is local only. The owner (or an
-interactive session) must run the push, or allow it. **Say so in any report: this work is committed, not pushed.**
-
-### THE OWNER'S ANSWERS, 26 OCTOBER 2026 (question tool; settled, do not ask again)
-
-1. **Sync by merging `origin/alpha`, not rebasing** (above).
-2. **The Worship, Present form-token fault is built INSIDE package X6.** X6's builder found it in the browser and left it
-   alone as outside its brief. Every control on that page (Prev, Next, Blank, Black, Show, the keys) worked exactly ONCE
-   and was then silently refused: the page takes one form token when drawn, the portal replaces the token each time it
-   accepts one, and `web/_apps/worship/api/advance.php` never handed the replacement back, so every later press was
-   answered 400 "csrf" with nothing shown to the operator. It was proved on the base commit with three plain requests
-   (200, 400, 400), so neither the browser nor X6's change plays any part — it was simply hidden while the page's script
-   was refused altogether. Built this session; see "X6" below.
-3. **#626: when a person is erased, the visitor's address, browser name, headers and session facts on their activity
-   records are blanked too — before roll-out.** Its own package, not yet started.
-4. **#610 found 1: a text sent AT ONCE is asked whether the account or organisation is switched off — before roll-out.**
-   Today only a HELD text is asked again when it comes due, and of the three callers only the prayer chain's own choice of
-   a partner asks. The rule is already written and tested as `Sms::whyNotThisPerson()`, so the work is to ask it in
-   `Sms::send()`. Its own package, not yet started.
-
-### WHAT LANDED THIS SESSION
-
-**X3 (#610, texts held for quiet hours) is COMMITTED on the working branch as `00fa9ad`** — three commits from
-`ro-x3-build` joined (`261c3b9` the build, `c006f11` the fixes after its check, `8eb831e` the last round of words and
-tests, which this session committed from the checkout), with the documentation lines from its `DOC-ENTRIES.md`
-(`CHANGELOG.md`, `FEATURES.md`, `DEV_NOTES.md`, `docs/INSTALL.md`, `.claude/CLAUDE.md`, `.OpenAI/CONTEXT.md`). Two
-independent checks and a fix round after each; Codex has not seen it.
-
-**ONE FAULT FOUND WHILE LANDING IT, in the test, and worth remembering.** On the merged tree the test failed 2 checks of
-103 where it had passed 106 of 106 in the builder's own checkout. Part K asks PHP's time-zone data for the next
-clock-change night in each direction and had a **twelve-month window**. This session ran on 26 October 2026, the day after
-Britain put its clocks back, so London's next "clocks go back" night is 31 October 2027 — five days outside the window.
-The test found no "back" night and reported a fault in code that was correct. Proved from PHP's own data and kept:
-over 366 days London has 0 back and 1 forward; over 732 days, 1 back and 2 forward. `clockChanges()` now takes the window
-as an argument and part K asks for **two years**; `ordinarySaturday()` keeps the shorter window on purpose (it only looks
-400 days ahead) and the comment says why. **This is the project's own time-zone trap in a new guise — a test that passes
-in one month and not another — so look for it in any other test that searches a fixed window from "now".** Then on the
-landed tree: held-texts 106 of 106 exit 0, mail-queue 155 of 155, all 30 audit checks exit 0, `php -l` clean. Evidence:
-`.claude-work/resume/x3-landing-evidence/`.
-
-### WHAT IS BUILT BUT NOT YET LANDED (each committed on its own branch, none pushed)
-
-| Package | Branch and commit | State, and what it still needs |
-| --- | --- | --- |
-| **X7** (#623, the QR pictures) | `ro-x7-build`, `c8c6044` | **Built and committed this session from the checkout.** The fault is real and proved: `QrEncoder` wrote the fifteen format marks BACK TO FRONT, so no reader could read any picture the portal ever drew; with the one line corrected, a strict reader written for this work and macOS's own reader read every size. The two-step set-up page also built a `chart.googleapis.com` address that carried the person's authenticator key to another website, and the portal's own page rule then refused the image, so the page was broken and leaky at once; it now draws its own picture with `Qr::dataUri()` and `Totp::getQrUrl()` is removed. New test `tools/qr-selftest.php` (67 checks, or 76 with `--with-qrencode`), new test-only reader `tools/qr-test-reader.php`, 23 kept qrencode fixtures. 34 planted faults caught, 9 more in `two-step-selftest.php`. **STILL OWED: the final two-step self-test runs on MySQL 8.0.36 and 8.4.11 (the builder was cut off before them), then ONE independent check, then join.** |
-| **X6** (#625, scripts the browser refused) | `ro-x6-build`, `808c794` plus the Worship fix | **Built and committed this session from the checkout (50 files).** 97 inline scripts and handlers in 63 files carried no nonce, so the browser refused them and the buttons did nothing. New check `check_inline_scripts_have_nonce.py` (self-test 52 of 52; 97 findings on the base tree, exit 0 on this one) with a 20-file exemption list explained line by line; new test `tools/page-scripts-selftest.php` (88 of 88 on this tree, 34 of 88 on the base, as it must be). Proved in a real browser against two throwaway portals side by side: 50 rows, none of the 47 feature rows works on the base, all work here. Two faults only a browser could find: the passkey dialog built before Bootstrap existed (fixed), and the Worship, Present token (the owner put it in this package; built this session). **STILL OWED: the final browser pass, the library-fallback proof, the other house tests, MySQL 8.4.11, then ONE independent check, then join.** |
-
-### WHAT NEEDS PICKING UP, in order
-
-1. **X7:** the two final self-test runs, then its one independent check, then join. Shares no file with X6, so the two may run side by side (owner, 12 October).
-2. **X6:** finish its owed proofs (the Worship rows included), then its one independent check, then join.
-3. **X4 (#622, the activity log's session facts):** built as `af719e3` on `ro-x4-build`; **its full independent check was cut off at 01:47 on 14 October, mid-way through the migration test, and never wrote a verdict.** Its working log (`rollout-X4--check.md`) is detailed and records real findings already: one-table restores from an OLDER backup do not hold; of 14 planted faults of its own the new test caught 9, and the five it missed are named; on the landing tree the new test fails one check (71 of 72) and `two-step-selftest.php` fails one (83 of 84), both because they read pages that have since changed. **Treat the check as unfinished: re-run its last part and get a verdict before any fix round.**
-4. **WF (the one change to GitHub's workflow files):** the package is `177527b`, `3aaa875`, `9b39f7c` on `ro-wf-build`; what it changes is `git diff aab9add 9b39f7c`. **Its one check FINISHED and is NOT CLEAN: five real problems** — two in the owner's guide, one that zips are almost never built on `alpha` (every pull request into alpha is set to merge by itself and such a merge starts no run, so a version rise there will not build a zip), one old weakness kept, and one list that needs the owner's yes. **The checker's full report was in its final message to the coordinator and that message is LOST with the 14 October session.** Its working log and the whole evidence folder survive (`rollout-WF--check.md`, `rollout-WF--check-evidence/`, start at `00-WHAT-IS-IN-THIS-FOLDER.txt`); `70-the-guide-against-the-files.txt` holds the guide findings. **Recover the five problems from the evidence before fixing anything, and do not assume there were only five.**
-5. **Two new packages from the owner's answers above:** the `Sms::send()` gate (#610 found 1) and the erasure of activity-record session facts (#626). Neither is started.
-6. **HIST** stays last, just before the pull request, exactly as agreed on 13 October.
-
-### THE MACHINE, left clean
-
-Containers this session started and removed by name with their data: `x3land-mysql80`, `x6worship-mysql80`. Left-behind
-volumes: 0 before, 0 after. No other project's container or volume was touched.
+Both of that day's narrative entries — X3/X7/X8 landing, the recovered WF report and what its checks found, and the
+account of the 14 October session being cut off mid-flight and what was recovered from it — are history, and are now
+in `.claude/history/HANDOFF-archive-to-2026-10-05.md` under the heading "APPENDED 27 OCTOBER 2026 (second batch)".
+Moved on 27 October 2026 when this file passed 1,000 lines again. **Nothing a decision depends on was moved:** every
+"OWNER DECISION" section is still below, in place and unchanged.
 
 ## Read this first — where we are right now
 
