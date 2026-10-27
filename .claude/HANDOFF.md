@@ -6,6 +6,62 @@
 
 ---
 
+## 27 OCTOBER 2026, LATER STILL — Codex slices 3, 4 and 5; the sweep; and two faults #626 left behind
+
+**The owner said to proceed, including the queued item 5 (slices 3-9 and sweep groups 3-4).**
+Slices 3 and 4 are done and their findings acted on; slice 5 is running. Full write-up:
+`.claude-work/resume/codex-pass/slices-3-and-4-result.md`.
+
+### The important one: #626 left two real faults, and nothing caught either
+
+Both in `ActivityLogCleaner.php`, both written three commits earlier, both fixed in `6fae118`:
+- **A cut-short session copy was attributed to the WRONG PERSON.** One pattern over the whole
+  text took the first account anywhere, nested objects included. Reproduced exactly:
+  `{"nested":{"user_id":42},"user_id":7,"cut":` answered 42. The record would show in another
+  member's own download, and the blanking step destroys the copy, so nothing could correct it.
+- **A new record could be written about somebody already erased.** The key-warning step asked
+  only whether the account row EXISTS; an erased account still has one. `linkAccounts()` had
+  the right guard a few hundred lines below; this sibling path did not.
+
+**The activity-log self-test passed 91 of 91 on BOTH broken versions.** Measured, twice. Two
+checks added, each proved to fail on its own fault and only its own (93/93 now).
+
+**A testing trap worth remembering:** planting a fault in a self-test that writes to a shared
+database leaves rows behind when it stops part way, and every later run then fails for THAT
+reason. I read "83 passed, 8 failed" twice and nearly recorded a regression that did not exist.
+**Recreate the database between planted runs.**
+
+### What else landed
+
+| What | Commit |
+| --- | --- |
+| Slice 1 + 3 fixes: an erasure refuses rather than erasing less; two routing faults; a new erasure-column tripwire | `7f51ab4` |
+| Slice 4 fixes: the two above, three untrue comments, two new self-test checks | `6fae118` |
+| Sweep group 3: README and FEATURES — twelve untrue claims, and the missing #622/#625 entries | `7a0e3a4` |
+
+**Slice 3's best news:** Codex examined the multi-organisation boundary and found **no confirmed
+cross-organisation leak**. The membership gate and both API switch paths check out.
+
+**Three of eleven findings I pushed back on with evidence rather than changing working code:**
+the asset-identifier lowercasing (the lookup is case-insensitive, so it matches anyway); a
+column that "cannot be emptied" (no live column reaches it — 21 of 22 are nullable and the
+22nd is deliberately handled, so the answer was a tripwire); and interpolated constants called
+an injection risk, which Codex itself conceded.
+
+### Still open, and worth the owner's eye
+
+- **Slice 4 finding 1 needs a decision:** the person's own download hands over OTHER PEOPLE'S
+  details — every prayer-request column (`moderatorID`, `assignedToUserID`, which the catalogue
+  itself marks as separate people) and booking notes that may hold a third party's telephone
+  number. Same shape as the `activityDescription` decision already taken, so the principle is
+  settled; which columns go is not.
+- **Slice 1 findings 3, 4 and 5 are unfixed** (concurrent erasures restoring an address; a retry
+  losing a changed address; unbounded mail clean-up in one transaction), as are slice 4's 4 and 5.
+- **#638 filed:** four self-test checks ALREADY FAIL on the committed branch — site-modes S20,
+  S69, S71 and site-addresses F12. Proved pre-existing in a worktree at HEAD. S69's own detail
+  shows the protection working and the response differing, so it reads as a reporting fault.
+- Sweep group 3 still has the DEV_NOTES items; group 4 (the API description's real gaps) untouched.
+
 ## 27 OCTOBER 2026, LATER — the code queue emptied, then the Codex pass found two ways past sign-in
 
 **The queue was empty of code work; it is not any more.** With X1-X9, WF, #604 and #626 all landed, I
