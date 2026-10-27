@@ -6,6 +6,73 @@
 
 ---
 
+## 27 OCTOBER 2026, LATER — the code queue emptied, then the Codex pass found two ways past sign-in
+
+**The queue was empty of code work; it is not any more.** With X1-X9, WF, #604 and #626 all landed, I
+started the two things left that were not blocked on the owner: the documentation sweep and the
+end-of-queue Codex pass. Both found real work.
+
+### THE SIGN-IN HOLES — the most important thing on this page
+
+**Codex slice 2 (`Auth.php`, `ApiAuth.php`, `Totp.php`, `Captcha.php`) returned "not safe to ship".
+Two holes were real, and are fixed in `6a6fbd6`.** Full write-up:
+`.claude-work/resume/codex-pass/slice-2-result.md`.
+1. **An OAuth callback was accepted with no sign-in started** — both sides of the state comparison
+   defaulted to empty, so `?state=` passed. Signs a visitor into the attacker's account.
+2. **The second factor could be skipped** by posting `?redirect[]=x`: the gate built the redirect
+   before unsetting `user_id`, `safeRedirectUrl()` took `string`, so it threw and the session stayed
+   signed in. **On the password form that needed nothing but the victim's password**, and it was
+   REPRODUCED LIVE on the old code.
+
+**Three lessons worth more than the fix:**
+- **Codex found two of four places. The other two came from its leads, not its list.** The password
+  path was found because its comment claimed to mirror the callbacks "EXACTLY" — it did, fault
+  included. The passkey path was found by the independent checker, because a search for
+  `safeRedirectUrl($_GET[` cannot see a value read from posted JSON.
+- **Nothing in the repository caught any of it**, and my own first proof passed on fully reverted
+  code because it re-implemented the expressions instead of loading the file. The checker measured
+  that. There are now two real checks: `tools/audit-checks/check_2fa_gate_order.py` (6 planted faults,
+  all caught) and section Z of `tools/two-step-selftest.php` (93 checks; Z1/Z2 fail on the old code).
+  **Both are needed** — reversing the order alone is invisible to the self-test.
+- **A third fault is LIVE on `main` and not fixed there:** 1.4.0's OAuth callbacks never call
+  `userRequires2fa()`, so Microsoft and Google sign-in skip two-factor entirely. #B2 added that gate
+  on this branch only.
+
+**OWNER'S ANSWERS, 27 October (question tool; settled):** (a) **no portal is live yet**, so nothing
+is exposed; (b) these go in a **private GitHub security advisory, not a public issue** — draft ready
+at `.claude-work/resume/security/ADVISORY-DRAFT--two-sign-in-holes.md`, for the owner to create.
+**Do not open a public issue for them.** One point left for the owner in that draft: the fix commit's
+comments explain both faults, so pushing it publishes them while `main` is still unfixed.
+
+### The documentation sweep
+
+Three read-only gatherers, 56 findings, triaged in
+`.claude-work/resume/doc-sweep-2026-10-27--TRIAGE.md`. Committed: `c8d12b9` (seven instructions that
+would have done harm — including DEV_NOTES telling you to push a migration to `main` "it deploys to
+dev", which would run untested SQL on a customer's live database) and `21875b5` (statements users and
+administrators were told that were untrue). **One of the 56 was WRONG** — `/health` in INSTALL.md is
+correct, because `Router.php:327` answers it before the routing table; the gatherer had checked only
+the seed file. Verify before fixing.
+
+**Still to do from the sweep:** groups 3 and 4 of the triage — about 30 more untrue statements, and the
+real gaps (the API description covers 44 of 61 reachable endpoints; 181 schema properties have no
+description; **nothing anywhere executes `api-spec.json` against the code**, which is how ten untrue
+statements accumulated in it).
+
+### The Codex pass — 2 of 9 slices done
+
+`.claude-work/resume/codex-pass/PLAN.md` has all nine, sized to one allowance each, worst first, with
+reusable prompts. Slice 1 (the erasure engine) returned five findings worth acting on and two I pushed
+back on with evidence — **nothing from slice 1 is fixed yet**. Slice 2 is fixed. Slices 3-9 are queued
+and block nothing. Two things that make a slice work: a fixed file list with "do not read the
+instruction files", and telling it not to report interpolation of a constant as an injection — it
+overstated exactly that in slice 1 and complied in slice 2.
+
+### Still blocked on the owner
+
+The push (23 commits local only), the required status checks, holding alpha's auto-merge before the
+first deploy, and now the security advisory. HIST stays last, after the sweep is finished.
+
 ## 27 OCTOBER 2026 — X8 and X9 committed; the WF fix round built and in check; #626 built and in check
 
 **Both remaining code packages are in flight at once, which the owner's 12 October decision allows: they share no
