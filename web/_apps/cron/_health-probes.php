@@ -26,6 +26,12 @@
  *
  * WHAT THIS FILE CANNOT DO
  * No permission check. Each caller decides who may see the result.
+ * ONE EXCEPTION (#622): the last two checks, "Old activity records" and
+ * "Authenticator keys", are added only when the reader is a signed-in GLOBAL
+ * administrator. They count across every organisation and only a global
+ * administrator can act on them, so an organisation's own administrator is
+ * not shown them, and the monitor's address (which has no reader signed in)
+ * never gets them. Each is left out altogether when it has nothing to say.
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -39,6 +45,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ActivityLogCleaner;
 use Portal\Core\App;
 use Portal\Core\DbBackup;
 
@@ -578,6 +585,70 @@ function maintenance_health_probes(\mysqli $db): array
         }
     } catch (\Throwable $e) {
         $probes['Stored secrets'] = ['state' => 'warn', 'label' => 'Could not be checked', 'detail' => get_class($e)];
+    }
+
+    // 11 and 12. What the activity log held before #622, for a GLOBAL
+    //     administrator only (see the top of this file). Each is amber while
+    //     it has something to say and ABSENT when it has not: a line that is
+    //     always there teaches people to stop reading it.
+    //
+    //     11. OLD ACTIVITY RECORDS still to be cleaned. Records written
+    //         before October 2026 hold the browser session's identifier and
+    //         a copy of the whole session; the Upgrade page cleans them in
+    //         pieces (Portal\Core\ActivityLogCleaner). This is what stops
+    //         anybody forgetting to finish.
+    //     12. ACCOUNTS whose authenticator key those records held in
+    //         readable text, and who still sign in with that key. Cleaning
+    //         the log cannot make such a key safe; only setting two-step
+    //         sign-in up again can. Counted, never named: Admin, Activity
+    //         Log names them. An account stops being counted when its
+    //         stored key changes or two-step sign-in is switched off.
+    //     Both only read. What a count costs is at ActivityLogCleaner::left()
+    //     and accountsWithReadableKey(): nothing once the cleaning is done
+    //     and no account is listed.
+    if (App::isRootAdmin() === true) {
+        try {
+            $oldRecords = ActivityLogCleaner::left($db);
+            if ($oldRecords === null) {
+                // Not counted is not the same as none left: say so.
+                $probes['Old activity records'] = [
+                    'state'  => 'warn',
+                    'label'  => 'Could not be counted',
+                    'detail' => 'The portal could not count the activity records that are still to be cleaned. Open Admin, Upgrade: it '
+                        . 'says how many are left and offers the button.',
+                ];
+            } elseif ($oldRecords > 0) {
+                $probes['Old activity records'] = [
+                    'state'  => 'warn',
+                    'label'  => number_format($oldRecords) . ' to clean',
+                    'detail' => number_format($oldRecords) . ($oldRecords === 1 ? ' activity record is' : ' activity records are')
+                        . ' still to be gone through. A record written before this version holds what it held until it is cleaned: a '
+                        . 'session identifier, which may still be in use, and for some accounts an authenticator key in readable text. '
+                        . 'Open Admin, Upgrade and press "Clean the old records" until none are left.',
+                ];
+            }
+            $readableKeys = ActivityLogCleaner::accountsWithReadableKey($db);
+            if ($readableKeys === null) {
+                $probes['Authenticator keys'] = [
+                    'state'  => 'warn',
+                    'label'  => 'Could not be counted',
+                    'detail' => 'The portal could not count the accounts that still sign in with an authenticator key the activity log once '
+                        . 'held. Admin, Activity Log lists them (type ' . ActivityLogCleaner::KEY_LINE_TYPE . ').',
+                ];
+            } elseif ($readableKeys > 0) {
+                $probes['Authenticator keys'] = [
+                    'state'  => 'warn',
+                    'label'  => $readableKeys . ' to replace',
+                    'detail' => ($readableKeys === 1 ? '1 account signs' : $readableKeys . ' accounts sign') . ' in with an authenticator key '
+                        . 'that the activity log kept in readable text before this version. The log has been cleaned, but backups made earlier '
+                        . 'still hold the key. Admin, Activity Log lists the accounts (type ' . ActivityLogCleaner::KEY_LINE_TYPE . '). Ask '
+                        . 'each person to switch two-step sign-in off on their Account page and set it up again: that makes a new key, and '
+                        . 'this line then stops counting them.',
+                ];
+            }
+        } catch (\Throwable $e) {
+            $probes['Old activity records'] = ['state' => 'warn', 'label' => 'Could not be checked', 'detail' => get_class($e)];
+        }
     }
 
     // 🚦 Overall

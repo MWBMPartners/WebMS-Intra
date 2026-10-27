@@ -89,6 +89,26 @@
 #      line, copied nothing and deleted the setting. Pages went from Auckland
 #      to UTC, with nothing to say so. Phases 1 to 6 could not see it: none
 #      of them takes this path over a database whose two places differ.
+#      THE SAME PHASE, FOR MIGRATION 220 (#622). The older database is also
+#      given two two-step backup codes, two activity records and a consent
+#      row written the old way (a session identifier in each, a copy of the
+#      session in the log). Migration 220 deletes every backup code ONCE,
+#      and "once" is decided by its own record in tblMigrations. The install
+#      script must therefore NOT record it in a database that holds a code,
+#      or the codes would survive this path. Afterwards: no code, the
+#      migration recorded, the consent row a fingerprint, and the activity
+#      records NOT marked as clean (Portal\Core\ActivityLogCleaner cleans
+#      them from the Upgrade page; nothing in SQL does). Then a code is added
+#      as if a person had made a new set, and the second pass must leave it.
+#      Phase 1 says the other half: in a NEW database the install script
+#      records migration 220 and marks the log as clean, with nothing to do.
+#      AND, AT THE END OF THE PHASE, the one case where the install script's
+#      two questions differ: a database with a backup code and an EMPTY
+#      activity log. There the record must still be withheld (a code is
+#      there to delete) although the empty log is rightly marked clean. Added
+#      27 October 2026: the install script asking whether the LOG is empty,
+#      rather than whether a CODE exists, is right in every other case, so
+#      nothing here or in the self-test could see it.
 #
 # And three DATA checks, between phases 4 and 5. Migration 210 holds one
 # statement that changes stored data: it empties an attendance session's
@@ -1221,6 +1241,17 @@ if ! mysql_file "${SQL_DIR}/full_schema.sql"; then
 fi
 echo "  ✓ full_schema.sql loaded without error"
 
+# Migration 220 (#622) on a NEW database: nothing to do. The install script
+# records it (no backup code exists, so there is none to delete) and marks the
+# activity log as clean (it is empty). Both are written with a test in the
+# install script; phase 7 runs the other side of each test.
+P1_220="$(mysql_q "SELECT CONCAT('220 recorded ', (SELECT COUNT(*) FROM tblMigrations WHERE filename = '220_activity_log_fingerprints.sql'), ' | how far ', COALESCE((SELECT settingValue FROM tblSettings WHERE settingKey = 'activityLog.cleanedThrough' AND siteID IS NULL), '(no row)'), ' | backup codes ', (SELECT COUNT(*) FROM tblTotpBackupCodes), ' | activity records ', (SELECT COUNT(*) FROM tblActivityLogs));")"
+if [[ "${P1_220}" != "220 recorded 1 | how far all | backup codes 0 | activity records 0" ]]; then
+    echo "✗ a NEW database must end with migration 220 recorded and its activity log marked as clean, having had nothing to do. Found: ${P1_220}" >&2
+    exit 1
+fi
+echo "  ✓ a new database: migration 220 has nothing to do (${P1_220})"
+
 P1_TABLES=$(count_tables)
 P1_COLUMNS=$(count_columns)
 P1_INDEXES=$(count_indexes)
@@ -1667,6 +1698,29 @@ phase7_zone_state() {
                  ' | old columns ', (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tblEvents' AND COLUMN_NAME = 'eventTimezone'));"
 }
 
+# Migration 220's side of the same phase (#622), as one line: how many backup
+# codes there are, whether the migration is recorded, how many consent rows
+# and activity records still hold a session identifier, and what the cleaner's
+# "how far" setting says.
+phase7_log_state() {
+    mysql_q "SELECT CONCAT(
+                 'backup codes ', (SELECT COUNT(*) FROM tblTotpBackupCodes),
+                 ' | 220 recorded ', (SELECT COUNT(*) FROM tblMigrations WHERE filename = '220_activity_log_fingerprints.sql'),
+                 ' | consent identifiers ', (SELECT COUNT(*) FROM tblConsentLog WHERE sessionID IS NOT NULL AND sessionID NOT LIKE 'sha256:%'),
+                 ' | activity records with an identifier ', (SELECT COUNT(*) FROM tblActivityLogs WHERE sessionID IS NOT NULL AND sessionID <> '' AND sessionID NOT LIKE 'sha256:%'),
+                 ' | how far ', COALESCE((SELECT settingValue FROM tblSettings WHERE settingKey = 'activityLog.cleanedThrough' AND siteID IS NULL), '(no row)'));"
+}
+
+# Just the three numbers the "codes, empty log" case at the end of phase 7
+# turns on: whether migration 220 is recorded, how many backup codes there
+# are, and what the cleaner's "how far" setting says.
+phase7_codes_state() {
+    mysql_q "SELECT CONCAT(
+                 '220 recorded ', (SELECT COUNT(*) FROM tblMigrations WHERE filename = '220_activity_log_fingerprints.sql'),
+                 ' | backup codes ', (SELECT COUNT(*) FROM tblTotpBackupCodes),
+                 ' | how far ', COALESCE((SELECT settingValue FROM tblSettings WHERE settingKey = 'activityLog.cleanedThrough' AND siteID IS NULL), '(no row)'));"
+}
+
 phase7_installer_carry_on_over_an_older_database() {
     echo
     echo "═════ Phase 7: the installer's \"carry on\" over an older database whose two time-zone places differ ═════"
@@ -1710,7 +1764,27 @@ phase7_installer_carry_on_over_an_older_database() {
         echo "✗ phase 7 FAILED — the older database's two time-zone places could not be set apart" >&2
         return 1
     fi
+    # And for migration 220 (#622): an account with two backup codes, two
+    # activity records and one consent row, each holding a session identifier
+    # as the portal stored it before, and the log holding a copy of a session.
+    if ! mysql_q "INSERT INTO tblUsers (emailAddress) VALUES ('e2e-phase7@example.test');
+                  SET @p7user := LAST_INSERT_ID();
+                  INSERT INTO tblTotpBackupCodes (userID, codeHash) VALUES (@p7user, 'e2e old code one'), (@p7user, 'e2e old code two');
+                  INSERT INTO tblActivityLogs (userID, activityType, activityDescription, sessionID, sessionDataSnapshot) VALUES
+                      (@p7user, 'E2eOld', 'e2e old record one', '0123456789abcdef0123456789abcdef', '{\"user_id\":1,\"totp_backup_codes\":[\"AAAA1111\"]}'),
+                      (@p7user, 'E2eOld', 'e2e old record two', '0123456789abcdef0123456789abcdef', '{\"user_id\":1}');
+                  INSERT INTO tblConsentLog (siteID, sessionID, consentType, decision) VALUES (1, 'fedcba9876543210fedcba9876543210', 'cookies', 'accept');" >/dev/null; then
+        echo "✗ phase 7 FAILED — the older database could not be given its old backup codes and activity records" >&2
+        return 1
+    fi
     local before after again
+    local log_before log_after log_again
+    log_before="$(phase7_log_state)" || return 1
+    echo "  the older database: ${log_before}"
+    if [[ "${log_before}" != "backup codes 2 | 220 recorded 0 | consent identifiers 1 | activity records with an identifier 2 | how far (no row)" ]]; then
+        echo "✗ phase 7 FAILED — the older database is not the one this phase is about for migration 220 (it must hold old backup codes and no record of the migration). Nothing was proved." >&2
+        return 1
+    fi
     before="$(phase7_zone_state)" || return 1
     echo "  the older database: ${before}"
     if [[ "${before}" != "UTC America/New_York | old setting rows 2 | marks 0 | old columns 1" ]]; then
@@ -1736,6 +1810,21 @@ phase7_installer_carry_on_over_an_older_database() {
         return 1
     fi
     echo "  ✓ each organisation's row holds the zone its pages were showing; the old setting and the old column are gone; the mark is there"
+    log_after="$(phase7_log_state)" || return 1
+    echo "  afterwards:         ${log_after}"
+    if [[ "${log_after}" != "backup codes 0 | 220 recorded 1 | consent identifiers 0 | activity records with an identifier 2 | how far (no row)" ]]; then
+        echo "✗ phase 7 FAILED — after the installer's \"carry on\", every old backup code must be gone, migration 220 recorded, the consent row a fingerprint, and the activity log NOT marked as clean (its two old records wait for the cleaner). Found: ${log_after}" >&2
+        echo "    If the backup codes are still there, the install script recorded migration 220 before it ran, and the migration took the database for already done." >&2
+        echo "    If \"how far\" says all, the install script marked a log that holds old records as clean, and nobody would ever be asked to clean it." >&2
+        return 1
+    fi
+    echo "  ✓ every old backup code is gone, migration 220 is recorded, and the old activity records are left for the cleaner, not marked as clean"
+    # Somebody makes a new set of backup codes after the upgrade.
+    if ! mysql_q "INSERT INTO tblTotpBackupCodes (userID, codeHash) SELECT userID, 'e2e a code made after the upgrade' FROM tblUsers WHERE emailAddress = 'e2e-phase7@example.test';" >/dev/null; then
+        echo "✗ phase 7 FAILED — a backup code could not be added after the carry-on" >&2
+        return 1
+    fi
+    log_after="$(phase7_log_state)" || return 1
 
     if ! mysql_file "${SQL_DIR}/full_schema.sql" 2> "${err_file}" || ! replay_all_migrations > /dev/null; then
         echo "✗ phase 7 FAILED — the same path a second time did not run" >&2
@@ -1747,6 +1836,67 @@ phase7_installer_carry_on_over_an_older_database() {
         return 1
     fi
     echo "  ✓ the same path a second time changes nothing"
+    log_again="$(phase7_log_state)" || return 1
+    if [[ "${log_again}" != "${log_after}" || "${log_again}" != "backup codes 1 | "* ]]; then
+        echo "✗ phase 7 FAILED — the same path a second time must NOT delete a backup code made after the upgrade, and must change nothing else of migration 220's. Before the second pass: ${log_after}. After it: ${log_again}" >&2
+        return 1
+    fi
+    echo "  ✓ and a backup code made after the upgrade is still there (${log_again})"
+
+    # ───── Migration 220 (#622): BACKUP CODES WITH AN EMPTY ACTIVITY LOG ─────
+    # The one case where the install script's two questions do not agree, and
+    # so the only case that can show it asking the WRONG ONE. The record that
+    # migration 220 has run must be written only where NO BACKUP CODE exists;
+    # written instead where the ACTIVITY LOG is empty, it is right in every
+    # case but this one. Everything above holds a database with both codes and
+    # old records; phase 1's database has neither; so neither could see it,
+    # and the independent check of this package planted exactly that fault on
+    # 27 October 2026 and nothing here noticed.
+    #
+    # What the fault would cost: in a database whose log has been emptied by
+    # its own retention, or that never wrote a record, every two-step backup
+    # code made before the fix stays alive — readable in every older backup —
+    # with the migration marked as done, so it can never run again.
+    #
+    # It reuses the database this phase has finished with: the activity log and
+    # the migration's row are taken away, one old code is left, and the
+    # install script is loaded once more. Loading it over a database that
+    # already holds it is the installer's "carry on" path, which this phase has
+    # done twice already.
+    if ! mysql_q "DELETE FROM tblActivityLogs;
+                  DELETE FROM tblMigrations WHERE filename = '220_activity_log_fingerprints.sql';
+                  DELETE FROM tblSettings WHERE settingKey = 'activityLog.cleanedThrough';
+                  DELETE FROM tblTotpBackupCodes;
+                  INSERT INTO tblTotpBackupCodes (userID, codeHash)
+                       SELECT userID, 'e2e an old code, in a database whose log is empty' FROM tblUsers WHERE emailAddress = 'e2e-phase7@example.test';" >/dev/null; then
+        echo "✗ phase 7 FAILED — the database could not be put into the \"codes, empty log\" state" >&2
+        return 1
+    fi
+    if ! mysql_file "${SQL_DIR}/full_schema.sql" 2> "${err_file}"; then
+        echo "✗ phase 7 FAILED — the install script would not load for the \"codes, empty log\" case" >&2
+        grep -v 'Using a password on the command line' "${err_file}" | sed 's/^/      /' >&2 || true
+        return 1
+    fi
+    local empty_log
+    empty_log="$(phase7_codes_state)" || return 1
+    if [[ "${empty_log}" != "220 recorded 0 | backup codes 1 | how far all" ]]; then
+        echo "✗ phase 7 FAILED — with a backup code and an EMPTY activity log, the install script must NOT record migration 220: a code is there, so the migration still has work to do. Marking the empty log as clean is right. Found: ${empty_log}" >&2
+        echo "    \"220 recorded 1\" means the install script is asking whether the ACTIVITY LOG is empty where it must ask whether a BACKUP CODE exists. The two agree in every other case, so this is the only check that shows it." >&2
+        return 1
+    fi
+    # And the consequence, run for real rather than argued: with no record of
+    # the migration, the old code is deleted when it runs.
+    if ! mysql_file "${SQL_DIR}/220_activity_log_fingerprints.sql" 2> "${err_file}"; then
+        echo "✗ phase 7 FAILED — migration 220 would not run for the \"codes, empty log\" case" >&2
+        grep -v 'Using a password on the command line' "${err_file}" | sed 's/^/      /' >&2 || true
+        return 1
+    fi
+    empty_log="$(phase7_codes_state)" || return 1
+    if [[ "${empty_log}" != "220 recorded 1 | backup codes 0 | how far all" ]]; then
+        echo "✗ phase 7 FAILED — after migration 220 ran over a database with a backup code and an empty activity log, the code must be gone and the migration recorded. Found: ${empty_log}" >&2
+        return 1
+    fi
+    echo "  ✓ backup codes with an EMPTY activity log: the install script leaves migration 220 unrecorded, and the migration then deletes the old code (${empty_log})"
     return 0
 }
 

@@ -1460,10 +1460,12 @@ CREATE TABLE IF NOT EXISTS `tblActivityLogs` (
     `claimID`             INT          DEFAULT NULL,
     `requestHeaders`      LONGTEXT     COLLATE utf8mb4_general_ci
                           COMMENT 'Request headers from the request which triggered the action',
-    `sessionID`           VARCHAR(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+    `sessionID`           VARCHAR(255) COLLATE utf8mb4_general_ci DEFAULT NULL
+                          COMMENT 'A FINGERPRINT of the browser session, never its identifier (which is the sign-in cookie): the text sha256: followed by the SHA-256 of the identifier in hexadecimal. The same for every record of one session. It cannot be turned back and is no use for signing in. Written only by Logger::sessionFingerprint() (#622). Empty when there was no session',
     `visitorIP`           VARCHAR(100) COLLATE utf8mb4_general_ci DEFAULT NULL,
     `userAgent`           TEXT         COLLATE utf8mb4_general_ci,
-    `sessionDataSnapshot` TEXT         COLLATE utf8mb4_general_ci,
+    `sessionDataSnapshot` TEXT         COLLATE utf8mb4_general_ci
+                          COMMENT 'A short list of facts about the session, as JSON that starts with format facts-1: signed in or not, the account, the organisation chosen, an account waiting for its second step, an account at a kiosk. Whole numbers and true or false only. NEVER a copy of the session. Written only by Logger::sessionFacts() (#622). Empty when there was no session',
     `timestamp`           DATETIME     DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`logID`),
     KEY `userID`  (`userID`),
@@ -3562,7 +3564,8 @@ CREATE TABLE IF NOT EXISTS `tblConsentLog` (
     `consentID`   INT          NOT NULL AUTO_INCREMENT,
     `siteID`      INT          NOT NULL,
     `userID`      INT          DEFAULT NULL,
-    `sessionID`   VARCHAR(255) DEFAULT NULL,
+    `sessionID`   VARCHAR(255) DEFAULT NULL
+                  COMMENT 'A FINGERPRINT of the browser session that made this decision, never its identifier: the text sha256: followed by the SHA-256 of the identifier in hexadecimal. Written only by Logger::sessionFingerprint() (#622). Empty when there was no session',
     `consentType` ENUM('cookies','privacy_policy','marketing','analytics') NOT NULL,
     `decision`    ENUM('accept','reject','withdraw') NOT NULL,
     `policyHash`  CHAR(64)     DEFAULT NULL,
@@ -10194,4 +10197,42 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- other step, which records texts held before it as not sent, has nothing to
 -- do in a new database and is in the migration only.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('219_held_texts.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- Migration 220 (#622): the activity log and the consent log keep a
+-- fingerprint of the browser session, never its identifier, and the activity
+-- log keeps a short list of facts, never a copy of the session. The three
+-- column comments that say so are written inline above (tblActivityLogs,
+-- tblConsentLog). The two statements below are the rest of it, and BOTH ARE
+-- WRITTEN WITH A TEST, for one reason: this script is not only run on an
+-- empty database. The installer's "carry on with what is there" choice runs
+-- it over an OLDER database and then runs every numbered migration. A mark
+-- written here without a test goes in first, and the migration then takes
+-- the older database for already done (met on 13 October 2026, #604).
+--
+-- 1. "Every activity record has been gone through" (the word all), ONLY
+--    where the activity log is empty. Portal\Core\ActivityLogCleaner cleans
+--    the records written before #622 and keeps "how far" in this setting. A
+--    new database has no such record, so it is told so here and its health
+--    page asks nobody to clean anything. An older database holds records:
+--    nothing is written, and the cleaner starts at the first one.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`)
+SELECT NULL, 'activityLog.cleanedThrough', 'all', '', 0
+  FROM DUAL
+ WHERE NOT EXISTS (SELECT 1 FROM `tblActivityLogs` LIMIT 1)
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+-- 2. The record that migration 220 has run, ONLY where no two-step backup
+--    code exists. Migration 220 deletes every backup code made before it,
+--    once, and "once" is decided by this very record: while it is absent the
+--    codes are deleted, and once it is there they never are again. A new
+--    database holds no code, so there is nothing to delete and the record is
+--    written here. An older database with codes gets NO record here; the
+--    migration then deletes them and records itself.
+--    WHAT THE TEST CANNOT SEE: nothing. A database with no backup code has
+--    nothing for that step to do, whatever its age.
+INSERT INTO `tblMigrations` (`filename`)
+SELECT '220_activity_log_fingerprints.sql'
+  FROM DUAL
+ WHERE NOT EXISTS (SELECT 1 FROM `tblTotpBackupCodes` LIMIT 1)
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

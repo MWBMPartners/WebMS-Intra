@@ -2,6 +2,44 @@
 
 
 ## [Unreleased] (alpha)
+- **Security — the activity log no longer stores a person's sign-in identifier or a copy of their session (#622)**
+  - **What an administrator should know after upgrading**
+    1. **What was wrong.** Every activity record kept the browser session's identifier — which IS the sign-in cookie —
+       and a copy of everything in that session. Anybody who could read that table, a backup, or a snapshot taken
+       before this upgrade could use a live session, and could read every set of two-step backup codes and some
+       authenticator keys.
+    2. **What a record keeps now.** A fingerprint of the identifier (`sha256:` and 64 characters — the same for every
+       record of one session, and no use for signing in) and a short list of six named facts: signed in or not, the
+       account, the organisation chosen, an account waiting for its second step, and an account at a kiosk. The consent
+       log is changed the same way.
+    3. **Every two-step backup code made before this version is deleted, once.** People make a new set from their
+       Account page. A second run of the upgrade never deletes codes made since. **Tell anyone who uses two-step
+       sign-in to make a new set**, or they will have none left.
+    4. **Old activity records are cleaned from the Upgrade page, in pieces.** A button, "Clean the old records", is
+       offered until none are left, and **the portal stays open while it runs**. As one statement the clean-up took 176
+       seconds for 500,000 records, which a shared host would cut off; in pieces it takes 60 to 90 seconds over three
+       or four presses.
+    5. **Accounts whose authenticator key the log held are recorded and counted.** Each gets one activity record, and
+       the health page tells a global administrator how many of those people still sign in with such a key — so you can
+       ask them to set two-step up again.
+    6. **A WHOLE-database restore is safe. Restoring ONE table is not.** Putting back `tblMigrations`,
+       `tblTotpBackupCodes` or `tblSettings` on its own can delete backup codes made since the upgrade, bring used ones
+       back alive, or lose the count on the health page. The whole-database restore carries everything together and has
+       none of these problems. (A guard against this is being built separately, on the owner's decision of 26 October
+       2026.)
+  - **What changed in the code**: `web/_core/Logger.php` (the fingerprint and the six facts), the new
+    `web/_core/ActivityLogCleaner.php`, `web/_install/upgrade.php`, `web/_apps/privacy/consent.php`,
+    `web/_apps/cron/_health-probes.php`, `web/_core/personal-data-catalogue.php`, migration
+    `220_activity_log_fingerprints.sql` and the install script, the new check
+    `tools/audit-checks/check_session_id_not_stored.py`, a change to `check_schema_seed_parity.py`, the new test
+    `tools/activity-log-selftest.php`, and the migration harness.
+  - **What its own tests could not catch, and now can.** The self-test passed 72 of 72 against three genuinely broken
+    versions — the worst a one-character fault that made the cleaner skip one record at every piece boundary, leaving
+    those records' session identifiers in place for ever while the Upgrade page and the health page both reported
+    nothing left. The test now cleans a log dense enough to cross several boundaries and reads the records back from
+    the database instead of believing the cleaner; it searches for every run of eight characters of a secret, not just
+    the first; and it **refuses to search for an empty text**, which is how two checks had come to pass while proving
+    nothing after the two-step page changed shape.
 - **Fixed — buttons that did nothing, because the browser refused the script behind them (#625)**
   - **What an administrator should know after upgrading**
     1. **What was wrong.** Every page the portal serves carries a rule saying which scripts the browser may run. A

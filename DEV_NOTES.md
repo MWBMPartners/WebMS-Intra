@@ -6284,6 +6284,52 @@ client; PHPMailer as a second engine) come after the first roll-out, by the owne
 - **Eight other handlers have the same spent-token fault** (worst: `geo/w3w-suggest.php`, which posts once per 400 ms
   of typing, and `auth/account/webauthn.php`, which posts twice per click). Their own issue.
 
+## The activity log and sessions (#622)
+
+- **ONE place for each thing, both in `web/_core/Logger.php`.** `Logger::sessionFingerprint()` is the only thing that
+  may be stored in place of a session identifier (`Logger::fingerprintOf()` is the rule: `sha256:` and the SHA-256 of
+  the identifier). `Logger::sessionFacts()` is the only copy of a session a record keeps: six named facts, whole
+  numbers and true/false only. To add a fact, add it there on purpose and say who reads it. Never go back to
+  "everything except a list".
+- **Never store `session_id()`.** `tools/audit-checks/check_session_id_not_stored.py` fails on it, and on any use of
+  the whole `$_SESSION`, outside its two short lists.
+- **The fingerprint is plain SHA-256 on purpose.** The clean-up of old rows makes the same value in SQL
+  (`CONCAT('sha256:', SHA2(sessionID, 256))`), where the key file cannot be read. The monthly sign-ins report
+  (`_apps/admin/reports/data.php`) joins on this column, so old and new records of one session must match.
+- **Migration 220 does only quick things**: three column comments, the consent log, the mark for an empty log, and the
+  delete of old backup codes. The delete runs only while the migration's own row is absent from `tblMigrations`: that
+  row is the "already done" mark. `full_schema.sql` writes that row ONLY where no backup code exists, and writes
+  `activityLog.cleanedThrough = all` ONLY where the activity log is empty, because the installer's "carry on" choice
+  runs the install script over older databases (the #604 trap).
+- **`Portal\Core\ActivityLogCleaner` cleans the old records**, from the Upgrade page, in pieces of 5,000 log numbers,
+  for about 20 seconds a press. One piece is one transaction: find authenticator keys and write each account's record,
+  then fingerprint and blank, then move "how far" on. Only one runs at a time (a named database lock). It is not part
+  of the upgrade gate: the version is recorded and the portal opened before it starts.
+- **Its two settings** are `activityLog.cleanedThrough` (a log number, or `all`) and `activityLog.keyLines` (the log
+  numbers of the key records). They travel with a backup, so an older backup put back is cleaned again from the start.
+- **WHAT A ONE-TABLE RESTORE DOES TO MIGRATION 220'S MARK.** "Once" is the migration's own row in `tblMigrations`.
+  Nothing on an ordinary page can touch that row, but Admin, Maintenance, Backup can put ONE table back on its own,
+  and `DbBackup::restoreTableWork()` refuses none of `tblMigrations`, `tblTotpBackupCodes` or `tblSettings`. Measured
+  by the independent check on 26 October 2026, on a database that had really been upgraded: `tblMigrations` alone from
+  an older backup makes the next press of the Upgrade page delete every backup code made since (1 then 0);
+  `tblTotpBackupCodes` alone brings used codes back alive and the migration leaves them (2 then 2); `tblSettings`
+  alone loses `activityLog.keyLines`, so the health page's count goes to 0 for good. **A WHOLE restore is safe in both
+  directions, because the row travels with it.** The hazard belongs to one-table restores in general, not to this
+  migration — ANY migration whose "once" test is its own row is reachable the same way. A guard is being built
+  separately (the owner, 26 October 2026).
+- **Measured** (13 October 2026, MySQL 8.0.36, 500,000 records, about 1 GB): one statement 176 s; the cleaner 60 to 90 s
+  over 3 or 4 presses, slowest piece 1.3 to 1.8 s; migration 220 itself 5.5 s (almost all of it 19,600 consent rows),
+  0.6 s on a second run.
+- **Why the self-test's made-up log is dense in one place.** A piece covers `[$from, $from + PIECE - 1]`. The older
+  part's records were sparse, so no boundary ever landed on a record that exists, and a one-character fault (`$to + 1`
+  for "how far") passed 72 of 72 while leaving one record uncleaned at every boundary — for ever, and reported as
+  finished. The test now builds `PIECE + 3` records at consecutive numbers and reads the database back.
+- **The self-test refuses to search the log for an empty text.** A pattern that had outgrown the two-step set-up page
+  read the authenticator key as nothing, and `logHolds('')` matched every record, so two checks passed while proving
+  nothing. A check that passes without proving anything is worse than one that fails.
+- Tests: `tools/activity-log-selftest.php` (77 checks); `tools/e2e-migrations/run.sh` phases 1 and 7, with a coda at
+  the end of phase 7 for the one case where "no backup code exists" and "the log is empty" disagree.
+
 ## MS365 Graph email via a shared mailbox (gap #234, migration 176)
 
 ### What was already there vs what #234 actually needed

@@ -1136,10 +1136,35 @@ ok('A12 the Account page says how many codes are left and offers to make a new s
     str_contains($landed['body'], 'You have 8 unused backup codes') === true && str_contains($landed['body'], 'name="action" value="new_backup_codes"') === true && str_contains($landed['body'], 'Make New Backup Codes') === true,
     'said 8: ' . (str_contains($landed['body'], 'You have 8 unused backup codes') === true ? 'yes' : 'no'));
 
-$enabledRow = one("SELECT sessionDataSnapshot FROM tblActivityLogs WHERE userID = ? AND activityType = 'TotpEnabled'", 'i', [PEOPLE['anna']]);
-ok('A13 control: switching on was recorded once, a record was written while the set-up page was open, and records do carry a copy of the session',
-    records('anna', 'TotpEnabled') === 1 && $control === 1 && str_contains((string) ($enabledRow['sessionDataSnapshot'] ?? ''), '"user_id":' . PEOPLE['anna']) === true,
-    'TotpEnabled: ' . records('anna', 'TotpEnabled') . '; written while set-up was open: ' . $control . '; copy of the session: ' . mb_substr((string) ($enabledRow['sessionDataSnapshot'] ?? '(none)'), 0, 80));
+// A13 IS THE CONTROL FOR A14 AND A15. Those two say that no backup code and
+// no authenticator key is left readable in an activity record. "Nothing
+// found" would also be the answer if records held nothing about the session
+// at all, so this check says what a record DOES hold about it, and names the
+// person. If this fails, A14 and A15 prove nothing.
+//
+// WHAT CHANGED, AND WHY (27 October 2026, #622). It used to look for
+// `"user_id":<her number>`, because a record carried a copy of EVERYTHING in
+// the session — which is how every set of backup codes came to be in the log
+// in readable text. #622 stopped that: a record now carries a FINGERPRINT of
+// the session (never its identifier, which is the sign-in cookie) and a short
+// list of named facts, and nothing else. So the control now asserts that new
+// truth: exactly the six facts, her own account number under `userID`, and an
+// identifier column that holds a fingerprint rather than a session's name.
+// It still fails if the facts stop being written at all — an empty, missing
+// or differently shaped copy fails the test below — and it fails if a whole
+// copy of the session comes back, because then there are more than six names.
+$enabledRow = one("SELECT sessionID, sessionDataSnapshot FROM tblActivityLogs WHERE userID = ? AND activityType = 'TotpEnabled'", 'i', [PEOPLE['anna']]);
+$enabledFacts = json_decode((string) ($enabledRow['sessionDataSnapshot'] ?? ''), true);
+$factNames    = ['format', 'signedIn', 'userID', 'organisationID', 'waitingForCodeUserID', 'kioskUserID'];
+ok('A13 control: switching on was recorded once, a record was written while the set-up page was open, and the record says whose session it was — the six named facts with her own account number, and a fingerprint in place of the session\'s identifier',
+    records('anna', 'TotpEnabled') === 1 && $control === 1
+        && is_array($enabledFacts) === true && array_keys($enabledFacts) === $factNames && $enabledFacts['format'] === 'facts-1'
+        && $enabledFacts['signedIn'] === true && $enabledFacts['userID'] === PEOPLE['anna']
+        && preg_match('/^sha256:[0-9a-f]{64}$/', (string) ($enabledRow['sessionID'] ?? '')) === 1,
+    'TotpEnabled: ' . records('anna', 'TotpEnabled') . '; written while set-up was open: ' . $control
+        . '; the names in the copy: ' . json_encode(is_array($enabledFacts) === true ? array_keys($enabledFacts) : $enabledRow['sessionDataSnapshot'])
+        . '; the account named in it: ' . json_encode(is_array($enabledFacts) === true ? ($enabledFacts['userID'] ?? null) : null)
+        . '; the identifier column is a fingerprint: ' . (preg_match('/^sha256:[0-9a-f]{64}$/', (string) ($enabledRow['sessionID'] ?? '')) === 1 ? 'yes' : 'NO'));
 // The codes are looked for by what they are, and by the name the old page kept
 // them under ("totp_backup_codes"): on a page that never showed them, this
 // file would not know what they were, and "none found" would mean nothing.

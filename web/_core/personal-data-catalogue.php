@@ -248,6 +248,11 @@ return [
     ],
     'tblConsentLog' => [
         'decision' => 'erase',
+        // Its sessionID has been a FINGERPRINT of the browser session's
+        // identifier since #622, as in tblActivityLogs below: it says which
+        // session decided, and is no use for signing in. (Kept BELOW the
+        // 'decision' line: check_personal_data_coverage.py reads an entry's
+        // decision from the line straight after its name.)
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['userID', 'sessionID', 'ipAddress', 'userAgent'],
     ],
@@ -963,6 +968,26 @@ return [
 
     'tblActivityLogs' => [
         'decision' => 'unlink',
+        // WHAT TWO OF THESE COLUMNS HOLD SINCE #622 (13 October 2026).
+        //   sessionID            a FINGERPRINT of the browser session's
+        //                        identifier ("sha256:" and 64 characters),
+        //                        never the identifier, which is the sign-in
+        //                        cookie. The same for every record of one
+        //                        session; no use for signing in.
+        //   sessionDataSnapshot  a short list of facts about the session:
+        //                        signed in or not, the account's number, the
+        //                        organisation chosen, an account waiting for
+        //                        its second step, an account at a kiosk.
+        //                        Numbers and true/false only. It used to be a
+        //                        copy of the whole session.
+        // Both are written in one place, Logger::sessionFingerprint() and
+        // Logger::sessionFacts(), and migration 220 brought the older rows
+        // into line.
+        // WHAT AN ERASURE DOES TO THEM: nothing. It empties `userID` on the
+        // person's records (every table listed without a hand-written
+        // instruction gets only that). The fingerprint and the facts stay, as
+        // the whole-session copy always did. The account number in the facts
+        // then leads only to an account whose details have been removed.
         'reason'   => 'Kept for running and repairing the portal. The record stays;'
                     . ' the link to the person is cut, so it can no longer be traced'
                     . ' back to them',

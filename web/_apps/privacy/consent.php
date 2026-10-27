@@ -23,6 +23,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Logger;
 use Portal\Core\Site;
 use Portal\Core\RateLimiter;
 
@@ -59,7 +60,15 @@ if (in_array($type, $validTypes, true) === false
 
 $siteId    = Site::id();
 $userId    = ($_SESSION['user_id'] ?? null) === null ? null : (int) $_SESSION['user_id'];
-$sessionId = session_id() ?: null;
+// 🔏 WHICH BROWSER SESSION DECIDED, as a fingerprint (#622). It is what ties a
+//    decision made by somebody who is not signed in (no userID) to the
+//    session that made it. This used to store the session's identifier
+//    itself, which IS the sign-in cookie: anybody who could read this table
+//    or a backup of it could use it. Logger::sessionFingerprint() is the one
+//    place that turns the identifier into something that may be stored, and
+//    migration 220 has done the same to the rows already here. Nothing in
+//    the portal reads this column back; the copy of "my data" leaves it out.
+$sessionId = Logger::sessionFingerprint();
 // 🛑 This used to read the Cloudflare and X-Forwarded-For headers directly and
 //    believe them. Anybody can send those headers, so anybody could claim any
 //    address they liked. RateLimiter::clientIp() is now the ONE place in the

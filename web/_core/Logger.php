@@ -139,6 +139,177 @@ class Logger
     /* Activity Logging                                                       */
     /* ---------------------------------------------------------------------- */
 
+    /* ---------------------------------------------------------------------- */
+    /* What a record may keep about the browser session (#622)                */
+    /* ---------------------------------------------------------------------- */
+    /*
+     * WHAT WAS WRONG
+     *   Every activity record used to store two things about the session.
+     *
+     *   1. The session's own identifier, exactly as it is. That value IS the
+     *      sign-in cookie. Anybody who could read the table, a backup file or
+     *      a snapshot taken before an upgrade could be that person for as
+     *      long as the session lived, an administrator included. The same
+     *      method was already blanking the cookie out of the request headers
+     *      it stored, and then stored the same secret in the next column.
+     *   2. A copy of EVERYTHING in the session, with three named values left
+     *      out. "Everything except a list" means whatever a page puts in the
+     *      session tomorrow is copied too. That is how every set of two-step
+     *      backup codes, and the authenticator key of anybody whose set-up
+     *      page was open, came to be in the log in readable text.
+     *
+     * WHAT IS STORED NOW
+     *   1. A FINGERPRINT of the identifier (fingerprintOf()). It cannot be
+     *      turned back into the identifier and is no use as a cookie. Every
+     *      record of one session still carries the same fingerprint, which
+     *      the monthly sign-ins report needs: it joins a password sign-in to
+     *      its code page by this column (_apps/admin/reports/data.php).
+     *   2. A SHORT LIST OF NAMED FACTS (sessionFacts()): numbers and
+     *      true/false only. It is a list of what goes IN, so a new value in
+     *      the session is left out unless somebody adds it there on purpose.
+     *
+     * Migration 220 turns the identifiers already stored into the same
+     * fingerprints and blanks the old copies.
+     */
+
+    /** What every stored fingerprint starts with: how one is told from an identifier. */
+    public const FINGERPRINT_MARK = 'sha256:';
+
+    /** The first value of every copy of a session written since #622. Migration 220 keeps a copy that starts with it and blanks any other. */
+    public const SESSION_FACTS_FORMAT = 'facts-1';
+
+    /**
+     * 🔏 The ONE place a session identifier becomes something that may be
+     * stored: "sha256:" and then the SHA-256 of the identifier, in hexadecimal.
+     *
+     * WHY IT STARTS WITH A MARK. A colon can never be in a real identifier:
+     * Auth::prepareSessionStart() drops any cookie that is not letters,
+     * digits, comma or hyphen. So a stored value that starts with the mark is
+     * a fingerprint and nothing else, and the database upgrade can tell which
+     * rows it has already done. Without that, a second run would fingerprint
+     * the fingerprints, and one session's old and new records would no
+     * longer match.
+     *
+     * WHY PLAIN SHA-256, with no key mixed in. Migration 220 has to make the
+     * SAME value for rows already stored, in SQL, where the installation's
+     * key file cannot be read: CONCAT('sha256:', SHA2(sessionID, 256)). A
+     * session that began before the upgrade and carries on after it then
+     * keeps one fingerprint across both. tools/activity-log-selftest.php
+     * holds the two to the same answer.
+     *
+     * WHAT IT CANNOT DO. It is only as hard to guess as the identifier. PHP
+     * makes the identifier of every signed-in session itself, long and
+     * random (every sign-in route asks for a new one). But a visitor who is
+     * NOT signed in can choose their own, and a short chosen one could be
+     * found from its fingerprint by trying. That gives away only what that
+     * visitor chose, for a session with nobody signed in.
+     *
+     * @param string $identifier A session identifier, as session_id() gives it.
+     */
+    public static function fingerprintOf(string $identifier): string
+    {
+        return self::FINGERPRINT_MARK . hash('sha256', $identifier);
+    }
+
+    /**
+     * The fingerprint of THIS request's session, or null when there is no
+     * session (a scheduled job, a tool).
+     *
+     * Anything that stores "which session" stores this and never
+     * session_id() itself. tools/audit-checks/check_session_id_not_stored.py
+     * fails when session_id() appears anywhere else under web/ without a
+     * written reason.
+     */
+    public static function sessionFingerprint(): ?string
+    {
+        $identifier = session_id();
+        if (is_string($identifier) === false || $identifier === '') {
+            return null;
+        }
+
+        return self::fingerprintOf($identifier);
+    }
+
+    /**
+     * 📋 The ONE place that decides what a record keeps about the session:
+     * the facts below and nothing else. Null when the request has no session.
+     *
+     *   format                 always "facts-1": says the copy was written
+     *                          by this list (migration 220 keeps such a copy
+     *                          and blanks any other)
+     *   signedIn               true when an account is signed in
+     *   userID                 that account's number, else null
+     *   organisationID         the organisation the person has chosen to
+     *                          work in, else null (the record's own siteID
+     *                          is the organisation the request was for)
+     *   waitingForCodeUserID   the account whose password was accepted and
+     *                          whose second step has not been given yet
+     *   kioskUserID            the account a shared kiosk has been handed to
+     *
+     * Each answers "who was this?" for somebody reading the log after
+     * something has gone wrong. Nothing in the portal reads them back.
+     *
+     * EVERY VALUE IS A WHOLE NUMBER, TRUE/FALSE OR NULL, AND THAT IS THE
+     * SAFEGUARD. Text never crosses, so a secret that some page keeps under
+     * one of these names by mistake still cannot be copied: sessionNumber()
+     * answers null for anything that is not plain digits.
+     *
+     * TO ADD A FACT: add it here, on purpose, and say who reads it. Do not go
+     * back to "everything except a list". If the list ever changes shape,
+     * change SESSION_FACTS_FORMAT, and make migration 220's test for "a copy
+     * written by this list" accept both.
+     *
+     * WHAT THIS CANNOT DO. It does not make an erasure complete. When a
+     * person is erased, GdprEraser empties `userID` on their activity
+     * records and nothing else on them, so the account NUMBER written here
+     * stays (and so does the fingerprint). That gap is older than #622: the
+     * whole-session copy stayed in the same way, with the person's name and
+     * e-mail address in it. It is written up beside #622 and not changed
+     * here.
+     *
+     * @return array{format: string, signedIn: bool, userID: int|null, organisationID: int|null, waitingForCodeUserID: int|null, kioskUserID: int|null}|null
+     */
+    public static function sessionFacts(): ?array
+    {
+        // Asked of $_SESSION itself, not of session_status(): a page that
+        // answers the browser first and closes its session early ("Forgot
+        // password" does) still has its session's values, and its records
+        // still carry the session's fingerprint. Where no session was ever
+        // opened (a scheduled job) there is no $_SESSION at all.
+        if (isset($_SESSION) === false || is_array($_SESSION) === false) {
+            return null;
+        }
+
+        $userId = self::sessionNumber('user_id');
+
+        return [
+            'format'               => self::SESSION_FACTS_FORMAT,
+            'signedIn'             => $userId !== null,
+            'userID'               => $userId,
+            'organisationID'       => self::sessionNumber('active_site_id'),
+            'waitingForCodeUserID' => self::sessionNumber('2fa_user_id'),
+            'kioskUserID'          => self::sessionNumber('kiosk_user_id'),
+        ];
+    }
+
+    /**
+     * One session value as a whole number above zero, or null. A whole
+     * number, or text that is nothing but one to ten digits, counts;
+     * anything else (other text, a list, true) is null and is never copied.
+     */
+    private static function sessionNumber(string $name): ?int
+    {
+        $value = $_SESSION[$name] ?? null;
+        if (is_int($value) === true) {
+            return $value > 0 ? $value : null;
+        }
+        if (is_string($value) === true && preg_match('/^[0-9]{1,10}$/', $value) === 1 && (int) $value > 0) {
+            return (int) $value;
+        }
+
+        return null;
+    }
+
     public static function activity(string $type, string $description = '', ?int $userId = null): void
     {
         // Declared before the try so the fallback line below can use whatever
@@ -152,12 +323,18 @@ class Logger
         //    the portal.
         try {
             $headersJson = json_encode(self::requestHeaders());
-            $sessionId   = session_id();
             $ip          = self::clientIp();
             $ua          = $_SERVER['HTTP_USER_AGENT'] ?? '';
-            $sessionData = $_SESSION ?? [];
-            unset($sessionData['csrf_token'], $sessionData['oauth_state'], $sessionData['oauth_nonce']);
-            $sessionSnap = json_encode($sessionData);
+
+            // 🔏 A fingerprint, never the identifier; the named facts, never
+            //    the session. Both are null when there is no session. See
+            //    "What a record may keep about the browser session" above.
+            $sessionMark  = self::sessionFingerprint();
+            $sessionFacts = self::sessionFacts();
+            $sessionSnap  = $sessionFacts === null ? null : json_encode($sessionFacts);
+            if ($sessionSnap === false) {
+                $sessionSnap = null;
+            }
 
             // 🌐 Include siteID for multi-site context
             $siteId = Site::id();
@@ -167,14 +344,14 @@ class Logger
                 '(siteID, userID, activityType, activityDescription, requestHeaders, sessionID, visitorIP, userAgent, sessionDataSnapshot) ' .
                 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 'iisssssss',
-                [$siteId, $userId, $type, $description, $headersJson, $sessionId, $ip, $ua, $sessionSnap]
+                [$siteId, $userId, $type, $description, $headersJson, $sessionMark, $ip, $ua, $sessionSnap]
             );
         } catch (Throwable $e) {
             $failure = get_class($e) . ': ' . $e->getMessage();
         }
 
         if ($failure !== null) {
-            // 📝 Deliberately NOT the session identifier, session contents or
+            // 📝 Deliberately NOT the session's fingerprint, its facts or the
             //    headers — see the section at the top of this class.
             self::writeFallback('an activity record', $failure, [
                 'type'        => $type,
@@ -913,8 +1090,9 @@ class Logger
      * 🔒 Redact credential-bearing headers before they are persisted to
      * tblActivityLogs / tblErrors / DbBackup snapshots. Bearer tokens,
      * session cookies, CSRF tokens and API keys must never land in plain
-     * text in logs. Mirrors the csrf_token/oauth_state/oauth_nonce scrub
-     * already applied to session snapshots in activity() above.
+     * text in logs. The session itself is dealt with separately: a record
+     * keeps a fingerprint of its identifier and a short list of facts, never
+     * the session (#622, see sessionFingerprint() and sessionFacts()).
      *
      *
      * 🔗 THE ADDRESS THE BROWSER CAME FROM (the "Referer" header) is kept, but

@@ -513,6 +513,27 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     and SAYS when a command fails — and says only what is known, never
     "not sent" when the answer was merely lost.
 
+    **The activity log and sessions (#622).**
+    `Logger::sessionFingerprint()` is the ONE thing stored in place of a
+    session identifier and `Logger::sessionFacts()` the ONE copy of a
+    session a record keeps (six named facts; add one there on purpose,
+    never "everything except a list"). Never store `session_id()` or the
+    whole `$_SESSION`: `tools/audit-checks/check_session_id_not_stored.py`
+    fails on it. The fingerprint is plain SHA-256 because the clean-up
+    must make the same value in SQL, and the monthly sign-ins report joins
+    on that column. Records written before #622 are cleaned by
+    `Portal\Core\ActivityLogCleaner`, in pieces, from the Upgrade page; it
+    is NOT part of the upgrade gate and never closes the portal. Migration
+    220 deletes old backup codes once, and its "already done" mark is its
+    own row in `tblMigrations`, which the install script writes only where
+    no backup code exists. **A one-table restore of `tblMigrations`,
+    `tblTotpBackupCodes` or `tblSettings` moves that mark and can lose
+    data — a whole-database restore is safe, and ANY migration whose
+    "once" test is its own row has the same exposure.** Test:
+    `tools/activity-log-selftest.php`, which reads the records back from
+    the database rather than believing the cleaner, and refuses to search
+    the log for an empty text.
+
     **Two-factor authentication (#613).** `auth/2fa/setup.php` is the ONE place
     backup codes are made, and it shows them only in the answer to the request
     that made them: never put a code, or the authenticator key, readable in

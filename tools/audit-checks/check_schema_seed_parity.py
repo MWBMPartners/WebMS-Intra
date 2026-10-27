@@ -18,6 +18,26 @@ migration in order. This script verifies, statically, that:
 Reverse drift (rows only in full_schema.sql — e.g. installer-managed auth.*
 provider settings) is reported as an informational count, never a failure.
 
+A ROW WRITTEN WITH A TEST IS READ TOO (#622). Some rows must not be written
+into every database: a mark that says "this migration's one-off work is done"
+is written by the install script only where there is nothing for that work to
+do, because the installer's "carry on" choice also runs the install script
+over OLDER databases (the trap met on 13 October 2026, #604). Such a row is
+written as
+
+    INSERT INTO `tblX` (cols) SELECT 'a', 'b' FROM DUAL WHERE NOT EXISTS (...)
+
+This script used to read only "INSERT ... VALUES". It therefore reported
+migration 217's mark as missing from the install script, and migration 220 as
+"not marked executed: add to the tblMigrations seed block". Following that
+advice would have written the record with no test, which is the very fault
+the test is there to prevent. Both forms are read now.
+
+WHAT IT CANNOT SEE: the test itself. A row written with a test counts as
+seeded whatever the test says, so this script cannot tell a right test from a
+wrong one. tools/e2e-migrations/run.sh (phase 7) and
+tools/activity-log-selftest.php (part I) run both sides of the tests.
+
 Exit code:
   0 — no findings
   1 — at least one parity gap AND --strict was passed
@@ -132,6 +152,13 @@ INSERT_RE = re.compile(
     r"\s*\(([^)]*)\)\s*VALUES\s*(.*)$",
     re.IGNORECASE | re.DOTALL,
 )
+# The tested form: INSERT INTO t (cols) SELECT v1, v2 FROM DUAL WHERE ...
+# The values between SELECT and FROM DUAL are read as one row.
+INSERT_SELECT_RE = re.compile(
+    r"INSERT\s+(?:IGNORE\s+)?INTO\s+`?(tblSettings|tblRoutes|tblMigrations)`?"
+    r"\s*\(([^)]*)\)\s*SELECT\s+(.*?)\s+FROM\s+DUAL\b",
+    re.IGNORECASE | re.DOTALL,
+)
 DELETE_RE = re.compile(
     r"DELETE\s+FROM\s+`?(tblSettings|tblRoutes)`?\s+WHERE\s+"
     r"`?(settingKey|routeKey)`?\s*(?:=\s*'([^']+)'|IN\s*\(([^)]*)\))",
@@ -150,6 +177,18 @@ def seeded_keys(text: str) -> dict[str, set[str]]:
     for st in split_statements(strip_sql_comments(text)):
         m = INSERT_RE.match(st)
         if m is None:
+            # A row written with a test (see the header). Its one row of
+            # values is handed on in the same shape as a VALUES list.
+            tested = INSERT_SELECT_RE.match(st)
+            if tested is None:
+                continue
+            table = tested.group(1).lower()
+            cols = [c.strip().strip("`").lower() for c in tested.group(2).split(",")]
+            if KEY_COLUMNS[table] in cols:
+                row = split_tuples("(" + tested.group(3) + ")")
+                idx = cols.index(KEY_COLUMNS[table])
+                if row and idx < len(row[0]):
+                    out[table].add(unquote(row[0][idx]))
             continue
         table = m.group(1).lower()
         cols = [c.strip().strip("`").lower() for c in m.group(2).split(",")]
@@ -218,6 +257,9 @@ def check() -> int:
         print("### Migrations not marked executed in full_schema.sql\n")
         for name in missing_marks:
             print(f"  • {name} — add to the tblMigrations seed block")
+        print()
+        print("  (If the migration does work that must happen only once, write its record WITH A TEST,")
+        print("   as migration 220's is: see \"A ROW WRITTEN WITH A TEST\" at the top of this script.)")
         print()
     if miss_settings:
         print("### tblSettings rows seeded by migrations but absent from full_schema.sql\n")

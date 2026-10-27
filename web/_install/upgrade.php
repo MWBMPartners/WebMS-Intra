@@ -60,6 +60,20 @@
  * pressed every request asks the database whether an upgrade is waiting; the
  * page says so.
  *
+ * OLD ACTIVITY RECORDS ARE CLEANED FROM HERE (#622), in pieces, by
+ * Portal\Core\ActivityLogCleaner. Records written before October 2026 hold
+ * the browser session's identifier (the sign-in cookie) and a copy of the
+ * whole session. Cleaning them as part of a database upgrade file took three
+ * minutes for 500,000 records, which a host would cut off, so it is done
+ * here instead: for about 20 seconds after upgrade files have run on a press
+ * of the upgrade button, and again on each press of "Clean the old records",
+ * which is offered while any are left and no upgrade file is waiting. IT IS NOT PART OF THE UPGRADE GATE. The version is recorded and
+ * the portal is opened BEFORE the cleaning starts, and that button closes
+ * nothing, takes no snapshot, runs no upgrade file and records no version.
+ * The page says what is true meanwhile: new records are safe, the old
+ * backup codes are gone, and an old record not yet cleaned still holds what
+ * it held.
+ *
  * EVERY ADDRESS THIS PAGE WRITES is built by Site::url() (#536): its three
  * redirects and its breadcrumb used to be written out as "/admin/upgrade"
  * and "/admin". Where organisations are told apart by the first part of the
@@ -86,6 +100,7 @@ require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARA
 //    everything" file, and the words for the channel.
 require_once __DIR__ . DIRECTORY_SEPARATOR . 'install_common.php';
 
+use Portal\Core\ActivityLogCleaner;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\FeedAdmin;
@@ -170,6 +185,30 @@ $ranWithoutWayBack = '';
 $unplacedAfterUpgrade = 0; // #533 — only computed for real after a run; see below
 $apiNotice = ['calendars' => 0, 'organisations' => 0]; // #514 part 8 — see below
 $secretRepair = null; // #497 — what the repair of stored secrets did; null until a run
+$cleanResult  = null; // #622 — what the cleaning of old activity records did on this press; null when it did not run
+
+// 🧹 #622: one call of the cleaner, and its record in the activity log. It
+//    works for about 20 seconds and never throws. TimeLimit never lowers a
+//    limit; it is asked for because some servers count waiting for the
+//    database against PHP's ordinary 30 seconds.
+//    NULL WHEN THERE IS NOTHING TO GO THROUGH (a new installation, or a
+//    cleaning finished long ago): then nothing runs, nothing is recorded and
+//    the page shows no card. Without that, every upgrade for ever would end
+//    with "0 old activity records were cleaned".
+$cleanOldRecords = static function (int $byUserId) use ($mysqli): ?array {
+    if (ActivityLogCleaner::left($mysqli) === 0) {
+        return null;
+    }
+    \Portal\Core\TimeLimit::atLeast(120);
+    $result = ActivityLogCleaner::run($mysqli);
+    try {
+        \Portal\Core\Logger::activity('ActivityLogCleaned', ActivityLogCleaner::inWords($result), $byUserId);
+    } catch (\Throwable $ignored) {
+        unset($ignored);
+    }
+
+    return $result;
+};
 
 // Handle POST to run migrations
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -194,6 +233,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $userId = (int) ($_SESSION['user_id'] ?? 0);
+
+    // 🧹 #622: "Clean the old records". It runs the cleaner and NOTHING else
+    //    on this page: the portal is not closed, no snapshot is taken, no
+    //    upgrade file runs and no version is recorded. What it did is shown
+    //    once, at the top of the page the browser is sent back to, so that
+    //    pressing "reload" there does not send the form again.
+    //    Refused while a database upgrade is waiting or the list of upgrades
+    //    cannot be read: the button is not drawn then, and the upgrade button
+    //    does the cleaning after the upgrade files.
+    if ((string) (is_string($_POST['clean_old_records'] ?? null) === true ? $_POST['clean_old_records'] : '') === '1') {
+        if ($migrator !== null && $pending === []) {
+            $cleaned = $cleanOldRecords($userId);
+            if ($cleaned === null) {
+                $_SESSION['flash_msg']  = 'No old activity records are left to clean.';
+                $_SESSION['flash_type'] = 'success';
+            } else {
+                $_SESSION['flash_msg']  = ActivityLogCleaner::inWords($cleaned);
+                $_SESSION['flash_type'] = ($cleaned['busy'] === true || $cleaned['error'] !== '') ? 'warning' : ($cleaned['finished'] === true ? 'success' : 'info');
+            }
+        } else {
+            $_SESSION['flash_msg']  = 'The old activity records were not cleaned, because a database upgrade is waiting or could not be '
+                                    . 'checked for. Run the upgrade first: it starts the cleaning when its files have run.';
+            $_SESSION['flash_type'] = 'warning';
+        }
+        header('Location: ' . Site::url('admin/upgrade'));
+        exit();
+    }
 
     // 🚫 The portal could not tell whether a database upgrade is waiting, and
     //    this page lists none (the _sql folder cannot be read, or is empty).
@@ -451,6 +517,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         //    shown again the next time the portal closed, for an upgrade
         //    nobody had started.
         \Portal\Core\Maintenance::setActive(false, '');
+
+        // 🧹 #622: now, and only now, start on the old activity records. The
+        //    version is recorded and the portal is open again, so a request
+        //    that is cut off during the cleaning leaves a finished upgrade
+        //    and some records still to clean, which the page then says.
+        //    Not run after a FAILED upgrade file: the portal is still closed
+        //    then, and the next press runs the files again first.
+        //    Nor on a press of "Finish the upgrade", when no upgrade file
+        //    ran: that card says the button does two things, and it does
+        //    those two. The cleaning has its own button on this page.
+        if ($results !== []) {
+            $cleanResult = $cleanOldRecords($userId);
+        }
     } else {
         // A migration failed: the portal stays closed, as before, but no
         // longer under words that say something is being applied.
@@ -485,6 +564,13 @@ try {
 } catch (\mysqli_sql_exception $e) {
     $executedErr = 'Could not read executed-migrations list: ' . $e->getMessage();
 }
+
+// 🧹 #622: how many old activity records are still to be gone through. Asked
+//    when the page is drawn, so it is true after a press as well as before.
+//    Null when it could not be counted, and then the card says nothing about
+//    a number. Not asked when the list of upgrades could not be read: the
+//    database is in doubt, and this page offers no button in that state.
+$oldRecordsLeft = $migrator === null ? null : ActivityLogCleaner::left($mysqli);
 
 // 🔒 The "refuse everything" file in the three private folders: put back
 //    wherever it is missing or holds no rule, every time this page is drawn. Done
@@ -841,6 +927,50 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <a href="<?php echo htmlspecialchars(Site::url('admin/calendar/feeds'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-info">
                             Open Outside calendars
                         </a>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- 🧹 #622: old activity records: what this press cleaned, how many are left, and the button -->
+            <?php if ($cleanResult !== null || ($oldRecordsLeft !== null && $oldRecordsLeft > 0)): ?>
+                <div class="card mb-4 <?php echo ($oldRecordsLeft ?? 0) > 0 ? 'border-warning' : ''; ?>" id="upgrade-old-records" data-left="<?php echo $oldRecordsLeft === null ? '' : (int) $oldRecordsLeft; ?>">
+                    <div class="card-header <?php echo ($oldRecordsLeft ?? 0) > 0 ? 'bg-warning-subtle' : ''; ?>">
+                        <h2 class="h6 mb-0">Old activity records</h2>
+                    </div>
+                    <div class="card-body">
+                        <?php if ($cleanResult !== null): ?>
+                            <p class="mb-2" id="upgrade-old-records-result"><?php echo htmlspecialchars(ActivityLogCleaner::inWords($cleanResult), ENT_QUOTES, 'UTF-8'); ?></p>
+                        <?php endif; ?>
+                        <?php if (($oldRecordsLeft ?? 0) > 0): ?>
+                            <p class="mb-2" id="upgrade-old-records-left">
+                                <strong><?php echo number_format((int) $oldRecordsLeft); ?> activity
+                                record<?php echo $oldRecordsLeft === 1 ? ' is' : 's are'; ?> still to be gone through.</strong>
+                                Before this version, every activity record kept the browser session&rsquo;s identifier and a copy of the whole
+                                session. The portal replaces each identifier with a fingerprint that is no use for signing in, and removes each
+                                copy, a few thousand records at a time.
+                            </p>
+                            <p class="mb-2" id="upgrade-old-records-meanwhile">
+                                <strong>What is true until none are left:</strong> every record the portal writes now is already safe.
+                                <?php if (count($pending) === 0): ?>
+                                    The two-step backup codes made before this version are already gone.
+                                <?php endif; ?>
+                                But an old record that has not been cleaned yet still holds what it held: a session identifier, which may still
+                                be in use, and for some accounts an authenticator key in readable text. So finish this today.
+                                <?php if (count($pending) === 0): ?>
+                                    The portal stays open while it is done.
+                                <?php endif; ?>
+                            </p>
+                            <?php if (count($pending) === 0 && $whyUnknown === ''): ?>
+                                <form method="post" id="upgrade-old-records-form">
+                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                                    <input type="hidden" name="clean_old_records" value="1">
+                                    <button type="submit" class="btn btn-warning">Clean the old records</button>
+                                    <span class="text-muted small ms-2">Each press works for about 20 seconds and keeps what it has done. Press again until none are left.</span>
+                                </form>
+                            <?php elseif (count($pending) > 0): ?>
+                                <p class="mb-0 text-muted small">The upgrade button below deletes the old backup codes and then starts this cleaning.</p>
+                            <?php endif; ?>
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php endif; ?>
