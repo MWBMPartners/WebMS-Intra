@@ -91,7 +91,7 @@ must-know shortcuts.</p>
         <li><strong>DB connection lost</strong> — Try <code>mysql … -e "SELECT NOW();"</code>; check DreamHost status.</li>
         <li><strong>Disk full</strong> — Prune <code>_backups/</code> older than 4 most recent; prune <code>_uploads/photos/queue/</code> older than 30 days.</li>
         <li><strong>Bad migration</strong> — Full-restore the latest snapshot via <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/backup'), ENT_QUOTES, 'UTF-8'); ?>">Backups</a>.</li>
-        <li><strong>Stolen credentials</strong> — clear every session, force password reset, rotate <code>enc.key</code>, rotate every encrypted integration credential. Exact SQL in <a href="https://github.com/MWBMPartners/WebMS-Intra/blob/main/docs/disaster-recovery-runbook.md#44-stolen-credentials" target="_blank" rel="noopener">runbook section 4.4</a>.</li>
+        <li><strong>Stolen credentials</strong> — clear every session, force password reset, rotate <code>enc.key</code>, rotate every encrypted integration credential. Exact SQL in <a href="https://github.com/MWBMPartners/WebMS-Intra/blob/main/docs/disaster-recovery-runbook.md#7-after-a-break-in" target="_blank" rel="noopener">runbook section 4.4</a>.</li>
         <li><strong>Compromised account</strong> — Disable user + revoke sessions, then run the offboarding flow.</li>
     </ul>
 </div></div>

@@ -69,8 +69,13 @@ endif;
                 <p>Make the portal feel like yours.</p>
                 <ul>
                     <li><a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>">/admin/settings</a> → set <code>site.name</code> to your congregation's name.</li>
-                    <li>Upload a logo and adjust <code>branding.primaryColor</code> to match.</li>
-                    <li>Add a tagline / strapline that will appear on the dashboard header.</li>
+                    <?php /* Said "adjust branding.primaryColor" until 27 October 2026. There is
+                             no such setting: the only branding.* one is branding.hidePoweredBy,
+                             and a colour belongs to an app, not to the portal as a whole. */ ?>
+                    <li>Set <code>site.brandLogoURL</code> to your logo.</li>
+                    <li>Set <code>site.tagline</code> for the line on the dashboard header.</li>
+                    <li>Each app carries its own colour (<code>calendar.brandColor</code>,
+                        <code>expenses.brandColor</code> and so on), so set the ones you use.</li>
                 </ul>
             </div>
         </div>

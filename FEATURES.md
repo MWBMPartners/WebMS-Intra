@@ -1620,7 +1620,7 @@ tables — **no new app, no third service-plan data model.**
   (`service_plans.public_share.enabled = 'false'`) and the plan level
   (`isPublicShared` defaults to 0 on every plan, existing and new). New
   CSRF'd `service-plans/share.php` (enable / disable / rotate the token)
-  plus a QR code via the existing `/qr.php` utility. `print.php` gains
+  plus a QR code via the existing `/qr` address (answered by `qr.php`). `print.php` gains
   `?version=leader|congregation` (default `leader` — byte-identical to
   before #128) — the congregation variant additionally suppresses the
   internal sectionType tag, matching a normal printed bulletin.

@@ -422,7 +422,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="badge text-bg-primary rounded-pill mt-1">4</span>
             <div>
                 <strong>Merge and deploy to dev</strong>
-                <p class="mb-0 small text-secondary">Once approved, the changes are merged into the main branch and automatically deployed to the dev site for testing.</p>
+                <p class="mb-0 small text-secondary">Once approved, the changes go onto the
+                <code>alpha</code> branch, which deploys the development site for testing. (This
+                used to say the <code>main</code> branch &mdash; that one deploys the LIVE site.)</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">
@@ -436,7 +438,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="badge text-bg-primary rounded-pill mt-1">6</span>
             <div>
                 <strong>Release to production</strong>
-                <p class="mb-0 small text-secondary">When a new version is tagged, the translations go live on the production site along with all other changes.</p>
+                <p class="mb-0 small text-secondary">The translations reach the live site the same
+                way everything else does: the change is promoted to <code>beta</code>, then to
+                <code>main</code>, and <code>main</code> deploys live. (This used to say a new tag
+                published them. Nobody tags by hand any more, and the workflow that published on a
+                tag has been removed.)</p>
             </div>
         </div>
     </div>

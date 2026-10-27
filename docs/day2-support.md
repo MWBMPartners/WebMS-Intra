@@ -10,11 +10,15 @@ This is a short, deliberately realistic statement of how problems with the porta
 
 | Channel | What for |
 |---|---|
-| In-portal feedback link (footer → "Report a problem") | Anything: bugs, confusion, suggestions |
+| Tell your portal administrator | Anything: bugs, confusion, suggestions |
 | The support e-mail address shown at Help → Support in your portal (an administrator sets it at Admin → Settings → Organisation) | Account issues, password reset failures |
 | Direct message to Salem874 | True emergencies only (data loss, security) |
 
-In-portal reports are preferred — they include the user, page, browser, and a screenshot automatically.
+**There is no in-portal feedback link.** This section used to name one in the footer and say
+that reports through it carried the user, the page, the browser and a screenshot automatically.
+No such link and no such feature exists, so ask people to say what they were doing, what they
+expected and what happened, and to give the page address and the time — those two let an
+administrator find the matching entry in the activity log.
 
 ## 2. Triage owner
 

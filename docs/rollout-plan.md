@@ -7,7 +7,7 @@
 
 To minimise day-1 issues affecting the whole congregation, we roll out in two phases:
 
-1. **Phase 1 — Leadership pilot (week 1)**: 3-5 leadership volunteers use the portal in production. Feedback collected via in-portal widget + dedicated email.
+1. **Phase 1 — Leadership pilot (week 1)**: 3-5 leadership volunteers use the portal in production. Feedback collected by e-mail — **the in-portal widget does not exist** (see the tooling table below; this line used to name it as a channel).
 2. **Phase 2 — Whole-congregation rollout (week 2+)**: invites sent to all members, "what's new" tour shown to everyone, day-2 support contract active.
 
 ## Phase 1 — Leadership pilot
@@ -31,9 +31,15 @@ To minimise day-1 issues affecting the whole congregation, we roll out in two ph
 
 ### Flag
 
-`portal.rollout.pilot_mode` setting (`tblSettings`):
-- `1` = pilot mode is on. Feedback widget visible to designated pilot users. Some risky new features are hidden until phase 2.
-- `0` = pilot complete. Whole-congregation mode active.
+`portal.rollout.pilot_mode` setting (`tblSettings`) — **seeded, and nothing reads it.**
+`grep -rln pilot_mode web/` finds only the two SQL files that create it, so neither value
+changes anything today. What it was MEANT to do, and what would have to be built:
+- `1` = pilot mode on: a feedback widget shown to chosen pilot users (that widget does not
+  exist either), and the riskier new features hidden until phase 2.
+- `0` = pilot complete, whole-congregation mode.
+
+This block described both behaviours as working until 27 October 2026. Anyone planning a pilot
+on the strength of it would have found the flag did nothing at all.
 
 ### Communications
 
@@ -75,7 +81,7 @@ After 1 week of whole-congregation use, review:
 - Sign-in rate (target: 60% of invited users have signed in).
 - Issue reports (severity + volume).
 - Most-used apps.
-- Most-confused-about features (from feedback widget).
+- Most-confused-about features (gathered by asking the pilot group — there is no feedback widget).
 
 Findings shape the next iteration.
 
@@ -83,8 +89,8 @@ Findings shape the next iteration.
 
 | Feature | Issue | Status |
 |---|---|---|
-| Pilot-mode flag | #232 | ✅ (this PR) |
-| Feedback widget | #232 | 🟡 Deferred to Phase 2 prep |
+| Pilot-mode flag | #232 | 🟡 Setting seeded only — **nothing reads it.** `portal.rollout.pilot_mode` exists in the database and no code under `web/` looks at it, so setting it to 1 changes nothing. Marked ✅ here until 27 October 2026. |
+| Feedback widget | #232 | 🟡 Does not exist. Deferred to Phase 2 prep. |
 | Invite-based onboarding | #239 | Pending |
 | "What's new" tour | #237 | Pending |
 | Day-2 support docs | #226 | ✅ Committed |

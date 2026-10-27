@@ -749,7 +749,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <h5 class="mt-3 mb-3">Debug panel</h5>
 
-    <p>Admin users can enable the <strong>debug panel</strong> by appending <code>?debug=true</code> to any portal page URL. This displays a panel at the bottom of the page with useful diagnostic information such as request timing, loaded settings, and the current user session data.</p>
+    <p>On a <strong>development or beta</strong> portal, an administrator can switch on the
+    <strong>debug panel</strong> by adding <code>?debug=true</code> to any page address. It shows a
+    panel at the foot of the page with how long the request took, the settings that were loaded, and
+    the current session.</p>
+    <p class="small text-secondary"><strong>It does not work on a live portal</strong>, and that is
+    deliberate: the panel would show settings and session details to anyone who talked an
+    administrator into opening such a link. The request is refused and the attempt is recorded. A
+    portal that has not been told which channel it is counts as live, so if this does nothing on
+    what you believe is a test site, that is why.</p>
 
     <div class="alert alert-info d-flex gap-2" role="alert">
         <i class="fa-solid fa-circle-info mt-1"></i>

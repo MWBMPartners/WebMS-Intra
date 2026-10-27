@@ -52,7 +52,15 @@ $supportEmail = htmlspecialchars(
     <div class="card-body">
         <h2 class="h5"><i class="fa-solid fa-bullhorn me-1"></i>How to report a problem</h2>
         <ol class="mb-0">
-            <li><strong>Use the "Report a problem" link in the footer of any page</strong> — preferred. It captures what you were looking at, which browser you're using, and a screenshot automatically.</li>
+            <?php /* There is no "Report a problem" link and no feedback feature. This line
+                     used to tell everybody to use one, and promised it captured the page, the
+                     browser and a screenshot. Nothing of the sort exists: the footer holds the
+                     copyright, the version and "Powered by". Do not put this back without
+                     building it first. */ ?>
+            <li><strong>Tell your portal administrator</strong> — and say what you were doing,
+                what you expected, and what happened instead. The page address and the time help
+                most, because they let an administrator find the matching entry in the activity
+                log.</li>
             <?php if ($supportEmail !== ''): ?>
             <li><strong>Email <a href="mailto:<?php echo $supportEmail; ?>"><?php echo $supportEmail; ?></a></strong> for account issues, password reset failures, or anything blocking you from signing in.</li>
             <?php else: ?>
