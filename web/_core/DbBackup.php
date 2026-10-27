@@ -1598,6 +1598,26 @@ class DbBackup
                 'mysql_server'   => (string) $this->db->server_info,
                 'portal_version' => defined('PORTAL_VERSION') === true ? (string) PORTAL_VERSION : '',
                 'time_zone'      => '+00:00',
+                // 🧾 THIS SNAPSHOT COVERS THE WHOLE DATABASE, and says so.
+                //    Added 27 October 2026 (owner's decision) after the Codex
+                //    review found that restoreAll() took its table list from
+                //    the manifest and nothing else — so a manifest edited down
+                //    to one name turned "restore ALL" into a one-table restore
+                //    of a table the one-table path refuses by name.
+                //
+                //    Every snapshot this method takes IS whole: the list comes
+                //    from `SHOW TABLES LIKE 'tbl%'` a few lines below. The flag
+                //    is not here to record a choice; it is here so a RESTORE can
+                //    tell a snapshot this portal wrote from a manifest somebody
+                //    has edited. `table_count` is the same fact in a form that
+                //    survives somebody deleting entries from `tables`.
+                //
+                //    A snapshot written BEFORE this flag existed does not carry
+                //    it, and cannot be told from a tampered one — see
+                //    restoreAll(), which skips the protected tables for those
+                //    and says so rather than guessing.
+                'whole_database' => true,
+                'table_count'    => count($tables),
                 'tables'         => [],
             ];
             $totalRows = 0;
@@ -2945,6 +2965,54 @@ class DbBackup
         }
 
         // ---------------------------------------------------------------
+        // 🛡️ IS THIS REALLY A WHOLE SNAPSHOT?
+        //
+        // Three tables may be put back only as part of a whole restore
+        // (WHOLE_DATABASE_ONLY): each holds a "this has already happened" mark,
+        // and moving one alone loses data. Refusing them HERE as well was
+        // considered and rejected long ago, for a good reason that has not
+        // changed — it would make the pre-upgrade snapshot impossible to undo,
+        // which is the one thing it exists for.
+        //
+        // But this method took its table list from the manifest and asked
+        // nothing else, and a manifest is an ordinary file in the snapshot
+        // folder. Edited down to a single name it turned "restore ALL" into
+        // exactly the one-table restore the other path refuses. Found by the
+        // Codex review, 27 October 2026.
+        //
+        // So a snapshot now SAYS whether it is whole (see snapshot()). If it
+        // does, everything is put back as before. If it does NOT — an older
+        // snapshot, or one somebody has edited — the protected tables are left
+        // alone and the rest is restored, and the answer says which and why.
+        // Guessing from the number of tables was rejected: a genuine older
+        // snapshot legitimately lacks tables added since, and this file goes to
+        // some trouble to keep such snapshots readable.
+        // ---------------------------------------------------------------
+        $saysItIsWhole = ($manifest['whole_database'] ?? null) === true;
+        $heldBack      = [];
+        if ($saysItIsWhole === false) {
+            foreach ($tables as $table) {
+                if (self::isWholeDatabaseOnly($table) === true) {
+                    $heldBack[] = $table;
+                }
+            }
+            if ($heldBack !== []) {
+                $tables = array_values(array_filter(
+                    $tables,
+                    static fn (string $t): bool => self::isWholeDatabaseOnly($t) === false
+                ));
+                if ($tables === []) {
+                    return $fail(
+                        'This snapshot holds nothing but ' . implode(', ', $heldBack) . ', and it does not say '
+                        . 'that it covers the whole database. Those tables can only be put back as part of a '
+                        . 'whole restore, because each one records what has already happened. Nothing has been '
+                        . 'changed. Use a snapshot taken by this portal.'
+                    );
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------
         // 🔍 CHECK EVERYTHING FIRST. Nothing in this block writes anything.
         // ---------------------------------------------------------------
         $rowsExpected = 0;
@@ -3027,6 +3095,21 @@ class DbBackup
         $emptied        = [];
         $outsideChanged = [];
         $warnings       = [];
+
+        // 🧾 SAY what was held back, if anything. A restore that quietly skips
+        //    a table is the silent kind of failure this portal keeps being
+        //    caught by, so this goes in the answer the administrator reads.
+        if ($heldBack !== []) {
+            $warnings[] = 'This snapshot does not say that it covers the whole database, so '
+                        . implode(' and ', $heldBack) . ' ' . (count($heldBack) === 1 ? 'was' : 'were')
+                        . ' left exactly as ' . (count($heldBack) === 1 ? 'it is' : 'they are')
+                        . '. Each of those records what has already happened — which migrations have run, '
+                        . 'which backup codes have been used, what the settings now say — and putting one '
+                        . 'back without the rest of the database loses data. Everything else in the snapshot '
+                        . ($dryRun === true ? 'would be' : 'was') . ' put back. Snapshots taken by this '
+                        . 'portal from 27 October 2026 onwards say that they cover the whole database, and '
+                        . 'for those nothing is held back.';
+        }
         $zoneWas        = null;
         $modeWas        = null;
         $atCommit       = false;

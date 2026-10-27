@@ -1,11 +1,13 @@
 {
     "format": 2,
-    "created_at": "2026-10-12T14:18:15+00:00",
+    "created_at": "2026-10-27T18:15:07+00:00",
     "reason": "sample for the schema check",
-    "php_version": "8.5.10",
+    "php_version": "8.5.11",
     "mysql_server": "8.0.36",
     "portal_version": "",
     "time_zone": "+00:00",
+    "whole_database": true,
+    "table_count": 228,
     "tables": {
         "tblExternalEventChoices": {
             "columns": [
@@ -62,7 +64,7 @@
                 "updatedAt"
             ],
             "rows": 1,
-            "sha256": "046c942484e630fb2d22136b5e0d5d5ad185324b1907021d55d25f15efc316b3",
+            "sha256": "e8e659e1b5f6efc6de520f3f189e53a5c9dbd0311391bec3b17a9e601a99995b",
             "file": "tblExternalFeeds.jsonl"
         }
     },

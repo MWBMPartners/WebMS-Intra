@@ -173,7 +173,27 @@ $payload = [
             'SELECT * FROM tblExpenseClaims WHERE userID = ?'
         ),
         'prayerRequests' => $fetchUserRows(
-            'SELECT * FROM tblPrayerRequests WHERE submitterID = ?'
+            // 🙈 NAMED COLUMNS, not `SELECT *`, and two are deliberately left out.
+            //
+            //    `moderatorID` and `assignedToUserID` are OTHER PEOPLE — the
+            //    personal-data list marks both as such. `SELECT *` handed a
+            //    person the account numbers of whoever moderated their request
+            //    and whoever it was given to, in their own download. Found by
+            //    the Codex review of 27 October 2026; the owner chose to drop
+            //    the third-party columns and keep everything that is the
+            //    person's own.
+            //
+            //    The same reasoning as leaving the free-text description out of
+            //    the activity records above: a download is for what the portal
+            //    holds about YOU, and somebody else's identity is not that.
+            //
+            //    If a column is added to tblPrayerRequests, it must be added
+            //    here on purpose — which is the point of naming them. Ask of
+            //    each one: whose is it?
+            'SELECT requestID, siteID, submitterID, assignedAt, partnerNote, partnerLastPrayedAt, '
+            . 'submitterName, submitterEmail, submitterIP, subject, body, kind, visibility, status, '
+            . 'isAnonymous, testimony, answeredAt, moderatedAt, createdAt, updatedAt '
+            . 'FROM tblPrayerRequests WHERE submitterID = ?'
         ),
         'consentLog' => $fetchUserRows(
             'SELECT consentID, consentType, decision, policyHash, ipAddress, createdAt FROM tblConsentLog WHERE userID = ? ORDER BY createdAt DESC'
@@ -288,8 +308,19 @@ $payload = [
         // 🏛️ Venue Bookings (#429) — export↔erasure parity with the three
         // GdprEraser::catalogue() entries added alongside this block.
         'venueBookingsEdited' => $fetchUserRows(
-            // tblVenueBookings.updatedByID — bookings this user last edited
-            'SELECT bookingID, siteID, venueID, roomID, bookingDate, startTime, endTime, statusID, notes, updatedAt '
+            // tblVenueBookings.updatedByID — bookings this user last edited.
+            //
+            // 🙈 `notes` is NOT included, and that is deliberate. These rows are
+            //    here only because this person was the LAST TO EDIT the booking,
+            //    which does not make the booking theirs. The notes are free text
+            //    that anybody may have written and may hold somebody else's
+            //    telephone number or name. Found by the Codex review of
+            //    27 October 2026; the owner chose to drop it.
+            //
+            //    Stripping names out of the text was rejected for the activity
+            //    log for the same reason it would be wrong here: pattern-matching
+            //    free text misses cases while looking as though it has not.
+            'SELECT bookingID, siteID, venueID, roomID, bookingDate, startTime, endTime, statusID, updatedAt '
             . 'FROM tblVenueBookings WHERE updatedByID = ?'
         ),
         'venueUsageWindowsCreated' => $fetchUserRows(

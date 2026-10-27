@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 65;
+const EXPECTED_CHECKS = 68;
 
 $failures = 0;
 $passes   = 0;
@@ -822,6 +822,61 @@ check(
         && str_contains($activitySelect, 'visitorIP') === true
         && str_contains($activitySelect, 'timestamp') === true,
     'it selects: ' . $activitySelect
+);
+
+// -----------------------------------------------------------------------------
+// 8d. THE DOWNLOAD DOES NOT HAND OVER OTHER PEOPLE'S DETAILS.
+//     The same rule as the activity description above, applied where the Codex
+//     review of 27 October 2026 found it broken: the prayer-request rows were
+//     fetched with `SELECT *`, so a person's own download carried the account
+//     numbers of whoever MODERATED their request and whoever it was ASSIGNED
+//     to — two people the written list itself marks as separate. And the venue
+//     bookings were included merely because this person was the last to EDIT
+//     them, notes and all: free text that anybody may have written and that may
+//     hold somebody else's telephone number.
+//
+//     The owner chose (27 October 2026) to drop the third-party columns and
+//     keep everything that is the person's own. These checks are here because
+//     the obvious "improvement" is to put a `SELECT *` back.
+// -----------------------------------------------------------------------------
+// $export itself is not read until section 9 below, so read the page here
+// rather than reaching forward for a variable that does not exist yet. The
+// same mistake crashed the activity-description checks when they were added.
+$exportHere    = (string) @file_get_contents(__DIR__ . '/../web/_apps/auth/account/data-export.php');
+$prayerSelect  = (preg_match('/\'prayerRequests\'\s*=>.*?FROM\s+tblPrayerRequests/s', $exportHere, $m) === 1) ? $m[0] : '';
+$bookingSelect = (preg_match('/\'venueBookingsEdited\'\s*=>.*?FROM\s+tblVenueBookings/s', $exportHere, $m) === 1) ? $m[0] : '';
+// Judge the CODE, not the comments beside it. Every check below reads these
+// stripped copies: the first draft tested the raw text and failed on the
+// page's own explanation, which names the columns it is explaining the
+// absence of and quotes "SELECT *" as the thing not to put back.
+$prayerCode    = (string) preg_replace('!//[^\n]*!', '', $prayerSelect);
+$bookingCode   = (string) preg_replace('!//[^\n]*!', '', $bookingSelect);
+
+check(
+    'the download does NOT hand over the account numbers of whoever moderated a prayer request or whoever it was given to: they are other people',
+    $prayerSelect !== ''
+        && str_contains($prayerCode, 'SELECT *') === false
+        && preg_match('/\bmoderatorID\b/', $prayerCode) !== 1
+        && preg_match('/\bassignedToUserID\b/', $prayerCode) !== 1,
+    $prayerSelect === ''
+        ? 'the prayer-request query could not be found in data-export.php at all, so this check proves nothing: find it and fix this check'
+        : 'it selects: ' . preg_replace('/\s+/', ' ', $prayerSelect)
+);
+check(
+    'and it still hands over the request that is the person\'s own: the subject, the body, how it was answered and when',
+    $prayerSelect !== ''
+        && str_contains($prayerCode, 'subject') === true
+        && str_contains($prayerCode, 'body') === true
+        && str_contains($prayerCode, 'submitterID') === true,
+    'it selects: ' . preg_replace('/\s+/', ' ', $prayerSelect)
+);
+check(
+    'the download does NOT hand over the free-text notes of a booking somebody merely edited: anybody may have written them, about anybody',
+    $bookingSelect !== ''
+        && preg_match('/\bnotes\b/', $bookingCode) !== 1,
+    $bookingSelect === ''
+        ? 'the venue-booking query could not be found in data-export.php at all, so this check proves nothing: find it and fix this check'
+        : 'it selects: ' . preg_replace('/\s+/', ' ', $bookingSelect)
 );
 
 // -----------------------------------------------------------------------------
