@@ -6,6 +6,61 @@
 
 ---
 
+## 27 OCTOBER 2026, LATEST — slices 5 and 6; two owner decisions carried out
+
+**Two decisions taken (question tool, settled):** (a) a snapshot now RECORDS whether it covers the
+whole database; (b) the data download drops the third-party columns only. Both built and committed
+as `b7496b7`. Slice 6 (outside calendars) is running.
+
+### Slice 5, backup and restore — and a lesson in reading before fixing
+
+Codex: "not safe to ship", six findings. The real one: **`restoreAll()` took its table list from
+the snapshot's manifest and asked nothing else**, so a manifest edited down to one name turned
+"restore ALL" into exactly the one-table restore the other path refuses.
+
+**The obvious fix was already rejected IN THE CODE, with a good reason** — refusing those tables
+in `restoreAll()` too "would make the pre-upgrade snapshot impossible to undo, which is the one
+thing it exists for". I read that before touching anything. So the fix is the owner's choice: a
+snapshot says `whole_database`, and a manifest that does not say so has the three protected tables
+held back, **named in the answer**, with the rest restored. Six cases proved, including that a real
+pre-upgrade snapshot still restores everything.
+
+Format number deliberately NOT raised (compatible both ways; raising it would make older releases
+refuse readable snapshots). Schema updated — mandatory, because that object sets
+`additionalProperties: false` — and the committed sample refreshed with `--write-samples`, which
+is what proof 1 of the backup self-test checks.
+
+**Slice 5's other five are NOT fixed:** case differences defeating the engine/queue checks; foreign-key
+checking assumed rather than enforced; a column whose type changed silently altering a value (#595
+already has the lasting fix); a restore that cannot resume inside one request; and a skipped
+duplicate still overwriting the kept row's self-links. Written up in
+`.claude-work/resume/codex-pass/slice-5-result.md`.
+
+### The download
+
+`SELECT *` on prayer requests handed a person the account numbers of whoever moderated their
+request and whoever it was assigned to; booking notes came along because they were the last to
+EDIT the booking. Columns now named explicitly. `tblExpenseClaims` was checked and left: its only
+person column is the person's own. Three checks pin it (coverage 65 -> 68), proved both ways.
+
+### Still owed, and said plainly
+
+- **No end-to-end self-test of the held-back restore path.** The six cases exercise the decision,
+  not a real restore of a flagless manifest. It belongs as a new proof in
+  `backup-restore-selftest.php`.
+- Proof 19 of the backup self-test still fails about three runs in five, #636, unrelated to any of
+  this — it failed identically before the commit.
+- Slice 1's findings 3-5, slice 4's 4-5, slice 5's 1 and 3-6 are all unfixed and written up.
+- Sweep: README and FEATURES done (`7a0e3a4`); **DEV_NOTES items and group 4 still to do.**
+- Slices 7, 8 and 9 queued: `IcsReader.php`; `FeedAdmin.php` + `ImportNotifier.php`; money.
+
+### Two traps worth carrying forward
+
+- **A check that reads prose judges the wrong thing.** My first download checks failed on the
+  page's own comment, which quotes "SELECT *" as the thing not to put back. Strip comments first.
+- **Recreate the test database between planted runs.** A plant that stops part way leaves rows
+  behind and every later run then fails for that reason instead.
+
 ## 27 OCTOBER 2026, LATER STILL — Codex slices 3, 4 and 5; the sweep; and two faults #626 left behind
 
 **The owner said to proceed, including the queued item 5 (slices 3-9 and sweep groups 3-4).**
