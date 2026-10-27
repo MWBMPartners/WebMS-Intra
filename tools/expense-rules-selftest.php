@@ -77,7 +77,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 50;
+const EXPECTED_CHECKS = 58;
 
 $dbName = (string) getenv('SELFTEST_DB_NAME');
 if (str_starts_with($dbName, 'selftest_') === false) {
@@ -484,6 +484,120 @@ $noAuthority = "if (\$isAdmin === false && App::hasRole('Approver') === false) {
     . "    }\n"
     . "}\n";
 $rawApprove = (string) @file_get_contents($apps . 'expenses/approve/save.php');
+
+// 💰 THE DECISION IS SAID EXACTLY, OR IT IS REFUSED (found 27 October 2026).
+//
+//    approve/save.php used to read:
+//        $decision = ($_POST["decision"] ?? "") === "Rejected" ? "Rejected" : "Approved";
+//    (with single quotes) so anything that was not the exact text "Rejected"
+//    recorded an APPROVAL — a missing field, lower case, a misspelling, or
+//    `decision[]=Rejected`, because an array is never equal to a string. If
+//    that was the last approval the claim needed, a claim meant to be REJECTED
+//    became payable.
+//
+//    BE HONEST ABOUT WHAT THESE CHECKS ARE: they read the CODE, not the
+//    behaviour, so they would not catch a third way of writing the same
+//    mistake. There is no end-to-end test that posts a malformed decision to
+//    the real page and proves nothing is approved; that belongs in a test which
+//    drives a server, and it is not written yet.
+$approveTight = squeezed($rawApprove);
+check(
+    "approve/save.php reads the decision through a named value it can then test, not a ternary that guesses",
+    str_contains($approveTight, '$decisionRaw=$_POST[') === true
+        && str_contains($approveTight, "==='Rejected'?'Rejected':'Approved'") === false
+);
+check(
+    "...it requires the decision to be text saying exactly Approved or Rejected",
+    str_contains($approveTight, 'is_string($decisionRaw)===true') === true
+        && str_contains($approveTight, '$decisionRaw===\'Approved\'') === true
+        && str_contains($approveTight, '$decisionRaw===\'Rejected\'') === true
+);
+
+// 🧠 THIS CHECK USED TO BE WORTHLESS, AND THAT IS WHY IT NOW READS THE BLOCK.
+//
+//    It used to assert only that the text `if($decision===''){` appeared
+//    somewhere before the first claim query. It never looked INSIDE the block.
+//    A review on 27 October 2026 planted this, which puts the money bug back
+//    in full while keeping every phrase the other checks hunt for:
+//
+//        if ($decision === '') {
+//            $decision = 'Approved';   // "be forgiving about an older form"
+//        }
+//
+//    and the self-test reported 54 of 54 passed. A missing `decision` field
+//    approved the claim again, with every check green. So the block's CONTENTS
+//    are what matter: it must stop the request, and it must not quietly decide.
+// NOTE the single quotes. Written with double quotes, PHP interpolates
+//    `$decision` out of the needle and the check silently looks for the wrong
+//    text — which is how two of these checks first passed by accident.
+$refuseFrom = at($approveTight, 'if($decision===\'\'){');
+// 🧱 The block is taken to its MATCHING close brace, not to "the next exit()
+//    anywhere in the file". A round-2 review deleted the `exit();` from this
+//    block and the check still passed, because strpos() happily found an
+//    exit() hundreds of characters further down. A check that reads past the
+//    end of what it is checking is not reading it at all.
+$refuseBody = '';
+if ($refuseFrom >= 0) {
+    $open  = strpos($approveTight, '{', $refuseFrom);
+    $depth = 0;
+    for ($i = $open; $i < strlen($approveTight); $i++) {
+        if ($approveTight[$i] === '{') {
+            $depth++;
+        } elseif ($approveTight[$i] === '}') {
+            $depth--;
+            if ($depth === 0) {
+                $refuseBody = substr($approveTight, $refuseFrom, ($i + 1) - $refuseFrom);
+                break;
+            }
+        }
+    }
+}
+check(
+    "...and when it is neither, the page STOPS without deciding anything",
+    $refuseBody !== ''
+        && str_contains($refuseBody, "\$_SESSION['flash_type']='danger'") === true
+        && str_contains($refuseBody, 'exit();') === true
+        // The block must not SET a decision. That is the planted fault above.
+        //    Tested as an assignment and not as plain text, because the
+        //    block's own opening condition, `if($decision===''){`, contains
+        //    the characters `$decision=` and defeated the simpler test.
+        && preg_match('/\\$decision\\s*=(?!=)/', $refuseBody) !== 1,
+    $refuseBody === '' ? 'the refusal block could not be found at all' : $refuseBody
+);
+// 🧠 AND THE LINE THAT MAKES THE BLOCK REACHABLE. A round-2 review changed
+//    only the initial value —
+//        $decision    = 'Approved';   // was: ''
+//    — leaving the refusal block and every phrase the other checks hunt for
+//    exactly as they were. `if ($decision === '')` can then never fire, so a
+//    missing field, an empty value, the wrong case and a list ALL record an
+//    approval again, and the self-test reported 57 of 57. Guarding the inside
+//    of a block is worth nothing if the way in can be closed off.
+check(
+    "...and the decision starts as nothing, so that block is actually reachable",
+    str_contains($approveTight, "$decision='';") === true,
+    preg_match('/\$decision\s*=\s*[^;]*;/', $rawApprove, $seen) === 1 ? trim($seen[0]) : '(not found)'
+);
+check(
+    "...and it refuses before the claim is even looked up, so it reveals nothing about which claims exist",
+    $refuseFrom >= 0 && $refuseFrom < at($approveTight, 'FROM tblExpenseClaims EC')
+);
+
+// 🔢 The claim NUMBER is guarded the same way as the decision. `(int) ['x']` is
+//    1 in PHP, silently, so `claimID[]=916301` used to arrive as claim number
+//    one and a real decision was recorded against whatever claim that is. The
+//    same line appeared in all three money handlers and all three were changed
+//    together, so all three are checked here.
+foreach (['approve', 'treasury', 'withdraw'] as $handler) {
+    $tight = squeezed((string) @file_get_contents($apps . 'expenses/' . $handler . '/save.php'));
+    check(
+        "expenses/$handler/save.php will not take a list as the claim number",
+        str_contains($tight, 'is_scalar($claimIdRaw)===true?(int)$claimIdRaw:0') === true
+            && str_contains($tight, '$claimID=(int)($_POST[') === false,
+        $tight === '' ? 'the file could not be read' : ''
+    );
+}
+
+
 check(
     'the refusal for somebody with no authority at all is exactly what it was',
     str_contains($rawApprove, $noAuthority) === true

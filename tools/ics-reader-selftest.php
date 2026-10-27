@@ -1422,6 +1422,28 @@ st_lines(
     st_lines_of($r['expand']['occurrences'])
 );
 
+// F6 is the same promise as F5, through the OTHER piece of code. A changed date
+// that LINES UP with one of its series' dates (F5) and one that does NOT line up
+// are handled by two different paths, and only the first was checked. The second
+// passed the changed date to itself as its own series, so the series' two flags —
+// private and cancelled — were simply thrown away. A private pastoral series with
+// one visit moved to another day imported that visit as NOT private, with its
+// title, for everybody. Most calendar programs do not repeat CLASS on a changed
+// date, because the standard does not ask them to, so this is the ordinary case
+// and not an exotic one. Found by an outside review on 27 October 2026; the
+// fixture's blocks deliberately say nothing about CLASS or STATUS.
+$r = st_read('class-orphan-override-inherits.ics');
+st_lines(
+    'F6 class-orphan-override-inherits.ics: a changed date that lines up with NO date of its series still inherits the series being private, and being cancelled',
+    [
+        '2026-10-06 19:00:00|2026-10-06 20:00:00|timed|key=20261006T180000Z|series|priv=yes|canc=no|dup=no|Pastoral visits',
+        '2026-10-07 19:00:00|2026-10-07 20:00:00|timed|key=20261007T180000Z|series|priv=yes|canc=no|dup=no|Pastoral visits (moved to the Wednesday)',
+        '2026-10-13 19:00:00|2026-10-13 20:00:00|timed|key=20261013T180000Z|series|priv=no|canc=yes|dup=no|Called-off meeting',
+        '2026-10-14 19:00:00|2026-10-14 20:00:00|timed|key=20261014T180000Z|series|priv=no|canc=yes|dup=no|Called-off meeting (moved to the Wednesday)',
+    ],
+    st_lines_of($r['expand']['occurrences'])
+);
+
 // =============================================================================
 // G. Untrusted text
 // =============================================================================

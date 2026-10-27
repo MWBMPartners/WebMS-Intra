@@ -72,7 +72,26 @@ use Portal\Core\Site;
 Auth::ensureSession();
 Auth::requireLogin();
 
-$claimID = (int) ($_POST['claimID'] ?? 0);
+// 🔢 THE CLAIM NUMBER IS A SINGLE VALUE, OR IT IS NOTHING.
+//
+//    `(int) ['x']` is 1 in PHP, silently — no warning, no notice. So
+//    `claimID[]=916301` used to arrive here as claim number ONE, and the page
+//    went on to act on whichever claim happens to be number 1, while the claim
+//    the person was actually looking at was left untouched.
+//
+//    It needs a valid anti-forgery token, so it is the person's own browser
+//    doing it: a proxy that folds a repeated hidden field into a list, or a
+//    script that sets the field twice.
+//
+//    On this page that means WITHDRAWING the wrong claim: one claim
+//    disappears from its claimant's list and the one they meant to
+//    withdraw is still waiting for a decision.
+//
+//    Anything that is not a single value becomes 0, which the existing "that is
+//    not a claim number" refusal below already turns away. The same guard is in
+//    the other two money handlers; all three were changed together.
+$claimIdRaw = $_POST['claimID'] ?? 0;
+$claimID    = is_scalar($claimIdRaw) === true ? (int) $claimIdRaw : 0;
 
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid CSRF token.';

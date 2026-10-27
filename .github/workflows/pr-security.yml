@@ -1029,6 +1029,25 @@ jobs:
         run: python3 tools/audit-checks/check_account_writes_guarded.py
 
       # =====================================================================
+      # Only ONE place may judge the PHP version (#640) — hard gate.
+      #
+      # A hard gate rather than a comment line, for the same reason the
+      # account-change guard is one: the thing it protects is a SECURITY
+      # judgement, and a second copy of it can disagree with the first, so the
+      # portal would tell a customer on one page that their PHP is fine and on
+      # another that it is not. There is nothing to weigh up and no false
+      # positive worth tolerating — the fix is always "ask PhpRuntime".
+      #
+      # This was added in the same breath as the check itself, because a review
+      # pointed out that writing a check and not wiring it up leaves a file
+      # that looks like a guard and guards nothing.
+      # =====================================================================
+      - name: One place decides the PHP version (hard gate)
+        id: php_version_one_place
+        if: always()
+        run: python3 tools/audit-checks/check_php_version_one_place.py
+
+      # =====================================================================
       # Summary in the Actions UI
       # =====================================================================
       - name: Job summary
@@ -1042,6 +1061,7 @@ jobs:
             # runs always, so a failed lint was summed up as a pass.
             echo "- PHP lint: ${{ steps.php_lint.outcome }} (hard gate)"
             echo "- Account-change guard: ${{ steps.account_guard.outcome }} (hard gate)"
+            echo "- One place decides the PHP version: ${{ steps.php_version_one_place.outcome }} (hard gate)"
             if [[ "${{ steps.install_gitleaks.outputs.installed }}" == "yes" ]]; then
               echo "- gitleaks: see step output / artifact"
             elif [[ "${{ steps.install_gitleaks.outcome }}" == "success" ]]; then

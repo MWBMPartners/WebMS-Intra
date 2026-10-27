@@ -438,14 +438,32 @@ function maintenance_health_probes(\mysqli $db): array
     }
 
     // 7. PHP
+    //
+    //    This probe used to judge the EXTENSIONS only and print the version
+    //    bare beside them, so a PHP too old to run the portal — or one missing
+    //    the October 2026 security fix — showed a green light here. The
+    //    version is judged by Portal\Core\PhpRuntime, the one place that
+    //    decides, so this line agrees with the dashboard, the Server
+    //    Information page and the installation wizard.
     $phpExts = ['curl', 'gd', 'mbstring', 'openssl', 'mysqli'];
     $missing = array_filter($phpExts, static fn (string $e) => extension_loaded($e) === false);
+    $phpJudged = \Portal\Core\PhpRuntime::classify();
+    $extState  = count($missing) === 0 ? 'ok' : 'warn';
+    // The worse of the two lights. A missing extension and an old version are
+    // different problems and both belong in the detail, so neither is hidden
+    // by the other.
+    $phpRank   = ['ok' => 0, 'warn' => 1, 'crit' => 2];
     $probes['PHP'] = [
-        'state'  => count($missing) === 0 ? 'ok' : 'warn',
+        'state'  => ($phpRank[$phpJudged['state']] ?? 1) >= ($phpRank[$extState] ?? 1)
+            ? $phpJudged['state']
+            : $extState,
         'label'  => PHP_VERSION,
-        'detail' => count($missing) === 0
-            ? 'All required extensions loaded'
-            : 'Missing: ' . implode(', ', $missing),
+        'detail' => ($phpJudged['state'] === 'ok'
+            ? 'Supported version'
+            : $phpJudged['headline'])
+            . '. ' . (count($missing) === 0
+                ? 'All required extensions loaded'
+                : 'Missing: ' . implode(', ', $missing)),
     ];
 
     // 8. Maintenance flag

@@ -814,9 +814,33 @@ final class ImportNotifier
      * switched-on calendars one by one. So the message can never hold a row
      * the list would not show an administrator of this organisation, and
      * never a row of another organisation: that reader takes the
-     * organisation's number and reads nothing else. Each calendar's number
-     * comes from the same read as its rows, so "3 waiting" is never printed
-     * above two.
+     * organisation's number and reads nothing else.
+     *
+     * A CALENDAR WHOSE ROWS ARE LISTED has its number from the SAME read as
+     * those rows, so "3 waiting" is never printed above two of them.
+     *
+     * A CALENDAR PAST THE LIMITS DOES NOT. Once MAX_EVENTS_LISTED events have
+     * been listed, or MAX_CALENDARS_LISTED calendars named, the rest are not
+     * read again and keep the number from the count taken at the top of this
+     * method. That number can be a few seconds old: if somebody approves
+     * those events in between, the message names a calendar with a count that
+     * has just stopped being true, and the total is that much too high. No
+     * title is shown for such a calendar, so nobody is told about an event they
+     * may not see.
+     *
+     * It is USUALLY too high rather than too low, because approving is what
+     * normally happens between the two moments — but an import that adds rows
+     * in that gap makes it too low, so "never too low" would be too strong a
+     * claim to make. (It was made, and a review on 27 October 2026 took it
+     * out.)
+     *
+     * Re-reading every calendar would cost one more query per calendar on
+     * shared hosting, where this runs inside a scheduled job with a hard time
+     * limit, to correct a number the message already says is a snapshot (it
+     * prints when the list was made). That trade is deliberate. This
+     * paragraph exists because the docblock used to claim the stronger
+     * guarantee for EVERY calendar, which was not true of the code below it
+     * (found by an outside review, 27 October 2026).
      *
      * WHAT IS SHOWN OF AN EVENT: its title and its time, and nothing else.
      * No place and no description (the owner asked for title and time).

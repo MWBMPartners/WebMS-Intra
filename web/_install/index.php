@@ -11,8 +11,8 @@
  * start without the database login this wizard exists to write. It is reached
  * through the web folder's index.php, whenever `_auth_keys/auth_creds.php` is
  * missing. It loads only files that need nothing but PHP: version.php,
- * brand-defaults.php, DbServer.php, Channel.php, PortalAddress.php, and its
- * own helpers in this folder.
+ * brand-defaults.php, DbServer.php, PhpRuntime.php, Channel.php,
+ * PortalAddress.php, and its own helpers in this folder.
  *
  * WHO MAY USE IT (#499, #500). Until October 2026 the only guard was "already
  * installed", so a stranger who reached a fresh upload first could point it
@@ -120,6 +120,14 @@ const INSTALL_NO_CONNECTION_MESSAGE = 'The installer has no database connection 
 //    to be loaded part way through step 2; it moved up here on 12 October 2026
 //    because the connection itself is now opened through it.
 require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'DbServer.php';
+
+// 🐘 Portal\Core\PhpRuntime judges the PHP this server runs, the same way
+//    DbServer judges the database: is it new enough for the portal to run at
+//    all, and is it older than the October 2026 security fix? Written to the
+//    same bootstrap-free contract — it needs nothing but PHP itself, not even
+//    a database connection — so this wizard can load it directly. It is the
+//    ONE place that decides; the checks below only report what it says.
+require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'PhpRuntime.php';
 
 // 🧭 Portal\Core\Channel says which copy of the portal this is, and
 //    🌐 Portal\Core\PortalAddress checks the address typed on the Web
@@ -2467,13 +2475,60 @@ $installWebRules    = INSTALL_WEB_FOLDER . DIRECTORY_SEPARATOR . '.htaccess';
 $installWebRulesOk  = is_file($installWebRules) === true && (int) filesize($installWebRules) > 0;
 $installFoldersOk   = $installCanHave('_auth_keys') === true && $installCanHave('_uploads') === true && $installCanHave('_backups') === true;
 
+// 🐘 What PHP is this, and what does it mean? Asked ONCE and used twice
+//    below — the "new enough to run" check, which stops the install, and the
+//    security note, which does not. See PhpRuntime.php for why the second one
+//    only warns: a version number cannot tell a patched build from an
+//    unpatched one, and on shared hosting the customer cannot change it.
+$installPhp = \Portal\Core\PhpRuntime::classify();
+
 $prereqs = [
     'php_version' => [
-        'label' => 'PHP 8.4 or newer',
-        'pass'  => version_compare(PHP_VERSION, '8.4.0', '>='),
+        'label' => 'PHP ' . \Portal\Core\PhpRuntime::MIN_PHP . ' or newer',
+        'pass'  => $installPhp['support']['state'] !== 'crit',
         'value' => 'This website runs PHP ' . PHP_VERSION,
-        'fix'   => 'The portal is written for PHP 8.4 and does not run on anything older. In your hosting panel, find the '
-                 . 'PHP version setting for this website and choose 8.4 or newer.',
+        'fix'   => $installPhp['support']['detail'],
+    ],
+    // 🔒 The October 2026 security fix. A NOTE, not a requirement: `pass` is
+    //    always true, so this never stops the install, exactly as the channel
+    //    note below never does. `warn` turns the badge amber.
+    //
+    //    Should it ever BLOCK instead, that is one constant —
+    //    PhpRuntime::BLOCK_INSTALL_WHEN_UNPATCHED — and the reasoning for the
+    //    present answer is beside it. It is read here so the decision has one
+    //    home rather than being re-argued on this screen.
+    'php_security' => [
+        // A note has no tick or cross beside it, so its label stands as a
+        // statement on its own. "PHP carries the October 2026 security fix"
+        // therefore ASSERTED the opposite of the value printed next to it on a
+        // server that does not carry it — seen on the real rendered page and
+        // reported by a review on 27 October 2026. A note's label has to be a
+        // TOPIC, the way the channel note's is, not a claim.
+        'label' => 'Whether PHP carries the October 2026 security fix',
+        'pass'  => \Portal\Core\PhpRuntime::BLOCK_INSTALL_WHEN_UNPATCHED === false
+                 || $installPhp['security']['state'] === 'ok',
+        'note'  => \Portal\Core\PhpRuntime::BLOCK_INSTALL_WHEN_UNPATCHED === false,
+        'warn'  => $installPhp['security']['state'] !== 'ok',
+        'warnWord' => 'Ask your host',
+        'link'     => \Portal\Core\PhpRuntime::PHP2SHELL_ADVISORY,
+        'linkText' => 'What the PHP project says about ' . \Portal\Core\PhpRuntime::PHP2SHELL_CVES,
+        'value' => $installPhp['security']['headline'],
+        // `fix` is printed only for a check that FAILED. `advice` is printed
+        // for EVERY entry, pass or fail — which is why this carries the words
+        // in `advice` only when it is a note. An earlier comment here claimed
+        // "exactly one of them is ever printed"; that was untrue, and with
+        // BLOCK_INSTALL_WHEN_UNPATCHED turned on the same three paragraphs
+        // printed twice. Caught by a review on 27 October 2026, which flipped
+        // the constant and looked at the row.
+        'fix'   => $installPhp['security']['detail'],
+        'advice' => (\Portal\Core\PhpRuntime::BLOCK_INSTALL_WHEN_UNPATCHED === true
+                     || $installPhp['security']['state'] === 'ok')
+            ? []
+            // Split into its own paragraphs: the screen prints each piece of
+            // advice as its own line, and handing it one block with blank lines
+            // inside rendered as a single wall of text (the page has no rule
+            // that keeps line breaks). Seen on the real page.
+            : preg_split('/\n\n+/', (string) $installPhp['security']['detail']),
     ],
     'mysqli'   => $installExtension('mysqli', 'PHP can talk to a MySQL database (the "mysqli" extension)', 'Everything the portal keeps is in the database.'),
     'sodium'   => $installExtension('sodium', 'PHP can encrypt (the "sodium" extension)', 'Passwords and keys saved in Settings are stored encrypted.'),
@@ -2509,6 +2564,8 @@ $prereqs = [
         'label'  => 'Which copy of the portal this is',
         'pass'   => true,
         'note'   => true,
+        'warn'   => $installChannelWords['assumed'],
+        'warnWord' => 'Assumed',
         'value'  => 'This is ' . $installChannelWords['copy'] . '. ' . $installChannelWords['how'],
         'advice' => $installChannelWords['advice'],
     ],
@@ -3424,11 +3481,28 @@ header('X-Robots-Tag: noindex, nofollow');
                 <?php foreach ($prereqs as $checkKey => $p): ?>
                     <?php
                     $isNote  = ($p['note'] ?? false) === true;
-                    $assumed = ($checkKey === 'channel' && $installChannelWords['assumed'] === true);
+                    // ⚠️ A note that still wants an amber badge rather than a
+                    //    blue "for your information" one. This used to be
+                    //    written as "is this the channel check, and is the
+                    //    channel assumed?", which meant no other note could
+                    //    ever warn about anything. The PHP security note needs
+                    //    exactly that, so the test now reads a flag and the
+                    //    channel sets it.
+                    $assumed = ($p['warn'] ?? false) === true;
                     ?>
                     <li class="install-check" data-check="<?php echo htmlspecialchars((string) $checkKey, ENT_QUOTES, 'UTF-8'); ?>">
                         <?php if ($isNote === true): ?>
-                            <span class="<?php echo $assumed === true ? 'prereq-warn' : 'prereq-note'; ?>"><?php echo $assumed === true ? '&#9888; Assumed' : '&#9432; For your information'; ?></span>
+                            <?php
+                            // The word on an amber note. It used to be the
+                            // single word "Assumed", because the channel check
+                            // was the only note that could be amber and that
+                            // is what its amber means. "Assumed" says nothing
+                            // sensible about a security fix, so each entry now
+                            // brings its own word and "Assumed" belongs to the
+                            // check it was written for.
+                            $warnWord = (string) ($p['warnWord'] ?? 'Worth a look');
+                            ?>
+                            <span class="<?php echo $assumed === true ? 'prereq-warn' : 'prereq-note'; ?>"><?php echo $assumed === true ? '&#9888; ' . htmlspecialchars($warnWord, ENT_QUOTES, 'UTF-8') : '&#9432; For your information'; ?></span>
                         <?php elseif ($p['pass'] === true): ?>
                             <span class="prereq-pass">&#10004; In order</span>
                         <?php else: ?>
@@ -3442,6 +3516,14 @@ header('X-Robots-Tag: noindex, nofollow');
                         <?php foreach (($p['advice'] ?? []) as $advice): ?>
                             <span class="install-check-fix"><?php echo htmlspecialchars((string) $advice, ENT_QUOTES, 'UTF-8'); ?></span>
                         <?php endforeach; ?>
+                        <?php if (($p['link'] ?? '') !== ''): ?>
+                            <?php /* A real link, not an address printed as text. The owner asked for
+                                     the reader to be LINKED to an official page; on this screen the
+                                     advice above is escaped, so the address was arriving as something
+                                     to copy out by hand. Only ever an address written into this
+                                     codebase, never one that came from a request. */ ?>
+                            <span class="install-check-fix"><a href="<?php echo htmlspecialchars((string) $p['link'], ENT_QUOTES, 'UTF-8'); ?>" rel="noopener noreferrer" target="_blank"><?php echo htmlspecialchars((string) ($p['linkText'] ?? 'Read more'), ENT_QUOTES, 'UTF-8'); ?></a></span>
+                        <?php endif; ?>
                     </li>
                 <?php endforeach; ?>
             </ul>

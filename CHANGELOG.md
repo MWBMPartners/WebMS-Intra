@@ -2,6 +2,97 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — a moved date of a PRIVATE imported event was shown to everybody (#644)**
+  - **What an administrator should know.** If you import a calendar from elsewhere and one of its
+    private repeating events had a single date moved, that moved date was imported as **not
+    private** — its title and time visible to whoever could see the calendar's public events. The
+    same thing happened to a cancelled series: the moved date lost its cancellation. Upgrading fixes
+    how new imports are read; re-importing the calendar corrects dates already brought in.
+  - **Why it happened.** The reader decides "private" and "cancelled" from the whole series, so that
+    a private series stays private on every one of its dates even when the moved date does not say
+    so — which matters because most calendar programs do not repeat that marking, and the standard
+    does not ask them to. One path through the code handed the moved date to itself as its own
+    series, so the series' two markings were simply dropped.
+  - **Why the existing test did not catch it.** There was already a check for exactly this promise,
+    and it passed: its moved date lines up with one of the series' own dates, which goes through a
+    different piece of code that was always right. The faulty path is only used when the moved date
+    lines up with nothing. Two paths, one checked.
+  - **Measured.** A private daily series with its second date moved imported as `private=false`
+    before and `private=true` after. The new check is the only one of 334 that fails on the old code.
+- **Fixed — on the Expenses approvals page, anything that was not exactly "Rejected" recorded an APPROVAL (#642)**
+  - **What an administrator should know.** A decision that did not arrive exactly as the word
+    `Rejected` was recorded as an **approval**. If the person deciding was the last approver a claim
+    was waiting for, **a claim somebody meant to reject became payable.** Nothing needs doing on an
+    installation beyond upgrading. If you have reason to think a claim was approved against
+    somebody's intention, the approvals history on the claim shows who recorded what and when.
+  - **Why it did not show up in normal use.** Nothing in the portal sends anything else: the form is
+    a two-option list whose values are exactly those words, and the database column accepts only
+    those two. It needed something outside the normal path — a proxy that folds a repeated field
+    into a list, a script that fails before setting the field, or a renamed field. That is why
+    guessing a default on a page that releases money is wrong even when today's form is right.
+  - **The fix.** The decision must say exactly "Approved" or "Rejected". Anything else is refused
+    with a message saying plainly that nothing has been changed, before the claim is even looked up.
+    There is no fallback, because only the approver knows which they meant, and a money page must
+    never guess in the direction that pays out.
+  - **The claim NUMBER had the same fault**, three lines above, and in the treasury and withdrawal
+    pages too. A claim number sent as a list arrived as claim number **one**, so a decision could be
+    recorded against whichever claim that is while the claim the person was looking at was left
+    alone. All three pages now refuse it.
+  - **How it is kept shut.** Checks in `tools/expense-rules-selftest.php` that read the code, and —
+    more to the point — five checks in `tools/access-pages-selftest.php` that post **real requests**
+    as a signed-in approver and read the database back. Proved both ways: on the original code four
+    of those five fail (the page really did record approvals) and the fifth, the control, passes. The
+    first version of this work claimed no such test harness existed; it did, and an independent check
+    pointed it out.
+- **Added — the portal now says whether its PHP carries the October 2026 security fix (#640)**
+  - **What an administrator should know.** In October 2026 two serious flaws were found in PHP itself
+    (CVE-2026-109618 and CVE-2026-109619, reported in the press as "PHP2Shell"). They let somebody who has
+    not signed in to anything run their own code on the server. The PHP project fixed them on 21 October
+    2026 in PHP 8.5.12 and 8.4.27. The portal now tells you, in words, whether the PHP serving your site is
+    older than the release that fixed them — on the admin dashboard, on Admin, Server Information, on the
+    health page, and on the installation wizard's checks screen.
+  - **It warns; it does not block.** An unpatched version never stops an installation and never closes the
+    portal. The reason is that **a version number cannot tell a patched build from an unpatched one**: most
+    hosting companies apply security fixes without changing the version number PHP reports, so a server
+    saying 8.4.11 may well already be fixed. Refusing to install on the strength of that number would lock
+    customers out of their own portal over something they usually cannot change and that may already be put
+    right. So the wording is always "this is older than the release that fixed it — ask your hosting
+    company", never "you are vulnerable".
+  - **What to do if you see the warning.** Ask your hosting company whether the fixes for CVE-2026-109618
+    and CVE-2026-109619 have been applied to your website, or move the website to PHP 8.5.12 or newer in
+    your hosting panel. The portal links to the PHP project's own announcement, which is the official
+    source and cannot go out of date about PHP's releases.
+  - **What was wrong before.** The installer accepted any PHP from 8.4.0 upwards, so **8.4.0 passed its
+    checks with a tick**, and a running portal never looked at the version again at all: three pages printed
+    it and left the reader to judge, and one judged it with its own rules written inline. Those rules even
+    carried a comment saying they were "short enough to keep here rather than build a second class for
+    them" — true until a security judgement had to be made as well, and a security judgement written in two
+    places is one that can disagree with itself.
+  - **Test builds of PHP are judged properly too.** A release candidate is NOT treated as the
+    finished release it is named after, and this is not a detail: PHP 8.6 was already in its ninth
+    pre-release when the fix shipped, so 8.6.0RC3 does not carry it even though 8.6 is "newer" than
+    8.5. The first version of this work got that wrong and told such a server it was fine; an
+    independent check caught it. A pre-release of a release line the portal has never heard of is now
+    answered "we cannot tell", which is the honest answer and the one that does not go stale badly.
+  - **How it is kept honest.** `Portal\Core\PhpRuntime` is the one place that decides, in the same shape
+    as `DbServer` does for the database; `tools/audit-checks/check_php_version_one_place.py` fails if a page
+    writes its own version rule again, and `tools/php-runtime-selftest.php` (82 checks, no database needed)
+    includes checks that the wording never claims more than a version number can prove, and pins every
+    fixed-release number by hand. Nine faults were planted to prove the test catches them, including one
+    that made 8.4.0 look safe, one that tightened the wording to "you are vulnerable", and two that gave
+    a wrong fix number for PHP 8.5 — which the first version of the test did not notice, because it
+    checked the numbers only against themselves.
+- **Fixed — two things an outside review found in the imported-calendar code (#514)**
+  - A tick box confirming that an event another calendar marked private may be shown more widely accepted a
+    value that was not a tick, if the request sent a list instead of a single value — because any non-empty
+    list counts as 1 when read as a number. **It was never reachable through the portal**, because the one
+    page that calls that code refuses anything which is not a single piece of text, but the code now refuses
+    it too: the next page to use it may not be as careful.
+  - The daily "events are waiting for approval" e-mail promised in its own notes that every calendar's count
+    came from the same reading as its listed events. That was true only of the calendars whose events it
+    lists; once the limit of twenty is reached, the rest keep a count taken a few seconds earlier, so a
+    number can be slightly too high. The notes now say what the code does, and why re-reading every calendar
+    was not worth one more query inside a scheduled job.
 - **Fixed — controls that posted in the background worked only once (#634), and one of them was on a money page**
   - **What an administrator should know.** Several buttons stopped working after a single press, and said
     nothing when they did. Nothing needs doing on an installation beyond upgrading; no setting changes.

@@ -284,7 +284,14 @@ foreach ($sqlFiles as $file) {
 //    receives security fixes. Portal\Core\DbServer answers both, and is the
 //    same code the installation wizard, the health page and the Server
 //    Information page use — so all four always agree.
+// 🐘 The same story for PHP: the version used to be printed bare, leaving the
+//    reader to judge it. Portal\Core\PhpRuntime is the ONE place that judges
+//    it — whether the portal can run here at all, and whether this is older
+//    than the October 2026 security fix — and the installation wizard, the
+//    health page and the Server Information page ask the same class, so all
+//    four agree.
 $phpVersion = PHP_VERSION;
+$phpRuntime = \Portal\Core\PhpRuntime::classify();
 $dbInfo     = \Portal\Core\DbServer::inspect($mysqli);
 $dbVersion  = trim($dbInfo['engine'] . ' ' . $dbInfo['version']);
 
@@ -589,6 +596,24 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
     <p class="mb-0 small"><a href="<?php echo htmlspecialchars(Router::url('admin/system-info'), ENT_QUOTES, 'UTF-8'); ?>">Admin &rarr; Server Information</a> shows the setting this connection is running under.</p>
 </div>
 <?php endif; ?>
+<?php if ($phpRuntime['security']['state'] !== 'ok'): ?>
+<!-- 🔒 Shown when the PHP serving this site is older than the release that
+     fixed the October 2026 remote-code-execution flaws. AMBER, never red, and
+     the wording never says "you are vulnerable": most hosting companies apply
+     security fixes without changing the version number PHP reports, so this
+     cannot be certain from the inside. See PhpRuntime.php. -->
+<div class="alert alert-warning" role="alert">
+    <h2 class="h6 alert-heading mb-2"><i class="fa-solid fa-triangle-exclamation me-1"></i> <?php echo htmlspecialchars($phpRuntime['security']['headline'], ENT_QUOTES, 'UTF-8'); ?></h2>
+    <?php foreach (preg_split('/\n\n+/', (string) $phpRuntime['security']['detail']) as $phpPara): ?>
+    <p class="mb-1 small"><?php echo htmlspecialchars((string) $phpPara, ENT_QUOTES, 'UTF-8'); ?></p>
+    <?php endforeach; ?>
+    <p class="mb-0 small">
+        <a href="<?php echo htmlspecialchars(\Portal\Core\PhpRuntime::PHP2SHELL_ADVISORY, ENT_QUOTES, 'UTF-8'); ?>" rel="noopener noreferrer" target="_blank">What the PHP project says about it</a>
+        &middot;
+        <a href="<?php echo htmlspecialchars(Site::url('admin/system-info'), ENT_QUOTES, 'UTF-8'); ?>">Admin &rarr; Server Information</a>
+    </p>
+</div>
+<?php endif; ?>
 <?php if ($keyClashes !== []): ?>
 <div class="alert alert-warning" role="alert">
     <h2 class="h6 alert-heading mb-2"><i class="fa-solid fa-triangle-exclamation me-1"></i> An organisation key is reserved</h2>
@@ -748,7 +773,12 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
             </div>
             <div class="portal-data-row">
                 <div class="col-12 col-md-4 fw-semibold">PHP Version</div>
-                <div class="col-12 col-md-8"><?php echo htmlspecialchars($phpVersion, ENT_QUOTES, 'UTF-8'); ?></div>
+                <div class="col-12 col-md-8">
+                    <?php echo htmlspecialchars($phpVersion, ENT_QUOTES, 'UTF-8'); ?>
+                    <?php if ($phpRuntime['state'] !== 'ok'): ?>
+                        <a href="<?php echo htmlspecialchars(Site::url('admin/system-info'), ENT_QUOTES, 'UTF-8'); ?>" class="badge bg-warning text-decoration-none ms-1">Needs a look</a>
+                    <?php endif; ?>
+                </div>
             </div>
             <div class="portal-data-row">
                 <div class="col-12 col-md-4 fw-semibold">Database</div>

@@ -69,7 +69,26 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 
 // 📝 Extract and validate input
 $userId   = (int) ($_SESSION['user_id'] ?? 0);
-$claimID  = (int) ($_POST['claimID'] ?? 0);
+// 🔢 THE CLAIM NUMBER IS A SINGLE VALUE, OR IT IS NOTHING.
+//
+//    `(int) ['x']` is 1 in PHP, silently — no warning, no notice. So
+//    `claimID[]=916301` used to arrive here as claim number ONE, and the page
+//    went on to act on whichever claim happens to be number 1, while the claim
+//    the person was actually looking at was left untouched.
+//
+//    It needs a valid anti-forgery token, so it is the person's own browser
+//    doing it: a proxy that folds a repeated hidden field into a list, or a
+//    script that sets the field twice.
+//
+//    On this page that means recording a PAYMENT against the wrong claim,
+//    so a claim nobody has paid is marked as paid and the one that was
+//    actually paid still looks outstanding.
+//
+//    Anything that is not a single value becomes 0, which the existing "that is
+//    not a claim number" refusal below already turns away. The same guard is in
+//    the other two money handlers; all three were changed together.
+$claimIdRaw = $_POST['claimID'] ?? 0;
+$claimID    = is_scalar($claimIdRaw) === true ? (int) $claimIdRaw : 0;
 $comments = trim($_POST['comments'] ?? '');
 $refs     = array_filter(array_map('trim', explode(',', implode(',', $_POST['payRef'] ?? []))));
 

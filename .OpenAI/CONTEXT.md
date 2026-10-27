@@ -472,6 +472,42 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     "the job ran in the last 15 minutes" and no more. Test: `tools/held-
     texts-selftest.php`, which reads the Notification preferences page.
 
+    **The PHP version is judged in ONE place (#640).**
+    `Portal\Core\PhpRuntime` is the ONE place that decides anything
+    about the PHP version: whether the portal can run on it
+    (`MIN_PHP`, 8.4.0) and whether it is older than the release that
+    fixed the October 2026 flaws (CVE-2026-109618 / CVE-2026-109619,
+    "PHP2Shell", fixed 21 October 2026 in 8.5.12 and 8.4.27). The
+    installer's checks screen, the admin dashboard, Server Information
+    and the health page all ask it — **do not write a second version
+    check; change the constants in that file.** `support` and
+    `security` are returned SEPARATELY and must stay so: 8.3.36
+    carries the fix and is still too old to run the portal. **A
+    version number cannot tell a vendor-patched build from an
+    unpatched one**, so the wording is always "older than the release
+    that fixed it — ask your hosting company" and NEVER "you are
+    vulnerable" (section G of the test fails on that wording), and an
+    unpatched PHP never blocks an installation — that decision is the
+    one constant `BLOCK_INSTALL_WHEN_UNPATCHED` (`false`), read by the
+    installer.
+    A FINISHED release of a line newer than `NEWEST_KNOWN_SERIES`
+    counts as fixed; a PRE-RELEASE of one does NOT -- it is "cannot
+    tell". That distinction is not a nicety: the first version of this
+    said any newer line must be fixed "because it was published
+    later", and PHP 8.6 disproved it (pre-releases from 2 July 2026,
+    RC3 on 8 October, both BEFORE the 21 October fix), so 8.6.0RC3 was
+    told it was safe. 8.6 is pinned at `8.6.0RC4` and the comparison
+    keeps the pre-release marker, because `version_compare` ranks RC
+    below the release -- never compare a tidied three-part number.
+    Going stale must make this less informative, never wrong. Pin
+    every fixed-release number by hand in the test: deriving "one
+    below" from the constant proves only that the constant agrees with
+    itself, and a wrong number passed 66 checks. The tripwire must
+    match `phpversion()` as well as `PHP_VERSION`.
+    Tests: `tools/php-runtime-selftest.php` (no database, which also
+    proves the class has no dependencies) and
+    `tools/audit-checks/check_php_version_one_place.py`.
+
     **The portal's own QR pictures (#623).** `Portal\Core\Qr` is the ONE
     place a QR picture is made (`QrEncoder` is its own helper); nothing
     under `web/` may ask another website to draw one, and

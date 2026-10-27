@@ -3334,7 +3334,46 @@ final class IcsReader
                 if (self::inWindow($override['start'], $windowStartLocal, $windowEndLocal) === false) {
                     continue;
                 }
-                $collected[] = self::buildOccurrence($override, $override['start'], $key, $orgZone, $override, true, $warnings);
+                // 🔒 THE SERIES IS THE MASTER, NOT THE CHANGED DATE ITSELF.
+                //
+                //    WHAT WAS WRONG (found by an outside review, 27 October
+                //    2026). This passed `$override` as BOTH the source and the
+                //    series. buildOccurrence() works out `private` and
+                //    `cancelled` as "the series says so OR this date says so",
+                //    so handing it the same array twice threw the MASTER's two
+                //    flags away.
+                //
+                //    The effect: a PRIVATE daily series, one of whose dates was
+                //    moved, imported that moved date as NOT PRIVATE whenever
+                //    the changed-date block did not repeat `CLASS:PRIVATE` —
+                //    and most calendar programs do not repeat it, because the
+                //    standard does not ask them to. A cancelled series lost its
+                //    cancellation the same way. That directly contradicts the
+                //    promise written on buildOccurrence(): "A series marked
+                //    private stays private on every date, even a changed one
+                //    that forgot to say so."
+                //
+                //    A UID can carry more than one master block, so the flags
+                //    are OR-ed across all of them: if ANY master says private
+                //    or cancelled, the date is. That is the cautious direction
+                //    for both — a date wrongly kept private is a nuisance, a
+                //    date wrongly made public is a disclosure.
+                //
+                //    With no master in the file at all (a genuinely orphaned
+                //    changed date) there is nothing to inherit and the override
+                //    is all there is, which is what it falls back to. Said
+                //    plainly: in that case the flags CANNOT be recovered, and
+                //    this code does not pretend otherwise.
+                $seriesForOverride = $override;
+                foreach ($masters[$uidKey] ?? [] as $master) {
+                    if ((bool) $master['private'] === true) {
+                        $seriesForOverride['private'] = true;
+                    }
+                    if ((bool) $master['cancelled'] === true) {
+                        $seriesForOverride['cancelled'] = true;
+                    }
+                }
+                $collected[] = self::buildOccurrence($override, $override['start'], $key, $orgZone, $seriesForOverride, true, $warnings);
             }
         }
 

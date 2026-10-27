@@ -2019,8 +2019,32 @@ foreach (['code' => $first, 'checks' => $checks, 'organisation' => req($fifth, '
         // Each page as it was answered, for somebody to open in a browser. The codes on them are of databases that no longer exist.
         file_put_contents($keepPages . $sep . 'installer-page-' . $name . '.html', $answer['body']);
     }
+    // 🔗 The installer may link to its own steps, to the portal — and to one
+    //    short list of OUTSIDE addresses, which is deliberately taken from the
+    //    product's own constants rather than written out here. Today that list
+    //    holds the PHP project's security advisory, because #640 requires the
+    //    checks screen to link the reader to an official page about the
+    //    October 2026 flaws rather than print an address for them to copy.
+    //
+    //    Taking the list from the constants matters: a NEW outside address
+    //    cannot be slipped into the installer without also appearing in
+    //    PhpRuntime (or whichever class owns it), where it is reviewed. A
+    //    hard-coded "php.net is fine" here would have let any php.net address
+    //    through, advisory or not.
+    //    PhpRuntime is loaded here rather than at the top of this file because
+    //    this is the only place that needs it. It depends on nothing at all —
+    //    not even a database — which is the contract the installer relies on,
+    //    so requiring it costs nothing and cannot disturb the run.
+    require_once $webSrc . $sep . '_core' . $sep . 'PhpRuntime.php';
+    $allowedOutside = [
+        \Portal\Core\PhpRuntime::PHP2SHELL_ADVISORY,
+        \Portal\Core\PhpRuntime::SUPPORTED_VERSIONS_PAGE,
+    ];
     preg_match_all('/<a\b[^>]*\bhref="([^"]*)"/', $answer['body'], $links);
     foreach ($links[1] as $href) {
+        if (in_array($href, $allowedOutside, true) === true) {
+            continue;
+        }
         if (preg_match('/^(\?step=(1|1\.5|2|3|4|4\.5)|\/)$/', $href) !== 1) {
             $strays[] = $name . ': a link to "' . $href . '"';
         }

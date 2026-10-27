@@ -121,6 +121,16 @@ jobs:
         if: ${{ !cancelled() && steps.php.outcome == 'success' }}
         run: php tools/giving-retention-selftest.php
 
+      # Sits next to the database-version test because it is its twin: one
+      # judges the database version, the other the PHP version, and both are
+      # the ONE place their answer is decided. Needs no database and no server,
+      # which is itself part of what it proves (PhpRuntime must depend on
+      # nothing, because the installation wizard loads it before the portal
+      # exists).
+      - name: PHP version judgement self-test (#640)
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/php-runtime-selftest.php
+
       - name: Database server versions self-test
         if: ${{ !cancelled() && steps.php.outcome == 'success' }}
         run: php tools/db-server-selftest.php

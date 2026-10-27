@@ -7460,6 +7460,76 @@ exactly one place to fix if the judgement is ever wrong, not four.
 
 ---
 
+## The PHP version is judged in one place (#640, 27 October 2026)
+
+`Portal\Core\PhpRuntime` is the ONE place that decides anything about the PHP
+version. It is deliberately the same shape as `DbServer`: three states
+(`ok` / `warn` / `crit`), a bootstrap-free contract, and constants at the top
+that are the only thing to change when the facts change.
+
+**Why it was built.** Four places read `PHP_VERSION`: the installer's checks
+screen, the admin dashboard, Server Information and the health page. Three
+printed it; one judged it with rules written inline, under a comment saying they
+were "short enough to keep here rather than build a second class for them".
+That was a fair call while the only question was "8.4 or newer". It stopped
+being fair when a security judgement had to be made as well — the October 2026
+flaws (CVE-2026-109618 / CVE-2026-109619, "PHP2Shell", fixed 21 October 2026 in
+8.5.12 and 8.4.27). A security judgement in two places is one that can disagree
+with itself, and then the portal tells a customer on one page that they are fine
+and on another that they are not.
+
+**Two judgements, kept apart on purpose.** `classify()` returns `support` (can
+the portal run here, and is the line maintained?) and `security` (is this older
+than the release that fixed those flaws?), plus a top-level `state` that is the
+worse of the two. They must stay separate: **8.3.36 carries the October fix and
+is still too old to run this portal**, and the opposite case — a supported line
+on an unpatched release — is the common one. A single verdict cannot express
+either without lying about the other.
+
+**The honest limit, which is the whole design constraint.** A version number
+cannot tell a vendor-patched build from an unpatched one. Debian, Red Hat,
+cPanel and most shared hosts backport security fixes WITHOUT changing the
+version PHP reports. So:
+
+- The wording is "older than the release that fixed it — ask your hosting
+  company", **never "you are vulnerable"**. Section G of
+  `tools/php-runtime-selftest.php` fails if that wording appears, and a planted
+  edit proved it fails. If somebody tightens the phrasing for impact, that
+  check is what stops it, and the reason is written beside it: a warning that
+  is sometimes wrong teaches people to ignore the next one.
+- **It never blocks an installation.** On shared hosting the customer cannot
+  change the version, so refusing would lock them out over a number that may
+  already be patched. The decision has one home,
+  `PhpRuntime::BLOCK_INSTALL_WHEN_UNPATCHED` (`false`), which the installer
+  reads — so reversing it is one line, not a rewrite.
+
+**Going stale makes it less informative, never wrong.** A release line newer
+than `NEWEST_KNOWN_SERIES` is reported as carrying the fix, because any line
+published after October 2026 necessarily does, with an honest note that nobody
+here has checked the portal against it. Two self-test checks exist only to stop
+somebody adding a "newer than we know is suspicious" rule, which would show
+every future customer a warning that is simply false.
+
+**Version strings as real servers report them.** `8.4.27-1~deb13u1` is judged
+as 8.4.27 (the packaging label is dropped). A two-part `8.5` is padded to
+`8.5.0` — the OLDEST release of that line, which is the cautious reading and
+therefore the right one for a security check. Anything unreadable gives `warn`
+and says so, never `ok`.
+
+**Where the installer's amber badge came from.** The checks screen could only
+show amber on one entry, because the test was written as "is this the channel
+check, and is the channel assumed?". It now reads a `warn` flag and a
+`warnWord` from the entry itself, and the channel keeps the word "Assumed" that
+its amber has always meant. Without that, the security note's badge read
+"⚠ Assumed", which says nothing sensible about a security fix. Measured on the
+rendered page, both ways.
+
+**Tests.** `tools/php-runtime-selftest.php` (no database, no server — which
+also proves the class has no dependencies) and
+`tools/audit-checks/check_php_version_one_place.py`. The second cannot see a
+comparison built from a variable, a rule written with `PHP_VERSION_ID` in an
+unusual spelling, or a judgement made in JavaScript; its header says so.
+
 ## Routing traps found 2026-09-10 (#483, #478, #477, #482)
 
 Four faults were fixed on the same day, and none of them was what its

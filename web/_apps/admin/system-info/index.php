@@ -163,28 +163,40 @@ if ($uptimeText !== '') {
 }
 
 // 🐘 ---------------------------------------------------------------------------
-// PHP: the version, and whether it is one this portal supports.
+// PHP: the version, whether it is one this portal supports, and whether it
+// carries the October 2026 security fix.
 // -----------------------------------------------------------------------------
 // The same three-way answer the database check gives — supported, worth
-// mentioning, or too old — but the rules are short enough to keep here rather
-// than build a second class for them.
+// mentioning, or too old.
+//
+// WHAT CHANGED, AND WHY IT MATTERS: these rules used to be written out here,
+// with a comment saying they were "short enough to keep here rather than build
+// a second class for them". That was true while the only question was "is it
+// 8.4 or newer". It stopped being true in October 2026, when a security
+// judgement had to be made as well — and a security judgement written in two
+// places is a security judgement that can disagree with itself, telling a
+// customer on one page that they are fine and on another that they are not.
+// Portal\Core\PhpRuntime is now the ONE place that decides, and the
+// installation wizard, the admin dashboard and the health page all ask it.
+// Do not write a second version check here: change the constants in that file.
+$phpRuntime = \Portal\Core\PhpRuntime::classify();
+$phpSecurity = $phpRuntime['security'];
 
-$phpState  = 'ok';
-$phpNote   = 'This is a supported version of PHP and it is still receiving security fixes.';
-
-if (version_compare(PHP_VERSION, '8.4.0', '<') === true) {
-    $phpState = 'crit';
-    $phpNote  = 'This portal needs PHP 8.4 or newer. Parts of the code use features '
-              . 'that older versions of PHP do not have, so things will break in ways '
-              . 'that are hard to diagnose. Ask your hosting provider to move this '
-              . 'site to a newer PHP version.';
-} elseif (version_compare(PHP_VERSION, '8.5.0', '<') === true) {
-    $phpState = 'warn';
-    $phpNote  = 'PHP 8.4 runs this portal perfectly well. Be aware that its active '
-              . 'support ends on 31 December 2026, after which it gets security fixes '
-              . 'only. PHP 8.5 is the version to move to when your hosting provider '
-              . 'offers it.';
-}
+// 🎨 The card's colour and the sentence under it must agree.
+//
+//    WHAT WAS WRONG: the colour was taken from the OVERALL state (the worse of
+//    support and security) while the sentence was taken from the SUPPORT half.
+//    On PHP 8.5.11 — the common case while the October 2026 fix is new — that
+//    gave an amber card whose sentence read "This is a supported version of PHP
+//    and it is still receiving security fixes", directly contradicting its own
+//    colour. Reported by a review on 27 October 2026.
+//
+//    The badge and border now follow the SUPPORT answer, which is what the
+//    sentence beside them is about; the security answer has its own panel
+//    below, with its own colour. Two questions, two answers, neither
+//    pretending to be the other.
+$phpState   = $phpRuntime['support']['state'];
+$phpNote    = $phpRuntime['support']['detail'];
 
 // 📦 The optional parts of PHP this portal relies on.
 //
@@ -352,10 +364,56 @@ $colourFor = static function (string $state): string {
         <h2 class="h5 mb-0"><i class="fa-brands fa-php me-2"></i>PHP</h2>
     </div>
     <div class="card-body">
+        <!-- 🏷️ The badge is LABELLED for what it judges, so its colour is
+             visibly scoped. Without the label it read as a verdict on the whole
+             of PHP: on 8.5.11 that is a GREEN badge and a sentence about still
+             receiving security fixes, sitting directly above an amber panel
+             saying this build is older than the October 2026 fix. Both are
+             true — one is about the release LINE, the other about this BUILD —
+             but a reader who arrived by clicking "Needs a look" is asking the
+             second question, and met the answer to the first. Reported by a
+             review on 27 October 2026, which also pointed out that an earlier
+             attempt at this fixed only the colour and left the sentence. -->
         <p class="mb-1">
+            <span class="text-muted small me-1">Version support:</span>
             <span class="badge bg-<?php echo $colourFor($phpState); ?>">PHP <?php echo htmlspecialchars(PHP_VERSION, ENT_QUOTES, 'UTF-8'); ?></span>
         </p>
-        <p class="mb-3"><?php echo htmlspecialchars($phpNote, ENT_QUOTES, 'UTF-8'); ?></p>
+        <p class="mb-3">
+            <?php echo htmlspecialchars($phpNote, ENT_QUOTES, 'UTF-8'); ?>
+            <?php if ($phpSecurity['state'] !== 'ok'): ?>
+                <?php /* Said here rather than left to the reader to notice: this
+                         sentence is about the release line, and there is
+                         something about THIS build immediately below. */ ?>
+                <strong>The October 2026 security fix is a separate question, and it is answered below.</strong>
+            <?php endif; ?>
+        </p>
+
+        <!-- 🔒 The October 2026 security fix, told apart from the support
+             question above because they are different questions: a version can
+             be fully supported and still be missing a fix, and the other way
+             round once a hosting company has patched an older build.
+
+             This block is shown even when the answer is good news, because
+             "yes, this server has the fix" is exactly what an administrator
+             needs to be able to see when somebody asks them about it. The
+             alert on the dashboard appears only when there is something to do.
+
+             The wording comes from PhpRuntime and never says "you are
+             vulnerable" — read that file's header before changing a word. -->
+        <div class="alert alert-<?php echo $phpSecurity['state'] === 'ok' ? 'success' : 'warning'; ?> mb-3" role="<?php echo $phpSecurity['state'] === 'ok' ? 'status' : 'alert'; ?>">
+            <h3 class="h6 alert-heading mb-2">
+                <i class="fa-solid fa-<?php echo $phpSecurity['state'] === 'ok' ? 'shield-halved' : 'triangle-exclamation'; ?> me-1" aria-hidden="true"></i>
+                <?php echo htmlspecialchars((string) $phpSecurity['headline'], ENT_QUOTES, 'UTF-8'); ?>
+            </h3>
+            <?php foreach (preg_split('/\n\n+/', (string) $phpSecurity['detail']) as $phpPara): ?>
+            <p class="mb-1 small"><?php echo htmlspecialchars((string) $phpPara, ENT_QUOTES, 'UTF-8'); ?></p>
+            <?php endforeach; ?>
+            <p class="mb-0 small">
+                <a href="<?php echo htmlspecialchars((string) $phpSecurity['advisoryUrl'], ENT_QUOTES, 'UTF-8'); ?>" rel="noopener noreferrer" target="_blank">
+                    What the PHP project says about <?php echo htmlspecialchars((string) $phpSecurity['cves'], ENT_QUOTES, 'UTF-8'); ?>
+                </a>
+            </p>
+        </div>
 
         <div class="portal-data-list">
             <?php foreach ($phpLimits as $label => $value): ?>

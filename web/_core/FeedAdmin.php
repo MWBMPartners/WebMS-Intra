@@ -3057,8 +3057,24 @@ final class FeedAdmin
             return ['ok' => false, 'message' => 'Choose how much detail to show.'];
         }
 
-        $website   = ($level === 'public' && (int) ($post['websiteOptIn'] ?? 0) === 1) ? 1 : 0;
-        $apiOptOut = ((int) ($post['apiOptOut'] ?? 0) === 1) ? 1 : 0;
+        // ☑️ The same guard as the private-mark confirmation further down this
+        //    file, for the same reason: any non-empty array read as a number is
+        //    1, so `websiteOptIn[]=0` would count as a tick. `websiteOptIn`
+        //    PUBLISHES a calendar's events to the public website, which makes
+        //    it the one of these worth being most careful about.
+        //
+        //    As with that one, it is not reachable through the portal — the one
+        //    page that calls this reads both fields through its own `$postText`,
+        //    which refuses anything that is not a string. It is guarded anyway:
+        //    a review on 27 October 2026 pointed out that the hardening's own
+        //    stated reason ("the next caller may not be as careful") applied
+        //    equally to these two, and only one of the three had been done.
+        $websiteTick = $post['websiteOptIn'] ?? 0;
+        $apiTick     = $post['apiOptOut'] ?? 0;
+        $website     = ($level === 'public'
+                        && is_scalar($websiteTick) === true
+                        && (int) $websiteTick === 1) ? 1 : 0;
+        $apiOptOut   = (is_scalar($apiTick) === true && (int) $apiTick === 1) ? 1 : 0;
 
         $from = self::parseYmd($post['fromDate'] ?? null);
         if ($from['ok'] === false) {
@@ -3115,7 +3131,22 @@ final class FeedAdmin
         }
         $overridesPrivateMark = 0;
         if ($anyPrivate === true && $fields['level'] !== 'hidden') {
-            if ((int) ($post['overridesPrivateMark'] ?? 0) !== 1) {
+            // ☑️ The administrator has to tick a box to widen an event the
+            //    other calendar marked private. A request chooses the TYPE of
+            //    what it sends as well as the value, so `overridesPrivateMark[]=0`
+            //    arrives here as an ARRAY — and `(int) ['0']` is 1, because any
+            //    non-empty array casts to 1. On its own that would mean an empty
+            //    tick box counted as a tick.
+            //
+            //    It was never reachable: the only page that calls this
+            //    (admin/calendar/feeds-choice.php) reads the field through its
+            //    own `$postText`, which refuses anything that is not a string.
+            //    So this is the belt as well as the braces — the signature of
+            //    this method says `mixed`, and the next caller may not be as
+            //    careful as that page is. Found by an outside review,
+            //    27 October 2026.
+            $confirmed = $post['overridesPrivateMark'] ?? 0;
+            if (is_scalar($confirmed) === false || (int) $confirmed !== 1) {
                 return ['ok' => false, 'message' => self::PRIVATE_WARNING_MESSAGE];
             }
             $overridesPrivateMark = 1;

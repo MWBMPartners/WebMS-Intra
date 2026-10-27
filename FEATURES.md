@@ -135,7 +135,7 @@ Central operations hub for admins / site admins.
 | `/admin/workflows` | Configurable workflow definition CRUD (#94) — step delete/isActive/autoAction (#443); the running engine is the `/approvals` app below |
 | `/admin/reports` | Reporting / analytics dashboard (#93) + custom report builder (#156, see subsection below) |
 | `/admin/captcha` | **Multi-provider captcha config — drag-and-drop priority + per-provider keys (#130)** |
-| `/admin/system-info` (+ `/phpinfo`) | **Server Information — what this install is actually running on, and whether the database version is still supported (#489, see subsection below)** |
+| `/admin/system-info` (+ `/phpinfo`) | **Server Information — what this install is actually running on, and whether the database and PHP versions are still supported and carry their security fixes (#489, #640, see subsection below)** |
 | `/settings` | Generic dot-notation settings editor |
 
 ---
@@ -234,6 +234,33 @@ screens and didn't say what it meant.
   ageing-but-working database, since that page is polled by uptime
   monitors and a permanently amber light is one everyone learns to
   ignore.
+- **The PHP version is judged too, not just printed (#640).** A new
+  `Portal\Core\PhpRuntime` — the same bootstrap-free shape as `DbServer`,
+  needing nothing at all, not even a database — answers two separate
+  questions: can this portal run on this PHP, and **is this PHP older than
+  the release that fixed the October 2026 flaws** (CVE-2026-109618 and
+  CVE-2026-109619, the pair reported as "PHP2Shell", fixed on 21 October 2026
+  in PHP 8.5.12 and 8.4.27)? The installation wizard's checks screen, the
+  admin dashboard, Server Information and the health page all ask that one
+  class, so they cannot disagree.
+  - **Before this, the installer accepted any PHP from 8.4.0 up — so 8.4.0
+    passed with a tick** — and a running portal never looked at the version
+    again.
+  - **It warns and never blocks.** A version number cannot tell a
+    vendor-patched build from an unpatched one: most hosts apply security
+    fixes without changing the number PHP reports. So the wording is always
+    "older than the release that fixed it — ask your hosting company", never
+    "you are vulnerable", and the Server Information page shows the good news
+    too, so an administrator asked about it can see the answer. Whether an
+    install should instead be refused is one constant,
+    `PhpRuntime::BLOCK_INSTALL_WHEN_UNPATCHED`.
+  - **`tools/php-runtime-selftest.php`** — 66 checks, no database and no
+    server needed (which also proves the class really has no dependencies).
+    It checks both directions: that an unpatched version IS warned about, and
+    that a future release line is NOT. Several checks exist purely to stop the
+    wording being tightened into a claim the evidence does not support.
+  - **`tools/audit-checks/check_php_version_one_place.py`** fails if any page
+    under `web/` compares `PHP_VERSION` itself again.
 - **Database strictness (#593).** Every connection the portal opens asks the
   database to refuse a value that does not fit, instead of quietly changing
   it. The health page has a **Database strictness** check (green "Strict",

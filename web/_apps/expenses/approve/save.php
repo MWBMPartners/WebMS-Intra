@@ -98,9 +98,78 @@ if ($isAdmin === false && App::hasRole('Approver') === false) {
 }
 
 // 📝 Extract and validate input
-$claimID  = (int) ($_POST['claimID'] ?? 0);
-$decision = ($_POST['decision'] ?? '') === 'Rejected' ? 'Rejected' : 'Approved';
-$comment  = trim($_POST['comments'] ?? '');
+// 🔢 THE CLAIM NUMBER IS A SINGLE VALUE, OR IT IS NOTHING.
+//
+//    `(int) ['x']` is 1 in PHP, silently — no warning, no notice. So
+//    `claimID[]=916301` used to arrive here as claim number ONE, and the page
+//    went on to act on whichever claim happens to be number 1. On this page
+//    that meant recording a real decision against the wrong claim, with a
+//    message naming claim 1, while the claim the person was looking at was left
+//    untouched.
+//
+//    It needs a valid anti-forgery token, so it is the person's own browser
+//    doing it: a proxy that folds a repeated hidden field into a list, or a
+//    script that sets the field twice. That is the same cause the decision
+//    check below guards against, and a review on 27 October 2026 pointed out
+//    that the reasoning had been applied to the decision and the comment and
+//    skipped for the number sitting between them.
+//
+//    Anything that is not a single value becomes 0, which the existing "that is
+//    not a claim number" refusal below already turns away.
+$claimIdRaw = $_POST['claimID'] ?? 0;
+$claimID    = is_scalar($claimIdRaw) === true ? (int) $claimIdRaw : 0;
+
+// 💰 THE DECISION MUST BE SAID EXACTLY, AND ANYTHING ELSE IS REFUSED.
+//
+//    WHAT WAS WRONG (found by an outside review, 27 October 2026). This read:
+//
+//        $decision = ($_POST['decision'] ?? '') === 'Rejected' ? 'Rejected' : 'Approved';
+//
+//    so EVERYTHING that was not the exact text "Rejected" became an APPROVAL.
+//    On a page that releases money. A missing field, "rejected" in lower case,
+//    "Reject", or `decision[]=Rejected` (a request chooses the TYPE of what it
+//    sends as well as the value, and an array is never equal to a string) all
+//    recorded an approval — and if that was the last approval the claim needed,
+//    a claim somebody meant to REJECT became payable.
+//
+//    Nothing in the portal sends any of those: the form is a two-option list
+//    whose values are exactly these words, and the column is an ENUM of the
+//    same two. That is precisely why it was never noticed. A proxy that folds
+//    a repeated field into an array, a script that fails before setting the
+//    field, or a renamed field would each have been enough.
+//
+//    The safe default on a money page is to REFUSE, not to guess, and never to
+//    guess in the direction that pays out. There is no sensible fallback here:
+//    only the approver knows which they meant.
+$decisionRaw = $_POST['decision'] ?? '';
+$decision    = '';
+if (is_string($decisionRaw) === true
+    && ($decisionRaw === 'Approved' || $decisionRaw === 'Rejected')) {
+    $decision = $decisionRaw;
+}
+if ($decision === '') {
+    $_SESSION['flash_msg']  = 'No decision was recorded, because the form did not say whether the claim was '
+                            . 'approved or rejected. Nothing has been changed. Please open the claim and choose '
+                            . 'again.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Router::url('expenses/approve'));
+    exit();
+}
+
+// 💬 The comment is text. An array here would stop the page with a TypeError,
+//    because trim() refuses one. That is NOT a blank page: bootstrap.php
+//    installs an exception handler which writes the fault to tblErrors and
+//    shows the portal's own 500 page. (An earlier version of this comment said
+//    "a blank 500 page"; a review on 27 October 2026 pointed out that is untrue
+//    of this codebase, and the note beside the `?lang[]=x` guard in
+//    bootstrap.php already words the same shape correctly — "a TypeError: a 500
+//    and one error row".) It is still worth avoiding: the approver sees an
+//    error page and cannot tell whether their decision was recorded.
+//
+//    Anything that is not text is treated as no comment, which is allowed: the
+//    field is optional.
+$commentRaw = $_POST['comments'] ?? '';
+$comment    = is_string($commentRaw) === true ? trim($commentRaw) : '';
 
 if ($claimID === 0) {
     $_SESSION['flash_msg']  = 'Invalid claim ID.';

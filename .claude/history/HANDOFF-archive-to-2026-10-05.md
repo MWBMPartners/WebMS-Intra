@@ -5953,3 +5953,223 @@ landed tree: held-texts 106 of 106 exit 0, mail-queue 155 of 155, all 30 audit c
 Containers this session started and removed by name with their data: `x3land-mysql80`, `x6worship-mysql80`. Left-behind
 volumes: 0 before, 0 after. No other project's container or volume was touched.
 
+
+
+---
+
+# APPENDED 27 OCTOBER 2026 (third batch)
+
+Moved out of `.claude/HANDOFF.md` when it passed 1,000 lines again, as the owner's rule for
+that file requires. This is HISTORY: it is the narrative of one day's work, kept so the
+reasoning behind it can be found, not instructions to follow. Every OWNER DECISION section
+was deliberately left in the live handoff.
+
+## 27 OCTOBER 2026 — X8 and X9 committed; the WF fix round built and in check; #626 built and in check
+
+**Both remaining code packages are in flight at once, which the owner's 12 October decision allows: they share no
+file.** WF changes `.github/workflows/`, `tools/deploy/`, `tools/e2e-migrations/`, `tools/db-strict-mode-selftest.php`
+and `tools/audit-checks/check_bind_param_arity.py`. #626 changes `web/_core/GdprEraser.php`,
+`personal-data-catalogue.php`, `web/_apps/admin/reports/data.php` and the two GDPR self-tests. The shared documents
+(`CHANGELOG.md`, `DEV_NOTES.md`, `FEATURES.md`) are written by WF only; #626's lines wait in
+`.claude-work/resume/rollout-626--DOC-ENTRIES.md` and go in when it is committed.
+
+### Landed
+
+| What | Commit |
+| --- | --- |
+| X8 (#610 found 1, the `Sms::send()` gate) + X9 (one-table restore guard) + the mail tests #625 had broken | `98ab31f` |
+
+**I broke two tests landing X6 and did not notice.** `mail-queue-selftest` (150/155) and `mail-queue-pages-selftest`
+(117/118) went red because #625 gives every answer a fresh one-off script number, and those checks compared two whole
+answers byte for byte to prove the portal never says whether an address has an account. X8's checker found it. Both
+now strip the number before comparing. **The lesson for landing: running "the tests the package names" is not enough
+when a change alters something every page emits.** Recorded as item 7 of #636.
+
+### WF fix round — COMMITTED as `c61211e`, after its check found eight more problems
+
+**The check of my own fix round was NOT CLEAN: eight real problems, seven of them untrue sentences rather than
+broken code.** All eight are fixed in the commit. The one that matters most:
+
+**The checklist I wrote for the owner would have locked every pull request into `main`, `beta` and `alpha` for
+ever.** It told them to require `Build and check the package` — and `package.yml` has **no `pull_request` trigger at
+all** — plus the backup and migration-harness jobs, both path-filtered. **A required check that never reports is a
+pending check for ever**, which is the same trap the document opens by warning about. The checklist now names the
+ten checks that really do run on every pull request and names the six that must never be required. **If you write
+anything about required checks, verify the trigger and the path filter of each name first.**
+
+The others: "nine new test jobs run on every pull request" was untrue in five places (two are path-filtered, two
+were not new, and two self-tests plus seven of the 32 audit scripts run in no workflow at all); the guide turned
+uploads off for the dry run and never turned them back on; the alpha bridge starts a MANUAL run so four of the
+guide's statements about an alpha zip were wrong (14 days not 90, and a different message); my comment on the one
+code change gave a false reason (swallowing the failure protects against a red mark, not against losing the deploy
+dispatch, which GitHub has already accepted); my corrected `continue-on-error` count was itself wrong (six before,
+one after — five went, two with Psalm and three from `pr-security.yml`); and `DEV_NOTES.md` section 3b told somebody
+to delete a channel's folder on the strength of a layout that was never built, which now opens with a warning.
+
+**What held:** the code change is safe (a dispatched `package.yml` cannot publish, `actions: write` is present, no
+loop, deploy-first order right), the three-file merge lost nothing from either side, the `lftp` correction matches
+the real trial output word for word, and the claim that the package's only `run.sh` change is comment text is true.
+
+### How the fix round was built (kept for the record)
+
+Worktree `.claude-work/worktrees/wffix`, branch `ro-wf-fix`, uncommitted. The package (built against `aab9add`) was
+applied onto `98ab31f` with a three-way merge. **Only one file conflicted** — `php-static-analysis.yml`, resolved the
+package's way (the Psalm job goes; the Dependabot bump inside it went with it). `codeql.yml` merged keeping the
+branch's bump to `v4.39.1`; `tools/e2e-migrations/run.sh` merged cleanly and **the package's change to it is
+comment-only**, proved by filtering the diff, which is why the migration harness was not re-run.
+
+All five problems from `rollout-WF--check-RECOVERED.md` are closed:
+
+1. **The roll-out order could not be obeyed** — the guide said "merge nothing until the dry run has been read", but on
+   `alpha` the bot merges and then starts a REAL deploy. Part 0 gained a step 3 (switch "Allow auto-merge" off, or
+   draft every open pull request into `alpha`), part 4 step 1 now says to put `SFTP_ENABLED` back to `false` as soon
+   as the dry run has been read, and the top of the guide points at both things only the owner can do.
+2. **Required checks** — new part 10 of the guide, pointing at the checklist already written. Owner's to run.
+3. **`continue-on-error`** — the owner's page said there was none; corrected to name `codeql.yml` and say plainly that
+   with Psalm gone **no code-analysis check here can turn a run red**. (Tracked onward as #618.)
+4. **Alpha almost never built a zip** — `auto-merge-alpha.yml` now also runs `gh workflow run package.yml --ref alpha`,
+   beside the deploy dispatch it already had. Its failure is swallowed with a warning on purpose: `gh workflow run`
+   cannot find a workflow until its file is on `main`, and a hard failure would lose the deploy dispatch.
+5. **"Making directory …"** — `lftp` never prints those words; the guide now says `mkdir -p`, proved against the F7
+   trial runs, and explains `get -O` and `chmod -f 644` so they do not alarm anybody.
+
+Also: `README.md`, `FEATURES.md`, `DEV_NOTES.md` no longer describe `release.yml`, and `DEV_NOTES.md`'s "tag a
+release" step is replaced by what really happens. Checks run: actionlint 1.7.12 on all 15 files (exit 0 under
+`SHELLCHECK_OPTS=--severity=error` as `lint.yml` sets it, and with no setting on the file I changed, before and
+after); deploy settings self-test 386/386; package self-test 340/340 in 4 min 36 s; all 32 audit checks; `php -l`.
+
+### #626 PART ONE — COMMITTED `fd6b8b2` (documents `8bf7967`); its check found the fix was NOT ENOUGH
+
+### #626 PART TWO — COMMITTED `edf56ff`. THE OWNER REJECTED "accept the limit"
+
+**What part one's check found, and it was right.** An erasure matches ONE COLUMN (`userID`). `Logger::activity()`
+took the account number as an OPTIONAL third argument and 279 of its 582 callers under `web/` left it out —
+`Auth.php`'s own `LoginLocal` line among them, which runs AFTER `$_SESSION` holds the account. Those records had an
+empty column and session facts naming the person, so an erasure went straight past them. Part one's instruction was
+therefore real but insufficient, and every sentence implying otherwise was corrected rather than left standing.
+
+**The owner's decision, 27 October 2026 (question tool):** offered "accept the limit, build the rest later", they
+answered *"I dont like your 'accept the limit' proposal. i would rather do this properly now. what would be the best
+'proper' fix now? remember GIRFT"*. So part two fixes the CAUSE.
+
+**THE ANSWER, and it is smaller than any of the three routes I offered.** The fix is in the LOGGER, not the eraser:
+`Logger::activity()` already reads the session to build the facts it stores, then wrote NULL into the column
+anyway. It now fills the column from `sessionFacts()['userID']` when the caller named nobody. `WHERE userID = ?` is
+then correct and the part-one instruction is sufficient. **Rejected on purpose: matching on the session fingerprint**
+(a shared machine or kiosk means one fingerprint is not proof of one person — how this eraser has wiped other
+people's records before, #574) **and matching on the account number inside the stored facts** (no index, and #622
+measured 175 seconds for one statement over 500,000 rows, which a shared host cuts off mid-erasure).
+
+**Three things that make this the GIRFT answer rather than a patch:**
+1. **Two unreported gaps close.** `auth/account/data-export.php` ("what we hold about you") and the "filter by
+   person" list on Admin, Activity both read that column, so a person's own sign-ins were missing from both.
+2. **Nothing is re-attributed.** The 303 callers that pass a number are untouched, and all of them pass the ACTOR
+   (`$actorUserID`, `$userId`) — verified — so filling from the session agrees with them rather than changing what
+   the column means. `waitingForCodeUserID` and `kioskUserID` are never used: neither is the person whose record it is.
+3. **The harmful case is handled.** A naive backfill would UNDO erasures: for somebody already erased the column is
+   empty and the facts still name them. `ActivityLogCleaner::linkAccounts()` CLEARS those records instead, which
+   retroactively finishes erasures that could never reach them. It tests with `GdprEraser::emptiedAccountSql()`, the
+   one definition the portal uses.
+
+**The ordering trap, written down because it is not obvious:** `linkAccounts()` MUST run inside the existing walk
+and BEFORE its blanking step. That step blanks every old whole-session copy, and the copy is the only place a
+pre-#622 record says whose session it was — a separate pass would always arrive to find the evidence gone. That is
+why migration 221 resets `activityLog.cleanedThrough` rather than adding a second marker: one walk, one mark, one button.
+
+Nine files. Checks: activity-log self-test 87/87 (was 77) and eraser 230/230 on MySQL 8.0.36 **and** 8.4.11;
+erasure pages 66/66; coverage 63/63; migration harness ALL PHASES PASSED, 42 ticks; three planted faults each caught
+by the right check, including the one that would undo an erasure; all 32 audit checks; `php -l`; `bash -n`.
+
+**Two harness failures on the way, and NEITHER was a test artefact — both are worth knowing:**
+- My phase-7 plant first carried a RAW session identifier, which also counted towards migration 220's "activity
+  records with an identifier" and made phase 7 say the database was not the one it was about. The record should
+  carry a FINGERPRINT anyway (it stands for a post-#622 record that merely lacks the account column).
+- **Migration 221 writes the cleaner's "how far" row with `0`, and phase 7's migration-220 check expected that row
+  to be ABSENT.** I widened that expectation to `0` rather than changing 221, because `0` means "start at the
+  beginning" and the check exists to catch `all` over a log that still holds old records. **That is me editing
+  somebody else's check so my own package passes, so the checker was asked to judge it specifically.** General
+  lesson: a migration that writes a settings row can break another migration's phase check without either being wrong.
+
+**ITS CHECK WAS NOT CLEAN — four real problems, all fixed, and two of them were tests that proved nothing:**
+
+1. **Migration 221's ONE JOB was covered nowhere.** Every installation that finished the #622 cleaning already
+   holds the mark, so the live path is the "row exists" branch — and phase 7's database has no row while the
+   self-test set the mark by hand. The checker changed the migration to leave an existing mark alone and **the
+   whole harness still passed**; the erasure gap would then have stayed open for ever. Two checks now cover it,
+   including that a second run does not send an administrator back to the start.
+2. **"A kiosk's own account" was untrue.** `kioskUserID` is A REAL MEMBER's account — the one a shared kiosk has
+   been handed to by a PIN (`_apps/assets/kiosk-action.php`), and `sessionFacts()`'s own docblock twenty lines
+   away said so correctly. It is still left out, for the right reason: a kiosk session outlives the person at it,
+   so naming them could blame them for somebody else's action. **A kiosk record therefore still names nobody and
+   an erasure cannot reach it** — the same gap in miniature, left open because what a shared device's record means
+   is the owner's decision. "One rule covers every record there is" is corrected to "every record of somebody
+   signed in as themselves". The CLEANER's half of that rule was also unchecked (the checker made it fall back to
+   `kioskUserID` and everything still passed); it is checked now, as is the pattern branch for a cut-short copy.
+3. **The Upgrade page and health line described only the older job**, so once migration 221 re-armed the walk they
+   told administrators something untrue about what was waiting and gave them no reason to press the button again.
+4. **The data download handed over other people's details.** Records that used to be invisible there are now the
+   actor's, and about two dozen call sites put an invited guest's e-mail address or an outside crew member's name
+   into the free-text description. **OWNER'S DECISION, 27 October 2026 (question tool): leave the description out
+   of the download.** Type, address and time stay. Stripping names out of the text was rejected — pattern-matching
+   free text from ~550 call sites would miss cases while looking as though it had not. Two checks pin it, because
+   the obvious "improvement" is to put it back.
+
+**Counts:** part one's "279 of 582" was inflated by matches inside COMMENTS, including the ones I had just
+written. Two careful counts the same day still disagreed (550/302/248 vs 551/295/256), so the prose says "roughly
+half" and `Logger.php` records how to count. The repository rule is that counts are not written down.
+
+**One judgement to revisit if it ever looks wrong:** phase 7 expected the cleaner's mark row to be ABSENT after
+the installer's "carry on"; migration 221 writes it with 0, so I widened that expectation rather than changing the
+migration. The checker was asked to judge that specifically and agreed. General lesson: a migration that writes a
+settings row can break another migration's phase check without either being wrong.
+
+Final checks: activity-log 91/91 and eraser 230/230 and erasure-pages 66/66 on MySQL 8.0.36 AND 8.4.11; coverage
+65/65; access-pages 293/293; upgrade-pages 95/95; harness ALL PHASES PASSED. Seven planted faults each caught by
+the right check. Documentation from `rollout-626b--DOC-ENTRIES.md` REPLACED part one's entries, which described the
+gap as open.
+
+Worktree `.claude-work/worktrees/e626`, branch `ro-626-build`, uncommitted, cut from `98ab31f`. Five files.
+
+**What #626 really was.** `tblActivityLogs` is marked "unlink" in the written list and names six columns. The derived
+route builds one instruction per column that holds an ACCOUNT NUMBER and empties nothing else — so five were named as
+personal and left in place for months, the session facts still holding the account number that had just been emptied
+beside them. The fix is a hand-written instruction with those five in `nullCols`, the only way to empty a column that
+is not itself a link to an account.
+
+**The trap to know about:** a hand-written entry WINS over the derived one for the whole table, so it must keep doing
+everything the derived one did. It matches on `userID`, and `processEntry()` always empties the matched column too.
+
+**`sessionID` is included, and that was a judgement.** The issue names five details, the handoff's version of the
+owner's question named four and left the fingerprint out. It is in because `admin/reports/data.php` already described
+the consequence (an erased person's password-and-code sign-ins count twice) **as though the eraser did this** — that
+comment was untrue when written and is now true. The checker was asked to judge that reasoning.
+
+Checks: coverage self-test 63/63 (was 60); eraser self-test 229/229 (was 225) on MySQL 8.0.36 **and** 8.4.11, and
+225/225 on the unchanged code so there is no regression; erasure pages 66/66 on 8.0.36; four planted faults each
+caught by the right check, including the one that matters most — hiding the fault by pinning the table.
+
+### Issues filed today
+
+- **#634** — seven handlers check the form token and hand back no replacement, so a background post works once. Two
+  proved repeat-use (`livechat/api/moderate.php` from `admin/live/chat.php`; `prompt-publish.php` from the Host
+  Console, which holds the token in a `const`). Four are reached from nothing, one is called by nothing at all.
+- **#635** — 35 MORE tables name a column as personal that nothing empties. `tblErrors` (address, browser name,
+  headers) is #626 over again. Pinned by name in `gdpr-coverage-selftest.php` so the list must shrink, never grow;
+  each table is the owner's decision.
+- **#637** — the deploy documents describe two superseded layouts as current, and seven automatic checks run in no
+  workflow (two of them this week's tripwires, for #625 and #622). Filed from the fix round's check.
+- **#636** — seven findings from the 25–27 October packages. Worth doing first: proof 19 of the backup restore test
+  fails about three runs in five regardless of any change, and `docs/disaster-recovery-runbook.md` still tells
+  somebody to restore the three tables the portal now refuses — a runbook read during an incident.
+
+### Next
+
+1. **WF is committed (`c61211e`).** Read #626's check report when it lands, fix what is real, and commit it with the
+   documentation lines from `.claude-work/resume/rollout-626--DOC-ENTRIES.md` (which also holds the one standing rule
+   to add to `.claude/CLAUDE.md` and `.OpenAI/CONTEXT.md`).
+2. Then **HIST** (the history rewrite to remove the owner's real name) — last before the pull request, prepared and
+   rehearsed in a mirror clone, with the owner running the push.
+3. **The push is still blocked on the owner.** 14 commits are local only; two attempts were refused by this
+   machine's permission rules, the second as "Out-of-Place Publication". Nothing has reached GitHub.
+
+---

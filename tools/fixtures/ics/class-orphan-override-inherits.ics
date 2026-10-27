@@ -1,0 +1,57 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra//Test fixture//EN
+X-WEBMS-FIXTURE-NOTE:What this proves: a changed date that does NOT line up
+X-WEBMS-FIXTURE-NOTE:with any date its series produced still inherits the two
+X-WEBMS-FIXTURE-NOTE:things the series decides - whether it is private, and
+X-WEBMS-FIXTURE-NOTE:whether it is cancelled.
+X-WEBMS-FIXTURE-NOTE:Why this file exists. A changed date that LINES UP with a
+X-WEBMS-FIXTURE-NOTE:date of its series was already covered (see F5). A changed
+X-WEBMS-FIXTURE-NOTE:date that does NOT line up is handled by a different piece
+X-WEBMS-FIXTURE-NOTE:of code, and that piece passed the changed date to itself
+X-WEBMS-FIXTURE-NOTE:as its own series, so the series' two flags were thrown
+X-WEBMS-FIXTURE-NOTE:away. A PRIVATE pastoral series with one visit rearranged
+X-WEBMS-FIXTURE-NOTE:onto another day therefore imported that visit as NOT
+X-WEBMS-FIXTURE-NOTE:private, with its title, for everybody to see. Most
+X-WEBMS-FIXTURE-NOTE:calendar programs do not repeat CLASS on a changed date,
+X-WEBMS-FIXTURE-NOTE:because the standard does not ask them to, so the changed
+X-WEBMS-FIXTURE-NOTE:blocks below deliberately say nothing about CLASS.
+X-WEBMS-FIXTURE-NOTE:Found by an outside review on 27 October 2026.
+X-WEBMS-FIXTURE-NOTE:(1) A PRIVATE Tuesday series, with a changed date moved to
+X-WEBMS-FIXTURE-NOTE:a Wednesday the rule never produced. Both dates private.
+X-WEBMS-FIXTURE-NOTE:(2) A CANCELLED series, same shape. Both cancelled.
+BEGIN:VEVENT
+UID:orphan-private-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261006T190000
+DTEND;TZID=Europe/London:20261006T200000
+RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=1
+CLASS:PRIVATE
+SUMMARY:Pastoral visits
+END:VEVENT
+BEGIN:VEVENT
+UID:orphan-private-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+RECURRENCE-ID;TZID=Europe/London:20261007T190000
+DTSTART;TZID=Europe/London:20261007T190000
+DTEND;TZID=Europe/London:20261007T200000
+SUMMARY:Pastoral visits (moved to the Wednesday)
+END:VEVENT
+BEGIN:VEVENT
+UID:orphan-cancelled-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+DTSTART;TZID=Europe/London:20261013T190000
+DTEND;TZID=Europe/London:20261013T200000
+RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=1
+STATUS:CANCELLED
+SUMMARY:Called-off meeting
+END:VEVENT
+BEGIN:VEVENT
+UID:orphan-cancelled-1@fixtures.webms.test
+DTSTAMP:20260901T090000Z
+RECURRENCE-ID;TZID=Europe/London:20261014T190000
+DTSTART;TZID=Europe/London:20261014T190000
+DTEND;TZID=Europe/London:20261014T200000
+SUMMARY:Called-off meeting (moved to the Wednesday)
+END:VEVENT
+END:VCALENDAR

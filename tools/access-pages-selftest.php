@@ -242,7 +242,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 293;
+const EXPECTED_CHECKS = 298;
 
 function refuse(string $why): never
 {
@@ -2302,6 +2302,89 @@ $message($jar['trs']);
 post($jar['trs'], $treasury, $treasury . '/save', ['claimID' => 916317, 'payRef' => ['ACCESS-W-LATE'], 'comments' => '']);
 $said = $message($jar['trs']);
 ok('…and a treasurer cannot record a payment for it: refused, nothing recorded', $storedAll(916317) === $all && str_contains($said, 'not in Approved status') === true, $said . '; claim: ' . claimState(916317));
+
+// --- M5b: #642 — a malformed decision must record NOTHING -----------------------
+// (M5b rather than M6: M1 to M9 were already in use, and this sits straight after
+//  M5. Two blocks were both labelled M6 for a while, which a review spotted.)
+//
+// This is the BEHAVIOUR half of #642, through the real page over HTTP. The
+// handler used to read the decision as
+//     ($_POST['decision'] ?? '') === 'Rejected' ? 'Rejected' : 'Approved'
+// so everything that was not the exact word "Rejected" recorded an APPROVAL —
+// and if it was the last approval a claim needed, a claim meant to be rejected
+// became payable.
+//
+// Why it is here and not only in tools/expense-rules-selftest.php: that file
+// reads the CODE, so it can only ever say the code looks right. These checks
+// post real requests with a real signed-in approver and read the database back,
+// which is the only thing that proves the page refuses them. (The first version
+// of this work claimed no such harness existed and left the behaviour untested;
+// a review on 27 October 2026 pointed out that this file already posts to this
+// exact address, so it was a handful of lines all along.)
+$mClaim(916321, MEM, 'ACCESS-642 decision sent as a list');
+$mClaim(916322, MEM, 'ACCESS-642 no decision sent at all');
+$mClaim(916323, MEM, 'ACCESS-642 decision in the wrong case');
+$mClaim(916324, MEM, 'ACCESS-642 claim number sent as a list');
+$mClaim(916325, MEM, 'ACCESS-642 control, a real rejection');
+
+$before642 = [
+    916321 => $storedAll(916321),
+    916322 => $storedAll(916322),
+    916323 => $storedAll(916323),
+    916324 => $storedAll(916324),
+];
+
+// A request chooses the TYPE of what it sends as well as the value, and any
+// non-empty array read as a number is 1. This is the shape that was a live
+// two-factor bypass in this codebase a week before #642 was found.
+$message($jar['appr']);
+post($jar['appr'], $approve, $approve . '/save', ['claimID' => 916321, 'decision' => ['Rejected'], 'comments' => 'sent as a list']);
+$said = $message($jar['appr']);
+ok(
+    'M5b #642 a decision sent as a LIST records nothing, and says so: the claim is untouched and still Pending',
+    $storedAll(916321) === $before642[916321] && claimState(916321) === 'Pending, 0 approval(s), 0 payment(s)'
+        && str_contains($said, 'No decision was recorded') === true,
+    $said . '; claim: ' . claimState(916321)
+);
+
+post($jar['appr'], $approve, $approve . '/save', ['claimID' => 916322, 'comments' => 'no decision field']);
+$said = $message($jar['appr']);
+ok(
+    'M5b #642 NO decision field at all records nothing — this used to record an approval',
+    $storedAll(916322) === $before642[916322] && claimState(916322) === 'Pending, 0 approval(s), 0 payment(s)'
+        && str_contains($said, 'No decision was recorded') === true,
+    $said . '; claim: ' . claimState(916322)
+);
+
+post($jar['appr'], $approve, $approve . '/save', ['claimID' => 916323, 'decision' => 'rejected', 'comments' => 'wrong case']);
+$said = $message($jar['appr']);
+ok(
+    'M5b #642 "rejected" in the wrong case records nothing — this used to record an APPROVAL of a claim somebody meant to reject',
+    $storedAll(916323) === $before642[916323] && claimState(916323) === 'Pending, 0 approval(s), 0 payment(s)'
+        && str_contains($said, 'No decision was recorded') === true,
+    $said . '; claim: ' . claimState(916323)
+);
+
+// The claim NUMBER, for the same reason: `(int) ['x']` is 1, silently, so this
+// used to act on whichever claim is number 1 rather than the one sent.
+post($jar['appr'], $approve, $approve . '/save', ['claimID' => [916324], 'decision' => 'Rejected', 'comments' => 'number as a list']);
+$said = $message($jar['appr']);
+ok(
+    'M5b #642 a claim NUMBER sent as a list records nothing against that claim, nor against claim 1',
+    $storedAll(916324) === $before642[916324]
+        && (one('SELECT COUNT(*) AS n FROM tblExpenseClaimApprovals WHERE claimID = 1')['n'] ?? 0) === 0
+        && str_contains($said, 'Invalid claim ID') === true,
+    $said . '; claim: ' . claimState(916324)
+);
+
+// CONTROL. Without this the four above would also pass on a page that refuses
+// every decision, which would be its own serious fault.
+post($jar['appr'], $approve, $approve . '/save', ['claimID' => 916325, 'decision' => 'Rejected', 'comments' => 'a real rejection']);
+ok(
+    'M5b #642 CONTROL: a properly spelled rejection still works, so the guard refuses only what it should',
+    claimState(916325) === 'Rejected, 1 approval(s), 0 payment(s)',
+    claimState(916325)
+);
 
 // --- M6: the form token -------------------------------------------------------
 // Until the fix round of 12 October 2026 every press in this part carried a
