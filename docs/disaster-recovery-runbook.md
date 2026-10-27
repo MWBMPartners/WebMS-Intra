@@ -225,7 +225,9 @@ What is still true:
    where the column may be empty), then take a new snapshot. **A snapshot
    already taken with such a value in it cannot be put back whole by the
    portal at all**; it is still good for looking at, and for a single table
-   that holds no such value. For the whole database use a full dump
+   that holds no such value — **except `tblMigrations`, `tblSettings` and
+   `tblTotpBackupCodes`, which refuse a single-table restore however clean
+   their values are** (see section 8). For the whole database use a full dump
    (section 9). *Tested (L01, L02, proof 24; L03, L04, section I: two such
    values in one table and one in another, named with their counts by the
    snapshot, its manifest and every page; after the rows were mended a new
@@ -857,6 +859,16 @@ Do not use the **Restore** button beside a single table. *Tested (L01, L02,
 proof 17)*: it refuses for any table that other tables point at, which is
 about a third of them.
 
+**Three tables refuse a single-table restore outright, and the reason is worth
+knowing before you need it:** `tblMigrations`, `tblSettings` and
+`tblTotpBackupCodes`. Putting one of those back on its own can move the mark
+that says which database changes have already run, or which one-off clean-ups
+have happened, and **that can lose data** — a change can be re-run, or skipped
+when it was needed. The portal names the three and says why when it refuses.
+A **whole-database** restore is untouched by this and is the supported route.
+Added 27 October 2026; this runbook pointed people at single-table restores
+without mentioning it.
+
 The page asks PHP for 15 minutes and carries on if the browser stops waiting.
 When it finishes it writes one line in the activity log (`/admin/activity`),
 "Snapshot … put back in full" or "… failed; nothing was changed", so you can
@@ -952,7 +964,7 @@ otherwise. *Tested (13, 14, 15, 23).*
 | `is in the older form, which has to be read whole`, or `Allowed memory size ... exhausted` | The snapshot was made before this release and its largest file is too big for PHP's memory limit, or it holds one very large record (2.1, item 2). | Use the command line, and change `php -r` to `php -d memory_limit=1G -r` in both commands of 8.3. *Tested (23).* If your host refuses that much, use a full dump. |
 | **Yellow**, with `pointer(s) were emptied` | A link between two tables was added after the snapshot was taken. Where the link's own rule is "empty the pointer when the other record is deleted", the restore does exactly that, and says how many and where. | Nothing to do. The count is also in the activity log. *Tested (L01, L02, proof 16: the count and the words. That the page shows a warning as yellow is read from the code, `backup.php`, and seen for another warning in L03, L04, section I; not seen in a browser.)* |
 | **Yellow**, with `table(s) that are NOT in this snapshot were changed as well` | A table was added after the snapshot was taken (by a later upgrade) and its records are linked to records the restore replaced. The database's own rule for the link deleted them or emptied their pointers. This follows the links onward (a table linked to such a table is counted too) and counts a table's links to itself. | Read the numbers. If those records matter, put them back from a full dump made after that upgrade. **Check this snapshot** shows the same message beforehand, without changing anything. *Tested (L01, L02, proof 22).* |
-| `never knowingly puts back a changed value` | A value in the snapshot does not fit its column as the column is now (2.1, item 5), or it is a value that is not on its column's list of choices (2.1, item 8). The message names the column. | Nothing has changed. If an upgrade changed that column: go back to the release the snapshot was made by, then restore; or use a full dump. If NO upgrade changed it, the database was run loosely when the value was saved: this snapshot cannot be put back whole. Mend the rows in the live database and take a new snapshot for next time; for today, restore from a full dump, or put back single tables that do not hold such a value. *Tested (L01, L02, proofs 18 and 24).* |
+| `never knowingly puts back a changed value` | A value in the snapshot does not fit its column as the column is now (2.1, item 5), or it is a value that is not on its column's list of choices (2.1, item 8). The message names the column. | Nothing has changed. If an upgrade changed that column: go back to the release the snapshot was made by, then restore; or use a full dump. If NO upgrade changed it, the database was run loosely when the value was saved: this snapshot cannot be put back whole. Mend the rows in the live database and take a new snapshot for next time; for today, restore from a full dump, or put back single tables that do not hold such a value — not `tblMigrations`, `tblSettings` or `tblTotpBackupCodes`, which refuse a single-table restore (section 8). *Tested (L01, L02, proofs 18 and 24).* |
 | `CANNOT BE PUT BACK WHOLE` (a yellow box on the backup page, a warning on the health page, a red box on the upgrade page) | The snapshot holds a value that is not on its column's list of choices (2.1, item 8). The message names the table, the column and how many. | Mend those rows in the live database, then take a new snapshot. *Tested (L01, L02, proof 24; L03, L04, section I).* |
 | `engine, which cannot undo a change` | A table is not of the kind that can undo (2.1, item 7). The message names it. | Ask your host to convert that table to InnoDB (`ALTER TABLE name ENGINE=InnoDB`), then try again. *Tested (L01, L02, proof 21: the refusal. The conversion itself was not run.)* |
 | `max_allowed_packet` and `so the row was not sent` | One single record in the snapshot is bigger than the largest message your database accepts. The message names the table and gives both sizes. | Nothing has changed, and the portal is open or closed as it was. Ask your host to raise `max_allowed_packet` to at least the number of MB the message gives, or use a full dump. *Tested (L25, L26: an 80 MB record, a server that accepts 64 MB; L01, L02, proof 20).* |

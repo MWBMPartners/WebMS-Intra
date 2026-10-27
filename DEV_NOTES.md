@@ -217,10 +217,20 @@ CI against real MySQL 8.0.36 and 8.4.11 databases, as two jobs side by side.
 ## Repository vs Server Structure
 
 The Git repository root contains documentation and CI/CD config. **All deployable
-code lives inside `web/`**, which maps directly to the server domain directory:
+code lives inside `web/`.**
+
+> **The server side of this diagram described a layout that no longer exists**,
+> until it was corrected on 27 October 2026 (#637). It showed the three channels
+> sharing one base folder, with `public_html`, `public_html_dev` and
+> `public_html_beta` beside each other — the arrangement where a deploy of one
+> channel could overwrite another's code, last push winning. **Each channel now
+> has a folder of its own**, and the web address points at `admin_html` inside
+> it. `README.md` holds the current deploy table and is the place to check first.
+> The domain below is **one customer's set-up, shown as an example**: no address
+> is built into this product (#500).
 
 ```
-Git repo root (NOT deployed)          Server: portal.millrdsdacambridge.uk/
+Git repo root (NOT deployed)          Server: <one channel's folder>/
 ├── .claude/                           ├── _core/
 ├── .github/workflows/deploy.yml       ├── _vendor/
 ├── CHANGELOG.md                       ├── _sql/
@@ -231,9 +241,9 @@ Git repo root (NOT deployed)          Server: portal.millrdsdacambridge.uk/
     ├── _apps/        (#159)           ├── _backups/      (server-managed)
     ├── _vendor/                       ├── _includes/
     ├── _sql/                          ├── _functions/
-    ├── _lang/                         ├── public_html/   (front controller + static)
-    ├── _install/                      ├── public_html_dev/   (alpha branch deploy)
-    ├── _includes/                     ├── public_html_beta/  (beta branch deploy)
+    ├── _lang/                         ├── admin_html/    (the staff pages)
+    ├── _install/                      ├── _install/
+    ├── _includes/                     ├── _lang/
     ├── _functions/                    ├── private_html/
     ├── _libraries/ (gitignored)       ├── public_html_landing/
     ├── public_html/                   └── public_html_redir/
@@ -248,11 +258,16 @@ Git repo root (NOT deployed)          Server: portal.millrdsdacambridge.uk/
 ```
 
 The `_` prefix on every server-side dir is a naming convention: any dir
-that starts with `_` is **above Apache's DocumentRoot** and cannot be
-directly accessed via HTTP. Only `public_html/` (and its per-branch
-siblings on the server) are web-accessible.
+that starts with `_` is **above the web server's document root** and cannot be
+reached over HTTP. Only the channel's web folder is web-accessible.
 
-The repo holds **one** `public_html/` source tree. Branch-based deploy mirrors it to the appropriate server-side destination — `alpha` → `public_html_dev/`, `beta` → `public_html_beta/`, `main` → `public_html/`. There is no per-channel front controller in the repo.
+The repo holds **one** `public_html/` source tree, and the deploy mirrors it into
+the channel's own folder. **The old destinations `public_html_dev/` and
+`public_html_beta/` beside a shared `public_html/` are gone** — see the warning at
+the top of this section and the deploy table in `README.md`. There is still no
+per-channel front controller in the repo. Note also that the channel is decided in
+exactly one place, `Portal\Core\Channel`: never work it out from a folder name in
+code, and never type `public_html` into a path (use `PORTAL_WEBROOT`).
 
 **Key rule:** when referencing paths in PHP code, use `PORTAL_ROOT` and related
 constants (defined in `bootstrap.php`). When referencing paths in Git/CI, prefix
@@ -860,14 +875,20 @@ rm -rf public_html public_html_beta public_html_dev
    address answers "not found" for everything — because nothing is published yet.
 8. Only then do beta, then main.
 
-#### One thing the deployment gets wrong today
+#### One thing the deployment used to get wrong
 
-The comment above `WEB_ROOT_EXCLUDES` says the shared upload "runs without
-`--delete`, so any other server-managed contents of `_libraries/` are preserved".
-**That is not true** — the shared upload does use `--delete`, and `_libraries/` is
-not excluded. So anything placed in `_libraries/` by hand, other than what the
-build puts there, is removed on the next deployment. Worth knowing before putting
-anything there.
+**This no longer applies, and is kept only so the lesson is not lost.** Until the
+deploy was rewritten (#499, commit `c61211e`), a constant `WEB_ROOT_EXCLUDES` in
+`.github/workflows/deploy.yml` carried a comment saying the shared upload "runs
+without `--delete`, so any other server-managed contents of `_libraries/` are
+preserved". That was untrue: the upload did use `--delete` and `_libraries/` was
+not excluded, so anything put there by hand was removed on the next deploy.
+
+**Neither the constant nor that comment exists any more** — `grep -rn
+WEB_ROOT_EXCLUDES .github/` finds nothing. The lesson that survives the rewrite:
+the mirrored folders are mirrored with `--delete`, so **nothing you place on the
+server by hand inside them survives a deploy**. Check what the current workflow
+excludes before relying on anything staying put.
 ```
 
 **Shared-base note.** The shared `_core/`, `_vendor/`, `_sql/` etc. upload to
@@ -947,7 +968,9 @@ touching code.
 
 ### How a value flows from DB to UI
 
-1. `Site::loadCurrentSite()` selects the row into a class-level cache.
+1. `Site::loadSiteRow()` selects the row into a class-level cache. (It is
+   private, and reached through `Site::init()`; this line named it
+   `loadCurrentSite()`, which no code has ever had.)
 2. `Site::branding('color' | 'logo' | 'favicon' | 'name' | …)` returns the
    relevant column.
 3. `web/_core/templates/header.php` reads `Site::branding('color')`,
@@ -1698,12 +1721,17 @@ deliberate choice cannot be told apart:
 Both were corrected at the seed instead, so newly installed portals land on the
 right value without any existing database being touched.
 
-## Migration numbers 168 and 169 do not exist
+## Migration numbers 168, 169 and 195 do not exist
 
-They were never used. Nothing depends on the numbering being unbroken — both the
-installer and the migration runner list the files and sort them, so a gap is
-invisible. Do not "fill in" the gap: a file numbered 168 today would run before
-169-187 on every replay, which is not where it belongs.
+They were never used — **three numbers, not two; this heading named only 168 and
+169 until 27 October 2026.** Nothing depends on the numbering being unbroken:
+both the installer and the migration runner list the files and sort them, so a
+gap is invisible. Verify with `ls web/_sql/ | grep -E '^(168|169|195)_'`, which
+finds nothing.
+
+Do not "fill in" a gap. A file numbered 168 today would run before everything
+from 169 onwards on every replay, which is not where new work belongs — give it
+the next number after the highest that exists.
 
 ## SQL Migrations
 
@@ -2976,7 +3004,7 @@ compute path.
 
 **Kit design — one level deep, cascade only at checkout (#413).** A kit
 is `tblAssets.parentAssetID` (column existed since migration 159,
-unused until this pass). `attachKitChild()` enforces, in order: both
+unused until this pass). `attachToKit()` enforces, in order: both
 assets exist on this site; child ≠ parent; the PARENT is not itself
 someone else's component (no two-level nesting); the CHILD doesn't
 already have components of its own (same reason); the child has no
@@ -3099,8 +3127,11 @@ What survives:
 
 If you need a quick patch on the server during an incident, **commit + push**
 instead of SCP'ing the file — manual edits to mirrored dirs vanish on the
-next deploy. If a library or vendored asset must live on the server but
-not in the repo, add it to `WEB_ROOT_EXCLUDES` in `.github/workflows/deploy.yml`.
+next deploy. If a library or vendored asset must live on the server but not in
+the repo, it has to be excluded from the mirror in `.github/workflows/deploy.yml`.
+**This used to name a constant `WEB_ROOT_EXCLUDES`, which the #499 rewrite
+removed**, so read the workflow for how exclusions are expressed now rather than
+searching for that name.
 
 Use the workflow_dispatch **dry-run** input on `deploy.yml` to preview what
 a deploy would change (and crucially, what it would delete) before pushing.
@@ -6362,9 +6393,13 @@ client; PHPMailer as a second engine) come after the first roll-out, by the owne
 - **Who may still be sent a held text** is asked when it comes due, in `Sms::whyNotThisPerson()`. The rule is not written
   there: with several organisations it is `Site::isOwnOrganisation()` (the list the membership gate uses); with one
   organisation, where nobody needs a membership row, it is whether the account is switched on. If Site cannot answer, the
-  run stops with the text still held and untaken: a text is not sent on a guess. **A text sent at once is not asked** (its
-  caller chose the person; only the prayer chain's own choice of a partner asks). The owner decided on 26 October 2026 that
-  this gap is closed in `Sms::send()` before roll-out; until that lands, it stands.
+  run stops with the text still held and untaken: a text is not sent on a guess. **A text sent at once IS asked, since the owner's decision of
+  26 October 2026 landed** (#610): `send()` puts the same question as `sendHeld()`, through
+  `whyNotThisPerson()`, to every text that names a person, and a person is judged at the moment their text would go —
+  now for a text going now, when it comes due for a held one. Asking BEFORE the hold was built first and silently
+  refused a text for anybody suspended and reinstated inside two days, which is why the moment matters.
+  **This paragraph said the opposite** — "a text sent at once is not asked", with the gap "still to land" — until
+  27 October 2026; see the list at the top of `web/_core/Sms.php`, which records the same change.
 - **Times.** `heldUseBy` and `claimedAt` are moments in UTC from `UTC_TIMESTAMP()`. `createdAt` and `sentAt` are still the
   database server's own clock, and the daily limit's "day" is a day on that clock. "Is the person in their quiet hours?" is
   asked of `Sabbath` for a moment read from the database (`SELECT UNIX_TIMESTAMP()`), when holding and when sending.
@@ -7316,8 +7351,9 @@ so that very old MySQL client programs — the kind that refuse to talk to
 anything whose version string starts with "10." — will still agree to
 connect. Read literally, that string looks like ancient MySQL 5.5, and
 every current MariaDB server would be misclassified and wrongly refused.
-`DbServer::extractVersion()` strips the prefix before doing anything
-else with the string. `tools/db-server-selftest.php` checks this
+`DbServer::parseVersion()` strips the prefix before doing anything else with
+the string. (This line named it `extractVersion()`, which no code has; the
+method is private, which is why nothing caught the wrong name.) `tools/db-server-selftest.php` checks this
 specifically, alongside 14 other real version strings, and needs no
 database to run:
 

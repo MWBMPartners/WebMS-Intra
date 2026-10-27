@@ -106,22 +106,31 @@
     "schemas": {
       "Error": {
         "type": "object",
+        "description": "A refusal. `meta` was missing from this schema until 27 October 2026 even though every refusal carries it: ApiResponse::error() builds its envelope from the same meta() as ApiResponse::success(). That matters to a caller making several writes without reloading, because meta.csrfToken is where the replacement form token arrives - on a refusal as well as on a success.",
         "required": [
           "status",
-          "message"
+          "message",
+          "meta"
         ],
         "properties": {
           "status": {
             "type": "string",
+            "description": "Always the text \"error\" on a refusal.",
             "example": "error"
           },
           "message": {
             "type": "string",
+            "description": "What went wrong, in words meant for a person. Safe to show to the caller.",
             "example": "Forbidden"
           },
           "detail": {
             "type": "string",
+            "description": "Extra detail for diagnosis. Present ONLY when the installation has debug mode switched on, which is for administrators; on an ordinary installation this field is absent altogether, so a caller must not depend on it.",
             "nullable": true
+          },
+          "meta": {
+            "type": "object",
+            "description": "The same envelope block a successful answer carries. Includes csrfToken when a session-authenticated write has just replaced the form token."
           }
         }
       },
@@ -134,7 +143,8 @@
         "properties": {
           "status": {
             "type": "string",
-            "example": "success"
+            "description": "Always the text \"ok\" on a successful answer. This example read \"success\" until 27 October 2026, which the portal has never sent: ApiResponse::success() writes 'status' => 'ok'.",
+            "example": "ok"
           },
           "data": {
             "type": "object",

@@ -35,7 +35,7 @@ dimensions that pass and flagging in the **Findings** column.
 
 ## 1. Sign-in (local + SSO + passkey)
 
-URL: `/auth/login`
+URL: `/login`  _(this said `/auth/login` until 27 October 2026. That is the FILE path, `auth/login/index.php`; the registered address is `login`. An address ending in a file path is answered with 404 by this portal, so anybody following the old line would have reported the sign-in page as broken.)_
 
 | Device | TT | NH | MR | FF | FU | LS | OF | Findings |
 |---|---|---|---|---|---|---|---|---|
