@@ -25,7 +25,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-187 (DDL + settings/routes seeds + tblMigrations
+-- Covers migrations: 000-222 (DDL + settings/routes seeds + tblMigrations
 -- marks). When you add a new migration, port its DDL/seeds into the
 -- appropriate section here AND add its filename to the seed block at the
 -- end of this file. CI enforces this via
@@ -3513,8 +3513,23 @@ CREATE TABLE IF NOT EXISTS `tblEmailTemplates` (
     `isActive`        TINYINT(1)   NOT NULL DEFAULT 1,
     `createdAt`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    -- Worked out by the database: the organisation number, or -1 when the
+    -- template applies to every organisation. It exists so the unique key
+    -- below can cover portal-wide templates, which siteID alone cannot:
+    -- MySQL never treats one empty value as equal to another, so two rows
+    -- that both say (empty, 'auth.passwordReset') are not duplicates as far
+    -- as a key on siteID is concerned, and every replay of migration 051 added
+    -- another copy. VIRTUAL, not STORED, because fk_template_site below is a
+    -- foreign key with ON DELETE CASCADE and MySQL refuses one of those on a
+    -- table holding a STORED generated column (ERROR 1215). Added by
+    -- migration 222; the same arrangement as tblSettings (migration 187).
+    `siteScope`       INT AS (COALESCE(`siteID`, -1)) VIRTUAL
+                      COMMENT 'Worked out by the database: the organisation number, or -1 when the template applies to every organisation. Exists so the unique key below can cover portal-wide templates, which siteID alone cannot because MySQL never treats one empty value as equal to another.',
     PRIMARY KEY (`templateID`),
+    -- Kept as well as the key below: still correct for an organisation's own
+    -- template, and fk_template_site needs an index on siteID to stand on.
     UNIQUE KEY `uq_template_site_key` (`siteID`, `templateKey`),
+    UNIQUE KEY `uq_template_key_scope` (`templateKey`, `siteScope`),
     KEY `idx_template_key` (`templateKey`),
     CONSTRAINT `fk_template_site` FOREIGN KEY (`siteID`)
         REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE
@@ -10259,4 +10274,25 @@ SELECT '221_activity_log_account_column.sql'
               AND `sessionDataSnapshot` <> ''
             LIMIT 1
        )
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+
+-- 222 — portal-wide e-mail templates can no longer be duplicated (#594).
+--    Recorded UNCONDITIONALLY, unlike 220 and 221 above, and that is the
+--    difference worth understanding: those two do work that must happen only
+--    once, so their record IS the test of whether it has happened. Migration
+--    222 does not. Everything in it is a plain statement of how the table
+--    should look — remove surplus copies, add a worked-out column, add a key —
+--    and running it against a database that already looks that way does
+--    nothing at all. A database built from this file has the column and the
+--    key already (see tblEmailTemplates above) and holds no duplicate to
+--    remove, so there is genuinely nothing left for the migration to do.
+--    WHY IT MATTERS THAT THIS IS HERE: without the record, a database built
+--    from this install script alone sees 222 as still waiting, and
+--    Maintenance::isActive() then closes the portal for an upgrade that has
+--    nothing to do. `tools/audit-checks/check_schema_seed_parity.py` is what
+--    notices a missing record — and note that it REPORTS rather than fails,
+--    so a clean run of the audit scripts does not prove this block is
+--    complete. Read what it prints.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('222_email_templates_global_uniqueness.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

@@ -2,6 +2,43 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — controls that posted in the background worked only once (#634), and one of them was on a money page**
+  - **What an administrator should know.** Several buttons stopped working after a single press, and said
+    nothing when they did. Nothing needs doing on an installation beyond upgrading; no setting changes.
+  - **Why it happened.** The portal replaces a page's form token every time it accepts one, which is right —
+    it stops a token being used twice. But seven data handlers checked a token and never sent the replacement
+    back, so a page that posts without reloading was left holding a spent one and every press after the first
+    was refused. The refusal is a 403 that the scripts ignored, so the control simply did nothing.
+  - **Where it showed.** The Host Console's "publish a prompt" form was the worst: it clears its fields and
+    stays on the page, and it held its token in a value that could never be updated, so the second prompt of
+    any session failed. Live-chat moderation had the same fault, hidden since #612 behind a full page reload
+    after every press — that reload is kept, because an approved message has left the queue, but it is no
+    longer the only thing holding the page together.
+  - **The one on a money page.** The Expenses approvals page builds its "Export" link and its approve/reject
+    form from the same token. Whichever was used first spent it, so **exporting a list broke the next
+    approval, and approving broke the export link** — with nothing saying why. A download cannot be handed a
+    replacement token, because its answer is the file; the export only reads, so it now uses a check that
+    leaves the token alone.
+  - **What was found to be wrong in the issue itself.** Three handlers it recorded as unreachable are
+    reachable (the welcome tour's, the Expenses export and, through `portal-tour.js`, the tour completion),
+    and one it thought likely in use is genuinely dead — which confirms that content translation has no way
+    in (#485).
+  - **How it is kept shut.** `tools/audit-checks/check_csrf_rotation_returned.py` refuses a handler that
+    spends the token and returns no replacement. The live-chat self-test now asserts that the replacement
+    really comes back — it had asserted the OPPOSITE, making the fault the expected behaviour, and it fails
+    on the unfixed code (63 of 64) and passes on the fixed one (64 of 64).
+- **Fixed — every pass of the installer over an existing database added three more e-mail templates (#594)**
+  - **What an administrator should know.** If the installer has been run more than once over the same
+    database, surplus copies of the three portal-wide e-mail templates have built up. The upgrade removes
+    them and stops it happening again. Templates an organisation has customised are untouched.
+  - **Why it happened.** A template belonging to every organisation leaves its organisation column empty,
+    and MySQL never treats one empty value as equal to another — so the table's "no two rows the same" rule
+    could not see duplicates, and migration 051's "insert this, or update it if it is already there" could
+    never find the row it had just written. Three rows became six, then nine. Measured.
+  - **The fix** is migration 222, the same arrangement migration 187 gave settings: the database works the
+    value out into a column of its own and the rule goes on that. Proved on MySQL 8.0.36, MySQL 8.4.11 and
+    MariaDB 11.4.13, including that it is safe to run twice and that a replay afterwards stays at three.
+  - Also: the install script's header claimed to cover "migrations 000-187" when the highest is 222.
 - **Security — three ways past sign-in, found by the end-of-queue review and closed (#B2 follow-up)**
   - **What an administrator should know.** Two-factor authentication could be skipped, and a visitor could be
     signed into somebody else's account. Nothing needs doing on an installation beyond upgrading; no setting

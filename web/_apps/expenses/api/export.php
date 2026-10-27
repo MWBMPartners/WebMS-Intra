@@ -38,8 +38,18 @@ if ($isAdmin === false && $isApprover === false) {
     exit('Forbidden');
 }
 
-// 🛡️ CSRF verification via GET token
-if (Auth::verifyCsrf($_GET['csrf_token'] ?? '') === false) {
+// 🛡️ Form-token check on a GET download — deliberately the non-spending one.
+//    WHAT WAS WRONG HERE (#634): this used Auth::verifyCsrf(), which REPLACES
+//    the token whenever it accepts one. The approvals page that holds this
+//    export link also holds the form that approves or rejects a claim, built
+//    from the same token. So downloading the list spent the token and the next
+//    approval was refused; approving first killed the export link. Nothing
+//    reported it as a token problem — the person simply saw a failure on a
+//    money page. A download cannot take a replacement token from its own
+//    answer, because the answer is the CSV file itself.
+//    This export only READS, so single use buys nothing here. See the long
+//    note on Auth::verifyCsrfWithoutSpending() for what that gives up.
+if (Auth::verifyCsrfWithoutSpending($_GET['csrf_token'] ?? '') === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
     // ⚠️ WHAT WAS WRONG HERE (#612): this sent the person to 'expenses', which is not

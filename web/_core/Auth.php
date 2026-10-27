@@ -1075,6 +1075,50 @@ class Auth
     }
 
     /**
+     * Check a form token WITHOUT spending it — for a read-only GET download only.
+     *
+     * WHY THIS EXISTS. `verifyCsrf()` above replaces the token every time it
+     * accepts one, which is right for a write: it stops the same token being
+     * replayed. It is wrong for a DOWNLOAD reached by an ordinary link, and
+     * the Expenses approvals page proved why (#634). That page carries two
+     * things built from the same token: the "Export" link, and the form that
+     * approves or rejects a claim. Whichever was used first spent the token,
+     * so the other one was then refused — export a list and the next approval
+     * failed; approve a claim and the export link gave "Invalid or expired
+     * form token". A download cannot fix this the way a background post can,
+     * by taking a replacement token from the answer: the answer is a CSV file,
+     * and the page it was clicked from never reloads.
+     *
+     * WHAT THIS DOES AND DOES NOT PROTECT. It still refuses a request that
+     * carries no token, a wrong token, or one from another session, so a
+     * stranger's page cannot make a signed-in person fetch this. What it gives
+     * up is single use: the same address works twice. That is an acceptable
+     * trade for a GET that only READS — it changes nothing, so there is
+     * nothing for a replay to do twice — and it is NOT acceptable for anything
+     * that writes.
+     *
+     * DO NOT USE THIS FOR A WRITE, and do not "simplify" a write onto it. If
+     * you are reaching for this on a POST, the answer you want is
+     * `ApiAuth::noteCsrfRotation()` and handing the replacement back.
+     *
+     * @param string $token The submitted token to check
+     *
+     * @return bool True if the token is valid; the stored token is left alone
+     */
+    public static function verifyCsrfWithoutSpending(string $token): bool
+    {
+        self::ensureSession();
+
+        if (isset($_SESSION['csrf_token']) === false) {
+            return false;
+        }
+
+        // Constant-time, exactly as above. The ONLY difference from
+        // verifyCsrf() is that nothing is written back to the session.
+        return hash_equals($_SESSION['csrf_token'], $token);
+    }
+
+    /**
      * 🛡️ Validate and sanitize a redirect URL to prevent open redirect attacks.
      * Only allows relative paths on the same origin. Rejects protocol-relative
      * URLs, backslash tricks, anything with a scheme and external hosts.

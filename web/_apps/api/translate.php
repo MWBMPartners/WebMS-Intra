@@ -31,6 +31,12 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token
     exit();
 }
 
+// 🔄 The check above consumed the token and issued a replacement. Every answer
+//    below therefore carries it, so a page posting more than once without
+//    reloading is not left holding a spent one (#634). The refusal ABOVE
+//    carries nothing on purpose: a failed check rotates nothing.
+$freshCsrf = Auth::csrfToken();
+
 // Only allow translation of content from a whitelist of known tables.
 // Add new translatable tables here as apps wire them up.
 $allowed = [
@@ -43,7 +49,7 @@ $allowed = [
 $sourceTable = (string) ($_POST['sourceTable'] ?? '');
 if (in_array($sourceTable, $allowed, true) === false) {
     http_response_code(400);
-    echo json_encode(['error' => 'table-not-allowed']);
+    echo json_encode(['error' => 'table-not-allowed', 'csrfToken' => $freshCsrf]);
     exit();
 }
 
@@ -54,7 +60,7 @@ $text        = (string) ($_POST['text'] ?? '');
 
 if ($sourceID <= 0 || $text === '') {
     http_response_code(400);
-    echo json_encode(['error' => 'missing-fields']);
+    echo json_encode(['error' => 'missing-fields', 'csrfToken' => $freshCsrf]);
     exit();
 }
 
@@ -62,14 +68,14 @@ $sourceLang = Translation::detect($text);
 $out = Translation::translate($sourceTable, $sourceID, $sourceField, $sourceLang, $targetLang, $text);
 
 if ($out === null) {
-    echo json_encode(['translation' => $text, 'cached' => true, 'sameLanguage' => true]);
+    echo json_encode(['translation' => $text, 'cached' => true, 'sameLanguage' => true, 'csrfToken' => $freshCsrf]);
     exit();
 }
 if ($out === false) {
     http_response_code(503);
-    echo json_encode(['error' => 'translation-unavailable']);
+    echo json_encode(['error' => 'translation-unavailable', 'csrfToken' => $freshCsrf]);
     exit();
 }
 
-echo json_encode(['translation' => $out, 'cached' => false, 'sourceLanguage' => $sourceLang]);
+echo json_encode(['translation' => $out, 'cached' => false, 'sourceLanguage' => $sourceLang, 'csrfToken' => $freshCsrf]);
 exit();

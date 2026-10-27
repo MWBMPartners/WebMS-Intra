@@ -335,6 +335,41 @@ final class ApiAuth
     }
 
     /**
+     * Record that THIS request's anti-forgery check passed and consumed the
+     * token, so the replacement travels back in the answer.
+     *
+     * WHY THIS EXISTS, AND WHY IT IS NOT A SECOND WAY OF DOING THINGS.
+     * `requireWrite()` above is the house way, and it records the rotation
+     * itself — a handler that uses it needs nothing from here. But four
+     * handlers deliberately do NOT use it: their sign-in rules are their own
+     * (a stream moderator, an event's coordinator, the person's own prayer
+     * request, the person's own tour), and `requireWrite()` would also let an
+     * API key through, which none of them is meant to accept. Before this
+     * method existed, those handlers checked the token with
+     * `Auth::verifyCsrf()`, which REPLACES it on every acceptance, and then
+     * answered without the replacement. A page that posts in the background
+     * keeps the token it was drawn with, so the SECOND press was refused —
+     * silently, because the refusal is a 403 the script ignored. That was
+     * live on the live-chat moderation page and the Host Console (#634).
+     *
+     * This is still ONE place deciding what the replacement is: the value
+     * comes from `Auth::csrfToken()`, exactly as `requireWrite()` takes it,
+     * and `ApiResponse` publishes it in `meta.csrfToken` on the success AND
+     * on every refusal reached after this point.
+     *
+     * CALL IT IMMEDIATELY AFTER a `verifyCsrf()` that passed, and nowhere
+     * else. Calling it without a passed check would hand out a token the
+     * request never earned; calling it late leaves the refusals in between
+     * carrying nothing, which is the half-fix #634 warns about.
+     *
+     * @return void
+     */
+    public static function noteCsrfRotation(): void
+    {
+        self::$rotatedCsrf = Auth::csrfToken();
+    }
+
+    /**
      * keyID of the authenticated API key, or null in session mode / unresolved.
      *
      * @return int|null

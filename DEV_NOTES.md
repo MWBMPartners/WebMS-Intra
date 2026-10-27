@@ -8006,6 +8006,59 @@ A real Google or Microsoft 365 calendar (every test calendar is hand-written; tw
 real mail or push service; the pull-request checks on GitHub; the organisation chosen by session or sub-domain (#502). **Codex has not reviewed
 any of it.**
 
+## The form token is replaced on every acceptance, and the answer must carry it (#634)
+
+`Auth::verifyCsrf()` replaces the stored token whenever it accepts one. That is deliberate — it
+stops a token being used twice. The consequence catches people out: **anything that posts without
+reloading must be handed the replacement, or its second post is refused**, and the refusal is a 403
+that most scripts ignore, so the control silently stops working.
+
+- The house way is `ApiAuth::requireWrite()` with `ApiResponse`, whose `meta.csrfToken` exists for
+  exactly this.
+- `ApiAuth::noteCsrfRotation()` is for a handler that deliberately does NOT use `requireWrite()`,
+  because its sign-in rules are its own and it must not accept an API key — a stream moderator, an
+  event's coordinator, the person's own prayer request, the person's own tour. Call it immediately
+  after a check that passed, and nowhere else: calling it without a passed check would hand out a
+  token the request never earned.
+- Return the replacement on the success **and on every refusal reached after the check**. A request
+  turned away for some other reason has still spent the token. `ApiResponse::meta()` is reached by
+  both `success()` and `error()`, so an ApiResponse handler gets this for free.
+- **In a page, read the token at the moment of posting, never once at load**, and keep it somewhere
+  you can reassign. A `const` cannot be updated at all, which is what made the Host Console's fault
+  permanent rather than passing.
+- `portal.js` writes a replacement back into the page's `<meta name="csrf-token">` tag for every
+  answer it sees, success or refusal, and publishes `Portal.csrf()` and `Portal.rememberCsrf()`.
+  **This only covers posts made through `Portal.fetch`, and the only caller of that under `web/` is
+  `_apps/documents/index.php`.** A script using plain `fetch()` must call `Portal.rememberCsrf()` on
+  its own answer — `portal-tour.js` does; `push-subscribe.js` and `report-builder.js` still do not.
+- Three answer shapes carry the token, and `rememberCsrf()` reads all three: `meta.csrfToken` from
+  an ApiResponse envelope, a top-level `csrfToken`, and a top-level `csrf_token` (the older
+  spelling, which the two push handlers send).
+- **A download cannot do any of this**, because its answer is the file and the page it was clicked
+  from never reloads. `Auth::verifyCsrfWithoutSpending()` exists for that one case — a read-only GET
+  — and must never be used for anything that writes. It gives up single use, which buys nothing on a
+  request that changes nothing.
+- The tripwire is `tools/audit-checks/check_csrf_rotation_returned.py`. Its header names the five
+  shapes it cannot see; read them before trusting it.
+
+## A unique key cannot cover a column that may be empty (#594, and #187 before it)
+
+This has now been got wrong twice, in two tables. MySQL never treats one empty value (`NULL`) as
+equal to another, so a unique key on `(siteID, somethingKey)` does **not** stop two portal-wide rows,
+and an `ON DUPLICATE KEY UPDATE` against such a key silently INSERTS instead of updating. Every
+replay then adds another copy.
+
+The fix both times: a VIRTUAL generated column holding `COALESCE(siteID, -1)`, with the unique key on
+that. It must be VIRTUAL and not STORED, because MySQL refuses a foreign key with ON DELETE CASCADE
+on a table holding a STORED generated column (ERROR 1215).
+
+**Before adding a table where "applies to every organisation" means an empty column, do this from
+the start.** And when de-duplicating existing rows, think about which copy wins: migration 187 could
+not simply keep the newest, because a replay re-seeds the row and the fresh copy would be newer than
+an administrator's edit, so it tested "does this row differ from its own default?" first. Migration
+222 can keep the newest only because nothing in the portal ever writes a portal-wide e-mail template
+— `admin/email-templates/save.php` takes its organisation from `Site::id()` and writes overrides only.
+
 ---
 
 Last updated: October 2026

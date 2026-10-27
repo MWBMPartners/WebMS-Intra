@@ -26,6 +26,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
 use Portal\Core\Auth;
@@ -38,6 +39,12 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     ApiResponse::error('Invalid CSRF token', 403);
 }
+
+// 🔄 The check above consumed the token and issued a replacement. Publish it
+//    (ApiResponse puts it in `meta.csrfToken`) so a page posting in the
+//    background is not left holding a spent one and refused on its second
+//    press — which is exactly what happened here before #634.
+ApiAuth::noteCsrfRotation();
 
 $db     = App::db();
 $userId = (int) ($_SESSION['user_id'] ?? 0);

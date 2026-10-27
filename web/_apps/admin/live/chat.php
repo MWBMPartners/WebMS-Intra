@@ -218,10 +218,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 //       answer: the reloaded page is drawn from the database and carries a fresh
 //       token. Approved and hidden messages have left the queue by then; a
 //       flagged message stays in it, marked as flagged.
-//    Tried and rejected: changing the handler to send the new token back. That
-//    would avoid the reload, but the handler was not part of this change. If it
-//    ever sends one (the other pages that do put it in `meta.csrfToken` of the
-//    reply), this script can use it instead of reloading.
+//    UPDATED BY #634: the handler NOW sends the replacement token back, in
+//    `meta.csrfToken`, and this script keeps it (see `csrfToken` below). The
+//    reload is deliberately KEPT anyway, for a reason that has nothing to do
+//    with tokens: approving or hiding a message takes it out of the queue, and
+//    the reloaded page is what shows the queue as it now stands. What changed
+//    is that the reload is no longer the only thing keeping the page working —
+//    if it is ever removed, the second press will still be accepted. The
+//    earlier note here said the handler "was not part of this change" and that
+//    a second press "would have been refused"; both were true then and are not
+//    now.
 //
 //    WHAT THE PERSON SEES (#612, after the independent check):
 //    - The moment any button is pressed, EVERY button on the page greys out, not
@@ -268,6 +274,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             }).then(function (r) {
                 return r.json().then(function (j) { return { ok: r.ok, body: j }; });
             }).then(function (resp) {
+                // 🔄 Keep the token current before anything else looks at the
+                //    answer. The handler replaced it the moment it accepted the
+                //    old one, so this runs for a REFUSAL too: a request turned
+                //    away AFTER the check (a made-up message number, say) has
+                //    still spent the token. Portal.rememberCsrf() is the one
+                //    shared implementation; this page reads what it stored
+                //    rather than keeping a second copy of the logic.
+                if (window.Portal && typeof window.Portal.rememberCsrf === 'function') {
+                    if (window.Portal.rememberCsrf(resp.body) === true) {
+                        csrfToken = window.Portal.csrf() || csrfToken;
+                    }
+                }
                 if (resp.ok !== true || (resp.body && resp.body.status === 'error')) {
                     alert((resp.body && resp.body.message) ? resp.body.message : 'Moderation failed.');
                     // The form token is stale after any refusal that got as far as the

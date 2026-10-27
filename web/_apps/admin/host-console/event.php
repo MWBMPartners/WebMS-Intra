@@ -287,7 +287,33 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     const form   = document.getElementById('hostPromptForm');
     const status = document.getElementById('hostPromptStatus');
     if (!form) { return; }
-    const csrf = <?php echo json_encode(\Portal\Core\Auth::csrfToken()); ?>;
+    // 🔄 `let`, not `const`, and deliberately so. The portal REPLACES the
+    //    anti-forgery token every time it accepts one, so the value this page
+    //    was drawn with is spent as soon as the first prompt is published. This
+    //    form clears its fields and stays on the page, which made the second
+    //    prompt fail — a 403 that showed only as "HTTP 403" (#634). It is
+    //    reassigned from every answer below. A `const` here cannot be updated
+    //    at all, which is what made the fault permanent rather than passing.
+    let csrf = <?php echo json_encode(\Portal\Core\Auth::csrfToken()); ?>;
+
+    // Store a replacement token from an answer, through the ONE shared helper
+    // in portal.js, and keep this page's copy in step with it.
+    const rememberCsrf = (answer) => {
+        if (window.Portal && typeof window.Portal.rememberCsrf === 'function') {
+            if (window.Portal.rememberCsrf(answer) === true) {
+                csrf = window.Portal.csrf() || csrf;
+                return;
+            }
+        }
+        // portal.js not loaded on this page for some reason: fall back to
+        // reading the answer directly rather than silently keeping a spent
+        // token. Both answer shapes are accepted, as the helper accepts them.
+        if (answer && answer.meta && typeof answer.meta.csrfToken === 'string' && answer.meta.csrfToken !== '') {
+            csrf = answer.meta.csrfToken;
+        } else if (answer && typeof answer.csrfToken === 'string' && answer.csrfToken !== '') {
+            csrf = answer.csrfToken;
+        }
+    };
 
     form.addEventListener('submit', async (ev) => {
         ev.preventDefault();
@@ -309,8 +335,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 credentials: 'same-origin',
             });
             const j = await r.json().catch(() => null);
+            // Before anything else: a refusal reached AFTER the token check has
+            // still spent the token, so the replacement is taken from a failure
+            // just as it is from a success.
+            rememberCsrf(j);
             if (!r.ok) {
-                const msg = (j && j.error && (j.error.message || j.error)) || ('HTTP ' + r.status);
+                // ApiResponse sends a refusal as {status:'error', message:'…'}.
+                // This used to read `j.error`, which that envelope never carries,
+                // so every refusal showed as a bare "HTTP 403" and the handler's
+                // own words — the reason — were thrown away (#634).
+                const msg = (j && (j.message || (j.error && (j.error.message || j.error)))) || ('HTTP ' + r.status);
                 status.innerHTML = '<span class="text-danger">' + String(msg).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'})[c]) + '</span>';
                 return;
             }

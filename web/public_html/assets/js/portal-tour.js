@@ -243,7 +243,24 @@
         var fd = new FormData();
         fd.append('csrf_token', csrfToken());
         fd.append('tourID', String(tour.tourID));
+        // 🔄 Keep the page's token current from the answer. The handler replaced
+        //    it the moment it accepted the old one (#634), and this script reads
+        //    the token out of the page's meta tag EVERY time it posts (see
+        //    csrfToken() above), so writing the replacement back into that tag
+        //    is all it takes. Without this, completing one tour leaves the whole
+        //    page holding a spent token and the next background post from any
+        //    script on it is refused.
+        //    This runs for a refusal as well as a success, because a request
+        //    turned away after the check has still spent the token. It stays
+        //    best-effort: nothing here is shown to the person, and a tour that
+        //    fails to record simply appears again.
         fetch(window.Portal.url('api/tours/complete'), { method: 'POST', body: fd, credentials: 'same-origin' })
+            .then(function (r) { return r.json().catch(function () { return null; }); })
+            .then(function (answer) {
+                if (window.Portal && typeof window.Portal.rememberCsrf === 'function') {
+                    window.Portal.rememberCsrf(answer);
+                }
+            })
             .catch(function () { /* best-effort */ });
     }
 

@@ -35,12 +35,18 @@
  *      message is no longer in the queue the page draws.
  *   B. Approve and Flag the same way. A flagged message stays in the queue,
  *      marked flagged, and is not offered a Flag button again.
- *   C. The form token. The handler throws a token away when it has used it and
- *      does not send the next one back, so a second press with the same token
- *      is refused ("CSRF check failed") and changes nothing. The page copes by
- *      reloading after a successful press; that is checked in the page's own
- *      text (this test cannot run JavaScript), and a reloaded page is checked
- *      to carry a different token that works.
+ *   C. The form token. The handler replaces the token when it accepts one, so a
+ *      second press with the SAME token is refused ("CSRF check failed") and
+ *      changes nothing. **Since #634 the handler SENDS THE REPLACEMENT BACK**,
+ *      in `meta.csrfToken`, and that is checked here — a spent token still
+ *      fails, but the page is now told the new one. This paragraph used to say
+ *      the handler "does not send the next one back", which was true when it
+ *      was written and became untrue with the fix; the check below asserted the
+ *      same thing and had to be reversed with it. The page ALSO reloads after a
+ *      successful press, for a reason that has nothing to do with tokens (an
+ *      approved or hidden message has left the queue); that is checked in the
+ *      page's own text, since this test cannot run JavaScript, and a reloaded
+ *      page is checked to carry a different token that works.
  *   D. Who may: a member sees "Forbidden" on the page. The member's own, genuine
  *      form token (read from a page they may open) is sent to the handler, which
  *      must refuse it with ITS OWN words, "Admin or stream_moderator role
@@ -113,7 +119,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/612
  * -----------------------------------------------------------------------------
  */
@@ -791,9 +797,22 @@ lcm_check(
     'a second press with the SAME token is refused (403) and changes nothing: this is why the page has to reload',
     lcm_said($second)
 );
+// CHANGED BY #634. This check used to assert the OPPOSITE — that the answer
+// carried no new token, "so the page cannot use one from it". That was true of
+// the code at the time, and asserting it made the fault the expected
+// behaviour: a test that passes only while the bug is present. The handler now
+// hands the replacement back, so the check asserts that instead.
+//
+// The press above still fails with the SAME token, which is right and
+// unchanged: the point is that the page is now TOLD the new one, not that a
+// spent token starts working.
+$firstToken = lcm_json($first)['meta']['csrfToken'] ?? null;
 lcm_check(
-    (lcm_json($first)['data']['csrfToken'] ?? null) === null && (lcm_json($first)['meta']['csrfToken'] ?? null) === null,
-    'and the first answer did not carry a new token (so the page cannot use one from it)'
+    is_string($firstToken) === true
+        && $firstToken !== ''
+        && $firstToken !== $page['token'],
+    'the first answer carries the REPLACEMENT token, and it differs from the one just spent (so the page can keep working without reloading)',
+    'meta.csrfToken was: ' . var_export($firstToken, true)
 );
 lcm_check($page['reloads'] === true, 'the page\'s script reloads after a success (read in its text; this test cannot run JavaScript)');
 $fresh = lcm_readPage($jar['admin']);

@@ -31,6 +31,12 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token
     exit();
 }
 
+// 🔄 The check above consumed the token and issued a replacement. Every answer
+//    below therefore carries it, so a page posting more than once without
+//    reloading is not left holding a spent one (#634). The refusal ABOVE
+//    carries nothing on purpose: a failed check rotates nothing.
+$freshCsrf = Auth::csrfToken();
+
 $siteId = Site::id();
 $userId = (int) ($_SESSION['user_id'] ?? 0);
 $kind   = (string) ($_POST['kind'] ?? 'announcement');
@@ -38,12 +44,12 @@ $text   = (string) ($_POST['text'] ?? '');
 
 if (in_array($kind, AiAssistant::KINDS, true) === false) {
     http_response_code(400);
-    echo json_encode(['error' => 'bad-kind']);
+    echo json_encode(['error' => 'bad-kind', 'csrfToken' => $freshCsrf]);
     exit();
 }
 if (trim($text) === '') {
     http_response_code(400);
-    echo json_encode(['error' => 'empty-text']);
+    echo json_encode(['error' => 'empty-text', 'csrfToken' => $freshCsrf]);
     exit();
 }
 
@@ -63,9 +69,9 @@ if ($out === null) {
         $msg = 'AI provider unavailable — please try again.';
     }
     http_response_code(503);
-    echo json_encode(['error' => 'unavailable', 'message' => $msg]);
+    echo json_encode(['error' => 'unavailable', 'message' => $msg, 'csrfToken' => $freshCsrf]);
     exit();
 }
 
-echo json_encode(['suggestion' => $out]);
+echo json_encode(['suggestion' => $out, 'csrfToken' => $freshCsrf]);
 exit();

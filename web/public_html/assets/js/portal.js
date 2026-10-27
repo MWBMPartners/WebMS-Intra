@@ -266,6 +266,24 @@
                 return;
             }
 
+            // 🔄 Keep the page's anti-forgery token current. The server REPLACES
+            //    the token every time it accepts one, so a page that posts more
+            //    than once without reloading is left holding a spent one and is
+            //    refused on its second post — silently, because the refusal is a
+            //    403 most scripts ignore. It runs for a REFUSAL as well as a
+            //    success, because a request refused for some other reason after
+            //    the check has still spent the token. See #634; the same shape
+            //    was live on the live-chat moderation page and the Host Console.
+            //
+            //    WHAT THIS DOES **NOT** COVER, said plainly because an earlier
+            //    version of this comment got it wrong: this runs only for posts
+            //    made through portalFetch, and the only caller of that in the
+            //    portal is web/_apps/documents/index.php. portal-tour.js,
+            //    push-subscribe.js and report-builder.js all use plain fetch(),
+            //    so they are NOT corrected by this and must call
+            //    Portal.rememberCsrf() on their own answers.
+            rememberCsrf(response);
+
             if (xhr.status >= 200 && xhr.status < 300) {
                 if (onSuccess) {
                     onSuccess(response);
@@ -295,6 +313,55 @@
             return meta.getAttribute('content');
         }
         return null;
+    }
+
+    /**
+     * Store a replacement anti-forgery token from an answer, if it carries one.
+     *
+     * THREE shapes are accepted, because the portal really does answer in three
+     * ways: the `meta.csrfToken` of an ApiResponse envelope; a plain top-level
+     * `csrfToken` from a handler that answers with bare JSON; and a top-level
+     * `csrf_token`, the older spelling, which is what the two push handlers
+     * (push/api/subscribe.php and unsubscribe.php) send. The third was missed
+     * at first and those two handlers' replacement tokens were being thrown
+     * away. Anything else is left alone — in particular, an answer with NO
+     * token must never blank the tag, or the next post would send nothing at
+     * all. A token is only ever replaced by another token.
+     *
+     * @param {Object} response - Parsed JSON answer from the portal
+     * @returns {boolean} True when a token was found and stored
+     */
+    function rememberCsrf(response) {
+        if (!response || typeof response !== 'object') {
+            return false;
+        }
+
+        // Checked in order, and each one only when the one before it yielded
+        // nothing — so an envelope whose meta carries no token can still be
+        // read for a top-level one, rather than stopping at the envelope.
+        var token = null;
+        if (response.meta && typeof response.meta.csrfToken === 'string' && response.meta.csrfToken !== '') {
+            token = response.meta.csrfToken;
+        }
+        if (!token && typeof response.csrfToken === 'string') {
+            token = response.csrfToken;
+        }
+        if (!token && typeof response.csrf_token === 'string') {
+            token = response.csrf_token;
+        }
+
+        // An empty string is not a token. Treat it as nothing rather than
+        // writing it into the tag.
+        if (!token) {
+            return false;
+        }
+
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        if (!meta) {
+            return false;
+        }
+        meta.setAttribute('content', token);
+        return true;
     }
 
     /* ========================================================================
@@ -576,4 +643,11 @@
     window.Portal.url = portalUrl;
     window.Portal.fetch = portalFetch;
     window.Portal.toast = showToast;
+    // 🔄 Published so a page that posts with its own `fetch()` — rather than
+    //    through Portal.fetch above — still keeps the anti-forgery token
+    //    current without writing its own copy of this. Read the token with
+    //    Portal.csrf() AT THE MOMENT OF POSTING, never once at page load, and
+    //    hand every answer to Portal.rememberCsrf(). See #634.
+    window.Portal.csrf = getMetaCsrf;
+    window.Portal.rememberCsrf = rememberCsrf;
 })();
