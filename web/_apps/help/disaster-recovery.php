@@ -48,7 +48,10 @@ must-know shortcuts.</p>
     <div class="col-md-4"><div class="card h-100"><div class="card-body">
         <h5><i class="fa-solid fa-1 me-1"></i>Stop the bleeding</h5>
         <p class="small">Toggle maintenance mode immediately to show a friendly "we'll be back" page.</p>
-        <a class="btn btn-warning btn-sm" href="<?php echo htmlspecialchars(Site::url('admin/maintenance/health'), ENT_QUOTES, 'UTF-8'); ?>">Maintenance mode</a>
+        <?php /* The toggle lives on Admin, Settings, Maintenance. This button pointed at
+                 admin/maintenance/health until 27 October 2026 — the health page has no
+                 toggle on it at all, so the first step of a recovery led nowhere. */ ?>
+        <a class="btn btn-warning btn-sm" href="<?php echo htmlspecialchars(Site::url('admin/settings/maintenance'), ENT_QUOTES, 'UTF-8'); ?>">Maintenance mode</a>
     </div></div></div>
     <div class="col-md-4"><div class="card h-100 border-info"><div class="card-body">
         <h5><i class="fa-solid fa-key me-1"></i>You can still get back in</h5>

@@ -809,11 +809,13 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
 ## A few more things worth knowing
 
 - **Branches are meant to be promoted through four steps on the way to
-  production, per the 7 September 2026 memory: `alpha` → `beta` →
-  `release-candidate` → `main`.** `main` is what customers actually run.
-  **No `release-candidate` branch exists on the remote today** (checked 16
-  September 2026) — treat this four-step flow as the intended design, to
-  be confirmed with the owner, not as something already set up. **One
+  production, per the 7 September 2026 memory: `alpha` → `beta` → `rc` →
+  `main`.** `main` is what customers actually run. **The third branch is
+  called `rc`, not `release-candidate`, and it does not exist** — nothing in
+  the repository creates it, and `.github/workflows/package.yml` says exactly
+  that in its own header while describing what it would build if it did. So
+  the four-step flow is the intended design; what runs today is `alpha` →
+  `beta` → `main`. **One
   working branch at a time**, currently
   `claude/alpha-wip`, created from the tip of `alpha`. All new work happens
   there; no second pull request is opened while one is already open against

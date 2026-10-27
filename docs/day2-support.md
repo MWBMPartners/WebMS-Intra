@@ -40,13 +40,21 @@ When a Critical issue is identified, follow the
 [disaster-recovery runbook](disaster-recovery-runbook.md) — it covers
 the steps below command-by-command.
 
-1. Maintenance mode goes on (`/admin/maintenance` or `portal.maintenance.active = '1'`).
+1. Maintenance mode goes on, at **`/admin/settings/maintenance`** (or by setting
+   `portal.maintenance.active = '1'`). That is the address of the toggle; this step
+   used to say `/admin/maintenance`, which nothing answers.
 2. Reporter + congregation notified via a single email blast.
 3. JSON backup taken if not already automatic.
 4. Diagnose + fix in a feature branch.
 5. Test on the dev environment.
 6. Deploy + run upgrade.
-7. Maintenance mode off (auto-clears on `installed_version` update).
+7. Maintenance mode off — **you must untick it yourself.** This step used to say it
+   "auto-clears on `installed_version` update", and that is wrong: an explicit flag
+   wins over everything else (`Maintenance::isActive()`, `web/_core/Maintenance.php`),
+   so a flag switched on by hand at step 1 stays on however the versions compare.
+   Trusting the old wording leaves the portal closed after the incident is over. (What
+   DOES clear by itself is the automatic closure while a database upgrade is really
+   waiting — nobody switched that on, so nobody has to switch it off.)
 8. Post-incident note posted in announcements + sent to congregation.
 
 ## 5. Maintenance windows

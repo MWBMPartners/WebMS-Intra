@@ -29,12 +29,13 @@ local copy it can fall back to, because some customers' own networks block
 those servers outright. Full detail in `.OpenAI/CONTEXT.md`.
 
 **Branches are meant to move through four steps on the way to production —
-per the 7 September 2026 memory: `alpha` → `beta` → `release-candidate` →
-`main`, where `main` is what customers actually run — and one working
-branch at a time, judged by contents not commit titles.** No
-`release-candidate` branch exists on the remote today (checked 16 September
-2026); treat the four-step flow as the intended design, to be confirmed
-with the owner, not as already in place. All new work happens on a single
+per the 7 September 2026 memory: `alpha` → `beta` → `rc` → `main`, where
+`main` is what customers actually run — and one working branch at a time,
+judged by contents not commit titles.** The third branch is called `rc`, not
+`release-candidate`, and it does not exist: nothing in the repository creates
+it, and `.github/workflows/package.yml` says so in its own header while
+describing what it would build if it did. Treat the four-step flow as the
+intended design; `alpha` → `beta` → `main` is what runs today. All new work happens on a single
 branch created from `alpha`; only one pull request is open against `alpha` at once, to avoid
 two pull requests racing to merge and conflicting. When several branches
 are created together just to split up one piece of work, treat them as
@@ -52,8 +53,16 @@ lighter, cheaper model unless the work is genuinely complex. Every change is
 reviewed by a different AI system from the one that built it — in practice,
 today, Claude plans and builds, and Codex reviews, or the reverse when
 Codex is the one that built something. After every finished piece of work:
-commit and push, update the related GitHub issue(s), update both `.claude/`
-and `.OpenAI/`, and update the handoff document (`.claude/HANDOFF.md`).
+commit, update the related GitHub issue(s), update both `.claude/` and
+`.OpenAI/`, and update the handoff document (`.claude/HANDOFF.md`).
+**Commit, but do not push.** The owner reserves pushes, pull requests,
+merges, tags and releases for their own explicit approval, and that rule
+says in so many words that an older repository instruction to push after
+every task does not supply it. Rule 6 of `.OpenAI/CONTEXT.md` and standing
+instruction 6 of `.claude/CLAUDE.md` both still read "commit and push",
+which is the conflict: the owner's reservation wins, and the two rule files
+are left alone until the owner settles the wording. Prepare the commit and
+stop at that boundary.
 
 **How committing and reviewing fit together (settled 16 September 2026).**
 Commit-and-push and cross-system-review-before-finished sound like they

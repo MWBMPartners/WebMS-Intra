@@ -17,8 +17,10 @@ everyone on the team and inside the build server, not just on one laptop.
 ## What the product is
 
 An internal portal platform for churches and similar organisations —
-announcements, calendar, giving, rotas, safeguarding and around forty other
-small apps, all switchable on or off per site. Built and sold by MWBM Partners
+announcements, calendar, giving, rotas, safeguarding and dozens of other small
+apps, all switchable on or off per site. Count them from `web/_apps/` rather
+than from any document — this file deliberately does not keep the number, for
+the same reason it warns about counts below. Built and sold by MWBM Partners
 Ltd, trading as MWservices. All rights reserved.
 
 The product name is chosen at install time from a set of brand presets
@@ -73,8 +75,12 @@ suspicion — they have gone stale before. Confirm against the code:
 
 ## Branch and release rules
 
-Four-step promotion: `alpha` → `beta` → `release-candidate` → `main`.
-`main` is production.
+Promotion is planned as `alpha` → `beta` → `rc` → `main`, with `main` as
+production. **The branch is called `rc`, not `release-candidate`, and it does
+not exist yet** — nothing in the repository creates it, and
+`.github/workflows/package.yml` says so in its own header. So the promotion
+that really runs today is `alpha` → `beta` → `main`, each branch deploying to
+its own web folder (the table is in `DEV_NOTES.md`).
 
 - **One work-in-progress branch at a time.** As of 7 September 2026 that is
   `claude/alpha-wip`.
@@ -87,9 +93,21 @@ Four-step promotion: `alpha` → `beta` → `release-candidate` → `main`.
 
 ## How the team wants work done
 
-- **Deep analysis and planning:** sequential Fable 5 agents, never a parallel
-  fan-out. Fall back to Opus only if Fable is unavailable, and try Fable again
-  next time.
+- **Deep analysis and planning:** the strongest reasoning model available, one
+  agent at a time, each building on what the one before it found. Since
+  23 September 2026 that is **Opus, not Fable** — the owner swapped them
+  deliberately, because the newest Opus costs less and is at least as good at
+  this, so there is nothing left to fall back to. **The rule is about the tier,
+  not the name:** an older note naming Fable as the planner is out of date
+  rather than a reminder.
+- **Never two analysis runs at once**, and nothing new starts — not even
+  planning the next package — while a finished one is being independently
+  checked. Two exceptions have been added since, both deliberate:
+  **fact-gathering may run in parallel** (reading code, working through a list
+  of issues, web research — work that only finds out what is already true;
+  owner, 21 September 2026), and **two packages that change no file in common
+  may run side by side** (owner, 12 October 2026). Judgements about one package
+  still happen one agent at a time.
 - **Building:** Sonnet or Haiku. Opus only when the work is genuinely hard.
 - **Guiding principle:** get it right first time. Spend effort efficiently, but
   never at the cost of correctness.
@@ -100,7 +118,15 @@ Four-step promotion: `alpha` → `beta` → `release-candidate` → `main`.
 
 ## After finishing any piece of work
 
-1. Commit and push to the current work-in-progress branch.
+1. Commit to the current work-in-progress branch. **Do not push.** The owner
+   reserves pushes, pull requests, merges, tags and releases for their own
+   explicit approval, and that rule says in so many words that an older
+   repository instruction to push after every task does not supply it.
+   **Know that this is a live conflict, not a settled wording:** standing
+   instruction 6 of `.claude/CLAUDE.md` and rule 6 of `.OpenAI/CONTEXT.md`
+   both still read "commit and push". The owner's reservation wins, and those
+   two rule files are deliberately left alone until the owner settles the
+   wording themselves. Prepare the commit and stop at that boundary.
 2. Update the relevant GitHub issue.
 3. Update `.claude/` (this file, `CLAUDE.md`, `HANDOFF.md`) and the repository
    documentation.

@@ -10,9 +10,23 @@
 # /index.php (the front controller itself), /api-docs/ (Swagger UI viewer,
 # served via Apache's DirectoryIndex), and /error.php (Apache ErrorDocument
 # target — must remain externally reachable as Apache invokes it for 4xx/5xx
-# subrequests). Every other PHP file lives in web/_apps/ outside the webroot
+# subrequests). Every APP page lives in web/_apps/ outside the webroot
 # entirely after #159 and is reached via the front-controller → Router →
 # tblRoutes pipeline.
+#
+# WHAT IS ACTUALLY IN THIS FOLDER, because the three-file story below used to
+# be written as though nothing else were here: the webroot holds EIGHT .php
+# files, not three. The five that are not entry points — robots.php,
+# sitemap.php, manifest.php, openapi.php and offline/index.php — are 404'd by
+# the deny rule like any other, and are reached only through the router, by
+# the clean addresses seeded in tblRoutes (robots.txt → robots.php,
+# sitemap.xml → sitemap.php, manifest.json → manifest.php,
+# openapi.json → openapi.php; Router.php includes offline/index.php itself for
+# the 'offline' address). So the deny rule's exception list is NOT a list of
+# what is in the folder, and a new file put here does NOT belong on it: give
+# it a route instead. Do not "tidy away" one of those five on the strength of
+# a comment saying only three files live here — each one answers a live
+# address.
 #
 # This means a probe like "/expenses/submit/save.php" returns 404 — no leak of
 # the backend language, no way to bypass the router's auth + CSRF gates by
@@ -43,8 +57,12 @@ RewriteRule ^index\.php$ / [R=301,L]
 #       /index.php           — front controller (rewrite target)
 #       /api-docs/index.php  — Swagger UI bundle (DirectoryIndex)
 #       /error.php           — Apache ErrorDocument target
-#     After #159 the webroot contains only those three .php files; every
-#     app controller now lives in web/_apps/ outside the webroot entirely.
+#     After #159 every app controller lives in web/_apps/ outside the webroot
+#     entirely. NOTE: this is a list of the three addresses Apache may EXECUTE
+#     directly, not a list of the .php files in this folder — there are eight
+#     of them, and the other five are meant to be 404'd here and reached
+#     through the router instead. See the header for which, and why adding a
+#     file here never means adding a line to this list.
 RewriteCond %{REQUEST_URI} \.php$
 RewriteCond %{REQUEST_URI} !^/index\.php$
 RewriteCond %{REQUEST_URI} !^/api-docs/index\.php$

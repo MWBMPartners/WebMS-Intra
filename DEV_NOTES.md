@@ -469,27 +469,50 @@ ssh -i ~/.ssh/webms_intra_deploy -p 22 <SFTP_USER>@<SFTP_HOST> 'pwd; ls'
 
 ### 3. Set the GitHub repo secrets
 
-| Secret           | Required | Example value                                                              |
-| ---------------- | -------- | -------------------------------------------------------------------------- |
-| `SFTP_HOST`      | yes      | `iad1-shared-XX-XX.dreamhost.com`                                          |
-| `SFTP_USER`      | yes      | `dh_abcd1234`                                                              |
-| `SFTP_LIVE_PATH` | yes      | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html`               |
-| `SFTP_BETA_PATH` | yes      | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_beta`          |
-| `SFTP_DEV_PATH`  | yes      | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_dev`           |
-| `SFTP_PORT`      | no       | `22` (default if omitted)                                                  |
-| `SFTP_KEY`       | one of   | full contents of `~/.ssh/webms_intra_deploy` (private key, preferred)      |
-| `SFTP_PASSWORD`  | one of   | DreamHost SFTP password (fallback when `SFTP_KEY` is unset)                |
+> ⚠️ **Three names in this step were RETIRED by the deploy rewrite (#499, #500).**
+> `SFTP_LIVE_PATH`, `SFTP_BETA_PATH` and `SFTP_DEV_PATH` used to be listed here as
+> required. They are now on `RETIRED_SETTINGS` in `tools/deploy/resolve-settings.sh`:
+> setting one only produces a warning, and the deploy will refuse for want of the
+> base folder. The table below is the real list. **Every value is an example of one
+> customer's set-up, not a default** — nothing in this product has a built-in address.
+
+| Setting                | Secret? | Required | Example value |
+| ---------------------- | ------- | -------- | ------------- |
+| `SFTP_HOST`            | secret  | yes      | `iad1-shared-XX-XX.example-host.com` |
+| `SFTP_USER`            | secret  | yes      | `dh_abcd1234` |
+| `SFTP_PATH_ROOT_DIR`   | secret  | yes      | `/home/dh_abcd1234/portal.example.org` — a FULL path to the base folder |
+| `SFTP_PATH_LIVE_DIR`   | secret  | yes      | `public_html` — **a NAME inside the base folder, never a path** |
+| `SFTP_PATH_BETA_DIR`   | secret  | yes      | `public_html_beta` |
+| `SFTP_PATH_ALPHA_DIR`  | secret  | yes      | `public_html_dev` (the alpha branch deploys the dev channel) |
+| `SFTP_PORT`            | secret  | no       | `22` if omitted |
+| `SFTP_KEY`             | secret  | one of   | the whole private key file (preferred) |
+| `SFTP_PASSWORD`        | secret  | one of   | the SFTP password (used only when `SFTP_KEY` is unset) |
+| `SFTP_ENABLED`         | variable | yes     | must be **exactly** `true` — four small letters, no spaces or line breaks. Anything else means "work it out but upload nothing", which is how you take a dry run. |
+| `ADMIN_BASE_URL_LIVE` / `_BETA` / `_ALPHA` | variable | no | the staff address the health check uses; empty means skip that check |
+
+A channel may have its own login and its own base folder instead
+(`SFTP_HOST_LIVE`, `SFTP_USER_LIVE`, `SFTP_KEY_LIVE` or `SFTP_PASSWORD_LIVE`,
+`SFTP_PORT_LIVE`, `SFTP_PATH_LIVE_ROOT_DIR`, and the same for `BETA` and `ALPHA`).
+**A channel's own login is all or nothing:** if any one of its five login settings is
+set, its host, user and key-or-password must ALL come from that channel's settings.
+Nothing is borrowed from the shared login, because "a new host with the shared user"
+would sign in happily and then write the shared base folder's path onto the wrong
+server, and that cannot be told from a deliberate choice by looking at the values.
 
 ```bash
-gh secret set SFTP_HOST      --body 'iad1-shared-XX-XX.dreamhost.com'
-gh secret set SFTP_USER      --body 'dh_abcd1234'
-gh secret set SFTP_LIVE_PATH --body '/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html'
-gh secret set SFTP_BETA_PATH --body '/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_beta'
-gh secret set SFTP_DEV_PATH  --body '/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html_dev'
-gh secret set SFTP_KEY       < ~/.ssh/webms_intra_deploy
+# Replace every value with your own. None of these is a default.
+gh secret set SFTP_HOST           --body 'iad1-shared-XX-XX.example-host.com'
+gh secret set SFTP_USER           --body 'dh_abcd1234'
+gh secret set SFTP_PATH_ROOT_DIR  --body '/home/dh_abcd1234/portal.example.org'
+gh secret set SFTP_PATH_LIVE_DIR  --body 'public_html'
+gh secret set SFTP_PATH_BETA_DIR  --body 'public_html_beta'
+gh secret set SFTP_PATH_ALPHA_DIR --body 'public_html_dev'
+gh secret set SFTP_KEY            < ~/.ssh/webms_intra_deploy
 # optional:
-gh secret set SFTP_PORT      --body '22'
-gh secret set SFTP_PASSWORD                       # prompts (avoids password in shell history)
+gh secret set SFTP_PORT           --body '22'
+gh secret set SFTP_PASSWORD                       # prompts (keeps it out of shell history)
+# not secret, and nothing uploads until this one says exactly "true":
+gh variable set SFTP_ENABLED      --body 'true'
 ```
 
 ---
@@ -1689,12 +1712,28 @@ the web-based Migrator (admin-only) and tracked in `tblMigrations`.
 
 ### Adding a New Migration
 
-1. Create `web/_sql/NNN_description.sql` (next sequential number)
-2. Write idempotent SQL (use `IF NOT EXISTS`, `IF EXISTS` where appropriate)
-3. Push to `main` -- it deploys to dev
-4. Run the migration on dev via the admin migration runner
-5. Test thoroughly
-6. Before tagging a production release, run the migration on production
+1. Create `web/_sql/NNN_description.sql` (next sequential number).
+2. **Put the same change in `web/_sql/full_schema.sql` as well, and make the two
+   agree** (the owner's rule, 11 September 2026). A migration brings an existing
+   database up to date; the install script builds a new one. A change in only one
+   of them means a fresh install and an upgraded install end up different, which
+   is what the end-to-end migration test exists to catch.
+3. Make the migration safe to run twice. **Do NOT write `IF NOT EXISTS` or
+   `IF EXISTS` on a column or an index to get that** — this step used to say to,
+   and it was wrong: that form is MariaDB-only and a hard error on MySQL, which
+   is what production runs. `tools/audit-checks/check_mariadb_only_ddl.py` fails
+   on it. Test for the column or index first and act on the answer instead.
+   (`CREATE TABLE IF NOT EXISTS` and `DROP TABLE IF EXISTS` are fine on both.)
+4. Push to the working branch, then to **`alpha`** — that is the branch that
+   deploys the dev channel. **This step used to say "push to `main` -- it
+   deploys to dev", which was the live channel all along**: `main` deploys live,
+   `beta` deploys beta, `alpha` deploys dev, and nothing else decides it
+   (`.github/workflows/deploy.yml`). Following the old step would have run an
+   untested migration against a customer's live database.
+5. Run the migration on dev through Admin, Migrations.
+6. Test thoroughly.
+7. Promote the branch as usual. **Do not tag by hand** — see "Release
+   Checklist"; the installation package and its tag are made by `package.yml`.
 
 ### Current Migrations
 
@@ -6434,8 +6473,12 @@ client; PHPMailer as a second engine) come after the first roll-out, by the owne
 - **Its two settings** are `activityLog.cleanedThrough` (a log number, or `all`) and `activityLog.keyLines` (the log
   numbers of the key records). They travel with a backup, so an older backup put back is cleaned again from the start.
 - **WHAT A ONE-TABLE RESTORE DOES TO MIGRATION 220'S MARK.** "Once" is the migration's own row in `tblMigrations`.
-  Nothing on an ordinary page can touch that row, but Admin, Maintenance, Backup can put ONE table back on its own,
-  and `DbBackup::restoreTableWork()` refuses none of `tblMigrations`, `tblTotpBackupCodes` or `tblSettings`. Measured
+  Nothing on an ordinary page can touch that row. Admin, Maintenance, Backup can put ONE table back on its own, and
+  **it now REFUSES all three of `tblMigrations`, `tblTotpBackupCodes` and `tblSettings`** — `DbBackup::WHOLE_DATABASE_ONLY`
+  (`web/_core/DbBackup.php`), asked by `isWholeDatabaseOnly()` and worded by `wholeDatabaseOnlyReason()`; the page draws
+  "Whole-snapshot restore only" in place of the form and refuses a posted request as well. **This paragraph used to say
+  it refused none of them**, which was true when it was measured and stopped being true when that guard landed; it is
+  kept because what was measured is exactly why the guard exists. Measured
   by the independent check on 26 October 2026, on a database that had really been upgraded: `tblMigrations` alone from
   an older backup makes the next press of the Upgrade page delete every backup code made since (1 then 0);
   `tblTotpBackupCodes` alone brings used codes back alive and the migration leaves them (2 then 2); `tblSettings`

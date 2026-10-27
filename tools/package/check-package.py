@@ -376,8 +376,10 @@ SQL_NAME = re.compile(r"_sql/(full_schema|\d{3}_[A-Za-z0-9_]+)\.sql")
 # changed, then put its new checksum here; the failure message prints it.
 ALLOWED_HTACCESS = {
     WEB + "/.htaccess": (
-        "75acb687a5e82a2701a94415b8e496181abd123d79e874f775c43b63f439f244",
-        "the web folder's own rules: every address goes to index.php, and a direct .php address is refused",
+        "896c4fc4a9125629ad39719291333f1c2ce7234623f00574f25fe3b3b3f71b1d",
+        "the web folder's own rules: every address goes to index.php, and a direct .php address is refused "
+        "(read 27 October 2026: the change was COMMENT ONLY — two comments said the web folder holds three "
+        ".php files when it holds eight; no rule, condition or exception changed)",
     ),
     "_install/.htaccess": (
         "1164cf44c0f2c929155912677502795ea2cf448e8d3d87f0dbb196c780cf502e",
