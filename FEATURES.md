@@ -26,9 +26,11 @@
 > **For what is actually true today, check the code.** The counts and the
 > commands to re-derive them used to be in `.claude/CLAUDE.md`; since
 > 5 October 2026 they are kept, as a dated record, in
-> `.claude/history/claude-md-inventory-2026-10-04.md`. As of 20 September 2026: 54 app folders, 47 of them
-> switchable on and off per site, 81 framework classes, 196 database changes
-> numbered 000-198, 213 tables, 19 in-app help guides.
+> `.claude/history/claude-md-inventory-2026-10-04.md`. **No counts are kept here**, because the ones that
+> were went stale: on 27 October 2026 the paragraph still said 81 framework classes (101), 196 database
+> changes numbered 000-198 (219, the highest numbered 221) and 213 tables (228). Count from the code —
+> `web/_apps/` for apps, `web/_core/apps/` for the switchable ones, `web/_core/` for classes,
+> `web/_sql/` for database changes, `web/_apps/help/` for the guides.
 >
 > **Original snapshot line, kept for reference:** 2026-06-21 · Version on
 > `main`: 1.2.1
@@ -262,7 +264,7 @@ Local + SSO + multi-factor sign-in.
 | WebAuthn / PassKey registration + login | ✅ |
 | Forgot password → email reset link — links last 60 minutes (a setting), are stored only as a fingerprint, work once, and are refused for a switched-off account; it stays open, under its own limit, to somebody blocked from signing in (#580) | ✅ |
 | Send e-mail through an SMTP mailbox — settings, route choice and "Send test" at Admin, Integrations, Email (global administrator only, as are the Integrations page's own three tests); certificate always checked; optional hourly limit, over which mail waits (#592, parts 2 and 3) | ✅ |
-| Mail queue — mail that cannot be sent at once is kept, tried again for about a day, never sent twice or after its use-by moment; a failed certificate holds mail, a refused sign-in makes it wait, and a restored backup holds what was waiting; mailings go 25 at a time; needs the scheduled job `/cron/mail-queue`, and until that runs mail goes as it did before and the health page shows waiting mail in red; four numbers settable for the installation and per organisation; no page lists the queue yet (#592, part 3) | ✅ |
+| Mail queue — mail that cannot be sent at once is kept, tried again for about a day, never sent twice or after its use-by moment; a failed certificate holds mail, a refused sign-in makes it wait, and a restored backup holds what was waiting; mailings go 25 at a time; needs the scheduled job `/cron/mail-queue`, and until that runs mail goes as it did before and the health page shows waiting mail in red; four numbers settable for the installation and per organisation (#592, part 3); the page that lists it is the next row | ✅ |
 | **Mail queue page** (Admin, Integrations, Email): lists waiting and held mail, most urgent first, never its content. A global administrator can send one held message again (with a plain warning about a second copy), delete one, and "Send waiting mail now". An organisation's administrator sees their own organisation's messages only, with no button. | ✅ |
 | **Ways past a failed certificate check** (SMTP only, global administrator only, each in the activity log): send one held message through the certificate shown; accept only this certificate; switch checking off (confirmed by typing the mail server's name). Checking switches itself back on when the certificate passes again. A standing warning shows on the e-mail page, the admin dashboard and the health page meanwhile, whatever mail route is in use. An SMTP mailbox can be tested, and its certificate accepted, before the portal is switched to it; a failed test holds no mail that goes by another route. | ✅ |
 | **The e-mail page is the one place the mail server's name and the certificate setting are changed.** The general Settings page refuses them. | ✅ |
@@ -758,7 +760,9 @@ the portal. Made for somebody with only a hosting panel (#499, #500).
   `docs/INSTALL.md` (shipped as `INSTALL.md`) and was proved by doing it on MySQL 8.0.36 and 8.4.11 (13 October
   2026), not yet on a real hosting panel or under Apache. A package carries no `.channel` file; the installer
   writes the installation's own. The portal closes for an upgrade only while a database upgrade is waiting. The
-  workflow that would publish a package (`package.yml`) is proposed only and is not in the repository.
+  workflow that builds a package (`package.yml`) IS in the repository — see the deployment section below
+  for what it does and for the `PACKAGE_PUBLISH_ENABLED` switch that decides whether anything is published.
+  This sentence said it was "proposed only and is not in the repository" until 27 October 2026.
 - **Ownership code first.** A code written into `_auth_keys/install-code.php`, which only somebody who can open the
   hosting's files can read. Nothing else is shown or acted on without it. Ten wrong tries write a new code. Asked
   for again at the finish.
@@ -910,7 +914,11 @@ another repo, ever**.
   with one is put straight into it.
 - An organisation's time zone is set on Admin → Sites (Edit) and nowhere else (#604). Admin → Health has a
   "Time zones" line that says how many organisations and events have no zone the portal knows.
-- **Links stay inside the organisation (#536, part 1 of 2).** Where organisations are told apart by the first
+- **Links stay inside the organisation (#536, both parts).** Part 2 landed in commit `0a87383`: the app
+  pages themselves were swept, and the list of places still to do
+  (`tools/audit-checks/site_aware_addresses_pending.txt`) has held nothing since 13 October 2026. The
+  first-part mode itself is still deliberately switched off (`Site::FIRST_PART_MODE_READY` is `false`).
+  Part 1 was: Where organisations are told apart by the first
   part of the address, the menu, page header, footer, error pages, "closed for maintenance" page, sign-in
   redirects (Microsoft and Google included), sign-out page and the portal's own script files all keep that part.
   A "come back to" address after sign-in cannot lead to another organisation or another site. The app pages
@@ -961,6 +969,20 @@ another repo, ever**.
 - Per-user language preference.
 - Date/time format settings (#69).
 
+- The activity log keeps a fingerprint, not the sign-in identifier (#622). A record used to store the session
+  identifier — which IS the sign-in cookie, so anyone reading the table, a backup or a pre-upgrade snapshot held
+  working sign-ins — beside a copy of everything in the session, which held two-step backup codes and some
+  authenticator keys in readable text. A record now keeps a one-way fingerprint and six named facts about the
+  session, and nothing else. Older records are cleaned in pieces from the Upgrade page; that clean-up is not part
+  of the upgrade gate and never closes the portal. `tools/audit-checks/check_session_id_not_stored.py` fails if
+  either thing starts coming back.
+- Buttons and controls that did nothing, because the browser refused the script behind them (#625). Every page
+  carries a rule saying which scripts may run, and 97 scripts and element handlers across 63 files did not carry
+  the one-off number that rule requires — so the browser refused them silently, the page looked finished and the
+  control did nothing. Element handlers (`onclick`, `onchange`) are replaced by two shared attributes read by
+  `assets/js/portal-actions.js`. A page that writes more than once without reloading is also handed the
+  replacement anti-forgery token, because accepting one replaces it — without that, such a page worked exactly
+  once and was then silently refused.
 - Erasure reaches every activity record a person has (#626). Each record names its person in its own column: the
   portal fills it from the session when the caller names nobody, so the one rule an erasure uses covers every record
   of somebody signed in as themselves. (Not a record made at a shared kiosk: see the note in DEV_NOTES.)
@@ -985,8 +1007,10 @@ another repo, ever**.
   is gone. Publishing stays off until a repository variable switches it on, and
   none of this has yet run on GitHub.
 - Most self-tests run on every pull request (`portal-selftests.yml`,
-  `mail-selftests.yml`, `calendar-selftests.yml`), the database ones against both
-  MySQL 8.0.36 and 8.4.11. Two run only when a pull request touches the files they
+  `mail-selftests.yml`, `calendar-selftests.yml`). `portal-selftests.yml` and
+  `mail-selftests.yml` run their database checks against both MySQL 8.0.36 and
+  8.4.11; **`calendar-selftests.yml` is pinned to 8.0.36 only, with no matrix**
+  (this line claimed both for all three until 27 October 2026). Two run only when a pull request touches the files they
   are about: the backup tests (`backup-selftest.yml`) and the migration harness
   (`e2e-migrations.yml`). A few self-tests and seven of the checks in
   `tools/audit-checks/` still run nowhere automatically — tracked as #637, so this
@@ -1093,7 +1117,7 @@ setting seeds.
 | ↳ Every "who did it" column the test can find is cleared, including a table's second one (#492) and three the database does not link to an account; so is the key to the person's private calendar feed. An accepted invitation is deleted with its person. Not reached: an approval step given to one named person (pinned in the test; needs a decision), names typed as free text, and an already-open session, which is not ended. | #492 | 208 | ⚠️ three gaps, named |
 | ↳ **Giving records keep a donor's name for a set time** (roll-out package A2b). On erasure, gifts with a tax declaration, receipt or statement (or every gift, if the organisation chooses) keep the donor's name and home address, held in `tblGivingKeptDonors`; every other gift and counted envelope loses the name at once (an envelope in a count not yet closed, whose gift will be a kept one, keeps its giver). Each organisation sets its country, the number of years, its financial year end and a hold at Admin, Giving records (`/admin/settings/giving-records`). The portal suggests a figure from researched data for 211 countries, never fewer than 6 years, and 10 as a flagged placeholder where it has none; every figure is a suggestion, not legal advice. Nothing is cleared before an administrator confirms the figure, while a hold is on, or before the donor's account has been emptied; a request whose run has already removed or changed anything cannot be cancelled, only run again. The seven settings are changed only on that page; the general settings editor refuses them. When the keep-until date has passed, the retention job removes the name, address, link and kept statement files together and adds a line to the erasure's audit trail. Not reached: a gift that names its donor only by a typed name; and nothing is cleared while the scheduled job is switched off and nobody runs it by hand. | #574 | 209 | ✅ |
 | Photos (4-tier visibility, moderation queue, EXIF-aware GD re-encode for non-privileged downloads) | #236 | 102 | ✅ |
-| Database snapshots (before every upgrade, and on demand): one file per table, a row per line; restore of the whole snapshot is all or nothing; "Check this snapshot" rehearses a restore and changes nothing; a snapshot that cannot be put back whole says so when it is taken, and stops an upgrade | #472 #577 #578 #579 | — | ✅ |
+| Database snapshots (before every upgrade, and on demand): one file per table, a row per line; a WHOLE-snapshot restore is all or nothing and is the supported route; ONE table can also be put back on its own, **except `tblMigrations`, `tblTotpBackupCodes` and `tblSettings`, which the page refuses** because a one-table restore of any of those moves a "this ran once" mark and can lose data (`DbBackup::WHOLE_DATABASE_ONLY`); "Check this snapshot" rehearses a restore and changes nothing; a snapshot that cannot be put back whole says so when it is taken, and stops an upgrade | #472 #577 #578 #579 #622 | — | ✅ |
 | Off-site backup (weekly AES-256-CBC to rclone/S3/SFTP). It sends the newest snapshot that exists; it does not make one (#581). The example script was corrected on 12 October 2026 (#488): until then it had never found a snapshot | #249 | 103 | ✅ |
 | Disaster-recovery runbook + `/help/disaster-recovery`. The runbook was rewritten and every command in it run on 12 October 2026 (#488). The in-app help page still gives the old advice (#583). The three backup faults it found (#577, #578, #579) were fixed the same day | #250 | 104 | ⚠️ |
 | CDN SRI audit script + Asset helpers for Sortable + Swagger UI | #161 | — | ✅ (4 hashes empty pending curl-and-fill) |
@@ -1316,7 +1340,7 @@ Phase 2 (#404-#410, migration 160) followed on directly: label-PDF polish, scan-
 | Item | Issue | Migration | Status |
 |---|---|---|---|
 | Depreciation value history — `tblAssetValueHistory` snapshot table; `AssetRegister::computeReducingBalanceValue()` (constant-percentage reducing-balance, no `depreciationRate` column — the fixed percentage is derived from cost/salvage/useful-life) alongside the existing straight-line method; item.php's read-only Value History panel is populated by the `#405` cron's write-on-change-only snapshot | #412 | 161 | ✅ |
-| Parent/child kits — `tblAssets.parentAssetID` (already existed, migration 159) now UI-wired: one-level-deep kit hierarchy (a component cannot itself have components), `AssetRegister::attachKitChild()`/`detachKitChild()`/`kitChildren()`/`eligibleKitChildCandidates()`, and kit-aware loans (`cascadeKitCheckout()`/`cascadeKitCheckin()`) that hand a top-level asset's WHOLE kit out/back together, with a per-component return condition captured at check-in | #413 | 161 | ✅ |
+| Parent/child kits — `tblAssets.parentAssetID` (already existed, migration 159) now UI-wired: one-level-deep kit hierarchy (a component cannot itself have components), `AssetRegister::attachToKit()`/`detachFromKit()`/`kitChildren()`/`eligibleKitChildCandidates()`, and kit-aware loans (`cascadeKitCheckout()`/`cascadeKitCheckin()`) that hand a top-level asset's WHOLE kit out/back together, with a per-component return condition captured at check-in | #413 | 161 | ✅ |
 | Stocktake / scan-to-verify — `tblAssetStocktakes` + `tblAssetStocktakeItems`; a manager opens a run (optionally scoped to one location/category), scans assets against the expected set, and `verifyStatus` tracks pending/present/missing/moved/unexpected per asset until the run is closed | #411 | 161 | ✅ |
 | Kiosk self check-in/out — unattended, PUBLIC shared-terminal mode (`tblAssetKioskTokens` per-device credential + `tblAssetKioskPins` per-user PIN); `/assets/kiosk`/`kiosk-action` carry NO login session of their own — identity lives in separate `kiosk_*` session keys, idle-timeout auto-checkout, and every action audits with `actorType: 'kiosk'` attributed to the PIN-resolved user | #414 | 161, 162 | ✅ |
 | GS1 Digital Link resolver + GEPIR verify — public `01/{gtin}`, `8003/{grai}`, `8004/{giai}` short URLs (a `Router::handleSpecialRoutes()` block, NOT a `tblRoutes` row) resolve straight to the matching asset's existing `/a/{token}` public page, globally/cross-site, NEVER matching a confidential asset (excluded in the SQL itself — no oracle); a manager-only "Verify" button on item.php's Identifiers panel runs the local GS1 mod-10 check-digit always, plus an optional GEPIR registry lookup when `assets.gepir_verify_enabled`/`assets.gepir_endpoint` are configured (off by default), caching the outcome in `verifiedAt`/`verifyNote` | #415 | 161 | ✅ |

@@ -104,7 +104,13 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     │   ├── offline/                 # PWA offline fallback page
     │   ├── manifest.php             # Brand-aware PWA manifest controller
     │   ├── openapi.php              # Brand-aware OpenAPI spec controller
-    │   ├── robots.txt
+    │   ├── robots.php               # Answers the /robots.txt address
+    │   ├── sitemap.php              # Answers the /sitemap.xml address
+    │   ├── sitemap.xsd              # The sitemap's own schema
+    │   ├── widget/                  # countdown.js, embedded by other websites.
+    │   │                            # Do NOT remove: see #478 — the folder hid a
+    │   │                            # sign-in-free address, and deleting it as
+    │   │                            # clutter would have published that page
     │   └── sw.js                    # Service worker
     ├── private_html/                # Private / non-live files
     ├── public_html_landing/         # Pre-launch landing page
@@ -292,9 +298,15 @@ preferred, password fallback) on a three-branch model:
 | `beta`  | beta       | its own folder, named by `SFTP_PATH_BETA_DIR`     | Conventional Commits |
 | `main`  | production | its own folder, named by `SFTP_PATH_LIVE_DIR`     | none on `main`       |
 
-**A merge into `main` publishes the release by itself** — `package.yml` works out the
-version, makes the tag and uploads the installation zip. Nobody pushes a `v*` tag any
-more, and a tag pushed by hand publishes nothing.
+**A merge into `main` BUILDS the release by itself** — `package.yml` works out the version
+and makes the installation zip. Nobody pushes a `v*` tag any more, and a tag pushed by hand
+publishes nothing.
+
+**Whether it is PUBLISHED is a separate switch:** the repository variable
+`PACKAGE_PUBLISH_ENABLED` must be exactly `true`. With it off — which is how it sits today —
+the run still builds the zip and keeps it on the run, makes no tag, and prints what it would
+have done. This paragraph said a merge "publishes the release by itself" until 27 October 2026,
+which would have had somebody expecting a release that never appeared.
 
 Each channel now has a folder of its own, and the web address points at `admin_html`
 inside it. The three channels no longer share one base folder, so a deploy of one cannot
@@ -327,13 +339,31 @@ Workflows in `.github/workflows/`:
   that gap is tracked as #637. Count from the workflow rather than
   trusting a number written here — an earlier version of this line said "all
   eleven", which was both stale and untrue
-- `portal-selftests.yml`, `mail-selftests.yml`, `calendar-selftests.yml`,
-  `backup-selftest.yml` — the repository's own self-tests, on every pull
-  request. Some need only PHP; the rest run against a real MySQL
+- `portal-selftests.yml`, `mail-selftests.yml`, `calendar-selftests.yml` — the
+  repository's own self-tests, on **every** pull request. Some need only PHP;
+  the rest run against a real MySQL. `calendar-selftests.yml` is pinned to
+  MySQL 8.0.36 only, with no matrix
+- `backup-selftest.yml` — the backup and restore self-tests, **only when a pull
+  request changes one of about sixteen named paths** (`DbBackup.php`, the backup
+  pages, `web/_sql/**` and so on). This used to be listed above as running on
+  every pull request, which it has never done. **A path-filtered check must
+  never be made a required status check**: GitHub leaves it pending for ever on
+  a pull request that does not touch those paths, and nothing can then merge
 - `e2e-migrations.yml` — loads the database from scratch and replays every
-  change on top, against a real MySQL 8.0, to prove nothing breaks on upgrade
-- `codeql.yml`, `php-static-analysis.yml`, `lint.yml`, `repo-config-audit.yml`
-  — advisory checks
+  change on top, to prove nothing breaks on upgrade. It runs against **both
+  MySQL 8.0.36 and 8.4.11**, as a matrix of exact versions (the harness refuses
+  to run if the server reports anything else). It is path-filtered too, on
+  `web/_sql/` and the harness itself, so the warning above applies to it as well
+- `php-static-analysis.yml` — **a hard gate, not advisory**: `php -l` on every
+  PHP file under `web/`, with no `continue-on-error`, so a syntax error turns the
+  run red. It was listed as advisory here until 27 October 2026, which was true
+  only while it also carried Psalm; Psalm was removed on 13 October and the
+  lint is all that is left
+- `codeql.yml`, `lint.yml`, `repo-config-audit.yml` — advisory. `codeql.yml`
+  keeps a `continue-on-error` on purpose, because GitHub's paid Code Scanning
+  is not enabled here and the upload is refused without it; removing the flag
+  would turn every run red for a billing reason. With Psalm gone, **no
+  code-analysis check here can turn a run red** (#618)
 
 > ⚠️ **Known problem: `version-bump.yml` and `changelog.yml` have not run on
 > `alpha` since 7 July 2026**, across roughly thirty merged pull requests. Both
