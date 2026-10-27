@@ -6252,6 +6252,38 @@ client; PHPMailer as a second engine) come after the first roll-out, by the owne
   not available for the check, and nobody has scanned a printed label with a real camera.
 - **Where gd is missing** the drawing falls back to SVG, and every caller sends the `mime` it is given back.
 
+## Scripts the browser refused, and the form token a long-lived page spends (#625)
+
+- **Every inline script needs the answer's own nonce.** `App::cspNonce()` makes one per response and
+  `templates/header.php` sends it in the page rule. A script written into a page without it, or a handler written on an
+  element, is refused by the browser and NOTHING is logged on the server: the page looks finished and the control does
+  nothing. That is why this went unnoticed in 63 files.
+- **`tools/audit-checks/check_inline_scripts_have_nonce.py` is the tripwire**, with an exemption list of 20 files in
+  four groups (pages that send no rule, pages that send their own, files that are not portal pages). Every reason on
+  that list was read and verified by the independent check. Three shapes it CANNOT see are named in its own header: a
+  nonce reused across answers, an unclosed HTML comment, and `setAttribute('onclick')` from a script file.
+- **Prefer an attribute to a handler.** `data-portal-submit-on-change` and `data-portal-select-on-click` are read by
+  `web/public_html/assets/js/portal-actions.js`, loaded once from the footer. A new page should use those rather than
+  writing a handler or a fresh inline script.
+- **A LONG-LIVED PAGE AND THE ROTATING TOKEN.** `Auth::verifyCsrf()` REPLACES the token every time it accepts one, so
+  a page that writes more than once without reloading must be handed the replacement and must keep it. The house way is
+  `ApiAuth::requireWrite()` with `ApiResponse`, which puts `csrfToken` in its `meta` block for exactly this reason.
+  `api/worship/advance.php` does it by hand, returning `csrfToken` on the successful answer AND on every refusal
+  reached after the check has rotated the token — otherwise one mistaken press ends the console's session.
+- **Four invariants hold the operator console together**, and three of the four were broken by careful people inside
+  twenty-four hours while this was being built, so they are written here as well as in the file: the token variable is
+  NOT `const`; only one command is in flight at a time; the deadline is armed across the body read, not just the wait
+  for headers; and the view's poll cannot pile up. Why a queue rather than independent requests: the commands are
+  ordered, and more fundamentally two commands in flight can never both succeed, because the token rotates on every
+  acceptance.
+- **A deadline must cover reading the answer.** A `fetch` promise settles when the HEADERS arrive, so clearing the
+  timer in `.finally()` on it leaves the body read unguarded — measured at a full 25 seconds against a stalled body.
+  Hold the controller across the body read.
+- **Say when a command fails, and say only what is known.** "Not sent" is untrue when the request was carried out and
+  only the answer was lost. The console says the command may or may not have gone through, and points at the view.
+- **Eight other handlers have the same spent-token fault** (worst: `geo/w3w-suggest.php`, which posts once per 400 ms
+  of typing, and `auth/account/webauthn.php`, which posts twice per click). Their own issue.
+
 ## MS365 Graph email via a shared mailbox (gap #234, migration 176)
 
 ### What was already there vs what #234 actually needed

@@ -800,7 +800,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <!-- 📦 WebAuthn registration script -->
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 (function() {
     'use strict';
 
@@ -808,7 +808,24 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     const startBtn    = document.getElementById('btnStartRegistration');
     const statusEl    = document.getElementById('passkeyStatus');
     const nameInput   = document.getElementById('passkeyName');
-    const modal       = new bootstrap.Modal(document.getElementById('passkeyModal'));
+
+    // 🪟 The box is made when it is first NEEDED, not when this script is read.
+    //    It used to be made right here: `new bootstrap.Modal(...)`. But this
+    //    script sits in the middle of the page and Bootstrap is loaded in the
+    //    footer, after it, so there was no `bootstrap` yet. The line threw
+    //    "bootstrap is not defined", the script stopped, and the button below
+    //    never got its listener. Nobody saw it, because until #625 browsers
+    //    refused this whole script for having no nonce (#144). With the nonce
+    //    it ran, and failed on that line: found by pressing the button in a
+    //    real browser, 14 October 2026. Do not move the `new` back up here.
+    //    Returns null when Bootstrap is not there at all (the content delivery
+    //    network is blocked and this installation holds no copy of its own).
+    function passkeyBox() {
+        if (typeof bootstrap === 'undefined' || typeof bootstrap.Modal !== 'function') {
+            return null;
+        }
+        return bootstrap.Modal.getOrCreateInstance(document.getElementById('passkeyModal'));
+    }
 
     if (!window.PublicKeyCredential) {
         registerBtn.disabled = true;
@@ -819,7 +836,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     registerBtn.addEventListener('click', function() {
         statusEl.textContent = '';
         nameInput.value      = '';
-        modal.show();
+        const box = passkeyBox();
+        if (box === null) {
+            // Say so, rather than be a button that does nothing.
+            if (window.Portal && typeof window.Portal.toast === 'function') {
+                window.Portal.toast('This box cannot be opened because part of the page did not load. Reload the page and try again.', 'warning');
+            }
+            return;
+        }
+        box.show();
     });
 
     startBtn.addEventListener('click', async function() {
@@ -886,7 +911,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             const verifyData = await verifyResp.json();
 
             if (verifyData.success) {
-                modal.hide();
+                const box = passkeyBox();
+                if (box !== null) { box.hide(); }
                 window.location.href = '<?php echo Router::urlForScript('account'); ?>?wa_registered=1';
             } else {
                 throw new Error(verifyData.error || 'Verification failed');

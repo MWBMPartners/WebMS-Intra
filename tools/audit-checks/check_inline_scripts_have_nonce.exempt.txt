@@ -1,0 +1,73 @@
+# Path: tools/audit-checks/check_inline_scripts_have_nonce.exempt.txt
+#
+# Files that are NOT held to the rule "a script written into a page carries the
+# nonce; no handler on an element". Read by
+# tools/audit-checks/check_inline_scripts_have_nonce.py, which explains the rule
+# and why it exists (#625).
+#
+# One entry per line:   <file>  <reason>  <the words that explain it>
+#
+# The reason is one of four:
+#   no-rule     The page draws its own <!doctype> and never includes the
+#               standard header (web/_core/templates/header.php), so no script
+#               rule is sent with it and its scripts and handlers run.
+#   own-rule    The page sends a script rule of its own.
+#   not-a-page  Not a portal page: a bundle made by others, or a static file a
+#               browser opens by itself.
+#   waiting     Held by other work today. The exact change is written here and
+#               the line goes when that work has landed. (None at the moment.)
+#
+# THE CHECK TESTS THIS LIST ITSELF. A file marked no-rule or own-rule that
+# includes the standard header is refused, whatever this list says. A line whose
+# file has nothing left to exempt is refused as stale. A line for a file that is
+# not there is refused. And the list may not grow: the check holds today's count
+# (MOST_EXEMPTIONS) and fails on a longer list.
+#
+# NEVER ADD A LINE TO MAKE A FAILURE GO AWAY. If the check fails on a page that
+# uses the standard header, the page is broken in a browser: give the script the
+# nonce, or turn the handler into a listener. A new stand-alone page should be
+# written clean from the start, so that it needs no line here.
+#
+# BEFORE WRAPPING ONE OF THE no-rule PAGES IN THE STANDARD HEADER: every script
+# and handler in it stops working the moment the header's rule is sent. Fix them
+# first, then remove the page's line (the check will insist).
+#
+# Package:   Portal\Tools
+# Author:    MWBM Partners Ltd (t/a MWservices)
+# Copyright: 2026-present MWBM Partners Ltd (t/a MWservices). All Rights Reserved.
+
+# --- Pages that draw themselves and send no script rule -----------------------
+
+# Signing in and getting back in. Shown to people who are not signed in.
+web/_apps/auth/login/index.php              no-rule  the sign-in page draws its own page; two scripts
+web/_apps/auth/forgot-password/index.php    no-rule  the "forgot my password" page draws its own page; one script
+web/_apps/auth/reset-password/index.php     no-rule  the "choose a new password" page draws its own page; one script
+web/_apps/auth/2fa/verify.php               no-rule  the second sign-in step draws its own page; one script
+
+# Pages for the public, with no portal menu round them.
+web/_apps/forms/public.php                  no-rule  a public form draws its own page; one script
+web/_apps/prayer-requests/anonymous.php     no-rule  the anonymous prayer request form draws its own page; one script
+web/_apps/calendar/public-landing.php       no-rule  an event's public page (the e/{slug} address) draws its own page; one script
+
+# Full-screen and print pages.
+web/_apps/worship/display.php               no-rule  the projector's display draws its own full-screen page; one script
+web/_apps/service-plans/print.php           no-rule  the print view of a service plan draws its own page; its Print button has an onclick
+web/_apps/assets/labels-pdf.php             no-rule  the sheet of asset labels draws its own page; its Print button has an onclick
+web/_apps/venues/schedule-pdf.php           no-rule  the venue schedule to print draws its own page; its Print button has an onclick
+web/_apps/venues/invoice-pdf.php            no-rule  the venue invoice to print draws its own page; its body has an onload that opens the print box
+
+# Pages that must work when the portal itself cannot.
+web/_install/index.php                      no-rule  the installer runs before there is a portal to draw a header; three scripts
+web/public_html/offline/index.php           no-rule  the "you are offline" page is kept by the browser and must stand alone; one script and a Retry button's onclick
+
+# --- Pages that send a script rule of their own -------------------------------
+
+web/public_html/api-docs/index.php                  own-rule  the API documentation page sends its own rule, which has no nonce in it, so its start-up script runs
+web/_apps/admin/email-templates/preview.php         own-rule  the e-mail preview sends "allow nothing" on purpose, so that a template can run no script; its Close link is a javascript: address and that rule stops it too (reported in #625, not changed)
+
+# --- Not portal pages ----------------------------------------------------------
+
+web/public_html/assets/images/brandkit/download-animated.html           not-a-page  a static helper file for downloading the animated logos; the web server sends it as a file, with no rule
+web/public_html/assets/noticeboard/noticeboard.noeval.js                not-a-page  the noticeboard's bundle, made by others and not edited here; line 1410 is the words of an error message and line 1590 is template text its own code turns into properties
+web/public_html/assets/vendor/react/react-dom-18.3.1.production.min.js  not-a-page  React, made by others; the "<script>" is how it makes a script element through innerHTML, which a browser never runs
+web/public_html/assets/vendor/swagger-ui/swagger-ui-bundle-5.17.14.js   not-a-page  Swagger UI, made by others; "onClick=" and the like are methods of its components, not attributes, and its "<script>" is React's own, as above

@@ -79,7 +79,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <i class="fa-solid fa-sitemap me-2"></i> Site Management
     </h1>
     <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#siteModal"
-            onclick="resetSiteForm()">
+            data-site-new>
         <i class="fa-solid fa-plus me-1"></i> New Site
     </button>
 </div>
@@ -218,7 +218,7 @@ $zonesWait = Site::timezoneFacts()['inRow'] === false;
             <div class="card-footer d-flex gap-2">
                 <button type="button" class="btn btn-sm btn-outline-primary"
                         data-bs-toggle="modal" data-bs-target="#siteModal"
-                        onclick="editSite(<?php echo htmlspecialchars(json_encode($site, JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES, 'UTF-8'); ?>)">
+                        data-site-edit="<?php echo htmlspecialchars(json_encode($site, JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES, 'UTF-8'); ?>">
                     <i class="fa-solid fa-pen me-1"></i> Edit
                 </button>
                 <a href="<?php echo htmlspecialchars(Site::url('admin/sites/users'), ENT_QUOTES, 'UTF-8'); ?>?site=<?php echo $sId; ?>" class="btn btn-sm btn-outline-secondary">
@@ -324,7 +324,7 @@ $zonesWait = Site::timezoneFacts()['inRow'] === false;
     </div>
 </div>
 
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 function resetSiteForm() {
     document.getElementById('formSiteID').value = '';
     document.getElementById('formSiteName').value = '';
@@ -357,6 +357,36 @@ function editSite(site) {
     document.getElementById('formIsActive').checked = (String(site.isActive) === '1');
     document.getElementById('modalTitleText').textContent = 'Edit Site';
 }
+
+// 👂 "New Site" and each "Edit" button fill the box through the two functions
+// above. They used to call them with onclick="..." written on the button,
+// which browsers refuse on a page with the standard header (#144, 3 June 2026;
+// #625). The box still opened (Bootstrap opens it from data-bs-toggle), but
+// nothing filled it: "Edit" opened as an empty "New Site", so retyping and
+// saving would have made a SECOND site.
+//
+// It is now done the way the other Edit boxes do it (Departments, Groups,
+// Users): the box says it is about to open, and names the button that opened
+// it. "New Site" carries data-site-new. Each "Edit" carries the site's details
+// in data-site-edit, as the same JSON with the same escaping that used to be
+// printed into the handler. They are read here as data and never run as script.
+document.getElementById('siteModal').addEventListener('show.bs.modal', function (event) {
+    var btn = event.relatedTarget;
+    if (!btn || typeof btn.hasAttribute !== 'function') { return; }
+    if (btn.hasAttribute('data-site-new') === true) {
+        resetSiteForm();
+        return;
+    }
+    if (btn.hasAttribute('data-site-edit') === true) {
+        var site = null;
+        try { site = JSON.parse(btn.getAttribute('data-site-edit')); } catch (e) { site = null; }
+        // A site whose details cannot be read must NOT open as a form: an
+        // empty form here is a "New Site" form, and saving it would make a
+        // second site. So the box is stopped from opening instead.
+        if (site === null || typeof site !== 'object') { event.preventDefault(); return; }
+        editSite(site);
+    }
+});
 </script>
 
 <?php

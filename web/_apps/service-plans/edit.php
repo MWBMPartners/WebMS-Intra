@@ -210,7 +210,7 @@ $sectionTypes = [
         <?php elseif ($isPlanShared === true): ?>
             <p class="small mb-2">Anyone with this link can view a read-only order of service — presenter names shown, no internal notes.</p>
             <div class="input-group input-group-sm mb-2" style="max-width: 480px;">
-                <input type="text" class="form-control" readonly value="<?php echo htmlspecialchars($publicUrl, ENT_QUOTES, 'UTF-8'); ?>" onclick="this.select();">
+                <input type="text" class="form-control" readonly value="<?php echo htmlspecialchars($publicUrl, ENT_QUOTES, 'UTF-8'); ?>" data-portal-select-on-click>
                 <a href="<?php echo htmlspecialchars($publicUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
             </div>
             <?php // The picture's address is the registered one, /qr, from Site::url() so that it carries the
@@ -445,7 +445,7 @@ $sectionTypes = [
     </div>
 </div>
 
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 // -----------------------------------------------------------------------
 // 🎵 Gap #128 residual — hymn/song picker typeahead. Progressive
 // enhancement only: with JS disabled or the fetch failing, `title` stays a

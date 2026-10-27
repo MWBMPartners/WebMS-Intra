@@ -180,7 +180,7 @@ $rowColor = static function (array $row): string {
             <form method="get" action="<?php echo htmlspecialchars(Site::url('venues'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
                 <div class="col-6 col-md-3">
                     <label class="form-label small" for="venue">Venue</label>
-                    <select class="form-select form-select-sm" id="venue" name="venue" onchange="this.form.submit()">
+                    <select class="form-select form-select-sm" id="venue" name="venue" data-portal-submit-on-change>
                         <?php if (count($venues) > 1): ?><option value="0">— choose —</option><?php endif; ?>
                         <?php foreach ($venues as $v): ?>
                             <option value="<?php echo (int) $v['venueID']; ?>" <?php echo $venueId === (int) $v['venueID'] ? 'selected' : ''; ?>>
@@ -191,7 +191,7 @@ $rowColor = static function (array $row): string {
                 </div>
                 <div class="col-6 col-md-2">
                     <label class="form-label small" for="year">Year</label>
-                    <select class="form-select form-select-sm" id="year" name="year" onchange="this.form.submit()">
+                    <select class="form-select form-select-sm" id="year" name="year" data-portal-submit-on-change>
                         <?php foreach ($years as $y): ?>
                             <option value="<?php echo (int) $y; ?>" <?php echo $year === $y ? 'selected' : ''; ?>><?php echo (int) $y; ?></option>
                         <?php endforeach; ?>
@@ -200,7 +200,7 @@ $rowColor = static function (array $row): string {
                 <?php if ($venueId > 0): ?>
                     <div class="col-6 col-md-2">
                         <label class="form-label small" for="status">Status</label>
-                        <select class="form-select form-select-sm" id="status" name="status" onchange="this.form.submit()">
+                        <select class="form-select form-select-sm" id="status" name="status" data-portal-submit-on-change>
                             <option value="0">All</option>
                             <?php foreach ($statuses as $st): ?>
                                 <option value="<?php echo (int) $st['statusID']; ?>" <?php echo $statusId === (int) $st['statusID'] ? 'selected' : ''; ?>>
@@ -211,7 +211,7 @@ $rowColor = static function (array $row): string {
                     </div>
                     <div class="col-6 col-md-2">
                         <label class="form-label small" for="type">Usage type</label>
-                        <select class="form-select form-select-sm" id="type" name="type" onchange="this.form.submit()">
+                        <select class="form-select form-select-sm" id="type" name="type" data-portal-submit-on-change>
                             <option value="0">All</option>
                             <?php foreach ($usageTypes as $ut): ?>
                                 <option value="<?php echo (int) $ut['usageTypeID']; ?>" <?php echo $usageTypeId === (int) $ut['usageTypeID'] ? 'selected' : ''; ?>>
@@ -223,7 +223,7 @@ $rowColor = static function (array $row): string {
                     <?php if (count($rooms) > 0): ?>
                         <div class="col-6 col-md-2">
                             <label class="form-label small" for="room">Room</label>
-                            <select class="form-select form-select-sm" id="room" name="room" onchange="this.form.submit()">
+                            <select class="form-select form-select-sm" id="room" name="room" data-portal-submit-on-change>
                                 <option value="0">All</option>
                                 <?php foreach ($rooms as $rm): ?>
                                     <option value="<?php echo (int) $rm['roomID']; ?>" <?php echo $roomId === (int) $rm['roomID'] ? 'selected' : ''; ?>>
@@ -234,7 +234,7 @@ $rowColor = static function (array $row): string {
                         </div>
                     <?php endif; ?>
                     <div class="col-6 col-md-2 form-check ms-1">
-                        <input type="checkbox" class="form-check-input" id="rejected" name="rejected" value="1" onchange="this.form.submit()" <?php echo $showRejected === true ? 'checked' : ''; ?>>
+                        <input type="checkbox" class="form-check-input" id="rejected" name="rejected" value="1" data-portal-submit-on-change <?php echo $showRejected === true ? 'checked' : ''; ?>>
                         <label class="form-check-label small" for="rejected">Show rejected</label>
                         <?php if ($showRejected === false): ?><input type="hidden" name="rejected" value="0"><?php endif; ?>
                     </div>

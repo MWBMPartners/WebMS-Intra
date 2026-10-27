@@ -213,7 +213,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <!-- 📦 Modal population script -->
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 const payModal = document.getElementById('payModal');
 payModal.addEventListener('show.bs.modal', ev => {
     const btn  = ev.relatedTarget;

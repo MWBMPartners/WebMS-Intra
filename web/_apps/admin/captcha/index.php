@@ -505,7 +505,7 @@ $providerIcon = static function (string $key): string {
 <!--    list is for reading, and letting them drag rows would suggest otherwise. -->
 <!-- ============================================================================ -->
 <?php echo \Portal\Core\Asset::sortableJs(); ?>
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 (function () {
     var list  = document.getElementById('captchaPriorityList');
     var field = document.getElementById('priorityField');

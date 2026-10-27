@@ -218,7 +218,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card-body">
             <form method="get" action="<?php echo htmlspecialchars(Site::url('venues/generate'), ENT_QUOTES, 'UTF-8'); ?>">
                 <label class="form-label" for="venue">Venue</label>
-                <select class="form-select" id="venue" name="venue" required onchange="this.form.submit()">
+                <select class="form-select" id="venue" name="venue" required data-portal-submit-on-change>
                     <option value="0">— choose —</option>
                     <?php foreach ($venues as $v): ?>
                         <option value="<?php echo (int) $v['venueID']; ?>"><?php echo $esc($v['venueName']); ?></option>

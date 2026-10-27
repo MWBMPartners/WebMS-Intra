@@ -138,7 +138,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <h4 class="mt-4">Supporting Files</h4>
     <div class="mb-3">
-        <div class="dropzone" role="button" tabindex="0" onclick="document.getElementById('files').click()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('files').click();}">Drop files here or click to upload</div>
+        <div class="dropzone" id="filesDropzone" role="button" tabindex="0">Drop files here or click to upload</div>
         <input type="file" name="files[]" id="files" class="form-control d-none" multiple accept="image/*,application/pdf">
         <noscript>
             <input type="file" name="files[]" class="form-control mt-2" multiple accept="image/*,application/pdf">
@@ -160,7 +160,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php echo Captcha::scriptTag(); ?>
 
 <!-- 📦 Inline items JavaScript -->
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 (function(){
     const list = document.getElementById('items-list');
     const grandTotal = document.getElementById('grandTotal');
@@ -219,6 +219,24 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     });
 
     recalc();
+
+    // 📎 The file area opens the file chooser on a click, and on Enter or
+    // Space for somebody using the keyboard. Both were handlers written on
+    // the element (onclick="...", onkeydown="..."), which browsers refuse on a
+    // page with the standard header (#144, 3 June 2026; #625): the area did
+    // nothing and no file could be added. WHAT IT STILL DOES NOT DO: take a
+    // file that is dropped on it. It never did; only the chooser adds files.
+    const dropzone  = document.getElementById('filesDropzone');
+    const fileInput = document.getElementById('files');
+    if (dropzone !== null && fileInput !== null) {
+        dropzone.addEventListener('click', () => { fileInput.click(); });
+        dropzone.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                fileInput.click();
+            }
+        });
+    }
 })();
 </script>
 

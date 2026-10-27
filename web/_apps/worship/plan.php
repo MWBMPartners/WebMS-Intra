@@ -380,7 +380,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 if ($isNew !== true && $canWrite === true && count($items) > 1) {
     echo Asset::sortableJs();
     ?>
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 (function () {
     'use strict';
     if (typeof Sortable === 'undefined') return;

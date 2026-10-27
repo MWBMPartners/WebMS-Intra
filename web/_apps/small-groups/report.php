@@ -96,7 +96,7 @@ $esc = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES,
 <form method="get" action="<?php echo htmlspecialchars(Site::url('small-groups/report'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end mb-4">
     <div class="col-12 col-md-4">
         <label for="id" class="form-label">Group</label>
-        <select name="id" id="id" class="form-select" onchange="this.form.submit()">
+        <select name="id" id="id" class="form-select" data-portal-submit-on-change>
             <?php foreach ($myGroups as $g): ?>
                 <option value="<?php echo (int) $g['groupID']; ?>" <?php echo $groupId === (int) $g['groupID'] ? 'selected' : ''; ?>>
                     <?php echo $esc($g['groupName']); ?>

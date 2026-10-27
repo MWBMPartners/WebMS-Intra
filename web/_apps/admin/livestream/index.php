@@ -515,7 +515,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endforeach; endif; ?>
 
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 // 🛑 Switch the "We're live" button off the moment its form is sent (#612). A double-click sent the form
 // twice with the same form token: the first press worked, the second was refused, and the person was left on
 // a bare "Bad request" page. A button that is already switched off cannot be pressed a second time. The page

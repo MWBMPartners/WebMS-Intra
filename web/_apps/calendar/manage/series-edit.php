@@ -445,7 +445,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </form>
 
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 // 📋 Select All toggle
 var selectAll = document.getElementById('selectAllEvents');
 var checkboxes = document.querySelectorAll('.portal-event-checkbox');

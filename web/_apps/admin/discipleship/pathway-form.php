@@ -181,7 +181,7 @@ function discipleshipRenderAutoRuleFields(array $step, array $eventOptions, arra
     ?>
     <div class="col-md-6">
         <label class="form-label small">Auto-completion rule</label>
-        <select name="autoRule" class="form-select form-select-sm discipleship-autorule" onchange="disciplershipToggleAutoRef(this)">
+        <select name="autoRule" class="form-select form-select-sm discipleship-autorule">
             <?php foreach ($rules as $val => $label): ?>
                 <option value="<?php echo htmlspecialchars($val, ENT_QUOTES, 'UTF-8'); ?>" <?php echo ($rule === $val ? 'selected' : ''); ?>>
                     <?php echo htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?>
@@ -433,7 +433,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     <?php endif; ?>
 </div>
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 // 🧩 Toggle which auto-completion ref picker shows based on the selected
 // autoRule (#303 Phase 2). Scoped to the enclosing <form> so multiple step
 // forms on the same page don't cross-toggle each other.
@@ -446,5 +446,17 @@ function disciplershipToggleAutoRef(selectEl) {
         picker.style.display = applies ? '' : 'none';
     });
 }
+// 👂 The rule chooser calls the function above when its choice changes. It
+// used to do so with onchange="..." written on the <select>, which browsers
+// refuse on a page with the standard header (#144, 3 June 2026; #625), so the
+// Event and Category pickers never appeared for a new step. One listener on
+// the document serves every step form on the page, since each has a chooser
+// with this class.
+document.addEventListener('change', function (event) {
+    var el = event.target;
+    if (el !== null && typeof el.matches === 'function' && el.matches('.discipleship-autorule') === true) {
+        disciplershipToggleAutoRef(el);
+    }
+});
 </script>
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

@@ -490,6 +490,29 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     selftest.php` with `tools/qr-test-reader.php`, which is proved against
     `qrencode`'s own pictures before it is pointed at ours.
 
+    **Scripts written into a page (#625).** Every inline script carries
+    the answer's own nonce from `App::cspNonce()`; a script or an element
+    handler without it is REFUSED by the browser and nothing is logged, so
+    the page looks finished and the control does nothing. Never add an
+    element handler (`onclick`, `onchange`): use `data-portal-submit-on-
+    change` / `data-portal-select-on-click`, read by
+    `web/public_html/assets/js/portal-actions.js`, or a listener carrying
+    the nonce. The tripwire is `tools/audit-
+    checks/check_inline_scripts_have_nonce.py` (its exemption list is
+    explained file by file, and its header names the three shapes it
+    cannot see); the page test is `tools/page-scripts-selftest.php`. Never
+    loosen the rule itself to make a script run. **A page that writes more
+    than once without reloading must be handed the replacement anti-
+    forgery token and must keep it**, because `Auth::verifyCsrf()`
+    replaces it on every acceptance — the house way is
+    `ApiAuth::requireWrite()` with `ApiResponse`, whose `meta.csrfToken`
+    exists for this; return it on the success AND on every refusal reached
+    after the rotation. Such a page sends ONE request at a time (two in
+    flight can never both succeed), arms its deadline across the BODY read
+    and not just the wait for headers, never lets its own polling pile up,
+    and SAYS when a command fails — and says only what is known, never
+    "not sent" when the answer was merely lost.
+
     **Two-factor authentication (#613).** `auth/2fa/setup.php` is the ONE place
     backup codes are made, and it shows them only in the answer to the request
     that made them: never put a code, or the authenticator key, readable in

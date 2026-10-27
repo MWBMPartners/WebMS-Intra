@@ -106,7 +106,7 @@ if ($livePushPublicKey !== ''):
             <?php endif; ?>
         </div>
     </div>
-    <script>
+    <script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
     (function () {
         var el = document.getElementById('ls-countdown');
         if (el === null) { return; }

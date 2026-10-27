@@ -103,7 +103,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <form method="get" action="<?php echo htmlspecialchars(Site::url('venues/invoices'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
             <div class="col-md-4">
                 <label class="form-label small" for="venue">Venue</label>
-                <select class="form-select form-select-sm" id="venue" name="venue" onchange="this.form.submit()">
+                <select class="form-select form-select-sm" id="venue" name="venue" data-portal-submit-on-change>
                     <option value="0">All venues</option>
                     <?php foreach ($venues as $v): ?>
                         <option value="<?php echo (int) $v['venueID']; ?>" <?php echo $venueFilter === (int) $v['venueID'] ? 'selected' : ''; ?>>
@@ -114,7 +114,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
             <div class="col-md-3">
                 <label class="form-label small" for="status">Status</label>
-                <select class="form-select form-select-sm" id="status" name="status" onchange="this.form.submit()">
+                <select class="form-select form-select-sm" id="status" name="status" data-portal-submit-on-change>
                     <option value="">All statuses</option>
                     <?php foreach (Venues::INVOICE_STATUSES as $s): ?>
                         <option value="<?php echo htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); ?>" <?php echo $statusFilter === $s ? 'selected' : ''; ?>>

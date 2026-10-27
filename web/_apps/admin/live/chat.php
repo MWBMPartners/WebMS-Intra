@@ -200,7 +200,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </p>
 </div>
 
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 // 🔄 Wire up the moderation buttons. Each button posts to `api/livechat/moderate`
 //    (the handler is _apps/livechat/api/moderate.php) with the page's form token.
 //

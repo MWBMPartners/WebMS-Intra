@@ -462,7 +462,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </form>
 
 <!-- 📜 JavaScript for dynamic count rows -->
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 document.addEventListener('DOMContentLoaded', function () {
     'use strict';
 

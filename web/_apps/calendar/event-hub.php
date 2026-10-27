@@ -458,7 +458,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </div>
                         <div class="col-md-3">
                             <label class="form-label small">Type</label>
-                            <select name="resourceType" class="form-select form-select-sm" onchange="this.form.querySelector('.hub-res-url').classList.toggle('d-none', this.value!=='link'); this.form.querySelector('.hub-res-body').classList.toggle('d-none', this.value!=='note');">
+                            <select name="resourceType" class="form-select form-select-sm" data-hub-resource-type>
                                 <option value="link">Link</option>
                                 <option value="note">Note</option>
                             </select>
@@ -480,6 +480,23 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </div>
                     </form>
                 </details>
+                <script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
+                // 🔀 The Type chooser shows the URL box for a link and the Note box
+                // for a note. It did this with onchange="..." written on the
+                // <select>, which browsers refuse on a page with the standard
+                // header (#144, 3 June 2026; #625). The Note box stayed hidden, so
+                // a note could not be added at all. This script is printed only
+                // with the form it serves (the same `if` as the form).
+                (function () {
+                    'use strict';
+                    var chooser = document.querySelector('[data-hub-resource-type]');
+                    if (chooser === null || !chooser.form) { return; }
+                    chooser.addEventListener('change', function () {
+                        chooser.form.querySelector('.hub-res-url').classList.toggle('d-none', chooser.value !== 'link');
+                        chooser.form.querySelector('.hub-res-body').classList.toggle('d-none', chooser.value !== 'note');
+                    });
+                }());
+                </script>
             <?php endif; ?>
         </div>
 

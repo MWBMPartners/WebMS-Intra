@@ -124,7 +124,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <button class="btn btn-outline-primary btn-sm w-100" type="submit">Apply</button>
             </div>
             <div class="col-md-4">
-                <button type="button" class="btn btn-outline-secondary btn-sm w-100" onclick="applyUkTaxYearPreset()">
+                <button type="button" class="btn btn-outline-secondary btn-sm w-100" id="stmt-uk-tax-year">
                     <i class="fa-regular fa-calendar me-1"></i>UK tax year (6 Apr – 5 Apr)
                 </button>
             </div>
@@ -268,6 +268,14 @@ function applyUkTaxYearPreset() {
     document.getElementById('stmt-from').value = startYear + '-04-06';
     document.getElementById('stmt-to').value = (startYear + 1) + '-04-05';
 }
+// 👂 The "UK tax year" button calls the function above. It used to do so with
+// onclick="..." written on the button, which browsers refuse on a page with
+// the standard header even though this script itself carries the nonce (#144,
+// 3 June 2026; #625). So the button did nothing.
+(function () {
+    var button = document.getElementById('stmt-uk-tax-year');
+    if (button !== null) { button.addEventListener('click', applyUkTaxYearPreset); }
+}());
 </script>
 
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

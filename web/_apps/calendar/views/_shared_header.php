@@ -147,7 +147,7 @@ $viewMeta = [
                 <label for="cal-date-jump" class="form-label small mb-0">Jump to:</label>
                 <input id="cal-date-jump" type="date" name="date" class="form-control form-control-sm"
                        value="<?php echo htmlspecialchars($cursor->format('Y-m-d'), ENT_QUOTES, 'UTF-8'); ?>"
-                       onchange="this.form.submit()">
+                       data-portal-submit-on-change>
             </form>
         </div>
     <?php endif; ?>
@@ -265,7 +265,7 @@ $viewMeta = [
 </div>
 
 <!-- 💾 Persist last-used view in localStorage (progressive enhancement) -->
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 (function () {
     try {
         // When user clicks a view-switcher button, remember the choice

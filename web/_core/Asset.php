@@ -7,15 +7,27 @@
  * Generates HTML tags for CSS and JavaScript assets with CDN primary sources
  * and local fallback paths.  Uses Subresource Integrity (SRI) hashes for CDN
  * resources to ensure tamper-proof delivery.  If the CDN fails (network error,
- * integrity mismatch), the browser automatically falls back to the local copy.
+ * integrity mismatch), the browser falls back to the portal's own copy.
+ *
+ * HOW THE FALLBACK WORKS SINCE #625. Each tag that has an own copy names it in
+ * a data- attribute (data-asset-fallback), and ONE small script, written just
+ * before the first such tag of a page, listens for a tag failing and switches
+ * it over. It used to be a handler written on each tag (onerror="...") plus a
+ * bare script after the Bootstrap one. Since 3 June 2026 (#144) the page
+ * header tells browsers to run only scripts that carry the page's one-time
+ * mark (a nonce), and a browser then refuses every handler written on an
+ * element and every script without the mark. So for four months the fallback
+ * could not run on any page that uses the standard header: on a network that
+ * blocks the content delivery network, pages had no styling, no icons, no
+ * menus and no boxes. Do not bring the handlers back. See fallbackListener().
  *
  * Convenience methods are provided for the three external libraries used by
  * the Portal (Bootstrap CSS, Bootstrap JS, Font Awesome) plus the two local-
  * only portal assets (portal.css, portal.js).
  *
  * Public methods:
- *   Asset::css(...)            returns a <link> tag with onerror fallback
- *   Asset::js(...)             returns a <script> tag with fallback
+ *   Asset::css(...)            returns a <link> tag that names its own copy
+ *   Asset::js(...)             returns a <script> tag that names its own copy
  *   Asset::bootstrapCss()      Bootstrap 5.3.3 CSS
  *   Asset::bootstrapJs()       Bootstrap 5.3.3 JS bundle
  *   Asset::fontAwesomeCss()    Font Awesome 6.5.1
@@ -234,9 +246,10 @@ class Asset
     /**
      * Generate a <link> tag for a CSS resource with CDN primary and local fallback.
      *
-     * The onerror handler fires if the CDN resource fails to load (network error
-     * or SRI integrity mismatch).  It nullifies itself to prevent infinite loops,
-     * then swaps the href to the local copy.
+     * If the CDN resource fails to load (network error or SRI integrity
+     * mismatch), the listener written by fallbackListener() swaps the href to
+     * the local copy named in data-asset-fallback. It does that once for each
+     * tag, so a missing local copy cannot start a loop.
      *
      * @param string $cdnUrl    Full URL to the CDN-hosted CSS file
      * @param string $localPath Web-root-relative path to the local CSS file
@@ -258,26 +271,33 @@ class Asset
             $tag .= ' crossorigin="anonymous"';
         }
 
-        // 🔄 Add onerror handler that falls back to the local copy
-        // The handler:
-        //   1. Sets onerror to null to prevent recursive error loops
-        //   2. Replaces the href with the local path
-        $escapedLocal = self::escJs($localPath);
-        $tag .= ' onerror="this.onerror=null;this.href=\'' . $escapedLocal . '\';"';
+        // 🔄 Name the local copy. This was an onerror="..." handler, which
+        //    browsers refuse on a page with the standard header (#625, and
+        //    the file heading). The listener reads this attribute instead.
+        $tag .= ' data-asset-fallback="' . self::esc($localPath) . '"';
 
         $tag .= '>';
 
-        return $tag;
+        return self::fallbackListener() . $tag;
     }
 
     /**
      * Generate a <script> tag for a JS resource with CDN primary and local fallback.
      *
-     * The fallback mechanism works in two stages:
-     *   1. The CDN script loads with an onerror handler for network failures.
-     *   2. After load, a follow-up inline script checks whether the expected global
-     *      object exists (e.g. `window.bootstrap`).  If not, it injects a new
-     *      <script> tag pointing to the local copy.
+     * The fallback has two triggers, both heard by the listener that
+     * fallbackListener() writes:
+     *   1. The CDN script fails to load (network failure, or its fingerprint
+     *      does not match).
+     *   2. The CDN script loads but the expected global object is missing
+     *      (e.g. `window.bootstrap`): an empty or wrong file was sent.
+     * Either way a new <script> tag pointing to the local copy is added to the
+     * page's head. It is added, not written in place, so it runs when it has
+     * arrived: a page script that needs the library the instant the page is
+     * read may run first. That was so before #625 as well.
+     *
+     * With no local copy ($localPath is '', as for SortableJS and Chart.js)
+     * nothing is named and nothing happens on failure. Before #625 the handler
+     * added a script tag with an empty address, which also did nothing.
      *
      * @param string $cdnUrl     Full URL to the CDN-hosted JS file
      * @param string $localPath  Web-root-relative path to the local JS file
@@ -302,29 +322,95 @@ class Asset
             $tag .= ' crossorigin="anonymous"';
         }
 
-        // 🔄 onerror handler for hard network failures – immediately inject local
-        $escapedLocal = self::escJs($localPath);
-        $fallbackSnippet = 'var s=document.createElement(\'script\');'
-            . 's.src=\'' . $escapedLocal . '\';'
-            . 'document.head.appendChild(s);';
-        $tag .= ' onerror="' . self::esc($fallbackSnippet) . '"';
+        // 🔄 Name the local copy, and the global to look for once the file
+        //    has loaded. These were an onerror="..." handler and a bare
+        //    <script> after the tag; browsers refuse both on a page with the
+        //    standard header (#625, and the file heading). With no local copy
+        //    there is nothing to fall back to, so nothing is named.
+        if ($localPath === '') {
+            return $tag . '></script>';
+        }
+        $tag .= ' data-asset-fallback="' . self::esc($localPath) . '"';
+        if ($testGlobal !== '') {
+            $tag .= ' data-asset-global="' . self::esc($testGlobal) . '"';
+        }
 
         $tag .= '></script>';
 
-        // 🧪 Post-load check: if the CDN appeared to load but the global is missing
-        // (e.g. empty response, corrupted file), inject the local fallback
-        if ($testGlobal !== '') {
-            $safeGlobal = self::escJs($testGlobal);
-            $tag .= "\n" . '<script>'
-                . 'if(typeof window.' . $safeGlobal . '===\'undefined\'){'
-                . 'var s=document.createElement(\'script\');'
-                . 's.src=\'' . $escapedLocal . '\';'
-                . 'document.head.appendChild(s);'
-                . '}'
-                . '</script>';
-        }
+        return self::fallbackListener() . $tag;
+    }
 
-        return $tag;
+    /** @var bool Whether this request has already been given the listener. */
+    private static bool $fallbackListenerWritten = false;
+
+    /**
+     * The one small script that makes the local fallback work (#625).
+     *
+     * Returned the FIRST time a tag with a local copy is made in a request,
+     * and an empty string after that, so a page carries it once, just before
+     * its first such tag. It has to come BEFORE the tags it serves: a failure
+     * that happens before anything is listening is never heard. So print tags
+     * in the order they were made (every caller does: header.php prints each
+     * as it makes it, and /api-docs makes and prints the stylesheet first).
+     *
+     * WHAT IT DOES. It listens on the document for two things a <link> or a
+     * <script> tells only itself about, `error` and `load`. Neither travels up
+     * the page, which is why both are caught on the way DOWN (the `true` at
+     * the end of each addEventListener). For a tag that names a local copy:
+     *   - a stylesheet that failed gets the local copy as its address. Its
+     *     fingerprint stays on the tag, as it always did, so the local copy
+     *     must be the same file byte for byte. The copies that
+     *     tools/download-cdn-fallbacks.sh fetches are.
+     *   - a script that failed, or that loaded without defining the global it
+     *     names, gets a new script tag for the local copy added to the head.
+     * Each tag is switched over once: its attribute is removed first.
+     *
+     * WHY IT CARRIES THE NONCE. It is a script written into the page, so on a
+     * page with the standard header it runs only with the page's one-time mark.
+     * On a page that sends no rule (sign-in, the public forms) or its own rule
+     * without a nonce (/api-docs) the attribute does no harm. The script it
+     * adds needs no mark: it comes from the portal's own address, which the
+     * rule allows by name ('self').
+     *
+     * WHAT IT CANNOT DO. It cannot help when the local copy is missing: the
+     * copies are not kept in git, they are fetched into an installation
+     * package when it is built. It cannot make a late library early (see
+     * js()). And it does nothing in a browser with scripts switched off, where
+     * a failed stylesheet stays failed, as it did with the old handler.
+     *
+     * The two values it reads from the tag (an address and a name) are
+     * constants of this class, never anything a person typed.
+     *
+     * @return string A <script> element, or '' when this request has it already
+     */
+    private static function fallbackListener(): string
+    {
+        if (self::$fallbackListenerWritten === true) {
+            return '';
+        }
+        self::$fallbackListenerWritten = true;
+
+        return '<script nonce="' . self::esc(App::cspNonce()) . '">'
+            . '(function(){'
+            . 'if(window.__portalAssetFallback){return;}'
+            . 'window.__portalAssetFallback=true;'
+            . 'function own(e){'
+            . 'var t=e.target;'
+            . 'if(!t||!t.getAttribute){return;}'
+            . 'var f=t.getAttribute("data-asset-fallback");'
+            . 'if(!f){return;}'
+            . 'if(e.type==="load"){'
+            . 'var g=t.getAttribute("data-asset-global");'
+            . 'if(t.tagName!=="SCRIPT"||!g||typeof window[g]!=="undefined"){return;}'
+            . '}'
+            . 't.removeAttribute("data-asset-fallback");'
+            . 'if(t.tagName==="LINK"){t.href=f;return;}'
+            . 'var s=document.createElement("script");s.src=f;document.head.appendChild(s);'
+            . '}'
+            . 'document.addEventListener("error",own,true);'
+            . 'document.addEventListener("load",own,true);'
+            . '})();'
+            . '</script>' . "\n";
     }
 
     // 🎨 ===========================================================================
@@ -391,7 +477,7 @@ class Asset
     /**
      * Portal stylesheet – local only, no CDN.
      *
-     * Returns a plain <link> tag with no onerror handler since there is no CDN
+     * Returns a plain <link> tag that names no fallback, since there is no CDN
      * source to fall back from.
      *
      * @return string HTML <link> tag
@@ -424,8 +510,8 @@ class Asset
      * SortableJS drag-reorder lib via jsdelivr CDN.
      *
      * Used by the admin captcha priority UI. No local fallback today —
-     * vendoring is a follow-up; the onerror handler in js() routes a
-     * missing-fallback as a no-op (the page degrades to no drag, not broken).
+     * vendoring is a follow-up; with no local copy js() names no fallback, so
+     * a failure does nothing (the page degrades to no drag, not broken).
      *
      * @return string HTML <script> tag
      */
@@ -571,23 +657,5 @@ class Asset
     private static function esc(string $value): string
     {
         return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-    }
-
-    /**
-     * Escape a string for safe embedding inside a JavaScript single-quoted literal
-     * that itself lives within an HTML attribute.
-     *
-     * Handles: single quotes, backslashes, and forward slashes.
-     *
-     * @param string $value Raw string
-     *
-     * @return string JS-safe string suitable for insertion between single quotes
-     */
-    private static function escJs(string $value): string
-    {
-        // 🔒 Escape backslashes first, then single quotes
-        $value = str_replace('\\', '\\\\', $value);
-        $value = str_replace("'", "\\'", $value);
-        return $value;
     }
 }

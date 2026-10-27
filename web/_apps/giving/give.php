@@ -119,7 +119,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
 
-    <script>
+    <script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
     // 🖱️ Progressive enhancement only — the server revalidates the amount
     // (floor + ceiling) regardless of what these quick-amount buttons set.
     document.querySelectorAll('.portal-give-quick').forEach(function (btn) {

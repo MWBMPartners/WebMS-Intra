@@ -231,7 +231,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 var editRoleModal = document.getElementById('editRoleModal');
 editRoleModal.addEventListener('show.bs.modal', function (event) {
     var btn = event.relatedTarget;

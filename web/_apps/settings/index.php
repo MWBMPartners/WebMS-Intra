@@ -742,7 +742,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <!-- 📦 Settings page scripts -->
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 // 📝 Edit modal population
 var editModal = document.getElementById('editModal');
 editModal.addEventListener('show.bs.modal', function (event) {

@@ -82,6 +82,13 @@ $productName   = Site::productName();
      data-offline-queueable. Auto-drains on `online` event + visibilitychange. -->
 <script defer src="/assets/js/portal-offline.js"></script>
 
+<!-- 🖱️ Small actions asked for by a data- attribute (#625): "send this form
+     when the choice changes" and "select this text on click". They used to be
+     handlers written on the element (onchange="...", onclick="..."), which
+     browsers have refused on every page with this header since #144. A script
+     file from the portal's own address is allowed. -->
+<script defer src="/assets/js/portal-actions.js"></script>
+
 <?php
 // 🐛 Debug panel (only renders for admins with ?debug=true)
 echo Debug::renderPanel();

@@ -176,7 +176,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                   // It was written "/qr.php?…": every address ending in .php answers "page not found" here
                                   // (.htaccess), so this picture was broken on every installation (found 12 October 2026, #500). ?>
                             <img src="<?php echo htmlspecialchars(Site::url('qr'), ENT_QUOTES, 'UTF-8'); ?>?content=<?php echo urlencode($publicUrl); ?>&amp;size=64" width="64" height="64" alt="QR code for the public form link" class="border rounded">
-                            <input type="text" class="form-control form-control-sm" style="max-width:360px;" readonly value="<?php echo htmlspecialchars($publicUrl, ENT_QUOTES, 'UTF-8'); ?>" onclick="this.select();">
+                            <input type="text" class="form-control form-control-sm" style="max-width:360px;" readonly value="<?php echo htmlspecialchars($publicUrl, ENT_QUOTES, 'UTF-8'); ?>" data-portal-select-on-click>
                             <form method="post" action="<?php echo htmlspecialchars(Site::url('forms/publish'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="formID" value="<?php echo $formId; ?>">

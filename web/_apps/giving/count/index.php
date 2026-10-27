@@ -197,7 +197,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <form method="get" class="row g-2 align-items-end mb-3">
     <div class="col-md-3">
         <label class="form-label small">Status</label>
-        <select class="form-select form-select-sm" name="status" onchange="this.form.submit()">
+        <select class="form-select form-select-sm" name="status" data-portal-submit-on-change>
             <option value="">All</option>
             <?php foreach ($validStatuses as $s): ?>
                 <option value="<?php echo htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); ?>" <?php echo $filterStatus === $s ? 'selected' : ''; ?>><?php echo htmlspecialchars(ucfirst($s), ENT_QUOTES, 'UTF-8'); ?></option>

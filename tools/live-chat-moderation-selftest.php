@@ -157,7 +157,11 @@ import { readFileSync } from 'node:fs';
 const [, , htmlFile, base, cookie, scenario, firstId] = process.argv;
 const watchdog = setTimeout(() => { console.log(JSON.stringify({ error: 'timed out' })); process.exit(3); }, 25000);
 const html = readFileSync(htmlFile, 'utf8');
-const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).filter((s) => s.includes('js-mod-btn'));
+// The tag is matched WITH its attributes: since #625 the page's script carries the page's nonce
+// (<script nonce="...">), because a browser refuses a script written into a page without it. The
+// pattern used to be the bare <script>, which would now find nothing. This test does not judge the
+// nonce: tools/page-scripts-selftest.php does, for every page it reaches.
+const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]).filter((s) => s.includes('js-mod-btn'));
 if (scripts.length !== 1) { console.log(JSON.stringify({ error: 'found ' + scripts.length + ' moderation scripts, expected 1' })); process.exit(2); }
 
 const seen = { reloads: 0, alerts: [], requests: [] };

@@ -19,7 +19,11 @@
  *   • CCLI usage log: every advance INTO a song item (where the prior
  *     item wasn't the same song) writes a tblCcliUsage row.
  *
- * Returns JSON identical in shape to /api/worship/state.
+ * Returns JSON identical in shape to /api/worship/state, PLUS a `csrfToken`
+ * field holding the replacement anti-forgery token (#625) -- on the
+ * successful answer and on every refusal reached after the check has
+ * rotated it. Without it the console worked for exactly one command. See
+ * the note beside the check itself.
  *
  * Relocated from the unreachable legacy path _apps/api/worship-advance.php
  * (#373 fold-in). ApiRouter::dispatch() resolves `api/{appName}/{action}` to
@@ -60,13 +64,36 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     http_response_code(400); echo json_encode(['ok' => false, 'error' => 'csrf']); exit();
 }
 
+// 🔄 THE REPLACEMENT TOKEN GOES BACK IN EVERY ANSWER FROM HERE ON (#625).
+//    Auth::verifyCsrf() REPLACES the anti-forgery token every time it accepts
+//    one, so a token can never be used twice. The operator console is drawn
+//    once and then sends command after command without reloading, so from the
+//    second command onwards it was holding a dead token and was answered 400
+//    "csrf". Every control on Worship, Present therefore worked exactly ONCE
+//    and was then silently refused: the page shows no error, so the button
+//    simply stopped doing anything. Proved on the commit before this one with
+//    three plain requests: 200, 400, 400.
+//    It was hidden for as long as it was because the page's script carried no
+//    nonce, so the browser refused it and nothing ran at all (#625).
+//    WHY EVERY ANSWER AND NOT ONLY THE SUCCESSFUL ONE: the token has already
+//    been replaced by the time any of the refusals below is reached (a plan
+//    that is not there, no permission, an action or itemID that is not
+//    allowed). An answer without the replacement would leave the console
+//    holding a dead token, so one mistaken press would stop the console for
+//    the rest of the service. The checks ABOVE this line deliberately do not
+//    carry it: a wrong method, no sign-in, or a token that did not match
+//    means nothing was rotated and there is nothing to hand back.
+//    The name matches the portal's existing convention for this, the
+//    `csrfToken` field ApiResponse puts in its `meta` block.
+$freshCsrf = Auth::csrfToken();
+
 $planId = (int) ($_POST['planID'] ?? 0);
 $action = (string) ($_POST['action'] ?? '');
 $userId = (int) ($_SESSION['user_id'] ?? 0);
 $siteId = Site::id();
 
 if (in_array($action, ['next', 'prev', 'goto', 'blank', 'black', 'show'], true) === false) {
-    http_response_code(400); echo json_encode(['ok' => false, 'error' => 'action']); exit();
+    http_response_code(400); echo json_encode(['ok' => false, 'error' => 'action', 'csrfToken' => $freshCsrf]); exit();
 }
 
 $stmt = $mysqli->prepare('SELECT planID, eventID FROM tblServicePlans WHERE planID = ? AND siteID = ? AND isActive = 1');
@@ -74,12 +101,12 @@ $stmt->bind_param('ii', $planId, $siteId);
 $stmt->execute();
 $plan = $stmt->get_result()->fetch_assoc() ?: null;
 $stmt->close();
-if ($plan === null) { http_response_code(404); echo json_encode(['ok' => false, 'error' => 'plan']); exit(); }
+if ($plan === null) { http_response_code(404); echo json_encode(['ok' => false, 'error' => 'plan', 'csrfToken' => $freshCsrf]); exit(); }
 
 $canOperate = App::isAdmin() === true
            || ((int) ($plan['eventID'] ?? 0) > 0 && Auth::isCoordinatorOf((int) $plan['eventID']));
 if ($canOperate === false) {
-    http_response_code(403); echo json_encode(['ok' => false, 'error' => 'forbidden']); exit();
+    http_response_code(403); echo json_encode(['ok' => false, 'error' => 'forbidden', 'csrfToken' => $freshCsrf]); exit();
 }
 
 // 📋 Current state (NULL row OK — defaults).
@@ -180,13 +207,13 @@ if ($action === 'next' || $action === 'prev') {
     $newBlank = 0; $newBlack = 0;
 } elseif ($action === 'goto') {
     $target = (int) ($_POST['itemID'] ?? 0);
-    if ($target <= 0) { http_response_code(400); echo json_encode(['ok' => false, 'error' => 'itemID']); exit(); }
+    if ($target <= 0) { http_response_code(400); echo json_encode(['ok' => false, 'error' => 'itemID', 'csrfToken' => $freshCsrf]); exit(); }
     $stmt = $mysqli->prepare('SELECT itemID FROM tblServicePlanItems WHERE itemID = ? AND planID = ?');
     $stmt->bind_param('ii', $target, $planId);
     $stmt->execute();
     $ok = (bool) $stmt->get_result()->fetch_assoc();
     $stmt->close();
-    if ($ok === false) { http_response_code(404); echo json_encode(['ok' => false, 'error' => 'item']); exit(); }
+    if ($ok === false) { http_response_code(404); echo json_encode(['ok' => false, 'error' => 'item', 'csrfToken' => $freshCsrf]); exit(); }
     $newItemId = $target;
     $newSlide = 0; $newBlank = 0; $newBlack = 0;
 } elseif ($action === 'blank') {
@@ -230,6 +257,8 @@ if ($newItemId !== null && $newItemId !== $prevItemId) {
 // 📤 Return the resolved state — body is the CURRENT verse for songs.
 $response = [
     'ok'                => true,
+    // 🔄 The replacement anti-forgery token: see the note by the check above.
+    'csrfToken'         => $freshCsrf,
     'currentItemID'     => $newItemId,
     'currentSlideIndex' => $newSlide,
     'totalSlides'       => 1,

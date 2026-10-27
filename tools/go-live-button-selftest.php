@@ -601,7 +601,11 @@ const GLB_NODE_SUBMIT_PROGRAM = <<<'NODEJS'
 // Written by tools/go-live-button-selftest.php for ONE run (deleted with its folder). Test only.
 import { readFileSync } from 'node:fs';
 const html = readFileSync(process.argv[2], 'utf8');
-const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).filter((s) => s.includes('golive-form'));
+// The tag is matched WITH its attributes: since #625 the page's script carries the page's nonce
+// (<script nonce="...">), because a browser refuses a script written into a page without it. The
+// pattern used to be the bare <script>, which would now find nothing. This test does not judge the
+// nonce: tools/page-scripts-selftest.php does, for every page it reaches.
+const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]).filter((s) => s.includes('golive-form'));
 if (scripts.length !== 1) { console.log(JSON.stringify({ error: 'found ' + scripts.length + ' scripts about the form, expected 1' })); process.exit(2); }
 const button = { disabled: false };
 let onSubmit = null;

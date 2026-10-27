@@ -194,7 +194,7 @@ $csrf = $esc(Auth::csrfToken());
                     <input type="hidden" name="action" value="change-role">
                     <input type="hidden" name="groupID" value="<?php echo $groupId; ?>">
                     <input type="hidden" name="membershipID" value="<?php echo (int) $m['membershipID']; ?>">
-                    <select name="memberRole" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <select name="memberRole" class="form-select form-select-sm" data-portal-submit-on-change>
                         <option value="member" <?php echo $m['memberRole'] === 'member' ? 'selected' : ''; ?>>Member</option>
                         <option value="co-leader" <?php echo $m['memberRole'] === 'co-leader' ? 'selected' : ''; ?>>Co-leader</option>
                         <option value="leader" <?php echo $m['memberRole'] === 'leader' ? 'selected' : ''; ?>>Leader</option>

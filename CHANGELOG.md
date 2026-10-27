@@ -2,6 +2,37 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — buttons that did nothing, because the browser refused the script behind them (#625)**
+  - **What an administrator should know after upgrading**
+    1. **What was wrong.** Every page the portal serves carries a rule saying which scripts the browser may run. A
+       script written straight into a page, and a handler written on an element (`onclick`, `onchange` and the like),
+       carried nothing to identify it, so the browser refused to run it and said so only in its own console. The page
+       looked finished and the button did nothing at all. There were 97 of them in 63 files.
+    2. **What that means for you.** Controls across the portal now work that silently did nothing before — on Settings,
+       Users, Roles, Groups, Departments, Sites, the calendar's event hub and series pages, Expenses (submit, approve
+       and treasury), Giving, Forms, Documents, Venues, Small Groups, Attendance, the host console, live chat
+       moderation, the noticeboard, Worship (plan and present) and your own account page. **Nothing was lost while they
+       were broken**: a button that did nothing changed nothing.
+    3. **"Register New Passkey" on your account page now works.** Its script ran for the first time and stopped
+       immediately, because it built its dialog before the part of the page that draws dialogs had loaded.
+    4. **Worship, Present: every control worked exactly ONCE per page load, and said nothing when it stopped.** The page
+       took one form token when drawn, the portal replaces that token each time it accepts one, and the page was never
+       given the replacement. Mid-service that is as bad as the page not loading. Commands now go through one at a time
+       in the order pressed, nothing is lost on a quick double press, a command that cannot be sent is **said** in a
+       badge beside the slide position instead of vanishing, and a request that never answers gives up after ten
+       seconds rather than silently stopping the console for the rest of the service.
+    5. **Nothing about the safety rule was loosened** to achieve this — checked independently, and the rule the portal
+       sends is byte for byte what it was.
+  - **What changed in the code**: 31 inline scripts in 28 pages now carry the page's own one-off nonce; 19 handlers
+    written on elements are gone, replaced by two attributes read by the new shared file
+    `web/public_html/assets/js/portal-actions.js`; 8 page-specific handlers became listeners; `Asset.php`,
+    `Captcha.php`, `header.php` and `footer.php` rewritten the same way; `web/_apps/worship/api/advance.php` returns
+    the replacement token and `web/_apps/worship/present.php` keeps it.
+  - **New checks so it cannot come back**: `tools/audit-checks/check_inline_scripts_have_nonce.py` (with its own
+    self-test and an exemption list explained line by line) and `tools/page-scripts-selftest.php`, which reads the real
+    pages as an administrator and as a member.
+  - **Still to do, raised as its own issue:** eight other handlers elsewhere in the portal have the same spent-token
+    fault, and the asynchronous logic that solves it belongs in a shared file rather than in one page.
 - **Fixed — the portal's QR codes could not be read, and one of them sent a key to another website (#623)**
   - **What an administrator should know after upgrading**
     1. **Every QR picture the portal has ever drawn was unreadable.** The fifteen squares that tell a reader which

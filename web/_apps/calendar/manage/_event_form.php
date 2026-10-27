@@ -378,7 +378,7 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
         <div id="venueCheckAlert-<?php echo $isEdit ? 'edit' : 'new'; ?>" class="alert d-none mb-0 w-100" role="status" aria-live="polite"></div>
     </div>
 
-    <script>
+    <script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
     (function () {
         // 🏛️ Venue Bookings (#429, #436) Surface A — venue→room cascade +
         // debounced "is it booked?" check. Silent no-op on ANY failure

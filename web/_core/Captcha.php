@@ -358,10 +358,21 @@ class Captcha
                 }
                 // 🕶️ Invisible widget: hidden input fed by grecaptcha.execute()
                 // The script is loaded with ?render=siteKey so grecaptcha is auto-initialised.
+                //
+                // 🔐 The script below carries the page's nonce (#625). On a page
+                // with the standard header a script written into the page runs
+                // only with that mark (#144, 3 June 2026). Without it the token
+                // was never fetched, so the form always failed its bot check.
+                // WHAT THE NONCE DOES NOT FIX: the standard header lets script
+                // FILES come from two outside addresses only, and Google's is
+                // not one of them. So on a page with the standard header the
+                // Google script file named by scriptTag() is still refused, and
+                // this script then finds no `grecaptcha` and does nothing. On a
+                // page that sends no rule (sign-in, the public forms) it works.
                 return ''
                     . '<input type="hidden" name="' . self::esc(self::RECAPTCHA_POST_FIELD)
                     . '" id="g-recaptcha-response">'
-                    . '<script>(function(){'
+                    . '<script nonce="' . self::esc(App::cspNonce()) . '">(function(){'
                     . 'function exec(){if(typeof grecaptcha==="undefined"||!grecaptcha.ready){return;}'
                     . 'grecaptcha.ready(function(){'
                     . 'grecaptcha.execute(' . json_encode($siteKey) . ',{action:' . json_encode($action) . '})'

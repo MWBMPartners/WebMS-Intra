@@ -300,7 +300,17 @@ header("Content-Security-Policy: default-src 'self'; "
 
     <!-- 🖨️ Print stylesheet (#241). Activated by @media print + .print-view body class. -->
     <link rel="stylesheet" href="/assets/css/print.css" media="print">
-    <link rel="stylesheet" href="/assets/css/print.css" media="screen" onload="this.media='not all'" disabled>
+<?php
+// The second link below is switched off (`disabled`), so a browser never
+// fetches it. It carried onload="this.media='not all'" until #625. That
+// handler was removed because browsers refuse every handler written on an
+// element of a page with this header (#144), and the new check for that fails
+// on one. Removing it changes nothing a person can see: a stylesheet that is
+// never fetched never finishes loading, so the handler had never run. The
+// link itself is left exactly as it was. This note is a PHP comment so that
+// it is not sent to every browser.
+?>
+    <link rel="stylesheet" href="/assets/css/print.css" media="screen" disabled>
 </head>
 <body data-portal-name="<?php echo htmlspecialchars((string) ($SETTINGS['site']['name'] ?? 'Portal'), ENT_QUOTES, 'UTF-8'); ?>" data-print-date="<?php echo htmlspecialchars(date('Y-m-d'), ENT_QUOTES, 'UTF-8'); ?>" data-portal-authenticated="<?php echo \Portal\Core\Auth::check() === true ? '1' : '0'; ?>">
 

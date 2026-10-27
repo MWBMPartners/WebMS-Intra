@@ -258,7 +258,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 // ✏️ Fill the edit form from the button that opened it (see the same
 //    script on the Groups page for why this is safe).
 document.getElementById('editDeptModal').addEventListener('show.bs.modal', function (event) {

@@ -670,7 +670,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <!-- 📦 Edit modal population script -->
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 var editUserModal = document.getElementById('editUserModal');
 editUserModal.addEventListener('show.bs.modal', function (event) {
     var btn = event.relatedTarget;
@@ -741,7 +741,7 @@ editUserModal.addEventListener('show.bs.modal', function (event) {
 </div>
 
 <!-- 📦 Roles modal population script (#516) -->
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 var rolesModal = document.getElementById('rolesModal');
 rolesModal.addEventListener('show.bs.modal', function (event) {
     var btn = event.relatedTarget;

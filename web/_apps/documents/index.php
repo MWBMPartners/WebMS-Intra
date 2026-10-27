@@ -257,7 +257,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 document.addEventListener('DOMContentLoaded', function () {
     var modalEl = document.getElementById('docEditModal');
     if (!modalEl || !window.bootstrap) {

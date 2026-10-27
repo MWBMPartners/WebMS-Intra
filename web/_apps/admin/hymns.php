@@ -287,7 +287,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="public_share_toggle">
                 <div class="form-check">
-                    <input type="checkbox" class="form-check-input" id="publicShareEnabled" name="enabled" value="1" <?php echo $publicShareEnabled === true ? 'checked' : ''; ?> onchange="this.form.submit()">
+                    <input type="checkbox" class="form-check-input" id="publicShareEnabled" name="enabled" value="1" <?php echo $publicShareEnabled === true ? 'checked' : ''; ?> data-portal-submit-on-change>
                     <label class="form-check-label" for="publicShareEnabled">Allow public Order-of-Service sharing on this site</label>
                 </div>
             </form>

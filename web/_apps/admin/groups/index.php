@@ -246,7 +246,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<script>
+<script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 // ✏️ Fill the edit form from the button that opened it. The values were
 //    already escaped into the data- attributes by PHP; reading them back
 //    with getAttribute() gives the plain text, and assigning it to .value
