@@ -1,8 +1,161 @@
 # Handoff — branch clean-up, full audit, documentation refresh
 
-**Updated:** 2026-10-27 (kept current as the work happens, so it can be picked up at any point).
+**Updated:** 2026-10-28 (kept current as the work happens, so it can be picked up at any point).
 **Working branch:** `claude/alpha-wip` — the single work-in-progress branch.
 **Target:** one pull request into `alpha` at the end. No stacked pull requests.
+
+---
+
+## 28 OCTOBER 2026, LATEST — slice 9 done as a whole-app review, a claim could be paid twice, and an edit handler
+
+**Owner answered all eight queued decisions** (question tool, 28 October): keep #640 as a warning;
+hold the advisory and publish as ONE once `main` is fixed; chase all three #645 items, item 1
+first; wire all twelve #646 checks, hard gates where green; prove MariaDB and do #487 while #475
+stays blocked; #569 as the whole package with markup reading as the visual audit; #641 check first
+then fix; #643 confirm the premise then record as intended. **Owner also supplied the database
+fact #475 was blocked on:** DreamHost shared hosting runs **MySQL 8.0.41-0ubuntu0.24.04.1**,
+confirmed by `SELECT version();`, and the first customer will be on it — so 8.0 stays the floor,
+while newer MySQL and MariaDB must also be supported. Note the vendor packaging suffix: that is
+the shape that breaks version parsing, and `DbServer` needs checking against it (not yet done).
+
+**Owner asked for an edit handler mid-run and approved building it.** Also asked for the
+narrow-hotfix route onto `main`: a branch carrying ONLY the sign-in fixes, which I prepare and
+they push. `main` is **563 commits behind** this branch and still carries all four sign-in holes
+(`userRequires2fa` appears in two files there, four places here). No branch protection, no open PR.
+
+### Slice 9, done properly as a whole-application review, not a diff
+
+Slice 9 had read only a diff and said plainly it could not judge five things. All five answered:
+**7 findings, filed #647-#650.** The big one: **an expense claim could be paid twice.**
+`treasury/save.php` read the status outside its transaction with no lock, never re-read it inside,
+and its UPDATE had no status guard — and there is no unique key on `tblExpenseClaimPayments`.
+Four things would each have stopped it; **none was present.** Two treasurers, or one double-click,
+each wrote a payment reference, each set `Reimbursed`, each e-mailed the claimant.
+**It is an omission, not a decision:** `approve/save.php` and `withdraw/save.php` always locked.
+Also found: the export and claim page ignore the department model (#648, the unsettled #541 item 3
+— the site-wide `Approver` role downloads every claim in the organisation while the decision
+handler says that role is "not authority to decide"); a receipt that fails to attach is silently
+dropped while the claimant is told the claim saved (#649); and four small faults (#650).
+
+**The HTTP harness CANNOT test the payment race** and this must not be re-attempted there:
+`access-pages-selftest.php` runs the built-in server with ONE worker
+(`unset($env['PHP_CLI_SERVER_WORKERS'])`), so two requests never overlap and such a test **passes
+on the broken code**. `tools/expense-payment-race-selftest.php` races two real connections instead.
+
+### #651, the edit handler, bounded on purpose
+
+The bound is **"a claim nobody has decided on"**, never "a Pending claim": a claim in a department
+needing several approvals stays Pending after the first approval, so editing it then would leave
+an approval against figures nobody approved. `ExpenseRules::whyNotEditable()` is the one place;
+it takes FACTS not a connection, because the handler asks it twice — once cheaply, once inside
+its `FOR UPDATE` lock. Claimant only, never an admin (#545's reasoning). Receipts untouched (#649).
+
+### The independent check found SIX real problems — and three plants my tests missed
+
+A fresh Opus agent that did not build it. **All six fixed; all three plants now caught.**
+- **P1, the worst: migration 223 was never marked in `full_schema.sql`'s `tblMigrations` seed
+  block**, so a brand-new installation would report an upgrade waiting that has nothing to do.
+  **`check_schema_seed_parity.py` PRINTED this and exited 0**, and I had measured "36/36 audit
+  checks pass" by exit code alone. The migration-222 comment in that very file warns: *"a clean
+  run of the audit scripts does not prove this block is complete. Read what it prints."*
+  **Standing lesson: run the audit scripts and READ THEM.** Fixed, and proved on a fresh install.
+- **P2 and P3 were tests that passed on broken code**, the thing this project fears most.
+  P2: a check searched for a call and was satisfied by the HTML COMMENT beside the button that
+  merely mentions it — `codeOnly()` strips PHP comments but keeps inline HTML (deliberately, so
+  the `<script>` check can fail). There is now a second helper, `phpOnly()`. P3: the locked
+  re-ask's ANSWER was never checked, so keeping the call and discarding the result passed 53/53 —
+  the £20 → £2,000 sequence. Both now brace-walk the refusal block, as the race test already did.
+- P4, P5, P6 were untrue comments (403 vs 404 are not "the same answer"; "the approvers were told
+  when it was submitted" is false once the department can change; "comment for comment" overstated
+  the match — treasury is strictly stronger than the two it claimed to copy).
+- Also closed two coverage gaps the checker found: nothing tested the edit handler's organisation
+  scoping, and nothing at all tested the `payRef`/`comments` type guards.
+
+**One plant of mine was faulty before the check was** — again. My F9 re-plant spliced on the first
+`$pageTitle` match, which sits at line 35 BEFORE the block, so it duplicated text instead of
+removing it and left the original call in place. **Always prove a plant landed** before concluding
+anything about the check.
+
+### #645, all three items settled by evidence
+
+1. **Disproved.** `FeedImporter::removalEndPoint()` returns `exact => false` for every capped read,
+   so the removal uses `startDateTime < point`, never `<=`. Already pinned by
+   `feed-importer-selftest.php:2136-2149`. The reviewer never read the consumer and said so.
+2. **REAL, and worse than reported — this is the one that can lose data, not item 1.** A file
+   ending inside a `VEVENT` reports `complete = true` *alongside a warning saying it was not
+   complete*. `FeedImporter.php:451` uses that flag as the SINGLE gate stopping an incomplete
+   download removing events, so a truncated download soft-deletes every event after the cut.
+   **Not yet fixed** — next package.
+3. **Reproduced, but it is the chosen behaviour** (01:30 → 02:30 on the spring-forward night,
+   exact length kept, counted against `COUNT`), matching the owner's 23 September decision and
+   every mainstream calendar. **But neither commented nor tested**, so it could be silently
+   reversed. Needs a note and a check, not a behaviour change.
+
+### Verified, and what was not
+
+668 checks green: 36/36 audit checks (output READ, not just exit codes), expense-payment-race
+25/25, expense-edit 59/59, expense-rules 58/58, expense-withdraw 37/37, access-pages 298/298 with
+a clean PHP error log, page-scripts 88/88, site-addresses 103/103. Migration 223 run twice on a
+fresh database: two routes, one migration row. Fresh install now records 223. Lint clean.
+**Not verified:** MariaDB; the new pages in a browser (markup read, never rendered); the two
+workflow steps actually running (no YAML library locally — `actionlint` in CI will confirm);
+Codex has reviewed none of this.
+
+### THREE check rounds, and every round's findings were in my CHECKS, not the handlers
+
+Said plainly because the owner's rule asks for it when a chunk passes three rounds: this one took
+**three**. The shipped handlers have been correct since round 1. What kept failing was the evidence
+that they were.
+
+- **Round 2** confirmed all six round-1 fixes and then defeated **three of the new checks**, each
+  with a planted fault: (a) the brace-matching walk counted braces inside STRING LITERALS, so one
+  `{` in a log message made it read 2,432 characters instead of 157 — the rest of the function —
+  and with a second plausible `$refuse(` later in the `try`, **all 59 checks passed with the fraud
+  gate deleted**; (b) `substr_count` of `WHEREclaimID=?ANDsiteID=?` required `>= 2` while THREE
+  statements share that prefix, so removing the organisation scoping from the lock left the count at
+  2 and the check passed *while asserting both reads were scoped*; (c) the test held its own LIFTED
+  COPY of the payment-reference parsing, so dropping `array_filter` from the HANDLER alone passed
+  everything — and that drift would have written an EMPTY payment reference against a real claim.
+- **The fix for (c) was not a cleverer test.** `ExpenseRules::paymentReferences()` is now the ONE
+  place payment references are read; the handler calls it and so do the checks. A copy cannot drift
+  when there is no copy. That change is why a round 3 was needed: it is shipped code.
+- **Round 3: CLEAN.** 23 planted faults, all caught — round 2's exact plant, eleven attempts to
+  defeat the brace walker (heredoc, nowdoc, interpolation, escaped quote, `'{{{'`, `'}}}'`,
+  trailing backslash), four scoping removals and seven parsing drifts. It also compared the new
+  method against a rebuild of the old inline code over 30 input shapes and found them identical,
+  and confirmed `array_values()` is neutral for all three call sites. One dead-store evasion of B11
+  was reported as Polish with a one-line fix; **I took it** (B11a) and proved it catches the plant.
+
+**Four lessons now written into both instruction files**, because each cost a round:
+1. A check that searches a page for a CALL can be satisfied by an HTML COMMENT mentioning it.
+   `codeOnly()` keeps inline HTML deliberately (the `<script>` check needs it); `phpOnly()` is for
+   "what does this page DO".
+2. A brace-matching walk must step over string literals, and should fail safe on an implausible
+   length rather than search half a file.
+3. `substr_count` of a shared SQL prefix cannot tell statements apart. Name each one.
+4. **Run the audit scripts and READ THEM.** `check_schema_seed_parity.py` named the missing
+   migration mark in its output while exiting 0, and "36 of 36 passed" measured by exit code alone
+   nearly shipped migration 223 unrecorded.
+
+**And twice my own plant was faulty before the check was.** The second time, a splice anchored on
+the first `$pageTitle` match — which sits at line 35, BEFORE the block — duplicated text instead of
+removing it and left the original call in place, so a working check looked blind. **Always prove a
+plant landed with a diff before drawing any conclusion from it.**
+
+### Next, in order
+
+1. #645 item 2 — the truncated-file gate. Data loss; highest priority of what remains. The fix is
+   designed: `$complete` is computed from `$sawCalendarStart && $sawCalendarEnd && !$stoppedEarly
+   && !$droppedLine` and nothing in it mentions a block left OPEN, so an unterminated `VEVENT`
+   followed by `END:VCALENDAR` satisfies all four. The comment at `IcsReader.php:1247` already
+   claims `complete` "is false anyway" — it states the guarantee the code forgot to implement.
+   There is a `$stack` of open blocks in scope, so the robust term is "nothing left open", which
+   also catches an unclosed `VALARM`. **Verify empirically that a well-formed file leaves that
+   stack empty before relying on it**, or every file becomes incomplete.
+3. #645 item 3 — a comment and a test for the missing-hour behaviour.
+4. #646 — wire the twelve (shares `portal-selftests.yml` with this package, so it waits).
+5. #643 — confirm the auto-increment premise against the table, then record as intended.
+6. The narrow hotfix branch off `main` for the owner to push; #487 + the MariaDB matrix; #641; #569.
 
 ---
 

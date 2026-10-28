@@ -89,8 +89,37 @@ $userId   = (int) ($_SESSION['user_id'] ?? 0);
 //    the other two money handlers; all three were changed together.
 $claimIdRaw = $_POST['claimID'] ?? 0;
 $claimID    = is_scalar($claimIdRaw) === true ? (int) $claimIdRaw : 0;
-$comments = trim($_POST['comments'] ?? '');
-$refs     = array_filter(array_map('trim', explode(',', implode(',', $_POST['payRef'] ?? []))));
+// 💬 The comment is text, or there is no comment.
+//
+//    WHAT WAS WRONG: this read `trim($_POST['comments'] ?? '')`. An array
+//    reaches trim(), which refuses one under `declare(strict_types=1)`, so
+//    `comments[]=x` ended the request in a TypeError — the portal's own 500
+//    page and one row in tblErrors. Nothing was corrupted, because it happens
+//    before the transaction, but the treasurer could not tell whether the
+//    payment had been recorded, which on a money page is its own harm.
+//
+//    This is the SIBLING of the claim-number guard directly above, added on
+//    27 October 2026 (#642). The reasoning was applied to the number and to
+//    the decision field on the approvals page, and missed the field sitting
+//    immediately below it here. The comment is optional, so anything that is
+//    not text is simply no comment.
+$commentsRaw = $_POST['comments'] ?? '';
+$comments    = is_string($commentsRaw) === true ? trim($commentsRaw) : '';
+
+// 🧾 THE PAYMENT REFERENCES, read by the ONE place that reads them.
+//
+//    `ExpenseRules::paymentReferences()` holds the whole rule: a list of text,
+//    a plain string, or nothing, with nested arrays dropped so `payRef[][]=x`
+//    can never store a payment reference of literally "Array". The long
+//    explanation of each case is on the method.
+//
+//    WHY IT IS NOT WRITTEN OUT HERE ANY MORE. It was, and its self-test held a
+//    lifted copy of the same lines. A round-2 independent check on 28 October
+//    2026 dropped `array_filter` from THIS copy only and every check still
+//    passed, because the test was exercising its own. The drift would have
+//    written an empty payment reference against a real claim. One place, called
+//    by both.
+$refs = ExpenseRules::paymentReferences($_POST['payRef'] ?? []);
 
 if ($claimID === 0) {
     $_SESSION['flash_msg']  = 'Invalid claim ID.';
@@ -157,6 +186,70 @@ $paidByName = $_SESSION['user_name'] ?? 'Treasury';
 
 $mysqli->begin_transaction();
 try {
+    // 0. 🔒 HOLD THE CLAIM STILL, SO IT CANNOT BE PAID TWICE.
+    //
+    //    WHAT WAS WRONG (found by a whole-application review of the money
+    //    pages on 28 October 2026; #647). The status read further up happens
+    //    OUTSIDE this transaction and takes no row lock, and nothing re-read
+    //    it in here. So two treasurers submitting for the same claim — or one
+    //    person clicking twice because the first answer was slow — BOTH saw
+    //    "Approved", both inserted their own payment reference, both set the
+    //    claim to "Reimbursed", and both sent the claimant a "you have been
+    //    reimbursed" e-mail. If each had really sent the money, it went out
+    //    twice, and the claim carried two payment records with two different
+    //    references and no way to tell which was the real one.
+    //
+    //    FOUR separate things would each have stopped that, and not one of
+    //    them was present: a lock on the read, a re-read inside the
+    //    transaction, an `AND status = 'Approved'` on the UPDATE below, and a
+    //    unique key on tblExpenseClaimPayments(claimID). The first three are
+    //    now here.
+    //
+    //    The fourth is deliberately NOT added. The `payAmount` column's own
+    //    comment promises partial payments ("may differ from claim total in
+    //    partial payments"), and a unique key on claimID would forbid them
+    //    outright — that question is #650, not this fix.
+    //
+    //    This is the same PATTERN approve/save.php and withdraw/save.php have
+    //    always used — open the transaction, re-fetch with FOR UPDATE, refuse
+    //    if the status has moved. This page was the only one of the three
+    //    money writers without it, which is why it counts as an omission
+    //    rather than a decision somebody made.
+    //
+    //    NOT identical to those two, though, and an earlier version of this
+    //    comment said "comment for comment", which an independent check on
+    //    28 October 2026 showed was untrue. This page is deliberately
+    //    STRONGER: it throws on a failed prepare where they test
+    //    `!== false`, and its status UPDATE carries `AND status = ?` where
+    //    theirs carry none. Those two are worth bringing to the other
+    //    handlers rather than weakening this one (#650 covers the first).
+    $lockedClaim = null;
+    $lockStmt = $mysqli->prepare(
+        'SELECT claimID, status FROM tblExpenseClaims '
+        . 'WHERE claimID = ? AND siteID = ? FOR UPDATE'
+    );
+    if ($lockStmt === false) {
+        throw new \RuntimeException('Failed to prepare claim lock: ' . $mysqli->error);
+    }
+    $lockStmt->bind_param('ii', $claimID, $siteId);
+    $lockStmt->execute();
+    $lockedClaim = $lockStmt->get_result()->fetch_assoc();
+    $lockStmt->close();
+
+    // 🛡️ Still awaiting payment? Between the first look above and this lock,
+    //    another treasurer may have paid it. Say so plainly rather than
+    //    paying it again: the person needs to know their payment was NOT
+    //    recorded, because they may have already moved the money.
+    if ($lockedClaim === null || $lockedClaim['status'] !== 'Approved') {
+        $mysqli->rollback();
+        $_SESSION['flash_msg']  = 'Claim #' . $claimID . ' is no longer waiting for payment — another treasurer '
+                                . 'has already recorded it as reimbursed. Your payment reference was NOT saved. '
+                                . 'Please check the claim before sending any money.';
+        $_SESSION['flash_type'] = 'warning';
+        header('Location: ' . Router::url('expenses/treasury'));
+        exit();
+    }
+
     // 1. 💳 Insert payment reference records with paidByID
     $stmt = $mysqli->prepare(
         'INSERT INTO tblExpenseClaimPayments (claimID, payReference, paidByID) VALUES (?, ?, ?)'
@@ -170,13 +263,44 @@ try {
     }
     $stmt->close();
 
-    // 2. 📝 Update claim status to Reimbursed
-    $upd = $mysqli->prepare('UPDATE tblExpenseClaims SET status = ?, updatedAt = NOW() WHERE claimID = ? AND siteID = ?');
-    if ($upd !== false) {
-        $reimbursed = 'Reimbursed';
-        $upd->bind_param('sii', $reimbursed, $claimID, $siteId);
-        $upd->execute();
+    // 2. 📝 Update claim status to Reimbursed.
+    //
+    //    `AND status = ?` is the second line of defence behind the lock above
+    //    (#647): even holding the row, the statement refuses to move a claim
+    //    that is not sitting at "Approved".
+    //
+    //    WHAT WAS WRONG: this read `if ($upd !== false)`, so a prepare that
+    //    FAILED was skipped silently and the transaction committed anyway —
+    //    leaving the payment rows written and the claim still "Approved", so
+    //    it came straight back onto the treasury list and could be paid a
+    //    second time. A money write must never commit half-done. Step 1 above
+    //    already threw on a failed prepare; this step now matches it.
+    $upd = $mysqli->prepare(
+        'UPDATE tblExpenseClaims SET status = ?, updatedAt = NOW() '
+        . 'WHERE claimID = ? AND siteID = ? AND status = ?'
+    );
+    if ($upd === false) {
+        throw new \RuntimeException('Failed to prepare claim status update: ' . $mysqli->error);
+    }
+    $reimbursed = 'Reimbursed';
+    $approvedStill = 'Approved';
+    $upd->bind_param('siis', $reimbursed, $claimID, $siteId, $approvedStill);
+    if ($upd->execute() === false) {
+        $updError = $upd->error;
         $upd->close();
+        throw new \RuntimeException('Failed to update claim status: ' . $updError);
+    }
+    $statusRowsChanged = $upd->affected_rows;
+    $upd->close();
+
+    // 🛡️ Exactly one row must have moved. Zero means the claim slipped out of
+    //    "Approved" despite the lock, which should be impossible — so treat it
+    //    as a fault and roll back rather than reporting a payment that the
+    //    claim does not reflect.
+    if ($statusRowsChanged !== 1) {
+        throw new \RuntimeException(
+            'Claim #' . $claimID . ' did not move to Reimbursed (' . $statusRowsChanged . ' rows changed)'
+        );
     }
 
     // 3. 📄 Generate COMPLETE PDF

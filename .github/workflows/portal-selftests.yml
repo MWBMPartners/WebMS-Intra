@@ -25,7 +25,10 @@
 #                          and the self-test of check 15 (bash and Python)
 #   2. PHP 8.5             the one test that needs PHP 8.5
 #   3. The package         the installation package's own self-test
-#   4. On a database       twenty-two tests, run twice: MySQL 8.0.36 and 8.4.11
+#   4. On a database       twenty-four tests, run twice: MySQL 8.0.36 and 8.4.11
+#                          (twenty-two throwaway databases, not twenty-four:
+#                          the installer test and the strict-mode test use the
+#                          second and the loose server instead of this one.)
 #
 # Almost every test is `tools/<name>-selftest.php` (the package's and the
 # deploy script's are shell scripts, check 15's is Python). Each is given
@@ -446,7 +449,7 @@ jobs:
             echo "::warning::Node.js is NOT on this machine. The site addresses' test will fail without it, and the live chat and go-live tests will pass with the page's script NOT run."
           fi
 
-      - name: Prepare the three servers and build twenty throwaway databases
+      - name: Prepare the three servers and build twenty-two throwaway databases
         id: databases
         env:
           MYSQL_CID: ${{ job.services.mysql.id }}
@@ -476,7 +479,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -502,6 +505,23 @@ jobs:
         env:
           SELFTEST_DB_NAME: selftest_expensewithdraw
         run: php -d memory_limit=512M tools/expense-withdraw-selftest.php
+
+      # 💷 A claim cannot be paid twice (#647). Two real connections race for
+      #    one claim. This CANNOT be done in access-pages-selftest.php: that
+      #    harness runs PHP's built-in server with one worker, so two requests
+      #    never overlap and a race test there would pass on the broken code.
+      - name: Expense payment race self-test (#647)
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_expensepayrace
+        run: php -d memory_limit=512M tools/expense-payment-race-selftest.php
+
+      # ✏️ A claim may be changed only while nobody has decided on it (#651).
+      - name: Expense edit self-test (#651)
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_expenseedit
+        run: php -d memory_limit=512M tools/expense-edit-selftest.php
 
       - name: My volunteering self-test
         if: ${{ !cancelled() && steps.databases.outcome == 'success' }}

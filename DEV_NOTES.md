@@ -8168,3 +8168,172 @@ an administrator's edit, so it tested "does this row differ from its own default
 ---
 
 Last updated: October 2026
+
+## The four money writers all lock the claim, and a claim can be changed only before anybody decides (#647, #651, 28 October 2026)
+
+A whole-application review of the Expenses pages on 28 October 2026 — the
+follow-up to slice 9 of the #514 review pass, which had read only a diff and
+said plainly it could not judge this — found two things worth recording
+together, because the second depends on the first.
+
+### What was wrong: the payment page never held the claim still
+
+`web/_apps/expenses/treasury/save.php` read a claim's status, then paid it,
+with nothing in between. Four separate things would each have stopped a second
+payment and **not one of them was present**:
+
+| What would have stopped it | Was it there? |
+| --- | --- |
+| A row lock on the status read | No — a plain `SELECT`, and outside the transaction |
+| A second read inside the transaction | No |
+| `AND status = 'Approved'` on the `UPDATE` | No |
+| A unique key on `tblExpenseClaimPayments(claimID)` | No, and no migration ever added one |
+
+So two treasurers submitting for one claim — or one person clicking Save twice
+on a slow answer — each inserted their own payment reference, each set the
+claim to `Reimbursed`, and each sent the claimant a "you have been reimbursed"
+e-mail.
+
+**What makes it an omission rather than a decision:** `approve/save.php` and
+`withdraw/save.php` had always done it correctly, opening a transaction,
+re-fetching with `SELECT … FOR UPDATE` and refusing when the status had moved.
+The payment page was the only one of the three money writers without it. The
+first three rows of that table are now in place; the fourth is deliberately
+not, because the `payAmount` column's own comment promises partial payments and
+a unique key would forbid them (#650).
+
+### Why the HTTP harness cannot test this, and what does instead
+
+The obvious home for a double-payment test is `tools/access-pages-selftest.php`:
+it drives the real pages over real HTTP with a treasurer signed in. **It cannot
+go there.** That harness starts PHP's built-in web server and deliberately does
+`unset($env['PHP_CLI_SERVER_WORKERS'])`, so the server handles one request at a
+time. Two payment requests fired at it never overlap — the second does not
+begin until the first has finished and the claim already reads `Reimbursed`. A
+race test built on that harness **passes on the broken code**, which is worse
+than no test, because it reads as proof.
+
+`tools/expense-payment-race-selftest.php` races two real database connections
+instead, and has two sections because neither catches the other's half:
+section A proves the mechanism (the lock really makes the second request wait,
+and when the wait ends the status has moved), section B reads the handler as
+text to prove it still contains what section A exercised. Deleting the lock
+from the page leaves section A passing — that was measured, not assumed.
+
+One honest limit, written beside the code as well: the `AND status = ?` guard
+on the `UPDATE` matters less than it looks. The only status this page moves a
+claim to is `Reimbursed`, and MySQL reports zero rows changed when an `UPDATE`
+sets a column to the value it already holds — so on the exact double-payment
+path, guard and no guard look identical from `affected_rows`. **The lock and
+the status re-check are what do the work**, because they return before the
+payment `INSERT`, and the payment `INSERT` is the harm.
+
+### A claim may be changed only while nobody has decided on it
+
+Until #651 nothing could change a claim at all, which gave the portal a
+structural answer to "can an amount change after approval?": no, because
+nothing can change. The edit handler turns that into a promise code must keep,
+so the bound is **not** "a Pending claim may be edited" but "a claim nobody has
+decided on may be edited".
+
+The difference is not pedantry. In a department needing several approvals a
+claim **stays `Pending` after the first approval**. If the status alone decided:
+
+1. the claimant opens the edit form on a £20 claim;
+2. an approver approves it;
+3. the claimant saves it as £2,000.
+
+The approval row would then sit against £2,000 nobody approved, and the claim
+would be fully approved and payable. Section D of
+`tools/expense-edit-selftest.php` walks exactly that sequence against a real
+database, and check D2 asserts the claim is *still* `Pending` at step 3 — which
+is the whole reason the rule counts decisions instead of reading the status.
+
+`Portal\Core\ExpenseRules::whyNotEditable()` is the ONE place that decides. It
+takes **facts rather than a connection** on purpose: the handler must ask it
+twice, once cheaply and once on facts read inside its own row lock, and a
+method that did its own reading could not serve the second call. It answers a
+reason; `editRefusalWords()` turns a reason into words, so a caller can branch
+or log on the reason without a sentence being pasted into a log — the same
+shape `Portal\Core\Sms` uses.
+
+Two details that are easy to get wrong:
+
+- **`$approvalCount !== 0`, not `> 0`.** `approvalCount()` answers `-1` when it
+  could not read the count, and `-1` is not greater than `0` — so `> 0` would
+  have called a claim editable precisely when the portal had no idea whether
+  anybody had decided it. "We could not tell" must never become "nobody has,
+  go ahead". There is a check on it (A4), and planting `> 0` fails it.
+- **Ownership is answered first.** Telling a stranger "you cannot edit this
+  because it has been approved" confirms the claim exists and says where it has
+  got to. A claim that is not yours gets the same answer as one that does not
+  exist. Check A10 pins it.
+
+### A check that was reading its own explanation
+
+Worth recording because it is a trap, not a one-off. The edit self-test
+originally proved migration 223 was safe to run twice with
+`substr_count($migration, 'ON DUPLICATE KEY UPDATE') >= 3`. Removing the clause
+from **both** route inserts left the count at 3 and the check passed — because
+the migration's own header comment mentions the phrase three times in prose.
+**The check was counting the explanation instead of the SQL.** It now strips
+SQL comments, splits on `INSERT INTO`, and requires every individual statement
+to carry its own clause; it catches both the whole fault and a single insert
+losing its clause. It was found by planting the fault, which is the only way it
+could have been.
+
+### Two copies of a rule, and the test that was exercising the wrong one
+
+The payment references were read inline in `treasury/save.php`, and its
+self-test held a LIFTED COPY of the same few lines so it could exercise the
+behaviour. A round-2 independent check on 28 October 2026 showed exactly what
+that costs. It dropped `array_filter` from the HANDLER's copy only, and all 25
+checks still passed — because the test was exercising its own copy.
+
+The drift was not cosmetic. With `payRef` absent the handler then gets `['']`
+rather than `[]`; `['']` is not `empty()`, so the "at least one payment
+reference is required" refusal lets it through, and **an empty payment
+reference is written against a real claim** — the same class of harm as the
+reference of literally `"Array"` that the guard exists to prevent.
+
+The fix was not a cleverer test. `Portal\Core\ExpenseRules::paymentReferences()`
+is now the ONE place payment references are read; the handler calls it and so do
+the behaviour checks. A copy cannot drift when there is no copy. **The general
+lesson: a test that holds its own copy of the logic it is testing is not testing
+anything.** Where lifting is genuinely unavoidable, pin the original's text as
+well, so the two cannot part company silently.
+
+### A brace inside a string, and a check that read 2,432 characters
+
+`tools/expense-edit-selftest.php` finds a refusal block by walking from its `if`
+to the matching close brace, then looks inside it — the recipe the payment race
+test already used. The first version counted raw `{` and `}` characters, and
+`phpOnly()` strips comments but KEEPS string literals.
+
+So a brace inside a string counted as code. With `Logger::activity('ExpenseEdit',
+'refused {', $userId);` in the block, the extracted "body" came back as 2,432
+characters instead of 157: it had swallowed the rest of the `try`, including the
+UPDATE, the item rewrite, the PDF and the commit. On its own that produced no
+false pass, because nothing later held `$refuse(`. The round-2 checker then
+added a second, entirely plausible `$refuse(` at the PDF step — and **all 59
+checks passed with the fraud gate removed.**
+
+The walk now steps over quoted runs honouring backslash escapes, and returns
+"not found" when the body exceeds 600 characters, so an unhandled shape (a
+heredoc, say) fails safe rather than searching half a file. Measured: the real
+block is 157 characters, and a legitimately longer nested-brace rewrite still
+passes, so the bound costs nothing today.
+
+### Counting is not naming
+
+The same round defeated a check reading
+`substr_count($savePhp, 'WHEREclaimID=?ANDsiteID=?') >= 2`, meant to prove the
+early lookup and the row lock were both scoped to the organisation. **Three**
+statements share that WHERE prefix — the lookup (`LIMIT 1`), the lock
+(`FOR UPDATE`) and the header UPDATE (`AND status = ?`) — so removing the
+scoping from either read left the count at 2 and the check passed while its own
+PASS line asserted that both reads were scoped. Each statement is now named by
+its own exact text. This is the same shape as the repository's standing warning
+about checking a name against the thing that actually uses it: a count cannot
+tell two statements apart, and the check existed precisely because round 1 had
+removed that scoping and nothing noticed.

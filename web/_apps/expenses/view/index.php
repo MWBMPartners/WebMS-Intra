@@ -104,6 +104,26 @@ if ($isClaimant === false && $isAdmin === false && $hasApprover === false && $ha
     return;
 }
 
+// ✏️ May this person change the claim? (#651)
+//
+//    Asked through `ExpenseRules::whyNotEditable()`, the ONE place that
+//    decides, so this page can never offer an Edit button that
+//    expenses/edit/save.php would refuse — and never hide one it would allow.
+//
+//    The approval count is only read when it could possibly matter: the
+//    claimant, on a Pending claim. Every other visitor to this page — an
+//    approver, a treasurer, an administrator, or the claimant looking at a
+//    claim that has moved on — pays nothing for this.
+$mayEditClaim = false;
+if ($isClaimant === true && $claim['status'] === 'Pending') {
+    $mayEditClaim = (ExpenseRules::whyNotEditable(
+        (string) $claim['status'],
+        ExpenseRules::approvalCount($mysqli, $claimID),
+        (int) $claim['userID'],
+        $currentUserId
+    ) === ExpenseRules::EDIT_ALLOWED);
+}
+
 $pageTitle   = 'Claim #' . $claimID . ' — ' . $claim['claimTitle'];
 $breadcrumbs = ['Dashboard' => Router::url(''), 'Expenses' => Router::url('expenses/submit'), 'Claim #' . $claimID => ''];
 
@@ -531,6 +551,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php if ($claim['status'] === 'Approved' && $isClaimant === false && ($hasTreasurer === true || $isAdmin === true)): ?>
         <a href="<?php echo htmlspecialchars(Router::url('expenses/treasury'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-success">
             <i class="fa-solid fa-sterling-sign me-1"></i> Go to Treasury
+        </a>
+    <?php endif; ?>
+    <?php if ($mayEditClaim === true): ?>
+        <!-- ✏️ Change the claim (#651) — the claimant only, and only while nobody
+             has decided on it. A claim that is still Pending but already has an
+             approval against it deliberately shows NO button: see
+             ExpenseRules::whyNotEditable() for why the status alone is not enough. -->
+        <a href="<?php echo htmlspecialchars(Router::url('expenses/edit') . '?id=' . (int) $claim['claimID'], ENT_QUOTES, 'UTF-8'); ?>"
+           class="btn btn-outline-primary">
+            <i class="fa-solid fa-pen me-1"></i> Change Claim
         </a>
     <?php endif; ?>
     <?php if ($claim['status'] === 'Pending' && $isClaimant === true): ?>

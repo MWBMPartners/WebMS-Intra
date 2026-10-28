@@ -871,6 +871,76 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     `tools/gdpr-coverage-selftest.php`, phases 1 and 7 of the migration harness.
     *(`.claude/CLAUDE.md` → the erasure bullet.)*
 
+24. **The money pages, and when a claim may be changed (#647, #651; 28 October 2026).**
+    All FOUR writers of an expense claim — `approve/save.php`,
+    `withdraw/save.php`, `treasury/save.php` and `edit/save.php` — open a
+    transaction, re-fetch the claim with `SELECT … FOR UPDATE`, and refuse when
+    what they expected has changed. **The payment page was the only one without
+    that**, so a claim could be paid twice: two treasurers, or one person
+    clicking Save twice, each wrote a payment reference, each set the claim to
+    `Reimbursed`, and each sent the claimant a "you have been reimbursed"
+    e-mail. A unique key on `tblExpenseClaimPayments(claimID)` is deliberately
+    NOT the fix, because the `payAmount` column's own comment promises partial
+    payments (#650).
+
+    `Portal\Core\ExpenseRules::whyNotEditable()` is the ONE place that decides
+    whether a claim may still be changed. Do not write a second status test in a
+    page. It takes **facts rather than a database connection**, because the save
+    handler asks it TWICE — once cheaply, and again on facts read INSIDE its row
+    lock — and a method that did its own reading could not serve the second
+    call.
+
+    The rule is **"a claim nobody has decided on"**, never "a Pending claim". A
+    claim in a department needing several approvals STAYS `Pending` after the
+    first approval, so editing it then would leave an approver's recorded
+    approval sitting against figures they never saw. Two details: the count test
+    is `!== 0` and never `> 0` (the count answers -1 when it could not be read,
+    and "we could not tell whether anybody has decided" must never become
+    "nobody has, go ahead"); and ownership is answered BEFORE the status, so a
+    stranger is never told that a claim exists or where it has got to. Only the
+    claimant may change a claim — not an administrator, for the same reason as
+    #545.
+
+    **The HTTP harness cannot test the payment race.**
+    `tools/access-pages-selftest.php` starts PHP's built-in server and
+    deliberately does `unset($env['PHP_CLI_SERVER_WORKERS'])`, so it handles one
+    request at a time and two payment requests never overlap. A race test built
+    on it passes on the broken code. Tests:
+    `tools/expense-payment-race-selftest.php` (two real database connections,
+    plus the handler read as text, because neither catches the other's half) and
+    `tools/expense-edit-selftest.php` (section D walks the fraud sequence on
+    real rows, at the level of the rule — it does not load the handler, which
+    is section C's job). The technical record is DEV_NOTES.md, "The four money
+    writers all lock the claim".
+
+    `ExpenseRules::paymentReferences()` is the ONE place payment references are
+    read. It used to be inline on the payment page, and the page's self-test
+    held its own COPY of those lines — so an independent check altered the
+    PAGE's copy alone and every check still passed, while the drift would have
+    written an EMPTY payment reference against a real claim. **A test holding
+    its own copy of the logic it tests is not testing anything.**
+
+    FOUR TRAPS FOUND BY PLANTING FAULTS, worth knowing before writing a check
+    of this kind:
+    - A check that searches a page for a CALL can be satisfied by an HTML
+      COMMENT that merely mentions it. `codeOnly()` keeps inline HTML
+      deliberately, so the `<script>` check can still fail; use `phpOnly()`
+      when you mean "what does this page DO".
+    - A brace-matching walk must STEP OVER STRING LITERALS. One `{` inside a
+      log message made the walk swallow 2,432 characters — the rest of the
+      function — and the check then passed on a security gate that had been
+      deleted.
+    - `substr_count` of a shared SQL prefix cannot tell statements apart.
+      Three statements shared one WHERE prefix, so removing the organisation
+      scoping from one left the count intact and the check passed while
+      asserting the opposite. Name each statement.
+    - **Run the audit scripts and READ THEM.** Several report a problem and
+      still exit 0. `check_schema_seed_parity.py` named a missing migration
+      mark in its output while exiting 0, and "36 of 36 passed" measured by
+      exit code alone nearly shipped migration 223 unrecorded — which would
+      have made every fresh installation offer an upgrade with nothing to do.
+
+
 ## A few more things worth knowing
 
 - **Branches are meant to be promoted through four steps on the way to

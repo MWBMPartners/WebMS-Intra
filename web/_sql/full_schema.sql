@@ -25,7 +25,7 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-222 (DDL + settings/routes seeds + tblMigrations
+-- Covers migrations: 000-223 (DDL + settings/routes seeds + tblMigrations
 -- marks). When you add a new migration, port its DDL/seeds into the
 -- appropriate section here AND add its filename to the seed block at the
 -- end of this file. CI enforces this via
@@ -2461,6 +2461,17 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('expenses/view', 'expenses/view/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+-- ✏️ Changing a claim nobody has decided on yet (#651, migration 223). The
+--    rule about when that is allowed is in Portal\Core\ExpenseRules; these
+--    two rows must stay in step with web/_sql/223_expenses_edit_routes.sql.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('expenses/edit', 'expenses/edit/index.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('expenses/edit/save', 'expenses/edit/save.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 -- ─── Settings ────────────────────────────────────────────────────────────────
@@ -10295,4 +10306,22 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 --    so a clean run of the audit scripts does not prove this block is
 --    complete. Read what it prints.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('222_email_templates_global_uniqueness.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+
+-- 223 — a claimant can correct a claim nobody has decided on (#651).
+--    Recorded UNCONDITIONALLY, like 222 above: migration 223 does nothing but
+--    seed two addresses into tblRoutes, both of which this file already seeds
+--    (see the Expenses block), so there is genuinely nothing left for it to do
+--    against a database built from here. It does no once-only work, so its
+--    record does not need to be a test of anything.
+--    THIS WAS LEFT OUT WHEN THE MIGRATION WAS WRITTEN, on 28 October 2026, and
+--    an independent check found it before the work was committed. The harm is
+--    exactly the one described for 222: without this row a brand-new
+--    installation sees 223 as still waiting and the Upgrade page offers an
+--    upgrade that has nothing to do. `check_schema_seed_parity.py` named it in
+--    its printed output while still exiting 0 — which is precisely what the
+--    note above warns about, and the warning was not heeded. Run the audit
+--    scripts and READ THEM; an exit code of 0 is not the whole answer.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('223_expenses_edit_routes.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

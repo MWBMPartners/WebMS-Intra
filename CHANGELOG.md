@@ -2,6 +2,54 @@
 
 
 ## [Unreleased] (alpha)
+- **Added — a claimant can correct a claim nobody has decided on yet (#651)**
+  - **What a member should know.** There is now a **Change Claim** button on your own expense claim,
+    and a form at `/expenses/edit`. You can change what the claim is for, which department it is
+    charged to, and its lines. The total is worked out again from the lines when you save.
+  - **It stops the moment anybody decides.** Once an approver has approved or rejected the claim,
+    the button disappears and the form refuses, telling you to withdraw the claim and submit a new
+    one. **This is stricter than "while it is still waiting".** In a department that needs several
+    approvals a claim stays "waiting" after the first one — and changing it then would leave an
+    approver's recorded approval sitting against numbers they never saw. Before this existed,
+    nothing could change a claim at all, so that guarantee came free; it is now a rule the code
+    keeps, and it is checked.
+  - **Only the person who made the claim** — not an administrator, not an approver. The portal
+    already requires somebody else to approve and to pay a claim (#545); who may change the amount
+    being claimed belongs to the same rule. An administrator who needs a claim corrected rejects it,
+    or asks the claimant.
+  - **What it does not do.** It does not add or remove receipts. Attachments already on a claim are
+    left exactly as they are. Attaching a receipt that failed to upload is #649.
+  - **Measured.** 53 checks, including the sequence above walked end to end against a real database:
+    the claim is still "waiting" at the moment of saving, so a rule that read only the status would
+    have let a £20 claim become £2,000. Six planted faults, five caught at the first attempt.
+- **Fixed — an expense claim could be paid twice (#647)**
+  - **What a treasurer should know.** The payment page read a claim's status, then paid it, with
+    nothing holding the claim still in between. **Two treasurers recording payment for the same
+    claim at the same time — or one person clicking Save twice because the first answer was slow —
+    both succeeded.** The claim ended up with two payment references, and the claimant received two
+    "you have been reimbursed" e-mails. If each treasurer had really sent the money, it went out
+    twice. Nothing needs doing beyond upgrading; if you suspect it has happened, a claim's payment
+    records show every reference against it and who recorded each one.
+  - **Four things would each have stopped it, and not one was there:** a lock on the first read, a
+    second read inside the transaction, a condition on the update, and a rule in the database
+    forbidding two payments for one claim. The first three are now in place.
+  - **Why this counts as something left out rather than a decision.** The approvals page and the
+    withdrawal page have always done it correctly — they hold the claim still and look again before
+    acting. The payment page was the only one of the three money pages without that.
+  - **How it was found.** By reading the code, not by anything failing. No test had ever exercised
+    two payments at once. The automated test that drives the real pages **cannot** test this: it
+    runs a web server that handles one request at a time, so two payment requests can never
+    overlap there and such a test would have passed on the broken code. A separate test races two
+    real database connections instead. Six planted faults, all caught.
+  - **The payment references are now read in one place**, `ExpenseRules::paymentReferences()`, rather
+    than inline on the page. The reason is worth recording: the page's test held its own copy of
+    those few lines, so when an independent check altered the page's copy alone, every check still
+    passed — and the drift would have written an empty payment reference against a real claim. A test
+    holding its own copy of the logic it tests is not testing anything.
+  - **Two smaller faults in the same page, fixed with it.** A failed status update used to commit
+    the payment records anyway, leaving the claim payable a second time. And a payment reference or
+    comment sent as a list ended the page in an error, in one case storing a payment reference of
+    literally "Array" against a real claim.
 - **Fixed — a moved date of a PRIVATE imported event was shown to everybody (#644)**
   - **What an administrator should know.** If you import a calendar from elsewhere and one of its
     private repeating events had a single date moved, that moved date was imported as **not

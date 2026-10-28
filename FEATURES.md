@@ -542,7 +542,19 @@ Full claim lifecycle with multi-approver, treasury, PDF, CSV.
 
 - Submit (`/expenses/submit`) — claim with line items, receipt uploads, auto-attached PDF.
 - Approve (`/expenses/approve`) — multi-approver workflow with comments.
-- Treasury (`/expenses/treasury`) — record reimbursement, payment reference.
+- Treasury (`/expenses/treasury`) — record reimbursement, payment reference. **A claim cannot be paid
+  twice (#647):** the page holds the claim still and looks again before writing, so two treasurers at
+  once — or one person clicking Save twice — produce one payment, one status change and one e-mail.
+  The loser is told plainly that their reference was not saved.
+- **Change a claim (`/expenses/edit`) — the claimant only, and only while NOBODY has decided on it (#651).**
+  A **Change Claim** button appears on your own claim. The title, the department and the lines can all
+  change; the total is always worked out again from the lines, never taken from the form. The moment any
+  approver records a decision the button disappears and the form refuses — which is stricter than "still
+  waiting", because a claim in a department needing several approvals stays waiting after the first one,
+  and editing it then would leave an approval sitting against numbers nobody approved. Not an
+  administrator, for the same reason as #545. It does not touch receipts. The rule is
+  `Portal\Core\ExpenseRules::whyNotEditable()`, asked by the page and the handler and asked again
+  inside the handler's row lock.
 - **Nobody approves, rejects or pays their own claim (#545)** — a lead, a treasurer and an administrator are all refused; a claim does not wait for its own claimant; a person's own claims are left out of both lists. The rule is `Portal\Core\ExpenseRules`.
 - Withdraw — the claimant can take back their own claim while it is still pending (a button on the claim's
   page; final; the claim, its receipts and any approvals already given are kept). Statuses: Pending, Approved,
@@ -552,7 +564,9 @@ Full claim lifecycle with multi-approver, treasury, PDF, CSV.
 
 **🔜 Open issues:** #40 (Payment integration prep — design phase).
 
-**Tables:** `tblExpenseClaims`, `tblExpenseLines`, `tblExpenseAttachments`, `tblExpenseApprovals`, `tblExpenseStatuses`
+**Tables:** `tblExpenseClaims`, `tblExpenseClaimItems`, `tblExpenseClaimFiles`, `tblExpenseClaimApprovals`, `tblExpenseClaimPayments`
+
+> Four of the five names in this list were wrong until 28 October 2026 (`tblExpenseLines`, `tblExpenseAttachments`, `tblExpenseApprovals`, `tblExpenseStatuses` — none of which exists), and there is no statuses table at all: the status is a column on `tblExpenseClaims`. Checked against `web/_sql/full_schema.sql`. A search for a wrong table name finds nothing, and "nothing found" reads exactly like "nothing to fix".
 
 ---
 

@@ -42,6 +42,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#statuses" class="badge text-bg-secondary text-decoration-none">Status Meanings</a>
             <a href="#receipts" class="badge text-bg-secondary text-decoration-none">Uploading Receipts</a>
             <a href="#viewing" class="badge text-bg-secondary text-decoration-none">Viewing Your Claims</a>
+            <a href="#changing" class="badge text-bg-secondary text-decoration-none">Changing a Claim</a>
             <a href="#withdrawing" class="badge text-bg-secondary text-decoration-none">Withdrawing a Claim</a>
         </div>
     </div>
@@ -298,11 +299,76 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<!-- Section 6: Withdrawing a Claim -->
+<!-- Section 6: Changing a Claim (#651) -->
+<div class="portal-card p-4 mb-4" id="changing">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-pen me-2 text-primary"></i>Changing a Claim</h2>
+
+    <p>
+        If you spot a mistake on a claim you have made &mdash; the wrong amount, a missing line, the wrong
+        department &mdash; you can correct it, as long as nobody has decided on it yet. This is usually
+        better than withdrawing the claim, because a withdrawn claim cannot be reopened.
+    </p>
+
+    <div class="list-group list-group-flush mb-3">
+        <div class="list-group-item d-flex gap-3 align-items-start">
+            <span class="badge text-bg-primary rounded-pill mt-1">1</span>
+            <div>
+                <strong>Open your claim</strong>
+                <p class="mb-0 small text-secondary">Find it under <strong>Viewing Your Claims</strong> and open it.</p>
+            </div>
+        </div>
+        <div class="list-group-item d-flex gap-3 align-items-start">
+            <span class="badge text-bg-primary rounded-pill mt-1">2</span>
+            <div>
+                <strong>Click &ldquo;Change Claim&rdquo;</strong>
+                <p class="mb-0 small text-secondary">
+                    If the button is not there, the claim can no longer be changed &mdash; see the note below.
+                </p>
+            </div>
+        </div>
+        <div class="list-group-item d-flex gap-3 align-items-start">
+            <span class="badge text-bg-primary rounded-pill mt-1">3</span>
+            <div>
+                <strong>Correct it and save</strong>
+                <p class="mb-0 small text-secondary">
+                    Change what the claim is for, the department, and any of its lines. To remove a line,
+                    clear its description. The total is worked out again from the lines when you save, so you
+                    never have to add it up yourself.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="alert alert-info d-flex gap-2" role="alert">
+        <i class="fa-solid fa-circle-info mt-1"></i>
+        <div>
+            <strong>You can change a claim only while nobody has decided on it.</strong>
+            As soon as an approver approves or rejects it, the <strong>Change Claim</strong> button
+            disappears. That can happen while the claim still shows as <span class="portal-badge portal-badge-pending"><i class="fa-solid fa-clock"></i> Pending</span>,
+            because some departments need more than one approval &mdash; so a claim can be waiting for a
+            second approver and already have the first. This is deliberate: if a claim could be changed
+            after somebody had approved it, their approval would be recorded against figures they never
+            saw. To correct it then, withdraw the claim and submit a new one.
+        </div>
+    </div>
+
+    <p class="small text-secondary mb-0">
+        Only the person who made a claim can change it. An administrator cannot change it for you &mdash;
+        the portal deliberately keeps the person claiming and the people approving and paying separate.
+        Receipts are not affected: anything already attached stays attached, and changing a claim does not
+        add or remove attachments.
+    </p>
+</div>
+
+<!-- Section 7: Withdrawing a Claim -->
 <div class="portal-card p-4 mb-4" id="withdrawing">
     <h2 class="h4 mb-3"><i class="fa-solid fa-rotate-left me-2 text-warning"></i>Withdrawing a Claim</h2>
 
-    <p>If you have submitted a claim in error or need to make corrections, you can withdraw it while it is still pending approval.</p>
+    <p>
+        If you have submitted a claim in error, you can withdraw it while it is still pending approval.
+        If you only need to <em>correct</em> it, see <a href="#changing">Changing a Claim</a> first &mdash;
+        a withdrawn claim cannot be reopened, so changing it is usually the better route.
+    </p>
 
     <div class="list-group list-group-flush mb-3">
         <div class="list-group-item d-flex gap-3 align-items-start">
@@ -338,7 +404,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="alert alert-warning d-flex gap-2" role="alert">
         <i class="fa-solid fa-triangle-exclamation mt-1"></i>
         <div>
-            <strong>Important:</strong> You can only withdraw your own claims, and only while they are still <strong>Pending</strong>. Once a claim has been approved, rejected, or reimbursed, it cannot be withdrawn. If you need to correct an approved claim, contact your administrator. A withdrawn claim cannot be reopened: submit a new claim instead. The withdrawn claim, its receipts and any approvals already given stay on record.
+            <strong>Important:</strong> You can only withdraw your own claims, and only while they are still <strong>Pending</strong>. Once a claim has been approved, rejected, or reimbursed, it cannot be withdrawn. If you need to correct a claim that nobody has decided on yet, <a href="#changing">change it</a> instead. Once an approver has decided, it can be neither changed nor withdrawn: submit a new claim, and ask your administrator what to do about the old one. A withdrawn claim cannot be reopened: submit a new claim instead. The withdrawn claim, its receipts and any approvals already given stay on record.
         </div>
     </div>
 </div>
