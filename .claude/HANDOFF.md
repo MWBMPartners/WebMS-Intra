@@ -6,15 +6,68 @@
 
 ---
 
-## 28 OCTOBER 2026, LATEST — #653 and #652 both FIXED (the two items left as "Found")
+## 28 OCTOBER 2026, LATEST — the migration harness now runs on MariaDB (#487), commit `97afe09`
+
+The owner asked why the end-to-end migration harness could not run on MariaDB, and whether it
+could be changed so it can. It can, and it now does: **all seven phases and all 42 checks pass on
+MariaDB 11.4.13 — the same 42 that pass on MySQL 8.0.36 and 8.4.11.** `e2e-migrations.yml` runs
+three jobs side by side.
+
+**Neither blocker was in the portal.** MariaDB 11.x ships no `mysql` or `mysqladmin` program (only
+`mariadb` and `mariadb-admin`), and the version check compared the server's WHOLE reported string,
+which `11.4.13-MariaDB-ubu2404` never matches. `E2E_DB_ENGINE` is now the ONE place deciding the
+image and both client names. The version check takes the leading three-part number: the moving-tag
+guarantee is intact (`8.4` still fails against 8.4.11) but it IS looser in one way — it accepts
+`8.0.36-log` — and must never be described as "exactly as strict as before".
+
+**The real difference it found, and the wrong first guess.** Phase 2 failed because two `tblEvents`
+links read `on update RESTRICT` where MySQL says `NO ACTION`. The engines do NOT normalise rules:
+measured on all three, a DECLARED rule is recorded faithfully and only the default for an OMITTED
+clause differs. Migration 179 omits `ON UPDATE`, which is why that pair showed it. The fold prints
+the PAIR `NO ACTION/RESTRICT`; folding to one word was tried and was worse, because 26 links in
+`full_schema.sql` DECLARE `ON DELETE RESTRICT` and a failure line would have named a rule the
+schema does not contain. **What it gives up:** a declared RESTRICT vs NO ACTION is now invisible
+(proved by planting) — harmless, but not catchable here.
+
+**The lesson.** The comparison was never at fault; it is always same-engine and found the same two
+links on both. The HARD-CODED expected list was at fault, written in one engine's spelling.
+
+**Two review rounds, both NOT CLEAN, both right — and both about TRUTHFULNESS, not behaviour.**
+Round 1: an untrue comment on a guard that cannot fire (the image and the client come from one
+variable, and `wait_for_mysql` dies first), plus "byte-identical on MySQL" reached by diffing a
+PASSING run. Round 2: four more, including **"MariaDB cannot tell them apart", which my own earlier
+measurement disproves**, and "a passing run never prints a link line" (it prints exactly two — the
+known-exceptions block — and those two are the lines this change reworded). All fixed, corrections
+left VISIBLE in the notes. **The pattern to watch in this package: the engineering held every
+round; the write-ups kept overstating.**
+
+Two stale untruths found on the way and fixed: DEV_NOTES said "the test cannot see MariaDB", and
+its phase list said "six phases" and listed six — phase 7 was added 13 October and never added.
+
+**NOT verified:** nothing has run on GitHub. The matrix expansion and whether a MariaDB job fits
+`timeout-minutes: 20` are reasoned from local timings. Codex has not reviewed this.
+
+**Next on #487:** the owner's other concern — re-verifying the database shape, starting with
+uniqueness rules on columns that can be empty. **No work done on it at all yet.**
+
+---
+
+## 28 OCTOBER 2026 — #653 and #652 both FIXED (the two items left as "Found")
 
 The owner asked for both to be done now rather than carried. Both are, with evidence.
 
 ### #653 — a repeating date in the hour that happens twice came out an hour short
 
 `IcsReader::laterOfARepeatedReading()` is the ONE place that decides what a reading in the
-repeated hour means: the LATER of the two moments sharing it, which is what `makeDate()` already
-gave a one-off, so the two paths now agree by construction. Called from `buildOccurrence()`.
+repeated hour means: the LATER of the two moments sharing it. Called from `buildOccurrence()` and
+from the length measurement in `prepareEvent()`.
+
+**Corrected 28 October 2026:** this entry used to say the later reading "is what `makeDate()`
+already gave a one-off, so the two paths now agree by construction". **That is false and it is the
+exact belief that made this fix a no-op twice.** `makeDate()` does NOT call
+`laterOfARepeatedReading()` — grep it — and plain PHP does not give the later reading at all: it
+gives standard time in Europe but DAYLIGHT time across the Americas. The two paths agree because
+check I34c holds them together, never by construction.
 
 **The symptom was wider than the issue said.** It reported zero length. Measured: a daily
 01:30–05:30 series read `01:30 → 04:30` — **three hours instead of four**. The fault is "an hour
