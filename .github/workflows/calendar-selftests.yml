@@ -21,6 +21,12 @@
 #                                        real pages through PHP's built-in web
 #                                        server on this machine (owner's
 #                                        decision of 25 September 2026)
+#   tools/ics-zone-sweep.php             every time zone on Earth, every
+#                                        ambiguous clock reading on the night
+#                                        the clocks go back (#653). No
+#                                        database, no port, 1.4 seconds. Run
+#                                        --dense; see the step for why that is
+#                                        not optional.
 #   tools/import-notifier-selftest.php   who is told that imported events are
 #                                        waiting for approval (#514 part 9);
 #                                        a database. It sends nothing: mail
@@ -168,6 +174,32 @@ jobs:
       - name: Calendar reader self-test (PHP only)
         if: ${{ !cancelled() && steps.php.outcome == 'success' }}
         run: php -d memory_limit=512M tools/ics-reader-selftest.php
+
+      # 🌍 Every zone on Earth, every ambiguous clock reading (#653).
+      #
+      #    The reader has to decide what a clock reading in the hour that
+      #    happens TWICE means. That one decision shipped as a NO-OP three
+      #    times, and all three times the self-test above passed in full. Its
+      #    checks pin five shapes that were each found broken once; this sweeps
+      #    the space, and it is what found the third fault.
+      #
+      #    --dense is not optional. Light sampling starts at 1900 and misses
+      #    the pre-filter form of that fault altogether, because the readings
+      #    that expose it sit a whole DAY apart (the 1867 Alaska, 1892 Samoa
+      #    and 1899 Rarotonga moves across the date line). Planting it was
+      #    caught by --dense and by nothing else, the 368 checks above
+      #    included.
+      #
+      #    It needs no database and no port, and it is NOT slow: 419 zones,
+      #    334,240 readings, 145,265 of them ambiguous, in 1.4 seconds. The
+      #    first draft of its own header guessed "minutes" and argued for
+      #    leaving it out of CI — wrong by two orders of magnitude, and #646 is
+      #    about exactly what happens to a guard that runs nowhere. A hard
+      #    gate, so a rename that leaves it nothing to test fails rather than
+      #    passing quietly.
+      - name: "Ambiguous clock readings in every time zone (hard gate, #653)"
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php -d memory_limit=1024M tools/ics-zone-sweep.php --dense
 
       - name: Event visibility self-test
         if: ${{ !cancelled() && steps.databases.outcome == 'success' }}

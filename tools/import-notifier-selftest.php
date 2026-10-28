@@ -62,7 +62,8 @@
  *   N8   both clock-change nights, in London and in Santiago: the day
  *        before, the day itself and the day after; the use-by moment; and an
  *        event's time shown exactly as stored, in the hour that happens
- *        twice and in the hour that does not exist
+ *        twice and in the hour that does not exist. Pinned to a FIXED year
+ *        (CHANGE_NIGHT_ANCHOR), never to today — see #652
  *   N9   Auckland: 07:00 and 13:30 on one local day fall on two UTC dates
  *   N10  the e-mail switched off by the person: nothing, and no claim
  *   N11  quiet hours hold NOTHING: a person inside theirs is told at once
@@ -167,7 +168,7 @@ set_exception_handler(static function (Throwable $e): void {
 });
 
 /** How many checks a full run makes (passed + failed + skipped). A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 132;
+const EXPECTED_CHECKS = 134;
 
 // =============================================================================
 // 🛑 Refuse anything but a throwaway database — BEFORE any class is loaded
@@ -311,6 +312,41 @@ const NAME_D  = 'Delta Closed ZQXOD';
 const ZONE_A  = 'Europe/London';
 const ZONE_B  = 'America/Santiago';
 const ZONE_C  = 'Pacific/Auckland';
+
+/**
+ * 🕰️ The moment the clock-change checks (N8) count forward from. It is a
+ * FIXED DATE, not today, and that is the whole point.
+ *
+ * It used to be `time()`. That made N8 ask for two clock changes in the
+ * twelve months from whenever the test happened to run — and on
+ * 28 October 2026 the window 28 Oct 2026 → 28 Oct 2027 held exactly ONE
+ * London change (28 March 2027), because the next one (31 October 2027)
+ * fell three days past the edge. Four checks went red, with nothing wrong
+ * anywhere in the code, and they would have stayed red until late March
+ * 2027 (#652). A check that cries wolf gets switched off, and then it
+ * catches nothing.
+ *
+ * A twelve-month window from 1 January 2027 holds two changes in each of
+ * the three zones. Named here with their real dates, so the next person
+ * does not have to work them out — and so that a change to PHP's time-zone
+ * data that moved any of them would be visible as a changed comment rather
+ * than a mysterious failure:
+ *
+ *   Europe/London      Sun 28 Mar 2027 02:00 forward  ·  Sun 31 Oct 2027 01:00 back
+ *   America/Santiago   Sat  3 Apr 2027 23:00 back     ·  Sun  5 Sep 2027 01:00 forward
+ *   Pacific/Auckland   Sun  4 Apr 2027 02:00 back     ·  Sun 26 Sep 2027 03:00 forward
+ *
+ * Santiago is deliberately in the list: its change falls at 23:00 on a
+ * SATURDAY, so the repeated hour is the last hour of the day rather than
+ * one in the small hours, and the test exercises both shapes.
+ *
+ * Nothing about these checks needs the changes to be in the FUTURE —
+ * `ImportNotifier::run()` is handed the moment to pretend it is
+ * (`$nowUtc`), so the whole of N8 happens in 2027 whatever today's date
+ * is. When this date is eventually in the past it is still a correct test
+ * of clock-change behaviour; move it only if PHP's data for 2027 changes.
+ */
+const CHANGE_NIGHT_ANCHOR = '2027-01-01 00:00:00';
 
 const A_ADM1   = 930101; // a site administrator of A
 const A_ADM2   = 930102; // a site root administrator of A
@@ -583,15 +619,21 @@ function dayFrom(string $date, int $days): string
 }
 
 /**
- * The clock changes of one zone in the next twelve months, from PHP's own
- * time-zone data. Each is the moment of the change and the offset from UTC
- * before and after it, in seconds.
+ * The clock changes of one zone in the twelve months after `$from`, from
+ * PHP's own time-zone data. Each is the moment of the change and the offset
+ * from UTC before and after it, in seconds.
+ *
+ * `$from` defaults to NOW, which is what `ordinaryDay()` wants: it is
+ * looking for a day in the near future that is nowhere near a change.
+ * N8 passes `CHANGE_NIGHT_ANCHOR` instead, because a test about clock
+ * changes must not depend on which side of one today happens to fall —
+ * see the comment on that constant (#652).
  *
  * @return list<array{ts:int, before:int, after:int}>
  */
-function clockChanges(string $zone): array
+function clockChanges(string $zone, ?int $from = null): array
 {
-    $from  = time();
+    $from  = $from ?? time();
     $steps = (new DateTimeZone($zone))->getTransitions($from, $from + 366 * 86400);
     $out   = [];
     // The first entry is the state at `$from`, not a change.
@@ -1239,14 +1281,52 @@ $changeNight = static function (int $site, string $name, string $zone, int $feed
         implode(' | ', array_slice($times, 0, 4))
     );
 };
+// The anchor is a FIXED date (CHANGE_NIGHT_ANCHOR), never today, so these
+// checks give the same answer whatever day of the year the test runs on.
+$anchor = (new DateTimeImmutable(CHANGE_NIGHT_ANCHOR, new DateTimeZone('UTC')))->getTimestamp();
+
+// 📌 The pinned nights, WRITTEN OUT BY HAND. This is not belt and braces: the
+// four checks below each derive their night from PHP's time-zone data, so if a
+// government moved a clock change and a data update followed, they would all
+// still pass while testing a different night from the one the constant's
+// comment names — and the comment would be quietly untrue. Deriving the
+// expected dates from the same data would only prove the data agrees with
+// itself. If this check ever fails, read the new dates off it and update the
+// comment on CHANGE_NIGHT_ANCHOR to match (#652).
+$pinned = [
+    ZONE_A => ['2027-03-28 02:00 forward', '2027-10-31 01:00 back'],
+    ZONE_B => ['2027-04-03 23:00 back', '2027-09-05 01:00 forward'],
+];
+foreach ($pinned as $zone => $want) {
+    $got = [];
+    foreach (clockChanges($zone, $anchor) as $change) {
+        $got[] = (new DateTimeImmutable('@' . $change['ts']))->setTimezone(new DateTimeZone($zone))->format('Y-m-d H:i')
+            . ' ' . ($change['after'] > $change['before'] ? 'forward' : 'back');
+    }
+    ok(
+        'N8 ' . $zone . ': the twelve months from ' . CHANGE_NIGHT_ANCHOR . ' UTC hold exactly the two clock changes named beside '
+        . 'CHANGE_NIGHT_ANCHOR (' . implode(' and ', $want) . '), on the organisation\'s own clock',
+        $got === $want,
+        'this PHP\'s time-zone data (' . timezone_version_get() . ') says: ' . json_encode($got)
+    );
+}
 foreach ([[ORG_A, NAME_A, ZONE_A, FEED_A1, addresses($adminsA)], [ORG_B, NAME_B, ZONE_B, FEED_B1, addresses([B_ADM])]] as [$site, $name, $zone, $feed, $expect]) {
-    $changes = clockChanges($zone);
+    $changes = clockChanges($zone, $anchor);
     foreach ([0, 1] as $index) {
         $label = $zone . ', change ' . ($index + 1);
         if (isset($changes[$index]) === false) {
-            // Four checks either way, so the count at the end still holds.
+            // Four either way, so the count at the end still holds. SKIPPED,
+            // not FAIL: if a country abolishes its clock changes and a PHP
+            // time-zone update follows, there is nothing wrong with this
+            // portal — the check simply cannot be made, and saying FAIL for
+            // that is how a check gets switched off (#652). Should this ever
+            // print, pick a zone that still changes, or a year that does.
             foreach (['the sending pattern', 'the use-by moment', 'when the list was made', 'the change-night event times'] as $part) {
-                ok('N8 ' . $label . ': ' . $part, false, 'this PHP\'s time-zone data shows fewer than two clock changes for ' . $zone . ' in the next twelve months, so nothing could be tried');
+                skipped(
+                    'N8 ' . $label . ': ' . $part,
+                    'this PHP\'s time-zone data (' . timezone_version_get() . ') shows fewer than two clock changes for ' . $zone
+                    . ' in the twelve months from ' . CHANGE_NIGHT_ANCHOR . ' UTC, so nothing could be tried.'
+                );
             }
             continue;
         }

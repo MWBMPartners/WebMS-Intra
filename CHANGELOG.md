@@ -75,19 +75,87 @@
     line, an unclosed reminder inside a closed event, and two events with the second cut off. Only
     the first is now called whole, and a well-formed calendar is unchanged — which matters, because
     getting that wrong would stop the portal tidying anything away on any calendar, for ever.
-- **Found, not fixed — a repeating event's later date in the hour that happens twice shows no length at all (#653)**
-  - On the night the clocks go **back**, 01:30 happens twice. A repeating event whose date **falls**
-    on that reading comes out as **01:30 to 01:30** — no length — so a weekly 01:30 to 02:30 service
-    looks like a zero-length entry one night a year. The underlying times really are an hour apart;
-    it is the two clock readings that collide, because the clock reads 01:30 twice.
-  - **It is the second or later date of a series, not the first.** A series that *starts* on that
-    reading is correct throughout, and so is a one-off. That difference is the clearest sign
-    something is wrong: the portal answers the same question two ways depending on which date of a
-    series is asked about. (Said carefully because the first version of this entry, and the issue's
-    own title, said "starting in" — the one reproduction that gives the right answer.)
-  - **Not fixed**, because it needs a decision about what an ambiguous reading means, and that is
-    the owner's to make — the same kind of decision as the forward direction below. Measurements and
-    options are on #653. It is **not new**: it was confirmed against the released code.
+- **Fixed — a repeating event in the hour that happens twice came out an hour short (#653)**
+  - **What a member would have seen.** On the night the clocks go **back**, 01:30 happens twice. A
+    repeating event whose date fell on that reading came out an hour short: a weekly **01:30 to
+    02:30** service showed as **01:30 to 01:30**, no length at all, and a **01:30 to 05:30** event
+    showed as **01:30 to 04:30** — three hours instead of four. One night a year, on any repeating
+    event in that hour.
+  - **Zero length was only the most visible case.** The real fault was "an hour short", and an event
+    that happened to be an hour long is what turns that into nothing at all. The underlying times
+    were right throughout; it was the clock readings that were wrong.
+  - **The clearest sign something was wrong** was that a one-off event at exactly the same time on
+    the same night was correct. The portal answered the same question two different ways depending
+    on whether the event repeated. There is now **one place** that decides what a reading in that
+    hour means — the latest moment that carries it — and a check holds the two to the same answer.
+  - **Said plainly about what is still awkward, because the two cases look alike and are not.** An
+    event that *ends* in the repeated hour still **looks** shorter than it is on screen — by
+    however much the clocks moved that night, usually an hour. What is stored is right. Fixing the
+    appearance means showing the time zone beside the time, not changing the data. And where somebody else's calendar states times in
+    **UTC** rather than local time, the portal is given two exact instants with no choice to make;
+    those can still read oddly, and that one genuinely cannot be fixed without storing the time
+    zone beside each time. Both are now written down and checked, so neither gets "fixed" into
+    being wrong.
+  - **Honest about the build: this fix was wrong twice before it was right, and neither fault was
+    found by the tests written alongside it.**
+    - It first judged every time in the **organisation's** zone, which moved an event stated in
+      UTC an hour late. All 357 checks in the calendar reader's own test passed; it took the
+      importer's test, which needs a real database, to catch it.
+    - It then relied on PHP to resolve an ambiguous time to the later of the two. **PHP does not
+      do that outside Europe and Australasia** — in New York, Chicago, Los Angeles, Havana,
+      Santiago and the Azores it picks the earlier one, so the fix did nothing at all there and
+      the fault stayed live. Every test still passed, because every test calendar was written in
+      London. An independent review caught it.
+    - It then built each candidate time with a PHP call that **quietly gives back a different
+      moment** than the one asked for, which made it a no-op again — mostly in places that moved
+      their clocks **permanently** rather than for the summer, such as Metlakatla in Alaska in
+      2015 or Ciudad Juárez in 2022, though not only those. A sweep of **every** time zone found
+      it, and a second independent review is what prompted that sweep.
+    - **A fourth fault, found by a third review, and the only one that stored wrong times rather
+      than merely failing to fix them.** The *length* of an event was measured between two times
+      the reader had resolved inconsistently, so in the Americas a one-hour event came out as
+      two hours. Part of that was already happening before any of this work; this work briefly
+      made it worse, affecting the first date of a series and one-off events as well. Now fixed,
+      and every zone gives the answer the file states.
+    - **A fifth and sixth fault, found by a fourth review.** Half the fix could be deleted with
+      every check still passing — so an event whose *end* fell in the repeated hour behaved
+      differently in New York and London again, and the comment pointing at the guard named a
+      check that could not see it. And an event that states its start as a **local time** but its
+      end as a **UTC time** — a mixture the calendar standard allows — **lost its end altogether**,
+      showing as a start time only with no warning. The released version is **also wrong on that
+      shape**, differently: it records the end as being *before* the start. So this repairs an
+      existing fault as well as a new one. Both fixed, both now checked.
+    - **A seventh fault, found by the fifth and final review.** An event **shorter than that
+      night's clock change** — a fifteen-minute slot, say — lost its end in 24 time zones,
+      including Mexico, Argentina and Venezuela, showing as a start time only. The released
+      version handled it correctly, so this one was ours. It was the same underlying trap the
+      work had already documented twice, sitting in the one place nobody had looked again.
+    - **One deliberate change worth knowing about.** A repeating event that *begins* on the night
+      the clocks go back, and whose end time falls in the repeated hour, is now stored as two
+      hours long on every later date rather than one. That follows from the rule the owner chose
+      in September 2026 (every date of a series keeps the same real length) and is what the
+      portal already did for British time zones; Google, Apple and Outlook would show one hour.
+      It only affects a series that starts on that one night.
+    - **What is now checked automatically**, on every change: the eight shapes that were each found
+      broken once — an ordinary summer-time change, a zone that resolves the ambiguity the other
+      way (New York), a **thirty-minute** change (Lord Howe), a permanent move (Metlakatla), and
+      an event whose own start time is the ambiguous one, an event whose *end* is the ambiguous
+      one, an event mixing a local start with a UTC end, and an event shorter than the change
+      itself. **Plus a sweep of every time zone on Earth** (419 of them, 145,265 ambiguous times, 1.4 seconds), which is what caught the third
+      fault and is the only thing that catches one form of it.
+  - It was **not new**: it was confirmed against the released code before being fixed.
+- **Fixed — a calendar test went red by itself as the year turned (#652)**
+  - Four checks in the import-notifier's test asked for **two** clock changes in the twelve months
+    from *today*, and from 25 October 2026 the window held only one. The checks failed with nothing
+    wrong anywhere in the portal, and would have done so on every pull request.
+  - **Measured rather than estimated:** it is a **five-day window that recurs irregularly** — four
+    of them in the next three years, 20 days out of 1,095 — not the five months the issue guessed.
+    One of the four was waiting for America/Santiago in April 2028, which nobody had hit yet. The
+    test now counts from a fixed date instead of today, so it gives the same answer whatever day of
+    the year it runs on.
+  - A check that cannot be made now reports **skipped** rather than failed, because a country
+    abolishing its clock changes is not a fault in this portal — and a check that cries wolf gets
+    switched off, and then it catches nothing.
 - **Recorded — what the portal does with a repeat that lands in the hour that does not exist (#645)**
   - On the night the clocks go forward an hour simply does not happen. A repeating event at 01:30
     therefore has one date with nowhere to land. **The portal moves it forward to 02:30, keeps it

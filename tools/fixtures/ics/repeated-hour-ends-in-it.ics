@@ -1,0 +1,10 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra self-test//#653//EN
+BEGIN:VEVENT
+UID:repeated-hour-ends-in-it@example.invalid
+DTSTART;TZID=Europe/London:20261025T004500
+DTEND;TZID=Europe/London:20261025T014500
+SUMMARY:Ends in the hour that happens twice
+END:VEVENT
+END:VCALENDAR

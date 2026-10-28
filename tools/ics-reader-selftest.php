@@ -352,6 +352,29 @@ function st_lines_of(array $occurrences): array
 }
 
 /**
+ * How far apart two stored readings are ON THE CLOCK, in seconds.
+ *
+ * Both texts are read in UTC, which has no clock changes, so this is plain
+ * arithmetic on the two readings and nothing else. It is the length a member
+ * sees on the page.
+ *
+ * WHY IT IS NOT DONE BY REBUILDING EACH READING IN ITS OWN ZONE. On the night
+ * the clocks go back a reading in the repeated hour names two moments, and PHP
+ * picks the EARLIER one in the Americas and the LATER one in Europe. A check
+ * that rebuilds the readings therefore measures something zone-dependent: the
+ * same correct pair comes out 3,600 seconds in London and 7,200 in New York.
+ * A check in I34i did exactly that and failed on correct output. This function
+ * exists so that no check here repeats it.
+ */
+function st_clockSeconds(string $start, string $end): int
+{
+    $utc = new DateTimeZone('UTC');
+
+    return (new DateTimeImmutable($end, $utc))->getTimestamp()
+        - (new DateTimeImmutable($start, $utc))->getTimestamp();
+}
+
+/**
  * Read a calendar in a SEPARATE PHP process and report what happened.
  *
  * Why this exists at all: running out of memory in PHP is a fatal error. It
@@ -3552,6 +3575,900 @@ st_lines(
     ],
     st_lines_of($r['expand']['occurrences'])
 );
+
+// =============================================================================
+// I34: A DATE THAT STARTS INSIDE THE HOUR THAT HAPPENS TWICE (#653).
+// =============================================================================
+//
+// I29 above covers a series that CROSSES the repeated hour. Nothing covered
+// one that STARTS inside it, and that gap hid a real fault for as long as the
+// class has existed.
+//
+// WHAT WAS WRONG. On the night the clocks go back, Europe/London runs
+// 01:00–01:59 twice: once on BST, once on GMT. A reading of "01:30" that night
+// names two moments an hour apart. `generateStarts()` carried the cursor's own
+// offset forward, so a repeating date landed on the EARLIER of the two, while
+// `makeDate()` — the path a ONE-OFF takes — resolves the identical reading to
+// the LATER one. The portal answered the same question two different ways
+// depending on whether the event repeated.
+//
+// Because the end of a date is the start plus its EXACT length (RFC 5545
+// §3.8.5.3, the owner's decision of 23 September 2026), resolving the start an
+// hour early pushed the end onto a reading an hour short. Measured against the
+// committed class on 28 October 2026:
+//
+//   01:30–02:30 daily  came out  01:30 → 01:30   length ZERO
+//   01:30–05:30 daily  came out  01:30 → 04:30   THREE hours, not four
+//
+// The issue reported only the zero-length case. The four-hour case shows what
+// the fault really is: a date starting in the repeated hour read an hour
+// short, and zero length is simply what that looks like when the date was an
+// hour long to begin with. The instants were right throughout — it was the
+// readings that were unreadable.
+//
+// WHERE THE DECISION LIVES. `IcsReader::laterOfARepeatedReading()`, the ONE
+// place that says what such a reading means, called from `buildOccurrence()`.
+// Its doc block carries the reasoning, including why it CANNOT be done in
+// `generateStarts()`: the recurrence key is the start turned into UTC and is
+// stored on the row, so resolving earlier would rename every one of these
+// dates and make the importer delete and re-add it. Check I34b pins that the
+// key is NOT changed, which is what makes that claim testable rather than a
+// promise in a comment.
+//
+// Every expected reading below was worked out by hand from the change at
+// 02:00 BST on 25 October 2026 and from the two instants that share "01:30"
+// that night (00:30Z on BST, 01:30Z on GMT), NOT read off the reader.
+//
+// WHICH CHECK CATCHES WHAT, measured by planting every plausible mistake
+// rather than assumed. Worth knowing, because four of them are caught by ONE
+// check each:
+//
+//   trusting PHP to resolve the         I34i, I34j, I34k, I34l, I34m. This is
+//   ambiguous reading, instead of       the mistake the FIX ITSELF SHIPPED,
+//   scanning the zone's transitions     and it made the whole thing a no-op
+//                                       across the Americas. Every London
+//                                       check passed.
+//   assuming the change is an hour      the Lord Howe check in I34i ALONE
+//   the pre-filter returning too        I34, I34c, I34d, I34e, I34i, I34j,
+//   often (so ambiguity is missed)      I34k, I34l, I34m
+//   the transitions window narrowed     I34, I34c, I34d, I34e, I34i, I34j,
+//   to nothing                          I34k, I34l, I34m
+//   the END built with                  I34n ALONE — and by NOTHING before
+//   `setTimestamp()` in                 I34n existed, the all-zone sweep
+//   `buildOccurrence()`                 included
+//   a candidate built with              I34j ALONE
+//   `setTimestamp()` (the THIRD no-op)
+//   the length measured from the        I34k ALONE
+//   UNRESOLVED pair (the regression
+//   this package introduced)
+//   `setTimestamp()` in the cheap       NOTHING HERE. Measured, not assumed.
+//   pre-filter only                     It is a real fault — it shows up in
+//                                       the 86,400-second date-line moves of
+//                                       1867 Alaska, 1892 Samoa and 1899
+//                                       Rarotonga — and the only thing that
+//                                       catches it is
+//                                       `tools/ics-zone-sweep.php --dense`,
+//                                       which runs on every pull request for
+//                                       this reason. Light sampling misses it
+//                                       too.
+//
+// Every row above has been re-measured TWICE: after I34j/I34k, and again after
+// I34l/I34m/I34n. Both times rows had quietly stopped being true — "I34i alone"
+// the first time, four rows missing I34l and I34m the second. A table presented
+// as a measurement has to be re-run when the thing it measures changes, or it
+// quietly becomes a claim, and this one has needed that twice.
+//
+// One row is REMOVED rather than left standing: "only the zero length fixed
+// (nudge an end equal to its start)". No fixture here produces a
+// `lengthSeconds` of exactly 0, so a nudge on that value is dead code and the
+// row described an experiment that cannot be run.
+//
+//   removing the fix altogether     I34, I34c, I34d, I34e
+//   judging the reading in the      I34h ALONE — and that check did not exist
+//   ORGANISATION's zone instead     until the mistake had been made and found
+//   of the written one              elsewhere. This is the REGRESSION THE FIX
+//                                   ITSELF SHIPPED FIRST: it moved an event
+//                                   stated in UTC an hour late, every other
+//                                   check here passed, and it took part G of
+//                                   tools/feed-importer-selftest.php — which
+//                                   needs a database and a web server — to
+//                                   notice. I34h brings that guard back to
+//                                   the one test that needs neither.
+//   "fixing" only the zero length   I34d (and I34h, and K1/K5, because a
+//                                   zero-length date is a legitimate shape
+//                                   elsewhere). A nudge that moves an end
+//                                   equal to its start on by an hour makes
+//                                   every hour-long case read correctly, so
+//                                   I34, I34c and I34c's agreement all pass;
+//                                   only the FOUR-hour case still shows the
+//                                   reading an hour short.
+//   resolving before the key        I34b (with I34, I34d, I34e)
+//   resolving to the EARLIER one    the line checks. I34c's AGREEMENT check
+//                                   passes, correctly — the choice is made in
+//                                   one place, so both paths move together
+//                                   and still agree. Agreement and
+//                                   correctness are two different claims, and
+//                                   neither check is asked to make the other.
+//
+// A PHP trap found while planting, and the reason that plant had to be
+// rewritten: `modify('-1 hour')` is applied to the WALL CLOCK, so on a
+// DateTimeImmutable reading 01:30 GMT that night it gives 00:30 BST — a
+// different reading, an hour and a half earlier in real terms than intended.
+// The genuine earlier instant with the SAME reading is
+// `setTimestamp(getTimestamp() - 3600)`. The first version of the plant used
+// `modify()`, fell through its own condition, changed nothing, and "passed"
+// all 357 checks — which looked exactly like a gap in the checks and was not.
+// Same family as the `diff()` trap in DEV_NOTES: hours are exact, clock
+// arithmetic is nominal, and the two part company twice a year.
+$repeatedDaily = st_read('repeated-hour-daily.ics');
+st_lines(
+    'I34 repeated-hour-daily.ics: a daily 01:30-02:30 series reads 01:30 to 02:30 on EVERY night, the repeated hour included',
+    [
+        '2026-10-24 01:30:00|2026-10-24 02:30:00|timed|key=20261024T003000Z|series|priv=no|canc=no|dup=no'
+        . '|Starts in the hour that happens twice',
+        '2026-10-25 01:30:00|2026-10-25 02:30:00|timed|key=20261025T003000Z|series|priv=no|canc=no|dup=no'
+        . '|Starts in the hour that happens twice',
+        '2026-10-26 01:30:00|2026-10-26 02:30:00|timed|key=20261026T013000Z|series|priv=no|canc=no|dup=no'
+        . '|Starts in the hour that happens twice',
+    ],
+    st_lines_of($repeatedDaily['expand']['occurrences'])
+);
+// I34b: the key of the date on the change night is the PRE-resolution start in
+// UTC, `20261025T003000Z`. This is the check that stops the fix being "tidied"
+// into `generateStarts()`, where it would change this very value — and a
+// changed key means a stored row the importer no longer recognises, so it
+// removes it and adds a new one. The key is asserted on its own, and not only
+// as part of the line above, so that a failure says plainly what broke.
+st_check(
+    'I34b and the identity of the date on the change night is unchanged by the fix (the pre-resolution start in UTC)',
+    ($repeatedDaily['expand']['occurrences'][1]['recurrenceKey'] ?? '') === '20261025T003000Z',
+    'key is ' . json_encode($repeatedDaily['expand']['occurrences'][1]['recurrenceKey'] ?? null)
+        . ' — if this is 20261025T013000Z the resolution has moved into generateStarts() and every '
+        . 'already-imported date of this shape will be deleted and re-added on the next refresh'
+);
+// I34c: the whole point of the fix — a one-off and a repeating date at the
+// same reading on the same night now give the same answer. Before the fix they
+// did not, and that disagreement is what showed the fault was in the repeating
+// path rather than a matter of taste.
+$repeatedOneOff = st_read('repeated-hour-one-off.ics');
+st_lines(
+    'I34c repeated-hour-one-off.ics: a ONE-OFF at the same reading reads the same 01:30 to 02:30',
+    [
+        '2026-10-25 01:30:00|2026-10-25 02:30:00|timed|key=|one-off|priv=no|canc=no|dup=no'
+        . '|A one-off at the same reading',
+    ],
+    st_lines_of($repeatedOneOff['expand']['occurrences'])
+);
+$oneOffPair   = [$repeatedOneOff['expand']['occurrences'][0]['start'] ?? '', $repeatedOneOff['expand']['occurrences'][0]['end'] ?? ''];
+$seriesPair   = [$repeatedDaily['expand']['occurrences'][1]['start'] ?? '', $repeatedDaily['expand']['occurrences'][1]['end'] ?? ''];
+st_check(
+    'I34c and the two AGREE, which is what makes this one decision rather than two that happen to match',
+    $oneOffPair === $seriesPair && $oneOffPair !== ['', ''],
+    'one-off ' . json_encode($oneOffPair) . ' vs series ' . json_encode($seriesPair)
+);
+// I34d: the four-hour case. This is the check that would still fail if the fix
+// only avoided a length of zero rather than resolving the reading — for
+// example by nudging an end that equals its start. The length it must read is
+// four hours, not "more than nothing".
+$repeatedLong = st_read('repeated-hour-long.ics');
+st_lines(
+    'I34d repeated-hour-long.ics: a daily FOUR-hour series from inside the repeated hour reads four hours on every night',
+    [
+        '2026-10-24 01:30:00|2026-10-24 05:30:00|timed|key=20261024T003000Z|series|priv=no|canc=no|dup=no'
+        . '|Four hours from inside the repeated hour',
+        '2026-10-25 01:30:00|2026-10-25 05:30:00|timed|key=20261025T003000Z|series|priv=no|canc=no|dup=no'
+        . '|Four hours from inside the repeated hour',
+        '2026-10-26 01:30:00|2026-10-26 05:30:00|timed|key=20261026T013000Z|series|priv=no|canc=no|dup=no'
+        . '|Four hours from inside the repeated hour',
+    ],
+    st_lines_of($repeatedLong['expand']['occurrences'])
+);
+// I34e: the OTHER length route. An end can come from an explicit DTEND (a
+// number of seconds) or from a DURATION (a hand-built interval), and
+// `buildOccurrence()` works them out in two separate branches. The fault was
+// in the shared start, so both were wrong; a fix applied to only one branch
+// would pass I34 and fail here.
+$repeatedDuration = st_read('repeated-hour-duration.ics');
+st_lines(
+    'I34e repeated-hour-duration.ics: the DURATION route gives the same answer as the DTEND route',
+    [
+        '2026-10-24 01:30:00|2026-10-24 02:30:00|timed|key=20261024T003000Z|series|priv=no|canc=no|dup=no'
+        . '|An hour long by DURATION',
+        '2026-10-25 01:30:00|2026-10-25 02:30:00|timed|key=20261025T003000Z|series|priv=no|canc=no|dup=no'
+        . '|An hour long by DURATION',
+        '2026-10-26 01:30:00|2026-10-26 02:30:00|timed|key=20261026T013000Z|series|priv=no|canc=no|dup=no'
+        . '|An hour long by DURATION',
+    ],
+    st_lines_of($repeatedDuration['expand']['occurrences'])
+);
+// I34f: A DATE WHOSE END FALLS IN THE REPEATED HOUR — a DISPLAY nuance, and
+// deliberately NOT called a data fault.
+//
+// The date below runs from 00:45 for two REAL hours (23:45Z to 01:45Z) and is
+// stored as "00:45 → 01:45". To a person's eye that is one hour, because the
+// end is on GMT and the start on BST and the reading says neither.
+//
+// BUT THE DATA IS NOT WRONG, and the first version of this comment said it was.
+// Reading this pair back in Europe/London recovers the full 7,200 seconds,
+// which the second check below asserts rather than describes.
+//
+// SAID NARROWLY, because the first draft of this said "the portal reads a
+// stored reading back by resolving it in the organisation's zone, which takes
+// the LATER of two". PHP takes the later in Europe and the EARLIER in the
+// Americas, so that recovery is a property of THIS ZONE and not a general one
+// — see I34i, which pins the opposite outcome in America/New_York. What is
+// general is that the stored instants are right. So what is lost here is only
+// what a reader can SEE on that one night, and the fix for that would be to
+// show the offset beside the time, not to change what is stored.
+//
+// Contrast I34h, which IS a data limit: there the pair reads back as MINUS 900
+// seconds and the real length cannot be recovered at all. The two cases look
+// alike and are not, and calling both "the known limit" — as this comment did
+// at first — would send the next reader off to fix the wrong one.
+//
+// Pinned so that nobody "corrects" the stored end to 02:45, which would be an
+// end an hour after the real one: wrong data in place of an awkward reading.
+//
+// This shape is the same for a ONE-OFF, so it was never caused by the
+// repeating path and the fix neither helps nor harms it.
+$endsInIt = st_read('repeated-hour-ends-in-it.ics');
+st_lines(
+    'I34f repeated-hour-ends-in-it.ics: a date ENDING in the repeated hour is stored unchanged, and LOOKS an hour short to a reader',
+    [
+        '2026-10-25 00:45:00|2026-10-25 01:45:00|timed|key=|one-off|priv=no|canc=no|dup=no'
+        . '|Ends in the hour that happens twice',
+    ],
+    st_lines_of($endsInIt['expand']['occurrences'])
+);
+// And the instants behind that reading really are two hours apart, which is
+// what makes the line above a reading problem rather than a lost hour. Worked
+// out here with plain date arithmetic on the two readings, in the zone, so the
+// check does not depend on the reader to describe the reader.
+$endsStart = new DateTimeImmutable((string) ($endsInIt['expand']['occurrences'][0]['start'] ?? '1970-01-01 00:00:00'), $orgZone);
+$endsEnd   = new DateTimeImmutable((string) ($endsInIt['expand']['occurrences'][0]['end'] ?? '1970-01-01 00:00:00'), $orgZone);
+st_check(
+    'I34f and the stored pair reads BACK as the full two hours (23:45Z to 01:45Z), so the data is right and only the appearance is short',
+    $endsEnd->getTimestamp() - $endsStart->getTimestamp() === 7200
+        && $endsStart->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i') === '2026-10-24 23:45'
+        && $endsEnd->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i') === '2026-10-25 01:45',
+    'real length ' . ($endsEnd->getTimestamp() - $endsStart->getTimestamp()) . 's, instants '
+        . $endsStart->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i') . 'Z to '
+        . $endsEnd->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i') . 'Z'
+);
+// I34h: A TIME STATED IN UTC IS AN INSTANT, NOT A READING — DO NOT MOVE IT.
+//
+// This is the check for the mistake the fix itself made first time round, and
+// it is here because the reader's own test had nothing that could see it.
+//
+// The first version resolved the reading in the ORGANISATION's zone, without
+// asking where the reading came from. A `DTSTART` ending in `Z` states an
+// instant; there is no ambiguity to resolve. Rebuilding its London reading and
+// taking "the later one" moved a real event an hour LATE. Nothing in this file
+// noticed — it took part G of `tools/feed-importer-selftest.php`, which needs a
+// database and a web server, to catch it. The fix is to judge the reading in
+// the zone it was WRITTEN in, which makes a `Z` time a no-op for the plainest
+// of reasons: UTC has no clock changes, so it has no repeated hour.
+//
+// AND THE SECOND HALF OF THIS CHECK IS THE HONEST BIT. The middle date of the
+// UTC series below reads `01:30 → 01:30` — zero length — and that is RIGHT.
+// The file stated two definite instants, 00:30Z and 01:30Z, and in London that
+// night BOTH read 01:30. There is no other reading to choose. So #653 did NOT
+// make a zero-length reading impossible, and anybody who takes it that way
+// will "fix" this by moving an event that is already correct. What #653 fixed
+// is the case where the portal CHOSE the wrong one of two possible readings.
+// Where the file leaves no choice, the reading collides and the instants are
+// still right — the same limit as I34f, in different clothes.
+//
+// Worked out by hand: the change is at 01:00Z. 00:30Z on 24 and 25 October is
+// still BST and reads 01:30; 00:30Z on 26 October is GMT and reads 00:30.
+//
+// THE LIST IS IN START ORDER, not the order the events appear in the file, so
+// the one-off on the 25th sits between the series' second and third dates. All
+// four readings and all three keys below were derived by hand and matched
+// first time; the order was the one thing assumed rather than worked out, and
+// it was the one thing wrong. I29's fixture hides this, because its events
+// happen to be in ascending order in the file as well.
+$utcInstant = st_read('repeated-hour-utc-instant.ics');
+st_lines(
+    'I34h repeated-hour-utc-instant.ics: a time stated in UTC is an instant and is never moved, even when its reading lands in the repeated hour',
+    [
+        '2026-10-24 01:30:00|2026-10-24 02:30:00|timed|key=20261024T003000Z|series|priv=no|canc=no|dup=no'
+        . '|A UTC series across the change',
+        '2026-10-25 01:30:00|2026-10-25 01:30:00|timed|key=20261025T003000Z|series|priv=no|canc=no|dup=no'
+        . '|A UTC series across the change',
+        '2026-10-25 01:30:00|2026-10-25 01:15:00|timed|key=|one-off|priv=no|canc=no|dup=no'
+        . '|Stated as an instant in UTC',
+        '2026-10-26 00:30:00|2026-10-26 01:30:00|timed|key=20261026T003000Z|series|priv=no|canc=no|dup=no'
+        . '|A UTC series across the change',
+    ],
+    st_lines_of($utcInstant['expand']['occurrences'])
+);
+// The one-off above reads END BEFORE START (01:30 → 01:15). That is not a
+// typing slip in this file: 00:30Z plus 45 real minutes is 01:15Z, which that
+// night reads 01:15 on GMT while the start reads 01:30 on BST. Part G of the
+// importer's self-test pins the same shape and says the same thing. It is
+// asserted separately here so that a reader who thinks it is a mistake finds
+// the answer rather than "fixing" it.
+// Picked out by TITLE, not by position: the list is in start order, so the
+// one-off's index moves if a date is ever added to the series beside it.
+$utcOne = ['start' => '', 'end' => ''];
+foreach ($utcInstant['expand']['occurrences'] as $occurrence) {
+    if ((string) $occurrence['title'] === 'Stated as an instant in UTC') {
+        $utcOne = $occurrence;
+    }
+}
+// What this asserts, and what it deliberately does NOT.
+//
+// The file said 00:30Z to 01:15Z — 45 real minutes. Stored as readings in
+// London that becomes `01:30 → 01:15`, end before start, because the start is
+// on BST and the end on GMT. The first version of this check went on to assert
+// that the two readings were still 2,700 seconds apart. They are not, and they
+// cannot be: reading `01:30` and `01:15` back in London resolves BOTH to GMT,
+// so the pair comes out NEGATIVE 900 seconds. The 45 minutes is simply not
+// recoverable from the stored pair.
+//
+// That is not a flaw in the check, it is the limit this whole section is
+// about, and the number is asserted so the limit is a measurement rather than
+// a claim. It is also why part G of the importer's self-test asserts only that
+// the end reads earlier than the start, and nothing about the length.
+$utcReadStart = new DateTimeImmutable((string) $utcOne['start'], $orgZone);
+$utcReadEnd   = new DateTimeImmutable((string) $utcOne['end'], $orgZone);
+st_check(
+    'I34h and that one-off reads end-before-start, and the real 45 minutes CANNOT be recovered from the readings (they read back as -900s)',
+    (string) $utcOne['end'] < (string) $utcOne['start']
+        && $utcReadEnd->getTimestamp() - $utcReadStart->getTimestamp() === -900,
+    'reads ' . json_encode([$utcOne['start'], $utcOne['end']]) . ', read back as '
+        . ($utcReadEnd->getTimestamp() - $utcReadStart->getTimestamp()) . 's'
+);
+$utcWarnings = $utcInstant['expand']['warnings'];
+unset($utcInstant, $utcOne, $utcReadStart, $utcReadEnd);
+
+// =============================================================================
+// I34i: A ZONE THAT RESOLVES THE OTHER WAY — the hole that let #653 half-ship.
+// =============================================================================
+//
+// THIS IS THE CHECK THAT WAS MISSING, and its absence is why the first version
+// of the #653 fix passed every one of the 357 checks in this file while being a
+// complete NO-OP across the Americas.
+//
+// `$orgZone` in this file is Europe/London and every I34 fixture is written in
+// it. The first fix resolved an ambiguous reading with
+// `new DateTimeImmutable($text, $zone)`, believing that PHP gives the later of
+// the two moments. PHP does not: it takes the first matching offset in the
+// zone's own table, which is STANDARD time in Europe, Australia and New Zealand
+// and DAYLIGHT time across the Americas. Measured on PHP 8.5.11 / tzdata
+// 2026.3:
+//
+//   Europe/London     2026-10-25 01:30  ->  GMT   (the later)
+//   Australia/Sydney  2027-04-04 02:30  ->  AEST  (the later)
+//   America/New_York  2026-11-01 01:30  ->  EDT   (the EARLIER)
+//   America/Santiago  2027-04-03 23:30  ->  -03   (the EARLIER)
+//
+// So in New York, Chicago, Los Angeles, Havana, Santiago and the Azores the
+// committed fault survived the fix untouched — including America/Santiago,
+// which this repository already uses as its non-European test zone in
+// `tools/import-notifier-selftest.php`. The repository's own time-zone rule
+// says to test "in a zone that actually changes"; what was needed was one
+// clause further on — a zone that resolves THE OTHER WAY.
+//
+// These checks therefore do not go through `st_read()`, which always reads in
+// `$orgZone`. They call the reader directly with an organisation in
+// America/New_York, as the I30 checks do for the per-feed ceiling.
+//
+// Worked out by hand: New York goes back at 02:00 EDT on 1 November 2026, so
+// 01:00-01:59 happens twice and the two instants reading 01:30 are 05:30Z (EDT)
+// and 06:30Z (EST). A daily 01:30-02:30 series across that night must read
+// 01:30 to 02:30 on all three nights, exactly as the London one does.
+$nyZone = new DateTimeZone('America/New_York');
+$nyIcs  = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:ny-repeated@fixtures.webms.test\r\n"
+    . "DTSTART;TZID=America/New_York:20261031T013000\r\nDTEND;TZID=America/New_York:20261031T023000\r\n"
+    . "RRULE:FREQ=DAILY;COUNT=3\r\nSUMMARY:New York across the repeated hour\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+$nyAnswer = IcsReader::expand(
+    IcsReader::parse($nyIcs, microtime(true) + 30.0),
+    $nyZone,
+    $nyZone,
+    new DateTimeImmutable('2026-10-25 00:00:00', $nyZone),
+    new DateTimeImmutable('2026-11-08 00:00:00', $nyZone),
+    microtime(true) + 30.0,
+    500
+);
+st_lines(
+    'I34i America/New_York — a zone where PHP resolves the ambiguous reading the OTHER way — reads 01:30 to 02:30 on every night too',
+    [
+        '2026-10-31 01:30:00|2026-10-31 02:30:00|timed|key=20261031T053000Z|series|priv=no|canc=no|dup=no'
+        . '|New York across the repeated hour',
+        '2026-11-01 01:30:00|2026-11-01 02:30:00|timed|key=20261101T053000Z|series|priv=no|canc=no|dup=no'
+        . '|New York across the repeated hour',
+        '2026-11-02 01:30:00|2026-11-02 02:30:00|timed|key=20261102T063000Z|series|priv=no|canc=no|dup=no'
+        . '|New York across the repeated hour',
+    ],
+    st_lines_of($nyAnswer['occurrences'])
+);
+// And the lengths, asserted as numbers, because "01:30 to 02:30" on the middle
+// night was `01:30 to 01:30` — zero — before this was fixed.
+//
+// MEASURED AS CLOCK TIME, by reading both stored texts in UTC. That is pure
+// arithmetic on the two readings and is what a member sees. It is deliberately
+// NOT done by rebuilding each reading in America/New_York, and the first
+// version of this check made exactly that mistake: PHP reads "01:30" back as
+// EDT there, so the pair came out 7,200 seconds and the check failed on
+// CORRECT output. The trap this whole section is about had simply moved into
+// the test. `st_clockSeconds()` exists so no check here can repeat it.
+$nyLengths = [];
+foreach ($nyAnswer['occurrences'] as $occurrence) {
+    $nyLengths[] = st_clockSeconds((string) $occurrence['start'], (string) $occurrence['end']);
+}
+st_check(
+    'I34i and all three New York dates are exactly an hour ON THE CLOCK, the one on the change night included',
+    $nyLengths === [3600, 3600, 3600],
+    'clock lengths in seconds: ' . json_encode($nyLengths)
+);
+// The round trip itself, pinned as the trap it is. Reading the middle night's
+// stored pair back in America/New_York gives 7,200 seconds, not 3,600, because
+// PHP resolves the ambiguous start to EDT — the earlier of the two. The stored
+// data is right; a naive re-read of it is not. Anything in the portal that
+// works out a length by rebuilding a stored reading has this to contend with
+// on one night a year, which is one more reason event times are compared as
+// TEXT here (#604).
+st_check(
+    'I34i and re-reading that night\'s stored pair in its own zone gives 7,200s, not 3,600 — the trap, pinned so nobody "fixes" the data to suit it',
+    (new DateTimeImmutable((string) $nyAnswer['occurrences'][1]['end'], $nyZone))->getTimestamp()
+        - (new DateTimeImmutable((string) $nyAnswer['occurrences'][1]['start'], $nyZone))->getTimestamp() === 7200,
+    'round trip gives '
+        . ((new DateTimeImmutable((string) $nyAnswer['occurrences'][1]['end'], $nyZone))->getTimestamp()
+            - (new DateTimeImmutable((string) $nyAnswer['occurrences'][1]['start'], $nyZone))->getTimestamp()) . 's'
+);
+// A 30-MINUTE change, so that nothing here quietly assumes an hour.
+// Australia/Lord_Howe puts its clocks back by thirty minutes, at 02:00 on
+// 4 April 2027, so 01:30-01:59 is the repeated half-hour and the two instants
+// reading 01:45 are 14:45Z and 15:15Z on 3 April (+11:00 then +10:30 — an
+// earlier draft said 15:15Z and 15:45Z, which was half an hour out in both). A daily 01:45 series one hour
+// long must still read 01:45 to 02:45 on that night.
+$lhZone = new DateTimeZone('Australia/Lord_Howe');
+$lhIcs  = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:lh-repeated@fixtures.webms.test\r\n"
+    . "DTSTART;TZID=Australia/Lord_Howe:20270403T014500\r\nDTEND;TZID=Australia/Lord_Howe:20270403T024500\r\n"
+    . "RRULE:FREQ=DAILY;COUNT=3\r\nSUMMARY:Lord Howe half-hour change\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+$lhAnswer = IcsReader::expand(
+    IcsReader::parse($lhIcs, microtime(true) + 30.0),
+    $lhZone,
+    $lhZone,
+    new DateTimeImmutable('2027-03-28 00:00:00', $lhZone),
+    new DateTimeImmutable('2027-04-10 00:00:00', $lhZone),
+    microtime(true) + 30.0,
+    500
+);
+$lhLengths = [];
+foreach ($lhAnswer['occurrences'] as $occurrence) {
+    $lhLengths[] = st_clockSeconds((string) $occurrence['start'], (string) $occurrence['end']);
+}
+st_check(
+    'I34i a THIRTY-minute change (Australia/Lord_Howe) is handled too, so nothing here assumes the change is an hour',
+    $lhLengths === [3600, 3600, 3600]
+        && ($lhAnswer['occurrences'][1]['start'] ?? '') === '2027-04-04 01:45:00'
+        && ($lhAnswer['occurrences'][1]['end'] ?? '') === '2027-04-04 02:45:00',
+    'lengths ' . json_encode($lhLengths) . '; the change-night date reads '
+        . json_encode([$lhAnswer['occurrences'][1]['start'] ?? null, $lhAnswer['occurrences'][1]['end'] ?? null])
+);
+unset($nyZone, $nyIcs, $nyAnswer, $nyLengths, $lhZone, $lhIcs, $lhAnswer, $lhLengths);
+
+// =============================================================================
+// I34j: A COUNTRY THAT MOVED ITS CLOCKS FOR GOOD — the third no-op.
+// =============================================================================
+//
+// I34i covers a zone that resolves the ambiguity the other way. It was not
+// enough, because every zone in it changes for SUMMER TIME. The fix shipped a
+// third time as a no-op, in a different place again, and this is the check for
+// it.
+//
+// `DateTimeImmutable::setTimestamp()` does not reliably set the instant it is
+// given. On an object carrying a named zone, PHP converts to the wall clock and
+// resolves again — so when the instant asked for is itself inside a repeated
+// hour, it SNAPS BACK to PHP's first-matching offset. The candidate built for
+// the later offset came back as the input instant, never newer, never chosen.
+// Measured in America/Metlakatla:
+//
+//   $local->setTimestamp(1446373800)                      -> 1446370200  (PST)
+//   (new DateTimeImmutable('@1446373800'))->setTimezone()  -> 1446373800  (AKST)
+//
+// A sweep of every zone PHP knows found it wrong in 81 zones at one reading per
+// transition over 1900-2050, 82 at three, 88 with denser sampling — and **117**
+// at `--dense` over 1850-2100, which is the span `tools/ics-zone-sweep.php`
+// actually runs on every pull request. THE COUNT DEPENDS ON THE YEAR SPAN AS
+// WELL AS THE SAMPLING, and the span is the bigger factor; an earlier draft
+// quoted the sampling and left the span out.
+//
+// MOST of the affected ambiguities were pure base-offset moves — standard time
+// on both sides, a country changing its clocks for good — but NOT all, and an
+// earlier draft of this comment said "every one", which was untrue and would
+// have told the next reader the failure mode is narrower than it is. Measured:
+// 10 distinct transitions in 7 zones had summer time in force on one or both
+// sides (Atlantic/Azores 1942-45, America/Santiago 1946, America/Montevideo
+// 1974, America/Cancun 1998, America/Argentina/San_Luis 2008, America/Iqaluit
+// 1942, Antarctica/Palmer 1965). The only property they share is that PHP's
+// internal table resolves those two offsets the wrong way round.
+//
+// The committed test passed 363 of 363 throughout.
+//
+// WHY THIS IS NOT A HISTORICAL CURIOSITY. An earlier draft said today's data
+// "has no such move after 2025". It does: Africa/Casablanca and
+// Africa/El_Aaiun move +01:00 to +00:00 with standard time on both sides on
+// 20 September 2026, and on tzdata 2026.3 that is the last transition either
+// has. The CONCLUSION still held, but for a reason the draft never gave — PHP
+// happens to resolve those two zones' repeated hour to the LATER, so the broken
+// version was right there by luck.
+//
+// Which is the point: no customer is wrong at this moment because of how the
+// data happens to fall, not because of anything the code guarantees.
+// Base-offset moves land every year or two (Mexico 2022, Greenland 2023,
+// Kazakhstan 2024, Morocco 2026), and the next one PHP resolves the other way
+// would have made #653 live again in that zone, silently, with every check
+// green. A member importing a 2022 Ciudad Juárez calendar reads an hour short
+// today.
+//
+// America/Metlakatla moved from PST (-08:00) to AKST (-09:00) at 02:00 on
+// 1 November 2015 — no summer time on either side. So 01:00-01:59 happens
+// twice, and the two instants reading 01:30 are 1446370200 (PST) and
+// 1446373800 (AKST). PHP's constructor picks the PST one; the later is AKST.
+// Worked out by hand: a local 01:30 is 09:30Z on PST and 10:30Z on AKST, which
+// is why the third date's key below differs from the first two.
+$bomZone = new DateTimeZone('America/Metlakatla');
+$bomIcs  = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:base-offset-move@fixtures.webms.test\r\n"
+    . "DTSTART;TZID=America/Metlakatla:20151031T013000\r\nDTEND;TZID=America/Metlakatla:20151031T023000\r\n"
+    . "RRULE:FREQ=DAILY;COUNT=3\r\nSUMMARY:Base offset moved for good\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+$bomAnswer = IcsReader::expand(
+    IcsReader::parse($bomIcs, microtime(true) + 30.0),
+    $bomZone,
+    $bomZone,
+    new DateTimeImmutable('2015-10-28 00:00:00', $bomZone),
+    new DateTimeImmutable('2015-11-05 00:00:00', $bomZone),
+    microtime(true) + 30.0,
+    500
+);
+st_lines(
+    'I34j America/Metlakatla moved its clocks back FOR GOOD in 2015 (no summer time either side): all three dates still read 01:30 to 02:30',
+    [
+        '2015-10-31 01:30:00|2015-10-31 02:30:00|timed|key=20151031T093000Z|series|priv=no|canc=no|dup=no'
+        . '|Base offset moved for good',
+        '2015-11-01 01:30:00|2015-11-01 02:30:00|timed|key=20151101T093000Z|series|priv=no|canc=no|dup=no'
+        . '|Base offset moved for good',
+        '2015-11-02 01:30:00|2015-11-02 02:30:00|timed|key=20151102T103000Z|series|priv=no|canc=no|dup=no'
+        . '|Base offset moved for good',
+    ],
+    st_lines_of($bomAnswer['occurrences'])
+);
+$bomLengths = [];
+foreach ($bomAnswer['occurrences'] as $occurrence) {
+    $bomLengths[] = st_clockSeconds((string) $occurrence['start'], (string) $occurrence['end']);
+}
+st_check(
+    'I34j and all three are an hour on the clock — the middle one read 01:30 to 01:30 while the candidate was built with setTimestamp()',
+    $bomLengths === [3600, 3600, 3600],
+    'clock lengths in seconds: ' . json_encode($bomLengths)
+);
+// A THIRD CHECK WAS WRITTEN HERE AND DELETED, which is worth a note because
+// the shape is a trap.
+//
+// It tried to assert WHICH of the two moments was chosen, by rebuilding the
+// stored start in its zone and comparing the instant with 1446373800 (AKST,
+// the later). It was written as `A || B` so that it would pass, and that is the
+// tell. Measured: branch A can NEVER pass, because rebuilding the reading goes
+// through PHP and gives the PST instant 1446370200 on correct and incorrect
+// code alike; and branch B compared the reading with itself and was therefore
+// ALWAYS true. The check passed on everything and tested nothing.
+//
+// The reason is the limit this whole section is about, and it cannot be worked
+// around from the output: a stored reading does not record which of the two
+// moments it names. The only observable difference between the right answer and
+// the wrong one is the stored END reading — 02:30 against 01:30 — and that is
+// exactly what the two checks above assert. Planting `setTimestamp()` back
+// confirms they catch it.
+//
+// The general lesson, which has now cost this package three rounds: an
+// assertion joined by `||` so that it will pass is not an assertion. If a
+// check needs an alternative branch to go green, find out which branch is
+// carrying it before believing either.
+unset($bomZone, $bomIcs, $bomAnswer, $bomLengths);
+
+// =============================================================================
+// I34k: THE EVENT'S OWN `DTSTART` IS THE AMBIGUOUS ONE (the regression #653
+//       introduced, and a pre-existing fault underneath it).
+// =============================================================================
+//
+// I34i's New York series starts on 31 OCTOBER — an unambiguous reading — so its
+// length is measured cleanly and it cannot see this. The check below starts the
+// series ON the change night, which is the shape that went wrong.
+//
+// THE PRE-EXISTING FAULT. `readDateTime()` resolves an ambiguous reading with
+// PHP's own pick, the EARLIER one across the Americas. So a `DTSTART` of 01:30
+// in New York was read as EDT while its `DTEND` of 02:30 was read —
+// unambiguously — as EST, and subtracting the two ABSORBED THE CLOCK CHANGE: a
+// one-hour event measured 7,200 seconds. The second and later dates of such a
+// series were already stored TWO HOURS long before any of this package existed.
+//
+// THE REGRESSION. #653 then moved the START to the later moment while that
+// inflated length stayed, so the first date and the one-off became wrong too.
+// Measured, file says 01:30 to 02:30:
+//
+//   before #653    01:30 -> 02:30,  01:30 -> 03:30,  01:30 -> 03:30
+//   with #653      01:30 -> 03:30,  01:30 -> 03:30,  01:30 -> 03:30
+//   now            01:30 -> 02:30,  01:30 -> 02:30,  01:30 -> 02:30
+//
+// The fix is in `prepareEvent()`: BOTH ends are resolved the same way before
+// the length is measured, which makes every zone answer as Europe/London
+// already did. In London both calls are no-ops, so no London check moved —
+// which is precisely why none of them caught this, and why this one is here.
+//
+// Worked out by hand. New York goes back at 02:00 EDT on 1 November 2026; the
+// two instants reading 01:30 are 05:30Z (EDT) and 06:30Z (EST). The key is the
+// PRE-resolution start in UTC, so the first date's key carries 05:30Z — PHP's
+// pick — while the second and third, on unambiguous readings, carry 06:30Z.
+$ambZone = new DateTimeZone('America/New_York');
+$ambIcs  = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:amb-dtstart@fixtures.webms.test\r\n"
+    . "DTSTART;TZID=America/New_York:20261101T013000\r\nDTEND;TZID=America/New_York:20261101T023000\r\n"
+    . "RRULE:FREQ=DAILY;COUNT=3\r\nSUMMARY:Series starting in the repeated hour\r\nEND:VEVENT\r\n"
+    . "BEGIN:VEVENT\r\nUID:amb-dtstart-one@fixtures.webms.test\r\n"
+    . "DTSTART;TZID=America/New_York:20261101T013000\r\nDTEND;TZID=America/New_York:20261101T023000\r\n"
+    . "SUMMARY:One-off starting in the repeated hour\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+$ambAnswer = IcsReader::expand(
+    IcsReader::parse($ambIcs, microtime(true) + 30.0),
+    $ambZone,
+    $ambZone,
+    new DateTimeImmutable('2026-10-25 00:00:00', $ambZone),
+    new DateTimeImmutable('2026-11-08 00:00:00', $ambZone),
+    microtime(true) + 30.0,
+    500
+);
+st_lines(
+    'I34k a series whose own DTSTART is the ambiguous reading keeps the length the FILE states — one hour, not two',
+    [
+        // The one-off sorts before the series' first date: same start, and
+        // start order is what the list is in (the lesson from I34h).
+        '2026-11-01 01:30:00|2026-11-01 02:30:00|timed|key=|one-off|priv=no|canc=no|dup=no'
+        . '|One-off starting in the repeated hour',
+        '2026-11-01 01:30:00|2026-11-01 02:30:00|timed|key=20261101T053000Z|series|priv=no|canc=no|dup=no'
+        . '|Series starting in the repeated hour',
+        '2026-11-02 01:30:00|2026-11-02 02:30:00|timed|key=20261102T063000Z|series|priv=no|canc=no|dup=no'
+        . '|Series starting in the repeated hour',
+        '2026-11-03 01:30:00|2026-11-03 02:30:00|timed|key=20261103T063000Z|series|priv=no|canc=no|dup=no'
+        . '|Series starting in the repeated hour',
+    ],
+    st_lines_of($ambAnswer['occurrences'])
+);
+// The lengths as numbers, because "02:30" against "03:30" is the whole fault
+// and a reader skimming the list above may not notice which it is.
+$ambLengths = [];
+foreach ($ambAnswer['occurrences'] as $occurrence) {
+    $ambLengths[] = st_clockSeconds((string) $occurrence['start'], (string) $occurrence['end']);
+}
+st_check(
+    'I34k and every one of them is ONE hour — the pre-existing fault stored the later dates as two, and #653 briefly made the first one and the one-off two as well',
+    $ambLengths === [3600, 3600, 3600, 3600],
+    'clock lengths in seconds: ' . json_encode($ambLengths)
+);
+// And the one-off agrees with the series' first date, which is the same
+// agreement I34c pins in London — now shown in a zone that resolves the other
+// way, because that is where the two came apart.
+$ambOne = null;
+$ambFirst = null;
+foreach ($ambAnswer['occurrences'] as $occurrence) {
+    if ($occurrence['isSeries'] === false) {
+        $ambOne = [(string) $occurrence['start'], (string) $occurrence['end']];
+    } elseif ($ambFirst === null) {
+        $ambFirst = [(string) $occurrence['start'], (string) $occurrence['end']];
+    }
+}
+st_check(
+    'I34k and the one-off still agrees with the series in a zone that resolves the ambiguity the other way',
+    $ambOne !== null && $ambOne === $ambFirst,
+    'one-off ' . json_encode($ambOne) . ' vs series ' . json_encode($ambFirst)
+);
+unset($ambZone, $ambIcs, $ambAnswer, $ambLengths, $ambOne, $ambFirst);
+
+// =============================================================================
+// I34l: THE **END** IS THE AMBIGUOUS ONE — the half of the fix nothing guarded.
+// =============================================================================
+//
+// The length is measured between BOTH ends resolved the same way. I34k pins
+// what happens when the START is ambiguous. Nothing pinned the END half, and an
+// independent check proved it: deleting the end-resolution on its own left all
+// 368 checks passing AND the all-zone sweep clean, while the behaviour really
+// changed. The comment in `prepareEvent()` even named I34f as the guard — and
+// I34f's fixture is Europe/London, where both calls are no-ops, so it could
+// never have seen it.
+//
+// With the end-resolution gone, the shape below is a ONE-hour series in New
+// York and a TWO-hour series in London — exactly the zone inconsistency the fix
+// exists to remove.
+//
+// Worked out by hand. New York goes back at 02:00 EDT on 1 November 2026.
+// 00:30 that morning is unambiguous (EDT, 04:30Z); 01:30 is ambiguous and
+// resolves to EST, 06:30Z. So the file's hour-on-the-clock is really two hours,
+// and every date of the series keeps those two hours exactly: 00:30 to 01:30 on
+// the change night, and 00:30 to 02:30 on an ordinary night after it. The keys
+// are the pre-resolution starts in UTC — 04:30Z then 05:30Z, because 00:30 is
+// EDT on the 1st and EST on the 2nd.
+$endAmbZone = new DateTimeZone('America/New_York');
+$endAmbIcs  = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:end-ambiguous@fixtures.webms.test\r\n"
+    . "DTSTART;TZID=America/New_York:20261101T003000\r\nDTEND;TZID=America/New_York:20261101T013000\r\n"
+    . "RRULE:FREQ=DAILY;COUNT=2\r\nSUMMARY:The end is the ambiguous one\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+$endAmbAnswer = IcsReader::expand(
+    IcsReader::parse($endAmbIcs, microtime(true) + 30.0),
+    $endAmbZone,
+    $endAmbZone,
+    new DateTimeImmutable('2026-10-28 00:00:00', $endAmbZone),
+    new DateTimeImmutable('2026-11-06 00:00:00', $endAmbZone),
+    microtime(true) + 30.0,
+    500
+);
+st_lines(
+    'I34l when the END is the ambiguous reading, the length still comes from the resolved pair — two real hours, kept exactly',
+    [
+        '2026-11-01 00:30:00|2026-11-01 01:30:00|timed|key=20261101T043000Z|series|priv=no|canc=no|dup=no'
+        . '|The end is the ambiguous one',
+        '2026-11-02 00:30:00|2026-11-02 02:30:00|timed|key=20261102T053000Z|series|priv=no|canc=no|dup=no'
+        . '|The end is the ambiguous one',
+    ],
+    st_lines_of($endAmbAnswer['occurrences'])
+);
+// The ORDINARY night is the one that tells the two behaviours apart: with the
+// end left unresolved the length would be 3,600 s and this would read
+// 00:30 to 01:30. Asserted as a number so it cannot be skimmed past.
+st_check(
+    'I34l and the date on the ORDINARY night is 7,200 seconds on the clock — 3,600 would mean the end-resolution had been dropped',
+    st_clockSeconds((string) ($endAmbAnswer['occurrences'][1]['start'] ?? ''), (string) ($endAmbAnswer['occurrences'][1]['end'] ?? '')) === 7200,
+    'clock length ' . st_clockSeconds((string) ($endAmbAnswer['occurrences'][1]['start'] ?? ''), (string) ($endAmbAnswer['occurrences'][1]['end'] ?? '')) . 's'
+);
+unset($endAmbZone, $endAmbIcs, $endAmbAnswer);
+
+// =============================================================================
+// I34m: A READING FOR A START AND AN INSTANT FOR AN END — do not lose the end.
+// =============================================================================
+//
+// `DTSTART;TZID=America/New_York:20261101T013000` with `DTEND:20261101T060000Z`
+// — a reading for one end and an instant for the other. **RFC 5545 permits it**,
+// which is the load-bearing half. An earlier draft said "Microsoft really does
+// produce this": that cannot be checked from here, and two of this file's own
+// skipped checks record that no real Microsoft or Google export has ever been
+// captured. The fault is real whoever writes the shape.
+//
+// Resolving the start to the later moment (06:30Z) pushes it PAST an end of
+// 06:00Z, so the resolved pair stops making sense. The first version of the
+// length fix then fell through to "no length at all", and the event **lost its
+// end entirely**: stored 01:30 to 01:30, shown as a start time only, with no
+// warning. **The released code was ALREADY wrong on this shape, differently**:
+// it stored 01:30 to 01:00 — an end BEFORE the start. Measured against a
+// released-equivalent copy. An earlier draft of this comment said the released
+// code stored 01:30 to 02:00, which was untrue and made the released behaviour
+// sound fine; in fact the fallback repairs a pre-existing fault as well as a
+// self-inflicted one.
+//
+// (A draft also quoted "6,822 readings of the shape" across 2020-2040. That
+// number could not be reproduced: counting "readings of a shape" depends
+// entirely on the sampling, and three reasonable samplings give 7,959, 3,411
+// and 4,548. Dropped rather than restated, for the same reason given about the
+// 117 figure above — quoted with its method, or not at all.)
+//
+// The length now comes from the FILE's own pair when the resolved pair is
+// incoherent — 05:30Z to 06:00Z, a plain thirty minutes. The stored START is
+// still the resolved reading, which is right; it is only the length that has to
+// come from the file, because the file gave an INSTANT and an instant cannot be
+// re-resolved.
+//
+// Worked out by hand: 01:30 resolves to 06:30Z, plus 1,800 s is 07:00Z, which
+// reads 02:00 on EST.
+$mixedZone = new DateTimeZone('America/New_York');
+$mixedIcs  = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:mixed-kinds@fixtures.webms.test\r\n"
+    . "DTSTART;TZID=America/New_York:20261101T013000\r\nDTEND:20261101T060000Z\r\n"
+    . "SUMMARY:A reading and an instant\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+$mixedAnswer = IcsReader::expand(
+    IcsReader::parse($mixedIcs, microtime(true) + 30.0),
+    $mixedZone,
+    $mixedZone,
+    new DateTimeImmutable('2026-10-28 00:00:00', $mixedZone),
+    new DateTimeImmutable('2026-11-06 00:00:00', $mixedZone),
+    microtime(true) + 30.0,
+    500
+);
+st_lines(
+    'I34m a TZID start in the repeated hour with an end stated in Z keeps its end (01:30 to 02:00), rather than losing it',
+    [
+        '2026-11-01 01:30:00|2026-11-01 02:00:00|timed|key=|one-off|priv=no|canc=no|dup=no'
+        . '|A reading and an instant',
+    ],
+    st_lines_of($mixedAnswer['occurrences'])
+);
+st_check(
+    'I34m and it has a length at all — an end equal to its start would mean the end had been silently dropped',
+    ($mixedAnswer['occurrences'][0]['end'] ?? '') !== ($mixedAnswer['occurrences'][0]['start'] ?? 'x')
+        && st_clockSeconds((string) ($mixedAnswer['occurrences'][0]['start'] ?? ''), (string) ($mixedAnswer['occurrences'][0]['end'] ?? '')) === 1800,
+    'reads ' . json_encode([$mixedAnswer['occurrences'][0]['start'] ?? null, $mixedAnswer['occurrences'][0]['end'] ?? null])
+);
+st_check(
+    'I34m and nothing was reported as a problem, because nothing went wrong',
+    $mixedAnswer['warnings'] === [],
+    implode(' | ', $mixedAnswer['warnings'])
+);
+unset($mixedZone, $mixedIcs, $mixedAnswer);
+
+// =============================================================================
+// I34n: AN EVENT SHORTER THAN THAT NIGHT'S CHANGE — the fourth `setTimestamp()`.
+// =============================================================================
+//
+// The same trap as I34j, in the one place nobody had looked: `buildOccurrence()`
+// built the END with `$startLocal->setTimestamp(...)`.
+//
+// `$startLocal` is the RESOLVED (later) start. An event SHORTER than that
+// night's change therefore has its end inside the repeated hour too, and
+// `setTimestamp()` on a zone-carrying object re-resolves through the wall clock
+// and snaps that end back to PHP's first-matching offset — the EARLIER pass, in
+// the zones PHP orders that way. The clamp then turned an end-before-start into
+// "no length at all": a fifteen-minute event stored as 23:30 to 23:30, shown as
+// a start time only, with no warning. **The released code stored it correctly,
+// so this was a regression** — and the comment sitting directly on it claimed
+// `setTimestamp()` was safe there, which was true about the ZONE and silent
+// about the INSTANT.
+//
+// 24 zones, 17 transitions after the year 2000: the nine Argentina zones
+// (2004), Cambridge Bay and Santo Domingo (2000), Caracas (2007, a
+// THIRTY-minute change), Ciudad Juárez (2022), Eirunepé and Rio Branco (2013),
+// Metlakatla (2015 and 2019). The `DURATION` route was never affected, because
+// `add()` works on the clock rather than through a timestamp.
+//
+// It could only ever collapse the end onto the start, never store a plausible
+// wrong length, because a longer event's end falls outside the repeated window
+// where no snap happens. Neither the other 373 checks nor
+// `tools/ics-zone-sweep.php --dense` could see it: the sweep tests the
+// resolution rule, not how a resolved start is used.
+//
+// America/Ciudad_Juarez because it is MODERN — Mexico abolished summer time in
+// October 2022 and this zone moved its base offset on 29 November 2022,
+// standard time on both sides, so 23:30 that night happens twice.
+$shortZone = new DateTimeZone('America/Ciudad_Juarez');
+$shortIcs  = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:shorter-than-the-change@fixtures.webms.test\r\n"
+    . "DTSTART;TZID=America/Ciudad_Juarez:20221129T233000\r\nDTEND;TZID=America/Ciudad_Juarez:20221129T234500\r\n"
+    . "SUMMARY:Shorter than the change itself\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+$shortAnswer = IcsReader::expand(
+    IcsReader::parse($shortIcs, microtime(true) + 30.0),
+    $shortZone,
+    $shortZone,
+    new DateTimeImmutable('2022-11-25 00:00:00', $shortZone),
+    new DateTimeImmutable('2022-12-05 00:00:00', $shortZone),
+    microtime(true) + 30.0,
+    500
+);
+st_lines(
+    'I34n a fifteen-minute event wholly inside the repeated hour keeps its fifteen minutes (it was being stored as zero)',
+    [
+        '2022-11-29 23:30:00|2022-11-29 23:45:00|timed|key=|one-off|priv=no|canc=no|dup=no'
+        . '|Shorter than the change itself',
+    ],
+    st_lines_of($shortAnswer['occurrences'])
+);
+st_check(
+    'I34n and it has a length at all — an end equal to its start is exactly what the snapped-back instant produced',
+    st_clockSeconds((string) ($shortAnswer['occurrences'][0]['start'] ?? ''), (string) ($shortAnswer['occurrences'][0]['end'] ?? '')) === 900,
+    'clock length ' . st_clockSeconds((string) ($shortAnswer['occurrences'][0]['start'] ?? ''), (string) ($shortAnswer['occurrences'][0]['end'] ?? '')) . 's'
+);
+unset($shortZone, $shortIcs, $shortAnswer);
+
+// I34g: nothing above needed a warning, because nothing went wrong. A warning
+// here would mean the reader had started telling customers about a night it
+// now handles correctly.
+st_check(
+    'I34g and not one of the six calendars reported a problem',
+    $repeatedDaily['expand']['warnings'] === [] && $repeatedOneOff['expand']['warnings'] === []
+        && $repeatedLong['expand']['warnings'] === [] && $repeatedDuration['expand']['warnings'] === []
+        && $endsInIt['expand']['warnings'] === [] && $utcWarnings === [],
+    implode(' | ', array_merge(
+        $repeatedDaily['expand']['warnings'],
+        $repeatedOneOff['expand']['warnings'],
+        $repeatedLong['expand']['warnings'],
+        $repeatedDuration['expand']['warnings'],
+        $endsInIt['expand']['warnings'],
+        $utcWarnings
+    ))
+);
+unset($repeatedDaily, $repeatedOneOff, $repeatedLong, $repeatedDuration, $endsInIt, $oneOffPair, $seriesPair, $endsStart, $endsEnd, $utcWarnings);
 
 // I30: the per-feed ceiling, which the owner decided on 23 September 2026
 // should be something a customer can change. The reader still reads no

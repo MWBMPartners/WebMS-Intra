@@ -6,7 +6,272 @@
 
 ---
 
-## 28 OCTOBER 2026, LATEST — the sign-in hotfix for `main` is built and WAITING ON A PUSH
+## 28 OCTOBER 2026, LATEST — #653 and #652 both FIXED (the two items left as "Found")
+
+The owner asked for both to be done now rather than carried. Both are, with evidence.
+
+### #653 — a repeating date in the hour that happens twice came out an hour short
+
+`IcsReader::laterOfARepeatedReading()` is the ONE place that decides what a reading in the
+repeated hour means: the LATER of the two moments sharing it, which is what `makeDate()` already
+gave a one-off, so the two paths now agree by construction. Called from `buildOccurrence()`.
+
+**The symptom was wider than the issue said.** It reported zero length. Measured: a daily
+01:30–05:30 series read `01:30 → 04:30` — **three hours instead of four**. The fault is "an hour
+short"; zero is what that looks like on an hour-long event.
+
+**Two things a future reader must not undo:**
+- It **cannot move into `generateStarts()`.** The recurrence key is the start turned into UTC and is
+  STORED as `externalRecurrenceKey`; resolving earlier renames every such date and the importer
+  deletes and re-adds it. Check I34b pins the key.
+- It takes **the zone the reading was WRITTEN in, never the organisation's.** A `Z` time is an
+  instant, not a reading. **The first version got this wrong and moved a real event an hour late**;
+  all 357 reader checks passed and only part G of `feed-importer-selftest.php` (database + web
+  server) caught it. I34h now guards it in the test that needs neither, and planting proved it is
+  the SOLE catcher.
+
+Nine new checks (I34–I34h), six new fixtures. **Five faults planted, all five caught.** One plant
+"passed" at first because `modify('-1 hour')` is a WALL-CLOCK operation — it fell through its own
+condition and changed nothing. That looked like a hole in the checks and was not.
+
+### #652 — a test that went red by itself as the year turned
+
+`import-notifier-selftest.php` asked for two London clock changes in the twelve months from
+*today*; from 25 October 2026 the window held one. Now anchored to a FIXED date
+(`CHANGE_NIGHT_ANCHOR`, 1 January 2027). **Measured day by day over the 1,095 days from 25 October
+2026:** the old shape fails on **20** of them, in four windows — 25–29 Oct 2026 and 25–29 Mar 2029
+(London), 2–6 Apr 2028 and 2–6 Sep 2029 (**Santiago**, a latent fault nobody had hit). The new
+shape fails on none. The issue's "until late March 2027" was wrong, and so was my own first figure
+of "five days", which round 1 caught; both are corrected on the issue. The four nights are now
+written out BY HAND in the test, so a time-zone data update cannot leave the comment quietly
+untrue; and "fewer than two changes" reports SKIPPED, not FAIL.
+
+### ROUND 1 OF THE INDEPENDENT CHECK FOUND THE FIX WAS HALF-DONE — now corrected
+
+**`new DateTimeImmutable($text, $zone)` does NOT give the later of two ambiguous moments.** It
+takes the first matching offset in the zone's table: standard time in Europe and Australasia, but
+**DAYLIGHT time across the Americas**. So the first fix was a **no-op in New York, Chicago,
+Los Angeles, Havana, Santiago and the Azores** — including America/Santiago, this repository's own
+non-European test zone — and #653 stayed live there while all 357 checks passed, because
+`ics-reader-selftest.php` hard-codes `$orgZone` as Europe/London and every new fixture was in it.
+
+**The rule read one clause further on:** not "a zone that really changes" but **a zone that
+resolves the OTHER way.** The helper now scans the zone's own transitions and keeps the latest
+instant carrying the reading, with a cheap offset pre-filter so the transition array is only built
+when it can matter. Verified across **fifteen** zones including Lord Howe (30-minute change) and
+Chatham. New section I34i covers New York and Lord Howe directly.
+
+Round 1's other three findings, all accepted and fixed: four documents stated the rule as
+universal; the `buildOccurrence()` comment's EXDATE reason was BACKWARDS (an `EXDATE;TZID=` already
+fails to match — moving the resolution earlier would make it START matching); and the DEV_NOTES
+"#652 is five days" figure was wrong — re-measured, it is **20 days in 1,095, in four windows**.
+
+**Found and filed, not fixed: #654** — a date cancelled with `EXDATE;TZID=…` **comes back** if its
+reading falls in the repeated hour, and that is the form Google, Apple and Outlook all write.
+Pre-existing; cannot be fixed where #653 sits, for the same stored-key reason.
+
+### ROUND 2 FOUND IT HAD SHIPPED AS A NO-OP A THIRD TIME — now fixed
+
+**`DateTimeImmutable::setTimestamp()` does not reliably set the instant it is given.** On an object
+carrying a named zone PHP converts to the wall clock and resolves AGAIN, so when the instant asked
+for is itself inside a repeated hour it snaps back to PHP's first-matching offset. Measured in
+America/Metlakatla: `setTimestamp(1446373800)` returns **1446370200**. So the candidate built for
+the later offset came back as the INPUT instant, never newer, never chosen — and the rewritten
+helper collapsed to PHP's pick again.
+
+Swept every zone PHP knows, 1900–2050, against an exhaustive reference: wrong in **81 zones** of
+14,454 ambiguous readings. After building each candidate as
+`(new DateTimeImmutable('@' . $ts))->setTimezone($writtenIn)`: **0**. The same unsafe construction
+was in the cheap pre-filter and is fixed there too.
+
+**Every affected case was a PERMANENT base-offset move** — standard time both sides, a country
+changing its clocks for good. Today's data has none after 2025, so nobody is wrong now; that is the
+luck of the data, not the code. I34i could not see it because every zone in it changes for SUMMER
+time. **Check I34j** (Metlakatla 2015) pins it, and planting `setTimestamp()` back confirms I34j is
+the only section that fails.
+
+Round 2's other findings, all accepted: `"45 (Pacific/Chatham)"` was a false measurement (45 minutes
+is Chatham's OFFSET; its change is an ordinary 3,600s); DEV_NOTES still carried the backwards EXDATE
+clause corrected in three other places; and CHANGELOG turned a one-off fifteen-zone sweep into a
+standing claim about the tests.
+
+**One of my own new checks was vacuous and I caught it in writing it.** I34j's third check asserted
+WHICH instant was chosen, joined by `||` so it would pass: branch A can never pass and branch B
+compared the reading with itself. Deleted, with the reason recorded — **a stored reading does not
+record which of the two moments it names**, so the stored END reading is the only observable.
+*An assertion joined by `||` so that it will go green is not an assertion.*
+
+**THIS IS ROUND 3 OF THE CHECK, AND THE PROJECT'S RULE SAYS TO SAY SO.** One fix, three independent
+rounds, three no-ops — each shipped with every committed check green. Ways to go faster are under
+"Blocked on me" in the report.
+
+### ROUND 3 FOUND A FOURTH FAULT — and this one STORED WRONG TIMES
+
+The first three were no-ops: the fix failing to fix. This one is different.
+
+`$lengthSeconds` was measured between the two moments `readDateTime()` returned, and that resolves
+an ambiguous reading with PHP's pick — the EARLIER across the Americas. So a New York `DTSTART` of
+01:30 was read as EDT while its `DTEND` of 02:30 was read as EST, and **the subtraction absorbed the
+clock change**: a one-hour event measured 7,200 seconds. Pre-existing for the second and later dates
+of a series; **#653 made the first date and the one-off wrong too**. Measured, file says 01:30-02:30:
+
+```
+before #653   01:30 -> 02:30,  01:30 -> 03:30,  01:30 -> 03:30
+with #653     01:30 -> 03:30,  01:30 -> 03:30,  01:30 -> 03:30
+now           01:30 -> 02:30,  01:30 -> 02:30,  01:30 -> 02:30
+```
+
+Fixed in `prepareEvent()`: BOTH ends resolved the same way before the length is measured. That makes
+every zone answer as Europe/London already did — which is why no London check caught it. **Check
+I34k** is the only thing that does.
+
+### THE SWEEP NOW RUNS IN CI — my own reason for leaving it out was wrong by 100x
+
+I had written that the all-zone sweep "took about a minute" and so did not belong in a
+per-pull-request job. **Measured: 419 zones, 334,240 readings, 145,265 ambiguous, in 1.4 seconds.**
+It is now `tools/ics-zone-sweep.php`, a hard gate in `calendar-selftests.yml`, run `--dense`.
+
+`--dense` matters: light sampling starts at 1900 and MISSES the pre-filter form of fault 3 entirely
+(the readings that expose it sit a DAY apart, at the 1867 Alaska / 1892 Samoa / 1899 Rarotonga
+date-line moves). That plant is caught by `--dense` and **by nothing else** — not the light sweep,
+not any of the 368 self-test checks.
+
+Round 3's other findings, all verified and corrected: the Lord Howe instants were 30 minutes out;
+"every affected case was a base-offset move" was untrue (10 transitions in 7 zones had summer time
+on one or both sides); "no such move after 2025" was untrue (Casablanca and El_Aaiun, 20 Sep 2026 —
+the conclusion survives only because PHP resolves THEIR repeated hour to the later, i.e. luck);
+88-vs-81 was a sampling difference and is now quoted with its sampling; the plant table had two rows
+that had stopped being true; and the pre-filter counts differ between London and New York at 01:30.
+
+### THIS IS NOW FOUR ROUNDS ON ONE ITEM — the rule says consider SIMPLIFYING
+
+`.claude/CLAUDE.md`: "If the same item fails two rounds running, consider simplifying the design
+before refining it again." My judgement, for the owner to overrule: **the design is not the problem.**
+"Find the latest instant whose reading equals this text, in this zone" is about as simple as the
+question allows. All four faults were PHP API traps — the constructor's resolution order,
+`setTimestamp()` re-resolving, and a length measured across two inconsistently-resolved moments —
+not design complexity. What was missing was an instrument that searched the space instead of five
+hand-picked points, and that now exists and runs. The alternative (revert #653, reopen it, accept a
+weekly service displaying 01:30-01:30) is under "Blocked on me".
+
+### ROUND 4 FOUND SIX MORE — two behavioural, and one of them a REGRESSION against main
+
+**Half the fix could be deleted and nothing noticed.** Resolving only the `DTSTART` and leaving the
+`DTEND` raw passed **all 368 checks AND the all-zone sweep**, while the behaviour really changed: a
+start of 00:30 with an end of 01:30 in New York became a one-hour series where its London twin
+stayed two. The comment beside the code **named I34f as the guard** — and I34f's fixture is London,
+where both calls are no-ops, so it could never have seen it. Check **I34l** now does.
+
+**An event could LOSE ITS END ENTIRELY.** A local-time start with a UTC end
+(`DTSTART;TZID=America/New_York:…013000` + `DTEND:…060000Z`, which Microsoft produces) had the
+resolved start pushed PAST the end, the pair stopped making sense, and the code fell through to "no
+length": stored `01:30 → 01:30`, shown as a start time only, **no warning**, where `main` stores
+`01:30 → 01:00` — an END BEFORE THE START, so that shape was ALREADY broken before this package
+(round 5 measured it; my own note had said `01:30 → 02:00`, which made the released behaviour sound
+fine). The length now falls back to the FILE's own pair when the resolved pair is incoherent, which
+repairs the pre-existing fault too. Check **I34m**.
+
+Both plants are now caught by exactly the check written for them, and resolving only the `DTEND` is
+caught by I34k alone.
+
+### Three untrue statements in the one paragraph meant to say what the code CANNOT do
+
+- "reading both back … gives the full length" — true in London, FALSE in the Americas.
+- "LOOKS an hour short" — it is short by the size of THAT NIGHT'S change (30 min in Lord Howe).
+- "it does not make the two paths produce the same INSTANT" — they DO; both pass through the single
+  call in `buildOccurrence()`. Measured with UTC as the organisation's zone: both 06:30Z. **That
+  paragraph has now been wrong in BOTH directions** across rounds — first claiming agreement "by
+  construction", then denying agreement that exists.
+
+### The sweep reported PASS over nothing
+
+Its own header calls that "worse than no sweep" — and it did it: an emptied reference gave
+`ambiguous: 0`, no mismatches, PASS, exit 0. There is now a floor (under 2,000 ambiguous readings
+REFUSES, exit 1, against 145,265 today). Two more header claims were untrue and are fixed. Also:
+the counts "81/82/88" were over 1900-2050; the gate runs 1850-2100, where the same plant gives
+**117** — the year span matters more than the sampling, and both are now quoted.
+
+### ROUND 5 (FINAL) FOUND A SEVENTH FAULT — the fourth `setTimestamp()`, now fixed and committed
+
+`buildOccurrence()` built the END as `$startLocal->setTimestamp(...)`. `$startLocal` is the RESOLVED
+(later) start, so an event **shorter than that night's change** had its end inside the repeated hour
+too, the snap pulled it back before the start, and the clamp turned that into **no length at all**:
+a fifteen-minute event stored `23:30 → 23:30`, no warning. **The released code stored it correctly,
+so this was a regression.** 24 zones, 17 transitions after 2000 (Argentina ×9, Cambridge Bay, Santo
+Domingo, Caracas, Ciudad Juárez, Eirunepé, Rio Branco, Metlakatla ×2). `DURATION` was never
+affected.
+
+**It is the same trap this class documents at length** — and the comment sitting directly on it
+claimed `setTimestamp()` was safe there, which was true about the ZONE and silent about the INSTANT.
+Check **I34n** is the only thing that catches it; the all-zone sweep cannot, because it tests the
+resolution rule and not how a resolved start is used.
+
+Round 5's other findings, all verified and corrected:
+- **"where the released code stores `01:30 → 02:00`" was untrue in four files.** It stores
+  `01:30 → 01:00` — an end BEFORE the start. So the fallback repairs a PRE-EXISTING fault too, and
+  my wording had told the next reader the opposite.
+- **"6,822 readings of that shape" could not be reproduced** (three reasonable samplings give
+  7,959 / 3,411 / 4,548). Dropped rather than restated.
+- **"which Microsoft really does produce" is unsupported from here** — and two of this repository's
+  own skipped checks record that no real Microsoft export has ever been captured. Reworded to what
+  is checkable: RFC 5545 permits the shape.
+- **CHANGELOG still generalised "reads back correctly"**, which is a Europe-only property.
+- **The plant tables were stale again**, missing I34l and I34m. Re-measured; one row removed as
+  unreproducible (no fixture yields a `lengthSeconds` of 0, so that experiment cannot be run).
+- The sweep's `--zone=UTC` refusal said "should find thousands" when the floor for one zone is 1,
+  and an unknown zone name died with an uncaught exception. Both fixed.
+
+### One deliberate consequence the owner should know about
+
+A series whose **first instance's `DTEND`** is the ambiguous reading now stores every LATER date two
+hours long where the released code stored one. That follows from the exact-length rule (the owner's
+decision of 23 September 2026) plus resolving both ends, and it is what Europe/London already did —
+but on an ordinary night the stored pair no longer matches the file's own readings, and Google, Apple
+and Outlook would show one hour. Narrow (the series must START on the change night), member-visible
+from now on, and never an explicit decision — only a consequence of two that were. Written up in
+DEV_NOTES and CHANGELOG.
+
+### A watchdog trap, worth one line before somebody repeats it
+
+`tools/watchdog.sh quiet` was pointed at a **subagent's harness transcript file**
+(`<session>/tasks/<agentId>.output`). It fired a false "finished or stalled" after 920 seconds while
+the agent was working perfectly well: the harness ROTATES that file, so it read 1.2 MB to `cat` and
+220 bytes to `stat` moments apart, and its modification time stopped moving. What proved the agent
+alive was its own work — the test calendar server still listening on the port it had been given.
+
+The rule's own example watches a file **the agent writes** (`.claude-work/resume/<report>.md`), not
+the harness's transcript. Watch something the work itself produces, or use a long backstop and let
+the completion notice be the primary signal.
+
+### Where this leaves things
+
+Tests all green: ics-reader **375**, import-notifier 134/134, feed-importer 139, feed-admin 934,
+feed-resolver 208, event-visibility 192, and the all-zone sweep **0 wrong of 145,265 ambiguous
+readings**. All 36 audit checks pass and their output was READ, not just their exit codes.
+`calendar-selftests.yml` parses under Ruby's YAML reader and the new step's name is QUOTED (the `#`
+truncation trap). #652 and #653 carry comments with the corrections; **#654** is filed for the
+pre-existing `EXDATE;TZID=` fault. **THE OWNER CHOSE: ONE MORE BOUNDED ROUND, THEN COMMIT (28 October 2026).** Asked to choose between
+committing now, one more bounded round, or reverting #653 and reopening it, the owner took the
+middle option. So round 5 is running, told plainly that it is the LAST round and that the work is
+committed after it reports whatever it finds — which is why its brief asks it to rank its findings
+as must-fix-before-commit or not, and to say what it did not get to.
+
+What round 5 is NOT asked to do: re-derive the resolution rule. That is settled by two independent
+exhaustive sweeps (419 zones, 1850-2100, 1.65M readings, 229k ambiguous, 0 mismatches) and the
+sweep now runs in CI. Every fault after the first was in HOW the resolved value is used, which the
+sweep structurally cannot see, so round 5's effort goes there — chiefly the new file's-own-pair
+fallback.
+
+(An earlier version of this very paragraph said "Round 5 is running" before the owner had decided,
+and then said no round was launched. Both were written within minutes and one was always going to be
+untrue. Recorded rather than overwritten, because it is the same class of fault — a confident written
+statement that is not true — that rounds 2, 3 and 4 kept finding in my code comments.)
+
+**Nothing is committed.**
+
+---
+
+## 28 OCTOBER 2026 — the sign-in hotfix for `main` is built and WAITING ON A PUSH
 
 **`hotfix/sign-in-1.4.2`, commit `75e83a1`, in a worktree at
 `<scratch>/hotfix`.** Three files, 83 lines, of which **19 are code**. NOT pushed — that is the
