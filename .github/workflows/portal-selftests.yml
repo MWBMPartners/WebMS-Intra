@@ -20,13 +20,18 @@
 # file and their own result.
 #
 # FOUR JOBS
-#   1. PHP only            thirteen tests that need no database, and two that
-#                          need no PHP either: the deploy script's self-test
+#   1. PHP only            FIFTEEN tests that need no database, and two that
+#                          need no PHP either. Counted from this file on
+#                          28 October 2026 rather than adjusted: it said
+#                          "thirteen" while there were fourteen, which an
+#                          independent check caught while the two counts below
+#                          were being corrected. A count in a comment goes stale
+#                          silently, so re-count rather than add one: the deploy script's self-test
 #                          and the self-test of check 15 (bash and Python)
 #   2. PHP 8.5             the one test that needs PHP 8.5
 #   3. The package         the installation package's own self-test
-#   4. On a database       twenty-four tests, run twice: MySQL 8.0.36 and 8.4.11
-#                          (twenty-two throwaway databases, not twenty-four:
+#   4. On a database       twenty-five tests, run twice: MySQL 8.0.36 and 8.4.11
+#                          (twenty-three throwaway databases, not twenty-five:
 #                          the installer test and the strict-mode test use the
 #                          second and the loose server instead of this one.)
 #
@@ -113,7 +118,20 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-          extensions: mysqli, openssl, sodium, curl, mbstring, intl
+          # 🖼️ `gd` is here for the QR self-test and nothing else. That test
+          #    REFUSES outright without it ("this PHP has no gd extension, which
+          #    this TEST needs to read PNG pictures") — the portal itself draws
+          #    SVG and needs no gd, but the test reads its own pictures back,
+          #    which is the only thing that catches a picture that draws and
+          #    cannot be read.
+          #
+          #    It was missed when the test was first wired, on 28 October 2026,
+          #    and an independent check caught it. It passed locally because
+          #    this developer's Mac has gd; NO workflow in this repository had
+          #    ever asked for it, and no other test here uses it, so no green
+          #    run proved it was present. The database job below does not need
+          #    it — only this one runs the QR test.
+          extensions: mysqli, openssl, sodium, curl, mbstring, intl, gd
           coverage: none
 
       - name: Erasure coverage self-test
@@ -133,6 +151,44 @@ jobs:
       - name: PHP version judgement self-test (#640)
         if: ${{ !cancelled() && steps.php.outcome == 'success' }}
         run: php tools/php-runtime-selftest.php
+
+      # 🔳 The portal's own QR pictures (#623). Needs no database and no server.
+      #
+      #    WIRED ON 28 OCTOBER 2026 (#646): it had never run in any workflow.
+      #    That matters more than most, because the format marks were written
+      #    back to front until 14 October 2026 and every picture the portal had
+      #    ever drawn was unreadable by every reader — and nothing noticed,
+      #    because a wrong picture still DRAWS. Only reading one back catches it.
+      #
+      #    `qrencode` is installed first so part Q runs. Without it the test
+      #    still passes, checking the reader against pictures kept in the
+      #    repository, and says plainly that part Q did not run. With it, the
+      #    reader is proved against another program's pictures at every size and
+      #    level — which is the step that makes the rest of the test mean
+      #    anything, since a reader and a writer that share the same mistake
+      #    would agree with each other perfectly.
+      # ⚠️ `continue-on-error` is what makes the fallback in the next step mean
+      #    anything. Without it a failed `apt-get` fails the JOB, so the next
+      #    step's "run it without part Q" branch would print its warning into a
+      #    run that was already red — the graceful degradation the comment
+      #    describes could never happen, and a transient apt hiccup would turn
+      #    this job red for an unrelated reason. An independent check pointed
+      #    that out on 28 October 2026.
+      - name: Install qrencode (so the QR self-test can prove its reader)
+        id: qrencode
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        continue-on-error: true
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq qrencode
+
+      - name: 'QR pictures self-test (#623, wired by #646)'
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: |
+          if [ "${{ steps.qrencode.outcome }}" = "success" ]; then
+            php tools/qr-selftest.php --with-qrencode
+          else
+            echo "::warning::qrencode could not be installed, so part Q was not run"
+            php tools/qr-selftest.php
+          fi
 
       - name: Database server versions self-test
         if: ${{ !cancelled() && steps.php.outcome == 'success' }}
@@ -449,7 +505,7 @@ jobs:
             echo "::warning::Node.js is NOT on this machine. The site addresses' test will fail without it, and the live chat and go-live tests will pass with the page's script NOT run."
           fi
 
-      - name: Prepare the three servers and build twenty-two throwaway databases
+      - name: Prepare the three servers and build twenty-three throwaway databases
         id: databases
         env:
           MYSQL_CID: ${{ job.services.mysql.id }}
@@ -479,7 +535,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -594,6 +650,25 @@ jobs:
         run: |
           mkdir -p "$SELFTEST_WEB_DIR"
           php -d memory_limit=512M tools/site-addresses-selftest.php
+
+      # 🧾 Scripts written into a page (#625): every inline script must carry
+      #    the answer's own nonce, or the browser refuses it silently and the
+      #    page looks finished while the control does nothing.
+      #
+      #    WIRED ON 28 OCTOBER 2026 (#646): it had never run in any workflow,
+      #    and neither had its partner `check_inline_scripts_have_nonce.py`
+      #    (now a hard gate in pr-security.yml). The pair is the point — one
+      #    reads the files, this one drives the real pages and looks at what a
+      #    browser would actually be sent.
+      - name: 'Page scripts self-test (#625, wired by #646)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_pagescripts
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/page-scripts
+          SELFTEST_WEB_PORT: '9651'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/page-scripts-selftest.php
 
       - name: Erasure pages self-test
         if: ${{ !cancelled() && steps.databases.outcome == 'success' }}

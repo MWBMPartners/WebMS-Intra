@@ -630,6 +630,14 @@ When making changes:
    asks for a PR)".)*
 7. Close the GitHub issue once the work has merged, with the commit or pull request reference
 
+### Every check RUNS now — and until 28 October 2026 twelve of them did not (#646)
+
+Ten scripts in `tools/audit-checks/` and two `*-selftest.php` files were invoked by **no workflow at all** (26 of 36 checks, 51 of 53 tests). Each guards something found broken at least once, so they were twelve correct guards over twelve faults that had each already happened. All twelve now run on every pull request, and the ten checks are **hard gates** (`if: always()`, no `|| true`). The worst was `check_2fa_gate_order.py`, the tripwire for the sign-in bypass of 27 October: its own note says the self-test CANNOT catch a re-reversal of the order, so the half that would was the half that ran nowhere.
+
+**ASK WHAT A TEST NEEDS, NOT WHETHER IT PASSES HERE.** Wiring `qr-selftest.php` in needed `gd`, which **no workflow in this repository had ever asked for** and which `setup-php` does not install by default — the test REFUSES outright without it. It passed locally only because this Mac's PHP has gd, and no green run had ever proved the runner did. When wiring a test, read its refusal conditions and check each one against the job's `extensions:` list. **A step id must also start with a letter or underscore**: `id: 2fa_gate_order` may make the whole workflow invalid, taking every other check with it, and `steps.2fa_gate_order.outcome` is not valid syntax anyway.
+
+**Two traps when editing a workflow file here.** A `#` with a space before it starts a comment, so `name: Role keys (hard gate, #646)` silently became `Role keys (hard gate,` — twelve names were truncated that way; quote any name holding a `#`. And **parse the file before pushing**: there is no `actionlint`, `yq` or `pyyaml` on this machine, but Ruby is (`ruby -ryaml -e 'YAML.load_file(ARGV[0])'`), and that is what caught the truncation and two stale counts. A step skipped by its own `if:` looks wired and is not.
+
 ### Monitor and fix the pull-request security checks (always applies)
 
 On EVERY PR you touch, actively monitor GitHub's own automated checks — the

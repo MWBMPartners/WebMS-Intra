@@ -126,7 +126,14 @@ if (str_starts_with($repo . $sep, $parent . $sep) === true || str_starts_with($p
     refuse("the scratch parent folder '{$parent}' and the repository must not contain each other; choose another with SELFTEST_WEB_DIR");
 }
 $portRaw = getenv('SELFTEST_WEB_PORT');
-$port    = ($portRaw === false || $portRaw === '') ? 9770 : (int) $portRaw;
+// 🔌 9651, not 9770. 9770 is the port the activity-log self-test is given in
+//    `portal-selftests.yml`, and both run in the same job — so if this test's
+//    SELFTEST_WEB_PORT line were ever dropped, the default would silently
+//    collide with a test running beside it. Found by an independent check on
+//    28 October 2026, while this test was being wired into that workflow for
+//    the first time (#646). A default that clashes with a neighbour is a trap
+//    that only shows up when somebody tidies the environment block.
+$port    = ($portRaw === false || $portRaw === '') ? 9651 : (int) $portRaw;
 if ($port < 1024 || $port > 65535) {
     refuse('SELFTEST_WEB_PORT must be between 1024 and 65535');
 }

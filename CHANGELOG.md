@@ -2,6 +2,41 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — ten automatic checks and two tests guarded nothing, because nothing ran them (#646)**
+  - **What this means for the project.** Ten checks and two tests existed, were correct, and were
+    **never invoked by any automated run.** Every one of them was written because the thing it
+    watches had already been found broken once. So any of those faults could have been reintroduced
+    and nothing would have objected. All twelve now run on every pull request, and the ten checks
+    run as **hard gates** — they stop the build.
+  - **The worst of them, said plainly.** `check_2fa_gate_order.py` is the tripwire for the sign-in
+    bypass fixed on 27 October 2026, where a gate handed out an identity before the check that earns
+    it, so a malformed web address left somebody signed in who was never asked for their second
+    factor — **on the ordinary password form.** The note beside that fix says two checks are needed
+    because neither catches the other's half: one watches the order of the code, the other watches
+    the behaviour, and **reversing the order alone is invisible to the behaviour test.** That was
+    measured, not assumed. The half that catches a repeat was the half that ran nowhere.
+  - **Proved, not assumed.** Each of the twelve passes on the current code. Three were then checked
+    the other way, by reintroducing the exact fault each one guards: the sign-in bypass above (caught,
+    naming the file and line), storing a session identifier in a record, and a page script missing
+    the token that lets a browser run it. All three were refused. The workflow files were parsed to
+    confirm every new step really exists, that none is skipped by its own condition, and that none
+    was given an escape hatch that would let it fail without stopping the build.
+  - **Four faults in the wiring itself, caught before it was committed**, by a check of the wiring by
+    a system that did not write it. Two of them would have shown up only on the build server:
+    the picture test needed a graphics library that **no automated run here had ever asked for** (it
+    passed on the developer's machine, which happens to have it); and one step was given a name
+    starting with a digit, which may make the whole security run invalid — and that run carries
+    every other check too. The other two: a count in a comment that was already wrong before this
+    change, and a fallback that could never have worked because the step before it was not allowed
+    to fail.
+  - **The twelve step names that were being silently cut short were the new ones**, written in this
+    change and corrected in it — not names that had been broken for a while. A `#` with a space
+    before it starts a comment in those files, so a name ending `(hard gate, #646)` became
+    `(hard gate,`. Said precisely because the first version of this entry implied the fault was
+    older than it was.
+  - **What is left for the owner.** All of this was proved on a developer's machine. Proving the
+    steps really run on the build server needs a push, which is the owner's to make — and two of the
+    four faults above are exactly the kind only the build server can disprove.
 - **Fixed — a download cut off part way through could delete events from an imported calendar (#645)**
   - **What an administrator should know.** If a calendar download was cut off **inside an event** —
     a dropped connection part way through a transfer, which is an ordinary thing — the portal

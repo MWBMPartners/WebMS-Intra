@@ -6,6 +6,58 @@
 
 ---
 
+## 28 OCTOBER 2026, LATEST — every check runs now (#646)
+
+**Not committed when this was written; see the commit after `6985b38`.**
+
+Ten audit checks and two self-tests were invoked by NO workflow: 26 of 36 checks and 51 of 53
+tests were wired. Each guards something found broken at least once. All twelve now run on every
+pull request; the ten checks are hard gates (`if: always()`, no `|| true`). **Now 36 of 36 and
+53 of 53.**
+
+The one that mattered: `check_2fa_gate_order.py`, the tripwire for the 27 October sign-in bypass,
+whose own note says the self-test CANNOT catch a re-reversal of the order. The half that would was
+the half running nowhere. Proved both ways — with the `unset()` moved back below the redirect it
+fails and names the file and both lines.
+
+### The independent check found FOUR faults in the wiring, two of them runner-only
+
+1. **`gd` was missing from the job's extensions.** `qr-selftest.php` REFUSES without it, so the step
+   would have reddened the job and checked nothing. **No workflow here had ever asked for gd**, it is
+   not in `setup-php`'s defaults, and no other test uses it — so no green run had ever proved the
+   runner had it. It passed locally because this Mac does. **Ask what a test NEEDS, not whether it
+   passes here.**
+2. **`id: 2fa_gate_order` begins with a digit**, which may make the whole of `pr-security.yml`
+   invalid — taking all twenty-four existing checks with it — and `steps.2fa_gate_order.outcome` is
+   not valid syntax anyway. Renamed `twofa_gate_order`.
+3. **A count in the header comment was already wrong** ("thirteen" when there were fourteen, missed
+   when #640 was wired) and this change made it fifteen while correcting two others four lines below.
+4. **The qrencode fallback could never work**: the install step had no `continue-on-error: true`, so
+   a failed `apt-get` failed the job and the fallback branch would print into an already-red run.
+
+Also taken from its Polish: `page-scripts-selftest.php`'s DEFAULT port was 9770 — the port the
+activity-log test is given in the same job — so dropping its env line would have collided silently.
+Moved to 9651. And the job summary now reports the ten as one line, proved by extracting the summary
+shell and running it with outcomes substituted, in both the all-passed and the something-failed case.
+
+### Ruby parses YAML, so workflows are validated locally now
+
+There is no `actionlint`, `yq` or `pyyaml` on this machine, but Ruby is there:
+`ruby -ryaml -e 'YAML.load_file(ARGV[0])'`. That found twelve of my own step names silently
+truncated (a `#` with a space before it starts a comment, so `(hard gate, #646)` became
+`(hard gate,`), confirmed every `if:` points at a step id that exists in the same job, and proved
+no port collides. **This retires the "actionlint in CI is what will confirm it" caveat** attached to
+two earlier commits — all 15 workflows now parse before a push.
+
+### Verified
+
+36/36 audit checks; page-scripts 88/88 on both the new default port and the workflow's explicit one;
+qr-selftest 67/67 on the fallback branch; all 15 workflows parse; no port or database clash; three
+of the ten gates proved to refuse their exact fault. **Not proved:** that any of it runs on GitHub —
+that needs a push, and two of the four faults above are exactly the kind only a runner can disprove.
+
+---
+
 ## 28 OCTOBER 2026, LATER — #645 settled: a truncated download was deleting events
 
 **Committed: nothing yet for this; the money package is `37a63de`.** #645's three items are all

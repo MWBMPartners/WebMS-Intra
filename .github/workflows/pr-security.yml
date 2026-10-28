@@ -1048,8 +1048,108 @@ jobs:
         run: python3 tools/audit-checks/check_php_version_one_place.py
 
       # =====================================================================
+      # Ten checks that guarded something already found broken once, and ran
+      # NOWHERE until 28 October 2026 (#646)
+      # =====================================================================
+      # Every one of these exists because the thing it watches was found broken
+      # at least once. None of them was invoked by any workflow, so somebody
+      # could have reintroduced any of those faults and nothing in CI would have
+      # objected. All ten pass locally today, so all ten go in as HARD GATES, as
+      # the owner chose on 28 October 2026 ("hard gates where green").
+      #
+      # Each has its own `id` and `if: always()` so one failing does not hide
+      # the rest, matching the steps above. A step added but skipped by its `if:`
+      # looks wired and is not — this repository has had that shape of fault
+      # before (a `|| true` meant a check documented as always-blocking could
+      # never fail the build), which is why none of these carries `|| true`.
+
+      # Every two-factor gate takes the sign-in away FIRST. This guards the
+      # sign-in bypass fixed on 27 October 2026, where a gate granted an
+      # identity before the check that earns it, so `?redirect[]=x` left
+      # somebody signed in who was never asked for a code — on the password
+      # form. Its own note says TWO checks are needed because neither catches
+      # the other's half: this one watches the ORDER, section Z of
+      # two-step-selftest.php watches the behaviour, and REVERSING THE ORDER
+      # ALONE IS INVISIBLE TO THE SELF-TEST. That was measured, not assumed.
+      # So the half that catches a re-reversal is this one, and until now it
+      # ran nowhere (#646). A hard gate: there is nothing to weigh up and the
+      # fix is always the same.
+      - name: 'Every two-factor gate takes the sign-in away first (hard gate, #646)'
+        # 🔤 NOT `2fa_gate_order`: a step id must start with a letter or an
+        #    underscore, and `steps.2fa_gate_order.outcome` is not valid
+        #    expression syntax either, so nothing could ever read the result.
+        #    It was the only id in any workflow here beginning with a digit,
+        #    and the downside was the whole of pr-security.yml being rejected.
+        id: twofa_gate_order
+        if: always()
+        run: python3 tools/audit-checks/check_2fa_gate_order.py
+
+      # A page that writes more than once must hand back the replacement
+      # anti-forgery token, because accepting one replaces it (#634).
+      - name: 'A page that writes twice hands back the replacement form token (hard gate, #646)'
+        id: csrf_rotation_returned
+        if: always()
+        run: python3 tools/audit-checks/check_csrf_rotation_returned.py
+
+      # A column an erasure must clear has to accept being emptied (#626).
+      - name: 'A column an erasure must clear can be emptied (hard gate, #646)'
+        id: erasure_columns_nullable
+        if: always()
+        run: python3 tools/audit-checks/check_erasure_columns_nullable.py
+
+      # An inline script without the answer's nonce is REFUSED by the browser
+      # and nothing is logged, so the page looks finished and the control does
+      # nothing (#625). Paired with page-scripts-selftest.php, now also wired.
+      - name: 'Every inline script carries the answer''s own nonce (hard gate, #646)'
+        id: inline_scripts_have_nonce
+        if: always()
+        run: python3 tools/audit-checks/check_inline_scripts_have_nonce.py
+
+      # The mail library must reach for nothing of the portal (#592).
+      - name: 'The mail library reaches for nothing of the portal (hard gate, #646)'
+        id: maillib_stands_alone
+        if: always()
+        run: python3 tools/audit-checks/check_maillib_stands_alone.py
+
+      # A membership question must be scoped to one organisation (#502, #511).
+      - name: 'Every membership question is scoped to one organisation (hard gate, #646)'
+        id: membership_queries_scoped
+        if: always()
+        run: python3 tools/audit-checks/check_membership_queries_scoped.py
+
+      # An organisation may not take a key the portal reserves.
+      - name: 'No organisation takes a key the portal reserves (hard gate, #646)'
+        id: reserved_site_keys
+        if: always()
+        run: python3 tools/audit-checks/check_reserved_site_keys.py
+
+      # A role key must be one the portal really has.
+      - name: 'Every role key is one the portal really has (hard gate, #646)'
+        id: role_keys
+        if: always()
+        run: python3 tools/audit-checks/check_role_keys.py
+
+      # Never store `session_id()` or the whole `$_SESSION` in a record (#622).
+      - name: 'No record stores a session identifier or a whole session (hard gate, #646)'
+        id: session_id_not_stored
+        if: always()
+        run: python3 tools/audit-checks/check_session_id_not_stored.py
+
+      # A long job must set its own time limit rather than inherit one.
+      - name: 'A long job sets its own time limit (hard gate, #646)'
+        id: time_limit_calls
+        if: always()
+        run: python3 tools/audit-checks/check_time_limit_calls.py
+
+      # =====================================================================
       # Summary in the Actions UI
       # =====================================================================
+      # 📋 The ten gates wired by #646 are deliberately NOT listed one by one
+      #    below: the summary would become a wall of names, and a failing step
+      #    already shows itself in the Actions list. One line says they ran, so
+      #    a reader of the summary can tell the difference between "they all
+      #    passed" and "they are not wired", which was the whole problem #646
+      #    was about.
       - name: Job summary
         if: always()
         run: |
@@ -1062,6 +1162,34 @@ jobs:
             echo "- PHP lint: ${{ steps.php_lint.outcome }} (hard gate)"
             echo "- Account-change guard: ${{ steps.account_guard.outcome }} (hard gate)"
             echo "- One place decides the PHP version: ${{ steps.php_version_one_place.outcome }} (hard gate)"
+            # The ten guards wired by #646, as ONE line unless something failed.
+            # Ten separate lines would bury the rest of the summary; what a
+            # reader needs is to tell "they all passed" from "they are not
+            # wired at all", which is the state #646 was about.
+            gates646=""
+            for entry in \
+              "every two-factor gate takes the sign-in away first:${{ steps.twofa_gate_order.outcome }}" \
+              "a page that writes twice returns the form token:${{ steps.csrf_rotation_returned.outcome }}" \
+              "a column an erasure clears can be emptied:${{ steps.erasure_columns_nullable.outcome }}" \
+              "every inline script carries its nonce:${{ steps.inline_scripts_have_nonce.outcome }}" \
+              "the mail library stands alone:${{ steps.maillib_stands_alone.outcome }}" \
+              "membership questions are scoped to one organisation:${{ steps.membership_queries_scoped.outcome }}" \
+              "no organisation takes a reserved key:${{ steps.reserved_site_keys.outcome }}" \
+              "every role key really exists:${{ steps.role_keys.outcome }}" \
+              "no record stores a session identifier:${{ steps.session_id_not_stored.outcome }}" \
+              "a long job sets its own time limit:${{ steps.time_limit_calls.outcome }}" ; do
+              label="${entry%:*}"
+              outcome="${entry##*:}"
+              if [[ "$outcome" != "success" ]]; then
+                gates646="${gates646}  - ${label}: ${outcome}"$'\n'
+              fi
+            done
+            if [[ -z "$gates646" ]]; then
+              echo "- The ten guards wired by #646: all passed (hard gates)"
+            else
+              echo "- The ten guards wired by #646: NOT all passed (hard gates):"
+              printf '%s' "$gates646"
+            fi
             if [[ "${{ steps.install_gitleaks.outputs.installed }}" == "yes" ]]; then
               echo "- gitleaks: see step output / artifact"
             elif [[ "${{ steps.install_gitleaks.outcome }}" == "success" ]]; then

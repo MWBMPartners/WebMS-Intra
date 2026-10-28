@@ -8523,3 +8523,111 @@ mistake recorded on the issue rather than quietly edited away.
 reproduction it implies actually reproduces it.** A comment that sends somebody
 to the wrong experiment is worse than one that says nothing, because the wrong
 experiment comes back green.
+
+
+## Ten checks and two tests that ran nowhere (#646, 28 October 2026)
+
+Found while wiring up a new check for #640, after an independent review pointed
+out that the new check was not in any workflow. Measuring that turned up a much
+larger gap: **ten of the scripts in `tools/audit-checks/` and two of the
+`tools/*-selftest.php` files were invoked by no workflow at all.**
+
+Every one of them guards something that was found broken at least once. That is
+why the script exists. So the position was: twelve correct guards, none of them
+running, over faults that had each happened before.
+
+### The measurement, before and after
+
+| | Before | After |
+| --- | --- | --- |
+| Audit checks on disk | 36 | 36 |
+| …invoked by a workflow | 26 | **36** |
+| Self-tests on disk | 53 | 53 |
+| …invoked by a workflow | 51 | **53** |
+
+### The one that mattered most
+
+`check_2fa_gate_order.py` guards the sign-in bypass fixed on 27 October 2026,
+where four two-factor gates granted an identity before the check that earns it,
+so `?redirect[]=x` made `Auth::safeRedirectUrl()` throw while `user_id` was
+still set — PHP wrote the session at shutdown and the next request saw somebody
+fully signed in who had never been asked for a code. On the password form, that
+needed nothing but the victim's password.
+
+The note beside that fix is explicit that **two** checks are needed because
+neither catches the other's half: this script watches the ORDER, section Z of
+`two-step-selftest.php` watches the BEHAVIOUR, and **reversing the order alone
+is invisible to the self-test** — measured at the time, not assumed. So the half
+that would catch a re-reversal was the half that ran nowhere.
+
+Proved both directions: with the fix in place the check passes; with the
+`unset()` moved back below the redirect in `web/_apps/auth/login/index.php`, it
+fails and names the file and both line numbers.
+
+### All ten as hard gates, and why that was safe to do
+
+The owner's instruction was "hard gates where green". All ten pass on the
+current code, so all ten went in as gates with `if: always()` and no `|| true`.
+That last point matters: this repository has already had a check "documented as
+always-blocking" that could never fail the build because of a `|| true`, which
+is why the account-change guard now runs twice.
+
+`check_no_hardcoded_domains.py` is left as it was — non-blocking, because it
+carries a pending list and `--strict` is what fails on it.
+
+### Four faults in the wiring, and two of them only a runner could have found
+
+An independent check of the wiring found four. They are worth listing because
+three are general traps, not one-offs.
+
+1. **The QR test needed `gd`, which no workflow here had ever asked for.**
+   `tools/qr-selftest.php` refuses outright without it — "this PHP has no gd
+   extension, which this TEST needs to read PNG pictures" — and exits 1, so the
+   step would have turned the job red and checked nothing. It passed locally
+   because this Mac's PHP has gd. **No green run proved gd was present**: it is
+   not in `setup-php`'s default set, not one of the five `setup-php` steps in
+   this repository listed it, and no other test here uses it. The classic shape
+   — the developer's machine has what the runner does not — and the only cure is
+   to ask what the test needs rather than whether it passes here.
+2. **A step id beginning with a digit.** `id: 2fa_gate_order`. Ids must start
+   with a letter or underscore, and `steps.2fa_gate_order.outcome` is not valid
+   expression syntax either, so nothing could ever read its result. The downside
+   was the whole of `pr-security.yml` being rejected, which would have taken out
+   every other check with it. It was the only such id in any workflow here.
+3. **A count in a comment that was already wrong.** The header said "thirteen
+   tests that need no database" when there were fourteen — missed when #640 was
+   wired — and this change made it fifteen while correcting two *other* counts
+   four lines below. Re-counted from the file: fifteen PHP tests plus two that
+   need no PHP.
+4. **A fallback that could not work.** The `qrencode` install step had no
+   `continue-on-error: true`, so a failed `apt-get` failed the job and the next
+   step's "run it without part Q" branch would have printed its warning into a
+   run that was already red. It failed *closed*, so nothing was hidden — but the
+   graceful degradation the comment described was impossible, and a transient
+   apt hiccup would have reddened a hard-gated job for an unrelated reason.
+
+### Two things local validation caught before any of that
+
+1. **Twelve step names were silently truncated — the twelve written in this
+   change.** A `#` preceded by a space starts a comment in a workflow file, so
+   `name: Role keys (hard gate, #646)` parsed as `Role keys (hard gate,`.
+   Existing names such as `Foreign-key target check (#552, …)` survive only
+   because their `#` follows a bracket with no space. All twelve are now quoted.
+   Worth knowing because the failure is invisible unless you parse the file.
+2. **The counts in the workflow's own header comment.** It claimed a number of
+   database-backed tests and of throwaway databases; both were re-counted from
+   the file rather than adjusted by arithmetic (25 tests, 23 databases — they
+   differ because two tests use the second and the loose server).
+
+Both were found by parsing the workflow files locally with Ruby's YAML reader.
+There is no `actionlint`, `yq` or `pyyaml` on this machine, but Ruby is present,
+and one line of it parses every workflow and counts the steps — well worth doing
+before a push rather than discovering it in a run.
+
+### What is NOT proved
+
+#646 asks for each check to be proved running **by pushing a branch with a
+planted fault and watching it go red**. That needs a push, which is the owner's.
+What is proved here is: every step exists as the YAML parses it, none is skipped
+by its own condition, none has an escape hatch, each check passes on the current
+code, and three of the ten refuse the exact fault they guard.

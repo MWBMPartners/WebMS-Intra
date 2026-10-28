@@ -828,6 +828,55 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     the design before refining it again. This does not relax the final check before a commit.
     *(`.claude/CLAUDE.md` → "Working with the owner".)*
 
+22b. **Every check now RUNS, and that was not true until 28 October 2026
+    (#646).** Ten scripts in `tools/audit-checks/` and two `*-selftest.php`
+    files were invoked by NO workflow — 26 of 36 checks and 51 of 53 tests were
+    wired. Every one of the twelve guards something found broken at least once,
+    so twelve correct guards sat over twelve faults that had each happened
+    before. All twelve now run on every pull request; the ten checks are HARD
+    GATES with `if: always()` and no `|| true`.
+
+    The worst was `check_2fa_gate_order.py`, the tripwire for the sign-in bypass
+    of 27 October. Its own note says TWO checks are needed because neither
+    catches the other's half — the script watches the ORDER, section Z of
+    `two-step-selftest.php` watches the BEHAVIOUR, and **reversing the order
+    alone is invisible to the self-test**, which was measured at the time. The
+    half that catches a repeat was the half that ran nowhere.
+
+    THREE MORE, each found by an independent check of the wiring itself:
+    - **Ask what a test NEEDS, not whether it passes here.** Wiring
+      `qr-selftest.php` needed `gd`, which **no workflow in this repository had
+      ever asked for** and which `setup-php` does not install by default. The
+      test refuses outright without it, so the step would have reddened the job
+      and checked nothing. It passed locally because this Mac has gd, and no
+      green run had ever proved the runner did. Read a test's refusal
+      conditions and check each against the job's `extensions:`.
+    - **A step id must start with a letter or `_`.** `id: 2fa_gate_order` may
+      make the entire workflow invalid — taking every other check with it — and
+      `steps.2fa_gate_order.outcome` is not valid expression syntax regardless.
+    - **A fallback needs `continue-on-error: true` on the step it falls back
+      from.** Without it the job is already failed, so the fallback branch runs
+      into a red run and changes nothing.
+
+    TWO THINGS TO KNOW BEFORE EDITING A WORKFLOW FILE HERE:
+    - **A `#` preceded by a space starts a comment.** `name: Role keys (hard
+      gate, #646)` silently became `Role keys (hard gate,`. Twelve step names
+      were truncated that way. Quote any name holding a `#`. Existing names like
+      `(#552, …)` survive only because their `#` follows a bracket.
+    - **Parse the file before pushing.** There is no `actionlint`, `yq` or
+      `pyyaml` on this machine, but Ruby is there:
+      `ruby -ryaml -e 'd=YAML.load_file(ARGV[0]); ...'` parses every workflow
+      and counts its steps. That is what found the truncation and two stale
+      counts in a header comment. A step skipped by its own `if:` looks wired
+      and is not, and this repository has had a `|| true` that made a check
+      "documented as always-blocking" unable to fail the build.
+
+    **Not proved:** #646 asks for each check to be proved running by pushing a
+    branch with a planted fault. That needs a push, which is the owner's. What
+    is proved is that every step exists as the YAML parses it, none is skipped,
+    none has an escape hatch, each check passes on current code, and three of
+    the ten refuse the exact fault they guard.
+
 22. **What the automatic checks are now (#499, 27 October 2026).** On every pull request: `pr-security.yml` (the hard
     gate — `php -l` on every file, a secrets scan, and most of the scripts in `tools/audit-checks/`),
     `php-static-analysis.yml` (`php -l` again, as its own required check), `codeql.yml`, and the self-test jobs
