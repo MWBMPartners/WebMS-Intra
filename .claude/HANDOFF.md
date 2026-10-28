@@ -6,6 +6,64 @@
 
 ---
 
+## 28 OCTOBER 2026, LATEST — the sign-in hotfix for `main` is built and WAITING ON A PUSH
+
+**`hotfix/sign-in-1.4.2`, commit `75e83a1`, in a worktree at
+`<scratch>/hotfix`.** Three files, 83 lines, of which **19 are code**. NOT pushed — that is the
+owner's, and it is the one thing blocking the advisory.
+
+### It closes TWO of the four holes, by the owner's decision
+
+A cherry-pick was never possible: `Auth.php` on this branch differs from `main` by **+1851/-41**
+across a dozen commits (several organisations, address rewriting, secret settings, the channel,
+sign-in limits). So the fix was written against `main`'s own code.
+
+| Hole | In 1.4.2? | Why |
+| --- | --- | --- |
+| 1, OAuth `state` accepted with no sign-in started | **yes** | two lines each in both callbacks |
+| 2, second factor skipped by `?redirect[]=x` | **yes** | `safeRedirectUrl()` takes `mixed`; the gate unsets first |
+| 0, Microsoft/Google/passkey skip two-factor entirely | no | **`main` has NO gate on those routes at all** |
+| 3, the passkey route asks for nothing | no | same |
+
+**The owner chose this on a measurement, 28 October 2026.** On `main`,
+`git grep -c userRequires2fa` finds one hit in `Auth.php` (the definition) and none in
+`webauthn.php`, so closing holes 0 and 3 there means writing NEW security code in three places
+against a codebase 568 commits behind, which this branch's tests cannot exercise. They are already
+fixed and tested on this branch, so they ride the release. Severity agrees with the cost: hole 1
+needs nothing from the victim, hole 2 needs their password alone, holes 0 and 3 need control of
+their Microsoft or Google account.
+
+### Measured against `main`'s own code, not this branch's
+
+- The gate-order check — written AFTER `main`'s last commit, pointed at the tree with `--web` —
+  **FAILS on unpatched `main`**, naming lines 107 and 108, and **PASSES on the hotfix**.
+- The OAuth condition over six cases: the old one **ACCEPTED** "no sign-in started, address carries
+  `state=`" and threw a TypeError on `state[]=x`; the new one refuses both and still accepts a real
+  sign-in with a matching value.
+- `php -l` clean. **This branch's test suite was NOT run against it and cannot be** — it assumes the
+  newer architecture. Say so when reporting it.
+
+**A trap worth remembering.** The first run of that check reported "all 4 two-factor gates take the
+sign-in away first" and looked like a pass. It had scanned THIS branch, because the script resolves
+its root from `__file__` and ignores the working directory. `main` has ONE gate, not four, and that
+number is what gave it away. Its `--web` flag then crashed on a path outside the repository
+(`relative_to()` raises), fixed in `d76369d`. **A check that silently measures the wrong tree is
+worse than one that crashes.**
+
+### Advisory: both open points are now decided
+
+Hold until `main` is fixed, publish as ONE. The draft
+(`.claude-work/resume/security/ADVISORY-DRAFT--two-sign-in-holes.md`, git-ignored) now carries the
+per-hole split and the evidence, so publishing is mechanical once the hotfix is merged.
+
+### Note on worktrees
+
+There are 24 worktrees from earlier sessions under `.claude-work/worktrees/`, plus mine. **Not
+touched** — the standing rule is to preserve active worktrees and never prune without exact
+reviewed candidates and the owner's approval.
+
+---
+
 ## 28 OCTOBER 2026, LATEST — every check runs now (#646)
 
 **Not committed when this was written; see the commit after `6985b38`.**
