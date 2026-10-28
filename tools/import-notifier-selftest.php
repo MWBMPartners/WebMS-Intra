@@ -167,7 +167,7 @@ set_exception_handler(static function (Throwable $e): void {
 });
 
 /** How many checks a full run makes (passed + failed + skipped). A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 124;
+const EXPECTED_CHECKS = 132;
 
 // =============================================================================
 // 🛑 Refuse anything but a throwaway database — BEFORE any class is loaded
@@ -2060,6 +2060,145 @@ foreach ($allPush as $p) {
     }
 }
 ok('N17 no push in any run held a name, an address or a title', $pushNamed === [], implode(', ', array_unique($pushNamed)));
+
+// =============================================================================
+head('N29. Two calendars that commit out of order (#643, recorded as intended)');
+// =============================================================================
+// WHAT THIS PINS, and it pins a LIMIT rather than a feature, so read the
+// reasoning before changing it.
+//
+// An approval's number comes from the database's own counter, which hands one
+// out when the row is INSERTED, not when the change is COMMITTED. Each import
+// runs in a long transaction holding only ITS OWN calendar's row lock
+// (FeedImporter opens the transaction, takes the lock, and commits at the end),
+// so two calendars importing at once can take numbers 100 and 101 and commit in
+// the other order. Verified against the table and the importer on 28 October
+// 2026: `approvalID INT NOT NULL AUTO_INCREMENT`, and nothing orders the two
+// commits.
+//
+// `waiting()` reports `newestId` as the highest waiting number ACROSS the
+// organisation's calendars, and `claimPush()` raises the mark only when it is
+// still lower (`WHERE pushUpToApprovalID < ?`). So:
+//
+//   1. calendar A inserts approval 100; its transaction is still open;
+//   2. calendar B inserts 101 and commits;
+//   3. the job runs, sees 101, pushes, records "told up to 101";
+//   4. calendar A commits. 100 is waiting — and 100 < 101, so no push.
+//
+// THE OWNER CHOSE TO ACCEPT THIS on 28 October 2026, after the premise was
+// confirmed, and the reason is the house rule: NEVER TWICE COMES BEFORE ALWAYS
+// DELIVERED. Every way of closing it risks a second push for an event somebody
+// has already been told about, which is worse than what happens here — and what
+// happens here loses nothing. The event is in the approvals list, the admin
+// page's counts include it, and the next day's e-mail names it, because the
+// e-mail is claimed by LOCAL DATE and not by approval number. The checks below
+// hold all three of those, so a future change cannot quietly turn this into a
+// lost event either.
+//
+// WHAT THESE CHECKS DO AND DO NOT PIN — measured, because the first version of
+// this comment implied more.
+//
+// They state the behaviour truthfully and they hold the three "nothing is lost"
+// guarantees, and THOSE are the load-bearing ones: if any change ever drops the
+// late approval, stops counting it, or leaves it out of the next day's e-mail,
+// one of them fails. That is the line between "a push is skipped" (accepted)
+// and "an event is hidden" (not).
+//
+// They are NOT a tripwire against somebody redesigning the mark. Three plants
+// were tried and none was caught: loosening `claimPush()`'s condition from `<`
+// to `<>`, removing that condition altogether, and loosening the push gate from
+// `<` to `!==`. All three leave this scenario unchanged, and the reason is
+// structural rather than a gap in the test — the mark only ever RISES, and the
+// gate compares it with the HIGHEST waiting number, which in this scenario is
+// already the mark. So no change that still compares against "the highest
+// number" can alter the outcome.
+//
+// A real fix for #643 would therefore have to change the data model — a mark
+// per calendar, a mark per approval, or a moment instead of a number — and it
+// would need its own checks. Do not read a green N29 as permission to change
+// the mark: read it as "the current behaviour is still what was agreed, and
+// nothing is being hidden".
+//
+// The one constraint that does not move: the fix must not be able to push twice.
+// See #643.
+forgetTold();
+
+// 🕳️ Leave a gap in the numbering, so there is a number BELOW the one the job
+//    is about to be told. That is what a late commit looks like from here.
+$lateNumber = $nextApproval++;
+
+$n29Early = waitingEvent(ORG_A, FEED_A1, 'Committed first ZQXN29A', $wallT1, ZONE_A);
+$n29Run1  = run(at(ZONE_A, '2027-02-03 03:00:00'));
+ok(
+    'N29 the calendar that commits first is pushed about, and the mark is its number',
+    count(pushFor($n29Run1, ORG_A)) === 1
+        && (int) (told(ORG_A, A_ADM1)['pushUpToApprovalID'] ?? 0) === $n29Early,
+    'pushes=' . json_encode(pushFor($n29Run1, ORG_A)) . ' told=' . json_encode(told(ORG_A, A_ADM1))
+);
+
+// 🐌 Now the other calendar commits, with its LOWER number.
+$nextApproval = $lateNumber;
+$n29Late      = waitingEvent(ORG_A, FEED_A2, 'Committed late ZQXN29B', $wallT1, ZONE_A);
+$nextApproval = $n29Early + 1;
+ok(
+    'N29 the late approval really does carry a LOWER number than the mark',
+    $n29Late < $n29Early,
+    'late=' . $n29Late . ' early=' . $n29Early
+);
+
+$n29Run2 = run(at(ZONE_A, '2027-02-03 03:05:00'));
+ok(
+    'N29 no second push: the late one is skipped, which is the accepted limit',
+    pushFor($n29Run2, ORG_A) === [],
+    json_encode($n29Run2['push'])
+);
+ok(
+    'N29 and the mark is NOT lowered to it, so nothing is pushed about twice later',
+    (int) (told(ORG_A, A_ADM1)['pushUpToApprovalID'] ?? 0) === $n29Early,
+    json_encode(told(ORG_A, A_ADM1))
+);
+
+// 🛟 NOTHING IS LOST. These three are what make the limit acceptable, so they
+//    matter more than the two above: if any of them ever fails, the behaviour
+//    has stopped being "a push is skipped" and become "an event is hidden".
+// Measured against this organisation's OWN earlier events rather than an
+// absolute total: earlier sections leave waiting events here on purpose, and a
+// check that assumed otherwise would fail for a reason that has nothing to do
+// with #643 (it did, first time round — the total was 5, not 2).
+$n29Waiting = \Portal\Core\ImportNotifier::waiting($mysqli, ORG_A);
+$n29LateRow = one('SELECT status FROM tblExternalEventApprovals WHERE approvalID = ?', 'i', [$n29Late]);
+ok(
+    'N29 the late approval is still WAITING — the push is skipped, the event is not',
+    ($n29LateRow['status'] ?? '') === 'pending',
+    json_encode($n29LateRow)
+);
+ok(
+    'N29 and the count the admin page shows includes it',
+    $n29Waiting['total'] >= 2
+        && array_sum(array_map(static fn (array $c): int => $c['n'], $n29Waiting['byCalendar'])) === $n29Waiting['total'],
+    json_encode($n29Waiting)
+);
+ok(
+    'N29 and its calendar is still named in the breakdown the admin page uses',
+    count(array_filter($n29Waiting['byCalendar'], static fn (array $c): bool => $c['feedID'] === FEED_A2)) === 1,
+    json_encode($n29Waiting['byCalendar'])
+);
+// 📧 The e-mail is claimed per LOCAL DATE, not per approval number, so the next
+//    day's message names the late event however low its number is. That is the
+//    route by which nobody misses it.
+$n29Run3 = run(at(ZONE_A, '2027-02-04 08:10:00'));
+// The stand-in records the message as `html`, not `body`. Written out because
+// the first version of this check read a key that does not exist, so it found
+// nothing and read as a real failure of the e-mail.
+$n29Mail = array_values(array_filter($n29Run3['mail'], static fn (array $m): bool => str_contains((string) ($m['html'] ?? ''), 'ZQXN29B')));
+ok(
+    'N29 the NEXT DAY\'s e-mail names the late event, so it is never missed',
+    count($n29Mail) >= 1,
+    'mails=' . count($n29Run3['mail']) . ' naming it=' . count($n29Mail)
+);
+
+removeWaiting([$n29Early, $n29Late]);
+forgetTold();
 
 // =============================================================================
 head('N19. The migration');

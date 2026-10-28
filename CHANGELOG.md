@@ -2,6 +2,20 @@
 
 
 ## [Unreleased] (alpha)
+- **Recorded as intended — one "waiting for approval" push can be skipped when two calendars finish at the same moment (#643)**
+  - **What an administrator should know.** If two outside calendars are imported at the same instant,
+    the push about one of them can be missed. **Nothing is lost:** the event is in the approvals
+    list, the page's counts include it, and the next day's e-mail names it. Only the push is skipped.
+  - **Why it is being left alone.** Every way of closing it risks sending a **second** push about an
+    event somebody has already been told about, and that is worse. The rule this whole feature is
+    built on is "never twice comes before always delivered".
+  - **The reason is now written beside the code, with checks on it**, so the behaviour cannot be
+    changed by accident — and in particular so that a future change cannot quietly turn "a push is
+    skipped" into "an event is hidden". The three checks that hold that second line are the ones
+    that matter, and they were proved to fail when the event was deliberately hidden.
+  - **Said plainly about the checks' limits:** they are not a tripwire against redesigning the
+    bookkeeping. Three deliberate faults were planted and none was caught, for a structural reason
+    recorded beside them. A real fix would change the data model and would need its own checks.
 - **Fixed — ten automatic checks and two tests guarded nothing, because nothing ran them (#646)**
   - **What this means for the project.** Ten checks and two tests existed, were correct, and were
     **never invoked by any automated run.** Every one of them was written because the thing it

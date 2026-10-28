@@ -1109,6 +1109,50 @@ final class ImportNotifier
      */
     private static function claimPush(\mysqli $db, int $siteId, int $userId, int $newestId): bool
     {
+        // ⚠️ ONE EVENT CAN BE SKIPPED HERE, AND THAT IS ACCEPTED (#643).
+        //
+        //    An approval's number comes from the database's own counter, which
+        //    hands one out when the row is INSERTED, not when it is COMMITTED.
+        //    Each import runs in a long transaction holding only ITS OWN
+        //    calendar's row lock, so two calendars importing at once can take
+        //    100 and 101 and commit in the other order:
+        //
+        //      1. calendar A inserts approval 100; its transaction stays open;
+        //      2. calendar B inserts 101 and commits;
+        //      3. this runs, sees 101, pushes, records "told up to 101";
+        //      4. calendar A commits. 100 is waiting — and `< 101` is false,
+        //         so no push is ever sent for it.
+        //
+        //    CONFIRMED, not assumed, on 28 October 2026: `approvalID` really is
+        //    `AUTO_INCREMENT`, `waiting()` really reports the highest number
+        //    ACROSS the organisation's calendars, and nothing orders the two
+        //    commits. The reviewer who reported it had read neither the table
+        //    nor the importer and said so.
+        //
+        //    THE OWNER CHOSE TO LEAVE IT, and the reason is the rule this whole
+        //    class is built on: NEVER TWICE COMES BEFORE ALWAYS DELIVERED.
+        //    Every way of closing it — a moment instead of a number, re-reading
+        //    after a pause — risks a second push for an event somebody has
+        //    already been told about, which is a worse outcome than this one.
+        //
+        //    AND THIS ONE LOSES NOTHING. The event stays in the approvals list,
+        //    the admin page's counts include it, and the next day's e-mail
+        //    names it, because the e-mail is claimed by LOCAL DATE and not by
+        //    approval number. Only the push is skipped. Section N29 of
+        //    `tools/import-notifier-selftest.php` holds all of that, including
+        //    the three "nothing is lost" halves — so if a change ever turns
+        //    this from "a push is skipped" into "an event is hidden", a test
+        //    says so. Be clear about the limit of that, though: N29 is NOT a
+        //    tripwire against redesigning the mark. Three plants were tried
+        //    against it and none was caught, because the mark only ever rises
+        //    and the gate compares it with the HIGHEST waiting number, which in
+        //    that scenario already equals the mark. A real fix has to change
+        //    the data model, and would need its own checks.
+        //
+        //    If you are about to fix it: the fix must not be able to push
+        //    twice. That is the whole constraint, and it is why `<` is here
+        //    rather than `<=`.
+
         $stmt = $db->prepare(
             'UPDATE tblExternalApprovalNotices SET pushUpToApprovalID = ?, pushAt = UTC_TIMESTAMP() '
             . 'WHERE siteID = ? AND userID = ? AND pushUpToApprovalID < ?'
