@@ -91,7 +91,15 @@ def check(web: Path) -> int:
             if WRITES_PENDING.search(line) is None:
                 continue
             gates += 1
-            where = path.relative_to(REPO_ROOT)
+            # `--web` may point outside this repository — at a worktree of an
+            # older branch, say, which is exactly how the sign-in hotfix for
+            # `main` was checked on 28 October 2026. `relative_to()` RAISES on
+            # a path that is not underneath, so the flag the script offers
+            # crashed it. Fall back to the full path, which is still useful.
+            try:
+                where = path.relative_to(REPO_ROOT)
+            except ValueError:
+                where = path
             unset_at = None
             redirect_at = None
             for j in range(i, min(i + WINDOW, len(lines))):
