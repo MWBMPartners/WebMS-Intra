@@ -8337,3 +8337,189 @@ its own exact text. This is the same shape as the repository's standing warning
 about checking a name against the thing that actually uses it: a count cannot
 tell two statements apart, and the check existed precisely because round 1 had
 removed that scoping and nothing noticed.
+
+
+## A truncated download was called a whole calendar, and that deleted events (#645 item 2, 28 October 2026)
+
+Reported by an outside review of `IcsReader.php` (Codex, slice 7 of the #514
+pass) as a documentation problem — "a caller cannot rely on the flag". It is
+worse than that: it is the one flag that stops an incomplete download removing
+events.
+
+### What was wrong
+
+`parse()` worked `complete` out from four things:
+
+```php
+$complete = ($sawCalendarStart === true && $sawCalendarEnd === true
+    && $stoppedEarly === false && $droppedLine === false);
+```
+
+**Not one of them mentions a block left open.** So this file satisfied all four:
+
+```
+BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:a
+DTSTART:20260102T120000Z
+END:VCALENDAR
+```
+
+`complete = true`, *alongside the warning* "The file ends in the middle of an
+event, so it was not complete." And the comment three lines above the
+calculation said the flag was "false anyway" — **it stated the guarantee the
+code had forgotten to implement**, which is the most dangerous kind of comment
+there is, because it stops the next reader looking.
+
+### Why it could lose data
+
+`FeedImporter::refresh()` asks that one flag and nothing else:
+
+> The file was cut short… Whatever arrived may be perfectly good, but it is not
+> the whole calendar, so nothing may be removed on the strength of it — and the
+> simplest way to guarantee that is to stop here without touching a single
+> event.
+
+A download cut off mid-event passed the gate, so the importer carried on and
+marked every event *after* the cut as removed, because they were not in what
+arrived. Soft deletion, so recoverable by re-importing — but from a member's
+point of view, the rest of the diary vanished. A connection dropped part way
+through a transfer is ordinary, not exotic.
+
+### The fix, and why it tests the block stack
+
+```php
+$leftSomethingOpen = ($stoppedEarly === false && count($stack) > 0);
+```
+
+**The stack, not `$current`.** `$current` knows only about an unterminated
+`VEVENT`. The stack catches any unclosed block — including a `VALARM` left open
+inside an event that *did* end, which was previously reported as a whole
+calendar with no warning whatsoever. This works because `END` pops only on a
+match, deliberately ("popping only on a match keeps the stack honest rather than
+unwinding blocks that never ended"), so one unclosed nested block keeps
+everything above it on the stack too. A well-formed file leaves the stack empty.
+
+`$stoppedEarly` is excluded because we stopped on purpose then — the file may be
+perfectly whole, and `complete` is already false in that case.
+
+**The plant that proves the stack earns its place:** replacing
+`count($stack) > 0` with `$current !== null` — the fix anybody would write
+without thinking about nested blocks — still passes I7b and **fails I7c**.
+
+### The direction that would hurt more
+
+I7d exists for the opposite risk. If this rule over-reached and called ordinary
+calendars incomplete, the importer would stop tidying anything away on every
+calendar, for ever, silently. I7d reads a well-formed fixture back through the
+same flag, so an over-reaching change fails a test instead of quietly halting
+every clean-up in the portal.
+
+Fixtures: `truncated-inside-event.ics`, `unclosed-alarm.ics`. Checks I7b, I7c,
+I7d of `tools/ics-reader-selftest.php`.
+
+## A repeat landing in the hour that does not exist (#645 item 3)
+
+Reported as a fault; **it is not one.** On the night the clocks go forward there
+is no 01:30 in Europe/London, so a daily series at 01:30 has one date with
+nowhere to land. The portal moves it forward to 02:30, keeps the occurrence
+exactly one hour long, and counts it against `COUNT`, so `COUNT=3` yields three
+dates.
+
+That is the right answer. Skipping the date would mean a series written as three
+dates silently delivering two, one night a year, with nothing to say why — and
+this portal is a diary, where a missing date is somebody not told about a
+service. It is also what Google Calendar, Apple Calendar and Outlook all show,
+so an imported calendar agrees with what its owner sees at the other end. RFC
+5545 does not settle it either way.
+
+**What was genuinely wrong is that none of this was written down or tested.**
+Nothing stopped a later change turning it into a skip, and nothing would have
+objected. The reasoning now sits in `generateStarts()`'s docblock and check C13
+pins the behaviour: three dates, the middle one moved, each exactly 3,600
+seconds. Planting the skip fails three C13 checks.
+
+Going the other way is the owner's decision, not a tidy-up. Change the docblock
+and C13 together.
+
+
+### The guard against over-reaching guarded nothing, because no fixture was ordinary enough
+
+The fix above needed a check in the opposite direction: if the rule ever
+over-reached and called ordinary calendars incomplete, `FeedImporter` would
+refuse to remove anything from any calendar, for ever, silently. Check I7d was
+written for that, and its comment said so.
+
+**It guarded nothing.** Measured on 28 October 2026: of the fifty-six fixtures
+in `tools/fixtures/ics/`, **not one held a correctly closed nested block.** No
+`END:VALARM` anywhere. No `BEGIN:VTIMEZONE` anywhere. The only `BEGIN:VALARM`
+was the deliberately unclosed one added that same day. I7d read `basic-utc.ics`,
+which is `VCALENDAR` → `VEVENT` → end: no nesting at all.
+
+An independent check proved the cost by narrowing the pop to the two blocks the
+reader cares about — the sort of tightening a later reader would write:
+
+```php
+if ($last === $block && ($block === 'VEVENT' || $block === 'VCALENDAR')) {
+```
+
+**All 345 checks passed.** Meanwhile ten of thirty-four well-formed shapes
+flipped to `complete = false`: a realistic Google export, any event carrying a
+reminder, `VTODO`, `VJOURNAL`, `VFREEBUSY`, `X-` components. Nearly every
+calendar anyone would really subscribe to. Every refresh of every one would have
+taken the "incomplete" branch for ever, and nothing would have said why.
+
+`nested-blocks-closed.ics` is now a deliberately ORDINARY calendar — a
+`VTIMEZONE` with `STANDARD` and `DAYLIGHT`, and an event with a `VALARM`, all
+properly closed. With it, the same plant fails I7d at once.
+
+**The lesson is about fixture sets, not about this rule.** A suite of
+fifty-six files can still have a hole the shape of "the normal case", because
+fixtures get written to pin faults and every fault is unusual by definition.
+When a check exists to prove something ORDINARY still works, go and look at
+whether any fixture is actually ordinary.
+
+### A check whose comment claimed more than it delivered
+
+C13's comment said it pinned the "exact rather than nominal" duration rule (RFC
+5545 §3.3.6) and would catch an interval taken from `diff()`. The same
+independent check restored that `diff()` route and **all four C13 checks
+passed.** The 2027 London change is at 01:00 on 28 March, the moved occurrence
+runs 02:30–03:30, and none of the three occurrences spans a transition — so
+exact and nominal give the same answer for that fixture.
+
+What C13 really pins is narrower: all three occurrences are 3,600 seconds, so
+the one that moved did not lose or gain an hour in the moving. I26 and I29 are
+what pin exact-versus-nominal, because their series genuinely cross a
+transition, and they are the checks that caught the planted `diff()`. The
+comment now says that. An overstated guarantee is worse than none.
+
+
+### The replacement comment was wrong in the same way as the one it replaced
+
+Worth recording as a pattern, not an anecdote. `generateStarts()`'s docblock
+said "the clocks going BACK need nothing special here" — wording that waved away
+a real fault and stopped reviewers looking. The replacement described the fault
+but got its reproduction wrong: it said an event "whose start lands in the
+repeated hour" comes out zero-length.
+
+**That reproduction gives the right answer.** A series whose `DTSTART` is in the
+repeated hour is correct throughout, because the first date goes through
+`readDateTime()` exactly as a one-off does. The fault is in the SECOND OR LATER
+date of a series, generated by `generateStarts()`. Measured:
+
+| series | result |
+| --- | --- |
+| weekly 01:30, DTSTART 2026-10-25 (first date on the reading) | correct, 3,600 s throughout |
+| weekly 01:30, DTSTART 2026-10-18 (25 October falls on it) | **25 October is 01:30–01:30, zero** |
+
+So a reader following the comment would have built the first shape, seen
+01:30–02:30, and concluded there was nothing to fix — the same outcome as the
+"needs nothing special" wording, reached by a different route. #653's title said
+"starting in" too, so the issue did not rescue it; both are corrected, with the
+mistake recorded on the issue rather than quietly edited away.
+
+**The general lesson: when a comment describes a fault, check that the
+reproduction it implies actually reproduces it.** A comment that sends somebody
+to the wrong experiment is worse than one that says nothing, because the wrong
+experiment comes back green.

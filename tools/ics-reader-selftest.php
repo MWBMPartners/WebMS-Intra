@@ -1196,6 +1196,83 @@ st_lines(
 );
 st_check('C12 and the same date is not reported as sent twice', $r['expand']['duplicates'] === 0, 'got ' . $r['expand']['duplicates']);
 
+// C13: A REPEAT LANDING IN THE HOUR THAT DOES NOT EXIST (#645 item 3).
+//
+// On the night the clocks go forward, an hour does not happen. In
+// Europe/London there is no 01:30 on 28 March 2027. A daily series at 01:30
+// across that night therefore has one date with nowhere to land.
+//
+// WHAT THIS PINS, and why it is here. The behaviour was reviewed on 28 October
+// 2026 and found to be RIGHT — the time moves forward to 02:30, the occurrence
+// keeps its exact one-hour length, and it still counts against COUNT, so
+// COUNT=3 gives three dates. But it was neither written down nor tested, so
+// somebody could have "fixed" it into SKIPPING the date and nothing would have
+// objected. A COUNT=3 series silently delivering two dates, on one night a
+// year, is a person not being told about a service.
+//
+// The reasoning is beside the code, in `generateStarts()`. Change both
+// together, and only on the owner's say-so: the alternative is defensible, it
+// is simply not what this portal does, and it is not what Google, Apple or
+// Outlook show either.
+$missingHour = st_read('missing-hour-daily.ics');
+st_lines(
+    'C13 missing-hour-daily.ics: a date in the hour that does not exist MOVES FORWARD and still counts',
+    [
+        '2027-03-27 01:30:00|2027-03-27 02:30:00|timed|key=20270327T013000Z|series|priv=no|canc=no|dup=no'
+        . '|Across the night the clocks go forward',
+        '2027-03-28 02:30:00|2027-03-28 03:30:00|timed|key=20270328T013000Z|series|priv=no|canc=no|dup=no'
+        . '|Across the night the clocks go forward',
+        '2027-03-29 01:30:00|2027-03-29 02:30:00|timed|key=20270329T003000Z|series|priv=no|canc=no|dup=no'
+        . '|Across the night the clocks go forward',
+    ],
+    st_lines_of($missingHour['expand']['occurrences'])
+);
+st_check(
+    'C13 COUNT=3 really gives THREE dates — the impossible one is not silently dropped',
+    count($missingHour['expand']['occurrences']) === 3,
+    'got ' . count($missingHour['expand']['occurrences'])
+        . ' — two would mean a series quietly losing a date on one night a year'
+);
+// 🕐 Each one is still exactly an hour.
+//
+//    SAID ACCURATELY, because the first version of this comment claimed more
+//    than the check delivers. It said this pinned the "exact rather than
+//    nominal" rule (RFC 5545 §3.3.6) and would catch an interval taken from
+//    `diff()`. An independent check on 28 October 2026 restored that very
+//    `diff()` route and **all four C13 checks passed.** The reason is simple:
+//    the 2027 London change happens at 01:00 on 28 March, and the moved
+//    occurrence runs 02:30 to 03:30, entirely after it — so not one of these
+//    three occurrences spans a transition, and exact and nominal give the same
+//    answer here.
+//
+//    What this check really pins is narrower and still worth having: all three
+//    occurrences are 3,600 seconds, so the one that MOVED did not lose or gain
+//    an hour in the moving. The exact-versus-nominal rule is pinned by the
+//    checks in I26 and I29 — I26's far-away end in another zone and I29's
+//    weekly series across a clock change — and those are the checks that
+//    caught the planted `diff()`. (Called "series" here at first; a round-2
+//    check pointed out that I26 and the first half of I29 use single events,
+//    so only part of that pair is a series. The load-bearing half of the
+//    sentence — that these are what catch it — was right.)
+//
+//    An overstated guarantee is worse than none, which is why this is written
+//    out rather than quietly reworded.
+$missingHourLengths = [];
+foreach ($missingHour['expand']['occurrences'] as $occurrence) {
+    $missingHourLengths[] = (new DateTimeImmutable($occurrence['end'], $orgZone))->getTimestamp()
+        - (new DateTimeImmutable($occurrence['start'], $orgZone))->getTimestamp();
+}
+st_check(
+    'C13 and every one of the three is still exactly one hour long, the moved one included',
+    $missingHourLengths === [3600, 3600, 3600],
+    'lengths in seconds: ' . json_encode($missingHourLengths)
+);
+st_check(
+    'C13 and nothing is reported as a problem, because nothing went wrong',
+    $missingHour['expand']['warnings'] === [],
+    implode(' | ', $missingHour['expand']['warnings'])
+);
+
 // =============================================================================
 // D. Skipped and changed dates
 // =============================================================================
@@ -1672,6 +1749,131 @@ st_check(
     'I7 what did arrive is still handed back, so a refresh can decide for itself',
     count($r['expand']['occurrences']) === 1,
     'got ' . count($r['expand']['occurrences'])
+);
+
+// I7b: A FILE CUT OFF *INSIDE* AN EVENT, WHICH USED TO BE CALLED COMPLETE.
+//
+// #645 item 2, reported by an outside review of this file and measured on
+// 28 October 2026. I7 above covers a file that simply stops; this covers the
+// nastier shape, where the transfer was cut inside a VEVENT and the closing
+// END:VCALENDAR still arrived (or the file was assembled wrongly). Four things
+// decided `complete` — calendar started, calendar ended, we did not stop early,
+// no line dropped — and not one of them mentioned a block left OPEN. So this
+// file satisfied all four and was reported COMPLETE, while the warning beside
+// it said the opposite.
+//
+// WHY IT IS A FAULT AND NOT UNTIDINESS. `FeedImporter` uses this ONE flag to
+// decide whether a download may be trusted to REMOVE events, and says so:
+// "nothing may be removed on the strength of it". A truncated download passed
+// that gate, so every event after the cut — absent from what arrived — was
+// marked as removed. A connection dropped part way through a transfer is
+// ordinary.
+$cutInside = st_read('truncated-inside-event.ics');
+st_check(
+    'I7b truncated-inside-event.ics: a file cut off INSIDE an event is NOT a whole calendar',
+    $cutInside['parse']['complete'] === false,
+    'complete=' . var_export($cutInside['parse']['complete'], true)
+        . ' — this is #645 item 2, and `true` here means the importer would delete every event after the cut'
+);
+st_check(
+    'I7b and it says so in words, not only in the flag',
+    in_array('The file ends in the middle of an event, so it was not complete.', $cutInside['parse']['warnings'], true) === true,
+    json_encode($cutInside['parse']['warnings'])
+);
+st_check(
+    'I7b what did arrive is still kept, including the half-read event',
+    count($cutInside['parse']['events']) === 2,
+    'got ' . count($cutInside['parse']['events'])
+);
+
+// I7c: AN UNCLOSED BLOCK INSIDE AN EVENT THAT DID END.
+//
+// The test is the block stack rather than "is there a half-built event",
+// deliberately, so an unclosed VALARM is caught too — END pops only on a
+// match, so one unclosed nested block keeps everything above it on the stack.
+// Before the fix this file was reported complete with no warning at all.
+$unclosedAlarm = st_read('unclosed-alarm.ics');
+st_check(
+    'I7c unclosed-alarm.ics: an unclosed VALARM inside a closed event is NOT a whole calendar either',
+    $unclosedAlarm['parse']['complete'] === false,
+    'complete=' . var_export($unclosedAlarm['parse']['complete'], true)
+);
+st_check(
+    'I7c and the reason is given, rather than a flag with nothing beside it',
+    in_array('The file ends with a part of it left unfinished, so it was not complete.', $unclosedAlarm['parse']['warnings'], true) === true,
+    json_encode($unclosedAlarm['parse']['warnings'])
+);
+st_check(
+    'I7c the event itself is still kept',
+    count($unclosedAlarm['parse']['events']) === 1,
+    'got ' . count($unclosedAlarm['parse']['events'])
+);
+
+// I7d: AND THE OTHER DIRECTION, which is the one that would hurt most if this
+// went wrong — a perfectly ordinary calendar must NOT become "incomplete",
+// because that would stop the importer tidying anything away, on every
+// calendar, for ever, and silently.
+//
+// WHAT WAS WRONG WITH THIS CHECK WHEN IT WAS FIRST WRITTEN, which is the
+// reason it now reads two fixtures instead of one. It read `basic-utc.ics`,
+// which is VCALENDAR → VEVENT → end: no nesting at all. And NOT ONE of the
+// repository's other fixtures held a correctly closed nested block either.
+// Measured on 28 October 2026, across every fixture that existed BEFORE
+// `nested-blocks-closed.ics` was added for this check: not one `END:VALARM`,
+// and not one `BEGIN:VTIMEZONE`. (Said that way round on purpose — a count of
+// files goes stale the moment somebody adds one, and this file now holds the
+// very thing the sentence says was missing.) So nothing in this suite
+// exercised the stack in the direction where it must answer "complete".
+//
+// An independent check proved what that cost. It narrowed the pop to the two
+// blocks the reader cares about —
+//
+//     if ($last === $block && ($block === 'VEVENT' || $block === 'VCALENDAR')) {
+//
+// which is exactly the sort of tightening a later reader would write, and all
+// 345 checks still passed. Meanwhile ten of thirty-four well-formed shapes
+// flipped to `complete = false`, including a realistic Google export, any
+// event carrying a reminder, VTODO, VJOURNAL and VFREEBUSY — that is to say,
+// very nearly every calendar anybody would really subscribe to. Every refresh
+// of every one of them would have taken the "incomplete" branch for ever.
+//
+// `nested-blocks-closed.ics` is therefore a deliberately ORDINARY calendar: a
+// VTIMEZONE holding STANDARD and DAYLIGHT, and an event holding a VALARM, all
+// properly closed. If the stack rule ever stops understanding nesting, this is
+// what says so.
+$nestedOk = st_read('nested-blocks-closed.ics');
+st_check(
+    'I7d nested-blocks-closed.ics: a VTIMEZONE and a VALARM, properly closed, is a WHOLE calendar',
+    $nestedOk['parse']['complete'] === true,
+    'complete=' . var_export($nestedOk['parse']['complete'], true)
+        . ' — `false` here means the importer would refuse to tidy ANY ordinary calendar, for ever'
+);
+st_check(
+    'I7d and it records no warning at all',
+    $nestedOk['parse']['warnings'] === [],
+    json_encode($nestedOk['parse']['warnings'])
+);
+st_check(
+    'I7d and its one event is read normally, so the fixture is really being parsed',
+    count($nestedOk['expand']['occurrences']) === 1
+        && $nestedOk['expand']['occurrences'][0]['start'] === '2026-10-15 19:00:00'
+        && $nestedOk['expand']['occurrences'][0]['end'] === '2026-10-15 20:00:00'
+        // 🔔 The title must be the EVENT's, not the alarm's. The VALARM carries
+        //    its own DESCRIPTION, and a reader that lost track of which block
+        //    it was in would hand back "Reminder" here.
+        && $nestedOk['expand']['occurrences'][0]['title'] === 'An event with a reminder'
+        && $nestedOk['expand']['occurrences'][0]['description'] === '',
+    'occurrences=' . count($nestedOk['expand']['occurrences'])
+        . ' ' . json_encode($nestedOk['expand']['occurrences'][0] ?? null)
+);
+
+// 🧾 The simplest shape too, kept as the control it always was.
+$wholeAgain = st_read('basic-utc.ics');
+st_check(
+    'I7d a plain calendar with no nesting is still a whole calendar',
+    $wholeAgain['parse']['complete'] === true && $wholeAgain['parse']['warnings'] === [],
+    'complete=' . var_export($wholeAgain['parse']['complete'], true)
+        . ' warnings=' . json_encode($wholeAgain['parse']['warnings'])
 );
 
 // I8: the limit on how many events are HELD from one file. Running out of

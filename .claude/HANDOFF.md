@@ -6,7 +6,74 @@
 
 ---
 
-## 28 OCTOBER 2026, LATEST — slice 9 done as a whole-app review, a claim could be paid twice, and an edit handler
+## 28 OCTOBER 2026, LATER — #645 settled: a truncated download was deleting events
+
+**Committed: nothing yet for this; the money package is `37a63de`.** #645's three items are all
+settled, two with code changes and one disproved.
+
+### Item 2 was the real one, and it could lose data
+
+`IcsReader::parse()`'s `complete` flag is the ONE thing `FeedImporter` asks before letting a refresh
+REMOVE events. It was worked out from four things — calendar started, calendar ended, did not stop
+early, no line dropped — and **not one of them mentioned a block left open**. So a download cut off
+INSIDE an event was reported as a whole calendar, and the importer then marked every event after the
+cut as removed. A dropped connection part way through a transfer is ordinary.
+
+**The comment above the calculation said `complete` was "false anyway".** It stated the guarantee
+the code had forgotten to implement, which is why the fault survived several reviews: the comment
+stopped people looking. That is the second comment of the day with that shape.
+
+Fixed with `count($stack) > 0`, not `$current !== null` — the stack also catches an unclosed
+`VALARM` inside an event that ended (previously reported whole, no warning at all). Planting the
+simpler version passes I7b and FAILS I7c, which is why the stack earns its place.
+
+Item 1 was **disproved**: `removalEndPoint()` returns `exact => false` for every capped read, so
+removal uses `<` not `<=`, already pinned by `feed-importer-selftest.php:2136-2149`. Item 3 was
+reproduced but is the RIGHT behaviour, now documented with check C13 on it.
+
+### Two check rounds, and both found faults in my CHECKS again
+
+- **Round 1 (NOT CLEAN, 3 problems).** The worst: **I7d, the check that exists to guard the
+  over-reach direction, guarded nothing.** Of every fixture that existed, NOT ONE held a correctly
+  closed nested block — no `END:VALARM`, no `BEGIN:VTIMEZONE` anywhere. Narrowing the stack pop to
+  `VEVENT`/`VCALENDAR` passed all 345 checks while ten of thirty-four well-formed shapes became
+  "incomplete": a realistic Google export, any event with a reminder, VTODO, VJOURNAL, VFREEBUSY.
+  Every refresh of nearly every real calendar would have taken the "incomplete" branch for ever.
+  Fixed with `nested-blocks-closed.ics`. **When a check exists to prove something ORDINARY still
+  works, go and look at whether any fixture is actually ordinary** — a fixture set grows to pin
+  faults, and every fault is unusual, so the normal case is exactly the hole that forms.
+  Also: C13's comment claimed it pinned exact-versus-nominal duration; restoring the `diff()` route
+  passed all four C13 checks, because none of its occurrences spans a transition (I26/I29 pin that).
+- **Round 2 (NOT CLEAN, 1 problem, wording only).** My replacement comment for the clocks-going-back
+  paragraph said the fault hits an event "whose start lands in the repeated hour". **That
+  reproduction gives the RIGHT answer** — a series whose DTSTART is on that reading is correct,
+  because the first date goes through `readDateTime()` like a one-off. It is the SECOND OR LATER
+  date. So the replacement would have sent the next reader away satisfied: the same failure as the
+  "needs nothing special" wording it replaced, by a different route. **#653's title said it too**;
+  both corrected, and the mistake recorded on the issue rather than quietly edited away.
+
+### Found and filed, not fixed
+
+- **#653 (high)** — a later occurrence falling in the repeated hour comes out ZERO LENGTH
+  (01:30 to 01:30), while the first date of a series and a one-off are correct, because the two
+  paths resolve the ambiguous reading differently. **Pre-existing**, confirmed against the committed
+  code. Needs the owner's decision on what an ambiguous reading means, like item 3's forward case.
+- **#652 (medium)** — four `import-notifier-selftest.php` checks fail by themselves as the calendar
+  rolls round: the test wants two Europe/London clock changes in the next twelve months and only one
+  fits from late October. Proved pre-existing by running it against the committed `IcsReader.php`.
+  It reports FAIL where it means "could not run", and will go red in CI on every pull request.
+
+### Verified
+
+2,073 checks: ics-reader 348/348 (2 pre-existing skips), feed-importer 139/139, feed-admin 934/934,
+feed-resolver 208/208, event-visibility 192/192, safefetch 252/252, plus 36/36 audit checks with
+their output READ. Four planted faults, all caught after the fixtures were converted to CRLF.
+**Not verified:** MariaDB; PHP 8.4 (run on 8.5.11); no real Google or Microsoft export exists in the
+repository, so section M stays skipped and "works against a real provider feed" is still unproven.
+
+---
+
+## 28 OCTOBER 2026 — slice 9 done as a whole-app review, a claim could be paid twice, and an edit handler
 
 **Owner answered all eight queued decisions** (question tool, 28 October): keep #640 as a warning;
 hold the advisory and publish as ONE once `main` is fixed; chase all three #645 items, item 1

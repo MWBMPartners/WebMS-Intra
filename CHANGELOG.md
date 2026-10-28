@@ -2,6 +2,54 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — a download cut off part way through could delete events from an imported calendar (#645)**
+  - **What an administrator should know.** If a calendar download was cut off **inside an event** —
+    a dropped connection part way through a transfer, which is an ordinary thing — the portal
+    reported the file as a **whole calendar**. It then did what it does with a whole calendar: it
+    marked every event the download did not contain as removed. So the events after the cut-off
+    point disappeared from the calendar. They are removed rather than destroyed, so re-importing the
+    calendar brings them back, and upgrading stops it happening again.
+  - **The flag and the warning disagreed with each other.** The reader already said, in words, "the
+    file ends in the middle of an event, so it was not complete" — and in the same breath reported
+    the file as complete. The comment beside the code even claimed the flag was "false anyway". It
+    described a guarantee the code did not keep: the flag was worked out from four things (the
+    calendar started, the calendar ended, we did not stop early, no line was dropped) and not one of
+    them mentioned a part of the file left unfinished.
+  - **Why this one flag matters so much.** It is the single thing the importer uses to decide whether
+    a download may be trusted to remove anything. Its own comment: "it is not the whole calendar, so
+    nothing may be removed on the strength of it — and the simplest way to guarantee that is to stop
+    here without touching a single event." The guard was right; what it was asking was wrong.
+  - **It now also catches an unfinished part inside an event that ended properly** — a reminder block
+    left open, say — which was never noticed before and was reported as a whole calendar with no
+    warning at all.
+  - **Measured.** Five shapes of file checked: whole, cut off inside an event, no end-of-calendar
+    line, an unclosed reminder inside a closed event, and two events with the second cut off. Only
+    the first is now called whole, and a well-formed calendar is unchanged — which matters, because
+    getting that wrong would stop the portal tidying anything away on any calendar, for ever.
+- **Found, not fixed — a repeating event's later date in the hour that happens twice shows no length at all (#653)**
+  - On the night the clocks go **back**, 01:30 happens twice. A repeating event whose date **falls**
+    on that reading comes out as **01:30 to 01:30** — no length — so a weekly 01:30 to 02:30 service
+    looks like a zero-length entry one night a year. The underlying times really are an hour apart;
+    it is the two clock readings that collide, because the clock reads 01:30 twice.
+  - **It is the second or later date of a series, not the first.** A series that *starts* on that
+    reading is correct throughout, and so is a one-off. That difference is the clearest sign
+    something is wrong: the portal answers the same question two ways depending on which date of a
+    series is asked about. (Said carefully because the first version of this entry, and the issue's
+    own title, said "starting in" — the one reproduction that gives the right answer.)
+  - **Not fixed**, because it needs a decision about what an ambiguous reading means, and that is
+    the owner's to make — the same kind of decision as the forward direction below. Measurements and
+    options are on #653. It is **not new**: it was confirmed against the released code.
+- **Recorded — what the portal does with a repeat that lands in the hour that does not exist (#645)**
+  - On the night the clocks go forward an hour simply does not happen. A repeating event at 01:30
+    therefore has one date with nowhere to land. **The portal moves it forward to 02:30, keeps it
+    exactly as long as it should be, and still counts it** — so a series set to three dates gives
+    three dates. Nothing has changed: this is what it already did, and it matches what Google,
+    Apple and Outlook all show.
+  - **What changed is that it is now written down and checked.** It was neither, so somebody could
+    have changed it into skipping the date and nothing would have objected — and a series quietly
+    delivering two of its three dates, one night a year, is somebody not being told about a service.
+    The alternative is defensible; it is simply not what this portal does, and that is now a
+    decision on the record rather than an accident.
 - **Added — a claimant can correct a claim nobody has decided on yet (#651)**
   - **What a member should know.** There is now a **Change Claim** button on your own expense claim,
     and a form at `/expenses/edit`. You can change what the claim is for, which department it is

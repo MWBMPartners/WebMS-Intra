@@ -1244,9 +1244,54 @@ final class IcsReader
             $current[$name][] = ['value' => $value, 'params' => $property['params']];
         }
 
+        // 🧩 WAS ANYTHING STILL OPEN WHEN THE FILE RAN OUT?
+        //
+        //    WHAT WAS WRONG (#645 item 2, found by an outside review of this
+        //    file and measured on 28 October 2026). `complete` was worked out
+        //    from four things — the calendar started, the calendar ended, we
+        //    did not stop early, no line was dropped — and NONE of them says
+        //    anything about a block left open. So this file:
+        //
+        //        BEGIN:VCALENDAR
+        //        BEGIN:VEVENT
+        //        UID:a
+        //        DTSTART:20260102T120000Z
+        //        END:VCALENDAR
+        //
+        //    satisfied all four and was reported COMPLETE, while the warning
+        //    three lines below said "the file ends in the middle of an event,
+        //    so it was not complete". The flag and the warning contradicted
+        //    each other, and the comment here said `complete` was "false
+        //    anyway" — it stated a guarantee the code did not implement.
+        //
+        //    WHY THAT COULD LOSE DATA, which is why it is a fault and not a
+        //    tidiness problem. `FeedImporter` uses this ONE flag to decide
+        //    whether a download may be trusted to remove events: "it is not
+        //    the whole calendar, so nothing may be removed on the strength of
+        //    it — and the simplest way to guarantee that is to stop here
+        //    without touching a single event." A download cut off mid-event
+        //    passed that gate, so the importer went on and marked every event
+        //    AFTER the truncation as removed, because they were not in what
+        //    arrived. A connection dropped part way through a transfer is an
+        //    ordinary thing, not an exotic one.
+        //
+        //    THE TEST IS THE BLOCK STACK, not `$current`, and that is
+        //    deliberate: `$current` only knows about an unterminated VEVENT.
+        //    The stack catches any unclosed block, including a VALARM left
+        //    open inside an event that DID end — note that `END` above pops
+        //    only on a match, so one unclosed nested block keeps everything
+        //    above it on the stack too. A well-formed file leaves the stack
+        //    empty.
+        //
+        //    `$stoppedEarly` is excluded because WE stopped on purpose then —
+        //    the file may be perfectly whole — and `complete` is already false
+        //    in that case, so this adds nothing there.
+        $leftSomethingOpen = ($stoppedEarly === false && count($stack) > 0);
+
         if ($current !== null && $stoppedEarly === false) {
             // A VEVENT that never ended: the download was cut off inside it.
-            // What arrived is kept, and `complete` below is false anyway.
+            // What arrived is kept, and `complete` is false because
+            // `$leftSomethingOpen` above is true.
             //
             // When WE stopped reading on purpose instead — too large, too many
             // lines, or too many events — whatever block was open is
@@ -1260,8 +1305,29 @@ final class IcsReader
             self::note($warnings, 'The file ends in the middle of an event, so it was not complete.');
         }
 
+        // ⚠️ A block left open that was NOT an event — an unclosed VALARM
+        //    inside an event that ended properly, say. Nothing said anything
+        //    about that case before, so the caller got `complete = false` with
+        //    no reason given. Only raised when the event-level warning above
+        //    has not already covered it, so a truncated file gets one clear
+        //    sentence rather than two overlapping ones.
+        //    It is also held back when the calendar itself did not begin and
+        //    end, because the warning further down already explains that and
+        //    two overlapping sentences help nobody. Measured: a file with no
+        //    END:VCALENDAR used to get one sentence and briefly got two.
+        if ($leftSomethingOpen === true
+            && $current === null
+            && $sawCalendarStart === true
+            && $sawCalendarEnd === true) {
+            self::note(
+                $warnings,
+                'The file ends with a part of it left unfinished, so it was not complete.'
+            );
+        }
+
         $complete = ($sawCalendarStart === true && $sawCalendarEnd === true
-            && $stoppedEarly === false && $droppedLine === false);
+            && $stoppedEarly === false && $droppedLine === false
+            && $leftSomethingOpen === false);
         if (($sawCalendarStart === false || $sawCalendarEnd === false) && $stoppedEarly === false) {
             // Only said when the FILE was the problem. When we stopped reading
             // on purpose the warning above has already said so in plain words,
@@ -2375,6 +2441,76 @@ final class IcsReader
      *
      * Dates come out in ascending order, so the caller can stop reading at the
      * first one past the window.
+     *
+     * A TIME THAT DOES NOT EXIST ON THE CLOCK (#645 item 3)
+     * ----------------------------------------------------
+     * On the night the clocks go FORWARD an hour simply does not happen: in
+     * Europe/London on 29 March 2026 there is no 01:30. A daily series at
+     * 01:30 therefore has one date with nowhere to land.
+     *
+     * WHAT THIS DOES, and it is a deliberate choice rather than an accident of
+     * PHP: the time moves forward to the next one that does exist (01:30
+     * becomes 02:30), the occurrence KEEPS ITS EXACT LENGTH, and it COUNTS
+     * against `COUNT`. So `COUNT=3` gives three dates, one of them moved.
+     *
+     * WHY, because the alternative is defensible and was considered. Skipping
+     * the date would mean a series the person wrote as three dates silently
+     * delivering two, on one night a year, with nothing to say why — and this
+     * portal is a diary, where a missing date is somebody not being told about
+     * a service. Moving it forward is also what Google Calendar, Apple
+     * Calendar and Outlook all show, so a calendar imported from any of them
+     * agrees with what its owner sees at the other end. RFC 5545 does not
+     * settle it either way.
+     *
+     * This is recorded here, with a check on it (section C of
+     * `tools/ics-reader-selftest.php`), because the behaviour was reviewed on
+     * 28 October 2026 and found to be RIGHT but completely undocumented and
+     * untested — so somebody could have "fixed" it into skipping the date and
+     * nothing would have objected. Going back the other way is a decision for
+     * the owner, not a tidy-up.
+     *
+     * THE CLOCKS GOING BACK ARE A DIFFERENT MATTER, AND NOT A SETTLED ONE
+     * --------------------------------------------------------------------
+     * That hour happens TWICE, so a wall-clock reading of it is ambiguous
+     * rather than impossible — and this reader does not handle it well. **An
+     * occurrence that FALLS in the repeated hour comes out with ZERO LENGTH**
+     * (#653): the instants are an hour apart, 00:30Z to 01:30Z, but both ends
+     * render as "01:30" on a clock that reads 01:30 twice, so a 01:30 to 02:30
+     * service shows as 01:30 to 01:30 on one night a year.
+     *
+     * BE PRECISE ABOUT WHICH OCCURRENCE, because the obvious reproduction
+     * gives the RIGHT answer and would send the next reader away satisfied.
+     * It is the SECOND OR LATER date of a series — not the first. A series
+     * whose DTSTART is itself in the repeated hour is fine, because the first
+     * date goes through `readDateTime()` just as a one-off does. Measured:
+     * weekly 01:30 from 18 October 2026 gives a zero-length 25 October, while
+     * weekly 01:30 from 25 October 2026 is correct throughout.
+     *
+     * An earlier version of this paragraph said "whose start lands in the
+     * repeated hour", which is exactly the reproduction that works. A round-2
+     * check caught it, and it is worth noticing that the mistake was the same
+     * shape as the one this paragraph exists to correct: wording that stops
+     * the next person looking.
+     *
+     * That difference is also the clearest sign the two paths disagree. A
+     * ONE-OFF, and the first date of a series, go through `readDateTime()`,
+     * which resolves the reading to GMT — the LATER of the two — and come out
+     * correctly. A LATER occurrence is generated here, where `setTime()`
+     * carries the cursor's offset and resolves it to BST, the EARLIER. So the
+     * portal answers the same question two ways depending on which date of a
+     * series is being asked about.
+     *
+     * AN EARLIER VERSION OF THIS COMMENT SAID "the clocks going back need
+     * nothing special here", and that is why this is spelled out. It was
+     * untrue, and an independent check on 28 October 2026 found the fault
+     * underneath it. A comment that waves something away stops the next person
+     * looking, which is the most expensive kind of mistake a comment can make
+     * — the same shape as the `complete` flag's "false anyway" in `parse()`,
+     * found the same day.
+     *
+     * It is NOT fixed here: it needs a decision about what an ambiguous
+     * reading means, made in one place, and that is the owner's to make, just
+     * as the forward direction above was. #653 has the measurements.
      *
      * The step limit below is counted afresh for EACH series, as the plan
      * asks. What bounds a whole file of nasty series is the deadline, not this

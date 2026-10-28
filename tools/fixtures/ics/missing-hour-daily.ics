@@ -1,0 +1,11 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//WebMS Intra self-test//#645 item 3//EN
+BEGIN:VEVENT
+UID:missing-hour@example.invalid
+DTSTART;TZID=Europe/London:20270327T013000
+DTEND;TZID=Europe/London:20270327T023000
+RRULE:FREQ=DAILY;COUNT=3
+SUMMARY:Across the night the clocks go forward
+END:VEVENT
+END:VCALENDAR
