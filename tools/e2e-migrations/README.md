@@ -23,12 +23,30 @@ Runs `web/_sql/` against a real, throwaway MySQL and checks four things:
    whichever have run. Phases 1 to 6 could not see a fault on that path: none
    of them takes it over a database whose two time-zone places differ.
 
-Which MySQL it runs on comes from `E2E_MYSQL_VERSION`: always an exact version
-such as 8.0.36 or 8.4.11, and 8.0.36 when nothing is given. The pull-request
-check runs it twice, side by side, on 8.0.36 and 8.4.11 (owner's decision, 24
-September 2026), because MySQL 8.4 refuses some links between tables that
-MySQL 8.0 allows (#552). Which MySQL 8 line production itself runs is not
-confirmed (see #475).
+Which server it runs on comes from two settings. `E2E_DB_ENGINE` picks the
+engine — `mysql` (the default) or `mariadb` — and `E2E_MYSQL_VERSION` picks the
+version: always an exact one such as 8.0.36, 8.4.11 or 11.4.13, and 8.0.36 when
+nothing is given. The pull-request check runs it three times, side by side, on
+MySQL 8.0.36, MySQL 8.4.11 and MariaDB 11.4.13. The two MySQL lines are the
+owner's decision of 24 September 2026, because MySQL 8.4 refuses some links
+between tables that MySQL 8.0 allows (#552). Which MySQL 8 line production
+itself runs is not confirmed (see #475).
+
+**MariaDB was added on 28 October 2026 (#487), and all 42 checks pass on it —
+the same 42 that pass on both MySQL lines.** Two things in the harness, not in
+the portal, had stopped it running there at all: MariaDB 11.x ships no `mysql`
+or `mysqladmin` program (only `mariadb` and `mariadb-admin`), and the version
+check compared the server's whole reported string, which
+`11.4.13-MariaDB-ubu2404` never matches. The version check now compares the
+leading three-part number. **The moving-tag guarantee is untouched** — `8.4`
+still does not pass for `8.4.11`, which is the mistake that check exists to
+catch — but it is a loosening in one way, said plainly: comparing the whole
+string also refused `8.0.36-log` and `8.0.36-0ubuntu0.24.04.1` when 8.0.36 was
+asked for, and those now pass. That is deliberate, because a decorated string
+names the same server. The check also refuses when the engine it was asked for
+is not the engine that answered — a cheap last line of defence rather than the
+thing that stops a mix-up, because the engine and the image come from one
+variable and `wait_for_mysql` would fail first anyway.
 
 ## What it tests
 
@@ -178,7 +196,20 @@ delete: an exception that is no longer true must not stay in the list.
 
 ## What it still cannot see
 
-- **MariaDB.** Nothing here runs on it.
+- **Whether a declared `RESTRICT` differs from a declared `NO ACTION`.** The
+  two are folded together when the links are written down, and printed as the
+  pair `NO ACTION/RESTRICT`, because the servers disagree only about a rule
+  that was LEFT OUT of the statement: MySQL 8.0 and 8.4 record "NO ACTION" for
+  an omitted clause, MariaDB 11.4 records "RESTRICT". A declared rule is
+  recorded faithfully by all three, so the fold does lose that one distinction
+  — which costs nothing real, because the two words name the same behaviour in
+  InnoDB, but this is not the place to catch such an edit. The narrow true
+  statement is that on MariaDB an OMITTED clause and an explicit `RESTRICT` are
+  the same text; MariaDB records two DECLARED rules distinctly, just as MySQL
+  does, so "MariaDB cannot tell them apart" would be wrong. Proved by planting:
+  changing a
+  declared `RESTRICT` to `NO ACTION` in `full_schema.sql` passes unnoticed,
+  while changing a `CASCADE` to `RESTRICT` is caught by phases 5 and 6.
 - **A database whose history matches neither starting point.** For example one
   installed in May or June 2026 by the installer of that time, which carried
   on past errors that the plain `mysql` client stops at. The install scripts
@@ -220,6 +251,7 @@ Needs `docker`, `docker compose`, `git` and bash 4 or newer.
 ```bash
 tools/e2e-migrations/run.sh                # all seven phases and the data checks, on MySQL 8.0.36
 E2E_MYSQL_VERSION=8.4.11 tools/e2e-migrations/run.sh   # the same, on MySQL 8.4.11
+E2E_DB_ENGINE=mariadb E2E_MYSQL_VERSION=11.4.13 tools/e2e-migrations/run.sh   # the same, on MariaDB 11.4.13
 E2E_BASE_REF=<commit, tag or branch> tools/e2e-migrations/run.sh   # phase 5 starts from there
 tools/e2e-migrations/run.sh --skip-stale   # phase 4 without its catching-up half
 tools/e2e-migrations/run.sh --keep         # leave the container up afterwards
@@ -330,7 +362,8 @@ script plus the replay.
 
 ## How it is wired
 
-- `docker-compose.yml` takes its image from `E2E_MYSQL_VERSION` (8.0.36 by
+- `docker-compose.yml` takes its image from `E2E_DB_ENGINE` (the repository
+  name, `mysql` or `mariadb`) and `E2E_MYSQL_VERSION` (the tag: 8.0.36 by
   default; always an exact version, never a moving tag), offers port `33069`
   on the host (an unusual one, so it does not clash with a local MySQL), and
   keeps the database in memory so every run starts empty.
@@ -390,7 +423,8 @@ missing podcast addresses were found.
 `.github/workflows/e2e-migrations.yml` runs this test on pull requests, and on
 pushes to alpha, beta and main, in both cases only when `web/_sql/`, this
 folder or the workflow itself changes. It can also be started by hand. It runs
-the test twice, as two jobs side by side: MySQL 8.0.36 and MySQL 8.4.11.
+the test three times, as three jobs side by side: MySQL 8.0.36, MySQL 8.4.11
+and MariaDB 11.4.13.
 
 **Phases 5 and 6, the data checks and the checksum have not yet run on GitHub**
 (written 12 October 2026). Phase 5's fetch of `origin/main` in GitHub's

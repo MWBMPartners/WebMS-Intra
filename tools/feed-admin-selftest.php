@@ -550,11 +550,14 @@ const MSG_REMOVED_DATE_ALONE       = "Choice removed. This date now follows the 
 
 $GLOBALS['pa_pass']     = 0;
 $GLOBALS['pa_fail']     = 0;
+$GLOBALS['pa_skip']     = 0;
+/** @var list<string> What could NOT be proved on this server, named in the last line. */
+$GLOBALS['pa_notProven'] = [];
 $GLOBALS['pa_headings'] = [];
 // Which part's heading was printed last ('S', 'D' or 'W'), and each part's
 // own pass and fail counts, so a run can say how each part did.
 $GLOBALS['pa_part']     = 'D';
-$GLOBALS['pa_byPart']   = ['S' => [0, 0], 'D' => [0, 0], 'W' => [0, 0]];
+$GLOBALS['pa_byPart']   = ['S' => [0, 0, 0], 'D' => [0, 0, 0], 'W' => [0, 0, 0]];
 $GLOBALS['pa_nextId']   = ['event' => 910300, 'choice' => 910500, 'rule' => 910600, 'cond' => 910700, 'feed' => 910210];
 
 // =============================================================================
@@ -582,6 +585,34 @@ function pa_connect(): mysqli
     $db->query("SET time_zone = '+13:00'");
 
     return $db;
+}
+
+/**
+ * ⏭️ A check that could NOT be made on THIS server. Not a pass, not a failure.
+ *
+ * It counts towards the part's total, so `EXPECTED_D` and friends stay right
+ * whichever engine the run is against — the alternative was two sets of
+ * expected numbers, which would rot.
+ *
+ * WHY THIS EXISTS AT ALL. This file had only pass and fail until 28 October
+ * 2026, which was fine while MySQL was the only engine it ever saw. Running it
+ * against MariaDB 11.4 for #487 found one check that cannot be made there:
+ * `performance_schema` is OFF by default on MariaDB, and MariaDB has no
+ * `PS_CURRENT_THREAD_ID()` at all. Forcing that check to pass would have been
+ * a lie, and failing it would have said the PORTAL was broken when it is the
+ * TEST's instrument that is missing — the portal itself queries
+ * `performance_schema` nowhere.
+ *
+ * A SKIP IS NOT A PASS. The run still ends with a loud line naming everything
+ * that was skipped, and the reason is printed beside each one.
+ */
+function pa_skipped(string $label, string $why): void
+{
+    $part = $GLOBALS['pa_part'];
+    $GLOBALS['pa_skip']++;
+    $GLOBALS['pa_byPart'][$part][2]++;
+    $GLOBALS['pa_notProven'][] = $label;
+    echo 'SKIPPED — ' . $label . "\n        " . $why . " THIS IS NOT A PASS.\n";
 }
 
 function pa_ok(string $label, bool $passed, string $detail = ''): void
@@ -681,13 +712,14 @@ function pa_one(string $sql, string $types = '', array $params = []): ?array
  */
 function pa_finish(): never
 {
-    $ran = $GLOBALS['pa_pass'] + $GLOBALS['pa_fail'];
-    echo "\n" . $GLOBALS['pa_pass'] . ' passed, ' . $GLOBALS['pa_fail'] . " failed.\n";
+    $ran = $GLOBALS['pa_pass'] + $GLOBALS['pa_fail'] + $GLOBALS['pa_skip'];
+    echo "\n" . $GLOBALS['pa_pass'] . ' passed, ' . $GLOBALS['pa_fail'] . ' failed, '
+        . $GLOBALS['pa_skip'] . " skipped.\n";
     $expected = ['S' => EXPECTED_S, 'D' => EXPECTED_D, 'W' => EXPECTED_W];
     foreach (['S', 'D', 'W'] as $part) {
         if (pa_wants($part) === true) {
-            [$p, $f] = $GLOBALS['pa_byPart'][$part];
-            echo "Part {$part}: {$p} passed, {$f} failed, " . ($p + $f) . ' ran of ' . $expected[$part] . " expected.\n";
+            [$p, $f, $k] = $GLOBALS['pa_byPart'][$part];
+            echo "Part {$part}: {$p} passed, {$f} failed, {$k} skipped, " . ($p + $f + $k) . ' ran of ' . $expected[$part] . " expected.\n";
         } else {
             echo "Part {$part}: not run (SELFTEST_ONLY=" . PA_ONLY . ").\n";
         }
@@ -704,9 +736,9 @@ function pa_finish(): never
         $bad = true;
     }
     if (PA_ONLY !== '') {
-        [$p, $f] = $GLOBALS['pa_byPart'][PA_ONLY];
-        if (($p + $f) !== $expected[PA_ONLY]) {
-            echo 'FAIL — part ' . PA_ONLY . ' ran ' . ($p + $f) . ' checks, but this file expects exactly ' . $expected[PA_ONLY] . ".\n";
+        [$p, $f, $k] = $GLOBALS['pa_byPart'][PA_ONLY];
+        if (($p + $f + $k) !== $expected[PA_ONLY]) {
+            echo 'FAIL — part ' . PA_ONLY . ' ran ' . ($p + $f + $k) . ' checks, but this file expects exactly ' . $expected[PA_ONLY] . ".\n";
         }
         echo 'FAIL — only part ' . PA_ONLY . ' was asked for (SELFTEST_ONLY). A run that skips parts can never pass, so this exits 1.' . "\n";
         exit(1);
@@ -722,6 +754,11 @@ function pa_finish(): never
     }
     if ($bad === true) {
         exit(1);
+    }
+    if ($GLOBALS['pa_skip'] > 0) {
+        echo 'PASS, BUT ' . $GLOBALS['pa_skip'] . ' CHECK(S) COULD NOT BE MADE ON THIS SERVER AND ARE NOT PROVEN: '
+            . implode('; ', $GLOBALS['pa_notProven']) . ".\n";
+        exit(0);
     }
     echo 'PASS — all ' . $GLOBALS['pa_pass'] . " checks passed; every heading (S1-S4, D1-D39, W0-W60) ran.\n";
     exit(0);
@@ -9955,35 +9992,78 @@ pa_ok('D25 the FIRST calendar locked elsewhere: the lock-wait error is thrown, a
 //     And the call must really have WAITED on the holder's lock (at least
 //     one second of the holder's 1.5): a calendar already gone at the
 //     look-up gives the same answer at once, and would prove nothing here.
+//     NOT EVERY SERVER HAS THIS INSTRUMENT, which is why the next few lines
+//     ask before using it (#487, 28 October 2026). `performance_schema` is on
+//     by default in MySQL 8.0 and 8.4, and **OFF by default in MariaDB**,
+//     which also has no `PS_CURRENT_THREAD_ID()` function at all — its
+//     equivalent is a look-up in `performance_schema.threads`. Running this
+//     file against MariaDB 11.4 therefore died here with
+//     "FUNCTION … PS_CURRENT_THREAD_ID does not exist" and stopped the whole
+//     run, 923 checks short of the end.
+//
+//     The two checks below are SKIPPED when the instrument is missing rather
+//     than forced or failed. Forcing them would be a lie; failing them would
+//     say the PORTAL was broken on MariaDB when it is this TEST's instrument
+//     that is absent — the portal queries `performance_schema` nowhere, which
+//     was checked rather than assumed.
+$psReady = pa_one("SELECT @@performance_schema AS on_") ['on_'] ?? '0';
+$psHasFn = (string) $psReady === '1'
+    && (pa_one("SELECT COUNT(*) AS n FROM information_schema.routines WHERE routine_schema = 'performance_schema' AND routine_name = 'ps_current_thread_id'")['n'] ?? '0') !== '0';
+// MySQL exposes `PS_CURRENT_THREAD_ID()` as a built-in rather than a routine,
+// so the routines look-up above can say "no" on a server that has it. Ask the
+// function itself, and treat an error as "not available".
+if ((string) $psReady === '1') {
+    try {
+        pa_one('SELECT PS_CURRENT_THREAD_ID() AS t');
+        $psHasFn = true;
+    } catch (Throwable $e) {
+        $psHasFn = false;
+    }
+}
 $openTrx = static fn (): int => (int) (pa_one(
     "SELECT COUNT(*) AS n FROM performance_schema.events_transactions_current WHERE THREAD_ID = PS_CURRENT_THREAD_ID() AND STATE = 'ACTIVE' AND AUTOCOMMIT = 'NO'"
 )['n'] ?? -1);
-$instr25 = pa_one(
-    "SELECT (SELECT ENABLED FROM performance_schema.setup_instruments WHERE NAME = 'transaction') AS i, "
-    . "(SELECT ENABLED FROM performance_schema.setup_consumers WHERE NAME = 'events_transactions_current') AS c"
-);
-$mysqli->begin_transaction();
-$seenOpen25 = $openTrx();
-$mysqli->rollback();
-$seenClosed25 = $openTrx();
-pa_ok(
-    'D25 the live transaction view is switched on here, and does see an open transaction on this connection (and none once it ends)',
-    ($instr25['i'] ?? '') === 'YES' && ($instr25['c'] ?? '') === 'YES' && $seenOpen25 === 1 && $seenClosed25 === 0,
-    pa_show([$instr25, $seenOpen25, $seenClosed25])
-);
+if ($psHasFn === false) {
+    pa_skipped(
+        'D25 the live transaction view is switched on here, and does see an open transaction on this connection (and none once it ends)',
+        'this server has no live transaction view to ask: @@performance_schema is ' . json_encode($psReady)
+        . ' and PS_CURRENT_THREAD_ID() is not available (MariaDB has neither by default).'
+    );
+} else {
+    $instr25 = pa_one(
+        "SELECT (SELECT ENABLED FROM performance_schema.setup_instruments WHERE NAME = 'transaction') AS i, "
+        . "(SELECT ENABLED FROM performance_schema.setup_consumers WHERE NAME = 'events_transactions_current') AS c"
+    );
+    $mysqli->begin_transaction();
+    $seenOpen25 = $openTrx();
+    $mysqli->rollback();
+    $seenClosed25 = $openTrx();
+    pa_ok(
+        'D25 the live transaction view is switched on here, and does see an open transaction on this connection (and none once it ends)',
+        ($instr25['i'] ?? '') === 'YES' && ($instr25['c'] ?? '') === 'YES' && $seenOpen25 === 1 && $seenClosed25 === 0,
+        pa_show([$instr25, $seenOpen25, $seenClosed25])
+    );
+}
 $w25i  = pa_bulkWorld('D25i');
 $race25 = $w25i['ok'] ? pa_withHolder(FA2, 1.5, 'delete', static fn (): array => pa_timed(static fn (): array => FeedAdmin::decide($mysqli, ORG_A, SA, 'approved', '', [pa_item($w25i['rows'][0]), pa_item($w25i['rows'][3])]))) : ['result' => null, 'holderOk' => false, 'holderLog' => 'set-up failed'];
 $dec25  = $race25['result']['result'] ?? [];
-$open25 = $openTrx();
+// -2 means "this server has no live transaction view", not "a transaction is
+// open". The clause below accepts it and the LABEL says so, so a run on
+// MariaDB never claims to have checked something it could not.
+$open25 = $psHasFn === true ? $openTrx() : -2;
 pa_ok(
-    'D25 a calendar deleted between the look-up and its lock: the call waited on the lock, then "Approved 1. 1 had changed … Other dates …", no error, nothing "not done", no transaction left open',
+    'D25 a calendar deleted between the look-up and its lock: the call waited on the lock, then "Approved 1. 1 had changed … Other dates …", no error, nothing "not done"'
+    . ($open25 === -2
+        ? ' (whether a transaction was left open was NOT CHECKED: this server has no live transaction view)'
+        : ', no transaction left open'),
     $w25i['ok'] === true && $race25['holderOk'] === true
     && is_array($race25['result']) && array_key_exists('threw', $race25['result']) && $race25['result']['threw'] === null
     && ($race25['result']['seconds'] ?? 0) >= 1.0
     && ($dec25['decided'] ?? -1) === 1 && ($dec25['changed'] ?? -1) === 1 && ($dec25['notDone'] ?? -1) === 0
     && array_key_exists('failure', $dec25) && $dec25['failure'] === null
     && ($dec25['message'] ?? '') === 'Approved 1. 1 had changed since you opened the page; please review it again.' . MSG_OTHER_ONE
-    && pa_one('SELECT feedID FROM tblExternalFeeds WHERE feedID = ?', 'i', [FA2]) === null && $open25 === 0,
+    && pa_one('SELECT feedID FROM tblExternalFeeds WHERE feedID = ?', 'i', [FA2]) === null
+    && ($open25 === 0 || $open25 === -2),
     pa_show([$dec25, $race25['holderLog'], $open25, $race25['result']['seconds'] ?? null, ($race25['result']['threw'] ?? null) instanceof Throwable ? $race25['result']['threw']->getMessage() : null])
 );
 // (f) A stale request fingerprint on ONE date of a three-date series (fix

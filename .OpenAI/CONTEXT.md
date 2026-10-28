@@ -322,6 +322,35 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     a change touches `web/_sql/`. *(`.claude/rules/database.md` → "Every
     database change goes in the install script too".)*
 
+    **MariaDB 11.4 is now covered by automated tests (#487, 28 October 2026),
+    and the words for it matter.** Two bodies of work pass on MariaDB 11.4.13:
+    the six calendar self-tests (`calendar-selftests.yml`, which runs them on
+    `mysql:8.0.36`, `mysql:8.4` and `mariadb:11.4`) and the end-to-end
+    migration harness — all seven phases and all 42 checks, the SAME 42 that
+    pass on MySQL 8.0.36 and 8.4.11. `e2e-migrations.yml` runs three jobs side
+    by side; `E2E_DB_ENGINE` (`mysql` or `mariadb`) is the ONE place that
+    decides the container image and both client program names. **Still do not
+    write "MariaDB is supported" without saying what was measured** — no
+    customer runs on it in production. One test skip remains, in feed-admin,
+    and it is a limit of the TEST: MariaDB has `performance_schema` off by
+    default and no `PS_CURRENT_THREAD_ID()`, while the portal queries
+    `performance_schema` nowhere (checked, not assumed).
+
+    Three MariaDB facts worth keeping. MariaDB 11.x ships **no `mysql` or
+    `mysqladmin` program** — only `mariadb` and `mariadb-admin` — which is
+    what stopped the harness running on it at all. `SELECT VERSION()` returns
+    `11.4.13-MariaDB-ubu2404`, so a check comparing the whole string for
+    equality can never pass (compare the leading three-part number instead;
+    that keeps the moving-tag guarantee, since `8.4` still does not equal
+    `8.4.11`; it is a deliberate loosening in one way, accepting `8.0.36-log`
+    and `8.0.36-0ubuntu0.24.04.1`, so do not call it "just as strict" flatly).
+    And
+    for a foreign-key rule that was **left out** of the statement, MySQL 8.0
+    and 8.4 record `NO ACTION` while MariaDB 11.4 records `RESTRICT` — a
+    DECLARED rule is recorded faithfully by all three, so the engines do NOT
+    normalise what they are told. That was measured on all three after the
+    first guess proved wrong.
+
 14. **The MySQL 8 dialect trap.** Production runs some version of MySQL 8
     (exact version unconfirmed — see `.claude/CLAUDE.md`'s database-version
     warning banner). Various handy `IF [NOT] EXISTS` forms on `ADD`/`DROP

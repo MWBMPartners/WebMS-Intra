@@ -391,8 +391,8 @@ does not look like that channel's own.
   on PRs and on pushes to alpha/beta/main, in both cases only when
   `web/_sql/`, the harness folder or the workflow itself changes, plus
   manual runs. Runs the
-  harness's six phases and its three data checks twice, as two jobs side by side, on MySQL 8.0.36
-  and MySQL 8.4.11.
+  harness's seven phases and its three data checks three times, as three jobs side by side, on
+  MySQL 8.0.36, MySQL 8.4.11 and MariaDB 11.4.13.
 - `repo-config-audit.yml` — weekly + on PRs touching `.github/workflows/`.
   Detects orphaned required-status-check rules (see gotchas section).
 
@@ -3392,8 +3392,9 @@ ignore rules remain the first wall; these guards are the second.
 
 ## End-to-end migration test (#248)
 
-Before each release, run every migration through real MySQL 8.0.36 and
-8.4.11 containers to catch what the static `check_sql_columns.py` and `check_migration_idempotency.py` audits miss:
+Before each release, run every migration through real MySQL 8.0.36, MySQL
+8.4.11 and MariaDB 11.4.13 containers to catch what the static
+`check_sql_columns.py` and `check_migration_idempotency.py` audits miss:
 
 - Statement order — a later migration assuming a table a previous one
   forgot to create.
@@ -3402,18 +3403,120 @@ Before each release, run every migration through real MySQL 8.0.36 and
 - Genuine non-idempotency that the static audit can't model (e.g. a
   trigger that errors second-time-round).
 
+### Teaching the harness MariaDB (#487, 28 October 2026)
+
+The harness now runs on MariaDB 11.4.13 as well, and **all seven phases and
+all 42 checks pass — the same 42 that pass on both MySQL lines.** That count
+was taken rather than assumed, because the MariaDB log is 1,284 lines shorter
+than MySQL's: the whole difference is the "Using a password on the command
+line interface can be insecure" warning that the `mariadb` client does not
+print, and 2,976 + 1,284 = 4,260 exactly. A shorter log is the shape a
+half-skipped run would also have, so it had to be counted.
+
+**Why it could not run before, and neither reason was in the portal.**
+
+1. **The client program does not exist.** MariaDB 11.x dropped the `mysql` and
+   `mysqladmin` compatibility symlinks; only `mariadb` and `mariadb-admin`
+   ship. `run.sh` had `mysql` written into it in four places and
+   `docker-compose.yml` called `mysqladmin` in its healthcheck, so it could
+   not open a connection at all.
+2. **The version check demanded whole-string equality.** `SELECT VERSION()`
+   returns `11.4.13-MariaDB-ubu2404`, which never equals `11.4.13`.
+
+`E2E_DB_ENGINE` (`mysql` or `mariadb`) is now the ONE place that decides the
+image repository and both client program names, exported for
+`docker-compose.yml` to read. The version check compares the **leading
+three-part number**, which keeps the MOVING-TAG guarantee exactly as it was:
+`8.4` still does not equal `8.4.11`, so the hole the old comment warns about
+stays shut. It now also refuses when the engine asked for is
+not the engine that answered. **That last one is a cheap last line of defence,
+not the thing that stops a mix-up, and the first version of its comment
+overstated it:** the image repository and the client name come from the SAME
+variable, so they cannot disagree, and if a mix-up is contrived anyway
+(by retagging the image) `wait_for_mysql` runs first and dies in its retry
+loop, so the engine check is never reached — measured. What that case really
+needed was a better message, so `wait_for_mysql` now names the client program
+it was calling. It strips MariaDB's fake `5.5.5-` prefix first, though 11.4.13
+does not use one.
+
+It is, however, **a loosening in one way, and that must not be glossed**:
+matching on the number accepts `8.0.36-log` and `8.0.36-0ubuntu0.24.04.1` when
+8.0.36 was asked for, where the whole-string compare refused them. That is
+deliberate — a decorated string names the same server — but it means the only
+safe way to describe this check is "as strict as it was ABOUT A MOVING TAG".
+An unqualified "exactly as strict as before" is false, and was written in six
+places before the second review round caught it.
+
+**The one real difference, and the wrong first guess.** Phase 2 failed on
+MariaDB: `tblEvents`' links `fk_event_venue` and `fk_event_room` came out `on
+update RESTRICT` where MySQL reports `on update NO ACTION`. The obvious
+explanation — that the two servers normalise FK rules differently — is
+**wrong**, and measuring it on all three engines disproved it. Every engine
+records a **declared** rule faithfully; only the default for an **omitted**
+clause differs:
+
+| declared | MySQL 8.0.36 | MySQL 8.4 | MariaDB 11.4.13 |
+|---|---|---|---|
+| `ON UPDATE NO ACTION` | NO ACTION | NO ACTION | NO ACTION |
+| `ON UPDATE RESTRICT` | RESTRICT | RESTRICT | RESTRICT |
+| *omitted* | **NO ACTION** | **NO ACTION** | **RESTRICT** |
+
+Migration 179 gives both links `ON DELETE SET NULL` and no `ON UPDATE` clause
+at all, which is why that pair was the one that showed it.
+
+`dump_inventory()` therefore folds the two together in one place, and prints
+them as the pair `NO ACTION/RESTRICT`. The two name the same rule in InnoDB on
+both engines — each rejects the change at once — so the fold loses no
+behaviour.
+
+**Two corrections the independent check forced, both worth keeping.** First,
+"the MySQL output is byte-identical before and after the fold" is WRONG, and I
+wrote it. The run's verdict and all 42 `✓` lines are unchanged (diffed), but 26
+links in `full_schema.sql` declare `ON DELETE RESTRICT`, so their recorded
+wording changes — "the verdict is unchanged" is the true claim, and the wider
+one was reached by diffing a passing run's `✓` lines, none of which carries
+rule text (0 of 42, checked). **A passing run DOES print link lines — exactly
+two**, in phase 2's known-exceptions block, and those two are precisely the
+lines whose wording this change altered, so a before/after diff of a passing
+MySQL run is not identical either. The first attempt to explain the mistake was
+itself wrong, which is why it is spelled out here. Second, the fold originally picked the single word
+`NO ACTION`, which made a failure line read `on delete NO ACTION` for a
+constraint whose SQL plainly says `RESTRICT`; somebody debugging a 4,000-line
+log would grep the schema for that word and find nothing. Printing the pair
+costs nothing — both sides of every comparison are folded alike — and is the
+only form that is true where somebody reads it.
+
+**What the fold gives up, said plainly:** the harness can no longer tell a
+declared `RESTRICT` from a declared `NO ACTION`, and 54 places in `web/_sql`
+do declare `RESTRICT`. That costs nothing real, because changing one word for
+the other changes no behaviour — but this is not the place to catch such an
+edit. **Do not excuse the fold by saying MariaDB "cannot tell them apart":
+that is false and was measured false** — MariaDB records a declared `NO ACTION`
+as `NO ACTION` and a declared `RESTRICT` as `RESTRICT`, exactly like MySQL. The
+true statement is narrower: on MariaDB an OMITTED clause and an explicit
+`RESTRICT` are the same text, so those two it genuinely cannot separate.
+
+**The lesson worth keeping.** The failure was never in the comparison. Every
+comparison the harness makes is same-engine — a fresh install against an
+upgraded one — and it correctly found the same two links on both engines. What
+failed was the **hard-coded exception list** `KNOWN_REPLAY_ONLY_LINKS`,
+written in one engine's spelling. A pinned list of expected text is a second
+copy of the thing it describes, and it will be written in the dialect of
+whatever machine it was written on.
+
 ### Procedure
 
 Requires `docker` on your own machine.
 
 ```bash
-tools/e2e-migrations/run.sh                # all six phases and the data checks
+tools/e2e-migrations/run.sh                # all seven phases and the data checks
 E2E_MYSQL_VERSION=8.4.11 tools/e2e-migrations/run.sh   # the same on MySQL 8.4.11
+E2E_DB_ENGINE=mariadb E2E_MYSQL_VERSION=11.4.13 tools/e2e-migrations/run.sh   # the same on MariaDB 11.4.13
 tools/e2e-migrations/run.sh --skip-stale   # phase 4 without its catching-up half
 tools/e2e-migrations/run.sh --keep         # leave the container up afterwards
 ```
 
-The script runs six phases and three data checks:
+The script runs seven phases and three data checks:
 1. **Fresh install**: load `full_schema.sql` into an empty database.
 2. **Installer replay**: run every migration over it. No table, column, index, link,
    address or setting value may change, apart from five differences named in `run.sh`.
@@ -3428,13 +3531,21 @@ The script runs six phases and three data checks:
 5. **Upgrade from the last release** (`origin/main`, or `E2E_BASE_REF`).
 6. **Upgrade from the oldest install script** (6 March 2026: a frozen file holding that
    day's base tables, upgraded by today's migrations).
+7. **The installer's "carry on" over an older database** whose two time-zone places
+   differ (#604): March's install script taken up to migration 216, then today's
+   install script and every migration over it. Each organisation must keep the time
+   zone its pages were showing, and a second pass must change nothing. (Added
+   13 October 2026; this list said "six phases" until 28 October 2026, when it was
+   noticed that phase 7 had never been added to it.)
 
 Phases 5 and 6 must end up equal to a fresh install, compared by name and not by
 count. Each phase has its own list of named exceptions in `run.sh`, and fails when a
-line in its list is no longer seen. The test cannot see MariaDB, a database whose
-history matches neither starting point, a setting's stored default, or the contents
-of tables other than addresses, settings and their values, recorded migrations and
-the planted sessions.
+line in its list is no longer seen. **The test now runs on MariaDB 11.4.13 as well as
+MySQL 8.0.36 and 8.4.11** (#487, 28 October 2026) — this paragraph said "the test
+cannot see MariaDB" until then. What it still cannot see: a database whose history
+matches neither starting point, a setting's stored default, the difference between a
+declared `RESTRICT` and a declared `NO ACTION`, or the contents of tables other than
+addresses, settings and their values, recorded migrations and the planted sessions.
 
 **After this work reaches `main`.** The first run of the migration test after roll-out package E reaches `main` will fail
 in phase 5, on purpose: `auth.password.minLength | every organisation | 12 → 8` in

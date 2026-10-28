@@ -196,6 +196,26 @@ DB_NAME="portal_e2e"
 # same variable and carries the same default: keep the two in step.
 export E2E_MYSQL_VERSION="${E2E_MYSQL_VERSION:-8.0.36}"
 
+# Which database SERVER to test against: "mysql" (the default, and what this
+# harness has always used) or "mariadb". ONE place decides what that choice
+# means — the image to pull and the two client programs to call — because
+# MariaDB 11.x NO LONGER SHIPS the `mysql` and `mysqladmin` compatibility
+# symlinks earlier versions had; only `mariadb` and `mariadb-admin` exist. So
+# a run.sh with `mysql` typed into it cannot talk to a MariaDB container at
+# all, which is why this harness could not run on MariaDB before 28 October
+# 2026 (#487). Measured against mariadb:11.4, not assumed.
+export E2E_DB_ENGINE="${E2E_DB_ENGINE:-mysql}"
+case "${E2E_DB_ENGINE}" in
+    mysql)   E2E_DB_CLIENT="mysql";   E2E_DB_ADMIN="mysqladmin" ;;
+    mariadb) E2E_DB_CLIENT="mariadb"; E2E_DB_ADMIN="mariadb-admin" ;;
+    *) echo "✗ E2E_DB_ENGINE must be 'mysql' or 'mariadb', not '${E2E_DB_ENGINE}'" >&2; exit 64 ;;
+esac
+# What compose itself reads is E2E_DB_ENGINE (the image repository is the
+# engine's own name on Docker Hub) and E2E_DB_ADMIN (its healthcheck calls the
+# admin program by name). E2E_DB_CLIENT is for this script only, but all three
+# are exported together so the set cannot drift apart.
+export E2E_DB_CLIENT E2E_DB_ADMIN
+
 KEEP=0
 SKIP_STALE=0
 for arg in "$@"; do
@@ -219,22 +239,22 @@ teardown() {
 }
 
 mysql_q() {
-    docker exec -i portal-e2e-mysql mysql -u"${DB_USER}" -p"${DB_PASS}" -h localhost --skip-column-names "${DB_NAME}" -e "$1"
+    docker exec -i portal-e2e-mysql "${E2E_DB_CLIENT}" -u"${DB_USER}" -p"${DB_PASS}" -h localhost --skip-column-names "${DB_NAME}" -e "$1"
 }
 
 mysql_file() {
-    docker exec -i portal-e2e-mysql mysql -u"${DB_USER}" -p"${DB_PASS}" -h localhost "${DB_NAME}" < "$1"
+    docker exec -i portal-e2e-mysql "${E2E_DB_CLIENT}" -u"${DB_USER}" -p"${DB_PASS}" -h localhost "${DB_NAME}" < "$1"
 }
 
 # Drops and recreates DB_NAME so each phase that needs a clean slate starts
 # from a genuinely empty database (also self-healing across --keep re-runs).
 reset_db() {
-    docker exec -i portal-e2e-mysql mysql -u"${DB_USER}" -p"${DB_PASS}" -e \
+    docker exec -i portal-e2e-mysql "${E2E_DB_CLIENT}" -u"${DB_USER}" -p"${DB_PASS}" -e \
         "DROP DATABASE IF EXISTS ${DB_NAME}; CREATE DATABASE ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
 }
 
 wait_for_mysql() {
-    echo -n "→ Waiting for MySQL to be ready (authenticated) "
+    echo -n "→ Waiting for ${E2E_DB_ENGINE} to be ready (authenticated) "
     # NB: `mysqladmin ping` reports success even when auth is denied (an
     # "access denied" reply still proves the server is alive), so it goes
     # green before the MySQL image has finished its first-boot init — the
@@ -243,7 +263,7 @@ wait_for_mysql() {
     # temporary init server runs with --skip-networking, so a TCP connect
     # only succeeds once the real, fully-initialised server is up.
     for i in $(seq 1 90); do
-        if docker exec portal-e2e-mysql mysql -u"${DB_USER}" -p"${DB_PASS}" \
+        if docker exec portal-e2e-mysql "${E2E_DB_CLIENT}" -u"${DB_USER}" -p"${DB_PASS}" \
                 -h 127.0.0.1 --protocol=TCP -e "SELECT 1;" >/dev/null 2>&1; then
             echo " ready."
             return 0
@@ -252,6 +272,12 @@ wait_for_mysql() {
         sleep 1
     done
     echo " timeout!" >&2
+    # Name the client program. This is the message a real engine/client mix-up
+    # produces — the engine check further down never gets the chance to speak,
+    # because this loop runs first and a missing client program looks exactly
+    # like a server that never came up. Without this line the run just dumped
+    # the server log, which says nothing about the real cause.
+    echo "→ Could not reach the server with '${E2E_DB_CLIENT}'. Is that the right client for a '${E2E_DB_ENGINE}' image? (MariaDB 11.x has no 'mysql' program; MySQL has no 'mariadb' one.)" >&2
     echo "→ Last 30 lines of container log:" >&2
     docker logs portal-e2e-mysql 2>&1 | tail -30 >&2 || true
     exit 1
@@ -467,9 +493,36 @@ dump_inventory() {
                     IF(non_unique = 0, 'unique', 'not unique'))
              FROM information_schema.statistics
              WHERE table_schema = DATABASE();" > "${SNAP_DIR}/${label}_indexes.raw" || return 1
+    # ⚠ "RESTRICT" and "NO ACTION" are FOLDED TOGETHER here, and the
+    # fold is deliberate. They name the SAME rule in InnoDB on both engines —
+    # each rejects the change at once — but the two servers write a rule that
+    # was LEFT OUT of the statement differently: MySQL 8.0 and 8.4 record
+    # "NO ACTION", MariaDB 11.4 records "RESTRICT". Measured on 28 October
+    # 2026 (#487) on all three, with the clause given and left out, because
+    # the first guess — that the servers normalise what they are told — was
+    # WRONG: both record a DECLARED rule faithfully, and only the default for
+    # an omitted clause differs. Migration 179's two links to tblVenues and
+    # tblVenueRooms give ON DELETE SET NULL and no ON UPDATE at all, so they
+    # were the pair that showed it: the names pinned in KNOWN_REPLAY_ONLY_LINKS
+    # could only ever match one engine.
+    # IT PRINTS THE PAIR, "NO ACTION/RESTRICT", rather than picking one word.
+    # Folding to the single word "NO ACTION" was tried first and was worse: 26
+    # links in full_schema.sql DECLARE "ON DELETE RESTRICT", so a failure line
+    # would have read "on delete NO ACTION" for a constraint whose SQL plainly
+    # says RESTRICT, and anybody grepping the schema for the word in the
+    # message would have found nothing. The comparison is exactly as strong
+    # either way — both sides are folded the same — but only the pair is TRUE
+    # at the point somebody reads it.
+    # WHAT THIS GIVES UP, said plainly: the harness now CANNOT TELL an
+    # explicitly declared RESTRICT from NO ACTION, and 54 places in web/_sql
+    # do declare RESTRICT. That costs nothing real, because changing one word
+    # to the other changes no behaviour — but it does mean this harness is
+    # not the place to catch such an edit. It cannot distinguish them anyway:
+    # on MariaDB an omitted clause and an explicit RESTRICT are the same text.
     mysql_q "SELECT CONCAT_WS(' | ', k.table_name, k.constraint_name, k.ordinal_position, k.column_name,
                     k.referenced_table_name, k.referenced_column_name,
-                    CONCAT('on delete ', r.delete_rule), CONCAT('on update ', r.update_rule))
+                    CONCAT('on delete ', IF(r.delete_rule IN ('RESTRICT', 'NO ACTION'), 'NO ACTION/RESTRICT', r.delete_rule)),
+                    CONCAT('on update ', IF(r.update_rule IN ('RESTRICT', 'NO ACTION'), 'NO ACTION/RESTRICT', r.update_rule)))
              FROM information_schema.key_column_usage k
              JOIN information_schema.referential_constraints r
                ON r.constraint_schema = k.constraint_schema
@@ -609,8 +662,8 @@ unseen_exceptions() {
 #   The same gap #554 was for fk_att_sess_event, which the install script now
 #   adds itself.
 KNOWN_REPLAY_ONLY_LINKS=(
-    "tblEvents | fk_event_room | 1 | roomID | tblVenueRooms | roomID | on delete SET NULL | on update NO ACTION"
-    "tblEvents | fk_event_venue | 1 | venueID | tblVenues | venueID | on delete SET NULL | on update NO ACTION"
+    "tblEvents | fk_event_room | 1 | roomID | tblVenueRooms | roomID | on delete SET NULL | on update NO ACTION/RESTRICT"
+    "tblEvents | fk_event_venue | 1 | venueID | tblVenues | venueID | on delete SET NULL | on update NO ACTION/RESTRICT"
 )
 #   Three apps the install script seeds as switched OFF and migrations 008,
 #   009 and 017 switch ON, because they write the value again when the row is
@@ -961,7 +1014,7 @@ compare_with_fresh_install() {
 # rule. (The message for that used to say the database "has no
 # fk_att_sess_event link (found 0)" when the link was there and deleted the
 # sessions with the event.)
-SESSION_EVENT_LINKS_SQL="SELECT CONCAT_WS(' | ', k.constraint_name, CONCAT('on delete ', r.delete_rule))
+SESSION_EVENT_LINKS_SQL="SELECT CONCAT_WS(' | ', k.constraint_name, CONCAT('on delete ', IF(r.delete_rule IN ('RESTRICT', 'NO ACTION'), 'NO ACTION/RESTRICT', r.delete_rule)))
      FROM information_schema.key_column_usage k
      JOIN information_schema.referential_constraints r
        ON r.constraint_schema = k.constraint_schema
@@ -1213,7 +1266,7 @@ check_missing_events_table() {
 # Start
 # -----------------------------------------------------------------------------
 
-echo "→ Bringing up MySQL ${E2E_MYSQL_VERSION}"
+echo "→ Bringing up ${E2E_DB_ENGINE} ${E2E_MYSQL_VERSION}"
 docker compose -f "${COMPOSE_FILE}" up -d --remove-orphans
 wait_for_mysql
 
@@ -1224,11 +1277,52 @@ wait_for_mysql
 # MySQL 8.0.36" while the container really ran 8.4.11, because this line
 # used to be fixed text.
 ACTUAL_MYSQL_VERSION=$(mysql_q "SELECT VERSION();")
-if [[ "${ACTUAL_MYSQL_VERSION}" != "${E2E_MYSQL_VERSION}" ]]; then
-    echo "✗ asked for MySQL ${E2E_MYSQL_VERSION}, but the server reports '${ACTUAL_MYSQL_VERSION}' — refusing to test the wrong version" >&2
+# Compare only the leading three-part NUMBER, because a server decorates it:
+# MariaDB reports "11.4.13-MariaDB-ubu2404", a Ubuntu-packaged MySQL reports
+# "8.0.41-0ubuntu0.24.04.1", and some MariaDB builds still carry the fake
+# "5.5.5-" prefix they add for the benefit of very old clients (stripped
+# first, or the number read would be 5.5.5). This keeps the MOVING-TAG
+# guarantee exactly as it was — "8.4" still does not equal "8.4.11", which is
+# the mistake this check exists to catch — while letting it work on either
+# engine. It is NOT strict in every way the old test was, and saying so
+# plainly: comparing the whole string also refused "8.0.36-log" and
+# "8.0.36-0ubuntu0.24.04.1" when 8.0.36 was asked for, and those now pass.
+# That is the point — a decorated string is the same server — but it is a
+# loosening, not a no-op. It used to compare the WHOLE string, which is the
+# second of the two reasons this harness could not run on MariaDB at all
+# (#487).
+VERSION_WITHOUT_OLD_CLIENT_PREFIX="${ACTUAL_MYSQL_VERSION#5.5.5-}"
+REPORTED_NUMBER="$(printf '%s' "${VERSION_WITHOUT_OLD_CLIENT_PREFIX}" \
+    | sed -n 's/^\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*$/\1/p')"
+if [[ "${REPORTED_NUMBER}" != "${E2E_MYSQL_VERSION}" ]]; then
+    echo "✗ asked for ${E2E_DB_ENGINE} ${E2E_MYSQL_VERSION}, but the server reports '${ACTUAL_MYSQL_VERSION}' — refusing to test the wrong version" >&2
     exit 1
 fi
-echo "  server version confirmed: ${ACTUAL_MYSQL_VERSION}"
+# And the ENGINE must be the one that was asked for. MariaDB puts its own name
+# in the string; MySQL never does.
+# ⚠ BE HONEST ABOUT WHAT THIS CAN AND CANNOT CATCH. An earlier version of
+# this comment claimed it stopped a run from "pulling one engine and talking to
+# it with the other's client name". It does not, and it cannot: the image
+# repository in docker-compose.yml and E2E_DB_CLIENT both come from the SAME
+# variable, so they can never disagree. And if a mix-up is contrived anyway (by
+# retagging the image, or editing the compose file), wait_for_mysql runs FIRST
+# and dies in its retry loop first — measured on 28 October 2026 by pinning the
+# image to mariadb 11.x and asking for mysql, which never reached this check at
+# all. It is reachable in principle: MariaDB 10.x still ships the `mysql`
+# symlink, so a retagged 10.x image with a matching version number WOULD get
+# past wait_for_mysql and be caught here. So this is a cheap last line of
+# defence, NOT the thing that stops a mix-up; the
+# message in wait_for_mysql is what a real mix-up actually produces, which is
+# why that one names the client it was calling.
+# It tests for one word, so it does not tell a Percona or Oracle Enterprise
+# build from plain MySQL. That only matters if the compose image is pointed
+# somewhere else by hand.
+if [[ "${ACTUAL_MYSQL_VERSION}" == *MariaDB* && "${E2E_DB_ENGINE}" != "mariadb" ]] \
+   || [[ "${ACTUAL_MYSQL_VERSION}" != *MariaDB* && "${E2E_DB_ENGINE}" == "mariadb" ]]; then
+    echo "✗ asked for engine '${E2E_DB_ENGINE}', but the server reports '${ACTUAL_MYSQL_VERSION}' — refusing to test the wrong engine" >&2
+    exit 1
+fi
+echo "  server confirmed: ${E2E_DB_ENGINE} ${ACTUAL_MYSQL_VERSION}"
 
 # -----------------------------------------------------------------------------
 # Phase 1: full_schema fresh-install
@@ -1238,7 +1332,7 @@ echo "═════ Phase 1: full_schema fresh-install ═════"
 echo "  Wiping DB and loading full_schema.sql …"
 reset_db
 if ! mysql_file "${SQL_DIR}/full_schema.sql"; then
-    echo "✗ full_schema.sql FAILED to load against MySQL ${E2E_MYSQL_VERSION} — see error above" >&2
+    echo "✗ full_schema.sql FAILED to load against ${E2E_DB_ENGINE} ${E2E_MYSQL_VERSION} — see error above" >&2
     exit 1
 fi
 echo "  ✓ full_schema.sql loaded without error"
@@ -1673,7 +1767,7 @@ phase6_upgrade_from_oldest_install_script() {
     echo "  ✓ the frozen install script's body is untouched (checksum ${body_sum}) and its header holds comments only"
     echo "  Loading the frozen install script of 6 March 2026 …"
     if ! reset_db || ! mysql_file "${OLDEST_SCHEMA}"; then
-        echo "✗ phase 6 FAILED — the frozen install script did not load on MySQL ${E2E_MYSQL_VERSION}" >&2
+        echo "✗ phase 6 FAILED — the frozen install script did not load on ${E2E_DB_ENGINE} ${E2E_MYSQL_VERSION}" >&2
         return 1
     fi
     echo "  old database installed: $(count_tables) tables, $(count_columns) columns, $(count_indexes) indexes, $(count_migrations) migrations recorded"
@@ -1751,7 +1845,7 @@ phase7_installer_carry_on_over_an_older_database() {
     local err_file="${SNAP_DIR}/p7_err.txt"
     echo "  Building the older database: the install script of 6 March 2026, then this checkout's migrations up to 216 …"
     if ! reset_db || ! mysql_file "${OLDEST_SCHEMA}"; then
-        echo "✗ phase 7 FAILED — the frozen install script did not load on MySQL ${E2E_MYSQL_VERSION}" >&2
+        echo "✗ phase 7 FAILED — the frozen install script did not load on ${E2E_DB_ENGINE} ${E2E_MYSQL_VERSION}" >&2
         return 1
     fi
     if ! mysql_q "SELECT filename FROM tblMigrations;" > "${done_list}"; then

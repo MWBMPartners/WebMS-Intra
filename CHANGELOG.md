@@ -2,6 +2,30 @@
 
 
 ## [Unreleased] (alpha)
+- **The migration test now runs on MariaDB as well as MySQL (#487)**
+  - **What this means.** The test that replays every database upgrade step, from the
+    oldest install script to today's, now runs on MariaDB 11.4 too. **All seven stages and
+    all 42 checks pass there — the same 42 that pass on MySQL 8.0 and MySQL 8.4.** Every
+    pull request now runs it three times, once per database, side by side.
+  - **Why it could not run before.** Nothing was wrong with the portal. The test itself
+    called two programs by name — `mysql` and `mysqladmin` — that MariaDB 11 no longer
+    ships, and it compared the database's reported version as a whole piece of text, which
+    for MariaDB reads `11.4.13-MariaDB-ubu2404` and so never matched. Both were in the test.
+  - **The version check still catches the mistake it was built for**, and is looser in one
+    way. It now compares the version number rather than the whole label, so asking for
+    "8.4" still will not pass against 8.4.11 — the mistake that check exists to catch. It
+    does now accept a label with extra wording after the number, such as "8.0.36-log",
+    which it used to refuse; that is deliberate, because such a label names the same
+    database. It also refuses outright if the database that answers is not the kind that
+    was asked for.
+  - **One genuine difference was found and understood.** Where a link between two tables
+    does not say what should happen on update, MySQL records "no action" and MariaDB
+    records "restrict". **These are the same rule** — both refuse the change — so the test
+    now treats the two words as one. Checked on all three databases, because the first
+    explanation turned out to be wrong.
+  - **Said plainly about what is still not proven.** Two bodies of automated tests now pass
+    on MariaDB 11.4. That is considerably more than before, but no customer runs the portal
+    on MariaDB in production, so it is not the same as saying MariaDB is supported.
 - **Recorded as intended — one "waiting for approval" push can be skipped when two calendars finish at the same moment (#643)**
   - **What an administrator should know.** If two outside calendars are imported at the same instant,
     the push about one of them can be missed. **Nothing is lost:** the event is in the approvals

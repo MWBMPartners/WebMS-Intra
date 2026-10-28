@@ -7,10 +7,13 @@
 # PURPOSE
 # -------
 # Runs tools/e2e-migrations/run.sh — the end-to-end migration test harness
-# (#248) — against a real, disposable MySQL container, TWICE, as two jobs
-# side by side: MySQL 8.0.36 and MySQL 8.4.11 (owner's decision, 24
-# September 2026, because MySQL 8.4 refuses some links between tables that
-# MySQL 8.0 allows — #552). Which MySQL 8 line production itself runs is
+# (#248) — against a real, disposable database container, THREE TIMES, as
+# three jobs side by side: MySQL 8.0.36, MySQL 8.4.11 and MariaDB 11.4.13.
+# The two MySQL lines are the owner's decision of 24 September 2026, because
+# MySQL 8.4 refuses some links between tables that MySQL 8.0 allows (#552).
+# MariaDB was added on 28 October 2026 (#487) once the harness was taught to
+# call MariaDB's own client programs; all 42 checks pass on it, the same 42
+# that pass on both MySQL lines. Which MySQL 8 line production itself runs is
 # not confirmed — that is #475. The harness has seven phases and three
 # data checks: (1) load web/_sql/full_schema.sql fresh; (2) replay every
 # numbered migration over that DB ignoring tblMigrations, as the
@@ -94,11 +97,10 @@ concurrency:
 
 jobs:
   e2e:
-    # One job per MySQL version, side by side. fail-fast is off so that a
-    # failure on one version never cancels the other: both answers are
-    # wanted. Neither job name is a required check (checked 25 September
+    # One job per engine and version, side by side. fail-fast is off so that
+    # a failure on one never cancels the others: every answer is wanted. Neither job name is a required check (checked 25 September
     # 2026 with tools/audit-required-checks.py), so the names can change.
-    name: Run migration harness (MySQL ${{ matrix.mysql }})
+    name: Run migration harness (${{ matrix.engine }} ${{ matrix.version }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -107,7 +109,21 @@ jobs:
         # Exact versions only: run.sh refuses to run when the server
         # reports anything else. Bump these by hand; Dependabot does not
         # watch image tags here.
-        mysql: ['8.0.36', '8.4.11']
+        #
+        # MariaDB 11.4.13 joined on 28 October 2026 (#487). The harness could
+        # not run on MariaDB at all before then, for two reasons that were in
+        # the harness and not in the portal: MariaDB 11.x ships no `mysql` or
+        # `mysqladmin` program (only `mariadb` and `mariadb-admin`), and the
+        # version check demanded the server's whole reported string match the
+        # number asked for, which "11.4.13-MariaDB-ubu2404" never does. Both
+        # are fixed in run.sh; E2E_DB_ENGINE picks the engine.
+        include:
+          - engine: 'mysql'
+            version: '8.0.36'
+          - engine: 'mysql'
+            version: '8.4.11'
+          - engine: 'mariadb'
+            version: '11.4.13'
 
     steps:
       - name: Checkout
@@ -115,7 +131,8 @@ jobs:
 
       # ubuntu-latest ships Docker + the docker compose plugin pre-installed,
       # so no separate setup step is needed before running the harness.
-      - name: Run E2E migration harness (all seven phases) on MySQL ${{ matrix.mysql }}
+      - name: Run E2E migration harness (all seven phases) on ${{ matrix.engine }} ${{ matrix.version }}
         env:
-          E2E_MYSQL_VERSION: ${{ matrix.mysql }}
+          E2E_DB_ENGINE: ${{ matrix.engine }}
+          E2E_MYSQL_VERSION: ${{ matrix.version }}
         run: bash tools/e2e-migrations/run.sh

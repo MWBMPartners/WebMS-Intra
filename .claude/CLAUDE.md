@@ -47,9 +47,81 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
 > the ONE place under `web/` that opens a database connection (#593, 12 October
 > 2026): it makes the connection strict, so a value that does not fit is an
 > error on every installation. Never write `new mysqli` anywhere else under
-> `web/`; `tools/db-strict-mode-selftest.php` fails if it finds one.** Second, **MariaDB is not
-> covered by any automated test here**, so its compatibility is unverified —
-> which is not the same as saying it does not work.
+> `web/`; `tools/db-strict-mode-selftest.php` fails if it finds one.** Second, **MariaDB IS now
+> covered, but only by the calendar self-tests (#487, 28 October 2026).**
+> `calendar-selftests.yml` runs its six tests on THREE engines —
+> `mysql:8.0.36`, `mysql:8.4` and `mariadb:11.4` — and all of them pass on
+> each. Measured locally first, on MariaDB 11.4.13: feed-admin 933 passed with
+> **one** skip, event-visibility 192, import-notifier 134, feed-resolver 208,
+> feed-importer 139, and `full_schema.sql` loads clean (228 tables). The one
+> skip is a limit of the TEST, not of MariaDB: `performance_schema` is OFF by
+> default there and there is no `PS_CURRENT_THREAD_ID()`, so one part-D check
+> has no instrument to ask — the portal queries `performance_schema` NOWHERE,
+> which was checked rather than assumed. **The END-TO-END MIGRATION HARNESS NOW
+> RUNS ON MARIADB TOO (#487, 28 October 2026), and that is the one that replays
+> every migration.** All seven phases and all 42 checks pass on MariaDB
+> 11.4.13 — the SAME 42 that pass on MySQL 8.0.36 and 8.4.11, counted rather
+> than assumed, because the MariaDB log is 1,284 lines shorter and the
+> difference is exactly the password warning the `mariadb` client does not
+> print (2,976 + 1,284 = 4,260 precisely). `e2e-migrations.yml` now runs three
+> jobs side by side. Two things in the HARNESS, never in the portal, had
+> stopped it: MariaDB 11.x ships no `mysql` or `mysqladmin` program (only
+> `mariadb` and `mariadb-admin`), and the version check compared the server's
+> whole reported string, which `11.4.13-MariaDB-ubu2404` never matches.
+> `E2E_DB_ENGINE` (`mysql` or `mariadb`) is now the ONE place that decides the
+> image and both client program names; the version check compares the leading
+> three-part number, which keeps the **moving-tag guarantee** exactly as it was
+> — `8.4` still does not pass for `8.4.11`. **Never say it is "exactly as
+> strict as before" without that qualifier:** it accepts `8.0.36-log` and
+> `8.0.36-0ubuntu0.24.04.1`, which the old whole-string compare refused, so it
+> is a deliberate loosening in that one way. It also refuses when the engine
+> asked for is not the engine that answered — a cheap last line of defence
+> only, since the engine and the image come from one variable and
+> `wait_for_mysql` fails first on MariaDB 11.x.
+>
+> **The one real difference it found, and the trap in it.** Phase 2 failed on
+> MariaDB because `tblEvents`' two links to `tblVenues` and `tblVenueRooms`
+> came out `on update RESTRICT` where MySQL says `on update NO ACTION`. The
+> first guess — that the servers normalise what they are told — was WRONG, and
+> measuring it on all three disproved it: every engine records a DECLARED rule
+> faithfully, and **only the default for an OMITTED clause differs** (MySQL
+> 8.0/8.4 → `NO ACTION`, MariaDB 11.4 → `RESTRICT`). Migration 179 gives those
+> two links `ON DELETE SET NULL` and no `ON UPDATE` at all, which is why they
+> were the pair that showed it. The two words name the same rule in InnoDB, so
+> `dump_inventory()` folds the two together in ONE place and prints them as the
+> PAIR `NO ACTION/RESTRICT`. **Be careful how that is reported.** The run's
+> verdict and all 42 `✓` lines are unchanged on MySQL (diffed), but saying the
+> MySQL output is "byte-identical" is WRONG and was corrected after the
+> independent check caught it: 26 links in `full_schema.sql` DECLARE
+> `ON DELETE RESTRICT`, so their recorded wording changes. That is also why the
+> fold prints the pair rather than one word — picking `NO ACTION` made a
+> failure line read `on delete NO ACTION` for a constraint whose SQL says
+> `RESTRICT`, so anybody grepping the schema for the word in the message would
+> find nothing. **What the fold gives up, plainly: the harness can no
+> longer tell a declared `RESTRICT` from a declared `NO ACTION`, and 54 places
+> in `web/_sql` do declare `RESTRICT`.** That costs nothing real — the two
+> behave identically — but it is not the place to catch such an edit, and on
+> MariaDB an OMITTED clause and an explicit `RESTRICT` are the same text — but
+> do NOT stretch that into "MariaDB cannot tell them apart", which is false and
+> was measured false: it records a DECLARED `NO ACTION` and a DECLARED
+> `RESTRICT` distinctly, exactly like MySQL. Note too that the failure was
+> never in the comparison, which is always same-engine and found the same two
+> links on both: it was the HARD-CODED exception list, written in one engine's
+> spelling. Also worth knowing: MariaDB's default server collation is
+> `utf8mb4_uca1400_ai_ci`, a third value alongside MySQL 8.0's
+> `utf8mb4_0900_ai_ci` and the schema's own `utf8mb4_general_ci`.
+>
+> **Still do not say "MariaDB is supported" without saying what was measured.**
+> Two automated bodies of work now pass on MariaDB 11.4 — the calendar
+> self-tests and the migration harness — and that is a great deal more than
+> before, but it is not the same as a customer running on it in production.
+>
+> `Portal\Core\DbServer` reads DreamHost's real version string correctly —
+> `8.0.41-0ubuntu0.24.04.1` is parsed as MySQL 8.0.41 and judged `warn`,
+> non-blocking, advising the customer to ask their host about 8.4. Measured
+> against the owner's own `SELECT VERSION()` on 28 October 2026, together with
+> the `-log` suffix, Ubuntu packaging, MariaDB's fake `5.5.5-` prefix and full
+> Debian packaging. Nothing needed fixing.
 >
 > Moving to MySQL 9.7 / MariaDB 12.3 (with 8.4 / 11.4 as fallbacks) is tracked
 > as **#475**. Until that lands, keep writing SQL to the MySQL 8.0 ∩ MariaDB

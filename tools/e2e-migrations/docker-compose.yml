@@ -1,11 +1,13 @@
 # End-to-end migration test harness — see tools/e2e-migrations/run.sh
-# Spins up a disposable MySQL instance. Which version comes from the
-# E2E_MYSQL_VERSION environment variable, which run.sh always sets before
-# calling docker compose: 8.0.36 if nothing else says otherwise, because
-# that is the version this harness has always used. The pull-request check
-# runs it twice, side by side — on 8.0.36 and on 8.4.11 (owner's decision,
-# 24 September 2026), because MySQL 8.4 refuses some links between tables
-# that MySQL 8.0 allows (#552). Which MySQL 8 line production itself runs
+# Spins up a disposable MySQL or MariaDB instance. Which ENGINE comes from
+# E2E_DB_ENGINE ("mysql" or "mariadb") and which VERSION from
+# E2E_MYSQL_VERSION; run.sh always sets both before calling docker compose,
+# defaulting to mysql 8.0.36, because that is what this harness has always
+# used. The pull-request check runs it THREE times, side by side — MySQL
+# 8.0.36, MySQL 8.4.11 and MariaDB 11.4.13. The two MySQL lines are the
+# owner's decision of 24 September 2026, because MySQL 8.4 refuses some links
+# between tables that MySQL 8.0 allows (#552); MariaDB was added on
+# 28 October 2026 (#487). Which MySQL 8 line production itself runs
 # is not confirmed — that is #475. Always give an EXACT version here, never
 # a moving tag such as "8.4": run.sh checks the server's own reported
 # version against this one and refuses to carry on if they differ, so a
@@ -15,9 +17,15 @@
 # convention").
 services:
   mysql:
-    image: mysql:${E2E_MYSQL_VERSION:-8.0.36}
+    # The repository is the ENGINE's own name on Docker Hub ("mysql" or
+    # "mariadb"), so one compose file serves both. run.sh works out both
+    # halves and exports them before calling docker compose.
+    image: ${E2E_DB_ENGINE:-mysql}:${E2E_MYSQL_VERSION:-8.0.36}
     container_name: portal-e2e-mysql
     environment:
+      # The MariaDB image still honours the MYSQL_* names for compatibility
+      # (checked against mariadb:11.4, 28 October 2026), so these serve both
+      # engines and need no second set.
       MYSQL_ROOT_PASSWORD: e2e-root
       MYSQL_DATABASE: portal_e2e
       MYSQL_USER: portal
@@ -35,7 +43,18 @@ services:
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_general_ci
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pe2e-root"]
+      # CMD-SHELL, not CMD, because the program's NAME varies: MariaDB 11.x
+      # dropped the `mysqladmin` symlink and ships `mariadb-admin` only.
+      # run.sh exports E2E_DB_ADMIN; compose substitutes it when it reads
+      # this file. (run.sh does not rely on this healthcheck anyway — see
+      # wait_for_mysql for why `ping` going green proves too little.)
+      # ⚠ The fallback below is the MYSQL program name. Running `docker
+      # compose up` BY HAND with only E2E_DB_ENGINE=mariadb set therefore
+      # leaves the container permanently unhealthy, because `mysqladmin` is
+      # not in a MariaDB image. Harmless today — nothing waits on this
+      # healthcheck — but export E2E_DB_ADMIN=mariadb-admin too if you bring
+      # it up without run.sh.
+      test: ["CMD-SHELL", "${E2E_DB_ADMIN:-mysqladmin} ping -h localhost -uroot -pe2e-root"]
       interval: 2s
       timeout: 5s
       retries: 30

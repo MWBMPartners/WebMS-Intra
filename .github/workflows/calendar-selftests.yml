@@ -103,16 +103,67 @@ concurrency:
 
 jobs:
   selftests:
-    name: Calendar self-tests
+    name: "Calendar self-tests (${{ matrix.label }})"
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    # 🗄️ THREE DATABASE ENGINES, not one (#487, 28 October 2026).
+    #
+    #    This job ran only on mysql:8.0.36 until now, and `.claude/CLAUDE.md`
+    #    said plainly that "MariaDB is not covered by any automated test here,
+    #    so its compatibility is unverified". It is covered from here on.
+    #
+    #    Measured before wiring it in, locally, on every test in this job:
+    #      MySQL 8.0.36    feed-admin 934/0/0, and the rest as always
+    #      MySQL 8.4.13    feed-admin 934/0/0, visibility 192, notifier 134,
+    #                      resolver 208, importer 139
+    #      MariaDB 11.4.13 feed-admin 933/0/**1**, visibility 192, notifier
+    #                      134, resolver 208, importer 139
+    #
+    #    The ONE skip is real and is not MariaDB's fault: `performance_schema`
+    #    is OFF by default there and it has no `PS_CURRENT_THREAD_ID()`, so one
+    #    check in part D has no instrument to ask. The PORTAL queries
+    #    `performance_schema` nowhere — that was checked, not assumed — so this
+    #    is a limit of the test, not of MariaDB support. The test says SKIPPED
+    #    with that reason and a skip is never read as a pass.
+    #
+    #    MOVING LINE TAGS HERE, unlike tools/e2e-migrations, and deliberately.
+    #    That harness demands exact versions because `run.sh` compares the
+    #    server's reported version against the one asked for and refuses on a
+    #    mismatch, which a moving tag would make meaningless. Nothing in THIS
+    #    job asserts a version, so `8.4` and `11.4` give free patch-level
+    #    coverage of the lines customers actually run. The exact builds this
+    #    was proved on are named above.
+    #
+    #    THE CLIENT PROGRAM IS NOT CALLED THE SAME THING. MariaDB 11.x has
+    #    DROPPED the `mysql` and `mysqladmin` compatibility symlinks — only
+    #    `mariadb` and `mariadb-admin` exist — so every `docker exec` into the
+    #    service and the health check take the name from the matrix. Verified
+    #    compatible: the mariadb image accepts `MYSQL_ROOT_PASSWORD`, and its
+    #    client honours `MYSQL_PWD`, `--protocol=TCP` and `--skip-column-names`.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: 'MySQL 8.0.36'
+            image: 'mysql:8.0.36'
+            client: 'mysql'
+            admin: 'mysqladmin'
+          - label: 'MySQL 8.4'
+            image: 'mysql:8.4'
+            client: 'mysql'
+            admin: 'mysqladmin'
+          - label: 'MariaDB 11.4'
+            image: 'mariadb:11.4'
+            client: 'mariadb'
+            admin: 'mariadb-admin'
 
     # 🗄️ The throwaway database. The password is not a secret: this
     # database exists only inside this one job, like the end-to-end
     # test's own (tools/e2e-migrations/docker-compose.yml).
     services:
       mysql:
-        image: mysql:8.0.36
+        image: ${{ matrix.image }}
         env:
           MYSQL_ROOT_PASSWORD: selftest-root
         ports:
@@ -122,7 +173,7 @@ jobs:
         # network connections, so a TCP answer means the real server is up.
         options: >-
           --tmpfs /var/lib/mysql
-          --health-cmd="mysqladmin ping -h 127.0.0.1 --protocol=TCP -uroot -pselftest-root"
+          --health-cmd="${{ matrix.admin }} ping -h 127.0.0.1 --protocol=TCP -uroot -pselftest-root"
           --health-interval=2s
           --health-timeout=5s
           --health-retries=60
@@ -152,9 +203,11 @@ jobs:
         id: databases
         env:
           MYSQL_CID: ${{ job.services.mysql.id }}
+          # `mysql` on MySQL, `mariadb` on MariaDB — 11.x dropped the symlink.
+          DB_CLIENT: ${{ matrix.client }}
         run: |
           for i in $(seq 1 90); do
-            if docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e 'SELECT 1' >/dev/null 2>&1; then
+            if docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP -e 'SELECT 1' >/dev/null 2>&1; then
               break
             fi
             if [ "$i" -eq 90 ]; then
@@ -164,10 +217,10 @@ jobs:
             fi
             sleep 1
           done
-          docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e 'SELECT VERSION(), @@collation_server'
+          docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP -e 'SELECT VERSION(), @@collation_server'
           for db in selftest_visibility selftest_resolver selftest_importer selftest_feedadmin selftest_notifier; do
-            docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE ${db}"
-            docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP "${db}" < web/_sql/full_schema.sql > /dev/null
+            docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE ${db}"
+            docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
           done
 
