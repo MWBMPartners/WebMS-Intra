@@ -1,8 +1,57 @@
 # Handoff — branch clean-up, full audit, documentation refresh
 
-**Updated:** 2026-10-28 (kept current as the work happens, so it can be picked up at any point).
+**Updated:** 2026-10-29 (kept current as the work happens, so it can be picked up at any point).
 **Working branch:** `claude/alpha-wip` — the single work-in-progress branch.
 **Target:** one pull request into `alpha` at the end. No stacked pull requests.
+
+---
+
+## 29 OCTOBER 2026, LATEST — #569 part one and the release-readiness batch, commit `1e4da0e`
+
+**What changed.** Two bodies of work in one commit, 54 files. (1) #569's head tags: one shared
+`web/_core/templates/head-meta.php` writes the meta description, canonical address and Open Graph /
+Twitter tags; `header.php` and the twelve own-`<head>` pages all use it. Plus the pre-push hook
+(`.githooks/pre-push`, `tools/install-git-hooks.sh`), a hard-gate audit check and an HTTP self-test.
+(2) The release batch the owner picked from a ranked table: offboarding that erased nothing now files
+an audited erasure request with a configurable mode (migration 226); fifteen apps switched on for a
+new install (migration 225); admin-only apps out of every member's menu; seven dead notification
+switches removed; GoCardless unselectable; sermon notes shown; the podcast address shown; six
+unlinked pages linked; the GMN check implemented; stale names in FEATURES.md corrected; standing
+notices on AI Assist and Zoom.
+
+**Owner decisions taken during the run.** Erasure timing is CONFIGURABLE (`on_request` default,
+`after_undo_window`), with immediate erasure logged as #663. The offboarding form has TWO options,
+honestly named. Notices added for AI Assist and Zoom now. Repeating events are to be BUILT before
+release (not started — see below). Transcription's trigger is to be ADDED (not started). Backups
+need scheduling plus download/upload, with a global-admin-defined key by default and including the
+key file as an opt-in (not started).
+
+**What was learned, worth keeping.** The erasure sweep must join to the NEWEST offboarding row, not
+any row for that person — otherwise one old row makes a request filed today due tonight and the undo
+window is bypassed. It must CLAIM the request with the same conditional UPDATE the staff page uses,
+or the Execute button stays armed mid-run and GdprEraser's own put-back never applies. `||` is
+logical OR in MySQL, not concatenation. Removing a preference switch is two changes, because
+`notifications-save.php` rebuilds the whole column. Removing a feature must not remove the test that
+guards a past fault (#612). A `disabled` control is not submitted, so disabling the GoCardless option
+would have switched the provider silently. Full detail in DEV_NOTES.md.
+
+**Checks.** 38 audit checks, `php -l` on 54 files, MySQL 8.0.36 (schema loads, both migrations replay
+twice, upgraded old DB equals a fresh install), page-head 15/15, asset-identifier 15/15,
+go-live 127/0. 0 dangling volumes. NOT done: the browser/visual half of #569, MySQL 8.4 / MariaDB,
+the e2e harness, offboarding end to end over HTTP.
+
+**Review.** Fresh Opus agent, NOT CLEAN, nine real findings, all fixed before the commit. Codex has
+not seen any of it.
+
+**Next, in order.** (1) Repeating events — the largest item and the one that affects daily use; the
+reading half is already built and tested, this is the writing half. (2) Backup scheduling plus
+download and import. (3) Transcription's trigger. (4) #641 in full. (5) The browser/visual audit for
+#569. Owner still needs to push: `hotfix/sign-in-1.4.2` (`75e83a1`) and everything on
+`claude/alpha-wip` through `1e4da0e`.
+
+**Housekeeping note.** This file is now about 1,340 lines, past the ~1,000 at which CLAUDE.md says
+older entries should move into the archive beside it. Not done here: it is a restructure of a shared
+document and should be its own change, not folded into a code commit.
 
 ---
 
