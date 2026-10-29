@@ -6,9 +6,47 @@
 
 ---
 
-## 29 OCTOBER 2026, LATEST — repeating events, and the installation-caps-organisation rule (#569, #668, migration 227)
+## 29 OCTOBER 2026, NEXT UP — backups: schedule, download, import (reconnaissance done)
 
-**State: built, verified, independently checked, NOT YET COMMITTED.**
+**Nothing built yet.** This is the next item on the owner's release list. What is already there,
+measured rather than assumed:
+
+- `Portal\Core\DbBackup` (3,842 lines) already does `snapshot()`, `restoreAll()`, `restoreTable()`,
+  `prune()`, `listSnapshots()`, `manifestOf()`, and `WHOLE_DATABASE_ONLY` for the three tables a
+  one-table restore refuses. `_backups/` is already outside the web root.
+- `/admin/maintenance/backup` (709 lines) offers `snapshot_now`, `restore_full`, `restore_table`,
+  `delete` and `check_snapshot`. So manual snapshot and restore WORK.
+- `cron/backup-check.php` + `_backup-freshness.php` check how old the newest snapshot is — they do
+  not TAKE one.
+
+**So the three missing pieces are exactly the owner's list:** a scheduled snapshot, a download, and
+an upload/import. Plus the owner's choice for protecting a downloaded snapshot: **a key the global
+administrator defines (the default), with including the portal's own key file as a selectable
+addition** — safest by default, flexible when moving host.
+
+**A real finding, now #671.** `/admin/maintenance/offsite-backup` looks finished — a settings page,
+six seeded `backup.offsite.*` settings, a Run button — but `offsite-backup-run.php` line 163 runs
+`sync-offsite.sh` through `exec()`. This product targets DreamHost shared hosting with no command
+line; the script is not in the repository and `rclone` cannot be installed there. It ships switched
+off, so nobody is silently misled, but the page says none of this. Recommended a standing notice now
+and a decision on remove-or-rebuild once the download and upload exist.
+
+**Things to be careful of when building it, from this package's own experience:**
+- A snapshot carries personal data. A download is the one place it leaves the server, so the
+  encryption choice is load-bearing and the key must never be written to a log or an address.
+- `DbBackup::WHOLE_DATABASE_ONLY` exists because a one-table restore of `tblMigrations`,
+  `tblTotpBackupCodes` or `tblSettings` can lose data. An IMPORT of a whole file has the same
+  exposure and more.
+- A scheduled snapshot runs under a job token; `Logger::withoutJobToken()` is the one place that
+  strips it from anything recorded.
+- Shared hosting has a request time limit. `snapshot()` already works within one; an import of a
+  large file may not, and that has to be measured rather than hoped.
+
+---
+
+## 29 OCTOBER 2026 — repeating events, and the installation-caps-organisation rule (#569, #668, migration 227), commit `6c6b854`
+
+**State: COMMITTED as `6c6b854`. Not pushed — pushes are the owner's.**
 
 **What changed.** The portal could not create a repeating event at all: no repeat control on the
 event form, and nothing had ever written `tblRecurrenceRules`, while FEATURES.md listed the feature
