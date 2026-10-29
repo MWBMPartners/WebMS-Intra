@@ -6,6 +6,103 @@
 
 ---
 
+## 29 OCTOBER 2026, LATEST — transcription you can actually reach (#276, migration 229)
+
+**State: built, verified, independently checked (NOT CLEAN → all fixed), committed.**
+
+Transcription looked finished and did nothing: **no page anywhere posted to `recordings/transcribe`**,
+so nothing was ever queued, no transcript was ever made, and `/recordings/search` searched an empty
+table. The handler, its registered address, the transcript page and the search all existed. The
+missing piece was a button.
+
+Adding it exposed three more faults, each invisible to every check already here:
+
+1. **The statement that SAVES a transcript could never run.** `fullText` is the reserved word
+   `FULLTEXT`, so a bare `fullText = ?` does not parse — it must be qualified or backquoted. It would
+   have thrown *after* the outside company was called and charged. Nothing had noticed because the
+   statement was unreachable.
+2. **"Process next" saved the settings.** It sat inside the Save form; HTML drops a nested `<form>`
+   and gives its button to the outer one. The only control that could work the queue did nothing.
+   Proved with PHP 8.4's own parser (`Dom\HTMLDocument` reports ONE form), not by reading.
+3. **One organisation could see and spend another's.** Counts, month spend and the recent list
+   (which carries recording titles) had no organisation filter, and "Process next" sent *another*
+   organisation's audio to the provider on the installation's single API key.
+
+**Also fixed:** the same recording could be sent twice while already with the provider (two bills);
+`recordings/view.php` had no flash block at all, so every message from the new button would have been
+swallowed; members were shown the provider's own error text; the transcript search was linked from
+nowhere; a per-organisation admin was offered settings the handler refuses.
+
+**New:** `tblTranscript.startedAt` (migration 229) so a job genuinely running can be told from one the
+host killed — refusing `processing` outright was the wrong fix and wedged such a recording for ever.
+`STUCK_AFTER_MINUTES` = 120, on the server's own clock to match `queuedAt`. And
+`transcription.monthCapPence`, built to the **#668** rule: the installation's figure caps the
+organisation's, read from `InstallationSettings::layer()`. £50 to start.
+
+**Verified:** 38 audit checks (read, not just exit codes), `php -l` clean, migration 229 loaded and
+replayed, **126 HTTP checks passing — also against a schema-only database, as CI runs it** — and
+**21 planted faults, every one caught**. Wired into `portal-selftests.yml` (port 9081, `dom` added to
+that job's extensions by name; the YAML was parsed with Ruby and no step name was truncated by its
+`#`). 0 dangling Docker volumes.
+
+**Two lessons about the checks, both from planting:**
+- A plant that changes no behaviour proves nothing. Resolving "not chosen" to the default in
+  `capFrom()` was caught by nothing — correctly, because `$SETTINGS` already carries the
+  installation's figure, so the two branches agree. It exposed an **overstated comment** claiming
+  that test was what prevented the fault. Corrected to say what actually carries it.
+- A check on the TEXT of a guard stays green when `&& false` is added to its condition. Q04 was
+  rewritten to pin the whole condition, the rollback and the return as ONE pattern.
+
+**Found, not built:** **#672** nothing drains the queue on its own (deliberate — nobody should be
+billed by a timer); **#673** `curl_close()` deprecated on PHP 8.5, 43 calls in 19 files, which will
+fill the error log on every outgoing request.
+
+**The independent check came back NOT CLEAN with five real problems, all fixed:**
+
+1. **A whole queue could be lost.** `admin/transcription/run.php` checked login, role, POST and
+   token — and nothing else. The only thing stopping a run with no company configured was the
+   button's `disabled`. A posted request claimed every waiting row, got `…-not-configured`, and
+   marked the lot FAILED. Reachable: queue rows under OpenAI, then switch to AssemblyAI with no key.
+   The handler now asks `providerIsReady()`, the same question the page asks. Checks R01–R03.
+2. **The self-test did not put the database back, and its clean-up comment said it did.** Proved by
+   experiment: section M09 posts the real settings form, and `save.php` writes SEVEN
+   installation-wide rows, four of which nothing was remembering — so a clean pass left
+   transcription switched ON installation-wide. CI never saw it because each test gets a fresh
+   database. Now every `transcription.%` row is read before the run and restored after.
+3. **Migration 229 and `full_schema.sql` disagreed** on `startedAt`'s COLUMN COMMENT, so an upgraded
+   database carried it and a fresh install did not. The harness cannot see this —
+   `dump_inventory()` does not read COLUMN_COMMENT. Fixed and verified: fresh and upgraded now give
+   a byte-identical column.
+4. **A stale comment.** `save.php`'s header still said the page "was not changed, so an
+   administrator of one organisation still sees a Save button there". This package changed exactly
+   that.
+5. **An untrue on-screen line.** `$cappedAbove` compared the effective cap with the MERGED setting,
+   so where the installation's own figure was above the hard maximum the page told a global
+   administrator their organisation had asked for more — about a number the organisation never
+   touched. And the self-test was CREATING that state (J06) while checking only the figure.
+
+**Plus seven of its observations acted on:** per-job containment so one bad row cannot end a batch;
+`$cap` clamped where it is used; `bind_param` types matching the values; a zero budget given its own
+reason and words; `TranscriptionRefused` no longer logged for refusals nobody can act on; the
+"charged either way" claim softened to what is knowable; and Q07 rewritten to ask about the
+transaction rather than "some commit before some call".
+
+**Two more lessons about checks, both from planting the fixes:** R13 and Q04 each passed on a guard
+disabled with `&& false`, because they looked for the TEXT of the guard. Both now pin the whole
+condition, and R13b asserts the sweep never re-throws at all.
+
+**After the fixes:** 143 checks pass (also on a schema-only database, as CI runs it), **27 planted
+faults, every one caught**, 38 audit checks clean, migration harness 42/42 on all seven phases.
+
+**Found, not built:** **#674** the page prefills installation-wide settings from the merged
+`$SETTINGS`, so a global administrator pressing Save can push one organisation's choice to every
+organisation — pre-existing, and the same shape worth checking on the translation, AI-assist and SMS
+pages.
+
+**Next:** archive this handoff (now past 1,600 lines), then item 6 (#641 in full).
+
+---
+
 ## 29 OCTOBER 2026, LATEST — backups a customer can keep (#569, migration 228)
 
 **State: built, verified, independently checked (NOT CLEAN → all fixed), committed.**

@@ -10,6 +10,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
 use Portal\Core\Recordings;
 use Portal\Core\Site;
@@ -122,6 +123,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="<?php echo htmlspecialchars(Site::url('recordings'), ENT_QUOTES, 'UTF-8'); ?>?topic=<?php echo urlencode((string) $t['topic']); ?>" class="badge bg-secondary text-decoration-none me-1"><?php echo htmlspecialchars((string) $t['topic'], ENT_QUOTES, 'UTF-8'); ?> · <?php echo (int) $t['useCount']; ?></a>
         <?php endforeach; ?>
     </div>
+<?php endif; ?>
+
+<?php // 🔍 SEARCH INSIDE TRANSCRIPTS. `/recordings/search` was reachable from
+      //    NOWHERE: nothing in the portal linked to it, so the full-text search
+      //    across every transcript existed and could only be found by typing
+      //    the address. It is only worth offering once there is something to
+      //    search, which is why it sits behind the same app switch as the
+      //    feature that fills it. ?>
+<?php if (AppRegistry::isEnabled('transcription') === true): ?>
+    <p class="mb-3">
+        <a class="text-decoration-none small"
+           href="<?php echo htmlspecialchars(Site::url('recordings/search'), ENT_QUOTES, 'UTF-8'); ?>">
+            <i class="fa-solid fa-magnifying-glass me-1"></i>Search the words spoken inside recordings
+        </a>
+    </p>
 <?php endif; ?>
 
 <?php if (count($recordings) === 0): ?>

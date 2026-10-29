@@ -1287,6 +1287,46 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     organisation, 0–3650 days, with no installation cap. The sweep is its own
     package.
 
+27. **Transcription, and the reserved word that could not save a transcript (#276, migration 229).**
+    `Portal\Core\Transcription` is the ONE place anything about transcription is decided:
+    `whyNotQueueable()` answers whether a recording may be queued (the page draws the button from it,
+    the handler accepts from it — never a second test in a page), `refusalWords()` and
+    `statusWords()` are the only words, `capFrom()` is the monthly ceiling, and `queue()` /
+    `processQueue()` are the only writers of the queue state.
+
+    **`fullText` IS THE RESERVED WORD `FULLTEXT`.** MySQL ignores case in keywords, so a bare
+    `fullText = ?` does not parse; it must be qualified (`t.fullText`) or quoted (`` `fullText` ``).
+    The statement that SAVES a finished transcript was written bare and therefore could NEVER RUN,
+    throwing after the outside company had been called and charged — and nothing noticed, because no
+    page could queue a recording in the first place. **Ask of any camel-case column whether its name
+    is a keyword: `php -l` cannot see it and no audit script here can either; only running the
+    statement finds it.**
+
+    **Both writers of the queue state take the RECORDING's row lock** (`SELECT … FOR UPDATE`) — the
+    transcript row may not exist yet, and there is nothing to lock in a row that is not there — and
+    the provider call is made only AFTER the transaction is committed, never inside it. Refusing a
+    `processing` row outright was the WRONG fix: shared hosting kills long requests, so that wedged
+    the recording for ever. The refusal is "processing AND started recently" (`startedAt`,
+    `STUCK_AFTER_MINUTES` = 120, on the server's own clock to match `queuedAt` and `generatedAt`).
+
+    **One API key pays for every organisation**, so `processQueue()`, `monthSpendPence()`,
+    `queueStatsFor()` and `recentFor()` are all scoped to one organisation, and the budget follows
+    rule 26: the installation's figure caps the organisation's, read from
+    `InstallationSettings::layer()`. **Nothing drains the queue on its own (#672)** — never describe
+    transcription as automatic.
+
+    Three traps worth keeping. A `<form>` inside a `<form>` is DROPPED by the parser and its button
+    is owned by the OUTER form — that is how "Process next" saved the settings and transcribed
+    nothing, and the markup looks perfectly correct, so ask the PARSED document
+    (`Dom\HTMLDocument`, PHP 8.4+) and never the text. `recordings/view.php` had NO flash block and
+    nothing in this portal prints one centrally (141 pages print their own), so
+    a handler's message is swallowed unless the page prints it. And a check searching for the TEXT of
+    a guard stays green when `&& false` is added to its condition, so pin the WHOLE condition — the
+    same weakness the QR-service guard had twice.
+
+    Test: `tools/transcription-pages-selftest.php` (143 checks, 27 planted faults; section Q states
+    plainly that a single-worker harness cannot create the race the lock exists for). **Two gates, not one:** `recordings/transcribe` AND `admin/transcription/run` must EACH ask `providerIsReady()` — the run page had only the button's `disabled`, and a posted request claimed every waiting row and marked the lot FAILED. **`processQueue()` must never re-throw** (one unwritable row gave a bare 500 and abandoned the rest). And a check that looks for the TEXT of a guard stays green when `&& false` is added to its condition — pin the WHOLE condition; two checks here failed that way and planting caught both.
+
 - **What a shared link looks like, and the pre-push gate (#569).** `web/_core/templates/head-meta.php` is the ONE place the meta description, canonical address and Open Graph / Twitter tags are written. `header.php` requires it, and so does every page that draws its own `<head>`; set `$pageTitle` and, where the page can do better than the fallback, `$pageDescription`, before requiring it. **The canonical address and `og:url` are left out entirely while `PortalAddress::visitorCanChooseHost()` is true** — the fallback is a host name the requester chose, and a canonical built from it points search engines and preview services at a name an outsider picked. `og:image` only where the brand in use has the square raster on disk (two of seven; #656), and `twitter:card` is `summary`, not `summary_large_image`, because the picture is square. **Do not count the own-`<head>` pages by searching:** three reasonable searches gave 27, 15 and 12, because a doctype may sit inside an e-mail body built as a PHP string and because a page can draw its own head for the main view AND include `header.php` for an error branch. The list that matters is the exemption list in `tools/audit-checks/check_page_head_tags.py`, which names each exempt file and why. That check was WRONG THREE TIMES and planting caught each: string literals stripped across the whole file (an HTML attribute's quote paired with one inside PHP and swallowed the `<title>`); comments not stripped before pairing quotes (an apostrophe in `// don't` put every later quote out of step); and asking only whether the text `head-meta.php` appeared anywhere, which a commented-out require satisfied. **Its most valuable guard is on `header.php`'s own require**, because ordinary pages write no `<title>` of their own and a page-by-page check would never notice its deletion. Behaviour is proved by `tools/page-head-selftest.php` over real HTTP, whose part E plants the fault. **`.githooks/pre-push`** (turned on per clone by `tools/install-git-hooks.sh`, setting `core.hooksPath`; per repository on purpose — a global hooks folder overrides every other project's) runs `php -l` on the PHP the push range touches **as it stands on disk, not as committed** plus all 38 audit checks, about nine seconds. It does NOT run the self-tests or the migration harness, and `git push --no-verify` skips it.
 - **Offboarding really erases now, and the sweep has three traps (#569, migration 226).** `_apps/offboarding/do.php` **files** an erasure request through `GdprEraser::fileRequest($siteId, $userId, true)` — a fourth way a request gets confirmed, now written into that method's docblock — and never erases inline: there is ONE audited erasure path and a second would have to agree about 35 tables for ever. `offboarding.erasureMode` is `on_request` (the default; it waits on Admin, Erasure requests) or `after_undo_window` (the daily sweep runs it once `offboarding.undo_window_days` has passed). **Neither erases at the moment of offboarding**, because `rehire.php` exists; immediate erasure is #663. **`rehire.php` cancels a request still waiting** — without that the default mode left a live request to erase somebody who had returned. In `run_offboarding_erasure_sweep()` (`_apps/cron/_retention-sweep.php`): **join to the NEWEST offboarding row per person, never to any row** (an old row made a request filed today due tonight, bypassing the window — measured); **claim the request** with the same conditional `UPDATE … WHERE status = 'pending_review'` the staff page uses, or the Execute button stays armed mid-run and GdprEraser's own put-back and still-going updates match nothing; and **never log the fault's own words**, which can quote the value being erased. It cannot honour a per-organisation mode: `tblOffboarding` has no organisation column. The form offers TWO options, not three, because the portal does one kind of erasure. **Nothing yet covers this end to end over HTTP** — the SQL was proved against a real database and the rest was read, so a page-level test is still owed.
 - **Removing a preference switch is two changes (#569, #662, #667).** `notifications-save.php` **rebuilds** `tblUsers.notifyPrefs` from its allowed-key list and writes the result over the whole column. Hide a switch and leave its key listed, and the next save rewrites that preference to off for everybody one at a time; take the key off the list and the stored value is DROPPED at the next save — not "left alone". Acceptable only while nothing reads it. The same replacing behaviour is why that page and the smaller card on `/account` overwrite each other's keys (#667). **And removing a feature must not remove the test guarding a past fault:** deleting that card broke section F of `go-live-button-selftest.php`, the only guard for #612, so the form was kept with its still-wired switch and section F's `count($storedNow) >= 15` became a named list of keys — stricter than a count, which is exactly what a deliberate change to the number of preferences invalidates. `||` is **logical OR** in MySQL, not concatenation. A **`disabled` control is not submitted**, so disabling the GoCardless option would have made Save switch the provider to Stripe silently.

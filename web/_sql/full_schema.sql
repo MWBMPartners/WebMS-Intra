@@ -5001,6 +5001,20 @@ CREATE TABLE IF NOT EXISTS `tblTranscript` (
     `costPence`    INT          DEFAULT NULL,
     `errorMsg`     VARCHAR(255) DEFAULT NULL,
     `queuedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- ⏱️ When this recording was handed to the transcription company, on
+    --    the SERVER'S OWN CLOCK to match the two columns either side of
+    --    it. NULL means it never was. It exists so a job that is genuinely
+    --    running can be told from one the host killed mid-call: refusing to
+    --    re-queue anything `processing` stops a double bill, and without a
+    --    start time that refusal would wedge a killed row for ever.
+    --    See migration 229.
+    -- The COLUMN COMMENT below is not decoration: migration 229 adds this
+    -- column WITH it, so leaving it off here gave an upgraded database a
+    -- comment and a fresh install none, and the two must agree. Measured on a
+    -- real upgrade path rather than reasoned about, and the end-to-end harness
+    -- cannot see it: `dump_inventory()` reads table, column, type, nullability,
+    -- default and extra, and not COLUMN_COMMENT.
+    `startedAt`    DATETIME     DEFAULT NULL COMMENT 'When this recording was handed to the transcription company, on the SERVER\'S OWN CLOCK to match queuedAt and generatedAt. NULL means it never was. Compared only against NOW() on the same clock, to tell a job that is genuinely running from one the host killed mid-call.',
     `generatedAt`  DATETIME     DEFAULT NULL,
     PRIMARY KEY (`transcriptID`),
     UNIQUE KEY `uq_t_recording` (`recordingID`),
@@ -5037,6 +5051,12 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'transcription.provider',        'openai', 'openai', 0),
     (NULL, 'transcription.language',        'en', 'en', 0),
     (NULL, 'transcription.batchSize',       '5', '5', 0),
+    -- 💳 A LIMIT, so the installation's value CAPS an organisation's and is
+    --    never simply overridden by it (#668, owner 29 October 2026). ONE
+    --    API key below pays for every organisation on the installation, so
+    --    the two administrators may be different people. Worked out only by
+    --    Transcription::capFrom(). Migration 229.
+    (NULL, 'transcription.monthCapPence',   '5000', '5000', 0),
     (NULL, 'transcription.openai.apiKey',   '', '', 1),
     (NULL, 'transcription.openai.model',    'whisper-1', 'whisper-1', 0),
     (NULL, 'transcription.assemblyai.apiKey','', '', 1),
@@ -10475,5 +10495,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('227_repeating_events.sql')
 -- 📋 Migration 228 (#569): the two `backup.schedule.*` settings and the three
 --    addresses are already seeded above, so a fresh install needs nothing from
 --    that migration either.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('229_transcription_reachable.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('228_backup_download_import_schedule.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;

@@ -214,6 +214,131 @@ CI against real MySQL 8.0.36 and 8.4.11 databases, as two jobs side by side.
 
 ---
 
+## Transcription: a reserved word, a nested form, and a double bill (#276, migration 229)
+
+Four separate faults, each invisible to every check this repository already ran.
+Worth reading as a set, because none of them was a typo — each was something that
+*looked* finished.
+
+### `fullText` is the reserved word `FULLTEXT`
+
+```sql
+SELECT fullText FROM tblTranscript;          -- ERROR 1064
+SELECT t.fullText FROM tblTranscript t;      -- fine: qualified
+SELECT `fullText` FROM tblTranscript;        -- fine: quoted
+UPDATE tblTranscript SET fullText = ?;       -- ERROR 1064
+UPDATE tblTranscript SET `fullText` = ?;     -- fine
+```
+
+MySQL matches keywords without regard to case, so the camel-case column name is
+the keyword. The statement in `Transcription::processQueue()` that **saves a
+finished transcript** was written with a bare `fullText = ?` and therefore could
+never run. The connection is strict, so `prepare()` throws — **after** the
+transcription company has been called and charged. Nothing noticed, because no
+page could queue a recording in the first place, so the statement had never been
+reached.
+
+Both other readers of the column were fine by accident of style: `transcript.php`
+and `stateFor()` both qualify it with a table alias. The schema quotes it.
+
+**Ask of any camel-case column whether its name is a keyword.** `php -l` cannot
+see this, and neither can any audit script here — only running the statement can.
+
+### A form inside a form is not a form
+
+The Transcription page's "Process next" button sat inside the configuration
+form, with its own `<form action=".../run">` wrapper. HTML forbids nested forms:
+a parser that meets a second `<form>` while one is open **drops the tag and keeps
+its contents**, so the button's owner became the Save form. Pressing "Process
+next" posted the settings, reported "Transcription settings saved", and drained
+nothing. It was the only control that could work the queue.
+
+Measured rather than argued about, with PHP 8.4's own spec-compliant parser:
+
+```php
+$doc = \Dom\HTMLDocument::createFromString($markup);
+$doc->getElementsByTagName('form')->length;   // 1, not 2
+```
+
+**Searching the markup cannot find this**, because the markup looks correct. The
+check that guards it (`formActionOwning()` in
+`tools/transcription-pages-selftest.php`, section K) asks the parsed document
+which form owns the button, and a companion check compares the number of `<form`
+tags written with the number that survive parsing — so any nested form anywhere
+on the page goes red.
+
+### Two writers of one queue state, and only one lock
+
+`queue()` and `processQueue()` both write `tblTranscript.status`. The sweep's
+conditional `UPDATE … WHERE status = 'queued'` was right as far as it went and
+could not stop this interleaving:
+
+1. `queue()` reads `queued` and decides to re-queue.
+2. The sweep flips the row to `processing` and calls the company.
+3. `queue()` writes `queued` over it.
+4. The next sweep sends **the same audio** and is charged again.
+
+Both now take `SELECT … FROM tblRecording WHERE recordingID = ? FOR UPDATE`
+first — the **recording's** row, not the transcript's, because the transcript row
+may not exist yet and there is nothing to lock in a row that is not there. The
+provider call happens after the transaction is committed: a lock must never be
+held across a twenty-five-minute HTTP request.
+
+**Refusing outright was the wrong fix and introduced a worse fault.** Shared
+hosting kills long requests without warning, leaving the row at `processing` for
+ever, and a flat refusal wedged that recording permanently. Hence
+`tblTranscript.startedAt` and `STUCK_AFTER_MINUTES` (120): the refusal is
+"processing **and started recently**". `startedAt` is on the server's own clock
+to match `queuedAt` and `generatedAt`, and is only ever compared against `NOW()`
+on that same clock — so the comparison is right in any zone, and on the two
+nights the clocks change a wedged row is freed after 60 or 180 minutes instead of
+120. Harmless, and said rather than hidden. (The mail queue stores UTC and is the
+better pattern; changing half of one table's columns would have made this
+comparison wrong, so it was left alone.)
+
+### What the harness cannot prove, and what was done instead
+
+The HTTP harness runs the built-in server with one worker
+(`PHP_CLI_SERVER_WORKERS` unset), so **two requests never overlap** and the race
+the lock exists for cannot be created. Removing the lock-based refusal leaves
+every behavioural check green — measured by planting it. The same limitation is
+recorded for the expense payment race.
+
+So section Q does what is possible: it extracts each method's body with **PHP's
+own tokenizer** (a brace-counting walk over raw text has already been caught here
+by a `{` inside a log message) and requires the lock, the whole refusal condition
+and the conditional claim to still be present; then it proves with **two real
+connections** that `FOR UPDATE` really blocks on this engine, with a companion
+check that an unlocked read of the same row does not — so the first is about the
+lock and not about something else refusing.
+
+**A check on code text knows the guard is written, not that it runs.** Said in
+the file, because the first version of that check looked for `stillRunning` and
+`return 'busy'` anywhere in the body and stayed green when `&& false` was added
+to the condition — the same weakness the QR-service guard had twice.
+
+### Whose money, and whose data
+
+One API key, stored installation-wide, pays for every organisation, and the audio
+leaves the server for a third party. So `processQueue()`, `monthSpendPence()`,
+`queueStatsFor()` and `recentFor()` are all scoped to one organisation — before
+this, pressing "Process next" sent another organisation's audio to the company on
+the installation's account, and the recent list showed other organisations'
+recording titles.
+
+`Transcription::capFrom()` is the monthly ceiling, built to the #668 rule: the
+installation's figure caps the organisation's, read from
+`InstallationSettings::layer()` rather than from the merged `$SETTINGS`. **What
+actually carries that guarantee is the merge**, not the null test inside it: when
+an organisation has chosen nothing, `$SETTINGS` already holds the installation's
+figure, so `min` returns it. Resolving null to the built-in default changes no
+answer in any reachable state — measured by planting it, which is how an
+overstated comment claiming otherwise was caught. The null test stays for the
+case of an unmerged array, and the layer the ceiling is read FROM is the thing
+section J really pins.
+
+---
+
 ## Offboarding, erasure and the undo window (#569)
 
 `offboarding/do.php` **files** an erasure request; it never erases inline. There

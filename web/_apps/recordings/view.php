@@ -11,10 +11,13 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Markdown;
 use Portal\Core\Recordings;
 use Portal\Core\Site;
+use Portal\Core\Transcription;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -55,6 +58,53 @@ if (isset($_SESSION[$playKey]) === false) {
     $_SESSION[$playKey] = 1;
 }
 
+// 🗒 TRANSCRIPTION (#276). The button below is the ONLY thing anywhere that
+//    reaches `recordings/transcribe`. Until 29 October 2026 there was none, so
+//    the handler and its registered address sat unreachable, no recording was
+//    ever queued, and `/recordings/search` searched an empty table for ever.
+//
+//    `Transcription::whyNotQueueable()` is the ONE place that decides whether a
+//    recording may be queued, and the handler asks it again — this page's copy
+//    only decides what to DRAW. A hidden button is a courtesy, not a boundary.
+$canQueue        = App::isAdmin() === true;
+$transcriptionOn = AppRegistry::isEnabled('transcription');
+$tState          = Transcription::stateFor($id, $siteId);
+$tReadable       = $tState !== null && $tState['status'] === 'completed' && $tState['hasText'] === true;
+$tReason         = '';
+if ($canQueue === true) {
+    $tSettings = App::settings()['transcription'] ?? [];
+    $tReason   = Transcription::whyNotQueueable([
+        'appIsOn'       => $transcriptionOn,
+        'hasMedia'      => ($rec['filePath'] !== null && (string) $rec['filePath'] !== ''),
+        'providerReady' => Transcription::providerIsReady($tSettings),
+        'stillRunning'  => $tState !== null && $tState['stillRunning'] === true,
+        // 💳 The installation's layer on its own: for a limit the
+        //    installation's value caps the organisation's (#668).
+        'capPence'      => Transcription::capFrom(App::settings(), InstallationSettings::layer()),
+        'spentPence'    => Transcription::monthSpendPence($siteId),
+    ]);
+}
+
+// 🎴 Whether the card appears at all.
+//
+//    A recording that only links out to another website can NEVER be
+//    transcribed here, so 'no-media' shows nothing rather than putting an
+//    explanation an administrator cannot act on under every such recording.
+//    Every other reason is something somebody can fix, so it is said.
+$tShowCard = $tReadable === true
+    || ($canQueue === true && $tState !== null)
+    || ($canQueue === true && $transcriptionOn === true && $tReason !== 'no-media');
+
+// 📣 The flash message. THIS PAGE HAD NO FLASH BLOCK, and nothing in this
+//    portal shows one centrally: 141 pages print their own flash and nothing
+//    in `header.php` or `footer.php` does it for them. So
+//    `recordings/transcribe` redirected back here with a message and it was
+//    swallowed every time — the button would have looked as though it did
+//    nothing at all, whether it worked or was refused.
+$flashMsg  = (string) ($_SESSION['flash_msg'] ?? '');
+$flashType = (string) ($_SESSION['flash_type'] ?? '');
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+
 $presenter = (string) ($rec['presenterName'] ?? '') !== ''
     ? (string) $rec['presenterName']
     : (string) ($rec['presenterText'] ?? '');
@@ -66,6 +116,12 @@ $pageSection = 'recordings';
 $breadcrumbs = ['Dashboard' => Site::url(''), 'Recordings' => Site::url('recordings'), (string) $rec['title'] => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
+
+<?php if ($flashMsg !== ''): ?>
+    <div class="alert alert-<?php echo htmlspecialchars($flashType !== '' ? $flashType : 'info', ENT_QUOTES, 'UTF-8'); ?>">
+        <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
+    </div>
+<?php endif; ?>
 
 <h1 class="mb-2"><?php echo htmlspecialchars((string) $rec['title'], ENT_QUOTES, 'UTF-8'); ?></h1>
 <p class="text-secondary mb-4">
@@ -96,6 +152,98 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php endif; ?>
     </div>
 </div>
+
+<?php // 🗒 Transcript — the card that makes transcription reachable at all. ?>
+<?php if ($tShowCard === true): ?>
+    <div class="card mb-4">
+        <div class="card-body">
+            <h2 class="h5 d-flex align-items-center justify-content-between">
+                <span><i class="fa-solid fa-closed-captioning me-2"></i>Transcript</span>
+                <?php if ($tState !== null): ?>
+                    <span class="badge bg-<?php
+                        echo htmlspecialchars(match ((string) $tState['status']) {
+                            'completed'  => 'success',
+                            'processing' => 'info',
+                            'failed'     => 'danger',
+                            default      => 'secondary',
+                        }, ENT_QUOTES, 'UTF-8');
+                    ?>"><?php echo htmlspecialchars(Transcription::statusWords((string) $tState['status']), ENT_QUOTES, 'UTF-8'); ?></span>
+                <?php endif; ?>
+            </h2>
+
+            <?php if ($tReadable === true): ?>
+                <p class="mb-2">
+                    <a class="btn btn-outline-primary btn-sm"
+                       href="<?php echo htmlspecialchars(Site::url('recordings/transcript'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $rec['recordingID']; ?>">
+                        <i class="fa-solid fa-book-open me-1"></i>Read the transcript
+                    </a>
+                </p>
+            <?php elseif ($tState === null): ?>
+                <p class="text-muted small mb-2">This recording has not been transcribed.</p>
+            <?php elseif ((string) $tState['status'] === 'queued'): ?>
+                <p class="text-muted small mb-2">
+                    Waiting in the queue. Nothing is sent to the transcription company until an
+                    administrator presses &ldquo;Process next&rdquo; on the Transcription page.
+                </p>
+            <?php elseif ($tState['stillRunning'] === true): ?>
+                <p class="text-muted small mb-2">The audio is with the transcription company now. This can take several minutes.</p>
+            <?php elseif ((string) $tState['status'] === 'processing'): ?>
+                <?php // ⏱️ `processing` but started too long ago to still be running — the shape
+                      //    a shared host leaves behind when it kills a long request. Said plainly,
+                      //    because such a row looks busy for ever and is the one thing that
+                      //    explains a recording that never finishes. ?>
+                <p class="text-muted small mb-2">
+                    This was sent to the transcription company but never came back &mdash; the
+                    request was most likely cut short by the server. It can be sent again.
+                </p>
+            <?php else: ?>
+                <p class="text-muted small mb-2">
+                    The last attempt did not produce a transcript.
+                    <?php if ($canQueue === true && $tState['errorMsg'] !== null): ?>
+                        <?php // 🔒 The provider's own words are shown to an ADMINISTRATOR only.
+                              //    A fault's message can quote what was sent, and this card is
+                              //    read by every member who can see the recording. ?>
+                        <br><span class="text-secondary">Reported reason: <?php echo htmlspecialchars((string) $tState['errorMsg'], ENT_QUOTES, 'UTF-8'); ?></span>
+                    <?php endif; ?>
+                </p>
+            <?php endif; ?>
+
+            <?php if ($canQueue === true): ?>
+                <?php if ($tReason !== ''): ?>
+                    <p class="text-muted small mb-0"><i class="fa-solid fa-circle-info me-1"></i><?php echo htmlspecialchars(Transcription::refusalWords($tReason), ENT_QUOTES, 'UTF-8'); ?></p>
+                <?php else: ?>
+                    <?php
+                    // 💸 WHY THERE IS NO "ARE YOU SURE" BOX. Transcription costs money, and a
+                    //    second press after one that already finished is charged again — so a
+                    //    confirmation box looks like the obvious thing to add. It is not what
+                    //    makes this safe, and adding it would need a script carrying this
+                    //    answer's nonce for the sake of something the server already handles:
+                    //    `tblTranscript` has one row per recording, so pressing twice while a
+                    //    job is waiting leaves ONE waiting job, and pressing while the audio
+                    //    is with the provider is refused outright by the lock in
+                    //    `Transcription::queue()`. The warning below is there so nobody is
+                    //    surprised by a bill, not to stop a double click.
+                    $tAgain = $tState !== null;
+                    ?>
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('recordings/transcribe'), ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="recordingID" value="<?php echo (int) $rec['recordingID']; ?>">
+                        <button class="btn btn-primary btn-sm" type="submit">
+                            <i class="fa-solid fa-closed-captioning me-1"></i><?php echo $tAgain === true ? 'Transcribe again' : 'Transcribe this recording'; ?>
+                        </button>
+                        <div class="form-text">
+                            <?php // 🔐 Said on the button, not buried in a help page: the audio
+                                  //    LEAVES THIS SERVER. A recording of a pastoral talk or a
+                                  //    members' meeting goes to a third party, and whoever presses
+                                  //    this should know that before they do, not afterwards. ?>
+                            The audio is sent to the transcription company your administrator has chosen, which charges for it<?php echo $tAgain === true ? ', including each time it is sent again' : ''; ?>.
+                        </div>
+                    </form>
+                <?php endif; ?>
+            <?php endif; ?>
+        </div>
+    </div>
+<?php endif; ?>
 
 <?php if (($rec['scripture'] ?? '') !== '' || ($rec['topics'] ?? '') !== ''): ?>
     <div class="mb-4 small">

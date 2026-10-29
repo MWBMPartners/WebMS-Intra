@@ -508,7 +508,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-          extensions: mysqli, openssl, sodium, curl, mbstring, intl
+          extensions: mysqli, openssl, sodium, curl, mbstring, intl, dom
           coverage: none
 
       # 🧱 Wait for each server to answer a SIGNED-IN query, not just a ping
@@ -560,7 +560,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -749,6 +749,24 @@ jobs:
         run: |
           mkdir -p "$SELFTEST_WEB_DIR"
           php -d memory_limit=512M tools/event-repeat-pages-selftest.php
+
+      # Transcription had a handler, a registered address and no button: no
+      # page anywhere posted to it, so no recording was ever queued and
+      # /recordings/search searched an empty table for ever. This drives the
+      # button that now exists, and section O walks the whole way through with
+      # a stand-in for the transcription company, so it proves a transcript can
+      # be SAVED as well as queued — which caught a statement that could not
+      # run at all. Section K needs `dom` (named in this job's extensions) to
+      # parse the admin page the way a browser does.
+      - name: 'Transcription on the real pages self-test (#276)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_transcription
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/transcription
+          SELFTEST_WEB_PORT: '9081'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/transcription-pages-selftest.php
 
       # Its stand-in mail server takes the mail port, and the port after
       # that must be free too. Part K makes a trigger and reads the

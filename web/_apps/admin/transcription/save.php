@@ -33,6 +33,7 @@ use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
+use Portal\Core\Transcription;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -52,10 +53,18 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token
 //    form-token check, so a forged request from another website cannot fill
 //    the activity log with refusals.
 //
-//    What this cannot do: the page that shows the form
-//    (web/_apps/admin/transcription/index.php) was not changed, so an
-//    administrator of one organisation still sees a Save button there. This
-//    refusal is what actually enforces the rule.
+//    THIS USED TO SAY the page was not changed, so an administrator of one
+//    organisation still saw a Save button here. That is no longer true: since
+//    29 October 2026 `web/_apps/admin/transcription/index.php` shows them what
+//    is set and who to ask, with no form at all — not a disabled one, because a
+//    disabled control is not submitted and a half-disabled form posts gaps.
+//    Section M02 of `tools/transcription-pages-selftest.php` pins that.
+//
+//    This refusal is still what ENFORCES the rule, and must stay: the page only
+//    decides what to draw, and anything can be posted. M06 to M08 prove the
+//    refusal holds on a direct post, and M09/M10 prove a global administrator
+//    really can save — so the refusal is about the role and not about a form
+//    that never worked.
 if (App::isRootAdmin() === false) {
     Logger::activity(
         'SettingsGroupSaveRefused',
@@ -111,6 +120,29 @@ $upsert($db, 'transcription.enabled',    isset($_POST['enabled']) === true ? '1'
 $upsert($db, 'transcription.provider',   $provider, false);
 $upsert($db, 'transcription.language',   substr(trim((string) ($_POST['language'] ?? 'en')), 0, 10), false);
 $upsert($db, 'transcription.batchSize',  (string) max(1, min(50, (int) ($_POST['batchSize'] ?? 5))), false);
+
+// 💳 The installation's monthly ceiling for transcription, in pence.
+//
+//    WRITTEN INSTALLATION-WIDE, by a global administrator only — which the
+//    refusal above has already enforced. That is the point of it: one API key
+//    pays for every organisation, so this is the installation's limit on what
+//    any organisation may spend, not one organisation's own budget. An
+//    organisation may hold itself to LESS (its own row, read only through
+//    `Transcription::capFrom()`); it can never raise its own above this (#668).
+//
+//    Clamped to the hard maximum in code, so three tiers each hold the one
+//    below: code, then the installation, then the organisation. A missing or
+//    non-numeric field would read as 0 and silently stop all transcription, so
+//    it falls back to what is already stored and then to the shipped default.
+$capWanted = trim((string) ($_POST['monthCapPence'] ?? ''));
+if (preg_match('/^\d+$/', $capWanted) === 1) {
+    $upsert(
+        $db,
+        Transcription::CAP_KEY,
+        (string) min((int) $capWanted, Transcription::HARD_MAX_CAP_PENCE),
+        false
+    );
+}
 $upsert($db, 'transcription.openai.model', trim((string) ($_POST['oa_model'] ?? 'whisper-1')), false);
 $upsert($db, 'transcription.local.binPath', trim((string) ($_POST['local_bin'] ?? '')), false);
 

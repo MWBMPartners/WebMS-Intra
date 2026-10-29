@@ -14,6 +14,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Site;
+use Portal\Core\Transcription;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -44,7 +45,8 @@ if ($row !== null && $row['jsonSegments'] !== null) {
     }
 }
 
-$pageTitle   = 'Transcript';
+$pageTitle       = 'Transcript';
+$pageDescription = 'The words spoken in this recording, written out.';
 $pageSection = 'recordings';
 $breadcrumbs = ['Dashboard' => Site::url(''), 'Recordings' => Site::url('recordings'), 'Transcript' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
@@ -55,10 +57,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php if ($row === null): ?>
     <div class="alert alert-info">No transcript exists for this recording yet. Admin can queue one from the recording's page.</div>
 <?php elseif ((string) $row['status'] !== 'completed'): ?>
+    <?php // 🔒 THE PROVIDER'S OWN WORDS ARE FOR AN ADMINISTRATOR ONLY. This page
+          //    is read by every member who can see the recording, and a fault's
+          //    message can quote what was sent to the outside company. The
+          //    status itself is put into plain words by the one place that holds
+          //    them, so this page and the recording's own card never disagree. ?>
     <div class="alert alert-warning">
-        Transcript status: <strong><?php echo htmlspecialchars((string) $row['status'], ENT_QUOTES, 'UTF-8'); ?></strong>.
-        <?php if ($row['errorMsg'] !== null): ?>
-            Last error: <?php echo htmlspecialchars((string) $row['errorMsg'], ENT_QUOTES, 'UTF-8'); ?>.
+        <?php echo htmlspecialchars(Transcription::statusWords((string) $row['status']), ENT_QUOTES, 'UTF-8'); ?>.
+        <?php if (App::isAdmin() === true && $row['errorMsg'] !== null): ?>
+            <br><span class="small">Reported reason: <?php echo htmlspecialchars((string) $row['errorMsg'], ENT_QUOTES, 'UTF-8'); ?></span>
         <?php endif; ?>
     </div>
 <?php else: ?>

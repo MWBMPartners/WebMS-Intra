@@ -2,6 +2,73 @@
 
 
 ## [Unreleased] (alpha)
+- **Added — transcription you can actually reach, and that cannot charge you twice (#276, migration 229)**
+  - **What was wrong.** Transcription looked finished. There was an app switch, a choice of three
+    transcription companies, somewhere to enter an account key, a page that shows a transcript, and a
+    search across every transcript. **No page anywhere had a button to transcribe a recording.** So
+    nothing was ever put in the queue, no transcript was ever made, and the search looked through an
+    empty list for ever. The transcript page even told members "an administrator can queue one from
+    the recording's page" — and that page had no such button.
+  - **There is now a Transcribe button**, on the recording's own page, for administrators. It says
+    before you press it that the audio is **sent to the transcription company your administrator has
+    chosen, which charges for it** — because a recording of a service or a members' meeting leaving
+    the server is something to know beforehand, not afterwards.
+  - **A second fault, found while testing the first.** The statement that saves a finished transcript
+    could never run: `fullText` is a reserved word in MySQL unless it is quoted. So even if a
+    recording had reached a transcription company, the words it sent back could not have been
+    written down — after the work had been paid for. Fixed, and the test now walks the whole way
+    through with a stand-in company so the saving is proved and not assumed.
+  - **The same recording cannot be sent twice.** Pressing Transcribe while the audio is already with
+    the company used to put it back in the queue, so it was sent again and charged for again. It is
+    now refused, and the page says waiting costs nothing. **A run the server cuts short no longer
+    wedges the recording either** — after two hours it reads as abandoned and can be sent again,
+    which the page explains rather than leaving it looking busy for ever.
+  - **A monthly budget, with the installation deciding the ceiling.** One account key pays for every
+    organisation on an installation, so the installation's figure is the **most** any organisation
+    may spend. An organisation can hold itself to less and can never give itself more (#668). Going
+    past it refuses the recording and says why, rather than quietly doing nothing. £50 a month to
+    begin with — roughly a hundred hours of audio.
+  - **Fixed — "Process next" saved the settings instead of transcribing anything.** On the
+    Transcription page that button sat inside the Save form. HTML does not allow a form inside a
+    form, so the button belonged to the Save form: pressing it saved the configuration, said
+    "settings saved", and transcribed nothing. It was the only control that could work the queue.
+  - **Fixed — one organisation could see and spend another's.** The queue counts, the month's spend
+    and the list of recent transcripts were read with no organisation filter, and that list carries
+    recording titles. Worse, pressing "Process next" sent **another organisation's** audio to the
+    company on the installation's account. All of it is now one organisation at a time.
+  - **Fixed — an administrator of one organisation was offered settings they may not change.** Those
+    settings belong to the whole installation and the handler has refused anybody but a global
+    administrator since September. The page now shows them what is set and who to ask.
+  - **Fixed — members were shown the transcription company's own error text**, which can quote what
+    was sent to it. They now see the state in plain words; the detail is for administrators.
+  - **Fixed — the search inside transcripts could not be found.** Nothing linked to it. The
+    recordings library now does, when the organisation uses transcription.
+  - **Fixed — the recording page showed no messages at all.** It had no flash block, and nothing in
+    this portal prints one centrally, so every answer from the new button would have been swallowed
+    and the button would have looked dead whether it worked or was refused.
+  - **Nothing happens on its own**, and the page says so: the queue moves only when an administrator
+    presses "Process next". There is no scheduled job, deliberately for now — nobody should be
+    billed by a timer they did not know about (#672).
+  - **Fixed after an independent review — "Process next" could lose a whole queue.** The only thing
+    stopping a run when no transcription company was set up was that the button looked disabled. A
+    button is not a boundary: a posted request claimed every waiting recording, got "not configured"
+    back, and marked the lot as failed. Queue a few recordings while one company is configured, then
+    switch company without entering its key, and that was reachable. The run now refuses and says
+    plainly that everything waiting is still waiting.
+  - **Fixed — one recording the server could not write no longer ends the whole run.** A fault part
+    way through a batch gave a blank error page, and the recordings already done went unreported.
+    Each recording is now handled on its own, so a run reports what it managed.
+  - **Fixed — a budget of nothing is no longer described as a budget that ran out.** Setting the
+    monthly figure to zero said "this month's budget has been used up", sending an administrator
+    looking for spending that never happened. It now says no budget has been set.
+  - **Fixed — the page could blame an organisation for the installation's own figure.** Where the
+    installation asked for more than the product allows at all, the page told a global administrator
+    their organisation had asked for more. It now names the organisation only when the organisation
+    really did.
+  - **Also made honest rather than reassuring:** where a transcription is cut short by the server,
+    the page said the attempt "was charged for either way". That cannot be known — the request may
+    have died before the company was reached, while it was working, or after it finished. It now
+    says so.
 - **Added — backups you can keep: taken automatically, downloaded, and brought back (#569, migration 228)**
   - **What was missing, and why it mattered more than it looked.** The portal could already take a
     snapshot, rehearse a restore and put one back, and it e-mailed an administrator when the newest

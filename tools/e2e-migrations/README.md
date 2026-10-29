@@ -144,11 +144,19 @@ delete: an exception that is no longer true must not stay in the list.
 
 - Two links, `fk_event_room` and `fk_event_venue` on `tblEvents`, which
   migration 179 adds and the install script does not declare.
-- Three settings, `attendance.enabled`, `calendar.enabled` and
-  `leadership.enabled`: the install script seeds them as `false`, and
-  migrations 008, 009 and 017 write `true` over them. So every new install
-  starts with those three apps switched on, and running the installer again
-  over a live database switches them back on.
+- **No setting values.** There used to be three — `attendance.enabled`,
+  `calendar.enabled` and `leadership.enabled`, which the install script seeded
+  as `false` while migrations 008, 009 and 017 wrote `true` over them.
+  **Migration 225 made the install script seed all three as `true`**, so the
+  replay stopped changing them and phase 2 began failing for three exceptions
+  that were no longer true — which is what the rule above is for. They were
+  deleted on 29 October 2026.
+
+  Worth knowing how long that took to notice: the harness had been failing
+  since migration 225 landed, because `e2e-migrations.yml` only runs when a
+  pull request touches `web/_sql/` and no pull request had been raised. **This
+  list is part of the schema's state**, so whoever changes what the install
+  script seeds has to edit it in the same piece of work.
 
 ### The rule for "equals a fresh install" (phases 5 and 6)
 
@@ -283,11 +291,7 @@ not in this sample.
       + tblEvents | fk_event_room | 1 | roomID | tblVenueRooms | roomID | on delete SET NULL | on update NO ACTION
       + tblEvents | fk_event_venue | 1 | venueID | tblVenues | venueID | on delete SET NULL | on update NO ACTION
   ✓ addresses: the replay changes and removes none (595 lines)
-  ✓ setting values: the replay changes none but the named ones below, and removes none (580 lines)
-  ⚠ setting values the replay changes — known and named in run.sh, not a failure:
-      ~ attendance.enabled | every organisation | false → true
-      ~ calendar.enabled | every organisation | false → true
-      ~ leadership.enabled | every organisation | false → true
+  ✓ setting values: the replay changes none, and removes none (597 lines)
 ═════ Phase 3: idempotency re-run ═════
   replayed=208 failed=0
   schema: 224 tables, 2434 columns, 1218 indexes, 208 migrations recorded

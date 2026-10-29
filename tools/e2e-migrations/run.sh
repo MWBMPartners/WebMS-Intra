@@ -650,13 +650,29 @@ unseen_exceptions() {
 #   tblMigrations count above uses).
 #
 # The named exceptions. Measured on 12 October 2026, on MySQL 8.0.36 and
-# 8.4.11: the replay changes no address, and exactly the five things below.
-# All five are older than this rule and each is a real difference, kept in
-# view here because fixing them means editing migrations this piece of work
-# did not own. Each is matched WORD FOR WORD, so a new difference cannot hide
-# behind an old one. When one of them is fixed, delete its line: the phase
-# FAILS while a line here names a difference that was not seen
-# (unseen_exceptions above). These two lists belong to phase 2 alone.
+# 8.4.11: the replay changes no address, and exactly the TWO things below.
+# Both are older than this rule and each is a real difference, kept in view
+# here because fixing them means editing migrations this piece of work did not
+# own. Each is matched WORD FOR WORD, so a new difference cannot hide behind an
+# old one. When one of them is fixed, delete its line: the phase FAILS while a
+# line here names a difference that was not seen (unseen_exceptions above).
+# These two lists belong to phase 2 alone.
+#
+# THREE SETTING EXCEPTIONS WERE DELETED ON 29 OCTOBER 2026, and the way they
+# were found is the point. They named `attendance.enabled`, `calendar.enabled`
+# and `leadership.enabled`, which the install script used to seed OFF while
+# migrations 008, 009 and 017 switched them ON. **Migration 225 fixed that** —
+# the install script now seeds all three ON — so the replay stopped changing
+# them and the phase began FAILING for three exceptions that were no longer
+# true. Exactly as the rule above says it should.
+#
+# It had been failing since migration 225 landed, unnoticed, because
+# `e2e-migrations.yml` only runs when a pull request touches `web/_sql/` and no
+# pull request had been raised. So the harness was red for days with nobody
+# told. Two things worth remembering from that: this list is part of the
+# schema's state and has to be edited by whoever changes what the install
+# script seeds, and a check that only runs on a pull request tells you nothing
+# until somebody opens one.
 #
 #   Two links that migration 179 adds and the install script does not declare.
 #   The same gap #554 was for fk_att_sess_event, which the install script now
@@ -665,15 +681,12 @@ KNOWN_REPLAY_ONLY_LINKS=(
     "tblEvents | fk_event_room | 1 | roomID | tblVenueRooms | roomID | on delete SET NULL | on update NO ACTION/RESTRICT"
     "tblEvents | fk_event_venue | 1 | venueID | tblVenues | venueID | on delete SET NULL | on update NO ACTION/RESTRICT"
 )
-#   Three apps the install script seeds as switched OFF and migrations 008,
-#   009 and 017 switch ON, because they write the value again when the row is
-#   already there. So every new install starts with them on, and running the
-#   installer again over a live database switches them back on.
-KNOWN_REPLAY_VALUE_CHANGES=(
-    "attendance.enabled | every organisation | false → true"
-    "calendar.enabled | every organisation | false → true"
-    "leadership.enabled | every organisation | false → true"
-)
+#   Empty since 29 October 2026: migration 225 made the install script seed
+#   the three apps that used to be here as switched ON, so the replay changes
+#   no setting value at all. A value difference is now a hard failure with
+#   nothing standing in front of it, which is the state this list exists to
+#   work towards.
+KNOWN_REPLAY_VALUE_CHANGES=()
 #
 # Needs the inventories "alone" (after phase 1) and "fresh" (after phase 2).
 # Returns 0 when the rule holds, 1 when it does not.
