@@ -680,6 +680,166 @@ request that runs out of time half way leaves a series partly made. Hence `HARD_
 - **Neither can test two people creating the same series at once.** The built-in server runs with
   one worker, so two requests never overlap and such a test would pass on broken code.
 
+## Backups a customer can keep (#569, migration 228)
+
+`DbBackup` writes a snapshot as a FOLDER under `web/_backups/`: one `.jsonl` file per table, and
+`_manifest.json` written last. Right for the server, useless for somebody who wants a copy
+elsewhere. Three pieces were added.
+
+### `Portal\Core\BackupArchive` — the ONE place a snapshot becomes one file
+
+Built on **libsodium's `secretstream`**, not on anything hand-rolled. That primitive exists for
+exactly this job: a long file encrypted in pieces where each piece is authenticated AND tied to its
+place in the order, so a file cannot be truncated, reordered or spliced without the read failing. A
+"encrypt each block and add a checksum" version was considered and rejected — chunked authenticated
+encryption has a short list of ways to be subtly wrong and this gets all of them right.
+
+The file is: a plaintext JSON envelope line (format, snapshot, key mode, salt, Argon2 costs — nothing
+secret, because an import must know what to ask for before it can ask), then libsodium's 24-byte
+stream header, then length-prefixed chunks. The entry list is INSIDE the encrypted part, so a file's
+contents cannot be identified without the key.
+
+**Nothing is ever held in memory.** Packing walks the folder and writes in 64 KB pieces; there is no
+temporary archive. A 6 MB table packs and unpacks with no measurable growth, which check F03 measures
+rather than asserts.
+
+**Four things it refuses, and all four were found by planting or by an independent check rather
+than by reading:**
+
+0. **An entry that declares more bytes than follow it.** This **hung** — 100% CPU, for ever.
+   Reproduced: an entry line saying `{"bytes":1000}` followed by five bytes in one FINAL chunk. The
+   end-of-stream test required no entry to be pending, so the one case that mattered fell straight
+   through it, nothing more could be pulled, and the loop span. On a host with a time limit that
+   burns a web worker until it is killed, and the half-unpacked folder was left behind too, because
+   `unpack()`'s clean-up lives in a `catch` that never ran. The "cut short in the middle of a file"
+   message was dead code for the same reason. Check C11, in a child process with a timeout, because a
+   hang cannot be observed from inside the process that is hanging.
+
+1. **A chunk length is bounded.** The four bytes giving it are read BEFORE anything is
+   authenticated — they have to be, because they say how much to read — so a hostile file can claim
+   any size. Without the bound, `fread($handle, 2147483647)` is a **memory-exhaustion fatal, not an
+   exception**, so nothing in-process can catch it: check C08 runs the unpack in a CHILD PROCESS and
+   asks whether it refused cleanly or died. The first version of that check sat in-process, the plant
+   killed PHP, and the output read exactly like a test that had not run.
+2. **The FINAL tag is required.** The closing line arrives inside the encrypted stream so it is
+   authentic, but libsodium's FINAL tag is a separate statement that nothing follows. A planted
+   packer that never emitted it passed all 36 checks, which made the class header's claim that FINAL
+   "proves the file is whole" untrue at the time.
+3. **A name with a slash or a dot-dot** is refused outright rather than cleaned up: the portal never
+   writes such a name, so one in a file means the file is not ours.
+
+**The key-work costs are bounded, and that bound is the one check an attacker needs no key to
+reach.** The envelope is plaintext and unauthenticated — it has to be readable before any key
+exists — and the Argon2 cost in it is paid BEFORE the stream is authenticated, so anybody who can
+touch the file sets the work and any typed key starts it. Measured on a good file with only the
+envelope rewritten: 2 GB of key work took 3.2 seconds, 16 GB took 30.8, and **1 TB never returned**.
+Argon2 asks the operating system for that memory directly, so PHP's `memory_limit` does not apply and
+on shared hosting it is the customer's account that pays. `MAX_PWHASH_MEM` is 1 GB (libsodium's own
+SENSITIVE preset) and `MIN_PWHASH_MEM` 8 KB — a floor as well as a ceiling, because a file claiming
+trivial work would make guessing the typed key cheap. Checks C12, C12b, C12c.
+
+A docblock here said the envelope was "never acted on" while the code beneath it acted on the salt
+and the costs. It cannot not act on them — they are what turn a typed key into the key. What makes it
+safe is that changing either produces a different key and the stream then fails to authenticate, plus
+the bound above. Corrected.
+
+**Two guards are honestly unprovable and say so in the code:** the check that a file did not change
+size while being packed (staging it means altering a file's length while another process is half way
+through reading it), and the download's clean-up on a **cancelled** download. A check was written for
+that second one and **passed with both guards removed**, because the page test's snapshot is small
+enough that the server finishes the answer before the test's client gives up — so no cancellation was
+ever staged. Staging one honestly needs a database big enough to still be streaming, which is minutes
+of runtime on every pull request. Both are defensive, believed right, unproven, and labelled.
+
+### `_backups/incoming/` is NOT a snapshot, and that cost real data
+
+`DbBackup::listSnapshots()` lists **every** folder in `_backups/`. The import page creates
+`_backups/incoming/` and tells the customer to put files there — so it appeared on the Backup page as
+a row reading "Unfinished — not a backup" **with a Delete button beside it**, and
+`isSnapshotName('incoming')` was true, so Delete accepted it and removed the folder and everything in
+it. That may be the only copy of the database somebody has just brought back after losing their
+server, and the row actively invited the press. Reproduced against the real class by the independent
+check.
+
+`DbBackup::NOT_SNAPSHOTS` is now the ONE list of reserved folder names, consulted by
+`isSnapshotName()` (so no action from a browser can name one) and by `listSnapshots()` (so it never
+appears). Before adding a name, ask whether it is a folder somebody might legitimately want to
+restore or delete through the page.
+
+### A download, and why it is a POST
+
+The key is typed in, and a key must never travel in an address — an address reaches the access log,
+the browser history, the `Referer` of the next request and any proxy between. So the key is posted
+and the file is the answer to that POST. The cost is that the browser cannot resume an interrupted
+download, which is the right trade.
+
+**It packs to a file before sending a byte.** Once bytes have gone the answer cannot be taken back,
+and the browser would save a part file with no way of knowing. A part backup is worse than none,
+because somebody keeps it believing it is a copy of their data. It costs disk briefly; the
+alternative costs correctness.
+
+### An import that does NOT restore
+
+Two steps, on purpose. The import unpacks; putting it back is the existing Restore with every guard
+it already has, including `WHOLE_DATABASE_ONLY`. One press would mean a second path writing over a
+live database, and that path would have to agree with the first about every guard for ever.
+
+Named `imported-YYYYMMDD-HHMMSS` from the moment of import: it cannot collide with what is there, it
+is obvious which came from outside, and `prune()` only removes `upgrade-…` so an imported backup is
+never tidied away by the scheduled job.
+
+**Two ways in, because the obvious one cannot be relied on.** `upload_max_filesize` and
+`post_max_size` are commonly 2–64 MB while a real database backup is larger, and a customer on
+shared hosting usually cannot raise them. So the page reads both limits and SAYS what the server will
+take, and the `_backups/incoming` folder route has no limit at all.
+
+### The scheduled job
+
+`cron/backup-run`, called daily by the hosting company's scheduler whatever the setting says; how
+often a backup is really taken is decided in the job, so changing the setting does not mean editing a
+scheduler entry the customer may not reach.
+
+**Whether one is due comes from the snapshots themselves**, not a stored "last run": a backup taken
+by hand counts, a failed run cannot push the next one a whole period away, and restoring the database
+cannot confuse it. `DbBackup::isTakenHere()` is the ONE place that decides whether a snapshot was
+taken here or imported, and both this job and `prune()` ask it — an imported snapshot must not count
+as evidence that the current database has been saved, and without that an import silently suppressed
+the next scheduled backup (measured by section N of `tools/backup-page-selftest.php`).
+
+**Four faults this work had, all found by running it and none visible on the page:**
+
+- the loop in `BackupArchive::readEntries()` **hung** on a file asking for more bytes than it
+  carried (above).
+- the Argon2 cost was taken unbounded from an unauthenticated envelope (above).
+- `_backups/incoming/` was listed as a deletable snapshot (above).
+- the download's temporary file survived a cancelled download, and two comments said it always did
+  not.
+- the job read `takenAt`, `name` and `deleted` — **none of which exist**. It would have taken a
+  backup every single run (an age of null reads as "due"), told nobody which one, and reported
+  nothing tidied. The project's own rule is to check a name against the thing that uses it.
+- it only caught exceptions, but `snapshot()` answers `success: false` for an ordinary failure — so a
+  backup that simply did not work would have been reported as taken, the worst possible outcome for a
+  backup job.
+- an imported snapshot suppressed the next scheduled backup.
+- **two of the "an administrator of one organisation cannot do this" checks were passing for the
+  wrong reason**: the Backup page refuses a non-global administrator before rendering anything, so it
+  carries no form token for them, and the request was refused by the FORM TOKEN rather than by the
+  gate under test. Planting the gate away left all 174 checks green. The checks now take a token from
+  a page that administrator can load, and assert it is non-empty so they cannot go hollow again.
+
+### Tests
+
+- `tools/backup-archive-selftest.php` — 47 checks, **no database and no web server**: the round trip
+  byte for byte (raw bytes and an empty file included), both key modes, a wrong key, a wrong key
+  file, a tampered byte, a truncated file, a missing FINAL tag, an impossible chunk length, a
+  path-climbing name, a miscounted entry list, a failed pack leaving no file, and that the file
+  carries no name, table name or key in the clear.
+- `tools/backup-page-selftest.php` — extended to 181 checks over real HTTP: the schedule saves and
+  refuses nonsense, the download round-trips through the real pages and is opened again by the class,
+  the import appears and unpacks, an imported snapshot is listed and REHEARSES a restore successfully,
+  both gates refuse an organisation's administrator and record it, and the job's token, not-due, due
+  and prune behaviour.
+
 ## Repository vs Server Structure
 
 The Git repository root contains documentation and CI/CD config. **All deployable

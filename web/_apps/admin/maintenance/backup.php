@@ -96,6 +96,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\BackupArchive;
 use Portal\Core\DbBackup;
 use Portal\Core\Logger;
 use Portal\Core\Maintenance;
@@ -337,7 +338,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stillClosed = ' The portal could not be reopened automatically and is still closed to everyone '
                      . 'else: the recovery guide says how to reopen it.';
 
-        if ($action === 'snapshot_now') {
+        if ($action === 'save_schedule') {
+            // ⏰ How often a backup is taken by itself, and how many are kept.
+            //    Installation-wide rows (siteID NULL), because one database
+            //    serves every organisation: there is nothing here for an
+            //    organisation to choose.
+            //
+            //    A GLOBAL administrator only. The page is already gated on that
+            //    for every action (see the top of this file), so this is not a
+            //    second gate — it is the same one.
+            $frequency = $posted('frequency') ?? '';
+            $keepRaw   = trim($posted('keep') ?? '');
+
+            if (in_array($frequency, ['off', 'daily', 'weekly', 'monthly'], true) === false) {
+                $flash     = 'That is not one of the choices for how often. Nothing was changed.';
+                $flashType = 'danger';
+            } elseif (preg_match('/^\d{1,4}$/', $keepRaw) !== 1 || (int) $keepRaw < 1 || (int) $keepRaw > 365) {
+                // Refused rather than quietly corrected: somebody who typed 0
+                // meant something, and keeping none would delete the snapshot
+                // that had just been taken.
+                $flash     = 'How many to keep has to be a whole number between 1 and 365. Nothing was changed.';
+                $flashType = 'danger';
+            } else {
+                $keep = (int) $keepRaw;
+                // Two installation-wide rows. `ON DUPLICATE KEY UPDATE` is
+                // right for a NULL siteID because migration 187 added
+                // `siteScope` (COALESCE(siteID, -1)) and a unique key on it, so
+                // a NULL collapses to one value and DOES match.
+                $save = $mysqli->prepare(
+                    'INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive, updatedAt) '
+                    . 'VALUES (NULL, ?, ?, ?, 0, NOW()) '
+                    . 'ON DUPLICATE KEY UPDATE settingValue = VALUES(settingValue), updatedAt = NOW()'
+                );
+                if ($save === false) {
+                    $flash     = 'The schedule could not be saved.';
+                    $flashType = 'danger';
+                } else {
+                    foreach ([
+                        'backup.schedule.frequency' => $frequency,
+                        'backup.schedule.keep'      => (string) $keep,
+                    ] as $key => $value) {
+                        $save->bind_param('sss', $key, $value, $value);
+                        $save->execute();
+                    }
+                    $save->close();
+                    Logger::activity(
+                        'BackupScheduleSaved',
+                        'Scheduled backups set to ' . $frequency . ', keeping ' . $keep,
+                        isset($_SESSION['user_id']) === true ? (int) $_SESSION['user_id'] : null
+                    );
+                    $flash = $frequency === 'off'
+                        ? 'Scheduled backups are now switched off. Backups can still be taken with the '
+                          . 'button above.'
+                        : 'Saved. A backup will be taken ' . $frequency . ', keeping ' . $keep
+                          . ' — as long as your hosting company\'s scheduler is calling /cron/backup-run.';
+                    $flashType = 'success';
+                }
+            }
+        } elseif ($action === 'snapshot_now') {
             $result = $backup->snapshot('manual');
             if ($result['success'] === true) {
                 $flash = sprintf(
@@ -589,13 +647,152 @@ $csrf = Auth::csrfToken();
     <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($flash, ENT_QUOTES, 'UTF-8'); ?></div>
 <?php endif; ?>
 
-<form method="post" class="mb-4 d-inline-block">
-    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
-    <input type="hidden" name="action" value="snapshot_now">
-    <button type="submit" class="btn btn-primary">
-        <i class="fa-solid fa-camera me-1"></i> Run snapshot now
-    </button>
-</form>
+<div class="d-flex flex-wrap gap-2 align-items-center mb-4">
+    <form method="post" class="d-inline-block mb-0">
+        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+        <input type="hidden" name="action" value="snapshot_now">
+        <button type="submit" class="btn btn-primary">
+            <i class="fa-solid fa-camera me-1"></i> Run snapshot now
+        </button>
+    </form>
+    <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/backup/import'), ENT_QUOTES, 'UTF-8'); ?>"
+       class="btn btn-outline-secondary">
+        <i class="fa-solid fa-file-import me-1"></i> Import a backup file
+    </a>
+</div>
+
+<?php
+// ⏰ ------------------------------------------------------------------------
+//    Scheduled backups. Read from the settings this request already loaded.
+//    `frequency` is a word rather than a number of hours so that the choices
+//    are the choices; `cron/backup-run.php` is the ONE place it is turned into
+//    a period.
+// ⚠️ 'off' when the row is absent, which is what `cron/backup-run.php` also
+//    falls back to. The page used to say 'daily' here, so in the window between
+//    deploying the files and running the upgrade it would have shown "Every
+//    day" while the job was doing nothing — the page telling somebody something
+//    untrue about their backups. The seeded default IS daily; this is only
+//    about the row not existing yet.
+$scheduleFrequency = (string) ($SETTINGS['backup']['schedule']['frequency'] ?? 'off');
+$scheduleKeep      = (string) ($SETTINGS['backup']['schedule']['keep'] ?? '7');
+$frequencyChoices  = [
+    'off'     => 'Never — only when somebody presses the button',
+    'daily'   => 'Every day',
+    'weekly'  => 'Every week',
+    'monthly' => 'Every four weeks',
+];
+?>
+<div class="card mb-4">
+    <div class="card-body">
+        <h2 class="h5 card-title"><i class="fa-solid fa-clock me-2"></i>Backups taken automatically</h2>
+
+        <div class="alert alert-info">
+            <i class="fa-solid fa-circle-info me-2"></i>
+            <strong>This only happens if your hosting company&rsquo;s scheduler is calling the portal.</strong>
+            Set it to call <code>/cron/backup-run?token=&lt;your token&gt;</code> <strong>once a day</strong>,
+            whatever you choose below &mdash; how often a backup is actually taken is decided here, not by
+            how often the scheduler calls. Your token is on the Settings page.
+        </div>
+
+        <form method="post" class="row g-3 align-items-end">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+            <input type="hidden" name="action" value="save_schedule">
+            <div class="col-md-6">
+                <label for="frequency" class="form-label">How often</label>
+                <select class="form-select" id="frequency" name="frequency">
+                    <?php foreach ($frequencyChoices as $value => $words): ?>
+                        <option value="<?php echo htmlspecialchars($value, ENT_QUOTES, 'UTF-8'); ?>"
+                            <?php echo $scheduleFrequency === $value ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($words, ENT_QUOTES, 'UTF-8'); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label for="keep" class="form-label">How many to keep</label>
+                <input type="number" class="form-control" id="keep" name="keep" min="1" max="365"
+                       value="<?php echo htmlspecialchars($scheduleKeep, ENT_QUOTES, 'UTF-8'); ?>" required>
+                <div class="form-text">Older ones are removed. Imported backups are never removed.</div>
+            </div>
+            <div class="col-md-3">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fa-solid fa-floppy-disk me-1"></i>Save schedule
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 📥 Download a copy to keep somewhere else. -->
+<?php $completeSnapshots = array_values(array_filter($snapshots, static fn (array $s): bool => $s['complete'] === true)); ?>
+<div class="card mb-4">
+    <div class="card-body">
+        <h2 class="h5 card-title"><i class="fa-solid fa-download me-2"></i>Download a copy to keep</h2>
+        <p class="text-secondary small mb-2">
+            Every snapshot lives on this server. If the hosting account is lost, they go with it. A
+            download is how you keep a copy somewhere else.
+        </p>
+        <div class="alert alert-warning">
+            <i class="fa-solid fa-triangle-exclamation me-2"></i>
+            <strong>The file holds every name, address, telephone number, giving record and care note in
+            the database.</strong> It is always encrypted, with a key you choose here &mdash; there is no
+            unencrypted option, and <strong>the key is not stored anywhere</strong>. If you lose it, the
+            file cannot be opened by anybody, including us. Keep it somewhere separate from the file.
+        </div>
+
+        <?php if ($completeSnapshots === []): ?>
+            <p class="text-muted mb-0"><em>There is no finished snapshot to download yet.</em></p>
+        <?php else: ?>
+        <form method="post"
+              action="<?php echo htmlspecialchars(Site::url('admin/maintenance/backup/download'), ENT_QUOTES, 'UTF-8'); ?>"
+              class="row g-3">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+            <div class="col-md-6">
+                <label for="downloadName" class="form-label">Which snapshot</label>
+                <select class="form-select" id="downloadName" name="name">
+                    <?php foreach ($completeSnapshots as $snap): ?>
+                        <option value="<?php echo htmlspecialchars($snap['name'], ENT_QUOTES, 'UTF-8'); ?>">
+                            <?php echo htmlspecialchars($snap['name'] . ' — ' . $snap['created_at'], ENT_QUOTES, 'UTF-8'); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label for="keyMode" class="form-label">How to protect it</label>
+                <select class="form-select" id="keyMode" name="keyMode">
+                    <option value="<?php echo htmlspecialchars(BackupArchive::KEY_PASSPHRASE, ENT_QUOTES, 'UTF-8'); ?>" selected>
+                        A key I choose (recommended)
+                    </option>
+                    <option value="<?php echo htmlspecialchars(BackupArchive::KEY_BOTH, ENT_QUOTES, 'UTF-8'); ?>">
+                        A key I choose AND this installation&rsquo;s key file
+                    </option>
+                </select>
+                <div class="form-text">
+                    Including the key file means the file is useless to anybody who does not also have
+                    that file &mdash; <strong>and useless to you if this server is gone</strong>, which is
+                    the very situation a backup is for. Choose it only if you keep the key file somewhere
+                    else as well.
+                </div>
+            </div>
+            <div class="col-md-6">
+                <label for="passphrase" class="form-label">The key (at least <?php echo (int) BackupArchive::MIN_PASSPHRASE; ?> characters)</label>
+                <input type="password" class="form-control" id="passphrase" name="passphrase"
+                       autocomplete="new-password" minlength="<?php echo (int) BackupArchive::MIN_PASSPHRASE; ?>" required>
+            </div>
+            <div class="col-md-6">
+                <label for="passphraseAgain" class="form-label">The key again</label>
+                <input type="password" class="form-control" id="passphraseAgain" name="passphraseAgain"
+                       autocomplete="new-password" minlength="<?php echo (int) BackupArchive::MIN_PASSPHRASE; ?>" required>
+            </div>
+            <div class="col-12">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fa-solid fa-download me-1"></i>Pack and download
+                </button>
+            </div>
+        </form>
+        <?php endif; ?>
+    </div>
+</div>
 
 <?php if ($inspectManifest !== null): ?>
     <div class="card mb-4 border-primary">

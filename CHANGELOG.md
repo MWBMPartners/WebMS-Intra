@@ -2,6 +2,67 @@
 
 
 ## [Unreleased] (alpha)
+- **Added — backups you can keep: taken automatically, downloaded, and brought back (#569, migration 228)**
+  - **What was missing, and why it mattered more than it looked.** The portal could already take a
+    snapshot, rehearse a restore and put one back, and it e-mailed an administrator when the newest
+    backup got too old. But **nothing ever took one unless somebody pressed the button**, and there
+    was no way to get a copy off the server. So the staleness alert existed to report a problem
+    nothing was preventing, and a customer who lost their hosting account would have lost every
+    snapshot with it.
+  - **Backups can now be taken on a schedule.** Choose every day, every week or every four weeks on
+    the Backup page, and how many to keep. Point your hosting company's scheduler at
+    `/cron/backup-run` **once a day** whatever you choose — how often a backup is actually taken is
+    decided in the portal, not by how often the scheduler calls, so changing your mind does not mean
+    editing a scheduler entry you may not be able to reach. The page says all of this.
+  - **Whether a backup is due is worked out from the snapshots themselves**, not from a remembered
+    "last run". So a backup taken by hand an hour ago counts, a failed run cannot push the next one a
+    whole week away, and restoring the database cannot confuse it. A snapshot **imported** from a file
+    deliberately does not count: it is a copy brought back from elsewhere, not evidence that the
+    current database has been saved.
+  - **A snapshot can be downloaded as one file** and kept somewhere else. **It is always encrypted,
+    with a key you choose, and the key is not stored anywhere** — if you lose it, nobody can open the
+    file, including us. The page says so before you start. There is no unencrypted option, because
+    that file holds every name, address, telephone number, giving record and care note in the
+    database, and the download is the one moment all of it leaves the server in one piece.
+  - **You can also require the installation's own key file**, so the file is useless to anybody who
+    does not have that too. The page warns that this also makes it useless to **you** if the server
+    is gone — which is the very situation a backup is for — so it is offered rather than
+    recommended.
+  - **And brought back in.** Put the file in `_backups/incoming` with your hosting company's file
+    manager and press Import, or upload it through the page. The page **reads this server's own
+    upload limits and tells you what it will take**, rather than letting you discover it by watching
+    an upload fail — a real database backup is usually larger than a shared host allows, which is
+    exactly why the folder route exists.
+  - **Importing does not restore anything**, on purpose. It unpacks the file so it appears in the
+    list, where you can rehearse a restore to check it reads properly before putting it back. One
+    press would have meant a second path writing over a live database, and that path would have to
+    agree with the first about every guard for ever.
+  - **Only a global administrator can download or import.** A backup holds the data of every
+    organisation on the installation, not just the one somebody administers, and both refusals are
+    recorded.
+  - **An imported snapshot is never tidied away** by the scheduled job, and is named for the moment
+    it was imported rather than overwriting the snapshot it came from.
+  - **Built on libsodium's `secretstream`** rather than anything hand-rolled, because that is the
+    primitive for exactly this job: a long file encrypted in pieces where every piece is
+    authenticated and tied to its place, so a file cannot be truncated, reordered or spliced without
+    the read failing. Nothing is ever held in memory: a 6 MB table packs and unpacks with no
+    measurable growth, which is checked rather than claimed.
+  - **Found by testing and by an independent review, not by reading** — eight faults in this work,
+    none of them visible on the page. Four from building it: the scheduled job read three field names
+    that do not exist (so it would have taken a backup every single run and reported nothing); it
+    treated a snapshot that merely *failed* as one that succeeded; an imported file suppressed the
+    next scheduled backup; and two of the "an administrator of one organisation cannot do this"
+    checks were passing because the request was refused by the **form token** rather than by the gate
+    being tested.
+  - Four more from the review, two of them serious. **Unpacking a file that asked for more data than
+    it carried looped for ever** at full CPU, burning a web worker until the host killed it.
+    **The `_backups/incoming` folder appeared on the Backup page as a failed snapshot with a Delete
+    button**, and pressing it destroyed the files in there — which may be the only copy somebody has
+    just brought back after losing their server. Also: the amount of key work a file could demand was
+    unbounded, and a file claiming a terabyte of it never returned at all; and a **cancelled**
+    download left a full encrypted copy of the database on the server, where nothing would ever have
+    removed it.
+
 - **Added — repeating events, which the portal could not create at all (#569, #668, migration 227)**
   - **What was missing.** FEATURES.md listed "Recurring rules: weekly / fortnightly / monthly /
     quarterly / yearly / custom" as shipped. There was no repeat option anywhere on the event form,

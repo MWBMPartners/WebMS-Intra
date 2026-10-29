@@ -230,6 +230,31 @@ class DbBackup
     private const NAME_FROM_BROWSER = '/\A[A-Za-z0-9_\-]+\z/';
 
     /**
+     * 🛑 Folders inside `_backups/` that are NOT snapshots and must never be
+     * treated as one.
+     *
+     * `incoming` is where an administrator puts a backup FILE brought back from
+     * somewhere else, using their hosting company's file manager
+     * (`_apps/admin/maintenance/backup-import.php` tells them to). It holds
+     * files, not a snapshot.
+     *
+     * WHY THIS LIST EXISTS, because it was a real fault found by the
+     * independent check of #569 and the consequence was data loss: this class
+     * lists EVERY folder in `_backups/`, so `incoming` appeared on the Backup
+     * page as a row reading "Unfinished — not a backup" with a Delete button
+     * beside it. `isSnapshotName('incoming')` was true, so Delete accepted it
+     * and removed the folder AND EVERYTHING IN IT — which may be the only copy
+     * of the database somebody has just brought back after losing their server.
+     * The row actively invited the press.
+     *
+     * One list, consulted by `isSnapshotName()` (so no action from a browser
+     * can name it) and by `listSnapshots()` (so it never appears). Before
+     * adding a name, ask whether it is a folder somebody might legitimately
+     * want to restore or delete through the page.
+     */
+    public const NOT_SNAPSHOTS = ['incoming'];
+
+    /**
      * How many times snapshot() tries for a folder name, one second apart,
      * before giving up. See the comment where it is used.
      */
@@ -405,7 +430,37 @@ class DbBackup
      */
     public static function isSnapshotName(mixed $name): bool
     {
-        return is_string($name) === true && preg_match(self::NAME_FROM_BROWSER, $name) === 1;
+        return is_string($name) === true
+            && preg_match(self::NAME_FROM_BROWSER, $name) === 1
+            // 🛑 A reserved folder is not a snapshot, so no action that takes a
+            //    snapshot name may touch it — inspect, rehearse, restore or
+            //    DELETE. See NOT_SNAPSHOTS for the data loss that caused.
+            && in_array($name, self::NOT_SNAPSHOTS, true) === false;
+    }
+
+    /**
+     * 🏷️ Was this snapshot TAKEN BY THIS INSTALLATION, rather than imported?
+     *
+     * A snapshot this installation took is named `upgrade-YYYYMMDD-HHMMSS`; one
+     * brought in from a file is named `imported-…` (see
+     * `_apps/admin/maintenance/backup-import.php`). The difference matters in
+     * two places and the same rule has to answer both:
+     *
+     *   • `prune()` only ever removes a snapshot this installation took, so
+     *     that a backup somebody went to the trouble of importing is never
+     *     tidied away by the scheduled job.
+     *   • `cron/backup-run` decides whether a backup is DUE from the newest one
+     *     this installation took. An imported snapshot must not count: it is a
+     *     copy brought back from somewhere else, not evidence that the current
+     *     database has been saved. Without this, importing a recent file would
+     *     silently suppress tonight's backup — found by section N of
+     *     `tools/backup-page-selftest.php`.
+     *
+     * The pattern is this class's own, so the two places cannot drift apart.
+     */
+    public static function isTakenHere(mixed $name): bool
+    {
+        return is_string($name) === true && preg_match(self::SNAPSHOT_NAME, $name) === 1;
     }
 
     /** Is this a table name a page may pass to restoreTable()? Same reasoning as isSnapshotName(). */
@@ -2232,6 +2287,13 @@ class DbBackup
             if ($name === '.' || $name === '..') {
                 continue;
             }
+            // 🛑 A reserved folder is not a snapshot and must not be listed as
+            //    one. `incoming` holds files an administrator brought back from
+            //    elsewhere; listing it put a Delete button beside them. See
+            //    NOT_SNAPSHOTS.
+            if (in_array($name, self::NOT_SNAPSHOTS, true) === true) {
+                continue;
+            }
             $path = $this->backupsRoot . DIRECTORY_SEPARATOR . $name;
             if (is_dir($path) === false) {
                 continue;
@@ -2364,7 +2426,11 @@ class DbBackup
         $mine = static function (array $snapshot): bool {
             // A link is skipped as well: removing "through" one would delete
             // whatever folder it points at.
-            return preg_match(self::SNAPSHOT_NAME, $snapshot['name']) === 1 && is_link($snapshot['path']) === false;
+            // 🏷️ Asks the ONE method that decides this, rather than repeating
+            //    its pattern. DEV_NOTES said "both this job and prune() ask it"
+            //    while this line held its own copy — true in substance, false as
+            //    written, and now simply true.
+            return self::isTakenHere($snapshot['name']) === true && is_link($snapshot['path']) === false;
         };
 
         $now = time();

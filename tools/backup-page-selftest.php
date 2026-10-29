@@ -126,6 +126,14 @@ declare(strict_types=1);
 // being run.
 require __DIR__ . '/backup-restore-selftest.php';
 
+// 📦 `BackupArchive` is loaded explicitly, the same way
+//    `backup-restore-selftest.php` loads `DbBackup`: this file runs OUTSIDE the
+//    portal, so nothing autoloads a portal class for it. Without this, the
+//    sections below die with "Class not found" — which is what happened on the
+//    first run, and is the same shape as the project's own rule that a class
+//    used by its short name needs its `use` line in that file.
+require __DIR__ . '/../web/_core/BackupArchive.php';
+
 const BPS_ROOT   = 918001;   // a global administrator
 const BPS_ADMIN  = 918002;   // an administrator of one organisation only
 const BPS_MEMBER = 918003;
@@ -1032,6 +1040,524 @@ if (brs_check($newest !== '', 'there is a finished snapshot to inspect') === tru
     bps_settle();
     brs_checkSame($stateBefore, 'the database is identical after all three refusals');
 }
+
+// =============================================================================
+// K. Backups taken on a schedule, set from the page
+// =============================================================================
+// Nothing in the portal ever took a backup by itself before #569: the freshness
+// alert reported a staleness that nothing was preventing. These two settings
+// decide how often and how many to keep, and `cron/backup-run` is the ONE place
+// the word becomes a period.
+echo "\nK. Backups taken on a schedule\n";
+
+$page = bps_request($jar['root'], 'GET', '/admin/maintenance/backup')['body'];
+brs_check(
+    str_contains($page, 'name="action" value="save_schedule"') === true,
+    'the Backup page offers the schedule'
+);
+brs_check(
+    str_contains(bps_text($page), 'once a day') === true
+    && str_contains($page, '/cron/backup-run') === true,
+    'and SAYS the hosting company\'s scheduler has to call it, once a day, with the address'
+);
+
+$answer = bps_press($jar['root'], ['action' => 'save_schedule', 'frequency' => 'weekly', 'keep' => '4']);
+brs_check(
+    bps_setting('backup.schedule.frequency') === 'weekly' && bps_setting('backup.schedule.keep') === '4',
+    'saving the schedule writes both settings',
+    bps_setting('backup.schedule.frequency') . ' / ' . bps_setting('backup.schedule.keep')
+);
+
+// 🚫 Refused, not quietly corrected: somebody who typed 0 meant something, and
+//    keeping none would delete the snapshot that had just been taken.
+$answer = bps_press($jar['root'], ['action' => 'save_schedule', 'frequency' => 'weekly', 'keep' => '0']);
+brs_check(
+    bps_setting('backup.schedule.keep') === '4',
+    'keeping zero is refused and the old value stands',
+    bps_setting('backup.schedule.keep')
+);
+brs_check(
+    str_contains(bps_message($answer['body'] ?? ''), 'between 1 and 365') === true
+        || str_contains(bps_text(bps_request($jar['root'], 'GET', '/admin/maintenance/backup')['body']), 'between 1 and 365') === true,
+    'and the refusal says what the range is'
+);
+
+$answer = bps_press($jar['root'], ['action' => 'save_schedule', 'frequency' => 'hourly', 'keep' => '4']);
+brs_check(
+    bps_setting('backup.schedule.frequency') === 'weekly',
+    'a frequency that is not one of the choices is refused',
+    bps_setting('backup.schedule.frequency')
+);
+
+// =============================================================================
+// L. A download somebody can keep, and the same file brought back
+// =============================================================================
+// This is the one moment every member's personal details leave the server in
+// one piece, so the file is always encrypted and the key is never stored. The
+// round trip is what proves the two halves agree: a file that packs and cannot
+// be opened is worse than no download at all.
+echo "\nL. Download a copy, and import it back\n";
+
+$page = bps_request($jar['root'], 'GET', '/admin/maintenance/backup')['body'];
+brs_check(
+    str_contains($page, '/admin/maintenance/backup/download') === true
+    && str_contains($page, 'name="passphraseAgain"') === true,
+    'the Backup page offers a download, and asks for the key twice'
+);
+brs_check(
+    str_contains(bps_text($page), 'is not stored anywhere') === true
+    && str_contains(bps_text($page), 'cannot be opened') === true,
+    'and says plainly that the key is not stored and a lost key means a file nobody can open'
+);
+
+// A finished snapshot to download. Taken through the page, like everything else
+// here.
+bps_press($jar['root'], ['action' => 'snapshot_now']);
+$finished = array_map(
+    static fn (string $path): string => basename(dirname($path)),
+    glob($backups . '/upgrade-*/_manifest.json') ?: []
+);
+sort($finished);
+$toDownload = (string) (array_slice($finished, -1)[0] ?? '');
+
+const BPS_KEY = 'a-long-enough-key-for-this-test';
+
+$downloaded = '';
+if (brs_check($toDownload !== '', 'there is a finished snapshot to download') === true) {
+    $form = bps_request($jar['root'], 'GET', '/admin/maintenance/backup');
+    $got  = bps_request($jar['root'], 'POST', '/admin/maintenance/backup/download', [
+        'csrf_token'      => bps_token($form['body']),
+        'name'            => $toDownload,
+        'keyMode'         => \Portal\Core\BackupArchive::KEY_PASSPHRASE,
+        'passphrase'      => BPS_KEY,
+        'passphraseAgain' => BPS_KEY,
+    ]);
+    brs_check($got['status'] === 200, 'the download answers with the file itself, not a redirect', 'HTTP ' . $got['status']);
+    brs_check(strlen($got['body']) > 1000, 'and the file has some size to it', strlen($got['body']) . ' bytes');
+
+    // 🔐 THE FILE MUST NOT CARRY THE DATA IN THE CLEAR. Checked on what the
+    //    browser really received, not on what the class says it wrote.
+    brs_check(
+        str_contains($got['body'], 'tblUsers') === false
+        && str_contains($got['body'], 'Rae Root') === false
+        && str_contains($got['body'], BPS_KEY) === false,
+        'the downloaded file holds no table name, no member name and no key in the clear'
+    );
+
+    // 🧹 The temporary file packed on the way out must be gone: it holds
+    //    everybody's details and would quietly double where that data sits.
+    $leftBehind = glob($backups . '/*-download-*') ?: [];
+    brs_check($leftBehind === [], 'and no packed copy is left in the backups folder', implode(', ', $leftBehind));
+
+    // Save what the browser received, and open it the way an import will.
+    $downloaded = $child . '/kept.' . \Portal\Core\BackupArchive::EXTENSION;
+    file_put_contents($downloaded, $got['body']);
+
+    try {
+        $envelope = \Portal\Core\BackupArchive::envelopeOf($downloaded);
+        brs_check(
+            (string) ($envelope['snapshot'] ?? '') === $toDownload,
+            'the file says which snapshot it was made from',
+            brs_say($envelope)
+        );
+    } catch (\Throwable $e) {
+        brs_check(false, 'the downloaded file can be read as a portal backup', $e->getMessage());
+    }
+}
+
+// 🚫 The key is typed twice, and a mismatch must not produce a file.
+$form = bps_request($jar['root'], 'GET', '/admin/maintenance/backup');
+$got  = bps_request($jar['root'], 'POST', '/admin/maintenance/backup/download', [
+    'csrf_token'      => bps_token($form['body']),
+    'name'            => $toDownload,
+    'keyMode'         => \Portal\Core\BackupArchive::KEY_PASSPHRASE,
+    'passphrase'      => BPS_KEY,
+    'passphraseAgain' => BPS_KEY . '-different',
+]);
+brs_check(
+    $got['status'] === 302,
+    'two keys that do not match give no file at all',
+    'HTTP ' . $got['status'] . ', ' . strlen($got['body']) . ' bytes'
+);
+
+// 🚫 A key shorter than the minimum.
+$form = bps_request($jar['root'], 'GET', '/admin/maintenance/backup');
+$got  = bps_request($jar['root'], 'POST', '/admin/maintenance/backup/download', [
+    'csrf_token'      => bps_token($form['body']),
+    'name'            => $toDownload,
+    'keyMode'         => \Portal\Core\BackupArchive::KEY_PASSPHRASE,
+    'passphrase'      => 'short',
+    'passphraseAgain' => 'short',
+]);
+brs_check($got['status'] === 302, 'a key shorter than the minimum gives no file', 'HTTP ' . $got['status']);
+
+// 🧹 WHAT IS AND IS NOT PROVED ABOUT THE TEMPORARY FILE.
+//
+// The check above ("no packed copy is left in the backups folder") covers the
+// ORDINARY path: a download that finishes removes the file it packed.
+//
+// THE CANCELLED PATH IS NOT PROVED HERE, and that is worth stating rather than
+// implying. A check was written for it — a download with a 150 ms curl timeout,
+// then a look for `*-download-*` — and it PASSED with the clean-up removed
+// entirely, twice: with `ignore_user_abort(true)` planted away, and with the
+// shutdown function planted away as well. The reason is that this test's
+// snapshot is small, so the server finishes writing the whole answer long
+// before curl gives up; no cancellation is ever staged, and the check was
+// measuring the ordinary path a second time.
+//
+// Staging it honestly would need a snapshot big enough that the server is still
+// streaming after the timeout — several megabytes of rows inserted first, which
+// is minutes of runtime on every pull request for one check.
+//
+// So `backup-download.php` guards that path two ways (`ignore_user_abort(true)`
+// and a `register_shutdown_function` registered before the file exists), both
+// reasoned from PHP's documented behaviour and from the independent check's own
+// measurement of the leak with a crafted loop — NOT from a check in this file.
+// If that page's clean-up is ever changed, nothing here will notice.
+
+// 🚧 AN ADMINISTRATOR OF ONE ORGANISATION MUST NOT BE ABLE TO DOWNLOAD ONE.
+//    A snapshot holds every organisation on the installation, so this is the
+//    gate that matters most here, and it is in the handler rather than only in
+//    what is drawn.
+//
+//    ⚠️ THE TOKEN HAS TO COME FROM A PAGE THEY CAN ACTUALLY LOAD. The Backup
+//       page refuses a non-global administrator before it renders anything, so
+//       it carries no form token for them — and the first version of this check
+//       took the token from there, got an empty string, and was refused by the
+//       FORM TOKEN check rather than by the gate it exists to test. Planting
+//       the gate away left all 174 checks passing. The token is session-wide,
+//       so any page with a form will do; `$orgToken` is asserted non-empty
+//       below so this cannot quietly go hollow again.
+$orgToken = '';
+foreach (['/account', '/', '/calendar'] as $wherever) {
+    $orgToken = bps_token(bps_request($jar['admin'], 'GET', $wherever)['body']);
+    if ($orgToken !== '') {
+        break;
+    }
+}
+brs_check(
+    $orgToken !== '',
+    'the organisation administrator has a usable form token, so the next check tests the gate and not the token'
+);
+
+$got = bps_request($jar['admin'], 'POST', '/admin/maintenance/backup/download', [
+    'csrf_token'      => $orgToken,
+    'name'            => $toDownload,
+    'keyMode'         => \Portal\Core\BackupArchive::KEY_PASSPHRASE,
+    'passphrase'      => BPS_KEY,
+    'passphraseAgain' => BPS_KEY,
+]);
+brs_check(
+    $got['status'] !== 200 || strlen($got['body']) < 1000,
+    'an administrator of ONE organisation cannot download a backup of the whole installation',
+    'HTTP ' . $got['status'] . ', ' . strlen($got['body']) . ' bytes'
+);
+brs_check(
+    (int) (Brs::$writer->query(
+        "SELECT COUNT(*) FROM tblActivityLogs WHERE activityType = 'BackupDownloadRefused'"
+    )->fetch_row()[0] ?? 0) >= 1,
+    'and the refusal is recorded, so a global administrator can see it was tried'
+);
+
+// 🚫 And a member cannot reach the page at all.
+$got = bps_request($jar['member'], 'GET', '/admin/maintenance/backup/import');
+brs_check($got['status'] !== 200, 'a member cannot open the import page', 'HTTP ' . $got['status']);
+
+// =============================================================================
+// M. Importing unpacks, and does NOT restore
+// =============================================================================
+// Two steps on purpose. The import produces a snapshot folder; putting it back
+// is the existing Restore, with every guard it already has. One press would
+// mean a second path writing over a live database, and that path would have to
+// agree with the first about every guard for ever.
+echo "\nM. Importing a backup file\n";
+
+$page = bps_request($jar['root'], 'GET', '/admin/maintenance/backup/import');
+brs_check($page['status'] === 200, 'the import page opens for a global administrator', 'HTTP ' . $page['status']);
+brs_check(
+    str_contains(bps_text($page['body']), 'does not restore anything') === true,
+    'and says plainly that importing does not restore anything'
+);
+brs_check(
+    str_contains(bps_text($page['body']), 'upload_max_filesize') === true
+    || str_contains(bps_text($page['body']), 'does not say what size') === true,
+    'and states what size of upload this server will actually take, rather than letting somebody find out'
+);
+
+if ($downloaded !== '' && is_file($downloaded) === true) {
+    // Put the file where a customer's hosting panel would put it.
+    @mkdir($backups . '/incoming', 0700, true);
+    copy($downloaded, $backups . '/incoming/kept.' . \Portal\Core\BackupArchive::EXTENSION);
+
+    $page = bps_request($jar['root'], 'GET', '/admin/maintenance/backup/import');
+    brs_check(
+        str_contains($page['body'], 'kept.' . \Portal\Core\BackupArchive::EXTENSION) === true,
+        'a file put in the incoming folder appears on the page'
+    );
+    brs_check(
+        str_contains($page['body'], 'value="' . $toDownload . '"') === true
+            || str_contains(bps_text($page['body']), $toDownload) === true,
+        'and the page says which snapshot it was made from'
+    );
+
+    $beforeFolders = glob($backups . '/imported-*') ?: [];
+
+    // 🚫 The wrong key must not unpack anything.
+    $got = bps_request($jar['root'], 'POST', '/admin/maintenance/backup/import', [
+        'csrf_token' => bps_token($page['body']),
+        'action'     => 'import_incoming',
+        'name'       => 'kept.' . \Portal\Core\BackupArchive::EXTENSION,
+        'passphrase' => 'the-wrong-key-entirely',
+    ]);
+    brs_check(
+        (glob($backups . '/imported-*') ?: []) === $beforeFolders,
+        'the wrong key leaves no half-unpacked snapshot behind'
+    );
+
+    // ✅ And the right one does unpack.
+    $page = bps_request($jar['root'], 'GET', '/admin/maintenance/backup/import');
+    $got  = bps_request($jar['root'], 'POST', '/admin/maintenance/backup/import', [
+        'csrf_token' => bps_token($page['body']),
+        'action'     => 'import_incoming',
+        'name'       => 'kept.' . \Portal\Core\BackupArchive::EXTENSION,
+        'passphrase' => BPS_KEY,
+    ]);
+    $afterFolders = glob($backups . '/imported-*') ?: [];
+    brs_check(count($afterFolders) === count($beforeFolders) + 1, 'the right key unpacks it as one new snapshot',
+        implode(', ', array_map('basename', $afterFolders)));
+
+    $importedName = basename((string) (array_slice($afterFolders, -1)[0] ?? ''));
+    brs_check(
+        $importedName !== '' && is_file($backups . '/' . $importedName . '/_manifest.json') === true,
+        'the unpacked snapshot has its manifest, so DbBackup sees it as finished',
+        $importedName
+    );
+
+    // 🏷️ Named for the moment of import, NOT the name inside the file: it
+    //    cannot collide with what is already there, it is obvious which came
+    //    from outside, and prune() only removes `upgrade-…` so an imported
+    //    backup is never tidied away by the scheduled job.
+    brs_check(
+        str_starts_with($importedName, 'imported-') === true,
+        'and is named for the import rather than overwriting the original snapshot',
+        $importedName
+    );
+    brs_check(
+        is_dir($backups . '/' . $toDownload) === true,
+        'the snapshot it was originally made from is untouched'
+    );
+
+    // 📋 It appears on the Backup page like any other snapshot, which is what
+    //    makes the existing Rehearse and Restore work on it.
+    $page = bps_request($jar['root'], 'GET', '/admin/maintenance/backup')['body'];
+    brs_check(
+        str_contains($page, '<code>' . $importedName . '</code>') === true,
+        'the imported snapshot is listed on the Backup page'
+    );
+    brs_check(
+        str_contains($page, 'name="name" value="' . $importedName . '"') === true,
+        'with the existing buttons working on it'
+    );
+
+    // 🔁 AND IT REALLY IS THE SAME SNAPSHOT. The strongest check here: the
+    //    rehearsal reads the imported folder and answers that it can be put
+    //    back, which is a far stronger statement than "the files unpacked".
+    $answer = bps_press($jar['root'], ['action' => 'check_snapshot', 'name' => $importedName]);
+    brs_check(
+        str_contains(bps_text($answer['body']), 'can be restored') === true
+            || str_contains(bps_text(bps_request($jar['root'], 'GET', '/admin/maintenance/backup')['body']), 'can be restored') === true,
+        'and rehearsing a restore of the IMPORTED snapshot says it can be put back',
+        bps_message($answer['body'])
+    );
+
+    // 🚧 An administrator of one organisation must not be able to import
+    //    either — with a REAL token, for the same reason as the download check
+    //    above. The import page does render a token for them (it shows itself
+    //    read-only rather than refusing outright), but taking it from a page
+    //    they can certainly load keeps the two checks alike and cannot go
+    //    hollow if that page's behaviour changes.
+    $before   = glob($backups . '/imported-*') ?: [];
+    $orgToken = '';
+    foreach (['/admin/maintenance/backup/import', '/account', '/'] as $wherever) {
+        $orgToken = bps_token(bps_request($jar['admin'], 'GET', $wherever)['body']);
+        if ($orgToken !== '') {
+            break;
+        }
+    }
+    brs_check($orgToken !== '', 'the organisation administrator has a usable form token for the import check');
+    bps_request($jar['admin'], 'POST', '/admin/maintenance/backup/import', [
+        'csrf_token' => $orgToken,
+        'action'     => 'import_incoming',
+        'name'       => 'kept.' . \Portal\Core\BackupArchive::EXTENSION,
+        'passphrase' => BPS_KEY,
+    ]);
+    brs_check(
+        (glob($backups . '/imported-*') ?: []) === $before,
+        'an administrator of ONE organisation cannot import a backup of the whole installation'
+    );
+    brs_check(
+        (int) (Brs::$writer->query(
+            "SELECT COUNT(*) FROM tblActivityLogs WHERE activityType = 'BackupImportRefused'"
+        )->fetch_row()[0] ?? 0) >= 1,
+        'and that refusal is recorded too'
+    );
+
+    // 🧹 The file the administrator put in the incoming folder is THEIRS and is
+    //    left alone. Only an uploaded one is removed.
+    brs_check(
+        is_file($backups . '/incoming/kept.' . \Portal\Core\BackupArchive::EXTENSION) === true,
+        'a file the administrator put in the incoming folder is left where they put it'
+    );
+
+    // 🛑 THE INCOMING FOLDER MUST NOT LOOK LIKE A SNAPSHOT, and this was a
+    //    real fault with a real cost, found by the independent check: this
+    //    class lists EVERY folder in `_backups/`, so `incoming` appeared on the
+    //    Backup page as a row reading "Unfinished — not a backup" with a DELETE
+    //    button beside it. `isSnapshotName('incoming')` was true, so Delete
+    //    accepted it and removed the folder and everything in it — which may be
+    //    the only copy of the database somebody has just brought back after
+    //    losing their server. The row actively invited the press.
+    $page = bps_request($jar['root'], 'GET', '/admin/maintenance/backup')['body'];
+    brs_check(
+        str_contains($page, '<code>incoming</code>') === false,
+        'the incoming folder is NOT listed on the Backup page as a snapshot'
+    );
+    brs_check(
+        str_contains($page, 'name="name" value="incoming"') === false,
+        'and no button on that page acts on it'
+    );
+
+    // And a Delete posted past the missing button must still be refused, because
+    // hiding a control is a courtesy and the handler is the control.
+    bps_press($jar['root'], ['action' => 'delete', 'name' => 'incoming']);
+    brs_check(
+        is_dir($backups . '/incoming') === true
+        && is_file($backups . '/incoming/kept.' . \Portal\Core\BackupArchive::EXTENSION) === true,
+        'a Delete posted for "incoming" is refused, and the files in it survive'
+    );
+}
+
+// =============================================================================
+// N. The scheduled job itself
+// =============================================================================
+// Called by the hosting company's scheduler, with a token and no session. The
+// address is seeded unprotected for exactly that reason; the token is the gate.
+echo "\nN. The scheduled backup job\n";
+
+// ⚠️ THE TOKEN IS WRITTEN FRESH EVERY RUN, AS A PLAIN VALUE.
+//
+//    `maintenance.cronToken` is a SENSITIVE setting, so the portal stores it
+//    encrypted and `bps_setting()` reads the column raw. The first version of
+//    this read that raw value and used it as the token: on a FRESH database the
+//    row is empty so a plaintext token was written and section N passed, but on
+//    a SECOND run against the same database it read the encrypted string and
+//    six checks failed with `{"error":"invalid_token"}` — a job that looked
+//    broken because the fixture was. Fine in CI, where the database is new each
+//    time, and thoroughly misleading locally.
+//
+//    `isSensitive = 0` is set as well as the value, so the portal reads back
+//    exactly what is written here however the row got there.
+$cronToken = 'selftest-cron-token-' . bin2hex(random_bytes(6));
+Brs::$writer->prepare(
+    'INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) '
+    . 'VALUES (NULL, ?, ?, ?, 0) '
+    . 'ON DUPLICATE KEY UPDATE settingValue = VALUES(settingValue), isSensitive = 0'
+)->execute(['maintenance.cronToken', $cronToken, $cronToken]);
+
+$noJar = $child . '/jar-nobody.txt';
+
+$got = bps_request($noJar, 'GET', '/cron/backup-run');
+brs_check($got['status'] === 403, 'the job refuses a call with no token', 'HTTP ' . $got['status']);
+
+$got = bps_request($noJar, 'GET', '/cron/backup-run?token=' . urlencode($cronToken . '-wrong'));
+brs_check($got['status'] === 403, 'and a wrong token', 'HTTP ' . $got['status']);
+
+// Switched off: answers plainly rather than as an error, so a daily call does
+// not fill the hosting company's log with failures.
+bps_press($jar['root'], ['action' => 'save_schedule', 'frequency' => 'off', 'keep' => '7']);
+$got    = bps_request($noJar, 'GET', '/cron/backup-run?token=' . urlencode($cronToken));
+$answer = json_decode($got['body'], true);
+brs_check(
+    $got['status'] === 200 && is_array($answer) === true && ($answer['action'] ?? '') === 'none',
+    'with the schedule off it answers "nothing to do" rather than an error',
+    mb_substr($got['body'], 0, 200)
+);
+
+// Daily, with a snapshot taken moments ago: not due.
+bps_press($jar['root'], ['action' => 'save_schedule', 'frequency' => 'daily', 'keep' => '7']);
+$got    = bps_request($noJar, 'GET', '/cron/backup-run?token=' . urlencode($cronToken));
+$answer = json_decode($got['body'], true);
+brs_check(
+    is_array($answer) === true && ($answer['action'] ?? '') === 'none'
+    && str_contains((string) ($answer['reason'] ?? ''), 'not old enough') === true,
+    'a backup taken moments ago means today\'s call takes no second one',
+    mb_substr($got['body'], 0, 200)
+);
+
+// 📅 MAKE EVERY FINISHED SNAPSHOT LOOK OLDER.
+//
+//    `touch()` is NOT enough and that was the first attempt: for a FINISHED
+//    snapshot `listSnapshots()` reads `created_at` from INSIDE `_manifest.json`
+//    (only an unfinished one falls back to the folder's timestamp). So the four
+//    checks below all read an age of 0 and reported the job as broken when the
+//    fixture was wrong. The manifest's own field is what has to move.
+$bps_age = static function (int $hoursAgo) use ($backups): int {
+    $moved = 0;
+    foreach (glob($backups . '/upgrade-*/_manifest.json') ?: [] as $manifestPath) {
+        $manifest = json_decode((string) file_get_contents($manifestPath), true);
+        if (is_array($manifest) === false) {
+            continue;
+        }
+        $manifest['created_at'] = date('c', time() - ($hoursAgo * 3600));
+        file_put_contents($manifestPath, (string) json_encode($manifest));
+        touch($manifestPath, time() - ($hoursAgo * 3600));
+        touch(dirname($manifestPath), time() - ($hoursAgo * 3600));
+        $moved++;
+    }
+
+    return $moved;
+};
+
+// 📅 DUE. The age is worked out from the newest FINISHED snapshot, so making
+//    that older is all it takes — there is no stored "last run" to fake, which
+//    is the point of reading it from the snapshots themselves.
+$aged = $bps_age(48);
+brs_check($aged > 0, 'there is a finished snapshot to make older', (string) $aged);
+$beforeCount = count(glob($backups . '/upgrade-*/_manifest.json') ?: []);
+$got         = bps_request($noJar, 'GET', '/cron/backup-run?token=' . urlencode($cronToken));
+$answer      = json_decode($got['body'], true);
+brs_check(
+    is_array($answer) === true && ($answer['action'] ?? '') === 'snapshot' && ($answer['ok'] ?? false) === true,
+    'with the newest backup two days old, the daily call takes one',
+    mb_substr($got['body'], 0, 300)
+);
+brs_check(
+    (string) ($answer['snapshot'] ?? '') !== '',
+    'and says which snapshot it made',
+    brs_say($answer)
+);
+brs_check(
+    count(glob($backups . '/upgrade-*/_manifest.json') ?: []) > $beforeCount,
+    'which really is a new finished snapshot on disk'
+);
+
+// 🧹 Keeping only one must remove the older ones — and must NOT touch an
+//    imported snapshot, which prune() leaves alone because it only removes
+//    folders named `upgrade-…`.
+$importedBefore = count(glob($backups . '/imported-*') ?: []);
+$bps_age(48);
+bps_press($jar['root'], ['action' => 'save_schedule', 'frequency' => 'daily', 'keep' => '1']);
+$got    = bps_request($noJar, 'GET', '/cron/backup-run?token=' . urlencode($cronToken));
+$answer = json_decode($got['body'], true);
+brs_check(
+    is_array($answer) === true && (int) ($answer['removed'] ?? 0) >= 1,
+    'keeping one removes the older snapshots',
+    brs_say($answer)
+);
+brs_check(
+    count(glob($backups . '/imported-*') ?: []) === $importedBefore,
+    'and an IMPORTED snapshot is never tidied away by the scheduled job'
+);
 
 // =============================================================================
 $failed = Brs::$proofOk === false;

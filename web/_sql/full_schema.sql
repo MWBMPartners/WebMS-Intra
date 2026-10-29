@@ -3707,7 +3707,12 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('cron/retention-sweep', 'cron/retention-sweep.php', 0),
     ('cron/health',          'cron/health.php',          0),
-    ('cron/backup-check',    'cron/backup-check.php',    0)
+    ('cron/backup-check',    'cron/backup-check.php',    0),
+    -- ⏰ Takes a backup on a schedule (migration 228). UNPROTECTED for the
+    --    same reason as cron/backup-check: a scheduler has a token and no
+    --    session, so a protected address would send it to the sign-in page and
+    --    no backup would ever be taken. The token is checked in the file.
+    ('cron/backup-run',      'cron/backup-run.php',      0)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('196_scheduled_job_addresses.sql')
@@ -5326,7 +5331,12 @@ CREATE TABLE IF NOT EXISTS `tblOffsiteSyncLog` (
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/maintenance/offsite-backup',     'admin/maintenance/offsite-backup.php',     1),
-    ('admin/maintenance/offsite-backup/run', 'admin/maintenance/offsite-backup-run.php', 1)
+    ('admin/maintenance/offsite-backup/run', 'admin/maintenance/offsite-backup-run.php', 1),
+    -- 📥 A backup as one encrypted file, and back again (migration 228).
+    --    Both refuse anybody who is not a GLOBAL administrator in their own
+    --    handler: a backup holds every organisation's data, not only one's own.
+    ('admin/maintenance/backup/download',    'admin/maintenance/backup-download.php',    1),
+    ('admin/maintenance/backup/import',      'admin/maintenance/backup-import.php',      1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
@@ -5335,7 +5345,21 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'backup.offsite.rcloneRemote', '', '', 0),
     (NULL, 'backup.offsite.keepWeekly',  '8', '8', 0),
     (NULL, 'backup.offsite.keepMonthly', '12', '12', 0),
-    (NULL, 'backup.offsite.alertEmail',  '', '', 0)
+    (NULL, 'backup.offsite.alertEmail',  '', '', 0),
+    -- ⏰ How often a backup is taken by itself, and how many are kept
+    --    (migration 228). Installation-wide and must stay so: one database
+    --    serves every organisation, so a backup is installation-wide by nature.
+    --    There is nothing here for an organisation to lower, which is why these
+    --    are NOT limit-type settings in the sense of #668.
+    --
+    --    DAILY BY DEFAULT because a scheduled backup only happens once the
+    --    customer points their hosting company's scheduler at /cron/backup-run.
+    --    Until they do, this changes nothing; "off" would mean somebody who DID
+    --    wire it up got nothing, and was then e-mailed by the freshness alert
+    --    about backups that were never going to be taken. Read in ONE place,
+    --    cron/backup-run.php.
+    (NULL, 'backup.schedule.frequency', 'daily', 'daily', 0),
+    (NULL, 'backup.schedule.keep',      '7',     '7',     0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 -- =============================================================================
@@ -10446,4 +10470,10 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('226_offboarding_erasure.sql')
 --    /admin/settings/repeats routes are already seeded above, so a fresh
 --    install needs nothing from that migration either.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('227_repeating_events.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- 📋 Migration 228 (#569): the two `backup.schedule.*` settings and the three
+--    addresses are already seeded above, so a fresh install needs nothing from
+--    that migration either.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('228_backup_download_import_schedule.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;

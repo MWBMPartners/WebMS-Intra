@@ -6,7 +6,54 @@
 
 ---
 
-## 29 OCTOBER 2026, NEXT UP — backups: schedule, download, import (reconnaissance done)
+## 29 OCTOBER 2026, LATEST — backups a customer can keep (#569, migration 228)
+
+**State: built, verified, independently checked (NOT CLEAN → all fixed), committed.**
+
+Three things the portal could not do: take a backup by itself, get a copy off the server, or bring
+one back. `Portal\Core\BackupArchive` is the ONE place a snapshot folder becomes one encrypted file
+and back, on libsodium's `secretstream`, streamed. `backup-download.php` packs and sends it;
+`backup-import.php` unpacks (and deliberately does NOT restore — one audited restore path);
+`cron/backup-run.php` takes one on a schedule and prunes. Migration 228 adds two settings and three
+routes.
+
+**Verified:** 38 audit checks, `php -l` clean, 47 archive checks (no database), 181 HTTP checks,
+migration 228 replayed three times with a customer's own choice surviving, an old database gaining
+the rows. 0 dangling Docker volumes.
+
+**The independent check came back NOT CLEAN with four real problems, all fixed:**
+
+1. **A HANG.** Unpacking a file whose entry declared more bytes than followed looped for ever at full
+   CPU — burning a web worker until the host killed it, and leaving the half-unpacked folder behind.
+   The end-of-stream test required no entry to be pending, so the one case that mattered fell through
+   it. Check C11, in a CHILD PROCESS, because a hang cannot be seen from inside the hanging process.
+2. **DATA LOSS.** `_backups/incoming/` — the folder the import page tells customers to use — appeared
+   on the Backup page as "Unfinished — not a backup" WITH A DELETE BUTTON, and Delete removed it and
+   everything in it. `DbBackup::NOT_SNAPSHOTS` is now the one list of reserved names.
+3. **Unbounded key work** taken from the unauthenticated envelope and paid before anything is
+   authenticated: a file claiming 1 TB never returned. Now bounded 8 KB–1 GB.
+4. **A cancelled download left a full encrypted copy of the database** on the server, which nothing
+   would ever remove.
+
+**TWO LESSONS WORTH MORE THAN THE FIXES.**
+
+First: **restoring a planted file from a scratch copy taken at the wrong moment silently undid three
+finished fixes.** Only a `grep` for the new constant caught it. When planting, save the restore copy
+immediately before the plant — never reuse one from earlier in the session — and grep for the fix
+after restoring.
+
+Second: **a check I wrote for the cancelled-download leak passed with BOTH guards removed.** The page
+test's snapshot is small enough that the server finishes before the client gives up, so no
+cancellation was ever staged and the check measured the ordinary path twice. It is now an honest
+comment saying the path is unproven, in both the test and the page.
+
+**Next:** the transcription trigger (item 5), then #641 in full, then the browser/visual half of #569.
+Found and logged, not built: #668 (limit settings application-wide — a known live instance), #669,
+#670, #671 (offsite backup needs a shell it will not have on shared hosting).
+
+---
+
+## 29 OCTOBER 2026 — backups: the reconnaissance that scoped the above
 
 **Nothing built yet.** This is the next item on the owner's release list. What is already there,
 measured rather than assumed:

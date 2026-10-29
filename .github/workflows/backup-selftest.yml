@@ -87,6 +87,12 @@ on:
       - 'web/_core/Maintenance.php'
       - 'web/_apps/admin/maintenance/backup.php'
       - 'web/_apps/admin/maintenance/backup-check.php'
+      # 📦 A backup a customer can keep, and bring back (#569)
+      - 'web/_core/BackupArchive.php'
+      - 'web/_apps/admin/maintenance/backup-download.php'
+      - 'web/_apps/admin/maintenance/backup-import.php'
+      - 'web/_apps/cron/backup-run.php'
+      - 'tools/backup-archive-selftest.php'
       - 'web/_apps/cron/_backup-freshness.php'
       - 'web/_apps/cron/_health-probes.php'
       - 'web/_install/upgrade.php'
@@ -221,6 +227,21 @@ jobs:
           set -o pipefail
           php -d memory_limit=-1 tools/backup-restore-selftest.php | tee /tmp/backup-restore-selftest.txt
           grep -q '^REACHED THE END$' /tmp/backup-restore-selftest.txt
+
+      # 📦 The archive test needs NO DATABASE and no web server, so it runs
+      #    before anything else: if packing or unpacking is broken, that is the
+      #    cheapest possible place to find out. It writes only inside a folder it
+      #    makes itself and removes it at the end.
+      #
+      #    `if: always()` and no `|| true`: this is a hard gate. It guards the
+      #    one moment every member's personal details leave the server in one
+      #    piece, so a failure here must turn the run red.
+      - name: 'Backup archive self-test (packing and encryption, no database) (#569)'
+        if: always()
+        run: |
+          set -o pipefail
+          php tools/backup-archive-selftest.php | tee /tmp/backup-archive-selftest.txt
+          grep -qE '^[0-9]+ checks: [0-9]+ passed, 0 failed\.$' /tmp/backup-archive-selftest.txt
 
       # The page test makes its scratch copy of web/ inside its own new
       # folder under the runner's temporary space, and deletes only that.
