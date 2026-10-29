@@ -6,6 +6,58 @@
 
 ---
 
+## 29 OCTOBER 2026, LATEST — the database-shape audit (#487 task 6), commit `962269a`
+
+The owner asked for the uniqueness-on-empty-columns review and then widened the brief: do whatever
+else is needed for a first USABLE release, with as few half-finished features as possible.
+
+**The audit.** Every unique key in the schema holding a column that can be empty, read out of a
+LOADED DATABASE (not the SQL — `information_schema` calls a generated column nullable even when it
+can never be empty, so `siteScope` looks like a fault and is not): **15 keys, 14 right, 1 broken.**
+
+**The broken one was live.** `tblEventAttendance.uq_attendance_unique` covered
+(eventID, userID, walkinName, dayDate); a row names its person by EITHER `userID` OR `walkinName`,
+so no row ever filled in all four and the key refused NOTHING, ever — while the mark-present page
+writes `INSERT IGNORE` under a comment saying "idempotent via unique key". Migration 224 fixes it
+with a worked-out `attendeeRef`, VIRTUAL (STORED is refused, ERROR 1215, tried).
+
+**The subtle part, do not undo it:** `attendeeRef` is NULL when the person is unknown, on purpose.
+`GdprEraser` anonymises attendance rather than deleting it so the aggregate survives; two erased
+people cannot be told apart; a key that collapsed them would delete the counts erasure exists to
+preserve. The de-dup's `WHERE` carries the same restriction. Four anonymised rows planted — all
+four survived, on all three engines.
+
+**I OVERSTATED THE HARM IN FIVE PLACES AND IT WAS CAUGHT.** "Counted twice in every attendance
+figure" is FALSE: the grid keys its display by person and day, walk-ins come back
+`SELECT DISTINCT`, both Discipleship joins feed an `INSERT IGNORE` with no empty key part, there is
+no `COUNT(*)` over the table and `ReportBuilder` cannot reach it. **Nothing shown to a user was ever
+wrong.** Corrected everywhere, correction left visible.
+
+**Two more real findings from the check, both fixed:** `full_schema.sql` and the migration disagreed
+about the column COMMENT (the rule says they must agree) — and **the harness does NOT compare column
+comments**, so all 42 checks passed over it; and a docblock in `Newsletter.php` still said the
+unimplemented branches "throw" when they fall back, so the file carried both versions at once.
+
+**Release readiness, done:** translation (#485) ships off but looked finished if enabled — its page
+now says nothing is being translated; newsletter documented three sending services when one exists —
+header, docblock and page all corrected. **Checked and NOT a bug:** the `.enabled` defaults mix
+`'0'`, `'false'` and `'true'`, which looked dangerous because `(bool)'false'` is true in PHP — but
+every reader uses `=== '1' || === 'true'`, never a cast.
+
+**Two limits recorded, neither hidden:** a whole-database restore of a pre-224 snapshot holding
+duplicates is refused (`restoreAll()` stops on any rejected row) — the way out is a one-table restore,
+which works because this table is not on `WHOLE_DATABASE_ONLY`; and the harness's comment blindness
+above.
+
+**THE PATTERN TO WATCH IN THIS WHOLE RUN:** three review rounds, all NOT CLEAN, **every finding about
+TRUTHFULNESS rather than behaviour.** The engineering held each time; the write-ups kept overstating.
+
+**Next:** continue the release-readiness sweep. Found while reading and NOT yet investigated — a
+walk-in cannot be un-marked (`event-attendance-mark.php` handles removal only for `$userId > 0`, with
+a comment deferring walk-in removal to "a v1.1 admin UI"), so a mistyped walk-in name may be
+permanent, and migration 224 makes re-adding the corrected name a no-op if the typo is still there.
+Also still open: #641 (api-spec vs handlers) and #569 (pre-push hook, visual audit).
+
 ## 28 OCTOBER 2026, LATEST — the migration harness now runs on MariaDB (#487), commit `97afe09`
 
 The owner asked why the end-to-end migration harness could not run on MariaDB, and whether it
