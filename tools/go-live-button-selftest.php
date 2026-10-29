@@ -1168,10 +1168,46 @@ glb_check(
     'the card\'s own three choices were saved as pressed',
     json_encode($storedNow) ?: ''
 );
+// 🔢 "Every other choice is still there" used to be checked as
+//    `count($storedNow) >= 15`, and that number stopped being true on
+//    29 October 2026 (#569, #662): SEVEN notification preferences were removed
+//    because nothing that sends anything ever read them, so the portal now
+//    stores eight, not fifteen.
+//
+//    THE NUMBER IS NOT SIMPLY LOWERED, because lowering a check to make it
+//    pass is how a guard quietly stops guarding. What this check is FOR is
+//    that pressing Save on the Account card does not throw away the member's
+//    other stored choices (#612), and a count was only ever a rough stand-in
+//    for that. So it now names the keys that must survive and requires every
+//    one of them, which is stricter than any count: adding or removing a
+//    preference changes this list on purpose, and dropping one fails.
+$mustSurvive = [
+    'eventReminders'       => null,   // null = any value, it just has to be there
+    'givingStatements'     => null,
+    'taskReminders'        => null,
+    'rotaReminders'        => null,
+    'approvalRequests'     => null,
+    'pushLivestream'       => false,  // switched OFF in the set-up above; this is the #612 property
+    'pushServiceReminders' => true,
+    'pushApprovals'        => null,
+];
+$survived = is_array($storedNow) === true;
+$missing  = [];
+foreach ($mustSurvive as $key => $expected) {
+    if (is_array($storedNow) === false || array_key_exists($key, $storedNow) === false) {
+        $survived = false;
+        $missing[] = $key . ' (gone)';
+        continue;
+    }
+    if ($expected !== null && $storedNow[$key] !== $expected) {
+        $survived = false;
+        $missing[] = $key . ' (is ' . json_encode($storedNow[$key]) . ', should be ' . json_encode($expected) . ')';
+    }
+}
 glb_check(
-    is_array($storedNow) === true && ($storedNow['pushLivestream'] ?? 'missing') === false && ($storedNow['pushServiceReminders'] ?? 'missing') === true && count($storedNow) >= 15,
+    $survived,
     'and every other choice the member had stored is still there: "We\'re live now" is still OFF (it used to be thrown away, and a missing choice counts as ON)',
-    json_encode($storedNow) ?: ''
+    ($missing === [] ? '' : implode('; ', $missing) . ' — ') . (json_encode($storedNow) ?: '')
 );
 $pressed = glb_press($jar['admin'], GLB_EVENT);
 glb_check(($pressed['answer']['status'] ?? 0) === 302 && glb_addressed(1) === [GLB_S_ON, GLB_S_ON2], 'so a press now still does NOT address that member\'s device', json_encode(glb_subs()) ?: '');

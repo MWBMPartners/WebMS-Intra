@@ -162,6 +162,16 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                             continue;
                         }
 
+                        // 🛡️ Nor a link to an administrator's page, for
+                        //    somebody who is not one (#569). The same guard is
+                        //    in _apps/dashboard/index.php, which builds its
+                        //    cards the same way — change both together. The
+                        //    full reasoning, and the one thing it cannot
+                        //    cover, is written there.
+                        if (str_starts_with($appRoute, 'admin/') === true && App::isAdmin() !== true) {
+                            continue;
+                        }
+
                         $appName = $appConf['displayName'] ?? ($registry[$appKey]['name'] ?? ucfirst($appKey));
                         $appIcon = $appConf['displayIcon'] ?? ($registry[$appKey]['icon'] ?? 'fa-solid fa-cube');
                         $isActive = ($navSection === $appKey);

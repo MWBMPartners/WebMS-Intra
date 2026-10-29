@@ -60,7 +60,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
             $stmt->bind_param('iiis', $slotId, $userId, $target, $message);
             $stmt->execute();
             $stmt->close();
-            $flash = 'Swap request sent. The other member will be notified.';
+            $flash = 'Swap request saved. Tell the other member yourself for now — '
+                   . 'the portal does not send them a message, and they have no page '
+                   . 'to answer it on yet.';
             $flashType = 'success';
         }
     } catch (\Throwable $e) {

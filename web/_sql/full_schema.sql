@@ -2270,7 +2270,7 @@ ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 -- ─── Future app toggles (disabled by default) ────────────────────────────────
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
-VALUES ('attendance.enabled', 'false', 0, 'false')
+VALUES ('attendance.enabled', 'true', 0, 'true')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
@@ -2286,7 +2286,7 @@ VALUES ('attendance.brandColor', '#6f42c1', 0, '#6f42c1')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
-VALUES ('calendar.enabled', 'false', 0, 'false')
+VALUES ('calendar.enabled', 'true', 0, 'true')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
@@ -2308,7 +2308,7 @@ VALUES ('calendar.defaultView', 'month', 0, 'month')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
-VALUES ('leadership.enabled', 'false', 0, 'false')
+VALUES ('leadership.enabled', 'true', 0, 'true')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
@@ -3075,7 +3075,7 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
-    (NULL, 'praise.enabled',     '0',              '0',              0),
+    (NULL, 'praise.enabled',     '1',              '1',              0),
     (NULL, 'praise.displayName', 'Praise Reports', 'Praise Reports', 0),
     (NULL, 'praise.displayIcon', 'fa-solid fa-hands-clapping', 'fa-solid fa-hands-clapping', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
@@ -3105,7 +3105,7 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
-    (NULL, 'milestones.enabled',           '0', '0', 0),
+    (NULL, 'milestones.enabled',           '1', '1', 0),
     (NULL, 'milestones.digest_recipients', '',  '',  0),
     (NULL, 'milestones.displayName',       'Milestones', 'Milestones', 0),
     (NULL, 'milestones.displayIcon',       'fa-solid fa-cake-candles', 'fa-solid fa-cake-candles', 0)
@@ -3230,7 +3230,7 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
-    (NULL, 'visitors.enabled',                   '0', '0', 0),
+    (NULL, 'visitors.enabled',                   '1', '1', 0),
     (NULL, 'visitors.coordinator_role',          'visitor_coordinator', 'visitor_coordinator', 0),
     (NULL, 'visitors.followup_initial_days',     '7',  '7',  0),
     (NULL, 'visitors.followup_followup_days',    '30', '30', 0),
@@ -3251,7 +3251,7 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
-    (NULL, 'directory.enabled',     '0', '0', 0),
+    (NULL, 'directory.enabled',     '1', '1', 0),
     (NULL, 'directory.displayName', 'Member Directory', 'Member Directory', 0),
     (NULL, 'directory.displayIcon', 'fa-solid fa-address-book', 'fa-solid fa-address-book', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
@@ -3341,7 +3341,7 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
-    (NULL, 'rota.enabled',              '0', '0', 0),
+    (NULL, 'rota.enabled',              '1', '1', 0),
     (NULL, 'rota.reminder_days_before', '3', '3', 0),
     (NULL, 'rota.allow_open_swap',      '1', '1', 0),
     (NULL, 'rota.displayName',          'Duty Roster', 'Duty Roster', 0),
@@ -3554,10 +3554,14 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/email-templates/preview', 'admin/email-templates/preview.php',1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
--- 📬 Notification prefs UI gating (matches migration 050)
-INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
-    (NULL, 'notifications.deliveryReady', 'false', 'false', 0)
-ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+-- 📬 Notification prefs UI gating: REMOVED (#569, migration 225).
+-- This block seeded `notifications.deliveryReady` = 'false'. Nothing that sends
+-- anything ever read it: it was read in one place, the Notification preferences
+-- page, purely to show every member a banner saying notifications were "not yet
+-- being sent on this site" — which was untrue, because the mail queue sent them
+-- regardless. The banner and the setting are both gone. The whole statement is
+-- removed rather than emptied: an INSERT ... VALUES with no rows is a syntax
+-- error, which is what a first attempt at this left behind.
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('account/notifications',      'auth/account/notifications.php',      1),
@@ -3922,7 +3926,7 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
-    (NULL, 'invites.enabled',           '0',  '0',  0),
+    (NULL, 'invites.enabled',           '1',  '1',  0),
     (NULL, 'invites.default_expiry_days','7',  '7',  0),
     (NULL, 'invites.default_role',      'user','user',0),
     (NULL, 'invites.displayName',       'Invitations', 'Invitations', 0),
@@ -3937,7 +3941,11 @@ CREATE TABLE IF NOT EXISTS `tblOffboarding` (
     `userID`         INT          NOT NULL,
     `effectiveDate`  DATE         NOT NULL,
     `reason`         VARCHAR(500) DEFAULT NULL,
-    `dataDisposition` ENUM('retain','anonymise','delete') NOT NULL DEFAULT 'retain',
+    `dataDisposition` ENUM('retain','anonymise','delete','erase') NOT NULL DEFAULT 'retain',
+                     -- 'erase' is what the form sends now (#569, migration 226). 'anonymise'
+                     -- and 'delete' are KEPT so existing audit rows still read as they were
+                     -- written; both are treated as 'erase' when read, because under the old
+                     -- code neither did anything at all, so there is no behaviour to preserve.
     `offboardedByID` INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `offboardedAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `rehiredAt`      DATETIME     DEFAULT NULL,
@@ -3960,6 +3968,15 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'offboarding.enabled',          '0',  '0',  0),
     (NULL, 'offboarding.undo_window_days', '7',  '7',  0),
+    -- 🗑️ When an erasure that offboarding asked for is actually carried out (#569).
+    --    'on_request'        — it waits on Admin → Erasure for somebody to run. The
+    --                          default, because nothing has to be scheduled for it to
+    --                          be safe, and nothing irreversible happens on its own.
+    --    'after_undo_window' — the daily housekeeping job runs it once
+    --                          offboarding.undo_window_days has passed.
+    --    Running it the instant somebody is offboarded is #663, deliberately not
+    --    offered yet: it would make the undo window meaningless for that person.
+    (NULL, 'offboarding.erasureMode',      'on_request', 'on_request', 0),
     (NULL, 'offboarding.displayName',      'Offboarding', 'Offboarding', 0),
     (NULL, 'offboarding.displayIcon',      'fa-solid fa-door-open', 'fa-solid fa-door-open', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
@@ -4024,7 +4041,7 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
-    (NULL, 'resources.enabled',         '0', '0', 0),
+    (NULL, 'resources.enabled',         '1', '1', 0),
     (NULL, 'resources.default_buffer',  '15','15', 0),
     (NULL, 'resources.lookahead_days',  '90','90', 0),
     (NULL, 'resources.displayName',     'Resource Booking', 'Resource Booking', 0),
@@ -4327,7 +4344,7 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
-    (NULL, 'recordings.enabled',        '0', '0', 0),
+    (NULL, 'recordings.enabled',        '1', '1', 0),
     (NULL, 'recordings.displayName',    'Recordings', 'Recordings', 0),
     (NULL, 'recordings.displayIcon',    'fa-solid fa-microphone-lines', 'fa-solid fa-microphone-lines', 0),
     (NULL, 'recordings.max_upload_mb',  '200', '200', 0),
@@ -4835,7 +4852,7 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
-    (NULL, 'projects.enabled',     '0', '0', 0),
+    (NULL, 'projects.enabled',     '1', '1', 0),
     (NULL, 'projects.displayName', 'Projects', 'Projects', 0),
     (NULL, 'projects.displayIcon', 'fa-solid fa-bullseye', 'fa-solid fa-bullseye', 0),
     (NULL, 'projects.currency',    'GBP', 'GBP', 0)
@@ -5256,7 +5273,7 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
-    (NULL, 'photos.enabled',         '0', '0', 0),
+    (NULL, 'photos.enabled',         '1', '1', 0),
     (NULL, 'photos.displayName',     'Photos', 'Photos', 0),
     (NULL, 'photos.displayIcon',     'fa-solid fa-images', 'fa-solid fa-images', 0),
     (NULL, 'photos.maxUploadMb',     '15', '15', 0),
@@ -5624,7 +5641,7 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     -- stores the 10 characters  /\n\s*\n/  (backslash-escapes, copy EXACTLY)
     (NULL, 'worship.song_verse_separator',      '/\\n\\s*\\n/', '/\\n\\s*\\n/', 0),
     -- 142_discipleship_pathways.sql
-    (NULL, 'discipleship.enabled',              'false', 'false', 0),
+    (NULL, 'discipleship.enabled',              'true', 'true', 0),
     -- 143_cop_live_chat.sql
     (NULL, 'chat.enabled',                      'false', 'false', 0),
     (NULL, 'chat.autoApprove',                  'false', 'false', 0),
@@ -8467,7 +8484,7 @@ COMMENT='Venue Bookings — reminder single-shot dedupe log, no FKs by design (#
 -- registered in tblRoutes (ApiRouter ignores tblRoutes for api/* paths).
 -- -----------------------------------------------------------------------------
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
-    (NULL, 'venues.enabled',                  '0',        '0',        0),
+    (NULL, 'venues.enabled',                  '1',        '1',        0),
     (NULL, 'venues.currency',                 'GBP',      'GBP',      0),
     (NULL, 'venues.maxFileSize',              '10485760', '10485760', 0),
     (NULL, 'venues.unagreed_lead_days',       '21',       '21',       0),
@@ -10378,4 +10395,18 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('223_expenses_edit_routes.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('224_event_attendance_person_uniqueness.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- 📋 Migration 225 (#569): the fifteen app switches above are already seeded
+--    ON in this script, and `notifications.deliveryReady` is no longer seeded
+--    at all, so a brand-new installation is already in the state migration 225
+--    brings an existing one to. This row says so, or the Upgrade page would
+--    offer a fresh install an upgrade with nothing to do.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('225_default_apps_on.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- 📋 Migration 226 (#569): `tblOffboarding.dataDisposition` above already
+--    includes 'erase', and `offboarding.erasureMode` is already seeded, so
+--    again a fresh install needs nothing from that migration.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('226_offboarding_erasure.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;

@@ -154,7 +154,11 @@ if (App::isRootAdmin() === false) {
         and medical notes — across every organisation on this installation,
         not only yours. It also empties the scrambled sender address out of
         old anonymous check-ins, and removes erased donors' names from giving
-        records past their keep-until date, again across every organisation. So only a
+        records past their keep-until date, again across every organisation.
+        <strong>Where the installation is set to carry out offboarding erasures
+        automatically, it also erases the personal details of people who have
+        left and whose window for being brought back has passed</strong> &mdash;
+        that part cannot be undone. So only a
         global administrator can use this page. Nothing has been changed.
     </div>
     <?php
@@ -201,9 +205,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                    . ($result['givingIdentityFailed'] > 0
                        ? ' ' . $result['givingIdentityFailed'] . ' could NOT be cleared; nothing was changed for them, '
                            . 'the reason is in the server\'s error log, and the next run tries again.'
-                       : '');
+                       : '')
+                   // 🗑️ Offboarding erasures, said plainly and ALWAYS, even
+                   //    when the answer is none. This sweep carries out
+                   //    irreversible erasures when the installation is set to
+                   //    'after_undo_window', and the first version of this
+                   //    message said nothing about them at all: a global
+                   //    administrator pressed Run and was not told that people
+                   //    had been erased. Saying "none" is also the quickest
+                   //    way to see that the mode is not switched on.
+                   . ' Offboarding erasures: '
+                   . ($result['offboardErasureMode'] !== 'after_undo_window'
+                       ? 'not carried out here &mdash; this installation leaves them waiting for somebody to run by hand.'
+                       : 'carried out for ' . $result['offboardErasuresRun'] . ' person(s)'
+                           . ($result['offboardErasuresWaiting'] > 0
+                               ? ', ' . $result['offboardErasuresWaiting'] . ' left for later (a run was already in flight)'
+                               : '')
+                           . ($result['offboardErasuresFailed'] > 0
+                               ? ', and ' . $result['offboardErasuresFailed'] . ' could NOT be carried out; '
+                                   . 'those requests have been put back for the next run.'
+                               : '.'));
         // A sweep that could not do part of its work is not a plain success.
-        $flashType = $result['givingIdentityFailed'] > 0 ? 'warning' : 'success';
+        $flashType = ($result['givingIdentityFailed'] > 0 || $result['offboardErasuresFailed'] > 0)
+            ? 'warning'
+            : 'success';
     }
 }
 

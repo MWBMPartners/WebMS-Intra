@@ -379,6 +379,15 @@ try {
 <p class="text-body-secondary small mb-4">
     Events imported from outside calendars are managed under
     <a href="<?php echo htmlspecialchars(Site::url('admin/calendar/feeds'), ENT_QUOTES, 'UTF-8'); ?>">Outside calendars</a>.
+    <?php
+    // 🔗 Two pages that worked and nothing linked to (#569): the reminder
+    //    settings for events, and a coordinator's list of their own events.
+    //    Both had addresses, so the only way to reach either was to type it.
+    ?>
+    Reminders sent before an event are set under
+    <a href="<?php echo htmlspecialchars(Site::url('admin/calendar/reminders'), ENT_QUOTES, 'UTF-8'); ?>">Event reminders</a>,
+    and the events you personally coordinate are listed under
+    <a href="<?php echo htmlspecialchars(Site::url('calendar/my-events'), ENT_QUOTES, 'UTF-8'); ?>">My events</a>.
 </p>
 
 <!-- ➕ Create event form (collapsible) -->

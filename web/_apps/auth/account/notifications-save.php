@@ -40,15 +40,37 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 }
 
 // 🛡️ Whitelist the keys we accept — anything else is silently dropped.
+// 🧹 Seven keys were removed from this list on 29 October 2026 (#569, #662):
+//    emailDigest, eventRsvpConfirmation, expenseStatusUpdates,
+//    expenseApproverNudges, announcementsNew, prayerModeration and
+//    accountSecurity. Their switches came off the page in the same change
+//    because nothing that sends anything ever read them.
+//
+//    REMOVING THEM FROM HERE IS THE HALF THAT MATTERS, and it has to happen in
+//    the same change. A few lines below, this handler writes `false` for every
+//    key on this list that the form did not send. Hide a switch and leave its
+//    key listed, and the very next time anybody saved their preferences the
+//    handler would quietly rewrite that stored preference to off — for
+//    everybody, one by one, as they each pressed Save.
+//
+//    BE PRECISE ABOUT WHAT HAPPENS TO THE OLD VALUES, because an earlier
+//    version of this note got it wrong and said they were "left exactly as
+//    they are". THEY ARE NOT. This handler REBUILDS the preferences from this
+//    list and writes the result over the whole `notifyPrefs` column, so a key
+//    that is not on the list is DROPPED the next time that member saves. That
+//    is accepted here only because nothing reads any of the seven: no
+//    behaviour changes either way. If one of them comes back with its sender,
+//    members will have lost whatever they had chosen and it starts from the
+//    default again.
+//
+//    The same replacing behaviour is why this page and the smaller card on
+//    `/account` have always fought over this column — see #667.
+//
+//    `eventReminders` STAYS on the list. Its switch is still on the page,
+//    deliberately, with a notice saying the e-mails are not yet filtered by
+//    it; see the comment beside that notice.
 $allowedKeys = [
-    'emailDigest',
     'eventReminders',
-    'eventRsvpConfirmation',
-    'expenseStatusUpdates',
-    'expenseApproverNudges',
-    'announcementsNew',
-    'prayerModeration',
-    'accountSecurity',
     'givingStatements',
     'taskReminders',
     'rotaReminders',

@@ -2,6 +2,138 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — offboarding offered to erase somebody's details and erased nothing (#569, migration 226)**
+  - **What was wrong.** When somebody left, the offboarding form offered three choices for their
+    personal details: keep them, anonymise them, or delete them. The choice was written into the
+    audit record and **nothing else happened at all.** No erasure, ever. The administrator was told
+    the offboarding had succeeded, and the person's name, address and telephone number stayed
+    exactly where they were. A note in the code explained that the erasure engine would arrive
+    later; it had arrived long before, and is what the Erasure requests page has been using.
+  - **What changed.** Choosing to erase now files a real erasure request, through the same audited
+    route an administrator uses by hand, so there is one erasure path rather than two that would
+    have to agree about every table for ever.
+  - **When it happens is now yours to choose.** A new setting offers two ways round: the request
+    waits on Admin, Erasure requests for somebody to carry out (the default — nothing has to be
+    scheduled for it to be safe), or the daily housekeeping job carries it out once the window for
+    undoing the offboarding has passed. **Neither erases at the moment somebody is offboarded**, on
+    purpose: an offboarding can be undone, and erasing straight away would destroy the very things
+    bringing somebody back restores.
+  - **Bringing somebody back now cancels it.** Undoing an offboarding cancels any erasure request
+    still waiting, and says so on screen. Without that, the request sat in the queue with nothing
+    marking it as undone, waiting for the next administrator to erase a person who had returned.
+  - **Two options now, not three.** "Anonymise" and "Delete" could never have behaved differently,
+    because the portal does one kind of erasure: it keeps attendance and giving totals and stops
+    them naming the person, so past figures stay correct, and removes outright only what is safe to
+    remove. The form says that plainly instead of offering a choice that did not exist.
+- **Changed — a new installation now shows the apps it actually has (#569, migration 225)**
+  - Fifteen app switches were seeded off under a note reading "future app toggles", written when
+    those apps were still planned, and nobody turned them on as each one shipped. The menu and the
+    dashboard are built from those switches, so a brand-new portal showed **no Events or Calendar,
+    no Attendance, no Directory, no Venues, no Leadership, no Recordings, no Rota, no Photos and no
+    Projects.** Every one of those pages worked if you typed its address; they were simply not
+    offered. A customer signing in for the first time would reasonably have concluded the portal
+    did not have them.
+  - Anything needing a paid account or an outside service stays off, as does anything unfinished.
+    Pastoral Care stays off too, for a specific reason: its page is for the care team only, and the
+    menu has no way to tell, so switching it on would offer every member a page most of them cannot
+    open.
+  - **An existing installation keeps any choice it has already made.** A switch somebody has
+    changed is left exactly alone.
+- **Fixed — a menu entry every member could see and nobody but an administrator could open (#569)**
+  - The menu and the dashboard cards offered one entry per switched-on app with no regard to who
+    was looking. Nothing was exposed — the pages refused properly — but the moment an administrator
+    switched on text messaging, transcription, translation or Zoom, every member was offered an
+    entry that bounced them straight back with "access denied". It looked broken, and it looked
+    broken to everybody except the one person who could use it.
+- **Fixed — seven notification switches that were saved and never read (#569)**
+  - The weekly digest, security alerts for sign-ins from new devices, RSVP confirmations, expense
+    status updates, approver nudges, new announcements and prayer-request moderation could all be
+    switched on and off. **Nothing that sends anything ever read any of them.** There is no weekly
+    digest at all, and "Security alerts" carried the words "strongly recommended — leave on" for
+    something that has never sent a single message. They are off the page until each one has
+    something behind it.
+  - **One switch was deliberately kept.** Turning "Event reminders" off does not stop the e-mails —
+    the reminder job honours only the push notification — so that switch now says so in plain words
+    rather than quietly lying. Making it work is tracked separately, at a higher priority than the
+    switches that merely did nothing.
+- **Fixed — GoCardless could be chosen and then failed every payment (#569)**
+  - It sat in the payment provider list labelled "follow-up". Choosing it let an administrator save
+    an access token and then failed every single payment. Stripe and PayPal work properly. It can no
+    longer be chosen. An installation already set to it still sees it, named for what it is, because
+    hiding it would have made pressing Save switch that installation to Stripe without saying so.
+- **Fixed — notes written for a recording could never be read (#569)**
+  - Sermon notes have been saved against recordings for some time and **no page ever showed them.**
+    They now appear on the recording, with an unpublished draft visible only to its author and to
+    administrators, as the notes were always designed to work.
+- **Fixed — nobody could find the podcast feed (#569)**
+  - The feed works and is protected by an unguessable address. That address was only ever created in
+    code: no page showed it, and the settings editor never displays a stored secret, so the only
+    thing an administrator could do was overwrite it with something they had made up. The address is
+    now shown, with a plain warning that anybody holding it can listen.
+- **Fixed — pages that worked and nothing linked to (#569)**
+  - Your recurring payments, your own safeguarding record, the events you coordinate, the song
+    reporting figures and the event reminder settings all worked and were reachable only by typing
+    their address. They are linked now.
+- **Added — a Global Model Number is now checked (#569)**
+  - An asset identifier of this kind ends in two characters worked out from the rest of it, so a
+    single mistyped character shows up. The portal accepted them unchecked and said so. The check is
+    now real, and proved against the published examples including the standard's own.
+- **Fixed — a broken link from an e-mail showed a line of bare text (#569)**
+  - Following an expired or mangled unsubscribe or erasure-confirmation link gave unstyled black
+    text on white, with no heading and nothing to do next — on the one kind of page a stranger is
+    most likely to meet, since the link arrives by e-mail. It is a proper page now, and it says
+    plainly that nothing has been changed.
+- **Added — a link to the portal now looks like something when you share it (#569)**
+  - **What was wrong.** Paste a link to any page into a chat, an e-mail or a team channel and you
+    got the bare address and nothing else. No description, no title beyond the address, no picture.
+    Every page was missing three things: a one-line description, a canonical address saying which
+    address the page should be known by, and the tags that chat apps and e-mail clients read to draw
+    a preview card.
+  - **The pages it mattered most for were the ones that would have been missed.** The sign-in page,
+    the forgotten-password pages, the public visitor form, anonymous prayer requests, accepting an
+    invitation — all the pages a stranger actually sees — draw their own page head rather than the
+    portal's shared one. Adding the tags to the shared header alone would have left out every page
+    whose preview anybody is likely to see.
+  - **What changed.** One shared file now writes those tags, and both the shared header and each
+    page that draws its own head use it, so there is one copy of the wording rather than a dozen.
+    Pages that can describe themselves do; the rest fall back to naming the page and the
+    organisation, rather than repeating one sentence everywhere.
+  - **A deliberate restraint worth knowing about.** The canonical address and the preview card are
+    left out completely until an administrator has set the portal's address. Without one, the portal
+    can only go by the address the request arrived at, which whoever sent the request chose — and a
+    canonical address built from that tells search engines and preview services that the page really
+    lives at a name an outsider picked. No tag is better than a tag pointing somewhere else.
+  - **The picture is left out when there isn't a real one.** Preview cards refuse SVG, and only two
+    of the seven brand sets have the square picture this needs. The other five appear without a
+    picture rather than with a broken one (#656).
+  - **Checked before every push, from now on.** A git hook runs this repository's fast checks and
+    refuses a push that breaks one. Turn it on once per clone with `tools/install-git-hooks.sh`;
+    git never copies hooks between clones, so each one needs telling once. It takes about eight
+    seconds. It does **not** run the self-tests or the migration tests — those need a database and
+    run on pull requests — and `git push --no-verify` skips it, which git gives no way to prevent.
+  - **Also fixed.** A date on the form-responses page was a link that went nowhere (`href="#"`),
+    which jumped the page to the top before opening the panel; it is a button now.
+- **Fixed — several screens said a feature was unfinished when it had already shipped (#569)**
+  - The Cloudflare video page said direct upload was "coming soon"; it has been working for some
+    time. The Discipleship page promised per-member progress and automatic completion "in Phase 2";
+    both already work, and only mentor pairing is genuinely outstanding. The Host Console said
+    pushing prompts to viewers was still to come; it is on each event's own page. The live chat page
+    said the chat box had yet to be put on the `/live` page; it is already there. The assets page
+    said Loans were coming "in a later sub-issue"; Loans exist.
+  - A note in the code claimed old "found" reports for assets were never cleared automatically. They
+    are — the scheduled asset job clears them.
+  - None of these changed how anything works. They were all statements that had stopped being true,
+    which is its own kind of fault: a working feature that says it is unfinished does not get used.
+- **Fixed — every member was told notifications were not being sent, while they were (#569)**
+  - The Notification preferences page showed a banner reading *"Notifications are not yet being sent
+    on this site"*, and it appeared on every fresh installation. It was untrue: the setting behind it
+    was read in that one place, no part of the portal that sends anything consulted it, and the mail
+    queue sent these messages regardless. The banner also printed the raw name of a setting at the
+    member. Both the banner and the dead setting are gone.
+- **Fixed — a rota swap request said somebody would be told, and nobody was (#657)**
+  - Asking to swap a duty said *"The other member will be notified."* Nothing was sent, and there is
+    no page on which the other person could answer it, so the duty could never change hands. The
+    wording now says plainly what does and does not happen. Making the feature work is #657.
 - **Fixed — a walk-in could be added to an attendance register but never taken off again**
   - **What was wrong.** On an event's attendance grid, clicking a cell adds or removes that person,
     and the page says so. For somebody who simply turned up — a "walk-in", recorded by name rather
@@ -22,7 +154,7 @@
     checking that, and if it were ever removed the board would have started sending its share links
     away with nothing looking broken. **There is now an automatic check** that fails if any outside QR
     service becomes reachable, or if that safeguard disappears.
-- **Fixed — the same person could be marked present twice, and every attendance figure counted them twice (#487, migration 224)**
+- **Fixed — the same person could be marked present twice over (#487, migration 224)**
   - **What was wrong.** An attendance record names its person in one of two ways: a member number, or the name of
     somebody who simply turned up. The rule meant to stop duplicates covered both columns at once — but no record
     ever fills in both, and a database rule of this kind quietly stands aside when any part of it is empty. So the

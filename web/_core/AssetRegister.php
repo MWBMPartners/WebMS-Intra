@@ -1195,8 +1195,15 @@ class AssetRegister
                 $warnings[] = 'Value is not purely numeric — GS1 mod-10 check digit could not be verified.';
             }
         } elseif ($scheme === 'gmn-mod1021') {
-            // 🚧 Stub — see gmnMod1021Check() doc comment.
-            $warnings[] = 'GMN check-character validation is not implemented yet — value accepted without verification.';
+            $result = self::gmnMod1021Check($value);
+            if ($result === false) {
+                $valid = false;
+                $warnings[] = 'The last two characters of this Global Model Number do not match the rest of it — '
+                    . 'check the value. (They are a deliberate safeguard against a typing mistake.)';
+            } elseif ($result === null) {
+                $warnings[] = 'This value cannot carry a Global Model Number safeguard — it is either too long, '
+                    . 'too short, or uses a character the standard does not allow — so it was accepted unchecked.';
+            }
         }
 
         return ['valid' => $valid, 'warnings' => $warnings];
@@ -1215,6 +1222,97 @@ class AssetRegister
      *                    wasn't purely numeric so the digit couldn't be
      *                    computed at all
      */
+    /**
+     * 🔢 Is the check character PAIR on a Global Model Number right? (#569)
+     *
+     * A GMN ends in two characters worked out from everything before them, so
+     * a single mistyped character almost always shows up. This is section
+     * 7.9.5 of the GS1 General Specifications.
+     *
+     * HOW IT WORKS, in order:
+     *   1. Take the value without its last two characters.
+     *   2. Give each character its position in GS1's 82-character set below.
+     *   3. Multiply each by a weight, taken from a fixed list of primes and
+     *      lined up FROM THE RIGHT, so the weight a character gets depends on
+     *      how far it is from the end.
+     *   4. Add those up and take the remainder on division by 1021.
+     *   5. Split that remainder into two: the whole part of it divided by 32,
+     *      and what is left. Each becomes one character of the pair, from the
+     *      32-character set below.
+     *
+     * WHY THE TWO CHARACTER SETS ARE DIFFERENT, since it looks like a mistake.
+     * The 82-character set is what a GMN may CONTAIN. The 32-character set is
+     * what the check pair itself may be, and it deliberately leaves out 0, O,
+     * 1 and I, because those are the pairs people misread and mistype. They
+     * are not the same set and must not be merged.
+     *
+     * THIS WAS A STUB UNTIL 29 OCTOBER 2026. The method was referred to by
+     * name from the caller and did not exist, and the caller told the user
+     * "GMN check-character validation is not implemented yet". It is now real
+     * and PROVED against the five published examples from the GS1 reference
+     * implementation, including GS1's own "95212349521234" → "R9":
+     * see section F of `tools/asset-identifier-selftest.php`. A check-digit
+     * routine that is almost right is worse than none, because it REFUSES
+     * valid identifiers — which is why it was proved before being wired in.
+     *
+     * WHAT IT CANNOT DO:
+     *   - It cannot tell whether the GMN is one anybody issued; only that its
+     *     last two characters agree with the rest.
+     *   - The weight list holds 28 entries, so a value whose body is longer
+     *     than 28 characters cannot be checked at all. That is the standard's
+     *     own limit, not ours. Such a value gives null, not false.
+     *   - It says nothing about the format: the regex above does that.
+     *
+     * @param string $value The whole GMN, including its two check characters.
+     *
+     * @return bool|null true if the pair matches, false if it does not, and
+     *                   null when no answer is possible — too short, too long
+     *                   for the weights, or holding a character the standard
+     *                   does not allow.
+     */
+    private static function gmnMod1021Check(string $value): ?bool
+    {
+        // What a GMN may contain, in the order the standard numbers them.
+        $cset82 = '!"%&\'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz';
+        // What a check character may be: no 0, O, 1 or I, so the pair cannot
+        // be misread. A DIFFERENT set from the one above, on purpose.
+        $cset32  = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+        $weights = [107, 103, 101, 97, 89, 83, 79, 73, 71, 67, 61, 59, 53, 47, 43, 41, 37, 31, 29, 23, 19, 17, 13, 11, 7, 5, 3, 2];
+
+        // Two characters of check pair plus at least one of body.
+        if (strlen($value) < 3) {
+            return null;
+        }
+        $body     = substr($value, 0, -2);
+        $given    = substr($value, -2);
+        $bodyLen  = strlen($body);
+
+        // Lined up from the RIGHT: a body longer than the weight list cannot
+        // be checked by this scheme at all.
+        $firstWeight = count($weights) - $bodyLen;
+        if ($firstWeight < 0) {
+            return null;
+        }
+
+        $sum = 0;
+        for ($i = 0; $i < $bodyLen; $i++) {
+            $position = strpos($cset82, $body[$i]);
+            if ($position === false) {
+                // A character the standard does not allow. "Cannot tell",
+                // never "wrong": the format check is what objects to it.
+                return null;
+            }
+            $sum += $position * $weights[$firstWeight + $i];
+        }
+        $sum %= 1021;
+
+        $expected = $cset32[intdiv($sum, 32)] . $cset32[$sum % 32];
+
+        // Plain comparison, not hash_equals(): this is a typing safeguard on a
+        // model number, not a secret, and nothing is being authenticated.
+        return $expected === $given;
+    }
+
     private static function gs1Mod10Check(string $value): ?bool
     {
         if (preg_match('/^\d{2,}$/', $value) !== 1) {
@@ -1345,7 +1443,7 @@ class AssetRegister
      * (`identifiers-save.php`) surfaces via a flash message. `isVerified`
      * is set to 1 only when validation passed with ZERO warnings — a known
      * type whose format/check-digit both confirm cleanly; an unknown type,
-     * a non-numeric check-digit target, or the stubbed GMN scheme all
+     * a non-numeric check-digit target, or a GMN this scheme cannot check all
      * still SAVE, just unverified (no ✔ badge on item.php).
      *
      * $data keys: typeCode (required, ≤20 chars — VARCHAR(20) column),
@@ -1422,7 +1520,7 @@ class AssetRegister
         $validation = self::validateIdentifier($typeCode, $value);
         $warnings   = $validation['warnings'];
         // 🏅 "Cleanly" verified = valid AND zero warnings — an unknown
-        // type, a non-numeric mod-10 target, or the GMN stub all still
+        // type, a non-numeric mod-10 target, or a GMN too long to check all still
         // save, but none of them earn the ✔ verified badge (see method
         // doc above).
         $isVerified = ($validation['valid'] === true && count($warnings) === 0) ? 1 : 0;
@@ -6803,16 +6901,17 @@ class AssetRegister
      * to erase it for); age-based retention is the only cleanup path a
      * row like this gets.
      *
-     * TODO(#405 reminders cron / Phase 2): this method is ready to call
-     * but NOT wired into any scheduled job by this pass — none of the
-     * existing `web/_apps/cron/*.php` endpoints (event-reminders.php,
-     * import-feeds.php, discipleship-sweep.php) already loop "every site,
-     * every day" in a shape this could just slot into without inventing a
-     * new one, and this sub-issue's scope explicitly excludes adding a new
-     * cron route/migration. Whichever future sub-issue adds a general
-     * daily housekeeping sweep should call
-     * `AssetRegister::purgeExpiredFoundReports($siteId)` once per active
-     * site from there.
+     * WIRED IN. `web/_apps/cron/asset-reminders.php` calls this once per
+     * active site, so expired found-reports are cleared by the scheduled job
+     * without anybody pressing anything.
+     *
+     * This used to carry a TODO saying the opposite — that the method was
+     * "ready to call but NOT wired into any scheduled job" and that some
+     * future sub-issue should do it. That stopped being true when
+     * asset-reminders.php was written, and the note stayed behind, so anybody
+     * reading this file would have believed old found-reports were piling up
+     * for ever. Corrected in the #569 sweep for exactly that reason: a stale
+     * note about unfinished work is as misleading as unfinished work.
      *
      * @return int Number of rows deleted
      */

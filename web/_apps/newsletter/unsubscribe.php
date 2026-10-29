@@ -15,9 +15,17 @@ use Portal\Core\Site;
 
 $token = (string) ($_GET['token'] ?? '');
 if ($token === '' || preg_match('/^[a-f0-9]{40}$/', $token) !== 1) {
+    // 🔗 A proper page, not a line of bare text (#569). This used to answer
+    //    `text/plain` with "Invalid unsubscribe link." — unstyled, no heading,
+    //    nothing to do next — and it is reached from an e-mail, which is
+    //    exactly where a link gets broken in half by a mail program or
+    //    followed months later. The same page is used for every reason a token
+    //    fails, on purpose: see the template's own header.
     http_response_code(400);
-    header('Content-Type: text/plain');
-    exit('Invalid unsubscribe link.');
+    $linkPurpose = 'unsubscribe from our newsletter';
+    $linkAdvice  = 'If you still want to unsubscribe, use the link at the bottom of a recent newsletter.';
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'link-unusable.php';
+    exit();
 }
 
 $db = App::db();
@@ -69,6 +77,15 @@ if ($userId > 0 && $siteId > 0) {
 <head>
 <meta charset="utf-8">
 <title>Unsubscribe</title>
+    <?php
+    // 🔗 #569 — the description, canonical address and preview card.
+    //    This page prints its own <head>, so it includes the shared
+    //    file itself rather than inheriting it from header.php.
+    $pageTitle       = 'Unsubscribe';
+    $pageDescription = 'Stop receiving our newsletter.';
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'head-meta.php';
+    ?>
+
 <meta name="robots" content="noindex, nofollow">
 <link rel="stylesheet" href="/assets/css/print.css">
 <style>

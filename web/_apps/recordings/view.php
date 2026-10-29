@@ -120,4 +120,73 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endif; ?>
 
+<?php
+// 📝 Sermon notes (#569).
+//
+//    These were WRITTEN AND NEVER SHOWN. `recordings/notes-edit.php` and
+//    `notes-save.php` have been storing notes in `tblRecordingNote` for some
+//    time, and no page anywhere read that table — this page showed only
+//    `summary`. So an administrator could write a set of notes, publish them,
+//    and no member could ever see them.
+//
+//    WHO SEES WHAT. `publishedAt` is the rule the table already states in its
+//    own column comment: NULL means an unpublished draft that only its author
+//    and administrators see. That is honoured here rather than reinvented.
+//
+//    Only `markdown` notes are shown, because only markdown is ever written:
+//    `notes-save.php` hard-codes that format, and nothing in the portal serves
+//    a file from `_uploads/recording-notes/`. The other two values of the
+//    `format` column are unused, so showing a "download" for them would be a
+//    link to nothing.
+$notesCanEdit = App::isAdmin() === true;
+$viewerId     = (int) ($_SESSION['user_id'] ?? 0);
+$notes        = [];
+$stmt = $db->prepare(
+    'SELECT noteID, body, publishedAt FROM tblRecordingNote '
+    . "WHERE recordingID = ? AND format = 'markdown' AND body IS NOT NULL AND body <> '' "
+    . '  AND (publishedAt IS NOT NULL OR createdByID = ? OR ? = 1) '
+    . 'ORDER BY publishedAt IS NULL, noteID'
+);
+if ($stmt !== false) {
+    $isAdminFlag = $notesCanEdit === true ? 1 : 0;
+    $recordingId = (int) $rec['recordingID'];
+    $stmt->bind_param('iii', $recordingId, $viewerId, $isAdminFlag);
+    $stmt->execute();
+    $rows = $stmt->get_result();
+    while (($row = $rows->fetch_assoc()) !== null) {
+        $notes[] = $row;
+    }
+    $stmt->close();
+}
+?>
+<?php if ($notes !== [] || $notesCanEdit === true): ?>
+    <div class="card mt-4">
+        <div class="card-body">
+            <h2 class="h5 d-flex align-items-center justify-content-between">
+                <span><i class="fa-solid fa-note-sticky me-2"></i>Notes</span>
+                <?php if ($notesCanEdit === true): ?>
+                    <a class="btn btn-sm btn-outline-secondary"
+                       href="<?php echo htmlspecialchars(Site::url('recordings/notes-edit'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $rec['recordingID']; ?>">
+                        <?php echo $notes === [] ? 'Add notes' : 'Edit notes'; ?>
+                    </a>
+                <?php endif; ?>
+            </h2>
+            <?php if ($notes === []): ?>
+                <p class="text-muted small mb-0">No notes yet for this recording.</p>
+            <?php else: ?>
+                <?php foreach ($notes as $note): ?>
+                    <?php if ($note['publishedAt'] === null): ?>
+                        <div class="alert alert-secondary py-1 px-2 small mb-2">
+                            <i class="fa-solid fa-pen me-1"></i>Draft &mdash; only you and administrators can see this.
+                        </div>
+                    <?php endif; ?>
+                    <div class="mb-3">
+                        <?php echo Markdown::render((string) $note['body'], ['allow_links' => true]); ?>
+                    </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+    </div>
+<?php endif; ?>
+
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

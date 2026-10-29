@@ -302,7 +302,8 @@ Local + SSO + multi-factor sign-in.
 | **Password policy** — min 12 chars (configurable), independent complexity flags, max length, **client-side strength meter** | ✅ (#132) |
 | Sign-in limit — 5 failed tries from one address, or 10 for one account (by user name or e-mail address), in 15 minutes; the screen says how long is left; a completed password reset frees the account's name | ✅ (#52, #580) |
 
-**Tables:** `tblUsers`, `tblLocalAccounts`, `tblPasswordResets`, `tblLinkedAccounts`, `tblWebAuthnCredentials`, `tblUserTotp`
+**Tables:** `tblUsers`, `tblLocalAccounts`, `tblPasswordResets`, `tblLinkedAccounts`, `tblWebAuthnCredentials`, `tblTotpBackupCodes`
+*(There is no `tblUserTotp`: the authenticator secret and its on/off flag are the `totpSecret` and `totpEnabled` columns of `tblUsers`. Corrected 29 October 2026.)*
 **Settings:** `auth.password.minLength`, `auth.password.maxLength`, `auth.password.requireUppercase`, `auth.password.requireLowercase`, `auth.password.requireNumber`, `auth.password.requireSpecial`, `auth.passwordReset.tokenExpiry`, `auth.ms365.*`, `auth.google.*`, `auth.turnstile.*`, `auth.recaptcha.*`, `auth.hcaptcha.*`, `auth.captcha.priority`
 
 ---
@@ -345,8 +346,10 @@ Events, series, RSVP, exports, and seven view modes.
 **🔜 Open issues:**
 - #97–#103: BookIT calendar-provider abstraction (7-PR series).
 
-**Tables:** `tblEvents`, `tblEventCategories`, `tblEventTypes`, `tblEventSeries`, `tblEventThemes`, `tblEventRecurrence`, `tblEventRsvps`, `tblCalendarMonthThemes`
-**Settings:** `calendar.enabled`, `calendar.displayName`, `calendar.displayIcon`, `calendar.brandColor`, `calendar.defaultView`, `calendar.enablePublicView`, `calendar.allowRecurringEvents`
+**Tables:** `tblEvents`, `tblEventCategories`, `tblEventTypes`, `tblEventSeries`, `tblEventThemes`, `tblRecurrenceRules`, `tblEventRSVPs`, `tblCalendarMonthThemes`
+*(Two names were wrong here: `tblEventRecurrence` is really `tblRecurrenceRules`, and `tblEventRsvps` is `tblEventRSVPs` — capitals matter on a case-sensitive server. Corrected 29 October 2026. Note that nothing in the portal WRITES `tblRecurrenceRules` yet: see the repeating-events row below.)*
+**Settings:** `calendar.enabled`, `calendar.displayName`, `calendar.displayIcon`, `calendar.brandColor`, `calendar.defaultView`
+*(`calendar.enablePublicView` and `calendar.allowRecurringEvents` were listed here and exist NOWHERE — not seeded, not read by any code. Removed 29 October 2026 rather than invented, because a settings list is read by somebody looking for a switch to turn.)*
 
 ---
 
@@ -643,7 +646,8 @@ File library with categories.
 - Upload / download / delete; uploads land under `_uploads/`.
 - Category management.
 
-**Tables:** `tblDocuments`, `tblDocumentCategories`
+**Tables:** `tblDocuments`, `tblDocCategories`
+*(Named `tblDocumentCategories` here until 29 October 2026; the table is `tblDocCategories`.)*
 
 ---
 
@@ -654,7 +658,8 @@ Reminder / task system.
 - Per-user assigned tasks with due dates.
 - Complete / dismiss actions.
 
-**Tables:** `tblTasks`, `tblTaskReminders`
+**Tables:** `tblTasks`
+*(There is no `tblTaskReminders`: a reminder is the `reminderDate` and `reminderSent` columns of `tblTasks`. Corrected 29 October 2026.)*
 
 ---
 
@@ -1138,10 +1143,15 @@ setting seeds.
 
 | App | Issue | Migration | Status |
 |---|---|---|---|
-| Reading Plans (Bible-in-a-year, chronological, streak counter) | #265 | 084 | ✅ |
+| Reading Plans (Bible-in-a-year, chronological, streak counter) — **the two seeded plans have NO DAYS, and there is no admin screen to add any:** nothing in `web/` ever writes `tblReadingPlanDay`, so every day shows "No reading content defined" and `plan.php` tells the member an admin can populate the table, which is only possible in raw SQL. The check-off and streak half does work. Ships switched off | #265 | 084 | 🟡 |
+| What a shared link looks like: description, canonical address, Open Graph and Twitter tags on every page, written by the one shared `_core/templates/head-meta.php`; canonical and `og:url` deliberately omitted until an administrator sets the portal's address, because the fallback is a host name the visitor chose; `og:image` only where the brand has a raster picture (#656) | #569 | — | ✅ |
+| Pre-push check: `.githooks/pre-push` runs `php -l` on the PHP being pushed and every `tools/audit-checks/` script (~8s), turned on per clone by `tools/install-git-hooks.sh`. Does NOT run the self-tests or the migration harness, and `--no-verify` skips it | #569 | — | ✅ |
 | QR generator + CueRCode adapter slot (`Portal\Core\Qr` is the one place a picture is made; readable at every size 1-40 and level L/M/Q/H since #623, when the format marks were found written back to front and every picture the portal had drawn was unreadable) | #275, #623 | 085 | ✅ (CueRCode hash empty pending its public API) |
 | Invite-based onboarding (SHA-256 hashed tokens, public acceptance route) | #239 | 086 | ✅ |
-| One-click offboarding (7-step atomic revocation + 7-day rehire window). Switching an account off, offboarding it or erasing it ends its open sessions on the person's next request (12 October 2026) | #240 | 087 | ✅ |
+| One-click offboarding (7-step atomic revocation + 7-day rehire window). Switching an account off, offboarding it or erasing it ends its open sessions on the person's next request (12 October 2026). **Since #569 it really erases:** choosing "Erase their personal details" files an audited erasure request through `GdprEraser`, and `offboarding.erasureMode` decides whether it waits on Admin, Erasure requests (`on_request`, the default) or is carried out by the daily sweep once the undo window has passed (`after_undo_window`). Neither erases at the moment of offboarding, because a rehire would have nothing to restore; immediate erasure is #663. Bringing somebody back cancels a request still waiting. The form offers TWO options, not three: the portal performs one kind of erasure, so "anonymise" and "delete" could never have differed | #240, #569 | 087, 226 | ✅ |
+| Global Model Number check character pair (GS1 General Specifications 7.9.5) on asset identifiers — was a stub that told the user so until #569; proved against the published examples including GS1's own `95212349521234` → `R9` by `tools/asset-identifier-selftest.php` | #569 | — | ✅ |
+| Notification preferences: seven switches REMOVED in #569 because nothing that sends anything ever read them (weekly digest, new-device security alerts, RSVP confirmations, expense status updates, approver nudges, new announcements, prayer moderation) — each goes back WITH its sender, never before (#662). **"Event reminders" is saved but the e-mail path does not honour it (#666)**, and the page says so. The `/account` card overlaps this page and the two overwrite each other's keys (#667) | #569 | — | 🟡 |
+| Sermon notes shown on a recording, with an unpublished draft visible only to its author and administrators; the podcast feed's address shown on the recordings admin page (it was only ever created in code, so nobody could subscribe) | #569 | — | ✅ |
 
 ### Wave 4 (#284) — PR landed 2026-06-02
 
@@ -1151,7 +1161,7 @@ setting seeds.
 | Service Plans (run-sheet builder, printable; live runtime + confidence monitor + operator→monitor messaging, #300) | #262 | 089 | ✅ |
 | Livestream (YouTube/Vimeo/Twitch/Facebook embed + countdown) | #273 | 090 | ✅ |
 | Recordings (RSS podcast feed + HTTP Range streaming + FULLTEXT search) | #264 | 091 | ✅ |
-| Zoom (OAuth, meeting creation from calendar, webhook HMAC) | #274 | 092 | ✅ |
+| Zoom (OAuth, webhook HMAC) — **meeting creation is NOT reachable:** the handlers `calendar/zoom-create` and `zoom-remove` have addresses but no page posts to them, and no page shows a member a join link | #274 | 092 | 🟡 |
 | Newsletter (composer with auto-pulled content blocks) | #269 | 093 | ✅ |
 | ↳ **Only the portal's own mailer is implemented.** `newsletter.provider` accepts `mailermatt` and `mailchimp`, but there is no adapter behind either: both fall back to the internal mailer, so newsletters still go out. No admin page offers them — reaching that state means typing the value into the general Settings editor — and since 29 October 2026 the Newsletter page SAYS so when it happens. | #269 | 093 | ⚠️ slot empty |
 | Giving (tithe log, Gift Aid digital declaration, HMRC schedule CSV, year-end PDF; online give-online checkout added later, see "PayPal payment adapter" section below; treasurer bulk year-end statements added later, see "Giving — Bulk year-end statements" section below) | #266 | 094 | ✅ |
@@ -1163,10 +1173,10 @@ setting seeds.
 
 | Item | Issue | Migration | Status |
 |---|---|---|---|
-| Transcription (Whisper / AssemblyAI / local; FULLTEXT search; click-to-timestamp) | #276 | 098 | ✅ |
+| Transcription (Whisper / AssemblyAI / local; FULLTEXT search; click-to-timestamp) — **NOT reachable yet:** the admin page, the queue runner, the search page and the transcript page all exist and are addressed, but nothing ever puts a recording into the queue, so the queue is always empty. The transcript page tells a member "an admin can queue one from the recording's page", and that page has no such button. Adding the trigger is the owner's decision of 29 October 2026 | #276 | 098 | 🟡 |
 | Translation (Anthropic / OpenAI / Google / DeepL / LibreTranslate; content-addressable cache) | #278 | 099 | ⚠️ **NOT WORKING — see #485** |
 | ↳ The engine, the admin configuration page and the member opt-in all exist. But automatic translation of **user-written content** has no reachable way in — the only caller sits at an address the router cannot resolve. Interface translation (`I18n` / `t()`) is a separate system and works normally. Verified 10 September 2026. **The app ships switched OFF (`translation.enabled` = `0`) and the `api/translate` handler has no `api.*.enabled` seed, so neither is reachable on a fresh install; and since 29 October 2026 the admin page itself carries a standing notice saying nothing is being translated**, because the page is otherwise indistinguishable from a finished feature. | #485 | — | 🔴 |
-| AI Assist (Anthropic / OpenAI / ollama; editable prompt templates; cap + daily limit + audit) | #277 | 100 | ✅ |
+| AI Assist (Anthropic / OpenAI / ollama; editable prompt templates; cap + daily limit + audit) — **NOT reachable, same shape as #485:** the engine and the admin pages work, but its only caller sits at `_apps/api/ai-improve.php`, a path `ApiRouter` can never load, its old address was deleted as dead by migration 158, and no page or script calls it. There is no AI control on any form | #277 | 100 | 🔴 |
 | GDPR Article 17 erasure engine (19-table catalogue, sealed audit chain, 1-month SLA queue) | #235 | 101 | ✅ |
 | ↳ Since 11 October 2026 the engine reads the written list of personal data (count the tables from `web/_core/personal-data-catalogue.php`, not from this line). An erasure keeps other people's records and takes only the erased person's number off them: visitors, salvation cards, tasks, rota slots, follow-up notes, pastoral visits, payments, files, check-ins. It clears the person's photo and biography. A request stuck at "processing" can be put back from Admin, Erasure requests. | #510, #535 | 208 | ✅ |
 | ↳ "Delete my account" (`/account/delete`) files an erasure request for an administrator to carry out; typing the phrase is the confirmation, so no email is sent. It no longer empties the account on the spot. "Request data erasure" (`/account/erasure-request`) confirms by an emailed link, and an administrator can confirm on the person's behalf from Admin, Erasure requests when that email never arrived. | — | — | ✅ |
@@ -1190,7 +1200,7 @@ setting seeds.
 | Nonce-based CSP `script-src` tightening + `App::cspNonce()` | #144 | #289 | ✅ |
 | External error monitor — `Portal\Core\ErrorMonitor` adapter for Sentry / GlitchTip | #143 | #290 | ✅ |
 | REST API write-side CRUD: Announcements / Tasks / Prayer Requests / Leadership (10 new endpoints) | #157 | #291 | ✅ (remaining Documents / Attendance / Expenses CRUD landed via #323 Phase 2, below) |
-| PWA offline write queue + sync-on-reconnect (`Portal.OfflineQueue` IndexedDB module + `/account/offline-queue`) | #233 | #292 | ✅ |
+| PWA offline write queue + sync-on-reconnect (`Portal.OfflineQueue` IndexedDB module + `/account/offline-queue`) — **captures nothing:** `portal-offline.js` only queues a form carrying `data-offline-queueable`, and no form in `web/` carries it. `/account/offline-queue` has an address but no link to it | #233 | #292 | 🟡 |
 | Codebase audit sweep — duplicate cookie banner removed; missing `Auth` import fixed; 6 SQL int-concat queries → prepared statements | — | #293 | ✅ |
 
 ### REST API v1 write surface (PR #372, 2026-07-22)

@@ -294,6 +294,30 @@ foreach ($SETTINGS as $key => $arr) {
         continue;
     }
 
+    // 🛡️ An app whose own page is for administrators is not offered to
+    //    everybody (#569). nav.php and this loop both build their list from
+    //    the app switches with NO regard to who is looking, so the moment an
+    //    administrator switched on SMS, transcription, translation or Zoom,
+    //    every member was offered a menu entry — or a card — that bounced
+    //    them straight back with "access denied". Nothing was exposed; it
+    //    just looked broken, and it looked broken to everybody except the
+    //    one person who could use it.
+    //
+    //    The test is the ADDRESS, not a list of app names: an app whose
+    //    landing page lives under `admin/` is an administrator's page by
+    //    construction, and a new one added later is covered without anybody
+    //    remembering to add it here.
+    //
+    //    WHAT THIS CANNOT DO: cover an app that is restricted by something
+    //    other than being an administrator. Pastoral Care is the example —
+    //    its page needs the `care_team` role and its address is not under
+    //    `admin/`, so this would still offer it to everybody. That is why
+    //    migration 225 deliberately leaves `care.enabled` switched off
+    //    rather than turning it on with the other finished apps.
+    if (str_starts_with($appRoute, 'admin/') === true && App::isAdmin() !== true) {
+        continue;
+    }
+
     $apps[] = [
         'key'   => $key,
         'name'  => $arr['displayName'] ?? ($appRegistryEntries[$key]['name'] ?? ucfirst($key)),

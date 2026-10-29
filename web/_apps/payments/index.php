@@ -112,11 +112,47 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="col-md-3">
                 <label class="form-label">Provider</label>
+                <?php
+                // 💳 GoCardless is NOT offered (#569, and #664 to finish it).
+                //
+                //    It used to sit here labelled "(follow-up)", and choosing
+                //    it FAILED EVERY PAYMENT: Portal\Core\Payments marks the
+                //    attempt failed with 'gocardless-not-implemented', and
+                //    webhook verification for it was never written. A payment
+                //    provider that cannot take money must not be a choice.
+                //
+                //    IT IS STILL SHOWN WHEN IT IS ALREADY THE STORED VALUE,
+                //    and that is the important part. Simply deleting the
+                //    option would leave the select showing Stripe for an
+                //    installation set to GoCardless, so pressing Save — to
+                //    change something else entirely, such as the currency —
+                //    would silently switch that installation's payment
+                //    provider. Shown, and named for what it is, so nothing
+                //    changes by accident and nobody newly chooses it.
+                ?>
                 <select class="form-select" name="provider">
                     <option value="stripe"     <?php echo $provider === 'stripe'     ? 'selected' : ''; ?>>Stripe</option>
                     <option value="paypal"     <?php echo $provider === 'paypal'     ? 'selected' : ''; ?>>PayPal</option>
-                    <option value="gocardless" <?php echo $provider === 'gocardless' ? 'selected' : ''; ?>>GoCardless (follow-up)</option>
+                    <?php if ($provider === 'gocardless'): ?>
+                    <?php
+                    // NOT `disabled`, and that was measured rather than
+                    // assumed. A disabled control is not submitted, and
+                    // payments/save.php reads `$_POST['provider'] ?? 'stripe'`
+                    // — so a disabled select would make Save switch this
+                    // installation to Stripe silently, which is the very
+                    // accident this option exists to prevent. It is shown,
+                    // enabled, and named for what it is.
+                    ?>
+                    <option value="gocardless" selected>GoCardless — not available, payments will fail</option>
+                    <?php endif; ?>
                 </select>
+                <?php if ($provider === 'gocardless'): ?>
+                <div class="form-text text-danger">
+                    <i class="fa-solid fa-triangle-exclamation me-1"></i>
+                    This installation is set to GoCardless, which this release cannot
+                    use: every payment through it fails. Choose Stripe or PayPal.
+                </div>
+                <?php endif; ?>
             </div>
             <div class="col-md-2">
                 <label class="form-label">Currency</label>
@@ -166,11 +202,28 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <small class="text-muted d-block mt-1">Webhook URL: <code><?php echo htmlspecialchars((($_SERVER['HTTPS'] ?? '') !== '' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? '') . '/payments/webhook?provider=paypal', ENT_QUOTES, 'UTF-8'); ?></code></small>
                 <small class="text-muted d-block">Subscribe to: <code>CHECKOUT.ORDER.APPROVED</code>, <code>PAYMENT.CAPTURE.COMPLETED</code>, <code>PAYMENT.CAPTURE.REFUNDED</code></small>
             </div>
+            <?php
+            // 🚫 The GoCardless access-token box is gone with the option above
+            //    (#569). Asking somebody for an access token for a provider
+            //    that cannot take a payment wastes their time and puts a real
+            //    credential into the database for nothing.
+            //
+            //    The box is still shown to an installation that ALREADY has a
+            //    token stored, so that it can be seen and cleared rather than
+            //    left behind invisibly. $hasGcTok never reveals the token
+            //    itself, only whether one is there.
+            ?>
+            <?php if ($hasGcTok === true || $provider === 'gocardless'): ?>
             <div class="col-md-3">
-                <h6 class="text-muted">GoCardless <span class="badge bg-secondary">follow-up</span></h6>
+                <h6 class="text-muted">GoCardless <span class="badge bg-danger">not available</span></h6>
                 <label class="form-label small">Access token <?php echo $hasGcTok === true ? '<span class="badge bg-success">set</span>' : ''; ?></label>
                 <input type="password" class="form-control form-control-sm" name="gc_token" placeholder="<?php echo $hasGcTok === true ? 'Leave blank to keep' : ''; ?>" autocomplete="off">
+                <small class="text-muted d-block mt-1">
+                    This release cannot take payments through GoCardless. The box is
+                    here only so a token already stored can be seen and replaced.
+                </small>
             </div>
+            <?php endif; ?>
             <div class="col-12">
                 <button class="btn btn-primary" type="submit">Save</button>
             </div>

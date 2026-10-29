@@ -134,6 +134,14 @@ $csrf = Auth::csrfToken();
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?php echo $titleSafe; ?> &middot; <?php echo $siteNameSafe; ?></title>
+    <?php
+    // 🔗 #569 — the description, canonical address and preview card.
+    //    This page prints its own <head>, so it includes the shared
+    //    file itself rather than inheriting it from header.php.
+    $pageTitle       = (string) $form['title'];
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'head-meta.php';
+    ?>
+
 
     <!-- 🤖 Public form — never index in search engines -->
     <meta name="robots" content="noindex, nofollow">

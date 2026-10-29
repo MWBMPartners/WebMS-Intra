@@ -194,9 +194,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php endif; ?>
 
     <p class="text-muted small mt-4">
-        Phase 1 ships the moderation queue + send/list/moderate handlers.
-        Phase 2 wires the viewer-side chat UI into the <code>/live</code> embed
-        and adds host-side push prompts.
+        Messages are moderated here. The chat box itself is already on the
+        <code>/live</code> page, and prompts to the people watching are pushed from the
+        Host Console.
     </p>
 </div>
 

@@ -72,6 +72,22 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php endif; ?>
 
 <h1 class="mb-3"><i class="fa-solid fa-video me-2"></i>Zoom Integration</h1>
+<?php
+// ⚠️ A standing notice, deliberately NOT dismissible and NOT inside the flash
+//    block (#569, #659). Connecting an account here works and then does
+//    nothing visible, which is worse than an obvious gap. Delete this notice
+//    only when an event can really create a meeting.
+?>
+<div class="alert alert-warning d-flex align-items-start" role="alert">
+    <i class="fa-solid fa-triangle-exclamation me-2 mt-1"></i>
+    <div>
+        <strong>Meetings cannot yet be created from an event.</strong>
+        Connecting an account here works, and so does the webhook, but no page has a
+        control to create a meeting for an event, and nobody attending an event is
+        shown a join link. So connecting Zoom is safe and changes nothing a member
+        sees, until the rest of the feature is finished.
+    </div>
+</div>
 <p class="text-secondary">Create Zoom meetings from calendar events; auto-link recordings via webhook.</p>
 
 <div class="card mb-4">

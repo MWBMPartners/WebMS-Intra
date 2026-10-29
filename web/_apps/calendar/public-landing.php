@@ -174,18 +174,34 @@ $eventNameSafe = htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?php echo $eventNameSafe; ?> &middot; <?php echo htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8'); ?></title>
     <?php
-    // 👁️ #514 part P2: at "title, date and time only" there is no meta
-    //    description and the only Open Graph line is the title (the #514
-    //    plan, part P2 row c), so a link preview in a chat app shows no more
-    //    than the page itself does.
-    if ($canSeeFull === true): ?>
-    <meta name="description" content="<?php echo htmlspecialchars(mb_substr((string) ($event['description'] ?? ''), 0, 160), ENT_QUOTES, 'UTF-8'); ?>">
-    <?php endif; ?>
-    <meta property="og:title" content="<?php echo $eventNameSafe; ?>">
-    <?php if ($canSeeFull === true): ?>
-    <meta property="og:type"  content="event">
-    <meta property="og:url"   content="<?php echo htmlspecialchars($publicUrl, ENT_QUOTES, 'UTF-8'); ?>">
-    <?php endif; ?>
+    // 🔗 #569 — the description, canonical address and preview card, from the
+    //    ONE shared file. This page prints its own <head>, so it includes that
+    //    file itself rather than inheriting it from header.php.
+    //
+    // 👁️ AND #514 part P2 still decides WHAT IT MAY SAY. At "title, date and
+    //    time only" a link preview must show no more than the page itself
+    //    does, so the description is the event's NAME, which is already in the
+    //    <title> and discloses nothing further. Only a viewer who may see the
+    //    whole event gets the event's own words.
+    //
+    //    THIS USED TO WRITE A SECOND SET OF TAGS of its own, below the shared
+    //    file's, and an independent check caught it: two `og:title` lines, and
+    //    when the viewer could see everything, a second `description`, an
+    //    `og:type` of `event` contradicting the shared file's `website`, and a
+    //    second `og:url` that could differ from the canonical address. Its
+    //    comment then claimed there was "no meta description" in the limited
+    //    case, which the shared file had already made untrue. One place writes
+    //    these tags now.
+    //
+    //    WHAT IS GIVEN UP, said plainly: `og:type` is `website` rather than
+    //    `event` for everybody. Nothing reads it here that would behave
+    //    differently, and one honest set of tags beats two contradictory ones.
+    $pageTitle       = (string) $event['eventName'];
+    $pageDescription = $canSeeFull === true
+        ? mb_substr((string) ($event['description'] ?? ''), 0, 160)
+        : (string) $event['eventName'];
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'head-meta.php';
+    ?>
     <link rel="stylesheet" href="/assets/css/portal.css">
     <style>
         body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #f8f9fa; }

@@ -235,6 +235,14 @@ $pageTitle = 'Two-Factor Verification';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?php echo htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8'); ?></title>
+    <?php
+    // 🔗 #569 — the description, canonical address and preview card.
+    //    This page prints its own <head>, so it includes the shared
+    //    file itself rather than inheriting it from header.php.
+    $pageDescription = 'Enter your two-step code to finish signing in.';
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'head-meta.php';
+    ?>
+
 
     <!-- 🎨 Stylesheets (CDN with local fallback), as on the sign-in page -->
     <?php echo Asset::bootstrapCss(\Portal\Core\I18n::isRtl()); ?>

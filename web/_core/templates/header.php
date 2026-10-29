@@ -232,6 +232,14 @@ header("Content-Security-Policy: default-src 'self'; "
 <?php endif; ?>
     <meta name="theme-color" content="<?php echo htmlspecialchars($siteColor, ENT_QUOTES, 'UTF-8'); ?>">
 
+    <?php
+    // 🔗 #569 — the description, canonical address and preview card. One
+    //    shared file, because the pages that print their own <head> (the
+    //    sign-in page and the public forms among them) need exactly the
+    //    same tags and must not each hold a copy. head-meta.php's own
+    //    header says why no count of those pages is given.
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'head-meta.php';
+    ?>
     <!-- 🤖 Robots / AI-crawler policy (defaults to deny; admin opt-in) -->
     <meta name="robots"    content="<?php echo htmlspecialchars($robotsContent,   ENT_QUOTES, 'UTF-8'); ?>">
     <meta name="googlebot" content="<?php echo htmlspecialchars($robotsContent,   ENT_QUOTES, 'UTF-8'); ?>">

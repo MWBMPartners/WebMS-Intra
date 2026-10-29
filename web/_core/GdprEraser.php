@@ -2010,7 +2010,7 @@ class GdprEraser
      *
      * HOW A REQUEST GETS CONFIRMED. Before an administrator can run a
      * request, somebody has to have confirmed that it really is the
-     * person's. There are three ways, and only three:
+     * person's. There are FOUR ways, and only four:
      *
      *   1. $alreadyConfirmed = false (the "Request data erasure" page). The
      *      request starts at "pending confirmation" and the person is
@@ -2024,6 +2024,27 @@ class GdprEraser
      *      only from a page that has itself checked such a typed phrase.
      *   3. confirmOnBehalf(): an administrator, for a request stuck at way 1
      *      because the email never arrived.
+     *   4. $alreadyConfirmed = true from offboarding (#569). When somebody
+     *      LEAVES and an administrator chooses to erase their details,
+     *      `_apps/offboarding/do.php` files the request already confirmed.
+     *      There is no typed phrase and no link to click, because this is not
+     *      the person asking: it is the ORGANISATION deciding about somebody
+     *      who has left, which is a different thing the law also allows.
+     *
+     *      WAY 2's RULE THEREFORE NO LONGER DESCRIBES EVERY CALLER, and this
+     *      entry exists because an independent check found the docblock
+     *      claiming it did. Read way 2's last sentence as what it is: the rule
+     *      for a page where the PERSON is asking. Where the organisation is
+     *      deciding, what stands in for the typed phrase is the offboarding
+     *      itself — an administrator has filled in a reason, chosen a date and
+     *      confirmed a destructive action, and `tblOffboarding` records who.
+     *
+     *      WHAT IS WEAKER HERE, said plainly: `fileRequest()` writes no audit
+     *      line of its own, so unlike confirmOnBehalf() the erasure trail does
+     *      not name who decided. The offboarding record does
+     *      (`offboardedByID`, and the step log), but somebody reading only the
+     *      erasure trail cannot see it. Worth closing when the erasure trail
+     *      is next worked on.
      *
      * What this cannot do: with way 1, if the email cannot be sent the
      * request waits until an administrator confirms it (way 3); `mailed`

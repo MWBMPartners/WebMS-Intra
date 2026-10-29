@@ -152,6 +152,18 @@ jobs:
         if: ${{ !cancelled() && steps.php.outcome == 'success' }}
         run: php tools/php-runtime-selftest.php
 
+      # 🔢 Asset identifier check digits (#569). Needs no database: both
+      #    routines are arithmetic over a string. `gmnMod1021Check()` was a
+      #    STUB referred to by name from its caller for months, and the caller
+      #    told the user so. It is proved here against the five examples
+      #    published with the GS1 reference implementation, because a
+      #    check-digit routine that is almost right REFUSES VALID
+      #    IDENTIFIERS, which is worse than not checking at all.
+      - name: 'Asset identifier check digits self-test (#569)'
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/asset-identifier-selftest.php
+
+
       # 🔳 The portal's own QR pictures (#623). Needs no database and no server.
       #
       #    WIRED ON 28 OCTOBER 2026 (#646): it had never run in any workflow.
@@ -535,7 +547,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -669,6 +681,24 @@ jobs:
         run: |
           mkdir -p "$SELFTEST_WEB_DIR"
           php -d memory_limit=512M tools/page-scripts-selftest.php
+
+      # 🔗 #569 — the description, canonical address and preview card, read off
+      #    real pages over HTTP. Its partner is the file-reading check
+      #    `check_page_head_tags.py`, a hard gate in pr-security.yml. The pair
+      #    is the point: the check proves every own-head page REQUIRES the
+      #    shared partial, and this proves the tags actually come out and that
+      #    the canonical address is left out when a visitor could choose the
+      #    host name. Building it caught a page that required the partial and
+      #    still answered with no tags, which the file-reading check cannot see.
+      #
+      #    It needs curl and mysqli (both in this job's extensions list) and
+      #    makes its own temporary folder, so it takes no SELFTEST_WEB_DIR.
+      - name: 'Page head tags self-test (#569)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_pagehead
+          SELFTEST_WEB_PORT: '9674'
+        run: php -d memory_limit=512M tools/page-head-selftest.php
 
       - name: Erasure pages self-test
         if: ${{ !cancelled() && steps.databases.outcome == 'success' }}

@@ -145,9 +145,30 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         ?>
             <div class="portal-data-row flex-wrap">
                 <div class="col-6 col-md-2 small">
-                    <a href="#" data-bs-toggle="collapse" data-bs-target="#<?php echo $collapseId; ?>">
+                    <?php
+                    // 🔘 A button, not a link (#569). This used to be
+                    //    <a href="#">: an address of "#" is not a place, so
+                    //    the browser jumps the page back to the top before
+                    //    Bootstrap opens the panel, and a middle-click or
+                    //    "open in new tab" gives a copy of the same page with
+                    //    nothing expanded. It also read as a link to assistive
+                    //    software, which announces it as somewhere to go
+                    //    rather than something to open.
+                    //
+                    //    Bootstrap drives a collapse from a <button> with the
+                    //    same two data- attributes, with no JavaScript of our
+                    //    own, so nothing else changes. aria-expanded and
+                    //    aria-controls tell a screen reader what this opens
+                    //    and whether it is already open; btn-link keeps it
+                    //    looking exactly as it did.
+                    ?>
+                    <button type="button" class="btn btn-link p-0 border-0 align-baseline text-start"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#<?php echo $collapseId; ?>"
+                            aria-expanded="false"
+                            aria-controls="<?php echo $collapseId; ?>">
                         <?php echo htmlspecialchars(date('Y-m-d H:i', strtotime((string) $resp['createdAt'])), ENT_QUOTES, 'UTF-8'); ?>
-                    </a>
+                    </button>
                 </div>
                 <div class="col-6 col-md-2">
                     <span class="badge <?php echo $channel === 'public' ? 'bg-info-subtle text-info-emphasis' : 'bg-secondary-subtle text-secondary-emphasis'; ?>">

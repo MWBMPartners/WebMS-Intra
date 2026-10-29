@@ -30,10 +30,15 @@
  *
  * Stored in tblUsers.notifyPrefs (JSON column from migration 026).
  *
- * Delivery gate: when notifications.deliveryReady === 'false' the page
- * shows a banner explaining that preferences are saved but emails aren't
- * being sent yet. Admins flip the setting once Mailer + the digest cron
- * are wired up.
+ * REMOVED — the "delivery gate" banner (#569). This page used to read
+ * `notifications.deliveryReady`, seeded 'false', and show every member a
+ * banner saying notifications were "not yet being sent on this site". That
+ * was UNTRUE: the setting was read in this one place, no sender ever
+ * consulted it, and the mail queue sends these messages regardless. So on a
+ * fresh install every member was told their preferences would not take
+ * effect, while they did. The banner also printed the raw setting name at
+ * the member, which the plain-English rule rules out. The setting itself is
+ * removed by migration 225; do not reintroduce either.
  *
  * @package   Portal\Auth
  * @license   All Rights Reserved
@@ -59,8 +64,6 @@ $breadcrumbs = ['Dashboard' => Site::url(''), 'Account' => Site::url('account'),
 $user   = App::user();
 $userId = (int) ($user['userID'] ?? 0);
 
-// 🚦 Delivery gate — informational only; we still save preferences.
-$deliveryReady = (App::settings('notifications.deliveryReady') ?? 'false') === 'true';
 $siteDigestOn  = (App::settings('notifications.digestEnabled')  ?? 'true')  === 'true';
 $digestDay     = (string) (App::settings('notifications.digestDay') ?? 'monday');
 
@@ -183,50 +186,56 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
     </div>
 <?php endif; ?>
 
-<?php if ($deliveryReady === false): ?>
-    <div class="alert alert-info">
-        <i class="fa-solid fa-circle-info me-1"></i>
-        <strong>Notifications are not yet being sent on this site.</strong>
-        Your preferences below are saved and will take effect once delivery is enabled.
-        Site admins control this via the <code>notifications.deliveryReady</code> setting.
-    </div>
-<?php endif; ?>
 
 <form method="post" action="<?php echo htmlspecialchars(Site::url('account/notifications/save'), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
 
-    <div class="card shadow-sm mb-3">
-        <div class="card-header"><h2 class="h6 mb-0">Email digest</h2></div>
-        <div class="card-body">
-            <?php if ($siteDigestOn === false): ?>
-                <p class="small text-muted mb-2">
-                    The site admin has disabled email digests for this site
-                    (<code>notifications.digestEnabled</code>). Your preference below is
-                    remembered for when it's re-enabled.
-                </p>
-            <?php else: ?>
-                <p class="small text-muted mb-2">
-                    Weekly summary of upcoming events, pending tasks, and any actions awaiting you.
-                    Sent on <strong><?php echo htmlspecialchars(ucfirst($digestDay), ENT_QUOTES, 'UTF-8'); ?></strong>.
-                </p>
-            <?php endif; ?>
-            <?php echo $switchRow('emailDigest', 'Send me the weekly digest', 'One email per week, summarising the things that matter to you.'); ?>
-        </div>
-    </div>
+    <?php
+    // 🧹 Three whole cards were removed here on 29 October 2026 (#569, #662):
+    //    "Email digest", "Expenses" and "Other", together with the RSVP
+    //    confirmation switch in Events below.
+    //
+    //    Every switch on them was SAVED AND NEVER READ. Measured, not assumed:
+    //    nothing under web/_core or web/_apps/cron — the only places anything
+    //    is sent from — mentions emailDigest, eventRsvpConfirmation,
+    //    expenseStatusUpdates, expenseApproverNudges, announcementsNew,
+    //    prayerModeration or accountSecurity. There is no weekly digest job at
+    //    all, and "Security alerts" said "Strongly recommended — leave on"
+    //    for something that has never sent anything.
+    //
+    //    A preference that does nothing is a quieter version of a control
+    //    whose label does not match its effect: the member believes they have
+    //    chosen, and has not. Each switch goes back on this page WITH its
+    //    sender, never before it — see #662, which lists what each one needs.
+    //
+    //    They are removed from `notifications-save.php`'s allowed-key list in
+    //    the same change. That matters: the handler writes `false` for every
+    //    key on its list that the form did not send, so leaving them listed
+    //    while hiding the switches would have quietly rewritten everybody's
+    //    stored preferences to off.
+    ?>
 
     <div class="card shadow-sm mb-3">
         <div class="card-header"><h2 class="h6 mb-0">Events &amp; Calendar</h2></div>
         <div class="card-body">
             <?php echo $switchRow('eventReminders',        'Event reminders',                'Get notified ahead of events you have RSVP\'d to.'); ?>
-            <?php echo $switchRow('eventRsvpConfirmation', 'RSVP confirmations',            'Confirmation email when you RSVP to an event.'); ?>
-        </div>
-    </div>
-
-    <div class="card shadow-sm mb-3">
-        <div class="card-header"><h2 class="h6 mb-0">Expenses</h2></div>
-        <div class="card-body">
-            <?php echo $switchRow('expenseStatusUpdates',  'Status updates on my claims', 'When an approver decides on a claim you submitted.'); ?>
-            <?php echo $switchRow('expenseApproverNudges', 'Approver nudges',             'For approvers: when a claim is waiting on you.'); ?>
+            <?php
+            // ⚠️ KEPT, unlike the other dead switches, and said plainly rather
+            //    than hidden. The event reminder job honours only the PUSH
+            //    switch ("Service reminders", further down); it does not read
+            //    this one, so reminder e-mails go out even to somebody who has
+            //    switched this off. That is not a switch that does nothing —
+            //    it is a switch that says "off" while mail still arrives, and
+            //    hiding it would remove the only sign that anything is wrong.
+            //    Tracked as its own defect, #666, at a higher priority than
+            //    the switches that merely do nothing.
+            ?>
+            <div class="alert alert-warning small mb-0 mt-2" role="alert">
+                <i class="fa-solid fa-triangle-exclamation me-1"></i>
+                Switching event reminders off does not stop the e-mails yet &mdash; only
+                the push notification below is affected. We are fixing this; until then,
+                reminders are sent to everybody who said they are going.
+            </div>
         </div>
     </div>
 
@@ -322,15 +331,6 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
         </div>
     </div>
     <?php endif; ?>
-
-    <div class="card shadow-sm mb-3">
-        <div class="card-header"><h2 class="h6 mb-0">Other</h2></div>
-        <div class="card-body">
-            <?php echo $switchRow('announcementsNew', 'New announcements',           'Site-wide notices when admins post a new announcement.'); ?>
-            <?php echo $switchRow('prayerModeration', 'Prayer-request moderation', 'For moderators: new submissions awaiting review.'); ?>
-            <?php echo $switchRow('accountSecurity',  'Security alerts',           'Sign-ins from new devices, password changes, 2FA enrolments. Strongly recommended — leave on.'); ?>
-        </div>
-    </div>
 
     <?php if ($sabbathOrgOn === true): ?>
     <!-- 🕯️ Sabbath quiet hours per-user override (#231) -->

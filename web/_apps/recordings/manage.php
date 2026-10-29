@@ -179,4 +179,52 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endif; ?>
 
+<?php
+// 📡 The podcast feed's address (#569).
+//
+//    The feed worked and NOBODY COULD FIND IT. It is guarded by a per-site
+//    unguessable token, and that token was only ever created in code, by
+//    Recordings::podcastToken(). No page showed the address or the token, and
+//    the Settings editor never displays a stored secret (#597) — so an
+//    administrator's only option was to overwrite the token with a value they
+//    had made up themselves. There was no way to subscribe by following the
+//    interface.
+//
+//    PortalAddress::forPage() is used, not absolute(): this is a link SHOWN ON
+//    A PAGE for somebody to copy, so where no portal address has been set it
+//    gives the address without a host name, which still works from the page it
+//    is shown on. absolute() is for links that LEAVE the portal, where "no
+//    address" has to mean "no link" (#500).
+//
+//    Asking for the token CREATES it the first time, which is the lazy
+//    generation this feature was designed around. Only an administrator ever
+//    reaches this page, so only an administrator can cause that.
+$podcastToken = Recordings::podcastToken($siteId);
+$podcastUrl   = $podcastToken === ''
+    ? ''
+    : \Portal\Core\PortalAddress::forPage('recordings/podcast?token=' . urlencode($podcastToken));
+?>
+<div class="card mt-4">
+    <div class="card-body">
+        <h2 class="h5"><i class="fa-solid fa-podcast me-2"></i>Podcast feed</h2>
+        <?php if ($podcastUrl === ''): ?>
+            <p class="text-muted small mb-0">
+                The feed address cannot be shown at the moment, because its token could
+                not be read or created. Nothing is broken for anybody already subscribed.
+            </p>
+        <?php else: ?>
+            <p class="small text-muted">
+                Paste this into a podcast app to subscribe. <strong>Anybody who has this
+                address can listen</strong>, so treat it like a password: it is the only
+                thing protecting the feed.
+            </p>
+            <div class="input-group input-group-sm">
+                <input type="text" class="form-control" readonly
+                       value="<?php echo htmlspecialchars($podcastUrl, ENT_QUOTES, 'UTF-8'); ?>"
+                       aria-label="Podcast feed address">
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
+
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

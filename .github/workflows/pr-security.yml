@@ -1151,6 +1151,18 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_no_outside_qr_service.py
 
+      # Every page that writes its own <head> must also write the description,
+      # canonical address and preview card (#569). Those pages are the ones a
+      # stranger sees — the sign-in page and the public forms — and before #569
+      # none of them wrote any of it, so a shared link showed as a bare
+      # address. This also guards header.php's own require, which hundreds of
+      # ordinary pages depend on and which no page-by-page check would notice.
+      # Its partner is tools/page-head-selftest.php, which fetches real pages.
+      - name: 'Pages write the shared head tags (hard gate, #569)'
+        id: page_head_tags
+        if: always()
+        run: python3 -I tools/audit-checks/check_page_head_tags.py
+
       # =====================================================================
       # Summary in the Actions UI
       # =====================================================================
@@ -1177,6 +1189,7 @@ jobs:
             # "the ten guards" over eleven results. This file has been bitten by
             # a stale count before.
             echo "- No known outside QR service is reachable: ${{ steps.no_outside_qr_service.outcome }} (hard gate, #623)"
+            echo "- Pages write the shared head tags: ${{ steps.page_head_tags.outcome }} (hard gate, #569)"
             # The ten guards wired by #646, as ONE line unless something failed.
             # Ten separate lines would bury the rest of the summary; what a
             # reader needs is to tell "they all passed" from "they are not

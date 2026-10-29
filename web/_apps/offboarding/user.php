@@ -95,14 +95,51 @@ $csrf = Auth::csrfToken();
                 <label class="form-label">Reason (audit-logged)</label>
                 <input type="text" name="reason" class="form-control" maxlength="500" placeholder="e.g. Left the volunteer team / moved away" required>
             </div>
+            <?php
+            // 🗂️ Two options, not three (#569). This used to offer Retain,
+            //    Anonymise and Delete, and the last two DID NOTHING AT ALL —
+            //    the choice was written to the audit row and no erasure ever
+            //    happened, under a note saying the erasure engine had not
+            //    shipped. It had: Portal\Core\GdprEraser is what the Erasure
+            //    pages use.
+            //
+            //    They are two rather than three because the portal performs
+            //    ONE kind of erasure. GdprEraser deliberately ANONYMISES
+            //    where deleting would destroy figures that must survive —
+            //    attendance and giving totals keep the record and lose the
+            //    name — and deletes outright only where that is safe. So
+            //    "Anonymise" and "Delete" could never have behaved
+            //    differently, and offering both was offering a choice that
+            //    did not exist. A true delete-everything mode is #663 and
+            //    was NOT built, because it would make past figures wrong.
+            //
+            //    What happens next depends on `offboarding.erasureMode`,
+            //    shown below so the administrator knows before pressing the
+            //    button rather than afterwards.
+            $erasureMode = (string) (App::settings('offboarding.erasureMode') ?? 'on_request');
+            $undoDays    = (int) (App::settings('offboarding.undo_window_days') ?? 7);
+            ?>
             <div class="mb-3">
-                <label class="form-label">Data disposition</label>
-                <select name="dataDisposition" class="form-select">
-                    <option value="retain">Retain — keep user data unchanged (default)</option>
-                    <option value="anonymise">Anonymise — replace PII with tombstone (GDPR follow-up via #235)</option>
-                    <option value="delete">Delete — invoke right-to-erasure (GDPR follow-up via #235)</option>
+                <label class="form-label" for="dataDisposition">What happens to their personal details</label>
+                <select name="dataDisposition" id="dataDisposition" class="form-select">
+                    <option value="retain">Keep their records (default)</option>
+                    <option value="erase">Erase their personal details</option>
                 </select>
-                <div class="form-text">Anonymise / Delete dispositions are recorded but the actual data transformation is performed by #235 GDPR engine when that ships. For now, both behave like "retain" with a flag for the follow-up batch run.</div>
+                <div class="form-text">
+                    Choosing to erase files a formal erasure request for this person.
+                    Attendance and giving totals are kept but stop naming them, so past
+                    figures stay correct.
+                    <?php if ($erasureMode === 'after_undo_window'): ?>
+                        It will be carried out automatically once the
+                        <?php echo (int) $undoDays; ?>-day window for undoing this
+                        offboarding has passed, so they can still be brought back until then.
+                    <?php else: ?>
+                        It will then wait on
+                        <a href="<?php echo htmlspecialchars(Site::url('admin/erasure-requests'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Erasure requests</a>
+                        for somebody to carry out. Nothing is erased until then, so they can
+                        still be brought back.
+                    <?php endif; ?>
+                </div>
             </div>
             <div class="mb-3">
                 <label class="form-label">Effective date</label>

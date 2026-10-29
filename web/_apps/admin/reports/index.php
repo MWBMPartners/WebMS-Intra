@@ -188,9 +188,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 📊 Reports Dashboard -->
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-chart-bar me-2"></i>Reports & Analytics</h1>
-    <a href="<?php echo htmlspecialchars(Site::url('admin/reports/builder'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary">
-        <i class="fa-solid fa-table-list me-1"></i>Custom reports
-    </a>
+    <div class="d-flex flex-wrap gap-2">
+        <?php
+        // 🔗 The CCLI report worked and nothing linked to it (#569). Its
+        //    figures are written by the worship app as a service runs, so it
+        //    fills up whether or not anybody can find the page — which is the
+        //    worst combination: real data nobody reads.
+        ?>
+        <a href="<?php echo htmlspecialchars(Site::url('admin/reports/ccli'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary">
+            <i class="fa-solid fa-music me-1"></i>Song reporting (CCLI)
+        </a>
+        <a href="<?php echo htmlspecialchars(Site::url('admin/reports/builder'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary">
+            <i class="fa-solid fa-table-list me-1"></i>Custom reports
+        </a>
+    </div>
 </div>
 
 <!-- 📊 Summary Cards -->

@@ -78,6 +78,24 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php endif; ?>
 
 <h1 class="mb-3"><i class="fa-solid fa-wand-magic-sparkles me-2"></i>AI Assist</h1>
+<?php
+// ⚠️ A standing notice, deliberately NOT dismissible and NOT inside the flash
+//    block (#569, #658). Without it this page looks exactly like a finished
+//    feature with a provider key box, and a customer can spend an afternoon
+//    setting up an API key for something no member can reach. Delete this
+//    notice only when the member-facing half ships.
+?>
+<div class="alert alert-warning d-flex align-items-start" role="alert">
+    <i class="fa-solid fa-triangle-exclamation me-2 mt-1"></i>
+    <div>
+        <strong>Nothing is being improved yet.</strong>
+        The engine and these settings work, but there is no AI control on any form
+        a member can reach, so nothing ever asks for a suggestion. The spend figures
+        below will stay at zero and the prompt templates will never be used, however
+        this page is set up. Filling in a provider key is safe and costs nothing; it
+        simply has no effect until the rest of the feature is finished.
+    </div>
+</div>
 
 <div class="row g-3 mb-3">
     <div class="col-md-4"><div class="card"><div class="card-body">

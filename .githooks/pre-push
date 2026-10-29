@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# Path: .githooks/pre-push
+# -----------------------------------------------------------------------------
+# Refuse a push that would break one of this repository's fast checks 🚦 (#569)
+# -----------------------------------------------------------------------------
+# The owner's standing rule "Nothing may look unfinished, careless or AI-made"
+# asks for the checklist to be checked AUTOMATICALLY before every push, rather
+# than remembered. This is that gate.
+#
+# WHAT IT RUNS, and why only these
+#   1. Every script in tools/audit-checks/. Together they take about eight
+#      seconds, which is short enough to run on every push including a
+#      one-line note. Each one guards something that was found broken at
+#      least once.
+#   2. `php -l` on the PHP files the push RANGE touches, as they stand in the
+#      working tree. A file that does not parse is the one fault that breaks
+#      every page at once.
+#
+#      BE PRECISE: it reads the files ON DISK, not the content being pushed.
+#      An earlier version of this note said "the files this push would
+#      actually send", which is not the same thing and was wrong. So an
+#      uncommitted syntax error in a file the range touches refuses the push
+#      even though the committed copy is fine, and the opposite also holds —
+#      a parse error that is committed but already fixed on disk passes. A
+#      file deleted from disk but present in the commit is skipped
+#      altogether. Checking the committed blobs would mean `git show`-ing
+#      each one into a temporary file; the working tree is almost always what
+#      is about to be pushed, and this is a guard against forgetting.
+#
+# WHAT IT DELIBERATELY DOES NOT RUN
+#   The *-selftest.php files and the end-to-end migration harness. They need a
+#   database, Docker and minutes rather than seconds. A gate slow enough to be
+#   resented is a gate that gets turned off, and those run in the pull-request
+#   checks instead. So a green push does NOT mean the self-tests pass.
+#
+#   The browser half of the #569 checklist — how pages look at different widths
+#   — is not here either, and cannot be: it needs a running portal and a real
+#   browser. That is a separate audit before a release.
+#
+# HOW TO TURN IT ON
+#   tools/install-git-hooks.sh        (once per clone)
+#   Git never copies hooks between clones, so each clone runs that once. This
+#   is deliberately per-repository rather than a global hooks folder: a global
+#   one would override the hooks of every other project on the machine.
+#
+# IT CAN BE BYPASSED, AND THAT IS SAID PLAINLY
+#   `git push --no-verify` skips every pre-push hook. Git offers no way to stop
+#   that, so this is a guard against forgetting, not against deciding. There is
+#   no separate "skip" variable here, because adding one would only make
+#   skipping easier to do by habit.
+#
+# @package   WebMS Intra
+# @author    MWBM Partners Ltd (t/a MWservices)
+# @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+# @license   All Rights Reserved
+# -----------------------------------------------------------------------------
+
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "${REPO_ROOT}" || exit 1
+
+FAILED=0
+ZERO_SHA="0000000000000000000000000000000000000000"
+
+printf '🚦 pre-push checks (%s)\n' "$(basename "${REPO_ROOT}")"
+
+# -----------------------------------------------------------------------------
+# 1. 🐘 php -l on the PHP files this push would send
+# -----------------------------------------------------------------------------
+# Git hands a pre-push hook one line per ref being pushed on standard input:
+#   <local ref> <local sha> <remote ref> <remote sha>
+# A remote sha of all zeros means the branch is new on the remote, so there is
+# nothing to compare against; the merge base with the default branch is used
+# instead. When even that cannot be worked out, the last commit is linted
+# rather than nothing — a smaller net, but never an empty one.
+CHANGED_PHP=""
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+    [ -z "${local_sha:-}" ] && continue
+    [ "${local_sha}" = "${ZERO_SHA}" ] && continue   # a branch being deleted
+
+    if [ "${remote_sha}" = "${ZERO_SHA}" ]; then
+        BASE="$(git merge-base "${local_sha}" origin/main 2>/dev/null \
+             || git merge-base "${local_sha}" main 2>/dev/null \
+             || echo "")"
+    else
+        BASE="${remote_sha}"
+    fi
+
+    if [ -n "${BASE}" ]; then
+        RANGE_FILES="$(git diff --name-only --diff-filter=ACMR "${BASE}" "${local_sha}" -- '*.php' 2>/dev/null)"
+    else
+        RANGE_FILES="$(git diff --name-only --diff-filter=ACMR "${local_sha}~1" "${local_sha}" -- '*.php' 2>/dev/null)"
+    fi
+    CHANGED_PHP="${CHANGED_PHP}
+${RANGE_FILES}"
+done
+
+# Sort and de-duplicate; several refs may touch the same file.
+CHANGED_PHP="$(printf '%s\n' "${CHANGED_PHP}" | sed '/^$/d' | sort -u)"
+
+if [ -z "${CHANGED_PHP}" ]; then
+    printf '   php -l      — no PHP files in this push\n'
+else
+    PHP_COUNT=0
+    PHP_BAD=0
+    while IFS= read -r file; do
+        [ -f "${file}" ] || continue      # deleted or renamed away; nothing to parse
+        PHP_COUNT=$((PHP_COUNT + 1))
+        if ! php -l "${file}" > /dev/null 2>&1; then
+            PHP_BAD=$((PHP_BAD + 1))
+            printf '\n✗ PHP syntax error in %s\n' "${file}"
+            php -l "${file}" 2>&1 | sed 's/^/    /'
+        fi
+    done <<< "${CHANGED_PHP}"
+
+    if [ "${PHP_BAD}" -gt 0 ]; then
+        FAILED=1
+    else
+        printf '   php -l      — %d file(s) parse\n' "${PHP_COUNT}"
+    fi
+fi
+
+# -----------------------------------------------------------------------------
+# 2. 🔍 Every audit check
+# -----------------------------------------------------------------------------
+# Each is run with `python3 -I`, which keeps the current folder off the import
+# path — the repository's own convention, so a stray file beside a check can
+# never be imported in place of a standard module.
+#
+# The OUTPUT of a failing check is shown in full. Several of these checks
+# deliberately print findings while still exiting 0, so the exit code alone is
+# not the whole story; the pull-request checks are where those are read. Here,
+# a non-zero exit is what refuses the push.
+CHECK_COUNT=0
+CHECK_BAD=0
+for check in tools/audit-checks/*.py; do
+    [ -f "${check}" ] || continue
+    CHECK_COUNT=$((CHECK_COUNT + 1))
+    if ! OUTPUT="$(python3 -I "${check}" 2>&1)"; then
+        CHECK_BAD=$((CHECK_BAD + 1))
+        printf '\n✗ %s\n' "${check}"
+        printf '%s\n' "${OUTPUT}" | sed 's/^/    /'
+    fi
+done
+
+if [ "${CHECK_BAD}" -gt 0 ]; then
+    FAILED=1
+else
+    printf '   audit       — %d check(s) pass\n' "${CHECK_COUNT}"
+fi
+
+# -----------------------------------------------------------------------------
+# 3. 🚦 Verdict
+# -----------------------------------------------------------------------------
+if [ "${FAILED}" -ne 0 ]; then
+    printf '\n🛑 Push refused: fix the above, or use `git push --no-verify` if you\n'
+    printf '   have a reason to push anyway (and say so where it is recorded).\n'
+    exit 1
+fi
+
+printf '✅ pre-push checks passed\n'
+exit 0

@@ -956,32 +956,49 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </script>
 
 <!-- 🔔 Notification Preferences Card -->
+<?php
+// 🔔 This card OVERLAPS the Notification preferences page, and that is a real
+//    pre-existing fault, not a tidy-up waiting to happen (#667).
+//
+//    Two handlers write the same column. `account/save.php`'s
+//    `update_notifications` action writes three keys here;
+//    `account/notifications-save.php` REBUILDS `tblUsers.notifyPrefs` from its
+//    own allowed list and writes the result over the top — so saving on the
+//    other page drops `expenseUpdates`, which only exists here. That is the
+//    same class of fault as #612 and it is logged rather than fixed in this
+//    package.
+//
+//    WHAT THIS PACKAGE DID CHANGE: the two switches on this card that nothing
+//    ever read — "Weekly email digest" and "Expense claim updates" — are gone
+//    from view (#569, #662). Nothing under web/_core or web/_apps/cron reads
+//    either; measured, not assumed.
+//
+//    THE FORM ITSELF IS DELIBERATELY KEPT, and this is the important part. An
+//    earlier attempt removed the whole card, which broke section F of
+//    `tools/go-live-button-selftest.php` — the ONLY regression guard proving
+//    that pressing Save here does not throw away a member's other stored
+//    choices (#612). Removing a feature must not quietly remove the test that
+//    guards a past fault, so the form, its action and its anti-forgery token
+//    all stay exactly as they were.
+//
+//    `account/save.php` still writes the two dead keys when a request happens
+//    to carry them. Harmless: nothing reads either. It is left alone so that
+//    this is a change to a page and not to a save handler.
+?>
+<!-- 🔔 Notification Preferences Card -->
 <div class="card shadow-sm mt-4">
     <div class="card-header">
         <h5 class="mb-0"><i class="fa-solid fa-bell me-2" aria-hidden="true"></i>Notification Preferences</h5>
     </div>
     <div class="card-body">
+        <p class="text-muted small">
+            More choices, including push notifications, are on the
+            <a href="<?php echo htmlspecialchars(Site::url('account/notifications'), ENT_QUOTES, 'UTF-8'); ?>">Notification preferences</a>
+            page.
+        </p>
         <form method="post" action="<?php echo htmlspecialchars(Site::url('account/save'), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="update_notifications">
-
-            <div class="form-check form-switch mb-3">
-                <input class="form-check-input" type="checkbox" id="notifyDigest" name="emailDigest" value="1"
-                       <?php echo ($notifyPrefs['emailDigest'] === true) ? 'checked' : ''; ?>>
-                <label class="form-check-label" for="notifyDigest">
-                    <strong>Weekly email digest</strong>
-                    <div class="text-muted small">Summary of upcoming events, pending items, and recent activity</div>
-                </label>
-            </div>
-
-            <div class="form-check form-switch mb-3">
-                <input class="form-check-input" type="checkbox" id="notifyExpenses" name="expenseUpdates" value="1"
-                       <?php echo ($notifyPrefs['expenseUpdates'] === true) ? 'checked' : ''; ?>>
-                <label class="form-check-label" for="notifyExpenses">
-                    <strong>Expense claim updates</strong>
-                    <div class="text-muted small">Notifications when your claims are approved, rejected, or reimbursed</div>
-                </label>
-            </div>
 
             <div class="form-check form-switch mb-3">
                 <input class="form-check-input" type="checkbox" id="notifyEvents" name="eventReminders" value="1"
@@ -1028,6 +1045,37 @@ $accAllowDelete = (\Portal\Core\App::settings('privacy.allowAccountDelete') ?? '
                             <i class="fa-solid fa-trash me-1"></i> Delete my account
                         </a>
                     <?php endif; ?>
+                    <?php
+                    // 🔗 Two pages about YOU that nothing linked to (#569).
+                    //    Both worked, both had addresses, and the only way to
+                    //    reach either was to type the address — which means
+                    //    nobody ever did. Both already handle having nothing
+                    //    to show, so an empty one is a sentence rather than a
+                    //    blank page.
+                    //
+                    //    "My giving" is shown only where money is actually
+                    //    being taken. Offering a page about recurring
+                    //    payments on an installation that takes none would be
+                    //    a link to a permanent "nothing here".
+                    //
+                    //    `account/offline-queue` is deliberately NOT linked:
+                    //    the offline queue captures nothing at all today
+                    //    because no form opts into it, so its page is empty
+                    //    for everybody, for ever. Linking it would be
+                    //    advertising a dead end. See #661.
+                    $accMoneyOn = ((string) (App::settings('giving.enabled') ?? '0')) === '1'
+                        || ((string) (App::settings('giving.enabled') ?? 'false')) === 'true'
+                        || ((string) (App::settings('payments.enabled') ?? '0')) === '1'
+                        || ((string) (App::settings('payments.enabled') ?? 'false')) === 'true';
+                    ?>
+                    <?php if ($accMoneyOn === true): ?>
+                        <a href="<?php echo htmlspecialchars(Site::url('account/recurring'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary">
+                            <i class="fa-solid fa-arrows-rotate me-1"></i> My recurring payments
+                        </a>
+                    <?php endif; ?>
+                    <a href="<?php echo htmlspecialchars(Site::url('account/safeguarding'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-secondary">
+                        <i class="fa-solid fa-user-shield me-1"></i> My safeguarding record
+                    </a>
                 </div>
             </div>
         </div>

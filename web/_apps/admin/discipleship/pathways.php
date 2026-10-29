@@ -94,8 +94,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
     <p class="text-muted small">
         Define ordered formation pathways (e.g. <em>New believer 101</em>, <em>Leadership track</em>)
-        for pastoral follow-up. Phase&nbsp;1 ships the structure; per-member progress, mentor pairing
-        and auto-completion ship in Phase&nbsp;2.
+        for pastoral follow-up. Each member's progress is recorded, and a step completes by itself
+        when the thing it asks for happens. Pairing a member with a mentor is not built yet.
     </p>
 
     <?php if (isset($_SESSION['flash_msg']) === true): ?>

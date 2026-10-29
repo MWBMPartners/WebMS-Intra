@@ -214,6 +214,232 @@ CI against real MySQL 8.0.36 and 8.4.11 databases, as two jobs side by side.
 
 ---
 
+## Offboarding, erasure and the undo window (#569)
+
+`offboarding/do.php` **files** an erasure request; it never erases inline. There
+is ONE audited erasure path — file, confirm, run, with a hash chain over what it
+did — and the Erasure requests pages drive it. A second path erasing inline
+would be two pieces of code that must agree about 35 tables for ever.
+
+`offboarding.erasureMode` decides when:
+
+- `on_request` (the default) — it waits for a person on Admin, Erasure requests.
+- `after_undo_window` — `run_offboarding_erasure_sweep()` in
+  `_apps/cron/_retention-sweep.php` runs it once `offboarding.undo_window_days`
+  has passed.
+
+**Neither mode erases at the moment of offboarding**, because
+`offboarding/rehire.php` exists: erasing destroys what a rehire restores.
+Immediate erasure is #663 and was deliberately not built. **Undoing an
+offboarding cancels any request still waiting** — without that, the default mode
+left a live request to erase somebody who had come back.
+
+### Three things the sweep gets wrong if you write it the obvious way
+
+All three were found by an independent check before this shipped, and all three
+are the kind that look fine in review:
+
+1. **Join to the NEWEST offboarding row, not to any row for that person.** The
+   first version joined `r.userID = o.userID`, so ANY row satisfied the age
+   test. Proved against real MySQL: an offboarding from 2024 that was never
+   undone made a request filed TODAY due on tonight's run — while the form had
+   just promised the administrator seven days to change their mind. Not exotic
+   either: `rehire.php` refuses an undo after the window, so anybody who left,
+   returned and left again has an older row with `rehiredAt` still empty.
+2. **Claim the request before running it**, with the same conditional
+   `UPDATE … WHERE status = 'pending_review'` the staff page uses. Without the
+   claim the row stays at `pending_review` for the whole run, so the Execute
+   button stays armed and can start a second erasure of the same account; and
+   `GdprEraser`'s own "put it back" and "still going" updates match nothing,
+   because both look for `processing`. A run that died half way left no sign of
+   life at all.
+3. **Never log the fault's own words.** An earlier version logged
+   `$e->getMessage()` under a comment promising it named nobody — but a database
+   or filesystem message can quote the very value being erased, and that error
+   row would outlive the erasure by up to a year.
+
+**It cannot honour a per-organisation choice of mode.** `tblOffboarding` has no
+organisation column — offboarding is portal-wide — and the mode is read once
+from whichever organisation the scheduled request resolved to. An organisation
+that saved its own override would not get it. Written down rather than
+half-guarded.
+
+### Two options on the form, because the portal does one kind of erasure
+
+`GdprEraser` anonymises where deleting would destroy figures that must survive
+and deletes only where that is safe, so "anonymise" and "delete" could never
+have differed. `'anonymise'` and `'delete'` are still accepted and still valid
+values of `tblOffboarding.dataDisposition`, so old audit rows read as written;
+the code treats all three as "erase".
+
+## What a settings default really means (#569, migration 225)
+
+Migration 225 turns a switch on only where `settingValue = defaultValue` — that
+is, where nobody has ever changed it. **It cannot tell a deliberate "off" from an
+untouched "off"**, because both leave the value equal to the default. Accepted
+because this lands before the first usable release.
+
+Each key keeps its own vocabulary (`'false'`/`'true'` for four of them,
+`'0'`/`'1'` for eleven) rather than being rewritten to one spelling, because
+anything comparing those values as text would change behaviour for reasons
+nothing to do with this change.
+
+## `||` is not concatenation in MySQL
+
+A first draft of migration 226 built its guarded `ALTER TABLE` with
+`'a' || 'b'`. In MySQL that is **logical OR** unless the server runs with
+`PIPES_AS_CONCAT`, so it produced the number `1` and then tried to `PREPARE`
+it. Use `CONCAT()`.
+
+## Removing a preference switch is two changes, not one
+
+`notifications-save.php` **rebuilds** `tblUsers.notifyPrefs` from its allowed-key
+list and writes the result over the whole column. So:
+
+- Hide a switch and leave its key on the list, and the next save rewrites that
+  stored preference to off — for everybody, one at a time, as they each press
+  Save. The key must come off the list in the same change.
+- Take the key off the list, and the stored value is **dropped** at the next
+  save. That is not "left alone", which an earlier version of the comment in
+  that file wrongly claimed. It is acceptable only while nothing reads the key.
+
+The same replacing behaviour is why that page and the smaller card on `/account`
+have always overwritten each other's keys — #667.
+
+**And removing a feature must not remove the test that guards a past fault.**
+Deleting the `/account` card outright broke section F of
+`go-live-button-selftest.php`, the only guard proving that saving there does not
+throw away a member's other choices (#612). The form was kept, with only its
+still-wired switch. Section F's `count($storedNow) >= 15` was then replaced by a
+named list of the keys that must survive: the count was only ever a stand-in for
+the real property, and a count is exactly what a deliberate change to the number
+of preferences invalidates.
+
+## A disabled control is not submitted
+
+Removing GoCardless from the payment picker by marking the option `disabled`
+would have been worse than leaving it alone: `payments/save.php` reads
+`$_POST['provider'] ?? 'stripe'`, so an installation already set to GoCardless
+would have been switched to Stripe by pressing Save for any other reason. It is
+shown, enabled and named for what it is.
+
+## What a shared link looks like: the head tags (#569)
+
+`web/_core/templates/head-meta.php` is the ONE place the description, canonical
+address, Open Graph and Twitter tags are written. `header.php` requires it, and
+so does every page that draws its own `<head>`. Set `$pageTitle` and, where the
+page can say something better than the fallback, `$pageDescription`, before
+requiring it.
+
+**Why a separate file rather than part of `header.php`.** The pages a stranger
+actually sees — the sign-in page, the forgotten-password pages, the public
+visitor form, anonymous prayer requests, accepting an invitation, unsubscribing
+— all print their own `<head>`, because they must not carry the portal's navbar.
+Putting the tags only in `header.php` would have missed exactly the pages whose
+preview card anybody is likely to see. Pasting the same twelve tags into each of
+those files was rejected: the wording would then exist in a dozen copies, and
+the check could only compare copies against each other.
+
+**The canonical rule is a correctness rule, not a nicety.** Both the canonical
+address and `og:url` are omitted entirely while
+`PortalAddress::visitorCanChooseHost()` is true. With no `site.url` set,
+`PortalAddress` falls back to the request's `Host` header, which whoever sent
+the request chose; a canonical address built from that announces to search
+engines and every preview service that the page really lives at a name an
+outsider picked. The description is still written in that state, because it
+needs no address.
+
+**`og:image` only when a raster file is on disk.** Every service that draws
+these cards refuses SVG and this portal's icons are mostly SVG, so the tag is
+written only where the brand in use really has a PNG. Two of seven brand folders
+do; the rest are #656. A card with no picture looks ordinary, a card with a
+picture that will not load looks broken. `twitter:card` is `summary`, not
+`summary_large_image`, because the picture is a square 512 and the wide card
+stretches a square into a half-empty banner.
+
+### Do not count the "own head" pages by searching for them
+
+Three reasonable searches written while building this gave **27, 15 and 12**, and
+all three were wrong in different ways:
+
+- A file's doctype may sit inside an **e-mail body built as a PHP string**, which
+  is not a page head at all. Two of the "missing a title" pages found that way
+  were e-mail templates.
+- Several pages print their own `<head>` for the main view **and** include
+  `header.php` for an error branch, so "own head" is not a property of a whole
+  file.
+
+The list that matters is the exemption list in
+`tools/audit-checks/check_page_head_tags.py`, which names each exempt file and
+why. The exempt ones are PDFs, e-mail previews, kiosk and wall-display screens and
+the embeddable widget — none of them an address a person shares. The most
+interesting member of that list is `admin/maintenance/backup.php`, the recovery
+screen shown when a backup or restore had to leave the portal closed: it is
+exempt because `head-meta.php` asks `PortalAddress` and the settings, which
+READ THE DATABASE, and that page exists for the case where the database
+connection had to be closed. Adding the tags there could break the one page
+that says how to reopen the portal.
+
+(An earlier version of this paragraph also listed "the XML podcast feed". It
+is not on the list: `recordings/podcast.php` builds its XML as a PHP string
+and so never prints a `<title>` the check can see, which means it needs no
+exemption. The check itself reported that exemption as stale and it was
+removed; the note had not kept up.)
+
+### The check was wrong three times, and planting caught each one
+
+Worth keeping, because it is the same shape as the QR guard (#623):
+
+1. **String literals stripped across the whole file.** HTML attributes carry
+   quotes too, so a quote in `content="…"` paired with one inside a nearby PHP
+   block and blanked everything between them — including the page's real
+   `<title>`. Three pages that genuinely print a title were reported as "no
+   longer writes a title", which reads like a tidy-up rather than a fault in the
+   check.
+2. **Comments not removed before pairing quotes.** An apostrophe in a
+   `// we don't …` comment opens a string as far as a regular expression is
+   concerned, so every quote after it pairs one out of step. That is why the
+   blanking is now a small hand-written scan tracking code, both quote kinds and
+   both comment kinds as states, rather than a regular expression.
+3. **Asking whether the text `head-meta.php` appears anywhere.** Comment the
+   require out and leave the line in place: the page writes no tags and the
+   check stays green. It now asks whether there is a **live require**, with
+   comments stripped. This is exactly the hole the QR guard had twice.
+
+**And the guard that matters most is on `header.php` itself.** Ordinary pages
+write no `<title>` of their own — `header.php` does — so a page-by-page check
+never looks at them. Delete the require from `header.php` and hundreds of pages
+silently lose their tags while every page-by-page check passes. That is checked
+separately and first.
+
+### Why the file-reading check is not enough on its own
+
+`tools/page-head-selftest.php` fetches real pages over HTTP. Building it caught
+a case the file-reading check cannot see: `/unsubscribe` **required the partial
+and still answered with no tags**, because asked without a token it returns
+HTTP 400 and a line of plain text, not a page. That turned out to be a fault in
+the test rather than the page, but the same shape — a require sitting in a
+branch that did not run — is a real fault the source-reading check is blind to.
+Its part E plants the fault of removing the require and fails if the tags are
+still there, because a test that cannot see the fault it exists to catch proves
+nothing.
+
+**Token-gated pages are not covered by it**, and that is a real gap: accepting
+an invitation, resetting a password, confirming an erasure and unsubscribing all
+need a seeded record before they draw HTML, which needs real user and
+organisation rows because of the foreign keys.
+
+### The pre-push hook
+
+`.githooks/pre-push`, turned on per clone by `tools/install-git-hooks.sh`, which
+sets `core.hooksPath`. Per repository on purpose (owner, 5 October 2026): a
+global hooks folder overrides every other project's hooks. It runs `php -l` on
+the PHP files being pushed and every script in `tools/audit-checks/` — about
+eight seconds. It deliberately does not run the self-tests or the migration
+harness, which need a database and minutes; a gate slow enough to be resented
+gets turned off. `git push --no-verify` skips it and git offers no way to
+prevent that, so it guards against forgetting, not against deciding.
+
 ## Repository vs Server Structure
 
 The Git repository root contains documentation and CI/CD config. **All deployable

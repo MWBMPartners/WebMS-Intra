@@ -53,6 +53,15 @@ $sent = (isset($_GET['sent']) === true && $_GET['sent'] === '1');
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Forgot Password &bull; <?php echo htmlspecialchars($SETTINGS['site']['name'] ?? 'Portal', ENT_QUOTES, 'UTF-8'); ?></title>
+    <?php
+    // 🔗 #569 — the description, canonical address and preview card.
+    //    This page prints its own <head>, so it includes the shared
+    //    file itself rather than inheriting it from header.php.
+    $pageTitle       = 'Forgot password';
+    $pageDescription = 'Ask for a link to set a new password.';
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'head-meta.php';
+    ?>
+
 
     <!-- 🎨 Stylesheets (CDN with local fallback) -->
     <?php echo Asset::bootstrapCss(); ?>

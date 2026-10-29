@@ -158,6 +158,14 @@ $serviceDate   = htmlspecialchars(date('l, j F Y', strtotime((string) $plan['ser
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?php echo $planTitleSafe; ?> &middot; <?php echo $siteNameSafe; ?></title>
+    <?php
+    // 🔗 #569 — the description, canonical address and preview card.
+    //    This page prints its own <head>, so it includes the shared
+    //    file itself rather than inheriting it from header.php.
+    $pageTitle       = (string) $plan['title'];
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'head-meta.php';
+    ?>
+
     <!-- 🤖 Never index a public Order-of-Service page — a per-service link
          shared by the church itself, not content meant for search engines. -->
     <meta name="robots" content="noindex, nofollow, noai, noimageai">

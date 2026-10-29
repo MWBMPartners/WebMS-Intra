@@ -32,6 +32,7 @@ declare(strict_types=1);
 use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\GdprEraser;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -56,7 +57,23 @@ if ($userId <= 0 || $reason === '') {
     header('Location: ' . Site::url('admin/users'));
     exit();
 }
-if (in_array($disp, ['retain','anonymise','delete'], true) === false) {
+// 🗂️ What the form may ask for (#569). It offers two choices now — keep
+//    their records, or erase their personal details — because the portal
+//    performs ONE kind of erasure; see the note on the form itself.
+//
+//    'anonymise' and 'delete' are still ACCEPTED and both mean 'erase'.
+//    They are the two words the old form sent, they are still valid values
+//    of the dataDisposition column so that existing audit rows keep their
+//    wording, and a bookmarked form or a replayed post may still send one.
+//    Treating them as 'erase' is the honest reading: under the old code they
+//    did nothing at all, so there is no behaviour to preserve.
+//
+//    Anything else, including nothing at all, means 'retain'. A request
+//    chooses the TYPE of what it sends as well as the value, so $disp is
+//    cast to a string above before it reaches this test.
+if (in_array($disp, ['anonymise', 'delete', 'erase'], true) === true) {
+    $disp = 'erase';
+} elseif ($disp !== 'retain') {
     $disp = 'retain';
 }
 if ($userId === $adminId) {
@@ -226,9 +243,70 @@ try {
         $stmt->close();
     }
 
+    // 10. 🗑️ The erasure itself, when that is what was asked for (#569).
+    //
+    //     This used to be the gap: the choice was written to the audit row
+    //     above and NOTHING ELSE HAPPENED. An administrator picked
+    //     "Anonymise" or "Delete", was told the offboarding had succeeded,
+    //     and the person's details stayed exactly where they were. The code
+    //     said the erasure engine had not shipped; it had.
+    //
+    //     WHY A REQUEST IS FILED RATHER THAN THE ERASURE RUN HERE. There is
+    //     one audited erasure path in this portal — file, confirm, run —
+    //     with a hash chain over what it did, and the Erasure pages drive
+    //     it. Writing a second path that erased inline would mean two pieces
+    //     of code that must agree about 35 tables for ever. It also keeps
+    //     the undo window meaningful: offboarding can be undone by
+    //     offboarding/rehire.php, and erasing a person's details at this
+    //     moment would destroy the very things rehire puts back.
+    //
+    //     `true` means ALREADY CONFIRMED: the request carries no token and
+    //     sends no e-mail, because the organisation has made this decision
+    //     about somebody who is leaving, and there is no link for anybody to
+    //     click. It lands as `pending_review`.
+    //
+    //     Filed INSIDE the transaction on purpose: if any step above fails
+    //     and the whole thing rolls back, the erasure request must go with
+    //     it, or a failed offboarding would leave a live request to erase
+    //     somebody who was never offboarded.
+    //
+    //     WHEN IT RUNS is `offboarding.erasureMode`:
+    //       on_request        — it waits on Admin → Erasure requests (the
+    //                           nothing new has to be set up for it).
+    //       after_undo_window — the daily housekeeping job runs it once the
+    //                           undo window has passed.
+    //     Running it immediately is deliberately not offered yet: #663.
+    $erasureNote = '';
+    if ($disp === 'erase') {
+        // An erasure request may already be open for this person — they may
+        // have asked for one themselves. Filing a second would mean two runs
+        // over the same account, so the existing one is used.
+        $existing = GdprEraser::openRequestFor(Site::id(), $userId);
+        if ($existing !== null) {
+            $stepsLog[] = ['step' => 'erasure_request', 'ok' => true, 'reused' => $existing];
+            $erasureNote = ' An erasure request was already open for this person (#' . $existing . '), so that one stands.';
+        } else {
+            $filed = GdprEraser::fileRequest(Site::id(), $userId, true);
+            $stepsLog[] = ['step' => 'erasure_request', 'ok' => true, 'requestID' => $filed['requestID']];
+            $mode = (string) (App::settings('offboarding.erasureMode') ?? 'on_request');
+            $erasureNote = $mode === 'after_undo_window'
+                ? ' An erasure request has been filed and will be carried out automatically once the window for undoing this offboarding has passed.'
+                : ' An erasure request has been filed. Nothing is erased until somebody carries it out on Admin, Erasure requests.';
+        }
+        // The audit row was written before this step, so its log is brought
+        // up to date rather than left saying less than happened.
+        $logJson = json_encode($stepsLog);
+        $stmt = $db->prepare('UPDATE tblOffboarding SET stepsLog = ? WHERE userID = ? ORDER BY offboardingID DESC LIMIT 1');
+        if ($stmt !== false) {
+            $stmt->bind_param('si', $logJson, $userId);
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
+
     $db->commit();
 
-    $_SESSION['flash_msg']  = 'User offboarded. Audit row + per-step outcomes recorded.';
+    $_SESSION['flash_msg']  = 'User offboarded. Audit row + per-step outcomes recorded.' . $erasureNote;
     $_SESSION['flash_type'] = 'success';
 } catch (\Throwable $e) {
     $db->rollback();

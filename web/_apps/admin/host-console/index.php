@@ -113,8 +113,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php endif; ?>
 
     <p class="text-muted small mt-4">
-        Phase 1 is read-only. Phase 2 will add host-side push prompts to viewers
-        (decision-call overlays, prayer requests, give-now CTAs).
+        This list is read-only. Open an event to push a prompt to the people watching it —
+        a decision call, a prayer request or an invitation to give.
     </p>
 </div>
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

@@ -450,6 +450,202 @@ function run_giving_identity_sweep(): array
  *               givingIdentityCleared:int,givingIdentityOnHold:int,givingIdentityWaiting:int,
  *               givingIdentityFailed:int,totalDeleted:int}
  */
+/**
+ * 🗑️ Erasures that offboarding asked for and whose undo window has passed.
+ *
+ * Only runs at all when `offboarding.erasureMode` is 'after_undo_window'.
+ * The other mode, 'on_request' (the default), leaves every request waiting on
+ * Admin → Erasure requests for a person to carry out, which is what most
+ * will want: nothing has to be scheduled for it to be safe.
+ *
+ * WHY THE WINDOW IS LOAD-BEARING. Offboarding can be undone — that is what
+ * `offboarding/rehire.php` is for, within `offboarding.undo_window_days` (7 by
+ * default). Erasing somebody's details destroys exactly what a rehire puts
+ * back, so an erasure must never run while that window is open. The window is
+ * measured from `offboardedAt`, the moment the offboarding happened, not from
+ * when the request was filed; they are the same moment today, and measuring
+ * from the offboarding is what the window is actually about.
+ *
+ * ONLY 'pending_review' IS TAKEN. A request at 'processing' has a run in
+ * flight — or a run that stopped half way, which `putBackStuckRequest()`
+ * exists to deal with. Running `execute()` over it again could erase twice,
+ * and "never twice" comes before "always promptly" for something
+ * irreversible. Those are counted as waiting instead.
+ *
+ * EACH REQUEST IS CLAIMED FIRST, with the same conditional UPDATE the Erasure
+ * requests page uses. That is what makes `execute()`'s own "put it back" and
+ * "still going" updates work, because both look for 'processing'. An earlier
+ * version of this function skipped the claim and its comment then said
+ * "`execute()` puts a failed request back itself" — which was NOT true for
+ * this caller, since that UPDATE matched nothing. The end state was right by
+ * accident. A claim that fails means somebody else's run has it, and the
+ * request is left alone.
+ *
+ * ONE FAILURE MUST NOT STOP THE REST, so each is attempted on its own and a
+ * failure is counted rather than thrown.
+ *
+ * NOT gated on `offboarding.enabled`. A request that has already been filed is
+ * a promise to erase somebody's details; switching the app off afterwards must
+ * not quietly cancel it.
+ *
+ * WHAT THIS CANNOT DO
+ *   - Tell whether the undo window was the right length, or notice an
+ *     offboarding somebody meant to undo and forgot. Once the window on the
+ *     person's newest departure has passed, the erasure runs.
+ *   - Honour a PER-ORGANISATION choice of mode. `offboarding.erasureMode` is
+ *     read once, from the settings of whichever organisation this scheduled
+ *     request resolved to, and then applied to every organisation's
+ *     offboardings — because `tblOffboarding` has no organisation column at
+ *     all: offboarding is portal-wide. So an organisation that set its own
+ *     override would not get it. Nothing stops that override being saved in
+ *     the general Settings editor, which is the real gap; it is written down
+ *     here rather than half-guarded.
+ *   - Cancel a request when an offboarding is undone. `rehire.php` does that,
+ *     and it has to, because in the default mode this function never runs.
+ *
+ * @return array{mode: string, ran: int, failed: int, waiting: int}
+ */
+function run_offboarding_erasure_sweep(): array
+{
+    $mode = (string) (App::settings('offboarding.erasureMode') ?? 'on_request');
+    if ($mode !== 'after_undo_window') {
+        return ['mode' => $mode, 'ran' => 0, 'failed' => 0, 'waiting' => 0];
+    }
+
+    $days = (int) (App::settings('offboarding.undo_window_days') ?? 7);
+    if ($days < 0) {
+        $days = 7;
+    }
+
+    $db   = App::db();
+    $due  = [];
+    $wait = 0;
+
+    // 🎯 THE NEWEST offboarding row for the person, and only that one.
+    //
+    //    THIS WAS WRONG AND IT COULD HAVE ERASED SOMEBODY EARLY. The first
+    //    version joined `r.userID = o.userID` with no link between the
+    //    request and the offboarding that filed it, so ANY row for that person
+    //    satisfied the age test. An independent check proved it against real
+    //    MySQL: an offboarding from 2024 that was never undone made a request
+    //    filed TODAY due on tonight's run, while the form had just promised
+    //    the administrator that the person could still be brought back for
+    //    seven days. That is not an exotic history — `rehire.php` refuses an
+    //    undo once the window has passed, so ANYBODY who left, came back
+    //    later and left again has an older row with `rehiredAt` still empty.
+    //
+    //    Joining to the newest row answers the question actually being asked:
+    //    "has the window on THIS person's current departure passed, and are
+    //    they still gone?" A person who has since been brought back has
+    //    `rehiredAt` filled on that newest row and is excluded.
+    $sql = 'SELECT r.requestID, r.userID, r.status '
+         . 'FROM tblErasureRequest r '
+         . 'INNER JOIN tblOffboarding o ON o.offboardingID = ('
+         . '    SELECT o2.offboardingID FROM tblOffboarding o2 '
+         . '     WHERE o2.userID = r.userID '
+         . '     ORDER BY o2.offboardedAt DESC, o2.offboardingID DESC LIMIT 1'
+         . ') '
+         . "WHERE r.status IN ('pending_review', 'processing') "
+         . "  AND o.dataDisposition IN ('erase', 'anonymise', 'delete') "
+         . '  AND o.rehiredAt IS NULL '
+         . '  AND o.offboardedAt <= DATE_SUB(NOW(), INTERVAL ? DAY) '
+         . 'ORDER BY r.requestID';
+
+    $stmt = $db->prepare($sql);
+    if ($stmt === false) {
+        Logger::errorPlatform('Cron', 'Error', 'OFFBOARD_ERASE_READ', 'could not read offboarding erasures that are due', $db->error);
+        return ['mode' => $mode, 'ran' => 0, 'failed' => 0, 'waiting' => 0];
+    }
+    $stmt->bind_param('i', $days);
+    $stmt->execute();
+    $rows = $stmt->get_result();
+    while (($row = $rows->fetch_assoc()) !== null) {
+        if ((string) $row['status'] !== 'pending_review') {
+            $wait++;
+            continue;
+        }
+        $due[] = ['requestID' => (int) $row['requestID'], 'userID' => (int) $row['userID']];
+    }
+    $stmt->close();
+
+    $ran    = 0;
+    $failed = 0;
+    foreach ($due as $one) {
+        // 🔒 CLAIM IT FIRST, exactly as the Erasure requests page does
+        //    (`_apps/admin/erasure/process.php`): one UPDATE that only
+        //    succeeds from 'pending_review'.
+        //
+        //    The first version of this did not, and that was a real hole
+        //    found by an independent check. Without the claim the row stayed
+        //    at 'pending_review' for the WHOLE run, so the Execute button on
+        //    that page stayed armed and could claim the same request while
+        //    this was already erasing it — two runs over one account. It also
+        //    meant `GdprEraser`'s own "put it back" and "still going" updates
+        //    matched nothing, because they look for 'processing': a run that
+        //    died half way left no sign of life at all, and
+        //    `putBackStuckRequest()` could never apply to it.
+        //
+        //    A claim that fails is somebody else's run, not an error. It is
+        //    counted as waiting and left completely alone.
+        $claimed = false;
+        try {
+            $lock = $db->prepare(
+                'UPDATE tblErasureRequest SET status = "processing", claimedAt = UTC_TIMESTAMP() '
+                . 'WHERE requestID = ? AND status = "pending_review"'
+            );
+            if ($lock !== false) {
+                $lock->bind_param('i', $one['requestID']);
+                $lock->execute();
+                $claimed = $lock->affected_rows > 0;
+                $lock->close();
+            }
+        } catch (\Throwable $e) {
+            // A database without migration 208 has no `claimedAt` column. The
+            // run is refused rather than started with no way of telling later
+            // whether it is still going — the same decision the staff page
+            // makes. Nothing has been changed at this point.
+            Logger::errorPlatform(
+                'Cron',
+                'Error',
+                'OFFBOARD_ERASE_CLAIM',
+                'could not claim an offboarding erasure that was due; it was left alone',
+                'requestID=' . $one['requestID']
+            );
+            $claimed = false;
+        }
+        if ($claimed === false) {
+            $wait++;
+            continue;
+        }
+
+        try {
+            // No administrator carried this out, so no account number is
+            // recorded against it: the trail says the scheduled job did.
+            GdprEraser::execute($one['requestID'], $one['userID'], null);
+            $ran++;
+        } catch (\Throwable $e) {
+            $failed++;
+            // 🚫 THE FAULT'S OWN WORDS ARE NOT LOGGED. An earlier version
+            //    logged $e->getMessage() under a comment promising it named
+            //    nobody — but a database or filesystem message can quote the
+            //    very value being erased, such as an address or a path with
+            //    somebody's name in it, and that row would then outlive the
+            //    erasure by up to a year. Only the request number goes in.
+            //    `GdprEraser::execute()` records its own failure against the
+            //    request, where it belongs, and puts the request back.
+            Logger::errorPlatform(
+                'Cron',
+                'Error',
+                'OFFBOARD_ERASE_FAIL',
+                'an offboarding erasure that was due could not be carried out; the request has been put back for the next run',
+                'requestID=' . $one['requestID']
+            );
+        }
+    }
+
+    return ['mode' => $mode, 'ran' => $ran, 'failed' => $failed, 'waiting' => $wait];
+}
+
 function run_retention_sweep(): array
 {
     $activityDays = (int) (App::settings('audit.retentionDays')  ?? '365');
@@ -585,10 +781,22 @@ function run_retention_sweep(): array
     $givingIdentityWaiting = $giving['waiting'];
     $givingIdentityFailed  = $giving['failed'];
 
+    // 🗑️ Erasures offboarding asked for, now that their undo window has
+    //    passed. Does nothing unless the installation has chosen that mode.
+    $offboardErase = run_offboarding_erasure_sweep();
+
     return [
         'activityDeleted'      => $activityDeleted,
         'errorsDeleted'        => $errorsDeleted,
         'registrationsDeleted' => $registrationsDeleted,
+        // 🗑️ Offboarding erasures. Not added to totalDeleted either: an
+        //    erasure empties and anonymises across many tables rather than
+        //    deleting a countable number of rows, so a figure here would not
+        //    mean the same thing as the others.
+        'offboardErasureMode'    => $offboardErase['mode'],
+        'offboardErasuresRun'    => $offboardErase['ran'],
+        'offboardErasuresFailed' => $offboardErase['failed'],
+        'offboardErasuresWaiting' => $offboardErase['waiting'],
         // 🚫 NONE of the figures from here down to totalDeleted is added to
         //    it, on purpose. Nothing was deleted: personal detail was emptied
         //    out of rows that remain. Adding them would make the scheduled

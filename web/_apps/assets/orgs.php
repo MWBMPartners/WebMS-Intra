@@ -106,7 +106,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php endif; ?>
 
 <h1 class="mb-3"><i class="fa-solid fa-building me-2"></i>External Organisations</h1>
-<p class="text-muted">Hire companies, partner charities, suppliers — anyone external who can co-own, lend to, or borrow from this site. Used by the Owners panel and (in a later sub-issue) Loans.</p>
+<p class="text-muted">Hire companies, partner charities, suppliers — anyone external who can co-own, lend to, or borrow from this site. Used by the Owners panel and by Loans.</p>
 
 <div class="card mb-3">
     <div class="card-body">

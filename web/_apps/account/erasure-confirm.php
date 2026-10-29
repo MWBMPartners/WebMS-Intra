@@ -22,9 +22,17 @@ use Portal\Core\Router;
 
 $token = (string) ($_GET['token'] ?? '');
 if ($token === '' || preg_match('/^[a-f0-9]{64}$/', $token) !== 1) {
+    // 🔗 A proper page, not a line of bare text (#569) — and here it matters
+    //    more than usual: somebody following this link is trying to confirm
+    //    that their personal details be erased, and being met with
+    //    "Invalid confirmation link." in bare text gives them no idea whether
+    //    their request still stands. The page says plainly that nothing has
+    //    been changed.
     http_response_code(400);
-    header('Content-Type: text/plain');
-    exit('Invalid confirmation link.');
+    $linkPurpose = 'confirm a request to erase their personal details';
+    $linkAdvice  = 'Your request has not been cancelled. Ask a site administrator to send the confirmation again.';
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'link-unusable.php';
+    exit();
 }
 
 $db = App::db();
@@ -39,6 +47,15 @@ if ($stmt !== false) {
 ?>
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Erasure request</title>
+    <?php
+    // 🔗 #569 — the description, canonical address and preview card.
+    //    This page prints its own <head>, so it includes the shared
+    //    file itself rather than inheriting it from header.php.
+    $pageTitle       = 'Erasure request';
+    $pageDescription = 'Confirm your request to have your personal details removed.';
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'head-meta.php';
+    ?>
+
 <style>body{font-family:Arial,sans-serif;max-width:520px;margin:80px auto;padding:24px;text-align:center;color:#1b2330;}h1{color:#5e6ad2;}</style>
 </head><body>
 <?php if ($affected > 0): ?>
