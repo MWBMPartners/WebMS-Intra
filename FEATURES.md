@@ -518,6 +518,11 @@ Service-type-aware headcount tracker.
   was a duplicated "who marked this" trail and a table that would mislead the first reader to count records rather
   than people. Erased members are deliberately exempt: their rows
   keep the attendance and lose the name, and collapsing them would delete the counts erasure exists to preserve.
+- **Taking a walk-in off the register works (29 October 2026).** It did not before, and the gap was
+  invisible: the grid draws a walk-in's cell exactly like a member's, the page says "click a cell to
+  toggle", and the form really posted the removal — the handler just had no branch for it and
+  redirected as though it had worked. So a mistyped walk-in name could never be removed. Migration
+  224 would have made that permanent, since re-adding the corrected spelling is now a no-op.
 - Sessions with date / time / event linkage / notes.
 - Counts split by service type (hierarchical: e.g. Worship → Sabbath School → Adult).
 - Filters by service type, date range; CSV export; trend reports.

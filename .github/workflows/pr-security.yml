@@ -1141,6 +1141,16 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_time_limit_calls.py
 
+      # Nothing under web/ may ask another website to draw a QR picture (#623).
+      # The rule existed for PHP and had no guard for JavaScript, which is how
+      # the noticeboard bundle's api.qrserver.com fallback went unnoticed. It is
+      # unreachable only because the noticeboard page hands the board the
+      # portal's own address; this also checks that guard is still there.
+      - name: 'No KNOWN outside QR service is reachable (hard gate, #623)'
+        id: no_outside_qr_service
+        if: always()
+        run: python3 tools/audit-checks/check_no_outside_qr_service.py
+
       # =====================================================================
       # Summary in the Actions UI
       # =====================================================================
@@ -1162,6 +1172,11 @@ jobs:
             echo "- PHP lint: ${{ steps.php_lint.outcome }} (hard gate)"
             echo "- Account-change guard: ${{ steps.account_guard.outcome }} (hard gate)"
             echo "- One place decides the PHP version: ${{ steps.php_version_one_place.outcome }} (hard gate)"
+            # Its OWN line, deliberately NOT inside the #646 loop below: this
+            # guard is #623's, and adding it there made that loop's label say
+            # "the ten guards" over eleven results. This file has been bitten by
+            # a stale count before.
+            echo "- No known outside QR service is reachable: ${{ steps.no_outside_qr_service.outcome }} (hard gate, #623)"
             # The ten guards wired by #646, as ONE line unless something failed.
             # Ten separate lines would bury the rest of the summary; what a
             # reader needs is to tell "they all passed" from "they are not

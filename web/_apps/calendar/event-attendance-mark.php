@@ -100,8 +100,23 @@ if ($toggle === 1) {
     $stmt->close();
     Logger::activity('EventAttendanceMarked', 'Event #' . $eventId . ' day ' . $dayDate . ' user/walkin');
 } else {
-    // 🗑️ Remove a cell — only for named users, not walk-ins (walk-ins can be
-    //     re-clicked away from the grid via a v1.1 admin UI).
+    // 🗑️ Remove a cell. BOTH kinds of attendee, mirroring the two branches
+    //    above — a member by number, a walk-in by name.
+    //
+    //    ⚠ THE WALK-IN HALF WAS MISSING UNTIL 29 OCTOBER 2026, and it was the
+    //    bad kind of missing: the grid renders a walk-in's cell EXACTLY like a
+    //    member's (green, with a tick), the page tells the coordinator "click
+    //    a cell to toggle", and the form really does post `toggle=0` with the
+    //    name. This branch simply ignored it, then redirected as though it had
+    //    worked. So a walk-in added by mistake — a mistyped name, the wrong
+    //    day — could never be taken off, and nothing said so. The old comment
+    //    here deferred it to "a v1.1 admin UI", but the page was already
+    //    sending the request; only the handler was absent.
+    //
+    //    Migration 224 made that worse rather than better: with one row per
+    //    person per day now enforced, re-adding the corrected spelling leaves
+    //    the mistyped row sitting there for ever. Finishing this is what makes
+    //    that migration safe to ship.
     if ($userId > 0) {
         $stmt = $mysqli->prepare(
             'DELETE FROM tblEventAttendance WHERE eventID = ? AND userID = ? AND dayDate = ?'
@@ -110,6 +125,42 @@ if ($toggle === 1) {
         $stmt->execute();
         $stmt->close();
         Logger::activity('EventAttendanceUnmarked', 'Event #' . $eventId . ' day ' . $dayDate . ' user ' . $userId);
+    } elseif ($walkinName !== '') {
+        // `userID IS NULL` is deliberate: it keeps this statement from ever
+        // reaching a MEMBER's row, whatever the posted name says. The name is
+        // compared the way the column is stored (utf8mb4_general_ci, so
+        // capitals and trailing spaces are ignored), which is the SAME rule
+        // `uq_attendance_person` applies — so this can never remove more than
+        // the one row that key allows for an event, a day and a person.
+        //
+        // ⚠ AN EARLIER VERSION OF THIS COMMENT SAID the grid and this
+        // statement "cannot disagree". THEY CAN, and it is worth knowing
+        // rather than believing otherwise. The grid builds its keys in PHP by
+        // exact bytes (`'w:' . $walkinName . ':' . $d`) while the database
+        // compares them case-insensitively. So "Dave" on one day and "dave" on
+        // another are ONE name in the grid's list (it reads
+        // `SELECT DISTINCT walkinName`) but two different PHP keys, and the
+        // second day draws as not attended although a row exists — which makes
+        // that row invisible AND out of this branch's reach, because the cell
+        // then posts `toggle=1` rather than `toggle=0`.
+        //
+        // That display gap is older than this branch and is NOT fixed here
+        // (#655);
+        // the grid should fold case the way the database does, or the enrol
+        // form should settle on one spelling. What IS true of this statement is
+        // the sentence above it.
+        $stmt = $mysqli->prepare(
+            'DELETE FROM tblEventAttendance '
+            . 'WHERE eventID = ? AND userID IS NULL AND walkinName = ? AND dayDate = ?'
+        );
+        $stmt->bind_param('iss', $eventId, $walkinName, $dayDate);
+        $stmt->execute();
+        $stmt->close();
+        // The NAME is left out on purpose, as the "marked" record above leaves
+        // it out: a walk-in's name is somebody's personal detail and the
+        // activity log is not where it belongs. Event and day are enough to
+        // follow what happened.
+        Logger::activity('EventAttendanceUnmarked', 'Event #' . $eventId . ' day ' . $dayDate . ' walk-in');
     }
 }
 

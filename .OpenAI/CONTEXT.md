@@ -351,6 +351,31 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     normalise what they are told. That was measured on all three after the
     first guess proved wrong.
 
+13a. **A control that posts a request nothing handles (29 October 2026).** Two
+    found in one sitting and they share a shape: the page sends the request
+    correctly, the handler has no branch for it, and the redirect at the end
+    makes it look as though it worked. Nothing is logged, nothing is shown --
+    worse than a missing button, because the control invites the click. A
+    walk-in could be added to an attendance register and never taken off: the
+    grid draws the cell like a member's and really posted the removal, but
+    `event-attendance-mark.php` read `if ($userId > 0)` and nothing else. To
+    hunt for more: list a handler's branches, list every form that posts to it,
+    and check each posted shape against a branch -- a trailing
+    `header('Location: ...')` hides every unhandled case.
+
+13c. **The QR rule had no guard for JavaScript (#623, 29 October 2026).**
+    `Portal\Core\Qr` is the one place a QR picture is made, because a picture
+    fetched from another website carries the encoded text inside that request's
+    address. That was enforced by reading PHP only. The noticeboard's generated
+    bundle still falls back to `api.qrserver.com`; it is unreachable ONLY
+    because `web/_apps/noticeboard/index.php` gives the board the portal's own
+    address first, and the bundle is generated from `dc-runtime`, which is not
+    in this repository, so it cannot be removed here.
+    `tools/audit-checks/check_no_outside_qr_service.py` now guards both halves.
+    **Its own first version passed on a broken guard:** it searched for the
+    plain string `qrUrl`, so renaming the function to `qrUrlRENAMED` left that
+    string as a prefix and the check went green. Planting is what caught it.
+
 13b. **A unique key is POWERLESS over a column that can be empty (#487,
     migration 224).** In MySQL and MariaDB a unique key stands aside for any row
     where any part of it is empty -- an empty value is not even equal to itself.

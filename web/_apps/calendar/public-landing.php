@@ -9,7 +9,14 @@
  *   • Live countdown widget (CSS + a tiny JS tick)
  *   • Date / time / location
  *   • Big "Register / RSVP" CTA (deep-link to /calendar/event?slug=…)
- *   • QR code (via Google Charts QR API for v1; self-hosted in v1.1)
+ *   • QR code, drawn HERE by Portal\Core\Qr and written into the page as a
+ *     data: URI. This line used to say "via Google Charts QR API for v1;
+ *     self-hosted in v1.1" and was left behind when #623 made Qr the one
+ *     place a QR picture is made. Nothing here asks another website to draw
+ *     one, and nothing may: the text being encoded would travel in that
+ *     address, and this page writes its own <head> so it sends no page rule
+ *     to stop the request. Guarded by
+ *     tools/audit-checks/check_no_outside_qr_service.py.
  *   • Brand attribution footer
  *
  * Different from /calendar/event?slug=… (which is the data-rich detail

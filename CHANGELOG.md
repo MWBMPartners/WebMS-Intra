@@ -2,6 +2,26 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — a walk-in could be added to an attendance register but never taken off again**
+  - **What was wrong.** On an event's attendance grid, clicking a cell adds or removes that person,
+    and the page says so. For somebody who simply turned up — a "walk-in", recorded by name rather
+    than by account — only the adding half existed. Clicking the cell to take them off sent the
+    request, the page reloaded, **and the tick was still there.** No message, no explanation.
+  - **Why it mattered more than it looks.** A walk-in is recorded by a typed name, so a typo or the
+    wrong day could never be undone. And because this release also starts enforcing one record per
+    person per day, re-adding the corrected spelling would have left the mistyped one in place for
+    good.
+  - **What changed.** Taking a walk-in off now works, matching how it already worked for members. The
+    name is matched the way the grid groups it, so the row that disappears is the one shown.
+- **Hardened — nothing can quietly start sending QR codes to another website**
+  - A QR picture fetched from somebody else's website carries whatever it encodes **inside the
+    address of that request**, and addresses end up in logs and browser histories. The portal draws
+    its own, and has since October 2026.
+  - The noticeboard's display bundle still carries an old fallback to an outside QR service. It never
+    runs, because the noticeboard hands the board the portal's own address first — but nothing was
+    checking that, and if it were ever removed the board would have started sending its share links
+    away with nothing looking broken. **There is now an automatic check** that fails if any outside QR
+    service becomes reachable, or if that safeguard disappears.
 - **Fixed — the same person could be marked present twice, and every attendance figure counted them twice (#487, migration 224)**
   - **What was wrong.** An attendance record names its person in one of two ways: a member number, or the name of
     somebody who simply turned up. The rule meant to stop duplicates covered both columns at once — but no record

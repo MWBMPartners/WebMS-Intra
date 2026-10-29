@@ -3390,6 +3390,129 @@ ignore rules remain the first wall; these guards are the second.
 
 ---
 
+## Controls that post a request nothing handles (#487 readiness sweep, 29 October 2026)
+
+Two found in one sitting, and they share a shape worth naming: **the page sends
+the request correctly, the handler has no branch for it, and the redirect at the
+end makes it look as though it worked.** Nothing is logged, nothing is shown.
+This is strictly worse than a missing button, because the control invites the
+click.
+
+**1. A walk-in could not be taken off an attendance register.**
+`_apps/calendar/event-attendance.php` draws every cell the same way and tells
+the coordinator "click a cell to toggle"; for an attended cell the form posts
+`toggle=0`, with `walkinName` where a member would have `userID`.
+`event-attendance-mark.php`'s removal branch read `if ($userId > 0)` and nothing
+else, so a walk-in's removal fell through to the redirect. The old comment
+deferred it to "a v1.1 admin UI" -- **but the page was already sending the
+request; only the handler was absent.** A mistyped walk-in name was therefore
+permanent, and migration 224 made that worse: the corrected spelling has a
+different `attendeeRef`, so adding it SUCCEEDS and you are left with two rows --
+the mistake and the correction -- with no way to remove the mistake. (An earlier
+version of this sentence said re-adding the corrected spelling "is now a no-op",
+which is wrong: it is the MISTYPED row that cannot be got rid of, not the new
+one that cannot be added.)
+
+The fix mirrors the insert branch. `userID IS NULL` is in the DELETE
+deliberately, so the statement can never reach a member's row whatever the
+posted name says, and the name is compared in the column's own collation
+(`utf8mb4_general_ci`, so capitals and trailing spaces are ignored) -- the same
+rule `uq_attendance_person` applies, so the cell the coordinator sees as one
+person is the row that goes. The activity record leaves the NAME out, as the
+"marked" record already did: a walk-in's name is personal detail and the
+activity log is not where it belongs.
+
+**One thing the fix does NOT cover, raised as #655.** The grid builds its keys
+in PHP by exact bytes while the database compares names case-insensitively, so
+"Dave" on one day and "dave" on another are one name in the list but two keys --
+the second day draws as not attended although a row exists, and that row is then
+invisible AND beyond this branch's reach (its cell posts "add", which the unique
+key swallows). Not reachable on a fresh install, because both insert paths trim
+and the grid is the only writer; left for its own package because fixing it
+touches how every participant is keyed.
+
+**How to look for more of these.** Find a handler's branches, then find every
+form that posts to it, and check each posted shape against a branch. A
+`header('Location: ...')` at the end of a handler hides every unhandled case, so
+grep for handlers whose last statement is a redirect and work backwards.
+
+## The QR rule had no guard for JavaScript (#623, found 29 October 2026)
+
+#623 made `Portal\Core\Qr` the one place a QR picture is made, because a
+picture fetched from another website carries the encoded text INSIDE the address
+of that request, and addresses reach server logs and browser histories. That was
+enforced by reading PHP. **A script can build such an address just as easily, and
+the browser fetches it without the portal ever seeing it.**
+
+`web/public_html/assets/noticeboard/noticeboard.noeval.js` does exactly that:
+`qrSrc()` tries the host's `qrUrl`, then `window.CueRCode`, then falls back to
+`https://api.qrserver.com/...`.
+
+**It is unreachable, and only for one reason.**
+`web/_apps/noticeboard/index.php` sets `NoticeboardHost.qrUrl` to return the
+portal's own `api/noticeboard/qr` address, and it always returns a non-empty
+string, so `qrSrc()` never reaches the fallback. Nothing was checking that.
+Remove or rename that function in a refactor and the noticeboard starts sending
+its share links to a third party, with nothing looking broken.
+
+**It cannot be fixed here.** That bundle is GENERATED from `dc-runtime/src/*.ts`
+("do not edit. Rebuild with `cd dc-runtime && bun run build`"), and `dc-runtime`
+is NOT in this repository. The fallback has to go in dc-runtime. What this
+repository can do is make sure it never becomes live, which is what
+`tools/audit-checks/check_no_outside_qr_service.py` does: no outside QR host may
+appear in any file under `web/` that is not on a counted allow-list, and the
+`qrUrl` host function must still be present.
+
+**Why the allow-list counts occurrences instead of parsing comments.** #623
+deliberately keeps notes naming the removed service so nobody reinstates it, so
+three files legitimately mention `chart.googleapis.com`. Telling a comment from
+code in a minified generated bundle is not something to trust a regular
+expression with, and a check that is wrong either way is worse than none.
+Counting per file needs no parsing and still fails on the only thing that
+matters: one more appearing.
+
+**The guard on that function was WRONG TWICE, and planting caught both. This is
+the part worth keeping.**
+
+*Version 1* looked for the plain string `qrUrl`. Renaming the function to
+`qrUrlRENAMED` -- precisely how it would be lost in a refactor -- **left that
+string in place as a prefix**, so the check went green over a guard that no
+longer existed.
+
+*Version 2* required `\bqrUrl\s*[:(]` and `api/noticeboard/qr` as TWO
+INDEPENDENT patterns, anywhere in the file. It caught the rename, and **passed on
+both of the states it exists to catch**:
+
+| planted state | what really happens | version 2 |
+|---|---|---|
+| the whole function commented out | `NoticeboardHost` has no `qrUrl`; `qrSrc()` falls through | **passed** |
+| function kept, `return '';`, address left in a note above | `qrSrc()`'s `if (r) return r` falls through | **passed** |
+| `"qrUrl": function` (quoted key) | nothing wrong at all | **failed** (cried wolf) |
+
+Missing the real fault and crying wolf, in one check.
+
+*Version 3* asks the question the guard is actually about: **is there a LIVE
+`qrUrl` property whose body RETURNS the portal's own QR address?** Whole-line
+comments and `/* */` blocks are stripped from that file first (it is
+hand-written, unlike the bundle, so the shapes are predictable), the key may be
+quoted, the spacing may be anything, and the property and the address must be in
+ONE PLACE rather than merely both somewhere in the file. All six cases above now
+come out right.
+
+**Why a trailing comment on a line of real code is deliberately NOT stripped:**
+cutting at the first `//` would also cut `https://` out of real code, and this
+file holds both. An address inside a trailing comment cannot fake a whole
+function, so the looser rule costs nothing.
+
+Three other faults were planted and caught first time: a new file calling an
+outside service, a second call added to an already-listed file, and the rename.
+
+**What it still cannot see, and the docstring says so:** a QR service not in its
+list (`qrcode.tec-it.com` and `qrtag.net` pass), and a listed host built up by
+concatenation (`'api.' + 'qrserver.com'` passes). Both are evasions rather than
+accidents. The accident -- a well-meaning fallback added, or a guard lost in a
+refactor -- is what it catches.
+
 ## A unique key is powerless over a column that can be empty (#487, 29 October 2026)
 
 **The rule, and it is absolute: in MySQL and MariaDB a unique key STANDS ASIDE
