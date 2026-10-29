@@ -6,7 +6,122 @@
 
 ---
 
-## 29 OCTOBER 2026, LATEST — #569 part one and the release-readiness batch, commit `1e4da0e`
+## 29 OCTOBER 2026, LATEST — repeating events, and the installation-caps-organisation rule (#569, #668, migration 227)
+
+**State: built, verified, independently checked, NOT YET COMMITTED.**
+
+**What changed.** The portal could not create a repeating event at all: no repeat control on the
+event form, and nothing had ever written `tblRecurrenceRules`, while FEATURES.md listed the feature
+as shipped. Now:
+
+- `web/_core/EventRecurrence.php` — the date generator. NOMINAL lengths (a wall-clock reading plus a
+  zone), deliberately the opposite of `IcsReader`'s exact-length rule, with the reason written beside
+  both. Skipped days rather than moved ones. Both ceilings report when they cut a series short.
+- Repeat controls on the create form (creation only, on purpose — #669 is changing an existing
+  series), and `calendar/manage/save.php` writes the series, the rule, and each date as a COPY of the
+  row just inserted. `calendar/export.php` already collapsed a series-with-a-rule into one `RRULE`,
+  so the calendar feed started working with no change to it.
+- **How big a series may be is a setting at two levels** (`/admin/settings/repeats`, migration 227),
+  and the owner's rule is that **the installation's limit CAPS an organisation's** — lower is allowed,
+  higher never. The two levels may be different people, so it is enforced in the handler and the
+  number is refused with the reason, never quietly clamped.
+- `web/_core/InstallationSettings.php` — the installation-wide settings layer, kept for the request.
+
+**The trap that cost the most, and the rule it proves.** The layer began as a third global,
+`$SETTINGS_INSTALLATION`. `Router.php` does `global $mysqli, $SETTINGS;` before loading a page and
+**those two are the only things a page inherits** — so the form and the settings page read an empty
+array and an organisation's 500-date series sailed past an installation limit of 6. Found by the HTTP
+test, not by reading. Widening the two-variable rule was rejected; a named class is the answer.
+
+**Verified:** 38 audit checks, `php -l` clean, 60 generator checks, 126 HTTP checks against MySQL
+8.0.36, migration 227 replayed three times (one row each), a customer's own chosen value survives the
+replay, an old database gains the rows. **Seventeen planted faults, all caught.** 0 dangling Docker
+volumes before and after.
+
+**TWO rounds of independent check, nine real faults between them, all fixed and guarded** (sections
+L and M of the HTTP test, sections I and H of the generator test).
+
+Round 1 (seven): the repeat block re-read `$_POST['seriesID']`, bypassing the #514 validation, so an
+administrator of one organisation could post another's series number and the copies landed in it;
+the feed published an endless series where the diary held five dates, and a 400-date series where the
+installation allowed five (a limit that held for `tblEvents` and not for what the installation
+PUBLISHES); a date pushed out of the missing hour lost its length; and two checks had been pinning a
+message that told people their series was cut short when it was not.
+
+Round 2 (two, both in the join between the dates made and the pattern published): `array_slice($dates,
+1)` assumed the typed start satisfied the pattern, so a Wednesday start with Thursday ticked threw
+away a real occurrence AND left the diary holding a day the pattern never makes; and the portal counts
+"every other week" from Sunday while RFC 5545 defaults to Monday, so "Sunday and Wednesday, every
+fortnight" sent three of its six dates wrong to every subscriber.
+
+Round 3 (two): the invariant was being enforced in the SAVE HANDLER, and round 3 proved that cannot
+work — **attaching an ordinary one-off event to a repeating series, two clicks on the event form and
+nowhere near the repeat code, left a PUBLIC event that appeared in nobody's subscribed calendar at
+all**, because collapsing a series skips every other row of it; and moving one date made the feed
+advertise a date that had never existed. Also, the R4 gap comments claimed the opposite of what the
+code measurably does (the old fictional reading resolved to the SAME instant, and the occurrence is
+not really longer — only looks it).
+
+**THE DESIGN THAT CAME OUT OF IT, and the thing to remember:** the guarantee lives in
+`calendar/export.php`, at the one place a pattern is USED. `$patternStillTrue()` expands the stored
+rule and requires it to equal exactly the rows in hand. A writer cannot know about every later edit;
+a reader can always ask. Comparing COUNTS is not enough (moving a date leaves the count unchanged),
+and it compares against the rows THIS VIEWER MAY SEE — otherwise a series holding an event somebody
+may not see would collapse and publish a count covering it.
+
+Round 4 (two): a stale CHANGELOG paragraph left standing beside its own correction, saying the
+opposite of the code; and the comparison looked at START readings only, so renaming and lengthening
+one occurrence left the series collapsed — the renamed public event in nobody's calendar and the old
+finishing time still advertised. It now compares the ends AND every field the entry renders
+(eventName, description, locationName, locationAddress, status, timezone, isAllDay), named explicitly
+rather than "everything but the dates".
+
+**A lesson about PLANTING from round 4, worth more than the fix:** section P changed the name AND the
+end together, so the two halves of the guard masked each other — each could be deleted with all 106
+checks still green. Isolating checks (P11–P16, one changed thing each) were needed. And a `perl -0pi`
+plant that does not match is SILENT; three plants were believed to have passed when they had never
+applied. Plant with an assertion that the text was found.
+
+**The owner's decision of 29 October 2026, after round 4:** keep the collapsing AND make it work for
+a series that has already started. The first version compared against the rows in hand, and the
+whole-calendar download carries only events from today on — so an ongoing weekly service could never
+match its own pattern. `$seriesRunForViewer()` now reads the whole run under the request's own
+visibility rule with NO time filter, and the entry starts where the series starts. The two filters
+had to be told apart: time must not stop a pattern being used, visibility must.
+
+Round 5 (three, ALL comment/document claims — no wrong behaviour): a DEV_NOTES paragraph saying "a
+series stops being tidy about a week after it begins", which the owner's change had just removed, left
+standing beside its own correction; a comment naming the MAP POSITION as something the calendar file
+does not render, which it does (as a GEO line), so a pin moved on one date was published for every
+date — the coordinates are compared now; and the substitution's own justification, which claimed
+every rendered field was compared when `uid`, `url` and `lastModified` never can be. That third one
+led to taking all five from the series' first row, which also removed a weekly UID churn nobody had
+noticed.
+
+Five rounds on one package is well past the project's "say so after three" threshold, and the same
+item failed all five — which is what the rule means by "simplify rather than refine": three
+handler-side guards became one question asked by the reader. The remaining known limit is #670.
+
+Fixing round 2 also introduced and caught a bug of its own (the copy loop ended up inside the
+rule-writing condition, so joining an existing series made one event and no repeats — check M10).
+
+#670 records what the feed still cannot do: a single date cancelled or moved later is invisible to
+subscribers, because the feed sends the pattern and there is no `EXDATE`.
+
+**Next:** commit this, then the backup package (scheduling, download, upload) — the next item on the
+owner's release list.
+
+**#668 is the big one left behind:** the installation-caps-organisation rule is now written down as a
+standing rule but has NOT been swept across the application. 30+ limit-shaped settings, and one known
+live instance — `/admin/settings/attendance` writes `attend.detailRetentionDays` per organisation,
+0–3650 days, with no installation cap.
+
+**Still over the archive threshold:** this file is ~1,400 lines against a ~1,000 line limit. Flagged
+again, not acted on.
+
+---
+
+## 29 OCTOBER 2026 — #569 part one and the release-readiness batch, commit `1e4da0e`
 
 **What changed.** Two bodies of work in one commit, 54 files. (1) #569's head tags: one shared
 `web/_core/templates/head-meta.php` writes the meta description, canonical address and Open Graph /

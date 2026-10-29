@@ -239,7 +239,10 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    is not built unless the owner says so. *(`.claude/CLAUDE.md` → "Working
    with the owner".)*
 
-8. **Progress updates, and how a long run ends.** Say in one sentence what
+8. **Progress updates, and how a long run ends. THE TABLE IS STANDING, NOT ON
+    REQUEST** (owner, 29 October 2026, having had to ask why it had stopped
+    appearing: it was given once when asked and then quietly dropped). It is how
+    the owner tracks an autonomous run without reading a narrative. Say in one sentence what
    you are about to do; while working, update only when you find something
    important, change direction or finish a piece of work — always in the same
    message as your next action, never as a place to stop. For a queue, show
@@ -1238,6 +1241,51 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
 
     Tests: I7b, I7c, I7d, C13 and I34 to I34h of
     `tools/ics-reader-selftest.php`.
+
+26. **One install, many organisations, and DIFFERENT PEOPLE at each level
+    (owner, 29 October 2026). Applies throughout the application, not only to
+    Calendar and Events — the owner named the noticeboard specifically.** One
+    installation may serve many organisations, and whoever administers the
+    INSTALLATION may be a different person from the administrators of the
+    organisations on it (a hosting provider and its customers). The boundary
+    between the two levels is therefore a boundary between PARTIES.
+
+    For a setting that is a **limit**, the installation's value takes
+    precedence: an organisation may hold itself to a LOWER limit and may never
+    raise its own above what the installation allows. If the installation
+    allows one year, an organisation may choose six months and may not choose
+    three years. This is the OPPOSITE of the ordinary settings rule, where an
+    organisation's row simply overrides the installation-wide one — and
+    `$SETTINGS` has already done that merge by the time any page runs, so the
+    merged array cannot express the rule on its own.
+
+    `$SETTINGS_INSTALLATION` is kept beside `$SETTINGS` by the settings loader
+    in `bootstrap.php` for exactly this, holding the installation-wide rows
+    alone. It is a layer, not a list of limits. The effective value is the
+    SMALLER of the two, then capped by a hard maximum in code: three tiers,
+    each unable to loosen the one above it.
+
+    Four things that are easy to get wrong, each found by a check rather than
+    by reading: "not chosen" must follow the INSTALLATION, not the built-in
+    default, or the default caps the installation and an installation can lower
+    a limit but never raise one; the rule is enforced in the HANDLER, never
+    only by a `max` on an input, because anything can be posted; the number is
+    REFUSED with the reason rather than quietly clamped, because silently
+    reducing somebody else's number is how a person comes to believe a limit is
+    in force when it is not; and the refusal is recorded, because it crosses a
+    line between two parties.
+
+    `Portal\Core\EventRecurrence::limitsFrom()` is the first reader built this
+    way and `installationAllows()` is how a page says what the installation
+    permits. Tests: section H of `tools/event-recurrence-selftest.php`, section
+    K of `tools/event-repeat-pages-selftest.php`.
+
+    **NOT yet swept across the application.** Over thirty limit-shaped settings
+    exist (`*max*`, `*limit*`, `*Days*`, `*quota*`, `*Retention*`), including
+    `noticeboard.upload.maxBytes`, and one live instance is known:
+    `/admin/settings/attendance` writes `attend.detailRetentionDays` per
+    organisation, 0–3650 days, with no installation cap. The sweep is its own
+    package.
 
 - **What a shared link looks like, and the pre-push gate (#569).** `web/_core/templates/head-meta.php` is the ONE place the meta description, canonical address and Open Graph / Twitter tags are written. `header.php` requires it, and so does every page that draws its own `<head>`; set `$pageTitle` and, where the page can do better than the fallback, `$pageDescription`, before requiring it. **The canonical address and `og:url` are left out entirely while `PortalAddress::visitorCanChooseHost()` is true** — the fallback is a host name the requester chose, and a canonical built from it points search engines and preview services at a name an outsider picked. `og:image` only where the brand in use has the square raster on disk (two of seven; #656), and `twitter:card` is `summary`, not `summary_large_image`, because the picture is square. **Do not count the own-`<head>` pages by searching:** three reasonable searches gave 27, 15 and 12, because a doctype may sit inside an e-mail body built as a PHP string and because a page can draw its own head for the main view AND include `header.php` for an error branch. The list that matters is the exemption list in `tools/audit-checks/check_page_head_tags.py`, which names each exempt file and why. That check was WRONG THREE TIMES and planting caught each: string literals stripped across the whole file (an HTML attribute's quote paired with one inside PHP and swallowed the `<title>`); comments not stripped before pairing quotes (an apostrophe in `// don't` put every later quote out of step); and asking only whether the text `head-meta.php` appeared anywhere, which a commented-out require satisfied. **Its most valuable guard is on `header.php`'s own require**, because ordinary pages write no `<title>` of their own and a page-by-page check would never notice its deletion. Behaviour is proved by `tools/page-head-selftest.php` over real HTTP, whose part E plants the fault. **`.githooks/pre-push`** (turned on per clone by `tools/install-git-hooks.sh`, setting `core.hooksPath`; per repository on purpose — a global hooks folder overrides every other project's) runs `php -l` on the PHP the push range touches **as it stands on disk, not as committed** plus all 38 audit checks, about nine seconds. It does NOT run the self-tests or the migration harness, and `git push --no-verify` skips it.
 - **Offboarding really erases now, and the sweep has three traps (#569, migration 226).** `_apps/offboarding/do.php` **files** an erasure request through `GdprEraser::fileRequest($siteId, $userId, true)` — a fourth way a request gets confirmed, now written into that method's docblock — and never erases inline: there is ONE audited erasure path and a second would have to agree about 35 tables for ever. `offboarding.erasureMode` is `on_request` (the default; it waits on Admin, Erasure requests) or `after_undo_window` (the daily sweep runs it once `offboarding.undo_window_days` has passed). **Neither erases at the moment of offboarding**, because `rehire.php` exists; immediate erasure is #663. **`rehire.php` cancels a request still waiting** — without that the default mode left a live request to erase somebody who had returned. In `run_offboarding_erasure_sweep()` (`_apps/cron/_retention-sweep.php`): **join to the NEWEST offboarding row per person, never to any row** (an old row made a request filed today due tonight, bypassing the window — measured); **claim the request** with the same conditional `UPDATE … WHERE status = 'pending_review'` the staff page uses, or the Execute button stays armed mid-run and GdprEraser's own put-back and still-going updates match nothing; and **never log the fault's own words**, which can quote the value being erased. It cannot honour a per-organisation mode: `tblOffboarding` has no organisation column. The form offers TWO options, not three, because the portal does one kind of erasure. **Nothing yet covers this end to end over HTTP** — the SQL was proved against a real database and the rest was read, so a page-level test is still owed.

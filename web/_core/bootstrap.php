@@ -461,6 +461,39 @@ try {
 
 $SETTINGS = [];
 
+// 🏢 THE INSTALLATION-WIDE LAYER, KEPT SEPARATELY (#569, 29 October 2026).
+//
+//    $SETTINGS below is the MERGED answer: installation-wide rows first, then
+//    this organisation's own laid over them. That is right for almost every
+//    setting, where an organisation's choice should simply win.
+//
+//    It is WRONG for a setting that is a LIMIT. One installation may serve
+//    many organisations, and the owner's rule for a limit is that the
+//    installation's value takes precedence over an organisation's: an
+//    organisation may hold itself to a LOWER limit, never raise its own above
+//    what the installation allows. Otherwise one organisation on a shared
+//    install could help itself to resources the host had deliberately capped.
+//
+//    The merged array cannot express that, because by then the two values have
+//    become one and there is no way to tell "the organisation chose 500" from
+//    "the installation allows 500". This second array keeps ONLY the
+//    installation-wide rows, so a reader that needs the distinction has it
+//    without a second query — the loop below is already reading both layers
+//    and was simply throwing the first away.
+//
+//    It is a LAYER, not a list of limits: nothing here decides which settings
+//    are limits. `EventRecurrence::limitsFrom()` is the first reader to use
+//    it. Code that just wants a setting's value should keep using $SETTINGS.
+//
+//    IT IS HANDED TO `Portal\Core\InstallationSettings` just below, and that
+//    is how a PAGE reads it. This variable alone is not enough: Router.php
+//    does `global $mysqli, $SETTINGS;` before loading a page and those two are
+//    the only things a page inherits, so a third global is simply not there
+//    (see .claude/rules/app-pages.md). The first version of this got that
+//    wrong and an organisation's 500-date series sailed past an installation
+//    limit of 6, because the page read an empty layer.
+$SETTINGS_INSTALLATION = [];
+
 // 🤫 From here on this request holds REAL secrets (see the load just below),
 //    so the record PHP keeps of an error must not carry what a function was
 //    called with.
@@ -563,8 +596,29 @@ try {
             }
 
             assign_setting($SETTINGS, $row['settingKey'], $value);
+
+            // 🏢 And again into the installation-wide layer, for the rows
+            //    that ARE installation-wide. Kept so that a limit can be
+            //    capped by the installation rather than overridden by an
+            //    organisation; see the note where $SETTINGS_INSTALLATION is
+            //    declared.
+            if ($row['siteID'] === null) {
+                assign_setting($SETTINGS_INSTALLATION, $row['settingKey'], $value);
+            }
         }
         $settingsStmt->close();
+
+        // 🏢 Hand the installation-wide layer over, so a PAGE can read it:
+        //    a page inherits only $mysqli and $SETTINGS, never a third global.
+        //    Wrapped because files reach a shared host one at a time; if this
+        //    file arrives before the class, the request carries on with the
+        //    layer simply unknown, which every reader is written to survive.
+        try {
+            \Portal\Core\InstallationSettings::remember($SETTINGS_INSTALLATION);
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] The installation-wide settings layer could not be kept: ' . $e->getMessage());
+        }
+
         if ($secretsReadAsStored !== '') {
             // One line for the request, not one per row, and never a value.
             error_log('[WebMS-Intra] Secret settings were read as stored, not decrypted: ' . $secretsReadAsStored);

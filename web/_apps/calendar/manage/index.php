@@ -367,6 +367,13 @@ try {
         <a href="<?php echo htmlspecialchars(Site::url('calendar/manage/import'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
             <i class="fa-solid fa-file-csv me-1"></i> Bulk Import (CSV)
         </a>
+        <!-- 🔁 How big a repeating series may be (#569, migration 227). Here
+             rather than buried in the general settings editor, because this is
+             the page somebody is on when they wonder why their repeat stopped
+             where it did. -->
+        <a href="<?php echo htmlspecialchars(Site::url('admin/settings/repeats'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
+            <i class="fa-solid fa-repeat me-1"></i> Repeat Limits
+        </a>
         <button class="btn btn-success" data-bs-toggle="collapse" data-bs-target="#createEventForm">
             <i class="fa-solid fa-plus me-1"></i> Create Event
         </button>

@@ -316,7 +316,33 @@ Events, series, RSVP, exports, and seven view modes.
 - Event CRUD with hero images, location, all-day support, public/featured flags.
 - Event series with bulk edit (#75).
 - Event categories + types (hierarchical, per-site).
-- Recurring rules: weekly / fortnightly / monthly / quarterly / yearly / custom.
+- **Repeating events: weekly / fortnightly / monthly / quarterly / yearly**, created from the event form
+  (#569). Pick how often, then stop after a number of dates or after a date. Weekly and fortnightly take
+  any set of weekdays; monthly, quarterly and yearly go by the same date each time or the same weekday
+  (the second Tuesday, the last Sunday). **Each date becomes its own ordinary event**, so one of them can
+  be moved or cancelled afterwards without touching the rest, and the series is written to
+  `tblRecurrenceRules` — which is what makes the calendar feed collapse the run into a single repeating
+  entry for whoever subscribes to it — including a series that has already started, which begins at its
+  own first date — but only while that pattern still produces exactly the dates in the diary, with the
+  same finishing times and the same title, description, location, map position, status, time zone and
+  all-day setting. The feed checks that every time by expanding the pattern
+  and comparing, against the dates that reader is allowed to see. So a series can never publish a date
+  it has not got, nor hide one it has, nor name one somebody may not see. **What it cannot yet do
+  (#670) is show a single cancelled, moved or edited date as a change to the pattern:** instead that
+  whole series goes back to being listed one date at a time. Accurate, just less tidy.
+  - **The time on the clock is what repeats.** "Every Sunday at 10:00" is 10:00 through both clock
+    changes. A date landing in the hour that does not exist moves forward and keeps its length.
+  - **The repeat chosen wins over the date typed**, and the first date moves onto the pattern if they
+    disagree (tick Thursday above a Wednesday and you get four Thursdays). The person is told.
+  - **A month without that date is skipped, never moved** — "the 31st" makes no date in February, and a
+    yearly 29 February series makes dates only in leap years.
+  - **How big a series may be is a setting**, per installation and per organisation
+    (`/admin/settings/repeats`): a number of dates and how far ahead. Whichever is reached first stops it,
+    and the person is told it was cut short so they can extend it later. **The installation's limit caps an
+    organisation's** — an organisation may choose lower, never higher (#668).
+  - **Not yet:** changing the PATTERN of a series that already exists (shifting or extending a whole run).
+    Repeats are offered on creation only, rather than half-offered. Custom rules are storable but nothing
+    generates dates from them.
 - RSVP system (#88) — capacity, waitlist, confirmation emails.
 - iCal export (`/calendar/export`). The feed people subscribe to and the download carry each event's own time
   zone and its stored time; a personal feed is on the holder's own organisation's clock (#604).
@@ -347,7 +373,7 @@ Events, series, RSVP, exports, and seven view modes.
 - #97–#103: BookIT calendar-provider abstraction (7-PR series).
 
 **Tables:** `tblEvents`, `tblEventCategories`, `tblEventTypes`, `tblEventSeries`, `tblEventThemes`, `tblRecurrenceRules`, `tblEventRSVPs`, `tblCalendarMonthThemes`
-*(Two names were wrong here: `tblEventRecurrence` is really `tblRecurrenceRules`, and `tblEventRsvps` is `tblEventRSVPs` — capitals matter on a case-sensitive server. Corrected 29 October 2026. Note that nothing in the portal WRITES `tblRecurrenceRules` yet: see the repeating-events row below.)*
+*(Two names were wrong here: `tblEventRecurrence` is really `tblRecurrenceRules`, and `tblEventRsvps` is `tblEventRSVPs` — capitals matter on a case-sensitive server. Corrected 29 October 2026. `tblRecurrenceRules` had never been written by anything until the repeating-events work later the same day; `calendar/export.php` had been reading it all along, which is why writing it made the calendar feed start collapsing a series into one repeating entry without that code changing.)*
 **Settings:** `calendar.enabled`, `calendar.displayName`, `calendar.displayIcon`, `calendar.brandColor`, `calendar.defaultView`
 *(`calendar.enablePublicView` and `calendar.allowRecurringEvents` were listed here and exist NOWHERE — not seeded, not read by any code. Removed 29 October 2026 rather than invented, because a settings list is read by somebody looking for a switch to turn.)*
 

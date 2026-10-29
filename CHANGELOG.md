@@ -2,6 +2,119 @@
 
 
 ## [Unreleased] (alpha)
+- **Added — repeating events, which the portal could not create at all (#569, #668, migration 227)**
+  - **What was missing.** FEATURES.md listed "Recurring rules: weekly / fortnightly / monthly /
+    quarterly / yearly / custom" as shipped. There was no repeat option anywhere on the event form,
+    and **nothing in the whole codebase had ever written `tblRecurrenceRules`** — so a weekly
+    service had to be typed in one date at a time, for ever. "Series" was only a grouping label.
+  - **What you can do now.** Choose how often on the event form, then stop after a number of dates
+    or after a date. Weekly and fortnightly take any set of weekdays. Monthly, quarterly and yearly
+    go either by the same date each time or by the same weekday — the second Tuesday, the last
+    Sunday. Each date becomes its own ordinary event, so **inside the portal** you can move or
+    cancel one of them later without disturbing the rest.
+  - **The calendar feed now sends the series as one repeating entry.** `calendar/export.php` has
+    always known how to collapse a series that has a rule that way. Nothing had ever written a rule,
+    so that code had never run. It does now — **and only while that one entry still describes the
+    series truthfully**, which the feed works out for itself every time. See below for what that
+    means in practice and what it still cannot do.
+  - **The time on the clock is what repeats, not a number of hours.** "Every Sunday at 10:00" reads
+    10:00 on both sides of both clock changes. This is the opposite rule from the one the portal
+    uses when READING somebody else's calendar, where each occurrence has to keep the same exact
+    length — so the existing reader was deliberately not reused, and the reason is written beside
+    both. Proved in three time zones, including one whose clocks change on a different date.
+  - **The repeat you choose wins over the date you typed, and you are told.** Tick "Thursday" above
+    a Wednesday and you get Thursdays — including the first one, which moves to the Thursday. The
+    message says so. The alternative, keeping the Wednesday and then repeating on Thursdays, cannot
+    be described by a calendar feed at all, so the two halves could never have agreed.
+  - **A month without that date is skipped, never moved.** "The 31st" makes no date in February
+    rather than quietly landing on 1 March. A yearly 29 February series therefore makes dates only
+    in leap years, and under the default three-year horizon that is a single date — reported to the
+    person rather than hidden.
+  - **How big a series may be is now yours to set, not ours** (`/admin/settings/repeats`): a number
+    of dates, and how far ahead. These began life as fixed numbers in the code — 200 dates and three
+    years — which are sensible for a church with one Sunday service and wrong for a school with a
+    daily registration period. Whichever limit is reached first stops the series, and the person
+    creating it is told it was cut short so they can extend it later.
+  - **The installation's limit caps an organisation's (#668).** One installation can serve many
+    organisations, and whoever runs the installation may be a different person from the
+    administrators of the organisations on it. So for a limit the installation has the last word: an
+    organisation may hold itself to fewer dates or a shorter horizon, and can never give itself
+    more. A number above the installation's limit is refused with the reason, and recorded — never
+    quietly reduced, because a silently shrunk number is how somebody comes to believe a limit is in
+    force when it is not. Raising the installation's limit raises what every organisation may then
+    have.
+  - **Lowering a limit never deletes anything.** It changes what a NEW series may produce. Dates
+    already in the diary are ordinary events and are left exactly alone. The page says so.
+  - **What the feed publishes can never exceed what the installation allows.** The repeating entry
+    sent to subscribers carries the exact number of dates in the diary, so a limit is a limit in
+    what the installation publishes as well as in what it stores. An independent check found both
+    halves of this wrong before release: leaving both stop fields empty published a
+    **forever-repeating** event while the diary held five dates, and a count typed past the form
+    published four hundred where the installation allowed five.
+  - **Not included, on purpose:** changing the pattern of a series that already exists — shifting
+    every future date, or extending a run. That means adding and removing rows in bulk and is its
+    own piece of work; the form offers repeats on creation only rather than half-offering them.
+  - **Two tests, and they check different things.** `tools/event-recurrence-selftest.php` proves the
+    date rules with no database at all (60 checks). `tools/event-repeat-pages-selftest.php` drives
+    the real form and save handler over HTTP and reads the rows back out of the database (126
+    checks), because the date rules can be perfect while the form posts a field name the handler
+    never reads. That second test earned its place immediately: it caught the form printing a
+    constant that had just been renamed, which made every create form raise a fatal error — and
+    `php -l` cannot see an undefined constant.
+  - **Two rounds of independent review found nine real faults between them, all fixed here.** The
+    second round found the two that mattered most, and both lived in the join between the dates
+    created and the pattern published: the first date of a series was thrown away whenever the typed
+    start did not satisfy the pattern (so the diary held a day the pattern never makes, and the feed
+    advertised one the diary had not got); and the portal counts "every other week" from Sunday
+    while a calendar feed assumes Monday, so "Sunday and Wednesday, every fortnight" sent three of
+    its six dates wrong to every subscriber. The feed now states the week start explicitly.
+  - **One rule holds the two halves together, and it is checked where it is used.** A repeating
+    series is published as a single pattern only while that one entry still describes the series
+    truthfully. The calendar feed works that out for itself every time: it expands the stored pattern
+    and compares it against the dates it has, their finishing times, and every detail the entry
+    actually carries — the title, description, location, status, time zone and all-day flag. So
+    attaching another event to the series, moving a date, deleting one, lengthening one or renaming
+    one all make the feed go quietly back to listing every date on its own. Less tidy, always true.
+    (A detail the calendar file does not carry at all, such as the hero image, can differ between
+    dates without affecting this.)
+  - **A third round of review was what forced that design**, and it is worth saying why. The first
+    two rounds had the save handler removing the pattern whenever it knew the pattern had stopped
+    being true. Round three showed that was unfixable from there: attaching a one-off event to a
+    repeating series — two clicks on the ordinary event form, nowhere near the repeat code — left a
+    **public event that appeared in nobody's subscribed calendar at all**, and moving a single date
+    made the feed advertise a date that had never existed. No amount of care in the save handler
+    covers every later edit. Asking the question at the one place the pattern is used does.
+  - **And the check compares against the dates the reader is allowed to see**, not every date in the
+    series. A series can hold an event a particular viewer may not see; comparing against all of
+    them would have found the pattern "true" and published a count covering a date that viewer was
+    never meant to know about.
+  - **Five rounds of independent review in all. The fifth found no wrong behaviour** — only three
+    claims in comments and notes that said more than the code did. One of those mattered: a comment
+    gave the map position as an example of something "the calendar file does not render", so the
+    coordinates were left out of the comparison and a pin moved on one date was published for every
+    date. The file does render them, and they are compared now. Chasing the third claim also removed
+    a weekly churn nobody had noticed: the published entry was identified by one occurrence and dated
+    at another, so its identifier changed every time a date passed and a subscriber's calendar saw a
+    delete-and-re-add each week. The entry is now the series' first occurrence throughout.
+  - **A series that has already started is published as one entry too** (the owner's decision of
+    29 October 2026). The download itself only carries events from today on, and the first version
+    of the check compared against just those — so an ongoing weekly service could never match its
+    own pattern and went out one date at a time, which is precisely the series somebody most wants
+    as a single entry. The pattern is now read against the whole run and the entry begins where the
+    series begins, so a subscriber sees the past dates as well. That is ordinary for a subscribed
+    calendar. The two filters had to be told apart to do it: "from today on" decides what the
+    download carries and must not stop a pattern being used, while "what this reader may see" must.
+  - **The first round found seven real faults, all fixed here too**, and they are
+    worth listing because every one was invisible to reading: a posted series number was read
+    straight past the check that refuses another organisation's (so copies landed in it); a series
+    number that did not exist gave an error page after the first event had already been saved; the
+    feed published an endless series, and one of four hundred dates where five were allowed; a date
+    pushed out of the hour that does not exist lost its length, and sometimes ended before it
+    started; the message told people their series had been cut short when they had simply asked for
+    that many dates — and **two checks had been pinning that wrong message**; the settings page
+    credited the installation's limit to the organisation; and the stored pattern described dates
+    that were never created.
+
 - **Fixed — offboarding offered to erase somebody's details and erased nothing (#569, migration 226)**
   - **What was wrong.** When somebody left, the offboarding form offered three choices for their
     personal details: keep them, anonymise them, or delete them. The choice was written into the

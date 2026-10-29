@@ -21,9 +21,11 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
+use Portal\Core\EventRecurrence;
 use Portal\Core\Events;
 use Portal\Core\Geocoder;
 use Portal\Core\GeoLocation;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -551,9 +553,573 @@ if ($action === 'create') {
     $newEventId = $stmt->insert_id;
     $stmt->close();
 
+    // -------------------------------------------------------------------------
+    // 🔁 Repeating events (#569)
+    // -------------------------------------------------------------------------
+    // The portal could not make one at all before this: there was no control on
+    // the form, and nothing in the whole codebase ever wrote
+    // `tblRecurrenceRules`, so a weekly service had to be typed in date by
+    // date. FEATURES.md promised the feature anyway.
+    //
+    // HOW THE DATES ARE MADE: `Portal\Core\EventRecurrence` works them out
+    // from the rule and the first occurrence's WALL-CLOCK reading, so "every
+    // Sunday at 10:00" stays 10:00 through a clock change. Its own header says
+    // why that is the opposite rule from `IcsReader`, which reads other
+    // people's calendars and must keep each occurrence the same EXACT length.
+    //
+    // HOW EACH DATE BECOMES AN EVENT: by COPYING THE ROW JUST INSERTED, with
+    // only the start, end and slug changed. That is deliberate and is the
+    // safest part of this: the copy uses the very column list this handler
+    // built a few lines above, so an occurrence carries every field the first
+    // one does — audience, venue, category, type, images, the lot — and a
+    // column added to the form later is copied without anybody remembering to
+    // come back here. Writing out a second INSERT with its own list would drift
+    // the moment the two disagreed.
+    //
+    // WHAT IT DOES NOT DO: change an existing series. Each occurrence is an
+    // ordinary event, so moving or cancelling ONE already works through the
+    // normal edit and delete; shifting a whole run, or extending it, is its own
+    // piece of work and the form does not offer it rather than half-offering.
+    $repeatFrequency = (string) ($_POST['repeatFrequency'] ?? '');
+    $repeatMade      = 0;
+    $repeatNote      = '';
+    $ruleWasWritten  = false;
+
+    if (in_array($repeatFrequency, ['weekly', 'fortnightly', 'monthly', 'quarterly', 'yearly'], true) === true) {
+        // The browser joins the date and time with a "T" and may leave the
+        // seconds off; the generator wants a full reading.
+        $toReading = static function (string $when): string {
+            $when = trim(str_replace('T', ' ', $when));
+            return preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $when) === 1 ? $when . ':00' : $when;
+        };
+
+        $repeatDays = [];
+        foreach ((array) ($_POST['repeatDays'] ?? []) as $day) {
+            if (is_scalar($day) === true && preg_match('/^[0-6]$/', (string) $day) === 1) {
+                $repeatDays[] = (string) (int) $day;
+            }
+        }
+
+        $monthlyByWeekday = (string) ($_POST['repeatMonthlyMode'] ?? 'day') === 'weekday';
+        $weekOfMonthRaw   = (string) ($_POST['repeatWeekOfMonth'] ?? '');
+        $countRaw         = (string) ($_POST['repeatCount'] ?? '');
+        $untilRaw         = trim((string) ($_POST['repeatUntil'] ?? ''));
+
+        $rule = [
+            'frequency'      => $repeatFrequency,
+            'intervalVal'    => 1,
+            'dayOfWeek'      => $repeatDays === [] ? null : implode(',', $repeatDays),
+            'dayOfMonth'     => $monthlyByWeekday === true ? null : (int) date('j', (int) strtotime($toReading($startDateTime))),
+            'weekOfMonth'    => $monthlyByWeekday === true && preg_match('/^-?[1-5]$/', $weekOfMonthRaw) === 1
+                ? (int) $weekOfMonthRaw
+                : null,
+            'monthOfYear'    => $repeatFrequency === 'yearly'
+                ? (int) date('n', (int) strtotime($toReading($startDateTime)))
+                : null,
+            'startDate'      => date('Y-m-d', (int) strtotime($toReading($startDateTime))),
+            'endDate'        => preg_match('/^\d{4}-\d{2}-\d{2}$/', $untilRaw) === 1 ? $untilRaw : null,
+            'maxOccurrences' => preg_match('/^\d+$/', $countRaw) === 1 && (int) $countRaw > 0 ? (int) $countRaw : null,
+        ];
+
+        // 🧢 HOW BIG A SERIES MAY BE is this installation's choice, and this
+        //    organisation's within it — `calendar.repeat.maxOccurrences` and
+        //    `calendar.repeat.maxYears`, set at /admin/settings/repeats.
+        //
+        //    BOTH LAYERS go in, and the order matters: the INSTALLATION'S
+        //    value takes precedence. An organisation may hold itself to a
+        //    lower ceiling, but can never raise its own above what the
+        //    installation allows (the owner, 29 October 2026) — the two levels
+        //    may be different people, a hosting provider and its customers.
+        //    `$SETTINGS` is the merged answer and cannot express that on its
+        //    own, which is why the settings loader keeps
+        //    `$SETTINGS_INSTALLATION` beside it.
+        //
+        //    These were constants in the class until 29 October 2026. They are
+        //    settings because 200 dates and three years are right for a church
+        //    with one Sunday service and wrong for a school with a daily
+        //    registration period, and this portal is a product rather than one
+        //    customer's installation.
+        $worked = EventRecurrence::datesFor(
+            $rule,
+            $toReading($startDateTime),
+            $endDt === null ? null : $toReading((string) $endDt),
+            $timezone,
+            EventRecurrence::limitsFrom($SETTINGS, InstallationSettings::layerOrNull())
+        );
+
+        // 📍 THE EVENT JUST CREATED IS MOVED ONTO THE PATTERN'S FIRST DATE.
+        //
+        //    This block used to say "the first date IS the event just created,
+        //    so only the rest are new" and take `array_slice($dates, 1)`. That
+        //    is only true when the typed start happens to satisfy the pattern,
+        //    and the form lets them disagree in one click — the weekday boxes
+        //    and the monthly mode are independent of the date typed above them.
+        //
+        //    Measured by the independent check: start Wednesday 2028-10-04 with
+        //    THURSDAY ticked gave the generator 10-05, 10-12, 10-19, 10-26. The
+        //    slice threw away 10-05 — a real occurrence — and the diary kept the
+        //    typed Wednesday, a day the pattern never produces. The rule row
+        //    then described Thursdays while the series' earliest event was a
+        //    Wednesday, so a subscriber expanding it saw 10-05, which does not
+        //    exist in the portal, and never saw 10-04, which does.
+        //
+        //    So the pattern wins: if its first date is not the one typed, the
+        //    event is moved onto it. Ticking "Thursday" means the event is on
+        //    Thursdays — all of them, including the first. The person is told,
+        //    because a date moving by itself would otherwise be a surprise.
+        //
+        //    The alternative was keeping BOTH the typed date and the pattern's
+        //    dates. It was rejected: no single RRULE can describe "this
+        //    Wednesday and then every Thursday", so the feed could never be
+        //    made to agree with the diary.
+        $generated   = $worked['dates'];
+        $firstWanted = $generated[0]['start'] ?? null;
+        $movedFirst  = '';
+
+        if ($firstWanted !== null && $firstWanted !== $toReading($startDateTime)) {
+            $firstEndWanted = $generated[0]['end'];
+            $moveFirst      = $mysqli->prepare(
+                'UPDATE tblEvents SET startDateTime = ?, endDateTime = ? '
+                . 'WHERE eventID = ? AND externalFeedID IS NULL'
+            );
+            if ($moveFirst !== false) {
+                $moveFirst->bind_param('ssi', $firstWanted, $firstEndWanted, $newEventId);
+                try {
+                    $moveFirst->execute();
+                    if ($moveFirst->affected_rows > 0) {
+                        $movedFirst = $firstWanted;
+                    }
+                } catch (\Throwable $e) {
+                    Logger::errorPlatform(
+                        'Calendar',
+                        'Error',
+                        'REPEAT_FIRST_MOVE_FAILED',
+                        'the first date of a repeating event could not be moved onto the pattern, so no '
+                        . 'repeat rule was recorded and the calendar feed will list each date on its own',
+                        'eventID=' . $newEventId
+                    );
+                }
+                $moveFirst->close();
+            }
+
+            // If it could not be moved, the diary does not match the pattern
+            // and must not claim to. Nothing is published as a repeating
+            // entry; the dates are still made.
+            if ($movedFirst === '') {
+                $firstWanted = null;
+            }
+        }
+
+        $extra = array_slice($generated, 1);
+
+        if ($extra !== []) {
+            // 🗂️ A rule belongs to a SERIES, not to an event — that is how
+            //    `tblRecurrenceRules` has always been shaped, and it is why
+            //    `calendar/export.php` can already collapse a series with a
+            //    rule into one VEVENT with an RRULE in the calendar feed. So
+            //    writing the rule makes that existing feature start working
+            //    too, without touching it.
+            // 🛡️ THE VALIDATED SERIES, NEVER `$_POST` AGAIN. This read
+            //    `(int) ($_POST['seriesID'] ?? 0)` and that was a real hole,
+            //    measured by the independent check: the validation a few
+            //    hundred lines above refuses a series belonging to another
+            //    organisation, or one holding an imported event, by setting
+            //    `$seriesID = null` (#514, D5). Reading the raw post here went
+            //    straight past it — an administrator of one organisation posted
+            //    another organisation's series number and the copies landed in
+            //    THAT organisation's series, with a rule row owned by this one
+            //    attached to it. There is no foreign key tying a series to a
+            //    site, so the database accepted it.
+            //
+            //    The same route put ordinary events inside an importer-managed
+            //    series, which is the precise thing #514 exists to prevent.
+            $seriesIdForRule = $seriesID ?? 0;
+
+            // 🗂️ Whether THIS request created the series, which decides
+            //    whether a rule may be written at all. See the rule block
+            //    below: a rule describes a whole series, so it may only exist
+            //    where the series holds exactly the dates the pattern makes.
+            $seriesWasCreatedHere = ($seriesIdForRule <= 0);
+
+            if ($seriesIdForRule <= 0) {
+                $seriesName = $eventName;
+                $seriesSlug = $slug;
+                $made = $mysqli->prepare(
+                    'INSERT INTO tblEventSeries (siteID, seriesName, seriesSlug) VALUES (?, ?, ?)'
+                );
+                if ($made !== false) {
+                    $made->bind_param('iss', $siteId, $seriesName, $seriesSlug);
+                    try {
+                        $made->execute();
+                        $seriesIdForRule = (int) $made->insert_id;
+                    } catch (\Throwable) {
+                        // The slug is unique per organisation and the event's
+                        // own slug already carries its date, so a clash means
+                        // two events of the same name on the same day. Adding
+                        // the event's number cannot clash with anything.
+                        $seriesIdForRule = 0;
+                    }
+                    $made->close();
+                }
+                if ($seriesIdForRule <= 0) {
+                    $seriesSlug = $slug . '-' . $newEventId;
+                    $made = $mysqli->prepare(
+                        'INSERT INTO tblEventSeries (siteID, seriesName, seriesSlug) VALUES (?, ?, ?)'
+                    );
+                    if ($made !== false) {
+                        $made->bind_param('iss', $siteId, $seriesName, $seriesSlug);
+                        $made->execute();
+                        $seriesIdForRule = (int) $made->insert_id;
+                        $made->close();
+                    }
+                }
+                // The event already created has to join the series too, or the
+                // first occurrence would sit outside its own run.
+                if ($seriesIdForRule > 0) {
+                    // `externalFeedID IS NULL` is not a formality here:
+                    // FeedImporter is the ONE writer of an imported event
+                    // (#514), so nothing in this handler may change one. It
+                    // cannot happen today — the row was created a moment ago
+                    // by this same request — but the guard costs nothing and
+                    // states the rule where somebody would otherwise have to
+                    // know it.
+                    $join = $mysqli->prepare(
+                        'UPDATE tblEvents SET seriesID = ? WHERE eventID = ? AND externalFeedID IS NULL'
+                    );
+                    if ($join !== false) {
+                        $join->bind_param('ii', $seriesIdForRule, $newEventId);
+                        // 🛡️ Wrapped: runs after the event row is committed, and
+                        //    under strict mysqli a lock-wait timeout would show
+                        //    an error page for an event that exists.
+                        try {
+                            $join->execute();
+                        } catch (\Throwable $e) {
+                            Logger::errorPlatform(
+                                'Calendar',
+                                'Error',
+                                'REPEAT_SERIES_JOIN_FAILED',
+                                'the first date of a repeating event could not be joined to its series, so the '
+                                . 'calendar feed will list each date on its own',
+                                'eventID=' . $newEventId . ' seriesID=' . $seriesIdForRule
+                            );
+                        }
+                        $join->close();
+                    }
+                }
+            }
+
+            // 🧹 ATTACHING TO A SERIES SOMEBODY ELSE ALREADY MADE: any rule
+            //    it carries stops being true the moment these dates join it,
+            //    so it is removed and none is written.
+            //
+            //    `export.php` reads a series' rule with `ORDER BY ruleID LIMIT
+            //    1` and then skips every other event of that series, so leaving
+            //    a stale rule in place would publish the OLD pattern and make
+            //    this run's dates vanish from every subscriber's calendar
+            //    entirely. Leaving a SECOND rule row would do the same, because
+            //    only the oldest is ever read. With no rule, the feed lists each
+            //    event on its own: less tidy, always true.
+            if ($seriesWasCreatedHere === false && $seriesIdForRule > 0) {
+                // 🛡️ Wrapped for the same reason the rule INSERT is: this runs
+                //    AFTER the event row is committed, mysqli is in strict mode
+                //    (bootstrap sets MYSQLI_REPORT_STRICT|MYSQLI_REPORT_ERROR),
+                //    and a lock-wait timeout here would give the member an
+                //    error page for an event that was created perfectly well.
+                $dropRule = $mysqli->prepare('DELETE FROM tblRecurrenceRules WHERE seriesID = ? AND siteID = ?');
+                if ($dropRule !== false) {
+                    $dropRule->bind_param('ii', $seriesIdForRule, $siteId);
+                    try {
+                        $dropRule->execute();
+                    } catch (\Throwable $e) {
+                        Logger::errorPlatform(
+                            'Calendar',
+                            'Error',
+                            'REPEAT_RULE_STALE',
+                            'the old repeat rule of a series these dates joined could not be removed, so the '
+                            . 'calendar feed may describe that series by its previous pattern',
+                            'eventID=' . $newEventId . ' seriesID=' . $seriesIdForRule
+                        );
+                    }
+                    $dropRule->close();
+                }
+            }
+
+            if ($seriesIdForRule > 0 && $seriesWasCreatedHere === true && $firstWanted !== null) {
+                // 📝 THE RULE ROW DESCRIBES THE DATES THAT WERE REALLY MADE,
+                //    not what the form asked for. This matters far more than it
+                //    looks, and the first version got it wrong in two ways that
+                //    the independent check measured.
+                //
+                //    `calendar/export.php` builds ONE repeating entry from this
+                //    row for everybody who subscribes to the calendar. So this
+                //    row is not a record of the request — it is a PUBLISHED
+                //    PROMISE about what is in the diary, and if the two
+                //    disagree, every subscriber's calendar is wrong.
+                //
+                //    What went wrong:
+                //      • With both stop fields left empty — which the form
+                //        invites — the row carried no count and no end date, so
+                //        the feed sent `RRULE:FREQ=WEEKLY` with no COUNT and no
+                //        UNTIL: a FOREVER-repeating event, while the diary held
+                //        five dates.
+                //      • Posting `repeatCount=400` past the form stored 400, so
+                //        the feed published a 400-date series on behalf of an
+                //        installation that had capped the organisation at five.
+                //        That was a route past the installation's limit — not
+                //        into `tblEvents`, but into what the installation
+                //        publishes, which is worse.
+                //
+                //    So `maxOccurrences` is the number of dates the pattern
+                //    produced, and `endDate` is deliberately NULL. Both are
+                //    needed: `export.php` prefers UNTIL over COUNT when both
+                //    are present, and an UNTIL taken from the request would
+                //    overshoot a series our ceiling had already stopped.
+                //    Leaving the asked-for end date out costs nothing a
+                //    subscriber can see — COUNT pins the series exactly — and
+                //    it is the only way the two cannot drift apart.
+                //
+                //    BE PRECISE about this number, because an earlier comment
+                //    here was not: it is the number GENERATED, bound before the
+                //    copies run. If a copy then fails, the whole rule row is
+                //    REMOVED after the loop rather than left over-promising —
+                //    see the clean-up at the end of this block. So a rule that
+                //    survives does describe exactly what is in the diary; this
+                //    one statement on its own does not guarantee that.
+                $datesMade = count($generated);
+
+                // 📅 AND ONLY THE FIELDS THAT APPLY TO THIS FREQUENCY.
+                //    Writing all of them regardless was the other fault. A
+                //    weekly series stored `dayOfMonth = 3`, which is meaningless
+                //    for a weekly rule; worse, choosing "every month, the same
+                //    date" while a weekday box happened to be ticked stored
+                //    BOTH, and `export.php` prefers `dayOfWeek`, so the feed
+                //    published "every Monday of every month" against one date a
+                //    month in the diary. The form shows every box at once on
+                //    purpose (no JavaScript), so a box that does not apply being
+                //    filled in is the ordinary case, not a strange one.
+                $byWeekday   = $monthlyByWeekday === true && $rule['weekOfMonth'] !== null;
+                $isWeekly    = in_array($repeatFrequency, ['weekly', 'fortnightly'], true);
+                $isYearly    = $repeatFrequency === 'yearly';
+
+                $ruleDayOfWeek = null;
+                if ($isWeekly === true) {
+                    $ruleDayOfWeek = $rule['dayOfWeek'];
+                } elseif ($byWeekday === true) {
+                    // The generator uses only the FIRST ticked weekday for an
+                    // nth-weekday pattern, so storing more would describe
+                    // dates that were never made.
+                    $firstDay      = $rule['dayOfWeek'] === null ? null : explode(',', (string) $rule['dayOfWeek'])[0];
+                    $ruleDayOfWeek = $firstDay === null || $firstDay === '' ? null : $firstDay;
+                }
+
+                $ruleDayOfMonth  = ($isWeekly === false && $byWeekday === false) ? $rule['dayOfMonth'] : null;
+                $ruleWeekOfMonth = $byWeekday === true ? $rule['weekOfMonth'] : null;
+                $ruleMonthOfYear = $isYearly === true ? $rule['monthOfYear'] : null;
+                // 📅 `endDate` is deliberately never written, so
+                //    `tblRecurrenceRules.endDate` is a column nothing fills and the
+                //    UNTIL branch of the feed's rule builder is unreachable. See the
+                //    note above for why: UNTIL beats COUNT in that builder, and an
+                //    UNTIL taken from the request would outlive a series our own
+                //    ceiling had stopped.
+                $ruleEndDate     = null;
+                $ruleStartDate   = substr((string) $firstWanted, 0, 10);
+
+                $ruleStmt = $mysqli->prepare(
+                    'INSERT INTO tblRecurrenceRules '
+                    . '(siteID, seriesID, frequency, intervalVal, dayOfWeek, dayOfMonth, weekOfMonth, monthOfYear, startDate, endDate, maxOccurrences) '
+                    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                );
+                if ($ruleStmt !== false) {
+                    $ruleStmt->bind_param(
+                        'iisisiiissi',
+                        $siteId,
+                        $seriesIdForRule,
+                        $rule['frequency'],
+                        $rule['intervalVal'],
+                        $ruleDayOfWeek,
+                        $ruleDayOfMonth,
+                        $ruleWeekOfMonth,
+                        $ruleMonthOfYear,
+                        // 📅 The series' OWN first date, not the one typed on the
+                        //    form. They differ whenever the first event was
+                        //    moved onto the pattern, and this column is the one
+                        //    field in the row that would otherwise still
+                        //    describe a date the series does not contain.
+                        //    Nothing reads it today (`export.php` does not
+                        //    select it), which is exactly why it would have
+                        //    stayed wrong unnoticed.
+                        $ruleStartDate,
+                        $ruleEndDate,
+                        $datesMade
+                    );
+                    // 🛡️ Wrapped, unlike the first version. The series number
+                    //    is validated now, so a missing series cannot arrive
+                    //    through the form — but one can be deleted between that
+                    //    check and this statement, and an uncaught foreign-key
+                    //    error here gave HTTP 500 AFTER the event row was
+                    //    already committed: the member saw an error page, one
+                    //    event existed, no repeats, and nothing was rolled back
+                    //    (measured). The event is real and worth keeping; the
+                    //    rule failing is worth recording, not worth losing it
+                    //    over.
+                    try {
+                        $ruleStmt->execute();
+                        $ruleWasWritten = true;
+                    } catch (\Throwable $e) {
+                        Logger::errorPlatform(
+                            'Calendar',
+                            'Error',
+                            'REPEAT_RULE_FAILED',
+                            'the repeat rule of a new series could not be saved, so the calendar feed will '
+                            . 'list each date on its own rather than as one repeating entry',
+                            'eventID=' . $newEventId . ' seriesID=' . $seriesIdForRule
+                        );
+                    }
+                    $ruleStmt->close();
+                }
+            }
+
+            // 📋 MAKING THE DATES IS NOT CONDITIONAL ON WRITING A RULE, and
+            //    keeping those two apart matters: this block sat INSIDE the
+            //    rule condition for a while, so joining an existing series —
+            //    where no rule may be written — silently created one event and
+            //    no repeats at all. Caught by check M10.
+            //
+            //    The dates are what the person asked for. The rule is only how
+            //    the calendar feed describes them, and it is absent whenever it
+            //    could not describe them truthfully.
+            if ($seriesIdForRule > 0) {
+                // 📋 The copy. Every column the form writes, taken from the row
+                //    just created, with the three that must differ replaced.
+                $copyColumns = $insertColumns;
+                $selectParts = [];
+                foreach ($copyColumns as $column) {
+                    if ($column === 'startDateTime' || $column === 'endDateTime' || $column === 'eventSlug') {
+                        $selectParts[] = '?';
+                        continue;
+                    }
+                    if ($column === 'seriesID') {
+                        $selectParts[] = '?';
+                        continue;
+                    }
+                    $selectParts[] = '`' . $column . '`';
+                }
+                $copySql = 'INSERT INTO tblEvents (`' . implode('`, `', $copyColumns) . '`) '
+                    // AND externalFeedID IS NULL: an imported event must
+                    // never be COPIED either. That would make a portal-owned
+                    // clone of somebody else's event, which no feed refresh
+                    // would ever tidy up, and FeedImporter is the only thing
+                    // allowed to create one (#514).
+                    . 'SELECT ' . implode(', ', $selectParts) . ' FROM tblEvents WHERE eventID = ? AND externalFeedID IS NULL';
+                $copyStmt = $mysqli->prepare($copySql);
+
+                if ($copyStmt !== false) {
+                    foreach ($extra as $index => $occurrence) {
+                        $occStart = (string) $occurrence['start'];
+                        $occEnd   = $occurrence['end'];
+                        $occSlug  = $slug . '-' . ($index + 2);
+                        $params   = [];
+                        foreach ($copyColumns as $column) {
+                            if ($column === 'startDateTime') {
+                                $params[] = $occStart;
+                            } elseif ($column === 'endDateTime') {
+                                $params[] = $occEnd;
+                            } elseif ($column === 'eventSlug') {
+                                $params[] = $occSlug;
+                            } elseif ($column === 'seriesID') {
+                                $params[] = $seriesIdForRule;
+                            }
+                        }
+                        $params[] = $newEventId;
+                        $types    = str_repeat('s', count($params) - 1) . 'i';
+                        $copyStmt->bind_param($types, ...$params);
+                        try {
+                            $copyStmt->execute();
+                            // affected_rows, not a blind increment: the
+                            // `externalFeedID IS NULL` guard in the SELECT can
+                            // match nothing, and reporting dates that were
+                            // never created is the kind of untrue message this
+                            // project treats as a fault in its own right.
+                            if ($copyStmt->affected_rows > 0) {
+                                $repeatMade++;
+                            }
+                        } catch (\Throwable $e) {
+                            // One date that will not save must not lose the
+                            // rest, and must not be hidden either.
+                            Logger::errorPlatform(
+                                'Calendar',
+                                'Error',
+                                'REPEAT_DATE_FAILED',
+                                'one date of a repeating event could not be created',
+                                'eventID=' . $newEventId . ' date=' . $occStart
+                            );
+                        }
+                    }
+                    $copyStmt->close();
+                }
+            }
+
+            // 🧹 THE INVARIANT, ENFORCED AFTER THE FACT: a rule row may exist
+            //    only where the series holds EXACTLY the dates that rule makes.
+            //
+            //    `maxOccurrences` above was bound before the copies ran, so it
+            //    is the number of dates GENERATED. If any copy failed — each is
+            //    caught and logged rather than losing the rest — the series has
+            //    fewer rows than the pattern, and a `COUNT` matching the
+            //    pattern would publish dates that are not in the diary while a
+            //    missing middle date would still be sent. There is no way to
+            //    describe that with one RRULE (#670), so the rule is removed and
+            //    the feed lists each event on its own.
+            if ($ruleWasWritten === true && ($repeatMade + 1) !== count($generated)) {
+                // 🛡️ Wrapped: see the other DELETE above. A failure here is the
+                //    worst of the three, because it would leave the
+                //    over-promising rule in place AND show an error page — so
+                //    the feed's own guard (export.php checks a rule against its
+                //    series before using it) is what actually makes this safe.
+                $dropRule = $mysqli->prepare('DELETE FROM tblRecurrenceRules WHERE seriesID = ? AND siteID = ?');
+                if ($dropRule !== false) {
+                    $dropRule->bind_param('ii', $seriesIdForRule, $siteId);
+                    try {
+                        $dropRule->execute();
+                    } catch (\Throwable $e) {
+                        // Recorded by the warning just below, which says the
+                        // feed will fall back to listing each date.
+                    }
+                    $dropRule->close();
+                }
+                Logger::errorPlatform(
+                    'Calendar',
+                    'Warning',
+                    'REPEAT_RULE_WITHDRAWN',
+                    'not every date of a repeating series could be created, so its repeat rule was removed '
+                    . 'and the calendar feed will list each date on its own rather than as one repeating entry',
+                    'eventID=' . $newEventId . ' seriesID=' . $seriesIdForRule
+                    . ' made=' . ($repeatMade + 1) . ' expected=' . count($generated)
+                );
+            }
+        }
+
+        $repeatNote = $repeatMade > 0
+            ? ' ' . $repeatMade . ' more date(s) were added.'
+            : ' No extra dates were added.';
+
+        // 📍 Say it when the first date moved. The pattern wins over the date
+        //    typed above it (ticking Thursday means Thursdays), but a date
+        //    changing by itself has to be stated or it looks like a fault.
+        if ($movedFirst !== '') {
+            $repeatNote .= ' The first date was moved to '
+                . date('j F Y', (int) strtotime(substr($movedFirst, 0, 10)))
+                . ' to match the repeat you chose.';
+        }
+
+        if ($worked['why'] !== '') {
+            $repeatNote .= ' ' . $worked['why'];
+        }
+    }
+
     Logger::activity('EventCreated', 'Created event: ' . $eventName . ' (ID:' . $newEventId . ')', $userId);
 
-    $_SESSION['flash_msg']  = 'Event "' . $eventName . '" created successfully.' . ($geoWarning !== null ? ' ' . $geoWarning : '');
+    $_SESSION['flash_msg']  = 'Event "' . $eventName . '" created successfully.' . $repeatNote . ($geoWarning !== null ? ' ' . $geoWarning : '');
     $_SESSION['flash_type'] = 'success';
     $appendVenueCoverageFlash($startDateTime, $endDt, $timezone);
     header('Location: ' . Site::url('calendar/manage'));

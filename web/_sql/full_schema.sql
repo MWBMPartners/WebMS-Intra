@@ -2307,6 +2307,31 @@ INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `default
 VALUES ('calendar.defaultView', 'month', 0, 'month')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
+-- 🔁 How big a repeating series may be (migration 227).
+--
+-- A repeat rule with no end date and no "repeat N times" is endless, and every
+-- date it produces is a real row in `tblEvents` created inside ONE web request
+-- on shared hosting. So there has to be a stop. These two rows are where it is
+-- set, rather than in the code: a church with one Sunday service and a school
+-- with a daily registration period want different numbers, and this portal is
+-- a product rather than one customer's installation.
+--
+-- These are the installation-wide defaults (no siteID). An organisation that
+-- wants its own writes a row with its own siteID, from
+-- /admin/settings/repeats; the settings loader lets a site row overwrite the
+-- installation-wide one.
+--
+-- `Portal\Core\EventRecurrence::limitsFrom()` is the ONE place these are read.
+-- It falls back to its own defaults for anything unusable, 0 included — a
+-- ceiling of none would make the repeat controls appear to work and silently
+-- produce nothing. It also refuses to honour more than 1,000 dates or 10 years
+-- however these rows are edited; that stop is in the class, because it is not
+-- a customer's choice.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'calendar.repeat.maxOccurrences', '200', '200', 0),
+    (NULL, 'calendar.repeat.maxYears',       '3',   '3',   0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
 VALUES ('leadership.enabled', 'true', 0, 'true')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
@@ -9738,6 +9763,12 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/settings/attendance/save',          'admin/settings/attendance/save.php',      1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+-- 🔁 The page that sets how big a repeating series may be (migration 227).
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/settings/repeats',      'admin/settings/repeats/index.php', 1),
+    ('admin/settings/repeats/save', 'admin/settings/repeats/save.php',  1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 INSERT INTO `tblMigrations` (`filename`) VALUES ('198_anonymous_checkin_visibility.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
@@ -10409,4 +10440,10 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('225_default_apps_on.sql')
 --    includes 'erase', and `offboarding.erasureMode` is already seeded, so
 --    again a fresh install needs nothing from that migration.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('226_offboarding_erasure.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- 📋 Migration 227 (#569): the two `calendar.repeat.*` settings and the two
+--    /admin/settings/repeats routes are already seeded above, so a fresh
+--    install needs nothing from that migration either.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('227_repeating_events.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;

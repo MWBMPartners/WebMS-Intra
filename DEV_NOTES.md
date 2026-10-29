@@ -440,6 +440,246 @@ harness, which need a database and minutes; a gate slow enough to be resented
 gets turned off. `git push --no-verify` skips it and git offers no way to
 prevent that, so it guards against forgetting, not against deciding.
 
+## Repeating events, and why the reader was not reused (#569, migration 227)
+
+`Portal\Core\EventRecurrence` works out every date of a repeating event. It is the WRITING half;
+`IcsReader` is the reading half, and the two follow **opposite** rules on purpose.
+
+**Nominal against exact (RFC 5545 §3.3.6).** `IcsReader` keeps every occurrence the same EXACT
+length, which is right when reading somebody else's calendar: they stated instants and we must not
+reinterpret them. The portal's own events store a **wall-clock reading plus a zone**, so "every
+Sunday at 10:00" must read 10:00 after a clock change — the NOMINAL rule. Reusing `IcsReader` would
+have moved every service by an hour twice a year, and every check would have passed because the
+arithmetic was never wrong, only the question.
+
+So the length of each occurrence is carried as **whole days plus a time of day**, never as a number
+of seconds (`endShape()` / `applyEndShape()`). An event running 22:00 to 01:00 keeps that shape.
+
+**A month without the date is skipped, not moved.** `dayIfTheMonthHasIt()` asks `checkdate()` rather
+than building the date and seeing where it lands, because PHP rolls 31 February into March without
+complaining. A silently moved date is the one outcome worse than a missing one. The consequence,
+accepted deliberately: a yearly 29 February series makes dates only in leap years, and under a
+three-year horizon that is ONE date. Raising `calendar.repeat.maxYears` to four is now a real answer
+to that, which is part of why the number was worth making a setting.
+
+**Each date is a COPY of the row just inserted**, with only the start, end, slug and series changed
+(`INSERT … SELECT`). The column list is the one this handler already built for the first event, so an
+occurrence carries every field the first one does and a column added to the form later is copied
+without anybody remembering to come back. Both new statements carry `AND externalFeedID IS NULL`:
+`FeedImporter` is the ONE writer of an imported event (#514), and a portal-owned clone of somebody
+else's event is something no feed refresh would ever tidy up.
+
+**A rule belongs to a SERIES, not an event.** That is how `tblRecurrenceRules` has always been
+shaped, and it is why `calendar/export.php` could already collapse a series-with-a-rule into one
+`VEVENT` with an `RRULE`. Nothing had ever written a rule, so that code had never run; writing one
+made that path live without changing it.
+
+**THE RULE ROW IS A PUBLISHED PROMISE, NOT A RECORD OF THE REQUEST.** This is the single most
+important thing on this page, and the first version got it wrong in two ways that the independent
+check measured:
+
+- Both stop fields left empty — which the form invites — stored no count and no end date, so the
+  feed sent `RRULE:FREQ=WEEKLY` with **no COUNT and no UNTIL**: a forever-repeating event in every
+  subscriber's calendar, while the diary held five dates.
+- `repeatCount=400` posted past the form stored 400, so the installation **published** a 400-date
+  series having capped that organisation at five. A limit that holds for `tblEvents` and not for
+  what the installation publishes is not a limit.
+
+So `maxOccurrences` is written as the number of dates **actually created**, and `endDate` is
+deliberately NULL. Both are needed: `export.php` prefers `UNTIL` over `COUNT` when both are present,
+and an `UNTIL` taken from the request would overshoot a series our own ceiling had stopped. The
+asked-for end date is therefore not kept, which costs nothing a subscriber can see — `COUNT` pins the
+series exactly — and is the only arrangement where the two cannot drift apart.
+
+**And only the fields that apply to the frequency are written.** Writing them all regardless was the
+other fault. A weekly series stored `dayOfMonth = 3`, meaningless for a weekly rule. Worse: the form
+shows every box at once on purpose (no JavaScript), so "every month, the same date" with a weekday
+box also ticked is the ORDINARY case — and it stored both, while `export.php` prefers `dayOfWeek`,
+publishing "every Monday of every month" against one date a month in the diary. An nth-weekday
+pattern stores only the FIRST ticked weekday, because that is the only one the generator uses.
+
+**THE INVARIANT, AND WHERE IT IS ENFORCED.** A pattern may be published only while it produces
+exactly the dates the reader can see. **The authoritative check is in `calendar/export.php`**, at the
+one place a rule is used: `$patternStillTrue()` expands the stored rule from the first row of the
+series' whole run and requires the result to equal that run exactly — the starts, the ends, and the
+nine columns the published entry renders.
+
+That is the third design, and the first two were wrong in a way worth recording. Rounds 1 and 2 put
+the enforcement in the SAVE HANDLER — remove the rule whenever the handler knows it has stopped being
+true. Round 3 showed that cannot work: **attaching an ordinary one-off event to a repeating series,
+two clicks on the event form and nowhere near the repeat code, left a public event that appeared in
+nobody's subscribed calendar at all** (the collapse skips every other row of the series), and moving
+one occurrence made the feed advertise a date that had never existed. A writer cannot know about every
+later edit. The reader can always ask.
+
+**Comparing counts is not enough** — measured. Moving one occurrence leaves the count unchanged, so a
+counts-only guard published a pattern containing a date the diary had never held. Expanding and
+comparing catches an added row, a removed row, a soft-deleted row and a moved row with one test.
+
+**TWO FILTERS HAD TO BE TOLD APART, and conflating them cost a round.** The first version compared
+against `$events` — the rows already in hand. Safe, but the whole-calendar download carries only
+events from today on, so a series that had already begun could never match its own pattern and every
+ongoing weekly service went out one date at a time. That is exactly the series somebody most wants as
+one entry. The owner chose on 29 October 2026 to make it work.
+
+- The **time** filter ("from today on") is about what this download carries. It must NOT stop a
+  pattern being used: the pattern covers past dates too, and a subscribed calendar showing them is
+  ordinary.
+- The **visibility** filter is about what this reader may know. It MUST stop it: a series holding an
+  event they may not see would otherwise be published as a count covering a date they were never
+  allowed to know about.
+
+So `$seriesRunForViewer()` reads the series' whole run under the request's own visibility rule and
+status filter, with no time filter, and the master entry takes its start and end from that run's
+first row rather than from whichever row this download happened to reach first. Starting it at the
+first future row while counting the whole run would advertise dates past the real end of the series.
+
+**The privacy half had no check of any kind until a planted fault found it**, and neither did the
+audit script — `check_event_visibility.py` was satisfied because the rule's name appeared in a
+comment nearby. Checks N17–N20 close it by making one occurrence members-only and reading the public
+feed.
+
+`EventRecurrence` is the same class that created the dates, so this is not a second implementation to
+keep in step; it is the one implementation asked the same question twice.
+
+**The save handler still does its three parts**, as a tidiness measure rather than the guarantee —
+each was a measured fault in its own right:
+
+1. **The event just inserted is MOVED onto the pattern's first date** when the typed start does not
+   satisfy the pattern. `array_slice($dates, 1)` assumed date 0 was that event; it only is when the
+   two happen to agree, and the form lets them disagree in one click because the weekday boxes are
+   independent of the date above them. Measured: a Wednesday start with Thursday ticked threw away
+   the first Thursday and left the diary holding a Wednesday the pattern never produces — and the
+   rule then advertised a date the portal did not have. Keeping both was rejected: no single `RRULE`
+   can say "this Wednesday and then every Thursday".
+2. **A rule is written only for a series this request created.** `export.php` reads a series' rule
+   with `ORDER BY ruleID LIMIT 1` and then skips every other event of that series, so a stale or
+   second rule row would publish the old pattern and make the new dates vanish from every
+   subscriber's calendar. Joining an existing series therefore DELETES its rule and writes none.
+3. **The rule is withdrawn if any date failed.** `maxOccurrences` is bound before the copies run,
+   so it is the number GENERATED; after the loop, a mismatch between that and the rows created
+   removes the rule entirely. A series with a hole in it cannot be described by one pattern (#670).
+
+**The week does not start on the same day in both halves.** `EventRecurrence` counts "every other
+week" from SUNDAY (`weeklyStarts()` walks from the Sunday beginning the first occurrence's week, and
+its day numbering is 0 = Sunday). RFC 5545 §3.3.10 defaults `WKST` to **Monday**, and `WKST` matters
+only for a weekly rule whose interval is above 1. So "Sunday and Wednesday, every fortnight" — an
+ordinary church pattern — put six dates in the diary while the feed described a different six, three
+of them wrong. `export.php` now emits `WKST=SU`, and only where it can matter. Declaring what the
+portal did was chosen over changing which dates a fortnightly series produces.
+
+**Two gap cases, not one.** A start in the missing hour moves forward and its end moves with it
+(fix: `shiftedBySameAmount()`). Separately, an END that lands in the missing hour is itself pushed
+past the gap, because it used to keep a reading that does not exist.
+
+**Do not overstate that second one** — the first draft of this paragraph did, in both directions, and
+the independent check measured it false. The instant and the length were always correct: a stored
+`01:30` resolved to 02:30 BST, sixty minutes after a 00:30 start, which is exactly what the stored
+`02:30` resolves to now. And the occurrence is **not** really longer than its siblings; it only looks
+an hour later on the clock — the same "appearance only" distinction the calendar reader already draws
+at its check I34f. What was genuinely wrong is the fictional text, and that is reason enough: this
+portal's rule is that wall-clock times compare **as text**, so a reading no clock ever shows sorts and
+compares against readings that do, and reads back as a different value from the one written. A
+maintainer who believes the occurrence is "really longer" will try to pull the end back an hour,
+which reinstates the fictional reading. Check I08 asks the general question: every reading the class
+produces must exist in the event's zone.
+
+**What the feed still cannot do (#670), stated precisely.** There is no `EXDATE` and there are no
+`RECURRENCE-ID` overrides, so the feed cannot send "this series, except that one date moved". What it
+does instead is stop sending the series as a pattern at all and list every date on its own. So a date
+cancelled, moved, lengthened, renamed or re-described **is** reflected in a subscription — accurately,
+just verbosely. Nothing is hidden and nothing is invented.
+
+**The published entry IS the series' first occurrence**, not merely dated like it: its identifier,
+link and last-changed time come from that row too. An earlier version took only the dates and
+justified the rest with "`$patternStillTrue()` has required every rendered field to be identical" —
+untrue on EVERY collapse, because `uid` comes from `eventID`, `url` from `eventSlug` and
+`lastModified` from `updatedAt`, none of which can match across a run. The measured consequence was
+an entry identified by one occurrence and dated at another, whose identifier changed every time a
+date passed, and which went out under two different identifiers from the two export addresses — a
+delete-and-re-add in a subscriber's calendar every week. Taking all five from the run's first row
+makes the entry coherent and the identifier stable. Checks Q07–Q09.
+
+One consequence worth knowing:
+
+- **A column the calendar file does not render may differ across the rows without stopping the
+  collapse** — the hero image, and `locationWebURL`. None of that reaches the file. Keep the list
+  honest if the renderer ever carries more: it has already been wrong once, naming the **map
+  position**, which the file does render as a `GEO` line. Measured: a moved pin on one occurrence
+  was published for every date. The two coordinate columns are compared now.
+
+*(An earlier version of this section also said "a series stops being tidy about a week after it
+begins", because the whole-calendar feed carries only future events and the guard then compared
+against those. That was true of the design before the owner's decision of 29 October 2026 and is
+false now — see the paragraph above on telling the two filters apart. It was left standing beside its
+own correction, which is exactly the contradiction these notes warn about four lines further down.)*
+
+The earlier version of this paragraph said a cancelled or moved date was "not reflected in an outside
+subscription". That was true of the first two designs and is not true now; it was left standing beside
+its own correction for a while, which is exactly the contradiction these notes exist to prevent.
+
+### The three ceilings, and who may loosen which
+
+`calendar.repeat.maxOccurrences` and `calendar.repeat.maxYears` are settings, not constants. Three
+tiers, each unable to loosen the one above it:
+
+| Tier | Where | Who sets it |
+|---|---|---|
+| `HARD_MAX_OCCURRENCES` 1000, `HARD_MAX_YEARS` 10 | `EventRecurrence` | nobody — a release changes it |
+| the installation's setting | `tblSettings`, `siteID IS NULL` | a global administrator |
+| the organisation's setting | `tblSettings`, real `siteID` | that organisation's administrator |
+
+**The installation's value CAPS the organisation's; it is not overridden by it (#668).** The
+effective number is the smaller of the two. One installation may serve many organisations and the
+two levels **may be different people**, so this is a boundary between parties and is enforced in the
+save handler, not by the `max` on the input. A number above it is refused with the reason and
+recorded, never quietly clamped.
+
+**A ceiling needs a ceiling.** A series is created inside ONE web request on shared hosting under
+whatever time limit the host sets, every date is an `INSERT … SELECT`, and there is no bulk undo. A
+request that runs out of time half way leaves a series partly made. Hence `HARD_MAX_*`.
+
+### Four things that were got wrong first, each caught by a check rather than by reading
+
+1. **The third global that never arrived.** The installation-wide layer began as
+   `$SETTINGS_INSTALLATION`, a global beside `$SETTINGS`. `Router.php` does
+   `global $mysqli, $SETTINGS;` before loading a page and **those two are the only things a page
+   inherits** (`.claude/rules/app-pages.md`). So the form and the settings page both read an empty
+   array, concluded the installation allowed the built-in defaults, and an organisation's 500-date
+   series sailed past an installation limit of 6. The layer now lives behind
+   `Portal\Core\InstallationSettings`; widening the two-variable rule was rejected, because that
+   rule is load-bearing. Caught by checks K01, K02 and K05 of the page test.
+2. **"Not chosen" resolved to the built-in default**, which then capped the installation: with the
+   default at 3 years, an installation raising its horizon to 4 handed back 3, because `min(3, 4)`
+   is 3. An installation could lower a limit but never raise one. `rawRepeatPair()` now answers null
+   for "this layer has not chosen", which is a different thing from choosing the default. Caught by
+   H04 of the generator test.
+3. **An endless rule reported nothing.** A weekly rule with no end produced 157 dates with
+   `capped = false`, so a diary that stopped in 2029 looked complete. `lastAllowedDate()` now returns
+   the SENTENCE to show rather than a yes/no, because the sentence has to name the number of years
+   and that number is a setting.
+4. **The form printed a renamed constant.** Making the ceiling configurable renamed
+   `MAX_OCCURRENCES` to `DEFAULT_MAX_OCCURRENCES`; `_event_form.php` still printed the old name, so
+   **every create form raised a fatal error.** `php -l` cannot see an undefined constant and the 51
+   generator checks never touch the form. Only the HTTP test caught it, which is the whole argument
+   for having one.
+
+### What the tests cover, and what they cannot
+
+- `tools/event-recurrence-selftest.php` — 60 checks, **no database**: the patterns, both clock
+  changes in three zones (one of which changes on a different date), the hour that does not exist,
+  skipped days, both ceilings, and the installation-caps-organisation arithmetic.
+- `tools/event-repeat-pages-selftest.php` — 126 checks over **real HTTP against a real database**:
+  the form is served, posted, and the rows read back. **Renaming `repeatFrequency` on the form fails
+  A03 and nothing else** — measured, not assumed, because every other section posts the field names
+  itself. A03 reads the names out of the save handler rather than listing them, so there is no third
+  copy to keep in step. (Do not stretch that into "A03 is the only check that catches a renamed
+  field": H02 pins `repeatCount`'s own attributes and A04 pins the five frequency values, so those
+  two names are covered twice. It was written the wider way first and the independent check caught
+  it.)
+- **Neither can test two people creating the same series at once.** The built-in server runs with
+  one worker, so two requests never overlap and such a test would pass on broken code.
+
 ## Repository vs Server Structure
 
 The Git repository root contains documentation and CI/CD config. **All deployable

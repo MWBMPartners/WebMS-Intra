@@ -193,6 +193,150 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
         </select>
     </div>
 
+    <?php if ($isEdit === false): ?>
+    <?php
+    // 🔁 Repeating events (#569). The portal could not make one at all before:
+    //    there was no control here, and nothing ever wrote tblRecurrenceRules,
+    //    so every weekly service had to be typed in one date at a time.
+    //
+    //    CREATION ONLY, on purpose. Each occurrence becomes an ordinary event
+    //    row, so moving or cancelling ONE of them already works through the
+    //    normal edit and delete — INSIDE THE PORTAL. For somebody who
+    //    SUBSCRIBES to the calendar it does not yet (#670): the feed sends the
+    //    series as one repeating pattern, with no EXDATE and no per-occurrence
+    //    override. What stops that being actively wrong is the guard in
+    //    `calendar/export.php`, which refuses to publish a pattern whose series
+    //    no longer matches it and lists every date on its own instead. Say that
+    //    qualifier wherever this feature is described.
+    //
+    //    Changing the PATTERN of a series that already exists — shifting every
+    //    future date, or extending the run — means adding and removing rows in
+    //    bulk and is its own piece of work (#669); it is not offered here
+    //    rather than half-offered.
+    //
+    //    NO JAVASCRIPT, deliberately. Showing and hiding these boxes by
+    //    frequency would need a script, and a script written into a page must
+    //    carry the answer's own nonce or the browser refuses it silently and
+    //    the control does nothing while the page looks finished (#625). Every
+    //    box is shown instead, each saying which frequency it applies to, and
+    //    the save handler ignores the ones that do not apply. Plainer, and it
+    //    cannot fail quietly.
+    $weekdayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    // 🧢 The two ceilings in force HERE. They are settings, not constants
+    //    (`calendar.repeat.maxOccurrences` and `calendar.repeat.maxYears`, set
+    //    at /admin/settings/repeats), so the numbers this form prints have to
+    //    be read rather than typed — otherwise the page would promise a limit
+    //    the save handler does not apply, which is the sort of untrue wording
+    //    this project treats as a real fault.
+    //
+    //    `limitsFrom()` is the ONE place these are read, and the save handler
+    //    calls it too, so the form and the handler cannot disagree.
+    //
+    //    BOTH LAYERS are passed, because the installation's limit CAPS an
+    //    organisation's rather than being overridden by it: an organisation
+    //    may hold itself to fewer dates, never more. `$SETTINGS` is the merged
+    //    answer; `$SETTINGS_INSTALLATION` holds the installation-wide rows
+    //    alone and is kept beside it by the settings loader for exactly this.
+    //
+    //    `layerOrNull()` rather than `layer()`: null means "no separate layer
+    //    known", which falls back to reading one layer, whereas an empty array
+    //    would mean "the installation allows the built-in defaults" and would
+    //    silently shrink a series on an installation that had raised its
+    //    limit. That matters only in the minutes after an upgrade, when files
+    //    reach a shared host one at a time.
+    //
+    //    It is read from the CLASS, not from a global: a page inherits only
+    //    $mysqli and $SETTINGS (.claude/rules/app-pages.md), and a third
+    //    global read as an empty array here is what let an organisation's
+    //    500-date series past an installation limit of 6.
+    $repeatLimits = \Portal\Core\EventRecurrence::limitsFrom(
+        $SETTINGS ?? [],
+        \Portal\Core\InstallationSettings::layerOrNull()
+    );
+    ?>
+    <div class="col-12 mt-4">
+        <h6 class="text-muted text-uppercase"><i class="fa-solid fa-repeat me-1"></i> Repeats</h6>
+        <hr class="mt-0">
+        <p class="text-body-secondary small">
+            Leave this as &ldquo;Does not repeat&rdquo; for a one-off event. Otherwise the
+            first date is the one above, and the rest are worked out from it &mdash; each
+            becomes its own event, so you can change or cancel a single date afterwards.
+            Dates are made for up to <?php echo (int) $repeatLimits['years']; ?>
+            <?php echo $repeatLimits['years'] === 1 ? 'year' : 'years'; ?> or
+            <?php echo (int) $repeatLimits['occurrences']; ?> dates,
+            whichever comes first; you will be told if that cut the series short.
+        </p>
+    </div>
+
+    <div class="col-12 col-md-4">
+        <label class="form-label" for="repeatFrequency">How often</label>
+        <select name="repeatFrequency" id="repeatFrequency" class="form-select">
+            <option value="">Does not repeat</option>
+            <option value="weekly">Every week</option>
+            <option value="fortnightly">Every two weeks</option>
+            <option value="monthly">Every month</option>
+            <option value="quarterly">Every three months</option>
+            <option value="yearly">Every year</option>
+        </select>
+    </div>
+
+    <div class="col-12 col-md-4">
+        <label class="form-label" for="repeatCount">Stop after this many dates</label>
+        <input type="number" class="form-control" name="repeatCount" id="repeatCount" min="1"
+               max="<?php echo (int) $repeatLimits['occurrences']; ?>" placeholder="e.g. 12">
+        <div class="form-text">Leave empty to use the date below instead.</div>
+    </div>
+
+    <div class="col-12 col-md-4">
+        <label class="form-label" for="repeatUntil">Or stop after this date</label>
+        <input type="date" class="form-control" name="repeatUntil" id="repeatUntil">
+        <div class="form-text">Leave both empty and dates are made up to the limits above.</div>
+    </div>
+
+    <div class="col-12">
+        <label class="form-label">Which days &mdash; for every week or every two weeks</label>
+        <div class="d-flex flex-wrap gap-3">
+            <?php foreach ($weekdayNames as $dayNumber => $dayName): ?>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="repeatDays[]"
+                           value="<?php echo (int) $dayNumber; ?>"
+                           id="repeatDay-<?php echo (int) $dayNumber; ?>">
+                    <label class="form-check-label" for="repeatDay-<?php echo (int) $dayNumber; ?>">
+                        <?php echo htmlspecialchars($dayName, ENT_QUOTES, 'UTF-8'); ?>
+                    </label>
+                </div>
+            <?php endforeach; ?>
+        </div>
+        <div class="form-text">Tick none and it repeats on the same day of the week as the first date.</div>
+    </div>
+
+    <div class="col-12 col-md-6">
+        <label class="form-label" for="repeatMonthlyMode">Which day of the month &mdash; for every month, three months or year</label>
+        <select name="repeatMonthlyMode" id="repeatMonthlyMode" class="form-select">
+            <option value="day">The same date each time (the 15th, say)</option>
+            <option value="weekday">The same weekday each time (the second Tuesday, say)</option>
+        </select>
+        <div class="form-text">
+            A month without that date is skipped rather than moved: &ldquo;the 31st&rdquo;
+            makes no date in February.
+        </div>
+    </div>
+
+    <div class="col-12 col-md-6">
+        <label class="form-label" for="repeatWeekOfMonth">Which one, if you chose the same weekday</label>
+        <select name="repeatWeekOfMonth" id="repeatWeekOfMonth" class="form-select">
+            <option value="1">The first</option>
+            <option value="2">The second</option>
+            <option value="3">The third</option>
+            <option value="4">The fourth</option>
+            <option value="5">The fifth (only in months that have one)</option>
+            <option value="-1">The last</option>
+        </select>
+        <div class="form-text">The weekday itself is the one ticked above, or the first date's.</div>
+    </div>
+    <?php endif; ?>
+
     <!-- 📍 Location -->
     <div class="col-12 mt-4">
         <h6 class="text-muted text-uppercase"><i class="fa-solid fa-location-dot me-1"></i> Location</h6>

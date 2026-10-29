@@ -309,9 +309,14 @@ FILE_ALLOWLIST: dict[str, str] = {
 # stop being watched either; the entry itself must be moved to match.
 LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # Moved from 393 to 476 by #604, which added the event form's zone check
-    # and the "old events marked Europe/London" button above it. The probe itself
-    # is unchanged.
-    ("_apps/calendar/manage/save.php", 476): (
+    # and the "old events marked Europe/London" button above it, and from 476 to
+    # 478 by #569, which added TWO `use` lines above it (the repeating-event
+    # generator and the installation-settings layer). The probe itself is
+    # unchanged both times. Moving the entry by hand is the point: see this
+    # list's own comment above. (This comment said "477" and "one `use` line"
+    # while the key below said 478 — corrected after the independent check
+    # noticed it contradicted its own entry.)
+    ("_apps/calendar/manage/save.php", 478): (
         "SELECT eventID FROM tblEvents WHERE eventSlug = ? AND siteID = ?",
         "the slug-uniqueness probe on event CREATE must search every event, imported ones included, so two events can never share a slug regardless of origin",
     ),

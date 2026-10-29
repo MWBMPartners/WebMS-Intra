@@ -57,6 +57,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\EventRecurrence;
 use Portal\Core\EventVisibility;
 use Portal\Core\Ical;
 use Portal\Core\Router;
@@ -96,6 +97,13 @@ $siteId = Site::id();
 $canManage = App::isAdmin();
 $viewerId  = EventVisibility::sessionViewerId();
 $today     = date('Y-m-d');
+
+// 👁️ Which visibility rule THIS request is answering under. Each branch
+//    below sets it beside its own query, and `$seriesRunForViewer()` reuses it
+//    so a series' whole run is read under exactly the rule that selected the
+//    rows being sent. Defaults to the narrowest of the three.
+$exportMode   = EventVisibility::MODE_ANONYMOUS;
+$exportViewer = 0;
 
 $events = [];
 
@@ -224,6 +232,7 @@ if ($eventId > 0) {
     //    events, through the unchanged status test, so $canManage plays no
     //    part here; it matters only to the single-event download's draft rule.
     //    That is today's behaviour, kept on purpose.
+    [$exportMode, $exportViewer] = [EventVisibility::MODE_SESSION, $viewerId];
     $visibility = EventVisibility::where('e', EventVisibility::MODE_SESSION, $viewerId, $today);
     $fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_SESSION, $viewerId, $today, 'canSeeFull');
     //    (The canSeeFull expression goes in through sprintf()'s `%s` for the
@@ -276,6 +285,7 @@ if ($eventId > 0) {
     //    only at its public level. The fragment goes after the literal
     //    conditions (see the series branch above for why), and the canSeeFull
     //    expression through sprintf()'s `%s` (see the single-event branch).
+    [$exportMode, $exportViewer] = [EventVisibility::MODE_ANONYMOUS, 0];
     $visibility = EventVisibility::where('e', EventVisibility::MODE_ANONYMOUS, 0, $today);
     $fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_ANONYMOUS, 0, $today, 'canSeeFull');
     $stmt = $db->prepare(sprintf(
@@ -367,6 +377,37 @@ $buildRrule = function (array $rule, bool $allDay): ?string {
     }
     if ($interval > 1) {
         $parts[] = 'INTERVAL=' . $interval;
+
+        // 📆 WKST — WHICH DAY THE WEEK STARTS ON, and it is not a nicety.
+        //
+        //    RFC 5545 §3.3.10 says WKST defaults to MO, and WKST only matters
+        //    for a WEEKLY rule whose INTERVAL is greater than 1 — it decides
+        //    where one "every other week" block ends and the next begins.
+        //
+        //    `Portal\Core\EventRecurrence` counts those weeks from SUNDAY (its
+        //    own day numbering is 0 = Sunday, and `weeklyStarts()` walks from
+        //    the Sunday that begins the first occurrence's week). So without
+        //    this the feed described a different fortnight from the one the
+        //    portal actually created.
+        //
+        //    Measured by the independent check of #569: "Sunday and Wednesday,
+        //    every fortnight" from Sunday 2028-11-05 put 11-05, 11-08, 11-19,
+        //    11-22, 12-03, 12-06 in the diary, while the same RRULE without
+        //    WKST expands to 11-05, 11-15, 11-19, 11-29, 12-03, 12-13 — three
+        //    of the six dates wrong in every subscriber's calendar. An ordinary
+        //    church pattern, not a corner case.
+        //
+        //    Declaring WKST=SU is the smaller and more honest of the two fixes:
+        //    it reports what the portal really did, rather than changing which
+        //    dates a fortnightly series produces. It is emitted only where it
+        //    can matter, so no other series' output changes.
+        //    TESTED AGAINST THE MAPPED FREQUENCY, not `$frequency`: at this
+        //    point `$frequency` is still the portal's own word, so a
+        //    'fortnightly' row would have been missed — and fortnightly is
+        //    precisely the case WKST exists for here.
+        if ($freqMap[$frequency] === 'WEEKLY') {
+            $parts[] = 'WKST=SU';
+        }
     }
 
     // 📅 BYDAY — CSV of 0=Sun..6=Sat from tblRecurrenceRules.dayOfWeek,
@@ -442,7 +483,7 @@ $buildRrule = function (array $rule, bool $allDay): ?string {
 };
 
 // 🔎 Lazily load (and cache) the recurrence rule for a series. Returns null
-//     if the series has no tblRecurrenceRules row — the common case today.
+//     if the series has no `tblRecurrenceRules` row — the common case today.
 $loadRecurrenceRule = function (int $seriesId) use ($db): ?array {
     $stmt = $db->prepare(
         'SELECT frequency, intervalVal, dayOfWeek, dayOfMonth, weekOfMonth, monthOfYear, endDate, maxOccurrences '
@@ -455,7 +496,217 @@ $loadRecurrenceRule = function (int $seriesId) use ($db): ?array {
     $stmt->execute();
     $rule = $stmt->get_result()->fetch_assoc();
     $stmt->close();
+
     return $rule; // null when no rule row exists for this series
+};
+
+// 🛡️ A PATTERN IS ONLY PUBLISHED WHILE IT IS STILL TRUE (#569, #670)
+// -----------------------------------------------------------------------------
+// Collapsing a series into one VEVENT publishes a PATTERN and then skips every
+// other row of that series. So the pattern had better be true, and it is only
+// true if nothing has happened to the series since it was made. Two ordinary
+// actions broke it, both measured by an independent check:
+//
+//   • Attaching an ordinary one-off event to a series that has a rule — the
+//     Series drop-down on the event form offers every series the organisation
+//     has, ruled ones included. The series then held five rows against a rule
+//     saying four, and the added event was published NOWHERE, because the
+//     collapse skipped it. A public event invisible in every subscriber's
+//     calendar.
+//   • Moving ONE occurrence, which is how a coordinator moves a single date.
+//     The feed went on publishing the original pattern — including a date the
+//     diary had never held — and left the moved one out.
+//
+// The save handler does remove a rule when it knows it has stopped being true,
+// but it cannot know about every later edit, delete or re-attachment. Asking
+// here, at the one place a rule is USED, makes the guarantee hold BY
+// CONSTRUCTION rather than resting on every writer remembering.
+//
+// WHAT IT COMPARES, exactly, because an earlier version of this note claimed
+// more than the code did and that is the fault this project treats most
+// seriously:
+//
+//   • the START reading of every row, against the pattern expanded from row 0;
+//   • the END reading of every row, likewise;
+//   • and every field the published entry RENDERS — the summary, description,
+//     location, status, time zone and all-day flag — which must be identical
+//     across the rows, because the collapsed entry carries row 0's copy of each
+//     and speaks for the whole run.
+//
+// Comparing the COUNT alone was the first attempt and is not enough — measured:
+// moving one occurrence leaves the count untouched, so a counts-only guard
+// published a pattern containing a date that had never existed.
+//
+// Comparing starts alone was the second, and is also not enough — measured:
+// renaming the third occurrence of a public series and extending it by two
+// hours left the start alone, so the series still collapsed, the renamed event
+// appeared in NO subscriber's calendar, and the feed advertised the old
+// finishing time for a date that had changed. Same outcome as the fault round 3
+// found, reached through a different column.
+//
+// WHAT IS STILL NOT COMPARED, said plainly: a column the entry does not render
+// — the hero image, and `locationWebURL` — may differ across the rows without
+// stopping the collapse. None of that reaches the calendar file. The list has to
+// be kept honest if the renderer ever starts carrying more, and it has already
+// been wrong once: it named the MAP POSITION as an example, which the file does
+// render as a GEO line, so a moved pin on one occurrence was published for every
+// date. Measured, not reasoned. `locationGeoLat`/`locationGeoLng` are compared
+// now.
+//
+// Four more rendered things are deliberately NOT compared, because they CANNOT
+// match across a run and are handled instead by taking them from the same row as
+// the dates: the identifier, the link, and the last-changed time. See the
+// substitution where the master entry is built.
+//
+// IT COMPARES AGAINST THE SERIES' WHOLE RUN AS THIS VIEWER MAY SEE IT, which
+// `$seriesRunForViewer()` reads. The long note there explains why the time
+// filter and the visibility filter had to be separated: the first version
+// compared against the rows already in hand, which was safe but meant an
+// ongoing series could never match its own pattern.
+//
+// The PRIVACY half of that still holds and is the reason the run is read under
+// the request's own visibility rule rather than counted outright: a series may
+// hold an event this viewer may not see, and a bare count would find the
+// pattern "true", collapse it, and publish a COUNT covering a date they were
+// never allowed to know about.
+//
+// `Portal\Core\EventRecurrence` is the same class that CREATED these dates, so
+// this is not a second implementation to keep in step — it is the one
+// implementation asked the same question twice. It opens no connection.
+//
+// When the answer is no, the series is simply not collapsed and every event
+// goes out on its own exactly as before rules existed: less tidy, always true.
+//
+// @param array<string,mixed>            $rule The row from tblRecurrenceRules.
+// @param list<array<string,mixed>>      $rows That series' rows, as fetched for
+//                                             this viewer, oldest first.
+$patternStillTrue = static function (array $rule, array $rows): bool {
+    if ($rows === []) {
+        return false;
+    }
+
+    $first = $rows[0];
+
+    // 🏷️ Every field the collapsed entry renders must be the same on every
+    //    row, because that entry carries row 0's copy and speaks for them all.
+    //    Named explicitly rather than "everything except the dates": a list
+    //    somebody has to extend on purpose is safer than one that silently
+    //    grows. These are the columns `Ical::emit()` turns into SUMMARY,
+    //    DESCRIPTION, LOCATION, STATUS, the TZID and the all-day shape.
+    //    `locationGeoLat`/`locationGeoLng` are in this list because the entry
+    //    really does render them, as a GEO line. A comment here used to name
+    //    the map position as an example of something that "does not reach the
+    //    file" — measurably false, and false in the direction of claiming more
+    //    safety than existed: moving one occurrence's pin left the series
+    //    collapsed and published that one pin for every date.
+    foreach ([
+        'eventName', 'description', 'locationName', 'locationAddress',
+        'status', 'timezone', 'isAllDay', 'locationGeoLat', 'locationGeoLng',
+    ] as $rendered) {
+        foreach ($rows as $row) {
+            if ((string) ($row[$rendered] ?? '') !== (string) ($first[$rendered] ?? '')) {
+                return false;
+            }
+        }
+    }
+    $worked = EventRecurrence::datesFor(
+        $rule,
+        (string) $first['startDateTime'],
+        $first['endDateTime'] === null ? null : (string) $first['endDateTime'],
+        (string) $first['timezone'],
+        [
+            // The rule's own count is the ceiling where it has one, so none of
+            // the installation's limits can cut the expansion short here and
+            // make a true pattern look false.
+            //
+            // A rule with NO count falls back to the HARD maximum, not to 1.
+            // `max(1, (int) $rule['maxOccurrences'])` was here and is wrong for
+            // exactly that case: `(int) null` is 0, so the ceiling became 1,
+            // the expansion produced one date, and every multi-row series
+            // failed the comparison. Not reachable from today's save handler,
+            // which always writes a count — but defensive code that is wrong in
+            // the defensive case, beside a comment claiming it was right, is
+            // the shape this project keeps finding.
+            'occurrences' => ((int) ($rule['maxOccurrences'] ?? 0)) > 0
+                ? (int) $rule['maxOccurrences']
+                : EventRecurrence::HARD_MAX_OCCURRENCES,
+            'years'       => EventRecurrence::HARD_MAX_YEARS,
+        ]
+    );
+
+    // 📅 Starts AND ends. `$worked['dates']` already carries both; the first
+    //    version threw the ends away, which is how an occurrence lengthened
+    //    from 11:00 to 13:00 went on being published as 11:00.
+    $pattern = array_map(
+        static fn (array $d): string => (string) $d['start'] . '/' . (string) ($d['end'] ?? ''),
+        $worked['dates']
+    );
+    $actual = array_map(
+        static fn (array $r): string => (string) $r['startDateTime'] . '/' . (string) ($r['endDateTime'] ?? ''),
+        $rows
+    );
+
+    return $pattern === $actual;
+};
+
+// 🔁 A SERIES' WHOLE RUN, as this viewer may see it (#569, owner's decision
+//     of 29 October 2026).
+// -----------------------------------------------------------------------------
+// The guard below compares the stored pattern against the series' rows. WHICH
+// rows is the whole question, and the first version got it wrong in a way that
+// was safe but not useful: it compared against the rows already in hand, and
+// the whole-calendar download selects only events from NOW ON. So a series that
+// had already begun could never match its own pattern, and every ongoing weekly
+// service went out one entry per date — exactly the series a subscriber most
+// wants as one tidy entry.
+//
+// Two filters were being conflated, and they are not the same kind of thing:
+//
+//   • the TIME filter ("from now on") is about what this download carries. It
+//     must NOT stop a series being described as a pattern: the pattern covers
+//     past dates too, and a subscribed calendar showing them is ordinary.
+//   • the VISIBILITY filter is about what this viewer may know. It MUST stop
+//     it: a series holding an event this viewer may not see would otherwise be
+//     published as a count covering a date they were never meant to know
+//     about.
+//
+// So this reads the series' whole run under the request's own visibility rule
+// and status filter, with no time filter.
+//
+// THE STATUS FILTER IS BELT-AND-BRACES, and saying so is more useful than
+// claiming it carries the guarantee. A drafted, cancelled or postponed
+// occurrence is already caught by the comparison below, because `status` is one
+// of the columns required to be identical across the run. Removing EITHER on its
+// own changes nothing observable — measured, by planting the removal of this
+// filter and finding all 126 checks still green. It is kept because it makes
+// this query mean one clear thing, "the run as the feed could carry it", rather
+// than leaving the reader to work out that another comparison happens to cover
+// it. Do not take the green run as licence to drop it without also checking what
+// `status` does in that list.
+$seriesRunForViewer = function (int $seriesId) use ($db, $siteId, $today, &$exportMode, &$exportViewer): array {
+    $visibility = EventVisibility::where('e', $exportMode, $exportViewer, $today);
+    $stmt       = $db->prepare(
+        'SELECT e.startDateTime, e.endDateTime, e.timezone, e.isAllDay, e.eventName, '
+        . 'e.description, e.locationName, e.locationAddress, e.status, '
+        . 'e.locationGeoLat, e.locationGeoLng, e.eventID, e.eventSlug, e.updatedAt '
+        . 'FROM tblEvents e WHERE e.seriesID = ? AND e.isDeleted = 0 AND e.siteID = ? '
+        . 'AND e.status = \'published\''
+        . $visibility['sql']
+        . ' ORDER BY e.startDateTime, e.eventID'
+    );
+    if ($stmt === false) {
+        return [];
+    }
+    $stmt->bind_param(
+        'ii' . $visibility['types'],
+        ...array_merge([$seriesId, $siteId], $visibility['params'])
+    );
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $run    = $result === false ? [] : $result->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+
+    return $run;
 };
 
 // 🧩 Build the Ical::emit() event list. A series whose recurrence rule
@@ -465,6 +716,8 @@ $loadRecurrenceRule = function (int $seriesId) use ($db): ?array {
 //     Recurrence collapsing never applies to a single `id=` export: the
 //     caller asked for one occurrence, not the whole series.
 $ruleCache        = [];
+$patternCache     = [];
+$runCache         = [];
 $seenSeriesIds    = [];
 $icalEvents       = [];
 
@@ -493,11 +746,65 @@ foreach ($events as $ev) {
             $ruleCache[$sid] = $loadRecurrenceRule($sid);
         }
         $rule = $ruleCache[$sid];
-        if ($rule !== null) {
+
+        // 🛡️ The pattern is used only while it still describes this series'
+        //    WHOLE run as this viewer may see it — see the notes on
+        //    `$seriesRunForViewer` and `$patternStillTrue`.
+        //
+        //    Both the run and the ANSWER are cached, not only the rule row. A
+        //    series that does NOT collapse never sets `$seenSeriesIds`, so
+        //    without this the query and the expansion ran again for every one
+        //    of its rows.
+        if (array_key_exists($sid, $runCache) === false) {
+            $runCache[$sid] = $rule === null ? [] : $seriesRunForViewer($sid);
+        }
+        if (array_key_exists($sid, $patternCache) === false) {
+            $patternCache[$sid] = $rule !== null
+                && $patternStillTrue($rule, $runCache[$sid]) === true;
+        }
+        if ($rule !== null && $patternCache[$sid] === true) {
             $rrule = $buildRrule($rule, $isAllDay);
         }
         if ($rrule !== null) {
             $seenSeriesIds[$sid] = true;
+
+            // 📅 THE MASTER ENTRY IS THE SERIES' FIRST OCCURRENCE, not whichever
+            //    row this download happened to reach first.
+            //
+            //    For a series that started weeks ago, `$ev` is its first FUTURE
+            //    row. Publishing the pattern from there while counting the whole
+            //    run would advertise dates past the real end of it — hence the
+            //    dates below. A subscriber therefore sees the series' past dates
+            //    as well, which is ordinary for a subscribed calendar and is the
+            //    owner's decision of 29 October 2026, taken so an ongoing weekly
+            //    service is one tidy entry rather than one entry per week.
+            //
+            //    THE IDENTIFIER, THE LINK AND THE LAST-CHANGED TIME COME FROM THE
+            //    SAME ROW, and that is not tidiness. An earlier version took only
+            //    the dates here and justified leaving the rest to `$ev` by saying
+            //    `$patternStillTrue()` had "required every rendered field to be
+            //    identical across the run". That was untrue on EVERY collapse, not
+            //    in some edge case: `uid` comes from `eventID`, `url` from
+            //    `eventSlug` and `lastModified` from `updatedAt`, and those three
+            //    can never match across a run. The measured consequence on the
+            //    whole-calendar download was that the entry was identified by one
+            //    occurrence and dated at another, the UID CHANGED EVERY TIME A DATE
+            //    PASSED, and the same series went out under two different UIDs
+            //    depending on which address was asked. A subscribing client saw a
+            //    delete-and-re-add each week.
+            //
+            //    Taking all five from the run's first row makes the entry coherent:
+            //    it IS the first occurrence, with a repeat rule attached. The UID is
+            //    then stable for the life of the series and the same from every
+            //    address.
+            $runFirst = $runCache[$sid][0] ?? null;
+            if ($runFirst !== null) {
+                $ev['startDateTime'] = (string) $runFirst['startDateTime'];
+                $ev['endDateTime']   = $runFirst['endDateTime'];
+                $ev['eventID']       = $runFirst['eventID'];
+                $ev['eventSlug']     = $runFirst['eventSlug'];
+                $ev['updatedAt']     = $runFirst['updatedAt'];
+            }
         }
     }
 

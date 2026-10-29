@@ -523,6 +523,48 @@ the same exact length — **because the owner chose the standard on 23 September
 judgement like that is made, write it beside the code and put a check on it, so
 nobody quietly reverses it later.
 
+## One install, many organisations, and DIFFERENT PEOPLE at each level
+
+**Set by the owner on 29 October 2026**, and it applies **throughout the application — not only to
+Calendar and Events. The owner named the noticeboard specifically.**
+
+One installation may serve many organisations, and **whoever administers the installation may be a
+different person from the administrators of the organisations on it** — a hosting provider and its
+customers is the ordinary case. So the boundary between the two levels is a boundary between
+*parties*, not a convenience for one person wearing two hats.
+
+**For a setting that is a LIMIT, the installation's value takes precedence.** An organisation may
+hold itself to a **lower** limit; it may **never** raise its own above what the installation allows.
+If the installation allows one year, an organisation may choose six months and may not choose three
+years. This is the opposite of the ordinary settings rule, where an organisation's row simply
+overrides the installation-wide one — and `$SETTINGS` has **already** done that merge by the time any
+page runs, so the merged array **cannot** express the rule on its own.
+
+- **`$SETTINGS_INSTALLATION`** is kept beside `$SETTINGS` by the settings loader in `bootstrap.php`
+  for exactly this: it holds the installation-wide rows alone, so a reader that needs the two layers
+  apart has them with no second query. It is a **layer, not a list of limits** — nothing in it decides
+  which settings are limits.
+- **The effective value is the smaller of the two, then capped by a hard maximum in code.** Three
+  tiers, each unable to loosen the one above it: code, then installation, then organisation.
+- **"Not chosen" must follow the installation, not the built-in default.** Resolving an organisation's
+  missing value to the default makes the default cap the installation, so an installation could lower
+  a limit but never raise one. Caught by a planted check, not by reading.
+- **Enforce it in the handler, never only in the form.** A `max` on an input is a courtesy to somebody
+  filling it in; it is not a boundary between two parties, because anything can be posted.
+- **Refuse the number with the reason; never quietly clamp it.** Silently reducing a number somebody
+  else typed is how a person comes to believe a limit is in force when it is not. Record the refusal:
+  a request to exceed the installation's limit crosses a line between two parties.
+
+`Portal\Core\EventRecurrence::limitsFrom()` is the first reader built this way, and
+`installationAllows()` is how a page says what the installation permits. Tests: section H of
+`tools/event-recurrence-selftest.php` and section K of `tools/event-repeat-pages-selftest.php`.
+
+**This has NOT yet been swept across the application.** There are over thirty limit-shaped settings
+(`*max*`, `*limit*`, `*Days*`, `*quota*`, `*Retention*`), `noticeboard.upload.maxBytes` among them, and
+a known live instance: `/admin/settings/attendance` writes `attend.detailRetentionDays` per
+organisation, 0–3650 days, with no installation cap — so an organisation can keep personal detail for
+ten years on an installation whose administrator intended ninety days. The sweep is its own package.
+
 ## Comment everything, in every language (all projects)
 
 Detailed comments in the code you write or change — HTML, PHP, CSS, JavaScript, XML, JSON and SQL. Explain the WHY, not the what. Record what was tried and rejected ("this used to do X, which was wrong because Y"): it stops the next person reintroducing the fault, or tidying away something load-bearing. Say what code CANNOT do where that is not obvious; an overstated guarantee is worse than none. **JSON has no comments** — never put `//` in a `.json` file; put the explanation in its schema (`description` on every property, `$comment` for maintainers). File headers: see "Code style".
@@ -672,6 +714,13 @@ The sections above cover plain English, reviews, planning, the handoff and the d
 - **Questions up front.** Work through the whole queue. Raise every decision only the owner can make at the START, in one numbered block — what is needed, why, the recommended answer, and what carries on meanwhile — then continue with everything not blocked. A question never stops the queue. A decision the owner has already taken is final; do not reopen it.
 - **When NOT to stop:** stop and ask only when you cannot continue without an answer, or before anything destructive — deleting data, force-pushing, or changing anything outside this repository. Everything else, carry on and report afterwards.
 - **Hold the scope.** Deliver what was asked, at the scope intended. Make routine judgement calls yourself. If the request looks mistaken, or a better way exists, say so in one sentence and carry on with the task as asked — do not quietly narrow, widen or change it. Anything found outside the task goes under "Found", or into an issue; it is not built unless the owner says so.
+- **The status table is STANDING, not on request (owner, 29 October 2026).** The owner had to ask
+  "i'd also asked you to give me regular status checks in tabular form, but havent been seeing this
+  (in fact this should also be a standing item, right? why not following my request)?" — and they
+  were right: the rule below already said to give it, it was given once when asked and then quietly
+  dropped. It is how the owner tracks an autonomous run without reading a narrative, so producing it
+  only when prompted defeats the point. Give it in every substantial report, unprompted, and end a
+  long run with Blocked on me / Changed / Found.
 - **Keeping the owner posted.** Before the first step of a task, say in one sentence what you are about to do. While working, give a short update only when you find something important, change direction, or finish a piece of work — always in the same message as your next action, never as a place to stop. For a queue, the update includes the task table, at least after each finished unit and whenever the queue changes: columns #, Task, Issue, Status, Notes; status words Queued · In progress · In review · Blocked (say on what) · Done (say the commit) · Dropped (say why).
 - **End a long run with three headings**, in this order: **Blocked on me** (what needs the owner and why, one line each — questions that came up part way through go here too); **Changed** (what landed, with the commits); **Found** (anything discovered and not done, each with an issue number). Write "nothing" under a heading with nothing in it.
 - **Narrow checks, then move on** (owner, 28 September 2026), for work built in chunks and committed once: after a chunk's first full check, each later round checks only the latest fix round's changes, still by a new agent; one fresh whole-part check happens once, just before the single commit; each round re-runs its own new planted faults plus a sample of earlier ones, and the full set runs once, before that commit. If a chunk goes past three check rounds, say so plainly in the next report, put the ways to speed up under "Blocked on me", and carry on meanwhile. If the same item fails two rounds running, consider simplifying the design before refining it again. This does not relax the final check before a commit.

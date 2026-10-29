@@ -163,6 +163,19 @@ jobs:
         if: ${{ !cancelled() && steps.php.outcome == 'success' }}
         run: php tools/asset-identifier-selftest.php
 
+      # 🔁 The dates a repeating event produces (#569). Needs no database and no
+      #    server: the class is arithmetic over a wall-clock reading, which is
+      #    why it was written that way.
+      #
+      #    Its clock-change checks are in zones that REALLY change, on the real
+      #    nights, in both directions, and one of them changes on a different
+      #    date from Europe — because this project has already been caught by a
+      #    test written in December in London, where nothing changes whatever
+      #    the code does.
+      - name: 'Repeating event dates self-test (#569)'
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/event-recurrence-selftest.php
+
 
       # 🔳 The portal's own QR pictures (#623). Needs no database and no server.
       #
@@ -547,7 +560,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -719,6 +732,23 @@ jobs:
         run: |
           mkdir -p "$SELFTEST_WEB_DIR"
           php -d memory_limit=512M tools/access-pages-selftest.php
+
+      # Its partner is tools/event-recurrence-selftest.php in the PHP-only job,
+      # which proves the DATE RULES with no database. This one drives the real
+      # form and save handler over HTTP and reads the rows back out of the
+      # database, because the generator can be perfect while the form posts a
+      # field name the handler does not read. Building it caught exactly that
+      # shape: the form printed a constant that had just been renamed, so every
+      # create form raised a fatal error that `php -l` cannot see.
+      - name: 'Repeating events on the real pages self-test (#569)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_evrep
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/event-repeat
+          SELFTEST_WEB_PORT: '9077'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/event-repeat-pages-selftest.php
 
       # Its stand-in mail server takes the mail port, and the port after
       # that must be free too. Part K makes a trigger and reads the
