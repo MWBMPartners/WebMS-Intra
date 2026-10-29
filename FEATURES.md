@@ -509,6 +509,15 @@ organisation, or an administrator. Nobody from another organisation. Viewing the
 
 Service-type-aware headcount tracker.
 
+- **One row per person per event per day is now actually enforced (29 October 2026, migration 224).** It was not
+  before: the rule covered `(eventID, userID, walkinName, dayDate)` and no row ever fills in both the member number
+  and the walk-in name, so an empty value made the rule stand aside and it refused nothing. The "mark present"
+  button writes with `INSERT IGNORE`, which leans entirely on that rule, so **a double-click or two coordinators
+  left a second record where one was intended.** No figure shown to anybody was wrong — the grid keys its display
+  by person and day and lists walk-ins with `SELECT DISTINCT`, so the surplus record was invisible; what it cost
+  was a duplicated "who marked this" trail and a table that would mislead the first reader to count records rather
+  than people. Erased members are deliberately exempt: their rows
+  keep the attendance and lose the name, and collapsing them would delete the counts erasure exists to preserve.
 - Sessions with date / time / event linkage / notes.
 - Counts split by service type (hierarchical: e.g. Worship → Sabbath School → Adult).
 - Filters by service type, date range; CSV export; trend reports.
@@ -1138,7 +1147,8 @@ setting seeds.
 | Livestream (YouTube/Vimeo/Twitch/Facebook embed + countdown) | #273 | 090 | ✅ |
 | Recordings (RSS podcast feed + HTTP Range streaming + FULLTEXT search) | #264 | 091 | ✅ |
 | Zoom (OAuth, meeting creation from calendar, webhook HMAC) | #274 | 092 | ✅ |
-| Newsletter (composer with auto-pulled content blocks, provider abstraction → MailerMatt slot) | #269 | 093 | ✅ |
+| Newsletter (composer with auto-pulled content blocks) | #269 | 093 | ✅ |
+| ↳ **Only the portal's own mailer is implemented.** `newsletter.provider` accepts `mailermatt` and `mailchimp`, but there is no adapter behind either: both fall back to the internal mailer, so newsletters still go out. No admin page offers them — reaching that state means typing the value into the general Settings editor — and since 29 October 2026 the Newsletter page SAYS so when it happens. | #269 | 093 | ⚠️ slot empty |
 | Giving (tithe log, Gift Aid digital declaration, HMRC schedule CSV, year-end PDF; online give-online checkout added later, see "PayPal payment adapter" section below; treasurer bulk year-end statements added later, see "Giving — Bulk year-end statements" section below) | #266 | 094 | ✅ |
 | SMS (Twilio + MessageBird + SigV4-signed AWS SNS; verification + per-category opt-in + Sabbath quiet hours: a text that is not a critical alert or an emergency notice is held and sent by `/cron/mail-queue` when they end, or recorded as not sent once its use-by moment has passed, #610) | #272, #610 | 095, 219 | ✅ |
 | Projects (public fundraising page, pledge thermometer, captcha-gated anonymous pledges; member "Pay now" pledge checkout added later, see "PayPal payment adapter" section below) | #267 | 096 | ✅ |
@@ -1150,7 +1160,7 @@ setting seeds.
 |---|---|---|---|
 | Transcription (Whisper / AssemblyAI / local; FULLTEXT search; click-to-timestamp) | #276 | 098 | ✅ |
 | Translation (Anthropic / OpenAI / Google / DeepL / LibreTranslate; content-addressable cache) | #278 | 099 | ⚠️ **NOT WORKING — see #485** |
-| ↳ The engine, the admin configuration page and the member opt-in all exist. But automatic translation of **user-written content** has no reachable way in — the only caller sits at an address the router cannot resolve. Interface translation (`I18n` / `t()`) is a separate system and works normally. Verified 10 September 2026. | #485 | — | 🔴 |
+| ↳ The engine, the admin configuration page and the member opt-in all exist. But automatic translation of **user-written content** has no reachable way in — the only caller sits at an address the router cannot resolve. Interface translation (`I18n` / `t()`) is a separate system and works normally. Verified 10 September 2026. **The app ships switched OFF (`translation.enabled` = `0`) and the `api/translate` handler has no `api.*.enabled` seed, so neither is reachable on a fresh install; and since 29 October 2026 the admin page itself carries a standing notice saying nothing is being translated**, because the page is otherwise indistinguishable from a finished feature. | #485 | — | 🔴 |
 | AI Assist (Anthropic / OpenAI / ollama; editable prompt templates; cap + daily limit + audit) | #277 | 100 | ✅ |
 | GDPR Article 17 erasure engine (19-table catalogue, sealed audit chain, 1-month SLA queue) | #235 | 101 | ✅ |
 | ↳ Since 11 October 2026 the engine reads the written list of personal data (count the tables from `web/_core/personal-data-catalogue.php`, not from this line). An erasure keeps other people's records and takes only the erased person's number off them: visitors, salvation cards, tasks, rota slots, follow-up notes, pastoral visits, payments, files, check-ins. It clears the person's photo and biography. A request stuck at "processing" can be put back from Admin, Erasure requests. | #510, #535 | 208 | ✅ |

@@ -8,7 +8,19 @@
  * through Portal\Core\Mailer; tomorrow a `mailermatt` provider drops in by
  * implementing the same dispatch interface (Newsletter::dispatch* contract).
  *
- *   newsletter.provider = internal | mailermatt | mailchimp
+ *   newsletter.provider = internal   <-- THE ONLY ONE THIS RELEASE IMPLEMENTS
+ *
+ * ⚠ `mailermatt` and `mailchimp` are NAMES WITH NO ADAPTER BEHIND THEM. The
+ *   switch in providerSend() accepts them and sends through the portal's own
+ *   mailer instead, which is the safe choice -- a newsletter still goes out
+ *   rather than silently failing -- but it is NOT what the setting says is
+ *   happening. There is no admin page offering them; reaching that state
+ *   needs somebody to type the value into the general Settings editor, and
+ *   the newsletter page now says so when they have.
+ *
+ *   This line used to read "internal | mailermatt | mailchimp" as though all
+ *   three worked. It is written out here because a setting that quietly means
+ *   something other than what it says is worse than one that is missing.
  *
  * Renders blocks into themed HTML, resolves segment recipients, mints
  * per-recipient unsubscribe tokens, and rate-limits sends per-hour so we
@@ -347,9 +359,21 @@ class Newsletter
 
     /**
      * Provider dispatch — swap by `newsletter.provider`. Today only
-     * `internal` (via Mailer) is wired. The `mailermatt` and `mailchimp`
-     * branches throw to make accidental selection visible until their
-     * adapters land.
+     * `internal` (via Mailer) is wired.
+     *
+     * ⚠ THIS USED TO SAY the `mailermatt` and `mailchimp` branches "throw to
+     * make accidental selection visible". **They do not and never did** — read
+     * the switch below: every arm, those two and the `default:`, calls
+     * Mailer::send(). Falling back is the deliberate choice, because a
+     * newsletter somebody has written and sent should go out rather than
+     * disappear into an exception. What was missing was anybody being TOLD,
+     * and that is now the Newsletter page's job: it warns when
+     * `newsletter.provider` names a service this release does not implement.
+     *
+     * Corrected 29 October 2026 after an independent check found the file
+     * carrying both versions at once — the header said "falls back", this said
+     * "throws", eight lines above code that does neither of the two things one
+     * of them described.
      *
      * @link https://github.com/MWBMPartners/webMailerMatt — pending public API
      */

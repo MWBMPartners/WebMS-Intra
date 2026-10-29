@@ -351,6 +351,44 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     normalise what they are told. That was measured on all three after the
     first guess proved wrong.
 
+13b. **A unique key is POWERLESS over a column that can be empty (#487,
+    migration 224).** In MySQL and MariaDB a unique key stands aside for any row
+    where any part of it is empty -- an empty value is not even equal to itself.
+    `INSERT IGNORE` and `ON DUPLICATE KEY UPDATE` lean entirely on the key, so
+    where it stands aside they stop meaning "do nothing the second time" and
+    start meaning "insert another row". `tblEventAttendance` collected
+    duplicate rows for exactly this reason: its key covered
+    `(eventID, userID, walkinName, dayDate)`, a row names its person by EITHER
+    the member number OR the walk-in name, so no row ever filled in all four and
+    the key refused nothing, ever -- under a comment claiming it was "idempotent
+    via unique key". **Do not say it "counted people twice in every figure":
+    that was claimed in five places and is FALSE, caught by the independent
+    check.** The attendance grid keys its display by person and day and lists
+    walk-ins with `SELECT DISTINCT`, so nothing shown was ever wrong. The cost
+    was a duplicated "who marked this" trail and a figure that would be wrong
+    as soon as anything counted rows rather than distinct people.
+
+    The cure is a worked-out (generated) column, as `tblSettings` and
+    `tblEmailTemplates` already do with `siteScope` = `COALESCE(siteID, -1)`.
+    Use `VIRTUAL`, never `STORED`: MySQL refuses a STORED generated column on a
+    table carrying an ON DELETE CASCADE foreign key (ERROR 1215).
+
+    Two things that look like mistakes and are not. `attendeeRef` is left EMPTY
+    when the person is unknown, because erasure anonymises attendance rather than
+    deleting it so the aggregate survives, two erased people cannot be told
+    apart, and collapsing them would delete the counts erasure exists to
+    preserve. And `tblWebhookEvent` is deliberately not fixed: coalescing its
+    reference would make every unparseable webhook of one provider collide and be
+    silently dropped, losing audit rows, while the money path is already
+    idempotent via `WHERE status = 'pending'`.
+
+    **Read these keys out of a LOADED DATABASE, never from the SQL**:
+    `information_schema` reports a generated column as nullable because that is
+    declared rather than worked out, so `siteScope` looks like a fault and is
+    not. Fourteen of the fifteen such keys in the schema are correct. The query
+    and the full table are in DEV_NOTES.md, "A unique key is powerless over a
+    column that can be empty".
+
 14. **The MySQL 8 dialect trap.** Production runs some version of MySQL 8
     (exact version unconfirmed — see `.claude/CLAUDE.md`'s database-version
     warning banner). Various handy `IF [NOT] EXISTS` forms on `ADD`/`DROP

@@ -12,6 +12,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Router;
+use Portal\Core\Settings;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -52,6 +53,38 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <?php if ($flashMsg !== ''): ?>
     <div class="alert alert-<?php echo htmlspecialchars($flashType !== '' ? $flashType : 'info', ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?></div>
+<?php endif; ?>
+
+<?php
+// 📣 Tell the truth when `newsletter.provider` names something this release
+//    does not implement. Only `internal` has an adapter; `mailermatt` and
+//    `mailchimp` are accepted by Newsletter::providerSend() and fall back to
+//    the portal's own mailer, so the newsletter DOES go out -- but the
+//    setting is then describing a route that is not being used.
+//
+//    No admin page offers those values, so reaching this state means somebody
+//    typed one into the general Settings editor. That is exactly the person
+//    who needs telling, because otherwise the only clue is a source comment.
+//
+//    Read with a plain settings lookup rather than a new helper: there is one
+//    setting and one question, and a helper would be a second place to keep
+//    the list of what is implemented in step.
+$newsletterRoute = strtolower(trim((string) Settings::get('newsletter.provider', 'internal')));
+?>
+<?php if ($newsletterRoute !== '' && $newsletterRoute !== 'internal'): ?>
+    <div class="alert alert-warning d-flex align-items-start" role="alert">
+        <i class="fa-solid fa-triangle-exclamation me-2 mt-1"></i>
+        <div>
+            <strong>Newsletters are being sent by the portal itself, not by
+            &ldquo;<?php echo htmlspecialchars($newsletterRoute, ENT_QUOTES, 'UTF-8'); ?>&rdquo;.</strong>
+            That sending service is not built into this release, so the setting has no
+            effect and your newsletters go out through the portal&rsquo;s own e-mail
+            settings instead. Nothing is lost and nothing is failing &mdash; but if you
+            meant to use an outside service, it is not in use. Set
+            <code>newsletter.provider</code> back to <code>internal</code> to stop this
+            message.
+        </div>
+    </div>
 <?php endif; ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">

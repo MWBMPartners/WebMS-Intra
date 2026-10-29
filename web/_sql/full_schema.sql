@@ -6059,8 +6059,60 @@ CREATE TABLE IF NOT EXISTS `tblEventAttendance` (
     `markedByID`   INT      DEFAULT NULL COMMENT 'Coordinator / admin who clicked the cell',
     `markedAt`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `notes`        VARCHAR(255) DEFAULT NULL,
+    -- 🧮 Worked out by the database so the rule below can name ONE ROW PER
+    --    PERSON, which neither column can do on its own (224). `u:` and `w:`
+    --    keep the two kinds apart, so member 12 never collides with a walk-in
+    --    called "12".
+    --
+    --    IT IS NULL ON PURPOSE when the person is not known at all. An erased
+    --    member's row keeps its attendance and loses its name
+    --    (`fk_attend_user` is ON DELETE SET NULL and `GdprEraser` anonymises
+    --    rather than deletes, so the aggregate survives), which leaves several
+    --    rows identical in every column. Because this part of the key is NULL
+    --    for exactly those rows, and a NULL is never equal to another,
+    --    identified people are held to one row each while anonymised rows are
+    --    left alone. A rule that collapsed them would delete the counts
+    --    erasure exists to preserve. "NULL" is meant exactly: an EMPTY NAME
+    --    (`walkinName = ''`) works out to `w:`, which is not NULL, so those
+    --    rows DO count as duplicates of each other.
+    --
+    --    THE WIDTH IS TIED TO `walkinName`: 'w:' plus 120 characters is 122.
+    --    Widening `walkinName` means widening this column in the same change,
+    --    or a long name is truncated and two people could be made to collide.
+    --
+    --    VIRTUAL, not STORED: `fk_attend_event` is ON DELETE CASCADE and MySQL
+    --    refuses a STORED generated column on such a table (ERROR 1215) —
+    --    the same reason migration 222 gave for `siteScope`.
+    `attendeeRef`  VARCHAR(140) AS (COALESCE(CONCAT('u:', `userID`), CONCAT('w:', `walkinName`))) VIRTUAL
+                   COMMENT 'Worked out by the database: u: and the member number, or w: and the walk-in name. Left empty when the person is not known at all, so anonymised rows are never treated as duplicates of one another.',
     PRIMARY KEY (`attendanceID`),
-    UNIQUE KEY `uq_attendance_unique` (`eventID`, `userID`, `walkinName`, `dayDate`),
+    -- ⚠ There used to be a `uq_attendance_unique` on
+    --   (eventID, userID, walkinName, dayDate). It REFUSED NOTHING and never
+    --   could: no row ever fills in both `userID` and `walkinName`, so every
+    --   row had an empty part and an empty part makes a unique key stand aside.
+    --   Meanwhile the "mark present" page wrote with INSERT IGNORE and a
+    --   comment claiming it was "idempotent via unique key", so a second press
+    --   of the button added a SECOND ROW instead of being ignored.
+    --
+    --   NOTHING SHOWN TO A USER WAS WRONG, and an earlier version of this
+    --   comment said it was. The grid keys its display by person and day and
+    --   lists walk-ins with SELECT DISTINCT, and the two Discipleship joins
+    --   feed an INSERT IGNORE whose key has no empty part, so nothing
+    --   double-counted. The cost was a table that disagreed with itself, a
+    --   duplicated "who marked this" trail, and a figure that WOULD be wrong
+    --   as soon as anything counted rows instead of distinct people.
+    --   Migration 224 removed that key rather than leaving it, because a key
+    --   called "unique" that enforces nothing is what convinced everybody the
+    --   duplicates were impossible. Do not reinstate it.
+    --
+    --   ⚠ A NOTE ON WALK-INS, so nobody "fixes" it later: a walk-in is now
+    --   unique BY NAME for an event and day, and `utf8mb4_general_ci` ignores
+    --   capitals and trailing spaces, so "Dave" and "dave" are one person
+    --   here. Two different people of the same name at one event cannot both
+    --   be recorded. That is what the old key was reaching for by naming
+    --   `walkinName` at all, and the grid already listed walk-ins with
+    --   `SELECT DISTINCT walkinName`, so the second was invisible anyway.
+    UNIQUE KEY `uq_attendance_person` (`eventID`, `dayDate`, `attendeeRef`),
     KEY `idx_attendance_event_day` (`eventID`, `dayDate`),
     KEY `idx_attendance_user`      (`userID`),
     CONSTRAINT `fk_attend_event`  FOREIGN KEY (`eventID`)    REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE,
@@ -10325,3 +10377,5 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 --    scripts and READ THEM; an exit code of 0 is not the whole answer.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('223_expenses_edit_routes.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
+INSERT INTO `tblMigrations` (`filename`) VALUES ('224_event_attendance_person_uniqueness.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;

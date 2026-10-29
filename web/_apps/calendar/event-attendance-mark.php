@@ -65,7 +65,24 @@ if ($ok === false) { http_response_code(404); exit('Event not found'); }
 $redirect = Site::url('calendar/event/attendance') . '?eventID=' . $eventId;
 
 if ($toggle === 1) {
-    // 💾 Insert (idempotent via unique key).
+    // 💾 Insert once. `INSERT IGNORE` throws the second copy away, and it can
+    //    only do that because `uq_attendance_person` really refuses it.
+    //
+    //    ⚠ THIS COMMENT USED TO SAY "idempotent via unique key" AND WAS WRONG.
+    //    The old key covered (eventID, userID, walkinName, dayDate), and no row
+    //    ever fills in both `userID` and `walkinName` — so every row had an
+    //    empty part, an empty part makes a unique key stand aside, and the key
+    //    refused nothing. Pressing the button twice added a SECOND ROW instead
+    //    of being ignored. Migration 224 replaced that key with one on a
+    //    worked-out `attendeeRef`, which is what makes this line true.
+    //
+    //    ⚠ What it did NOT do, because an earlier version of this comment
+    //    claimed it did: no attendance figure shown to anybody was wrong.
+    //    `event-attendance.php` keys its grid by person and day and lists
+    //    walk-ins with SELECT DISTINCT, so the surplus row was invisible. What
+    //    it cost was a duplicated "who marked this" trail and a table that
+    //    would mislead the first reader to count rows rather than people. If a future change touches that key, this
+    //    `INSERT IGNORE` is relying on it — check them together.
     if ($userId > 0) {
         $stmt = $mysqli->prepare(
             'INSERT IGNORE INTO tblEventAttendance (eventID, userID, dayDate, markedByID) VALUES (?, ?, ?, ?)'

@@ -61,6 +61,36 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <h1 class="mb-3"><i class="fa-solid fa-language me-2"></i>Translation</h1>
 
+<?php
+// 📣 Say plainly, at the top, that this does not do anything yet (#485).
+//    Everything below is real and works: the engine translates, the cache
+//    fills, the spend is counted. What does NOT exist is anything that ASKS
+//    it to. No page in the portal sends a prayer request, an announcement or
+//    any other piece of members' writing for translation, so on a normal
+//    installation these figures stay at zero for ever.
+//
+//    This notice is here because the page is otherwise indistinguishable
+//    from a finished feature: it has settings, a spend cap and statistics,
+//    and an administrator who filled in an API key would reasonably expect
+//    members to start seeing translations. They will not.
+//
+//    It is NOT hidden behind the flash-message block above, and not a
+//    dismissible alert, because it must be true every time the page is
+//    opened. When the member-facing half ships, delete this block — and the
+//    note in .claude/CLAUDE.md and FEATURES.md that says the same thing.
+?>
+<div class="alert alert-warning d-flex align-items-start" role="alert">
+    <i class="fa-solid fa-triangle-exclamation me-2 mt-1"></i>
+    <div>
+        <strong>Nothing is being translated yet.</strong>
+        The translation engine and these settings work, but no part of the portal
+        currently sends members&rsquo; writing to it &mdash; so the figures below will
+        stay at zero, and members will not see translated content, however this page
+        is set up. Filling in a provider key here is safe and costs nothing; it simply
+        has no effect until the rest of the feature is finished.
+    </div>
+</div>
+
 <div class="row g-3 mb-3">
     <div class="col-md-4"><div class="card"><div class="card-body">
         <div class="small text-muted">Cached translations</div>

@@ -2,6 +2,31 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — the same person could be marked present twice, and every attendance figure counted them twice (#487, migration 224)**
+  - **What was wrong.** An attendance record names its person in one of two ways: a member number, or the name of
+    somebody who simply turned up. The rule meant to stop duplicates covered both columns at once — but no record
+    ever fills in both, and a database rule of this kind quietly stands aside when any part of it is empty. So the
+    rule **refused nothing, for any record, ever.**
+  - **What it cost — and what it did not.** The "mark present" button relies on that rule to throw away a second
+    copy. With the rule unable to act, pressing it twice recorded the person a second time. **No attendance figure
+    shown anywhere in the portal was wrong**, because the attendance grid lists each person once however many
+    records they have; the cost was a record that said two different people had marked the same person present, a
+    table that disagreed with itself, and a figure that would have been wrong the moment anything counted records
+    instead of people.
+  - **What changed.** The database now works out a single value naming the person, however they were recorded, and
+    the rule applies to that. Pressing the button twice is now genuinely harmless.
+  - **Upgrading tidies existing records.** Where the same person was already recorded more than once for the same
+    event on the same day, the earliest record is kept and the surplus removed. **People whose details have been
+    erased are deliberately left alone**: their records keep the attendance but no longer say who it was, and there
+    is no way to tell two erased people apart — so collapsing them would have quietly reduced the attendance of
+    every event they ever came to.
+- **Clearer — two settings that quietly did nothing now say so**
+  - **Translation.** The translation engine and its settings page work, but nothing in the portal sends members'
+    writing to it, so nothing is ever translated. The feature ships switched off, and its page now says this plainly
+    at the top instead of looking like a finished feature with an API key box.
+  - **Newsletter sending service.** Only the portal's own e-mail is built in. If the newsletter setting names an
+    outside service, newsletters still go out — through the portal — and the Newsletter page now says that the named
+    service is not in use, rather than leaving it to be discovered.
 - **The migration test now runs on MariaDB as well as MySQL (#487)**
   - **What this means.** The test that replays every database upgrade step, from the
     oldest install script to today's, now runs on MariaDB 11.4 too. **All seven stages and

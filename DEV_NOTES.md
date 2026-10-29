@@ -3390,6 +3390,170 @@ ignore rules remain the first wall; these guards are the second.
 
 ---
 
+## A unique key is powerless over a column that can be empty (#487, 29 October 2026)
+
+**The rule, and it is absolute: in MySQL and MariaDB a unique key STANDS ASIDE
+for any row where any part of it is empty.** An empty value is not even equal to
+itself. So a unique key is only a rule at all for rows that fill in every one of
+its columns.
+
+That is useful on purpose — it is what lets a token column hold many rows with
+no token yet — and it is a trap whenever the key is meant to stop duplicates.
+**`INSERT IGNORE` and `ON DUPLICATE KEY UPDATE` lean entirely on the key**, so
+where the key stands aside they stop being "do nothing the second time" and
+become "insert another row".
+
+### What the audit found
+
+Every unique key in `full_schema.sql` holding a column that can be empty, read
+out of a real loaded database rather than by reading the SQL: **15 keys.
+Fourteen are right. One was broken.**
+
+| Table / key | Verdict |
+|---|---|
+| `tblEventAttendance.uq_attendance_unique` | **BROKEN — fixed by migration 224.** See below. |
+| `tblSettings.uq_setting_key_scope`, `tblEmailTemplates.uq_template_key_scope` | Correct. Protected by the generated `siteScope` = `COALESCE(siteID, -1)`, which can never be empty. `information_schema` still CALLS these columns nullable, because a generated column's nullability is declared rather than worked out — so they look like false hits and are not. |
+| `tblSettings.uq_setting_key_site`, `tblEmailTemplates.uq_template_site_key` | Harmless. The older, weaker keys that the `_scope` ones above replaced; migration 222 explains why they stay. |
+| `tblForms.uq_forms_token`, `tblServicePlan.uq_sp_public_token`, `tblServicePlans.uq_plan_display_token`, `tblServicePlans.uq_plans_runsheet`, `tblSites.uq_site_host` | Correct, and the standing-aside is the POINT: many rows have no token and no host pattern yet. |
+| `tblAssets.uq_asset_tag` | Correct. An asset tag is optional, so many untagged assets must be allowed. |
+| `tblEvents.uq_event_external_identity` | Correct. Portal-made events have no external identity and are deliberately unconstrained; `FeedImporter` always supplies the hash (`UNHEX(?)`), and a row with none is swept away as stale. |
+| `tblSmallGroupMeetingAttendance.uq_sgma_meeting_user` | Correct in practice. `userID` is only ever emptied by erasure, never at insert time, so the key holds for every row it is meant to. |
+| `tblZoomAccount.uq_za_site_user` | Weak but idle. An empty `userID` means a site-level account and several would be allowed; nothing writes with `INSERT IGNORE`, so nothing depends on it. Noted, not changed. |
+| `tblWebhookEvent.uq_we_provider_ref` | **Deliberately left alone**, and this is the interesting one. `INSERT IGNORE` does lean on it, and `providerRef` is empty for an unknown provider or a failed parse, so retries would each log a row. Coalescing it to `''` would be WORSE: every unparseable webhook of one provider would then collide and be silently dropped, losing audit rows. The money path is guarded separately by `UPDATE … WHERE status = 'pending'`, which is genuinely idempotent. Logging everything is the safer failure. |
+
+### The one that was broken
+
+`uq_attendance_unique` covered `(eventID, userID, walkinName, dayDate)`. The
+table's own comments say a row names its person EITHER by `userID` OR by
+`walkinName` — so **no row ever fills in all four columns, and the key therefore
+refused nothing, for any row, ever.** Meanwhile
+`_apps/calendar/event-attendance-mark.php` writes with `INSERT IGNORE` under a
+comment reading "idempotent via unique key". Two identical inserts, two rows:
+measured on MySQL 8.0.36 before anything was changed.
+
+**That comment is the lesson.** It stated the guarantee the schema had forgotten
+to implement, which is exactly why nobody went looking — the same shape as the
+`complete` flag in #645.
+
+**But do not overstate what it cost, as the first write-up of this did in five
+places.** "The person was counted twice in every attendance figure" is FALSE and
+the independent check proved it by finding every reader: the only page that
+displays these rows keys its grid by person and day
+(`$attended['u:5:2026-10-29'] = true`) and lists walk-ins with
+`SELECT DISTINCT walkinName`, so a surplus row sets the same entry and changes
+nothing on screen; the two joins in `Discipleship.php` both feed
+`INSERT IGNORE INTO tblPathwayProgress`, whose key has no empty part, so
+progress cannot be awarded twice; no `COUNT(*)` over the table exists anywhere;
+and `ReportBuilder` cannot reach it. **Nothing shown to a user was ever wrong.**
+What the surplus row really cost: a duplicated `markedByID`/`markedAt` trail
+claiming two people marked the same person, a table that disagrees with itself,
+and a figure that WOULD be wrong the moment anything counts rows rather than
+distinct people — which is the reason to fix it rather than rely on every future
+reader remembering to de-duplicate. Writing a user-visible harm that did not
+happen is the same fault as the comment above, running the other way.
+
+### Why the fix is allowed to be empty, which looks wrong and is the point
+
+Migration 224 adds `attendeeRef`, worked out as
+`COALESCE(CONCAT('u:', userID), CONCAT('w:', walkinName))`, and puts the key on
+`(eventID, dayDate, attendeeRef)`.
+
+It is **empty when the person is not known at all**, and that is deliberate.
+`fk_attend_user` is ON DELETE SET NULL and `GdprEraser` ANONYMISES these rows
+rather than deleting them — its own stated reason is that the aggregate
+attendance must survive. Several erased members at one event therefore leave
+several rows identical in every column, and **there is no way to tell two erased
+people apart.** A key that collapsed them would have permanently reduced the
+recorded attendance of every event an erased member ever attended — deleting the
+very counts erasure exists to preserve.
+
+So the standing-aside behaviour that CAUSED this fault is what now does the right
+thing: identified people are held to one row each, anonymised rows are left
+alone. The de-duplication carries the same restriction, and its `WHERE` clause
+is load-bearing for that reason.
+
+Proved on a real database before it was written, both directions: a duplicate
+member and a duplicate walk-in were refused, a fourth anonymised row was
+accepted, and a different member and a different day were still accepted.
+`VIRTUAL` not `STORED`, for migration 222's reason — MySQL refuses a STORED
+generated column on a table carrying an ON DELETE CASCADE foreign key (ERROR
+1215).
+
+### Three consequences, all deliberate, all worth stating
+
+1. **A walk-in is now unique BY NAME** for an event and day, and
+   `utf8mb4_general_ci` ignores capitals and trailing spaces, so "Dave" and
+   "dave" are one person here. Two different people of the same name at one
+   event cannot both be recorded. That is what the old key was reaching for by
+   naming `walkinName` at all, and the grid already listed walk-ins with
+   `SELECT DISTINCT walkinName`, so the second was invisible anyway.
+2. **`VARCHAR(140)` is tied to `walkinName` being `VARCHAR(120)`** — `'w:'`
+   plus 120 characters is 122. Widening `walkinName` means widening
+   `attendeeRef` in the same change, or a long name is truncated and two
+   different people could be made to collide.
+3. **"NULL" means NULL, not empty.** A row holding `walkinName = ''` works out
+   to `w:`, which is not NULL, so such rows DO de-duplicate against each other.
+   The page cannot write one (it trims and refuses an empty name), so that needs
+   legacy or hand-written data.
+
+### What this makes harder: restoring a pre-upgrade snapshot
+
+**A WHOLE-DATABASE restore of a snapshot taken before this migration will be
+REFUSED if that snapshot holds duplicates**, because `DbBackup::restoreAll()`
+stops on any rejected row while only `restoreTable()` skips duplicate keys
+(1062/1586). That is the same limit migrations 187 and 222 carry, and
+`DbBackup`'s own notes already list "put back rows the database now calls
+duplicates" among the things it cannot do — but it was RARE for those and is the
+COMMON case here, because the fault was live and every double-press left a
+duplicate.
+
+**The way out, and it exists here where it did not for `tblSettings`:**
+`tblEventAttendance` is NOT on `DbBackup::WHOLE_DATABASE_ONLY`, so a ONE-TABLE
+restore of it works and skips the rows it cannot place. Worth knowing before
+somebody reports the whole-database restore as a new bug.
+
+### A gap in the harness, found by this change
+
+**The migration harness does NOT compare column COMMENTS.** `dump_inventory()`
+takes `table_name, column_name, column_type, is_nullable, column_default,
+extra` — no comment — so `full_schema.sql` and a migration can disagree about a
+column's comment and all 42 checks still pass. That is exactly what happened
+here: the migration's `COMMENT` carried one extra sentence, the two were made
+identical only because the independent check diffed `SHOW CREATE TABLE` by hand
+on both engines. If the "the two must agree" rule is meant to cover comments,
+the inventory needs the column added; until then, compare them by eye when you
+touch one.
+
+**The old key was REMOVED rather than left.** Migration 222 kept its equivalent,
+and that was right there: it still worked for an organisation's own template and
+a foreign key needed it. Neither applies here — this one enforced nothing at all,
+and a key called "unique" that enforces nothing is what convinced everybody the
+duplicates were impossible. Both foreign keys keep an index to stand on
+(`idx_attendance_event_day`, `idx_attendance_user`), checked by dropping it on a
+real server.
+
+### How to check this yourself
+
+Load `full_schema.sql` into a throwaway database and ask it — do not read the
+SQL, because a generated column's declared nullability will mislead you:
+
+```sql
+SELECT s.TABLE_NAME, s.INDEX_NAME,
+       GROUP_CONCAT(CONCAT(c.COLUMN_NAME, IF(c.IS_NULLABLE='YES','(NULLABLE)',''))
+                    ORDER BY s.SEQ_IN_INDEX SEPARATOR ' + ') AS cols
+  FROM information_schema.STATISTICS s
+  JOIN information_schema.COLUMNS c
+    ON c.TABLE_SCHEMA = s.TABLE_SCHEMA AND c.TABLE_NAME = s.TABLE_NAME
+   AND c.COLUMN_NAME = s.COLUMN_NAME
+ WHERE s.TABLE_SCHEMA = DATABASE() AND s.NON_UNIQUE = 0
+ GROUP BY s.TABLE_NAME, s.INDEX_NAME
+HAVING SUM(c.IS_NULLABLE='YES') > 0;
+```
+
+Then, for each hit, ask the only question that matters: **is a row that leaves
+that column empty a row the key is supposed to refuse?** If yes, it needs a
+worked-out column. If no, it is right as it stands.
+
 ## End-to-end migration test (#248)
 
 Before each release, run every migration through real MySQL 8.0.36, MySQL
