@@ -2,6 +2,80 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — a visible Export button on a money page that refused most of the people it was shown to (#675)**
+  - **What #675 said, and why all three of its claims were wrong.** The issue reported `expenses/export` as
+    a handler that had "never answered a request", that "nothing links to it", and that four
+    `api.expenses.*` switches were seeded with no handler behind them. Measured over real HTTP and against
+    a real MySQL 8.0.36 loaded from the install script: it answers **200 with a real CSV**; a **live Export
+    button on the approvals page** links to it; and **none of those four switches exists on any
+    installation** — migration 186 deletes them and `full_schema.sql` folds that DELETE in after every one
+    of their INSERTs. A fresh database holds exactly three `api.expenses.*` rows. The issue's own grep
+    missed the button because it searched for `expenses/export` while the address is `expenses/api/export`.
+  - **One qualifier, because the issue was not wrong about everything.** Its narrower wording — that
+    `api.expenses.export.enabled` is not seeded, so **that address** has never answered — is **true**, and
+    deliberately still is. What was wrong was the conclusion: the handler is not dead, because it is reached
+    at a different address altogether.
+  - **What was actually wrong was worse.** The Export button was drawn **unconditionally**, and
+    `/expenses/approve` has no gate beyond being signed in — it just shows an empty list to somebody with
+    nothing to decide. So every member saw the button, and the handler then refused most of them with a
+    bare, unstyled **`Forbidden`**: no portal page, no message, no way back. Measured on six kinds of
+    account, **four were refused that way**, and they included the department leads and department
+    approvers that page exists to serve.
+  - **One rule now, asked by both.** `ExpenseRules::mayExportClaims()` is the ONE place that decides who
+    may download the spreadsheet — an administrator, a global administrator, or a holder of the `approver`
+    role. The button asks it and so does the handler. **Who may download has not changed**; the button is
+    simply no longer offered to people it refuses, and there is one rule where there were two copies.
+  - **`isApprover` and the `approver` role are different things with confusingly similar names.**
+    `tblUserDepts.isApprover` means "may decide **one department's** claims"; the `approver` role (seeded
+    as "Expense Approver") means trusted with the organisation's claims as a whole. The file is every
+    department's figures, so it is the second. Widening it to department approvers, scoped to their own
+    departments, is **#681** and is a deliberate decision rather than an oversight here.
+  - **`api.expenses.export.enabled` is deliberately NOT seeded** (owner, 30 October 2026). The same file
+    also sits at `api/expenses/export`, which ApiRouter would serve; seeding it would publish a second
+    address for the same CSV that a bearer token still could not use, because the handler needs a session
+    and reads its token from the query string. The working address is documented in `api-spec.json`
+    instead, said plainly to be a browser download and not a REST endpoint.
+- **Fixed — the API check read a seed and a deletion as the same thing, and called a page route dead (#675)**
+  - **The blind spot, and its dangerous direction.** `check_api_spec_matches_code.py` found seeded switches
+    with one regex over `full_schema.sql`, which both seeds and deletes settings. A key written inside a
+    `DELETE` matched exactly as one inside an `INSERT`. Reporting four switches that do not exist was the
+    harmless half. **The dangerous half is check G:** a handler whose switch is seeded and then deleted is
+    403 to everybody, and the old reading called it seeded and passed. Proved by planting — with a
+    `DELETE` of `api.events.create.enabled` appended to the install script, the old reading still answered
+    "seeded: True". The two statement kinds are now applied **in file order**, and the function says
+    plainly what it still cannot see (a `DELETE` by `LIKE`, by subquery, or from application code).
+  - **A file in an `api` folder is not necessarily an API endpoint.** The check assumed any
+    `_apps/{app}/api/{action}.php` could only be reached by ApiRouter. `Router::dispatch()` resolves a
+    `tblRoutes` target under `PORTAL_APPS` first, so `expenses/api/export` reaches that same file with
+    **neither** the `api.{app}.{action}.enabled` row **nor** the app's own API-folder switch in front of
+    it — two fewer gates than the folder name implies. New **check I** names every such file and why, and
+    fails both ways, so a new one is a decision rather than a discovery. There is exactly one today.
+  - **The first version of that fix was ALSO wrong, in the same silent direction, and the independent
+    check caught it.** It ended a `DELETE` at the next `;` **character**, so a semicolon inside the
+    statement's own `--` comment ended the span early, the key fell outside it and was read as a seed —
+    and its docstring had claimed that case was merely over-reporting. These two differ by one character,
+    and the first passed while the second correctly failed:
+
+    ```sql
+    -- these are gone; nothing reads them any more
+    -- these are gone and nothing reads them any more
+    ```
+
+    `read_install_script()` now scans the file once, blanking comments and tracking quoted literals, so a
+    semicolon in a comment or a literal cannot end a statement and **a key quoted inside a comment is not
+    read as live at all**. That last part fixed a second finding: a route target left behind in a comment
+    was being read as a live route, which made check G stop guarding a handler that had really become
+    unreachable. The `'#0f766e'` colours the install script seeds are why the scanner has to know that `#`
+    does not start a comment inside a literal.
+  - **Its own test grew from 26 planted faults to 33**, each still required to be caught by the expected
+    check and **by nothing else**. Three of the new ones are the scanner faults above.
+  - **Two more from the same check, both fixed.** An organisation with **no claims** downloaded a file of
+    three bytes — the byte-order mark alone — because `CsvExporter::download()` derives its headings from
+    the first row and there was no first row, while the API description promised a heading row and a column
+    order; the handler now passes the headings explicitly, which also makes the documented order
+    load-bearing rather than a side effect of the query's alias order. And the file name's date used PHP's
+    default zone rather than the organisation's, so late on a Sunday evening in Sydney it was named for
+    Saturday; it now comes from `Site::timezone()` (#604).
 - **Added — the browser half of the look-and-feel audit, which was never blocked (#569)**
   - **What this is.** `tools/visual-audit.php` stands a real portal up over HTTP — copies `web/`, writes a
     throwaway `auth_creds.php` and key, starts PHP's own server behind a router imitating `.htaccess` —

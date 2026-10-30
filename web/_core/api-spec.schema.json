@@ -213,11 +213,11 @@
       }
     },
     "paths": {
-      "description": "Every address this API answers. A key must be one of the two shapes ApiRouter can serve — `/api/{app}/{action}` or `/api/v1/{resource}[/{id}]` — or `/health`, which the router answers itself. That the set matches the handlers on disk is checked separately, by check_api_spec_matches_code.py.",
+      "description": "Every address this API answers. A key must be one of the two shapes ApiRouter can serve — `/api/{app}/{action}` or `/api/v1/{resource}[/{id}]` — or one of the two addresses the description carries that ApiRouter does NOT serve, each named in full rather than allowed as a shape: `/health`, which the router answers itself, and `/expenses/api/export`, the Expenses spreadsheet download, which is an ordinary page route and is described here only so a developer does not have to find it in the code (#675). Naming them in full is deliberate: a shape such as `/{app}/api/{action}` would also accept a misspelling of one, and because both are skipped by the handler comparison in check_api_spec_matches_code.py nothing else would notice. That the set matches the handlers on disk is checked separately, by that script.",
       "type": "object",
       "minProperties": 1,
       "propertyNames": {
-        "pattern": "^(/health|/api/v1/[a-z0-9-]+(/\\{id\\})?|/api/(?!v1/)[a-z0-9-]+/[a-z0-9-]+)$"
+        "pattern": "^(/health|/expenses/api/export|/api/v1/[a-z0-9-]+(/\\{id\\})?|/api/(?!v1/)[a-z0-9-]+/[a-z0-9-]+)$"
       },
       "additionalProperties": {
         "$ref": "#/$defs/pathItem"

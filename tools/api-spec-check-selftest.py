@@ -234,11 +234,126 @@ def plants() -> list[Plant]:
                      "ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;")
         replace_once(SQL, statement,
                      statement + "\n\n" + statement.replace("expenses.list", "expenses.export"))
-    # Declared "AG" on purpose. Seeding expenses/export makes it reachable, and
-    # it is undocumented (deliberately -- see #675), so A fires as well as G's
-    # stale branch. Both are real, so both are declared; sabotaging either one
-    # changes the set and the plant goes red.
-    out.append(Plant("the unseeded list gone stale (now seeded)", "AG", g_stale))
+    # Declared "A" since 30 October 2026, and the change is worth recording
+    # because it is the plant catching up with reality rather than being
+    # weakened. It used to be "AG": UNSEEDED_ON_PURPOSE named expenses/export,
+    # so seeding it made that entry stale and G fired too. #675 measured the
+    # endpoint and found the list entry was wrong -- the handler is reached as
+    # an ordinary page route and answers a real CSV -- so the list is empty and
+    # has nothing left to go stale. What the plant still guards is the half
+    # that matters: seeding `api.expenses.export.enabled` opens the
+    # `api/expenses/export` address, which is deliberately NOT described (the
+    # description covers `expenses/api/export`, the address that works), so A
+    # fires. In other words, nobody can seed that switch without also
+    # documenting what they have just published.
+    out.append(Plant("api.expenses.export.enabled seeded, publishing an undescribed address",
+                     "A", g_stale))
+
+    # ---- the DELETE-aware reading of the install script (#675) ------------
+    #      seeded_switches() used to be one regex over the whole file, which
+    #      matched a key inside a DELETE statement exactly as it matched one
+    #      inside an INSERT. These two plants are the two directions of that.
+    def g_seeded_then_deleted() -> None:
+        # THE DANGEROUS DIRECTION, and the reason that function was rewritten.
+        # events/create is seeded and documented. Delete its row at the end of
+        # the install script and the endpoint is 403 to everybody -- while the
+        # old regex still read the name in the INSERT and called it seeded, so
+        # the check passed. Measured on 30 October 2026: the old reading
+        # answered True for ('events', 'create') with this plant in place.
+        SQL.write_text(
+            SQL.read_text(encoding="utf-8")
+            + "\n-- planted by api-spec-check-selftest.py\n"
+              "DELETE FROM `tblSettings` WHERE `settingKey` IN ('api.events.create.enabled');\n",
+            encoding="utf-8")
+    out.append(Plant("a live switch seeded and then DELETED", "G", g_seeded_then_deleted))
+
+    def h_delete_removed() -> None:
+        # The harmless direction, which is how the fault was found. Migration
+        # 186 removes four `api.expenses.*` rows for handlers that are not in
+        # the repository, and the install script folds that DELETE in AFTER the
+        # INSERTs. Take the DELETE away and a fresh install really does hold
+        # four switches for nothing, which is H.
+        statement = ("DELETE FROM `tblSettings`\nWHERE `settingKey` IN (\n"
+                     "    'api.expenses.stats.enabled',\n"
+                     "    'api.expenses.attachments.enabled',\n"
+                     "    'api.expenses.update.enabled',\n"
+                     "    'api.expenses.update-status.enabled'\n);")
+        replace_once(SQL, statement, "-- planted: the DELETE removed")
+    out.append(Plant("the install script's DELETE of four dead switches removed",
+                     "H", h_delete_removed))
+
+    # ---- I: a handler reached as an ordinary page route -------------------
+    def gi_route_removed() -> None:
+        # Takes the `tblRoutes` row away from expenses/api/export. Declared
+        # "GI" because both halves are true and both are the point: the handler
+        # becomes genuinely unreachable (G), and PAGE_ROUTED_ON_PURPOSE still
+        # names it, so that list is now stale (I). A check that reported only
+        # one of the two would leave the other able to rot.
+        statement = "VALUES ('expenses/api/export', 'expenses/api/export.php', 1)"
+        replace_once(SQL, statement, "VALUES ('expenses/api/zzgone', 'expenses/api/zzgone.php', 1)")
+    out.append(Plant("the page route for expenses/api/export removed", "GI", gi_route_removed))
+
+    def i_new_page_route() -> None:
+        # A NEW handler in an `api` folder with a page route and no switch.
+        # Without check I this reads as an ordinary ApiRouter handler that
+        # somebody forgot to seed (G); with it, the truth is reported -- a file
+        # answering requests with neither of ApiRouter's gates in front of it.
+        # The file and its route are one change, not two: a page-routed handler
+        # is not a page-routed handler without both.
+        target = REPO / "web/_apps/venues/api/zzpaged.php"
+        target.write_text("<?php\n// Planted by api-spec-check-selftest.py.\n", encoding="utf-8")
+        SQL.write_text(
+            SQL.read_text(encoding="utf-8")
+            + "\n-- planted by api-spec-check-selftest.py\n"
+              "INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)\n"
+              "VALUES ('venues/api/zzpaged', 'venues/api/zzpaged.php', 1)\n"
+              "ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);\n",
+            encoding="utf-8")
+    out.append(Plant("a new page-routed handler in an api folder, unlisted", "I",
+                     i_new_page_route, [REPO / "web/_apps/venues/api/zzpaged.php"]))
+
+    # ---- the SQL scanner: three faults the independent check found ---------
+    #      All three were green before 30 October 2026, and the first is the
+    #      silent direction on the very fault the DELETE-awareness exists to
+    #      catch. See read_install_script() in the check for the measurements.
+    def g_semicolon_in_a_comment() -> None:
+        # The statement is a correct, ordinary DELETE. The ONLY thing wrong
+        # with it is a semicolon inside its `--` comment, which is this
+        # file's own commenting style. With the naive `text.find(";")` the
+        # span ended at that semicolon, the key fell OUTSIDE it and was read
+        # as a SEED, and the check passed on an endpoint answering 403 to
+        # everybody. The same statement without the semicolon failed
+        # correctly, so one character decided it.
+        SQL.write_text(
+            SQL.read_text(encoding="utf-8")
+            + "\n-- planted by api-spec-check-selftest.py\n"
+              "DELETE FROM `tblSettings`\n"
+              "-- these are gone; nothing reads them any more\n"
+              "WHERE `settingKey` IN ( 'api.events.create.enabled' );\n",
+            encoding="utf-8")
+    out.append(Plant("a DELETE whose own comment contains a semicolon", "G",
+                     g_semicolon_in_a_comment))
+
+    def g_seed_commented_out() -> None:
+        # A live seed commented out must read as ABSENT. Before comments were
+        # stripped, the key was still matched inside the comment and counted.
+        line = "    (NULL, 'api.events.create.enabled',        'true', 'true', 0),"
+        replace_once(SQL, line, "--" + line[2:])
+    out.append(Plant("a live switch seed commented out", "G", g_seed_commented_out))
+
+    def gi_route_only_in_a_comment() -> None:
+        # The route row is renamed away AND its old target is left quoted in a
+        # comment, which is exactly how somebody would record the change.
+        # Before comments were stripped, that comment was read as a live route
+        # and check G stopped guarding a handler that had become unreachable.
+        statement = "VALUES ('expenses/api/export', 'expenses/api/export.php', 1)"
+        replace_once(SQL, statement, "VALUES ('expenses/api/zzgone', 'expenses/api/zzgone.php', 1)")
+        SQL.write_text(
+            SQL.read_text(encoding="utf-8")
+            + "\n-- planted: the download used to be routed as 'expenses/api/export.php'.\n",
+            encoding="utf-8")
+    out.append(Plant("a removed route whose target survives in a comment", "GI",
+                     gi_route_only_in_a_comment))
     def h_orphan_seed() -> None:
         # ADDS a row. An earlier version renamed venues/check's switch, which
         # took the switch away from a real handler and tripped G too.

@@ -24,6 +24,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\ExpenseRules;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -117,10 +118,24 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- ✔️ Pending Expense Approvals -->
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-check-double me-2"></i>Pending Expense Approvals</h1>
-    <a href="<?php echo htmlspecialchars(Router::url('expenses/api/export'), ENT_QUOTES, 'UTF-8'); ?>?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
-       class="btn btn-outline-success" title="Export all claims CSV">
-        <i class="fa-solid fa-file-csv me-1"></i> Export
-    </a>
+    <?php
+    // 📤 The Export button, only for somebody the download will actually serve
+    //    (#675). This used to be drawn for every visitor of this page, and
+    //    this page is open to anybody signed in — it just shows an empty list
+    //    to somebody with nothing to decide. So a department approver, a
+    //    department lead, a treasurer or an ordinary member saw the button and
+    //    pressing it gave them a bare "Forbidden" with no way back.
+    //
+    //    ExpenseRules::mayExportClaims() is the ONE place that decides, and
+    //    `expenses/api/export.php` asks the same question. Never test the
+    //    role here instead: two copies is how this broke.
+    if (ExpenseRules::mayExportClaims() === true):
+    ?>
+        <a href="<?php echo htmlspecialchars(Router::url('expenses/api/export'), ENT_QUOTES, 'UTF-8'); ?>?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
+           class="btn btn-outline-success" title="Export all claims CSV">
+            <i class="fa-solid fa-file-csv me-1"></i> Export
+        </a>
+    <?php endif; ?>
 </div>
 
 <!-- #545: said whether or not the list is empty, so somebody looking for a

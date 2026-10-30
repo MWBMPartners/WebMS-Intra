@@ -10829,3 +10829,159 @@ is how it recognises one; and a literal status inside an `INSERT`'s `VALUES`
 list. That last was checked rather than assumed — all four
 `INSERT INTO tblEvents` statements name `status` in their column list and bind
 it with `?`, so the shape does not occur today.
+
+## An install script that both seeds and deletes cannot be read with one regex (#675)
+
+**30 October 2026.** `check_api_spec_matches_code.py` decided which API endpoint
+switches a fresh install holds with a single `re.findall` over
+`web/_sql/full_schema.sql`:
+
+```python
+set(re.findall(r"'api\.([a-z0-9\-]+)\.([a-z0-9\-]+)\.enabled'", text))
+```
+
+That file does not only seed. It **folds old migrations in**, deletions
+included. Migration 186 removes four `api.expenses.*` switches for handlers that
+are not in this repository, and the fold-in puts that `DELETE` *after* every one
+of their `INSERT`s. A key written inside the `DELETE` matched the regex exactly
+as a key inside an `INSERT` does, so the check counted four rows as seeded that
+no installation has held since migration 186.
+
+**Read this out of a loaded database, not out of the SQL.** The same lesson as
+the generated-column one below. Loading `full_schema.sql` into MySQL 8.0.36 and
+asking gives three rows — `api.expenses.create.enabled`,
+`api.expenses.delete.enabled`, `api.expenses.list.enabled` — and nothing else
+beginning `api.expenses.`. Reading the file gives seven.
+
+**Crying wolf was the harmless direction. The dangerous one is the opposite.**
+The check also asks whether every handler on disk HAS a seeded switch, because
+without one `ApiRouter` answers 403 to everybody. A handler whose switch is
+seeded and then deleted is exactly that case — genuinely unreachable — and the
+old reading called it seeded and passed. Measured rather than argued: append
+
+```sql
+DELETE FROM `tblSettings` WHERE `settingKey` IN ('api.events.create.enabled');
+```
+
+to the install script and the old regex still answers `('events', 'create') in
+seeded == True`, for an endpoint that now answers 403 to every caller. That
+plant is committed as part of `tools/api-spec-check-selftest.py`.
+
+The fix is to apply the two statement kinds **in file order**: a key in an
+`INSERT` adds, a key inside a `DELETE` span removes, and a later seed brings a
+row back. Nothing there understands SQL and it does not need to — the keys are
+plain quoted literals and the only question is which statement each sits inside.
+What it still cannot see is written in the function: a `DELETE` matching by
+`LIKE`, by a subquery or by anything other than the key in full; a row written by
+application code; and an `UPDATE` changing a value, which is correct to ignore
+because an administrator may switch any endpoint off.
+
+**The same shape applies to routes**, and for the same reason: `full_schema.sql`
+removes `tblRoutes` rows as well as adding them, so `page_routed_handlers()`
+honours deletions identically.
+
+## A file in an `api` folder is not necessarily an API endpoint (#675)
+
+Found in the same package, and it is the part most likely to catch somebody out
+again. `web/_apps/expenses/api/export.php` is in an `api` folder, so every
+reasonable assumption is that `ApiRouter` serves it at `api/expenses/export`. It
+does not — or rather, it would, but that address answers 403 because
+`api.expenses.export.enabled` is deliberately not seeded.
+
+The file is reached through the **ordinary page router**. `tblRoutes` holds
+
+```
+expenses/api/export  ->  expenses/api/export.php
+```
+
+and `Router::dispatch()` resolves a target under `PORTAL_APPS` first, so the
+address `expenses/api/export` loads that same file. **At that address neither of
+ApiRouter's two gates applies**: not the per-endpoint `api.{app}.{action}.enabled`
+row, and not the app's own API-folder switch from `AppRegistry::API_FOLDER_APPS`.
+Two fewer gates than the folder name implies, on a file whose own header comment
+still calls it an "endpoint".
+
+Three consequences worth keeping:
+
+* **A check that walks `_apps/*/api/*.php` and assumes ApiRouter is wrong.** That
+  is what made #675 report a live, working CSV download as a dead handler.
+* **An audit of "who can reach what" must read `tblRoutes` too**, not just the
+  switch table. There is exactly one such file today; `check_api_spec_matches_code.py`
+  check I names it and fails both ways, so a second one has to be a decision.
+* **Searching for the wrong address finds nothing, and nothing reads like
+  nothing-to-fix.** #675 said "nothing links to it" on the strength of
+  `grep -rn "expenses/export" web/`. The link says `expenses/api/export`. This is
+  the same shape as the `tblActivityLog`/`tblActivityLogs` miss recorded above:
+  check a name against the thing that actually uses it.
+
+## A harness that fetches a fresh token cannot test a token being spent (#675, #634)
+
+Small, and it invalidated a check I had just written. The point of
+`Auth::verifyCsrfWithoutSpending()` in the Expenses export is that the approvals
+page's approve/reject form is built from the same token, and `verifyCsrf()`
+**replaces** a token whenever it accepts one — so downloading the list used to
+stop the next approval from working.
+
+The obvious test is: download, then approve. Written with the harness's own
+`post()` helper it **passes on the broken code**, because `post()` reads a fresh
+token off the page before submitting — a reasonable thing for a harness to do
+and completely wrong here. Measured by planting the spending call back: the
+`post()` version stayed green.
+
+The real sequence is **one page load, one token, two uses of it**: the person
+opens the approvals page, presses Export, then presses Approve on the form that
+page had already drawn. The check now captures the token once and posts it
+directly, and planting the regression turns both of its halves red.
+
+## My fix for that regex was wrong in the same silent direction, and one character decided it (#675)
+
+Worth its own note, because the lesson is not "parse SQL properly" — it is that
+**a docstring claiming a limitation is harmless is the thing to check hardest.**
+
+The rewritten `seeded_switches()` applied seeds and deletions in file order, and
+found the end of each `DELETE` statement with `text.find(";", …)`. Its docstring
+said:
+
+> "A DELETE carrying one inside a literal would end the span early, and the keys
+> after it would read as seeds — **the over-reporting direction, not the silent
+> one**."
+
+That sentence is false, and the independent check found it. Keys read as seeds go
+into the "present" set, so a handler that exists on disk stops being reported as
+unseeded — which is check G passing on an endpoint that answers 403 to every
+caller. The *exact* fault the rewrite existed to catch.
+
+It does not even need a string literal. A `--` comment is enough, and comments
+like this are this file's own style throughout. **These two statements differ by
+one character**, and the first passed while the second correctly failed:
+
+```sql
+DELETE FROM `tblSettings`
+-- these are gone; nothing reads them any more
+WHERE `settingKey` IN ('api.events.create.enabled');
+
+DELETE FROM `tblSettings`
+-- these are gone and nothing reads them any more
+WHERE `settingKey` IN ('api.events.create.enabled');
+```
+
+`read_install_script()` now scans the file once, tracking whether each character
+is in code, a quoted literal, a quoted identifier or a comment. Comments are
+blanked to spaces of the same length so every offset still lines up, and only a
+semicolon found in *code* ends a statement.
+
+Three things that fell out of doing it properly:
+
+* **A key quoted inside a comment is no longer read as live**, which fixed a
+  second finding of the same check: removing the `expenses/api/export` route row
+  while leaving `-- used to be routed as 'expenses/api/export.php'` behind made
+  the check go green on a handler that had genuinely become unreachable. Writing
+  that comment is the natural thing to do when removing a route.
+* **`#` starts a comment in MySQL, but not inside a literal.** The install script
+  seeds colours such as `'#0f766e'`; a scanner that did not know this would blank
+  the rest of those lines and lose whatever followed.
+* **`--` only starts a comment when followed by whitespace or end of input.** The
+  file is full of `-----` rules inside comments, and `a--b` is not a comment.
+
+Both faults are now committed plants in `tools/api-spec-check-selftest.py`, which
+is why they are safe to forget.

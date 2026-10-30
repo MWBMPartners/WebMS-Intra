@@ -7811,6 +7811,51 @@
         }
       }
     },
+    "/expenses/api/export": {
+      "get": {
+        "tags": [
+          "Expenses"
+        ],
+        "summary": "Download every expense claim as a spreadsheet (browser download, not a REST endpoint)",
+        "description": "Hands back a CSV file of every expense claim in the organisation you are signed in to: claim number, claimant, department, title, date, amount and status.\n\n**This is not part of the REST API, and a bearer token cannot call it.** It is the address behind the Export button on the approvals page, and it is described here only so that nobody has to discover it by reading the code. Three things follow from that, and each will surprise somebody who assumes otherwise from the `api` in the address:\n\n* It needs a **signed-in session**, and it reads the anti-forgery token from the query string (`?csrf_token=...`) rather than a header, because a download is a plain link the browser follows. Sent without a valid token it sets a message and sends you back to the approvals page; it does not answer with JSON.\n* It answers with a **file**, not the portal's usual JSON envelope. There is no `status`, `data` or `meta` to read.\n* Despite living in an `api` folder it is reached through the ordinary page router, so **neither the `api.expenses.export.enabled` switch nor the Expenses app's API switch applies to it**. `api.expenses.export.enabled` is deliberately not seeded on any installation, which means the `/api/expenses/export` address answers 403 and only the address documented here works.\n\nWho may use it: an administrator of the organisation, a global administrator, or somebody holding the `approver` role (seeded as \"Expense Approver\"). The `isApprover` flag that lets somebody decide **one department's** claims is a different thing and is not enough, because this file covers every department. Anyone else gets 403.\n\n**Legacy alias:** none.\n\n**Only GET is described, but the handler does not check the method**: it asks for no particular verb, so a POST to the same address with a valid token also returns the file. That is stated rather than relied upon — treat GET as the supported way in.",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "csrf_token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The anti-forgery token for your session. It is read from the query string because the browser follows this as a link. **It is checked without being spent** (#634): the approvals page's approve and reject form is built from the same token, and an earlier version replaced the token on every successful check, so downloading the list stopped the next approval from working and approving first broke the download link. A download cannot be handed a replacement token, because the answer is the file itself."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The spreadsheet. `Content-Type: text/csv; charset=utf-8`, sent as an attachment named `expenses-export-<date>.csv`. The first row is the column headings and begins with a byte-order mark so that spreadsheet programs open it as UTF-8. Amounts are in **pounds**, matching the rest of Expenses and unlike the asset figures, which are in pence. An organisation with no claims yet gets the heading row and nothing after it — not an empty file. (Until 30 October 2026 it got three bytes, the byte-order mark alone, because the headings were derived from the first row and there was no first row.)",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string",
+                  "description": "The file's text. Columns, in order: claimID, Claimant, Department, Title, Date, Amount, Status — that order is sent explicitly by the handler, so it does not change if the query behind it is reordered. **A claim always belongs to a department** (`tblExpenseClaims.deptID` cannot be empty and is tied to `tblDepts`), so the Department column is blank only where the department itself has no name recorded."
+                }
+              }
+            }
+          },
+          "302": {
+            "description": "Either the anti-forgery token was missing or no longer valid — in which case you are sent back to the approvals page, which shows the reason — or you are not signed in at all, in which case the sign-in page is where you are sent. No file is sent. A signed-in person who is not a member of the organisation is refused earlier still, by the membership gate, and gets a 403 whose wording is about membership rather than about the `approver` role."
+          },
+          "403": {
+            "description": "You are signed in but may not download this: you are neither an administrator nor a holder of the `approver` role. The body is the single word `Forbidden` — no JSON envelope, no portal page. It is sent with PHP's default `text/html` content type rather than `text/plain`, so do not rely on the type to tell a refusal from a file; check the status code."
+          }
+        }
+      }
+    },
     "/api/v1/leadership": {
       "get": {
         "tags": [

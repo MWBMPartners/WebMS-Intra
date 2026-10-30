@@ -35,11 +35,21 @@
  * with authority over the department is enough, which is what the approval
  * handler has always done for a department with no required approvers.
  *
+ * ONE METHOD HERE IS DIFFERENT, so that nobody has to discover it: every
+ * other method takes facts or a `mysqli` and answers from them alone, but
+ * `mayExportClaims()` reads the session and the open organisation through
+ * `App::`. That is on purpose — it answers a question about the person being
+ * served right now, and passing that in would invite a caller to supply a
+ * stale answer. It is here, rather than in the page or the handler, because
+ * BOTH of them have to ask it and they must never be able to disagree (#675).
+ *
  * WHAT THIS CLASS CANNOT DO
  * -------------------------
  * - It does not decide who has authority to approve or pay at all. That
  *   stays with the handlers (an administrator, the Expense Approver role
  *   with a department flag, a department flag alone; the Treasurer role).
+ *   `mayExportClaims()` is not an exception: downloading the list is neither
+ *   approving nor paying.
  * - It compares account numbers. One person with two accounts is two
  *   people as far as this rule can tell.
  * - It does not look at claims already approved or paid before #545. A
@@ -436,5 +446,72 @@ final class ExpenseRules
         }
 
         return [];
+    }
+
+    // 📤 ─────────────────────────────────────────────────────────────────────
+    //    WHO MAY DOWNLOAD THE CLAIMS SPREADSHEET (#675)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * The role key that may download the claims spreadsheet, alongside an
+     * administrator.
+     *
+     * It is `approver` — the standard role seeded as "Expense Approver" — and
+     * NOT the `isApprover` flag on `tblUserDepts`, which is a different thing
+     * with a confusingly similar name. A person can hold either without the
+     * other, and the two answer different questions:
+     *
+     *   * `tblUserDepts.isApprover` — may decide the claims OF ONE DEPARTMENT.
+     *   * the `approver` role        — trusted with the organisation's claims
+     *                                  as a whole.
+     *
+     * The download is the whole organisation's claims in one file, with every
+     * claimant's name, so it is the second of those. Widening it to department
+     * approvers would hand somebody every department's figures when the page
+     * they came from shows them only their own; that is a deliberate decision
+     * left open as its own question, not an oversight here.
+     */
+    public const EXPORT_ROLE = 'approver';
+
+    /**
+     * 📤 May the person signed in right now download the claims spreadsheet?
+     *
+     * THE ONE PLACE THAT DECIDES THIS. Both the button and the handler ask it,
+     * which is the whole point of its existing.
+     *
+     * WHAT WAS WRONG BEFORE (#675, measured over real HTTP on 30 October 2026)
+     * -----------------------------------------------------------------------
+     * The rule lived only in `expenses/api/export.php`, and the Export button
+     * on `expenses/approve` was drawn UNCONDITIONALLY. That page has no gate
+     * beyond being signed in — it simply shows an empty list to somebody with
+     * nothing to decide — so every signed-in member saw the button. Pressing
+     * it gave a bare, unstyled `Forbidden`: no portal page, no message, no way
+     * back. Measured on six kinds of account, four of them were refused that
+     * way, and they included the department leads and department approvers the
+     * approvals page exists to serve.
+     *
+     * Note what this does NOT change: who may download. The rule is exactly
+     * the one the handler already applied. All that is new is that the button
+     * is no longer offered to people it refuses, and that there is one rule
+     * instead of two copies of it.
+     *
+     * It takes no arguments on purpose. `App::isAdmin()` and `App::hasRole()`
+     * both read the session and the open organisation, so the answer belongs
+     * to the request being served; passing either in would invite a caller to
+     * supply a stale one.
+     *
+     * A global administrator is admitted by `App::hasRole()` itself, which
+     * returns true for every role when `isRootAdmin` is set — so there is no
+     * separate test for one here, and adding one would be a second rule.
+     *
+     * @return bool True when this person may download the spreadsheet.
+     */
+    public static function mayExportClaims(): bool
+    {
+        if (App::isAdmin() === true) {
+            return true;
+        }
+
+        return App::hasRole(self::EXPORT_ROLE);
     }
 }

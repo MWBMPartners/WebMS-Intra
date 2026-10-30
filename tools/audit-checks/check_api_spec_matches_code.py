@@ -35,8 +35,13 @@ D  The `api/v1/` resources in the description and in `ApiRouter` are the same
    set, both ways round.
 E  No documented path has a shape `ApiRouter` cannot answer.
 F  No handler file sits where the router can never reach it.
-G  Every handler on disk has its `api.{app}.{action}.enabled` row seeded.
+G  Every handler on disk has its `api.{app}.{action}.enabled` row seeded --
+   unless check I accounts for it.
 H  Every seeded `api.*.enabled` row has a handler file.
+I  Every handler in an `api` folder that is reached as an ORDINARY PAGE ROUTE
+   instead, through `tblRoutes`, is named and explained. Such a file answers
+   requests with neither of ApiRouter's two gates in front of it, so it is the
+   one position where the folder name misleads a reader.
 
 Note G is about ONE of two gates. `ApiRouter::dispatch()` asks the app's own
 switch first, through `AppRegistry::API_FOLDER_APPS`, and a folder with no line
@@ -44,7 +49,7 @@ there is refused for everybody; `tools/app-switch-selftest.php` is what covers
 that list. So a seeded switch is necessary for an address to work, not
 sufficient.
 
-G and H are about whether an address works at all, not about the description,
+G, H and I are about whether an address works at all, not about the description,
 and they are here because this is the one check that already holds the handler
 list and the seed list side by side. Without the seed `ApiRouter` answers 403
 to everybody, so a handler with no row is unreachable however well documented,
@@ -145,7 +150,22 @@ NAME = re.compile(r"^[a-z0-9\-]+$")
 
 # 🩺 Paths in the description that are not `api/` addresses and so have no
 #    handler to find. `/health` is answered by the router itself.
-NOT_API_PATHS = {"/health"}
+# 📄 Addresses the description carries that ApiRouter does not serve, so the
+#    handler comparison must skip them. Each is here for a different reason and
+#    neither is a loophole:
+#
+#      /health              — the router answers it itself.
+#      /expenses/api/export — an ordinary page route (#675). It is in an `api`
+#                             folder and it is NOT an API endpoint; check I is
+#                             what proves the route and the file behind it still
+#                             exist, and `api-spec.schema.json` spells the
+#                             address out in full so a misspelling cannot slip
+#                             past the skip.
+#
+#    Skipping means checks A to E say nothing about these two, which is why the
+#    cover has to come from somewhere else. Do not add a path here without
+#    saying, as above, what then guards it.
+NOT_API_PATHS = {"/health", "/expenses/api/export"}
 
 # 📂 Files in an `api` folder the router can never reach, each with the reason
 #    it is still here. An UNLISTED one fails, and so does a listed one that has
@@ -167,16 +187,52 @@ UNREACHABLE_ON_PURPOSE = {
 # 🔌 Handlers with no `api.{app}.{action}.enabled` row, so ApiRouter answers
 #    403 to everybody. Same rule as above: unlisted fails, and so does a listed
 #    one that has been seeded or deleted.
-UNSEEDED_ON_PURPOSE = {
-    "expenses/export": "#675 — never seeded and nothing links to it, so it has never answered a request.",
-}
+#    EMPTY since 30 October 2026 (#675). It used to name `expenses/export`,
+#    on the strength of a claim that turned out to be wrong in both halves:
+#    the handler is reached through `tblRoutes` as an ordinary page route
+#    (`expenses/api/export`), where no `api.*.enabled` row applies, and it
+#    answers a real CSV today. Check I is what now accounts for it. Nothing
+#    may be added here without measuring the endpoint first.
+UNSEEDED_ON_PURPOSE: dict[str, str] = {}
 
 # 🪧 Seeded switches with no handler file: a switch for nothing.
-ORPHAN_SEEDS_ON_PURPOSE = {
-    "expenses/attachments": "#675 — a row for a handler that is not in the repository.",
-    "expenses/stats": "#675 — a row for a handler that is not in the repository.",
-    "expenses/update": "#675 — a row for a handler that is not in the repository.",
-    "expenses/update-status": "#675 — a row for a handler that is not in the repository.",
+#
+#    ALSO EMPTY since 30 October 2026 (#675), and the reason is the lesson of
+#    this whole package. It used to name four `api.expenses.*` rows as seeded
+#    with no handler. They are NOT seeded: migration 186 deletes all four, and
+#    `full_schema.sql` folds that DELETE in AFTER every one of their INSERTs.
+#    Measured on a real MySQL 8.0.36 loaded from the install script, a fresh
+#    database holds exactly three `api.expenses.*` rows -- create, delete,
+#    list. The four were an artefact of seeded_switches() reading the file with
+#    a plain regex, which matched the names INSIDE the DELETE statement and
+#    counted each as a seed. See that function for the fix and for the
+#    dangerous direction of the same blindness.
+ORPHAN_SEEDS_ON_PURPOSE: dict[str, str] = {}
+
+# 🛣️ Handler files in an `api` folder that are reached as ORDINARY PAGE ROUTES
+#    through `tblRoutes`, not through ApiRouter.
+#
+#    This category exists because the check used to assume that a file at
+#    `_apps/{app}/api/{action}.php` could only ever be an ApiRouter endpoint.
+#    `Router::dispatch()` looks up `PORTAL_APPS` first, so a `tblRoutes` row
+#    whose `targetFile` is `{app}/api/{action}.php` reaches exactly the same
+#    file at a completely different address -- and at that address NEITHER the
+#    `api.{app}.{action}.enabled` row NOR the app's own API-folder switch is
+#    consulted. So such a file is reachable while check G says it is dead.
+#
+#    They are listed rather than waved through BECAUSE of that difference: a
+#    page-routed handler in an `api` folder has two fewer gates in front of it
+#    than its position suggests, and anybody reading the folder name will
+#    assume otherwise. A new one should be a deliberate decision, not a
+#    discovery.
+PAGE_ROUTED_ON_PURPOSE = {
+    "expenses/export": "#675 — the Expenses CSV download. Route `expenses/api/export` "
+                       "→ `expenses/api/export.php`, with a live button on "
+                       "`expenses/approve`. It gates itself on App::isAdmin() or the "
+                       "`approver` role and scopes its query to Site::id(); it is a "
+                       "browser download, not part of the REST API, which is why "
+                       "`api.expenses.export.enabled` is deliberately NOT seeded "
+                       "(owner, 30 October 2026).",
 }
 
 VERBS = ("get", "post", "put", "patch", "delete")
@@ -301,10 +357,252 @@ def handlers_on_disk() -> tuple[set[tuple[str, str]], list[str], list[str]]:
     return reachable, helpers, unreachable
 
 
-def seeded_switches() -> set[tuple[str, str]]:
-    """Every (app, action) whose `api.*.enabled` row the install script seeds."""
+def read_install_script() -> tuple[str, list[int]]:
+    """
+    The install script, with every COMMENT blanked out, and the offsets of the
+    semicolons that really end a statement.
+
+    WHY THIS EXISTS — a fault the independent check found on 30 October 2026,
+    in the very function that was written to close this shape of hole (#675).
+
+    The first version of seeded_switches() ended a `DELETE` statement at the
+    next `;` found by `str.find`. Its docstring claimed that a semicolon
+    appearing inside the statement would make the check OVER-report, "the
+    over-reporting direction, not the silent one". **That was wrong**, and it
+    does not even need a string literal — a `--` comment is enough, which is
+    this file's own style throughout. These two differ by one character:
+
+        DELETE FROM `tblSettings`
+        -- these are gone; nothing reads them any more
+        WHERE `settingKey` IN ('api.events.create.enabled');
+
+        DELETE FROM `tblSettings`
+        -- these are gone and nothing reads them any more
+        WHERE `settingKey` IN ('api.events.create.enabled');
+
+    The second correctly fails check G. The FIRST passes: the semicolon in
+    "gone;" ends the span early, so the key sits outside it and is read as a
+    SEED. `web/_apps/events/api/create.php` is on disk, so the check then
+    reports a healthy endpoint that in fact answers 403 to every caller. That
+    is the silent direction, on the exact fault the rewrite exists to catch.
+    Measured both ways before this was written.
+
+    So the text is scanned ONCE, character by character, tracking whether we
+    are in code, a quoted literal, a quoted identifier or a comment:
+
+      * every comment's characters become spaces, same length, so offsets
+        found in the result still point at the right place in the original.
+        **Anything quoted inside a comment therefore disappears**, which fixes
+        a second finding from the same check: a commented-out route literal
+        used to be read as a live route, which made check G stop guarding a
+        handler that had really become unreachable.
+      * a `;` is recorded as ending a statement only when it is in CODE.
+
+    MySQL's own rules, because guessing them would defeat the point:
+      * `--` starts a comment only when followed by whitespace or the end of
+        the input. `a--b` is not a comment, and the file contains `-----` rules
+        inside comments that must not be mistaken for anything else.
+      * `#` starts a comment anywhere in code. It must NOT when quoted: the
+        install script seeds colours such as `'#0f766e'`, and treating that as
+        a comment would blank the rest of the line.
+      * inside a `'...'` literal, `''` is one quote and `\\` escapes the next
+        character. Both appear in this file.
+
+    @return (masked text, sorted offsets of the statement-ending semicolons)
+    """
     text = SCHEMA_SQL.read_text(encoding="utf-8", errors="replace")
-    return set(re.findall(r"'api\.([a-z0-9\-]+)\.([a-z0-9\-]+)\.enabled'", text))
+    out: list[str] = []
+    ends: list[int] = []
+    i, size = 0, len(text)
+    while i < size:
+        ch = text[i]
+
+        # --- a comment: blank it, keeping the length -----------------------
+        if ch == "-" and text.startswith("--", i) and (i + 2 >= size or text[i + 2] in " \t\r\n"):
+            stop = text.find("\n", i)
+            stop = size if stop == -1 else stop
+            out.append(" " * (stop - i))
+            i = stop
+            continue
+        if ch == "#":
+            stop = text.find("\n", i)
+            stop = size if stop == -1 else stop
+            out.append(" " * (stop - i))
+            i = stop
+            continue
+        if text.startswith("/*", i):
+            stop = text.find("*/", i + 2)
+            stop = size if stop == -1 else stop + 2
+            # Newlines are kept so line numbers in any later message still add up.
+            out.append("".join("\n" if c == "\n" else " " for c in text[i:stop]))
+            i = stop
+            continue
+
+        # --- a quoted literal or identifier: kept, but nothing inside it
+        #     counts as code -----------------------------------------------
+        if ch in ("'", '"', "`"):
+            out.append(ch)
+            i += 1
+            while i < size:
+                if text[i] == "\\" and ch != "`":
+                    out.append(text[i:i + 2])
+                    i += 2
+                    continue
+                if text[i] == ch:
+                    # A doubled quote is one character of the value.
+                    if i + 1 < size and text[i + 1] == ch:
+                        out.append(text[i:i + 2])
+                        i += 2
+                        continue
+                    out.append(ch)
+                    i += 1
+                    break
+                out.append(text[i])
+                i += 1
+            continue
+
+        # --- ordinary code -------------------------------------------------
+        if ch == ";":
+            ends.append(i)
+        out.append(ch)
+        i += 1
+
+    masked = "".join(out)
+    # The mask must not move anything, or every offset below is wrong.
+    assert len(masked) == size, "the masked install script changed length"
+
+    return masked, ends
+
+
+def statement_spans(masked: str, ends: list[int], what: str) -> list[tuple[int, int]]:
+    """
+    Where each `DELETE FROM <table>` statement begins and ends in the masked
+    text. The end is the first STATEMENT-ENDING semicolon after it -- not
+    merely the next `;` character, which is the whole point of the scanner
+    above.
+    """
+    spans: list[tuple[int, int]] = []
+    for match in re.finditer(r"DELETE\s+FROM\s+`?%s`?" % what, masked, re.IGNORECASE):
+        after = [e for e in ends if e > match.start()]
+        spans.append((match.start(), after[0] if after else len(masked)))
+
+    return spans
+
+
+def seeded_switches() -> set[tuple[str, str]]:
+    """
+    Every (app, action) whose `api.*.enabled` row a FRESH INSTALL really ends
+    up holding.
+
+    WHY THIS IS NOT ONE REGEX, THOUGH IT USED TO BE
+    -----------------------------------------------
+    It was `set(re.findall(...))` over the whole file. That is wrong in a way
+    that is invisible from either side, because `full_schema.sql` both SEEDS
+    and DELETES settings -- it folds old migrations in, and migration 186
+    deletes four `api.expenses.*` rows that earlier blocks of the same file
+    insert. A name inside that DELETE matched the regex exactly as a name
+    inside an INSERT does, so the check counted four rows as seeded that no
+    installation has held since migration 186. Measured, not reasoned: a real
+    MySQL 8.0.36 loaded from this file holds `api.expenses.create.enabled`,
+    `api.expenses.delete.enabled` and `api.expenses.list.enabled`, and nothing
+    else beginning `api.expenses.`.
+
+    Crying wolf was the harmless direction. **The dangerous one is check G.**
+    A handler whose switch is seeded and then deleted is unreachable -- 403 to
+    everybody -- and the old reading called it seeded, so G passed on it. That
+    is the shape this function now exists to catch.
+
+    So the two statement kinds are applied IN FILE ORDER: a name in an INSERT
+    adds, a name in a DELETE removes, and a later seed brings a deleted row
+    back. Nothing here understands SQL; it does not need to. The keys are
+    plain quoted literals and the only question is which statement each one
+    sits inside.
+
+    WHAT IT STILL CANNOT SEE, stated plainly because an overstated guarantee
+    is worse than none:
+
+      * a DELETE that matches by `LIKE 'api.%'`, by a subquery, or by anything
+        other than the key written out in full. There is no such statement in
+        `full_schema.sql` today (checked: the three DELETEs from `tblSettings`
+        name their keys literally), but one added later would be invisible
+        here and this function would over-report.
+      * a row inserted or removed by application code rather than by the
+        install script.
+      * an `UPDATE` that changes a row's VALUE. This function answers "is the
+        row there", never "is it set to true" -- which is correct for its one
+        caller, since an administrator may switch any endpoint off.
+      * a statement built by `PREPARE`/`EXECUTE` from a string, as the portable
+        DDL idiom does. The key would be inside a literal and read as a seed.
+
+    What it CAN now see, which the first version could not: a semicolon inside
+    a comment or a literal, and a key quoted inside a comment. See
+    read_install_script() for the fault that taught us both.
+    """
+    masked, ends = read_install_script()
+    spans = statement_spans(masked, ends, "tblSettings")
+
+    def inside_a_delete(at: int) -> bool:
+        return any(start <= at <= stop for start, stop in spans)
+
+    present: set[tuple[str, str]] = set()
+    for key in re.finditer(r"'api\.([a-z0-9\-]+)\.([a-z0-9\-]+)\.enabled'", masked):
+        pair = (key.group(1), key.group(2))
+        if inside_a_delete(key.start()) is True:
+            present.discard(pair)
+        else:
+            present.add(pair)
+
+    return present
+
+
+def page_routed_handlers() -> set[tuple[str, str]]:
+    """
+    Every (app, action) whose handler file a `tblRoutes` row reaches as an
+    ordinary page, so no `api.*.enabled` switch applies to it.
+
+    `Router::dispatch()` resolves a route's `targetFile` under `PORTAL_APPS`
+    first, so a row like
+
+        ('expenses/api/export', 'expenses/api/export.php', 1)
+
+    loads `web/_apps/expenses/api/export.php` at the address
+    `expenses/api/export` -- the SAME file ApiRouter would serve at
+    `api/expenses/export`, with none of ApiRouter's gates in front of it.
+
+    Only the `targetFile` is read, because that is what decides which file
+    runs. The route KEY is not required to match any pattern: the portal
+    happens to name this one after the file, but a row could point any address
+    at the same handler and the consequence for check G would be identical.
+
+    Deletions are honoured the same way and for the same reason as in
+    seeded_switches(): `full_schema.sql` removes routes as well as adding them.
+
+    WHAT IT CANNOT SEE, and one of these was a real finding of the independent
+    check on 30 October 2026:
+
+      * it reads the TARGET, so a route whose target is built by concatenation
+        or supplied through `PREPARE` is invisible.
+      * it used to read a target quoted inside a COMMENT as a live route, so
+        leaving `-- the download used to be routed as 'expenses/api/export.php'`
+        behind while removing the real row made the check go green on a handler
+        that had become unreachable. Comments are now blanked before anything
+        is read -- see read_install_script().
+      * a route added by application code rather than by the install script.
+    """
+    masked, ends = read_install_script()
+    spans = statement_spans(masked, ends, "tblRoutes")
+
+    present: set[tuple[str, str]] = set()
+    # A quoted `{app}/api/{action}.php`, wherever it appears. In an INSERT that
+    # is a route's target; inside a DELETE span it is a route being removed.
+    for hit in re.finditer(r"'([a-z0-9\-]+)/api/([a-z0-9\-]+)\.php'", masked):
+        pair = (hit.group(1), hit.group(2))
+        if any(start <= hit.start() <= stop for start, stop in spans) is True:
+            present.discard(pair)
+        else:
+            present.add(pair)
+
+    return present
 
 
 class Described:
@@ -417,6 +715,9 @@ def main() -> int:
         return 1
 
     switches = seeded_switches()
+    # 🛣️ Handlers reached as ordinary pages instead. Check G must not call
+    #    these dead, because they are not: see page_routed_handlers().
+    paged = page_routed_handlers() & reachable
     live = reachable & switches                      # file on disk AND switch seeded
     described = set(spoken.targets) | set(spoken.aliases)
 
@@ -435,8 +736,12 @@ def main() -> int:
         print("\ndocumented with no handler file:")
         for app, action in sorted(described - reachable):
             print("      api/%s/%s" % (app, action))
-        print("\nhandlers with no seeded switch:")
-        for app, action in sorted(reachable - switches):
+        print("\nreached as an ordinary page route, not through ApiRouter: %d"
+              % len(paged))
+        for app, action in sorted(paged):
+            print("      %s/api/%s  (no api.*.enabled gate applies)" % (app, action))
+        print("\nhandlers with no seeded switch and no page route:")
+        for app, action in sorted(reachable - switches - paged):
             print("      api/%s/%s" % (app, action))
         print("\nseeded switches with no handler:")
         for app, action in sorted(switches - reachable):
@@ -510,7 +815,7 @@ def main() -> int:
         "refuses -- and one nested deeper is not looked for at all. Either way they "
         "answer nothing. Move each to the reachable position, or delete it.")
     problems += named_list_problems(
-        "G", {"%s/%s" % p for p in (reachable - switches)}, UNSEEDED_ON_PURPOSE,
+        "G", {"%s/%s" % p for p in (reachable - switches - paged)}, UNSEEDED_ON_PURPOSE,
         "handler(s) have no `api.{app}.{action}.enabled` row in the install script",
         "ApiRouter answers 403 when that row is absent, so the endpoint is "
         "unreachable however well it is documented. (That row is not the only "
@@ -521,6 +826,14 @@ def main() -> int:
         "seeded `api.*.enabled` row(s) have no handler file",
         "A switch for an endpoint that does not exist. Remove the row in a "
         "migration, or build the handler.")
+    problems += named_list_problems(
+        "I", {"%s/%s" % p for p in paged}, PAGE_ROUTED_ON_PURPOSE,
+        "handler(s) in an `api` folder are reached as ORDINARY PAGE ROUTES",
+        "A `tblRoutes` row points an ordinary address at a file in an `api` "
+        "folder, so Router -- not ApiRouter -- serves it, and NEITHER the "
+        "`api.{app}.{action}.enabled` row NOR the app's own API-folder switch is "
+        "asked. That is two fewer gates than the file's position implies. Name it "
+        "here with what gates it does have, or move it out of the `api` folder.")
 
     if problems:
         print("\n\n".join(problems), file=sys.stderr)

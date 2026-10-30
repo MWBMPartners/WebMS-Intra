@@ -585,6 +585,16 @@ Full claim lifecycle with multi-approver, treasury, PDF, CSV.
 
 - Submit (`/expenses/submit`) — claim with line items, receipt uploads, auto-attached PDF.
 - Approve (`/expenses/approve`) — multi-approver workflow with comments.
+- **Download every claim as a spreadsheet** — an **Export** button on the approvals page hands back a
+  CSV of the organisation's claims (claim number, claimant, department, title, date, amount, status),
+  scoped to the organisation you are signed in to. For an **administrator, a global administrator or a
+  holder of the `approver` role** only; the button is shown to exactly those people and the handler
+  refuses anybody else on its own. The rule is `ExpenseRules::mayExportClaims()`, asked by both.
+  Note the department `isApprover` flag is **not** enough — it means "may decide one department's
+  claims", and this file is every department's figures (widening it, scoped, is #681). Until
+  30 October 2026 the button was drawn for everybody who could open the page and gave most of them a
+  bare "Forbidden" (#675). The address is `expenses/api/export`, an ordinary page route despite the
+  folder; `api/expenses/export` is deliberately shut.
 - Treasury (`/expenses/treasury`) — record reimbursement, payment reference. **A claim cannot be paid
   twice (#647):** the page holds the claim still and looks again before writing, so two treasurers at
   once — or one person clicking Save twice — produce one payment, one status change and one e-mail.

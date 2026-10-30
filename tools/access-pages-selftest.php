@@ -76,6 +76,15 @@
  *      Expenses addresses stay inside the organisation's own address.
  *
  * Roll-out package H1 (12 October 2026, #587) added part M:
+ *  L2. #675 — the Expenses spreadsheet. The Export button on the
+ *      approvals page is offered only to people the download serves, and
+ *      the handler still refuses everybody else on its own; an
+ *      administrator really gets a CSV, of their OWN organisation's claims;
+ *      the download does not spend the approvals form's token (#634); a
+ *      token that is no good lands on a real page rather than a 404; the
+ *      `approver` role opens the button and the file together, which is how
+ *      the two are shown to be reading one rule; and the ApiRouter address
+ *      for the same file stays shut.
  *   M. Withdrawing a claim, through the real page, reading back what is
  *      STORED. The claimant withdraws a pending claim and its status reads
  *      Withdrawn; a second press, and an approved, a paid and a rejected
@@ -242,7 +251,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 298;
+const EXPECTED_CHECKS = 320;
 
 function refuse(string $why): never
 {
@@ -2005,6 +2014,183 @@ ok('recording a payment on A\'s address lands back on A\'s own treasury page', $
 // the person was sent to. It passed for as long as the button had never
 // worked (#587), because being sent back to the claim's page is also what
 // happens when the withdrawal FAILS. Part M replaces it.)
+
+// =============================================================================
+head('L2. #675 — the Expenses spreadsheet: the button is offered only to people it serves');
+// =============================================================================
+/**
+ * WHY THIS PART EXISTS, because the issue that led to it was wrong three times
+ * over and the corrections are the useful part.
+ *
+ * #675 said `expenses/export` was a handler that had "never answered a
+ * request", that "nothing links to it", and that four `api.expenses.*` switches
+ * were seeded with no handler behind them. Measured on 30 October 2026, all
+ * three were false:
+ *
+ *   * it answers 200 with a real CSV;
+ *   * a live Export button on this very page links to it;
+ *   * migration 186 deletes those four switches and the install script folds
+ *     that DELETE in, so no installation has held them for a long time.
+ *
+ * What the measuring DID find was worse than the issue's version, and it is
+ * what this part guards. The button was drawn unconditionally. This page has no
+ * gate beyond being signed in — it simply shows an empty list to somebody with
+ * nothing to decide — so every member saw the button, and the handler then
+ * refused most of them with a bare, unstyled `Forbidden`: no portal page, no
+ * message, no way back. Four of the six kinds of account tested were refused
+ * that way, and they included the department leads and department approvers
+ * this page exists to serve.
+ *
+ * The rule now lives in ONE place, `ExpenseRules::mayExportClaims()`, which the
+ * button and the handler both ask. So the two halves worth checking are: the
+ * button is offered to exactly the people the download serves, and the handler
+ * still refuses everybody else on its own — because a gate that is only a
+ * hidden button is not a gate at all.
+ *
+ * It also pins the two things most likely to be "tidied" into a fault later:
+ * the download must NOT spend the form token (#634), and the ApiRouter address
+ * must stay shut.
+ */
+$exportAddress = ADDR_A . '/expenses/api/export';
+
+/** The approvals page, and the token it is carrying right now. */
+$approvalsNow = static function (string $who) use (&$jar, $approve): array {
+    $page = req($jar[$who], 'GET', $approve);
+
+    return ['html' => $page['body'], 'token' => token($page['body'])];
+};
+
+/** Is the Export button drawn on this copy of the approvals page? */
+$buttonDrawn = static fn (string $html): bool
+    => preg_match('#href="[^"]*/expenses/api/export[^"]*"#i', $html) === 1;
+
+// --- who is offered the button -----------------------------------------------
+// An administrator and a global administrator may export; the four below may
+// not. The handler's rule is "an administrator, or the `approver` ROLE", and
+// none of these four hold that role: APPR has `tblUserDepts.isApprover`, which
+// is a different thing with a confusingly similar name.
+foreach (['adm' => true, 'gadm' => true, 'appr' => false, 'lead' => false, 'trs' => false, 'mem' => false] as $who => $mayExport) {
+    $page = $approvalsNow($who);
+    ok(
+        sprintf('the Export button is %s for "%s"', $mayExport === true ? 'SHOWN' : 'not shown', $who),
+        $buttonDrawn($page['html']) === $mayExport,
+        'button ' . ($buttonDrawn($page['html']) === true ? 'was' : 'was NOT') . ' drawn'
+    );
+}
+
+// --- the handler refuses on its own, button or no button ---------------------
+// This is the half a hidden button cannot provide. Each of the four asks for
+// the address directly, carrying a perfectly good form token.
+foreach (['appr', 'lead', 'trs', 'mem'] as $who) {
+    $page   = $approvalsNow($who);
+    $answer = req($jar[$who], 'GET', $exportAddress . '?csrf_token=' . urlencode($page['token']));
+    ok(
+        sprintf('"%s" asking for the address directly, with a valid token, is still refused 403', $who),
+        $answer['status'] === 403,
+        'HTTP ' . $answer['status']
+    );
+}
+
+// --- what an administrator actually gets ------------------------------------
+$page = $approvalsNow('adm');
+$csv  = req($jar['adm'], 'GET', $exportAddress . '?csrf_token=' . urlencode($page['token']));
+$type = preg_match('/^Content-Type:\s*(.+)$/mi', $csv['head'], $m) === 1 ? strtolower(trim($m[1])) : '';
+ok('an administrator gets HTTP 200 and a CSV file, not a web page', $csv['status'] === 200 && str_contains($type, 'text/csv') === true, 'HTTP ' . $csv['status'] . ' type: ' . ($type === '' ? 'none' : $type));
+ok('…sent as a download, with a dated file name', preg_match('/^Content-Disposition:[^\n]*attachment[^\n]*expenses-export-\d{4}-\d{2}-\d{2}\.csv/mi', $csv['head']) === 1, 'Content-Disposition: ' . (preg_match('/^Content-Disposition:\s*(.+)$/mi', $csv['head'], $d) === 1 ? trim($d[1]) : 'none'));
+// The heading row is checked by name and in order. A reordering is a silent
+// break for anybody whose spreadsheet or script reads it by position.
+$firstLine = trim((string) strtok($csv['body'], "\n"));
+ok('…the heading row names its columns, in order', str_ends_with($firstLine, 'claimID,Claimant,Department,Title,Date,Amount,Status') === true, 'first line: ' . $firstLine);
+ok('…and the organisation\'s own claims are in it', str_contains($csv['body'], 'ACCESS member approved claim') === true);
+
+// --- it is one organisation's claims, not the installation's -----------------
+// A claim of B's, with a title nothing else uses, must not appear in A's file.
+// DEPT_B is not created until part M, so this part makes its own department
+// of B and takes it away again. Using DEPT_B here fails on the link to
+// tblDepts, which is how that was found rather than guessed.
+q("INSERT INTO tblDepts (deptID, siteID, deptName, deptCode, isActive) VALUES (?, ?, 'ACCESS L2 B dept', 'L2B', 1)", 'ii', [916392, ORG_B]);
+q(
+    "INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status) VALUES (?, ?, ?, ?, 'ACCESS L2 B-ONLY CLAIM', CURDATE(), 99.99, 'Pending')",
+    'iiii', [916391, ORG_B, BMEM, 916392]
+);
+$page = $approvalsNow('adm');
+$csv  = req($jar['adm'], 'GET', $exportAddress . '?csrf_token=' . urlencode($page['token']));
+ok('the file holds A\'s claims only: a claim of B\'s is not in it', $csv['status'] === 200 && str_contains($csv['body'], 'ACCESS L2 B-ONLY CLAIM') === false, 'HTTP ' . $csv['status']);
+q('DELETE FROM tblExpenseClaims WHERE claimID = ?', 'i', [916391]);
+q('DELETE FROM tblDepts WHERE deptID = ?', 'i', [916392]);
+
+// --- an organisation with NO claims still gets the heading row --------------
+// Found by the independent check on 30 October 2026, not by me.
+// CsvExporter::download() derives its headings from `array_keys($rows[0])` and
+// writes NONE when there are no rows, so an administrator of a new
+// organisation downloaded three bytes — the byte-order mark alone — while the
+// API description promised a heading row and a column order. The handler now
+// passes the headings explicitly. B has no claims of its own at this point,
+// which is what makes this testable without inventing anything.
+$bExport = req($jar['badm'], 'GET', ADDR_B . '/expenses/api/export?csrf_token=' . urlencode(token(req($jar['badm'], 'GET', ADDR_B . '/expenses/approve')['body'])));
+$bFirst  = trim((string) strtok($bExport['body'], "\n"));
+ok(
+    'an organisation with no claims gets the heading row, not an empty file',
+    $bExport['status'] === 200 && str_ends_with($bFirst, 'claimID,Claimant,Department,Title,Date,Amount,Status') === true && strlen($bExport['body']) > 10,
+    'HTTP ' . $bExport['status'] . ', ' . strlen($bExport['body']) . ' bytes, first line: ' . $bFirst
+);
+
+// --- #634: the download must not spend the form token -----------------------
+// The approve/reject form on this page is built from the same token, and
+// Auth::verifyCsrf() REPLACES a token whenever it accepts one. An earlier
+// version of the handler used it, so downloading the list stopped the next
+// approval from working, and approving first broke the download link. Nothing
+// reported it as a token problem: somebody simply saw a money page fail.
+// A download cannot be handed a replacement token, because the answer is the
+// file itself — which is why verifyCsrfWithoutSpending() exists here.
+$page = $approvalsNow('adm');
+$first = req($jar['adm'], 'GET', $exportAddress . '?csrf_token=' . urlencode($page['token']));
+$again = req($jar['adm'], 'GET', $exportAddress . '?csrf_token=' . urlencode($page['token']));
+ok('#634: the same token downloads the file twice — the download does not spend it', $first['status'] === 200 && $again['status'] === 200, 'first HTTP ' . $first['status'] . ', again HTTP ' . $again['status']);
+// NOT post(), and this is the whole point of the check. post() reads a FRESH
+// token off the page before submitting, which is a reasonable thing for a
+// harness to do and completely wrong here: it hides the fault. Measured by
+// planting it — with the handler put back to the spending Auth::verifyCsrf(),
+// the version of this check that used post() still PASSED, because the
+// approval went in carrying a token fetched after the download had replaced
+// the old one. The real sequence is one page load, one token, two uses of it:
+// the person opens the approvals page, presses Export, then presses Approve on
+// the form that page had already drawn.
+$decision = req($jar['adm'], 'POST', $approve . '/save', ['csrf_token' => $page['token'], 'claimID' => 916306, 'decision' => 'Approved', 'comments' => 'after the download']);
+ok('#634: …and the approval the SAME page already carried still goes through afterwards', $decision['status'] === 302 && $decision['location'] === $approve && claimState(916306) === 'Pending, 1 approval(s), 0 payment(s)', 'HTTP ' . $decision['status'] . ' Location: ' . $decision['location'] . '; claim: ' . claimState(916306));
+
+// --- a token that is no good -------------------------------------------------
+// #612's lesson: the handler used to send the person to 'expenses', which
+// nothing answers, so an expired token ended in "page not found" instead of the
+// message it had just set. It must land back on a real page, inside A's own
+// address.
+$bad = req($jar['adm'], 'GET', $exportAddress . '?csrf_token=not-a-real-token');
+ok('a token that is no good sends an administrator back to A\'s own approvals page, not to a 404', $bad['status'] === 302 && $bad['location'] === $approve, 'HTTP ' . $bad['status'] . ' Location: ' . ($bad['location'] === '' ? 'none' : $bad['location']));
+
+// --- the `approver` role is what counts -------------------------------------
+// Giving the department approver the ROLE must open both halves at once. This
+// is what shows the button and the handler are reading the SAME rule: if the
+// page kept its own copy, one of the two would stay as it was.
+q("INSERT INTO tblRoles (roleID, siteID, roleKey, roleName, isStandard) VALUES (916299, ?, 'approver', 'Expense Approver', 1)", 'i', [ORG_A]);
+q('INSERT INTO tblUserRoles (userID, roleID, siteID) VALUES (?, 916299, ?)', 'ii', [APPR, ORG_A]);
+$page  = $approvalsNow('appr');
+$asRole = req($jar['appr'], 'GET', $exportAddress . '?csrf_token=' . urlencode($page['token']));
+ok('given the `approver` role, the department approver is offered the button AND the file', $buttonDrawn($page['html']) === true && $asRole['status'] === 200 && str_contains((string) strtok($asRole['body'], "\n"), 'claimID') === true, 'button ' . ($buttonDrawn($page['html']) === true ? 'drawn' : 'NOT drawn') . ', HTTP ' . $asRole['status']);
+q('DELETE FROM tblUserRoles WHERE userID = ? AND roleID = 916299', 'i', [APPR]);
+q('DELETE FROM tblRoles WHERE roleID = 916299');
+$page = $approvalsNow('appr');
+ok('…and taking the role away again puts both back as they were', $buttonDrawn($page['html']) === false && req($jar['appr'], 'GET', $exportAddress . '?csrf_token=' . urlencode($page['token']))['status'] === 403);
+
+// --- the ApiRouter address stays shut ---------------------------------------
+// The SAME FILE also sits at `api/expenses/export`, which ApiRouter would
+// serve. `api.expenses.export.enabled` is deliberately not seeded (owner,
+// 30 October 2026), so that address answers 403 and the page route above is the
+// only way in. Seeding it would publish a second address for the same CSV that
+// a bearer token still could not use, because the handler needs a session and
+// reads its token from the query string.
+$page = $approvalsNow('adm');
+$viaApi = req($jar['adm'], 'GET', ADDR_A . '/api/expenses/export?csrf_token=' . urlencode($page['token']));
+ok('the ApiRouter address is shut for an administrator too: 403, and no file', $viaApi['status'] === 403 && str_contains(strtolower($viaApi['head']), 'text/csv') === false, 'HTTP ' . $viaApi['status']);
 
 // =============================================================================
 head('M. #587 — withdrawing a claim through the real page, reading back what is STORED');
