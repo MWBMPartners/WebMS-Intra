@@ -2,6 +2,75 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — the mail queue's four numbers were the live half of the limits rule, and a tripwire now guards the lot (#668, part 2)**
+  - **Every one of #668's 32 candidate settings is judged**, and the answer is narrower than the list
+    suggests. All 32 are seeded installation-wide, and `_apps/settings/save.php` **refuses to add a
+    per-organisation row for a key the installation already has** — so for almost all of them an
+    organisation cannot override at all, whatever the name suggests. The complete exposure was
+    `attend.detailRetentionDays` (its own page; fixed in part 1) and the **four `mail.queue.*`
+    numbers** in `MailQueue::NUMBERS`, which are the one deliberate exception to that refusal. (An
+    earlier draft of this entry said five, contradicting its own heading two lines above.)
+  - **The mail-queue numbers, fixed.** `MailQueue::ownNumberCheck()` tested only `sensible()` — the hard
+    range **in code** — and merely *mentioned* the installation's value in its words. The Settings page
+    needs `App::isAdmin()`, not `isRootAdmin()`, so **an administrator of a single organisation** could
+    set `keepFailedDays` to 365 where the installation chose 7, keeping a failed message's body
+    (encrypted, but on the installation's disk) for a year, or `maxAgeHours` to 720 where it chose 48,
+    sending a reset link a month old. It now refuses with the ceiling named. **The CAP had no test** —
+    be precise, because an earlier draft said the method had none, which would have meant a
+    regression in it went unnoticed: section F8 already drove `ownNumberCheck()` through the real
+    page with four checks. What nothing covered was the comparison with the installation's value.
+    F8 now drives all four numbers against their ceilings over real HTTP (155 → 159 checks).
+  - **The cap is not save-time only.** `MailQueue::numbers()`, which is what the JOB uses, also takes
+    the smaller of the organisation's value and the installation's — so a row stored before this
+    check existed, written by direct SQL, or brought back by a whole-database restore of an older
+    backup is brought down rather than obeyed. The independent check measured the first version
+    using 365 days where the installation said 7, which also made the comment beside
+    `ownNumberCheck()` untrue: it justifies reading the installation's row there precisely so that
+    the save test and what the job does cannot disagree.
+  - **It reads the installation's own row rather than asking `SettingLimit`, deliberately:** the queue
+    reads these numbers with one `LIKE 'mail.queue.%'` query because a scheduled job serves many
+    organisations and cannot use the request's merged settings. Two readers could then disagree about
+    what the job will actually do, which is worse than a little duplication. The rule is the same.
+  - **The noticeboard, which the owner asked about specifically:** `noticeboard.upload.maxBytes` is
+    seeded installation-wide, read with `App::settings()` by `noticeboard/api/upload.php`, and written
+    by **no page at all**. Not exposed today, and the tripwire will catch it if a settings page appears.
+  - **The tripwire — `check_limit_settings_capped.py`, a hard gate.** It asks the narrow question
+    instead of grepping for `max`: *which files can create a per-organisation settings row, and do any
+    write a limit-shaped key without asking what the installation allows?* Two such files today, both
+    asking; `NOT_A_LIMIT` is empty and fails both ways. **It resolves constants, and that is the only
+    reason it works** — the live breach is written as `AnonymousCheckins::RETENTION_KEY` and appears
+    nowhere as a literal in the page that writes it.
+  - **Three faults in the tripwire, each found by planting.** It asked whether a VALUES list
+    *contained* a placeholder — true of every such INSERT — and so **accused two global-administrator-only
+    pages that write `siteID NULL` only**: two false alarms out of four findings, on a check whose issue
+    says in so many words that crying wolf gets it switched off. It did not recognise
+    `EventRecurrence::installationAllows()`, so it reported **the worked example the issue points at**.
+    And it found **nothing at all** until it joined adjacent string literals, because the house style
+    builds `'INSERT … ' . 'VALUES …'` in pieces and the one file it exists for is written that way.
+  - **A SEVENTH route, found by the independent check and NOT fixed on purpose (#687).**
+    `/admin/settings/giving-records` is gated on `App::isAdmin()` and writes `giving.retention.years`
+    **per organisation**, 1 to 50 years — how long a donor's **name and home address** are kept — with
+    **no installation layer at all**, and `lockedInGeneralEditor()` means the installation's
+    administrator cannot even express a ceiling. Identical in shape to the attendance breach and more
+    sensitive in content. It is **not capped**, because for this one setting capping is the
+    **dangerous** direction: the figure is a statutory retention period, the owner chose a country per
+    organisation deliberately, and an installation forcing it DOWN could make a customer destroy
+    records their own law requires them to keep. That is the owner's decision, so it is **#687**, and
+    the tripwire names the file in `NOT_A_LIMIT` with the reasoning so the judgement is on record
+    rather than looking like an oversight.
+  - **The tripwire cried wolf twice more, and missed five keys, before it was right.** Widening the
+    word list to catch `keepFailedDays` made it match `min` inside `venues.reminder_roles` and `count`
+    inside `org.address.countryCode`; testing every segment made the NAMESPACE decide, so six
+    `giving.retention.*` settings that are not limits were reported beside the one that is. The rule
+    that is precise on all twelve keys judged: **the LAST segment, split into words, matched whole.**
+    It also read `web/_apps` only, so it could not see `GivingRetention` at all — two of the seven
+    per-organisation writers in this application are in `web/_core`.
+  - **A correction to my own record:** I reported four settings as seeded-but-unread. **Two of them are
+    read** — `expenses.followUpDays` via `$SETTINGS['expenses']['followUpDays']`, and
+    `photos.maxUploadMb` via a differently-scoped `$settings['maxUploadMb']` that no longer carries the
+    dotted path. That is a **fifth** shape hiding a key from a search. The two genuinely dead ones are
+    **#686**; `forms.responseRetentionDays` matters more than cosmetically, because its name promises
+    that form responses stop being kept and nothing deletes them.
 - **Added — the installation caps the organisation, and the first live breach fixed (#668, part 1)**
   - **The rule** (owner, 29 October 2026, application-wide): for a setting that is a **limit**, an
     organisation may hold itself to a **lower** one but may **never** raise its own above what the

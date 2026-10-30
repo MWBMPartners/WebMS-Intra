@@ -169,7 +169,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 155;
+const EXPECTED_CHECKS = 159;
 
 /** What a child process prints before its findings, so they can be found in whatever else it printed. */
 const RESULT_MARK = '@@mail-queue-selftest@@';
@@ -3710,6 +3710,130 @@ if (part('F8', 'One organisation\'s own value for the four numbers, through the 
             && str_contains($capitals, 'differs from it only in capital') === true && $asMember['status'] === 403 && $ownNow === ['mail.queue.holdDays' => '3'],
         'the installation\'s value ' . json_encode($wide('mail.queue.retryHours')) . '; this organisation\'s own rows ' . json_encode($ownNow) . '; a member got HTTP ' . $asMember['status'] . '; a global administrator: ' . mb_substr($byRoot, 0, 160)
     );
+
+    // 🚧 #668 part 2 — THE INSTALLATION CAPS THE ORGANISATION, through the real
+    //    page. These four numbers are the ONLY settings on #668's list that an
+    //    organisation can really raise: `_apps/settings/save.php` refuses to ADD
+    //    a per-organisation row for any key the installation already has, and
+    //    these are the deliberate exception. Until 30 October 2026 the only test
+    //    applied was `sensible()`, the hard range IN CODE, with the
+    //    installation's value merely MENTIONED in the words — so an
+    //    administrator of a single organisation (this page needs
+    //    `App::isAdmin()`, not `isRootAdmin()`) could set `keepFailedDays` to
+    //    365 where the installation chose 7, keeping a failed message's body on
+    //    the installation's disk for a year, or `maxAgeHours` to 720 where it
+    //    chose 48, sending a reset link a month old.
+    //
+    //    The installation's values are the seeded ones, listed just below so
+    //    they appear once. Each of the four is checked just above and just
+    //    below its own ceiling, so a change to one number cannot make this
+    //    section pass by accident.
+    // It ADDS where the organisation has no row of its own and EDITS where it
+    // has one, because both branches of the page call ownNumberCheck() and both
+    // need the cap. Taking that from the row rather than assuming "no row yet"
+    // matters here: a global administrator gave this organisation a holdDays
+    // row a few lines above, so an unconditional add hits "already exists" and
+    // the cap is never reached — which is how the first version of this check
+    // reported two passes and one failure that had nothing to do with the cap.
+    $capFor = static function (string $key, int $allowed) use ($save, $orgJar, $ownRow): array {
+        $post = static function (int $value) use ($save, $orgJar, $ownRow, $key): string {
+            $existing = $ownRow($key);
+            $fields   = ['settingKey' => $key, 'settingValue' => (string) $value];
+            if ($existing !== null) {
+                $fields['settingID'] = (string) $existing['settingID'];
+            }
+
+            return $save($orgJar, 121, $fields);
+        };
+        $before = $ownRow($key);
+        $over   = $post($allowed + 1);
+        $rowAfterOver = $ownRow($key);
+        $under  = $post($allowed - 1);
+        $rowAfterUnder = $ownRow($key);
+
+        return [
+            'over' => $over, 'under' => $under, 'underRow' => $rowAfterUnder,
+            // "Nothing was stored" means the row is as it was — absent if it was
+            // absent, unchanged if it already existed.
+            'overUnchanged' => $before === null
+                ? $rowAfterOver === null
+                : ($rowAfterOver !== null && $rowAfterOver['settingValue'] === $before['settingValue']),
+        ];
+    };
+    // 🔢 ALL FOUR, and the figures in ONE place. The first version drove three
+    //    and left `retryHours` out while its own label said "each of the four"
+    //    — the overstated-guarantee trap. The ceilings were also written twice
+    //    in this block, which is how they could disagree.
+    $ceilings = [
+        'mail.queue.retryHours'     => 24,
+        'mail.queue.maxAgeHours'    => 48,
+        'mail.queue.keepFailedDays' => 7,
+        'mail.queue.holdDays'       => 7,
+    ];
+    $capResults = [];
+    foreach ($ceilings as $key => $allowed) {
+        $capResults[$key] = $capFor($key, $allowed);
+        // Put the organisation back as it was, so the next key starts clean and
+        // the run's own clean-up check still finds nothing left behind.
+        $left = $ownRow($key);
+        if ($left !== null) {
+            $save($orgJar, 121, ['settingID' => (string) $left['settingID'], 'settingKey' => $key, 'settingValue' => '']);
+        }
+    }
+    $capsRefused = [];
+    $capsAllowed = [];
+    foreach ($capResults as $key => $r) {
+        $allowed = $ceilings[$key];
+        $capsRefused[$key] = str_contains($r['over'], 'allows at most ' . $allowed) === true
+            && str_contains($r['over'], 'not saved') === true
+            && $r['overUnchanged'] === true;
+        $capsAllowed[$key] = $r['underRow'] !== null && (string) $r['underRow']['settingValue'] === (string) ($allowed - 1);
+    }
+    ok(
+        '#668: an organisation asking for MORE than the installation allows is refused for each of the four numbers, told what the ceiling is, and nothing is stored',
+        $capsRefused === array_map(static fn (): bool => true, $ceilings),
+        json_encode($capsRefused) . ' — one answer: ' . mb_substr($capResults['mail.queue.keepFailedDays']['over'], 0, 320)
+    );
+    ok(
+        '#668: …while one LESS than the installation allows is still stored, so the cap tightens rather than blocks',
+        $capsAllowed === array_map(static fn (): bool => true, $ceilings),
+        json_encode($capsAllowed)
+    );
+    // The installation's own value must still be changeable UPWARDS by a global
+    // administrator — capping it against itself would make the ceiling a
+    // one-way ratchet.
+    $wideHold = $wide('mail.queue.holdDays');
+    $raise    = $save($rootJar, 1, ['settingID' => (string) ($wideHold['settingID'] ?? 0), 'settingKey' => 'mail.queue.holdDays', 'settingValue' => '30']);
+    $raisedTo = $wide('mail.queue.holdDays')['settingValue'] ?? '';
+    ok(
+        '#668: a GLOBAL administrator can still RAISE the installation\'s own ceiling, which capping it against itself would have prevented',
+        $raisedTo === '30',
+        'it now holds ' . json_encode($raisedTo) . '; the page said: ' . mb_substr($raise, 0, 200)
+    );
+    if ($wideHold !== null) {
+        $save($rootJar, 1, ['settingID' => (string) $wideHold['settingID'], 'settingKey' => 'mail.queue.holdDays', 'settingValue' => (string) $wideHold['settingValue']]);
+    }
+
+    // 🚧 #668: AND THE JOB OBEYS THE CAP TOO, not just the Save button.
+    //    A row can be over the installation's limit without anybody pressing
+    //    Save: it may predate the check (the per-organisation feature shipped
+    //    with #592), be written by direct SQL, or come back from a
+    //    whole-database restore of an older backup — the supported route, since
+    //    a one-table restore of tblSettings is refused. So the row is written
+    //    straight into the database here, exactly as those three cases would
+    //    leave it, and what the JOB uses is read back.
+    //
+    //    Without this the cap was save-time only, and the independent check
+    //    measured the job still using 365 days where the installation said 7.
+    q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (1, 'mail.queue.keepFailedDays', '365', '7', 0) ON DUPLICATE KEY UPDATE settingValue = '365'");
+    $jobNumbers = child(['task' => 'numbers', 'siteId' => 1])['numbers'] ?? [];
+    $wideKeep   = (int) ($wide('mail.queue.keepFailedDays')['settingValue'] ?? 0);
+    ok(
+        '#668: a row already stored ABOVE the installation\'s limit is brought down for the JOB as well, not only refused at the Save button',
+        $wideKeep > 0 && (int) ($jobNumbers['keepFailedDays'] ?? -1) === $wideKeep,
+        'the installation allows ' . $wideKeep . '; the job would use ' . json_encode($jobNumbers['keepFailedDays'] ?? null) . ' (all of them: ' . json_encode($jobNumbers) . ')'
+    );
+    q("DELETE FROM tblSettings WHERE siteID = 1 AND settingKey = 'mail.queue.keepFailedDays'");
 }
 
 // =============================================================================

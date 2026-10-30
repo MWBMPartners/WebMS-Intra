@@ -262,6 +262,35 @@ final class MailQueue
                     break; // the organisation and the installation were the same row
                 }
             }
+
+            // 🚧 THE INSTALLATION CAPS THE ORGANISATION HERE TOO (#668 part 2).
+            //    ownNumberCheck() refuses a value above the installation's when
+            //    somebody SAVES one — but a row stored before that check existed
+            //    (the per-organisation feature shipped with #592), written by
+            //    direct SQL, or brought back by a whole-database restore of an
+            //    older backup, would otherwise still be obeyed by the job. So a
+            //    failed message's body could sit on the installation's disk for
+            //    a year on an installation that chose seven days, with nothing
+            //    to show for it.
+            //
+            //    IT WAS SAVE-TIME ONLY IN THE FIRST VERSION, and the independent
+            //    check measured it: the installation's rows said 7 and 48 while
+            //    the job used 365 and 720 for an organisation whose rows were
+            //    already there. Worse, the comment beside ownNumberCheck()
+            //    justifies reading the installation's row THERE precisely so the
+            //    save test and "what the job does" cannot disagree — and they
+            //    disagreed, in the one direction the rule is about.
+            //
+            //    Lower is always allowed, higher never: the organisation's own
+            //    value only ever shortens. A number the installation has not
+            //    usefully set falls back to the built-in default, which is the
+            //    same fallback the loop above uses, so the two cannot drift.
+            $ceiling = $rule['default'];
+            $wide    = $rows[$rule['key']][0] ?? '';
+            if ($wide !== '' && self::sensible($wide, $rule) === true) {
+                $ceiling = (int) $wide;
+            }
+            $out[$name] = min($out[$name], $ceiling);
         }
 
         return $out;
@@ -326,6 +355,48 @@ final class MailQueue
             $installation = ($stored !== '' && self::sensible($stored, $rule) === true)
                 ? 'The installation\'s value, which every organisation without its own uses, is ' . (int) $stored . '.'
                 : 'The installation has no usable value of its own stored, so organisations without their own use the built-in ' . $rule['default'] . '.';
+
+            // 🚧 THE INSTALLATION CAPS THE ORGANISATION (#668 part 2). These four
+            //    numbers are the ONLY settings an organisation may add a row for
+            //    while the installation already has one — every other key is
+            //    refused as a duplicate by `_apps/settings/save.php`, which is
+            //    what kept the rest of #668's list out of reach. The exception is
+            //    deliberate and useful; what was missing is the cap.
+            //
+            //    Until 30 October 2026 this method checked only `sensible()`, the
+            //    HARD RANGE IN CODE, and merely MENTIONED the installation's value
+            //    in its words. So an administrator of a single organisation — the
+            //    page needs `App::isAdmin()`, not `isRootAdmin()` — could set
+            //    `keepFailedDays` to 365 on an installation that chose 7, or
+            //    `maxAgeHours` to 720 where it chose 48. Every one of the four is
+            //    a limit in the #668 sense and LONGER is the harmful direction:
+            //    a failed message's body is kept (encrypted) on the
+            //    installation's disk, and an old message still being sent means a
+            //    reset link older than the installation intended going out.
+            //
+            //    IT READS THE INSTALLATION'S OWN ROW rather than asking
+            //    SettingLimit, and that is deliberate. The queue reads these
+            //    numbers with one `LIKE 'mail.queue.%'` query because a scheduled
+            //    job serves MANY organisations and cannot use the request's
+            //    merged settings; if this check asked a different reader the two
+            //    could disagree about what the queue will actually do, which is
+            //    worse than a little duplication. The three-tier RULE is the same
+            //    one SettingLimit states — lower is always allowed, higher never.
+            //
+            //    0 needs no special handling here: `sensible()` already requires
+            //    at least 1, so "no limit" cannot be expressed and the zero trap
+            //    of part 1 does not arise.
+            $allowed = ($stored !== '' && self::sensible($stored, $rule) === true)
+                ? (int) $stored
+                : (int) $rule['default'];
+
+            if (self::sensible($value, $rule) === true && (int) $value > $allowed) {
+                return ['ok' => false, 'installation' => $installation,
+                    'words' => 'Nothing was saved. This installation allows at most ' . $allowed . ' for "'
+                        . $key . '" (' . $rule['what'] . '), so ' . (int) $value . ' was not saved. You can '
+                        . 'choose ' . $allowed . ' or less. Ask whoever runs this installation if you need more.'];
+            }
+
             if (self::sensible($value, $rule) === true) {
                 return ['ok' => true, 'installation' => $installation,
                     'words' => 'This organisation\'s own value (' . $rule['what'] . ') is now ' . (int) $value . ', for its mail only. ' . $installation];

@@ -493,6 +493,21 @@ if ($settingId > 0) {
         exit();
     }
     if ($ownNumber !== null && $ownNumber['ok'] === false) {
+        // 📝 RECORD IT. A request to exceed the installation's limit crosses a
+        //    line between two parties who may be two different people — a
+        //    hosting provider and its customer — which is why #668 asks for
+        //    the refusal to be on record and not only on screen. Every other
+        //    refusal on this page logs `SettingsUpdateRefused`; these two were
+        //    the exception until 30 October 2026.
+        //
+        //    It names the KEY and the ceiling, never the value that was asked
+        //    for: the number itself is in the message the person sees, and a
+        //    record that repeats it adds nothing an administrator would act on.
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" was not saved for this organisation. ' . $ownNumber['installation'],
+            $_SESSION['user_id'] ?? null
+        );
         $_SESSION['flash_msg']  = $ownNumber['words'];
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
@@ -822,6 +837,21 @@ if ($settingId > 0) {
     //    Every refusal above this line has already been applied.
     $ownNumber = MailQueue::ownNumberCheck($mysqli, $settingKey, $settingVal);
     if ($ownNumber !== null && $ownNumber['ok'] === false) {
+        // 📝 RECORD IT. A request to exceed the installation's limit crosses a
+        //    line between two parties who may be two different people — a
+        //    hosting provider and its customer — which is why #668 asks for
+        //    the refusal to be on record and not only on screen. Every other
+        //    refusal on this page logs `SettingsUpdateRefused`; these two were
+        //    the exception until 30 October 2026.
+        //
+        //    It names the KEY and the ceiling, never the value that was asked
+        //    for: the number itself is in the message the person sees, and a
+        //    record that repeats it adds nothing an administrator would act on.
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $settingKey . '" was not saved for this organisation. ' . $ownNumber['installation'],
+            $_SESSION['user_id'] ?? null
+        );
         $_SESSION['flash_msg']  = $ownNumber['words'];
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));

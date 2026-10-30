@@ -1193,6 +1193,26 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_install_wide_prefill.py
 
+      # A LIMIT an organisation can set is capped by the installation (#668).
+      # Same boundary as the check above and the opposite direction of travel:
+      # there the fault is an organisation's value becoming everyone's, here it
+      # is an organisation raising its own above what the installation allows.
+      # An organisation may hold itself to less and may never choose more. The
+      # fault is completely silent - the save succeeds, the number is stored,
+      # and only the installation's administrator would notice, who may never
+      # look.
+      #
+      # It asks the narrow question rather than grepping for "max": which files
+      # can create a PER-ORGANISATION settings row, and do any write a
+      # limit-shaped key without asking what the installation allows. Two such
+      # files today, both asking. It RESOLVES CONSTANTS, which is the only
+      # reason it works - the live breach it was built for is written as
+      # AnonymousCheckins::RETENTION_KEY and appears nowhere as a literal.
+      - name: 'A limit an organisation can set is capped by the installation (hard gate, #668)'
+        id: limit_settings_capped
+        if: always()
+        run: python3 -I tools/audit-checks/check_limit_settings_capped.py
+
       # The API description satisfies its own schema, and every property and
       # parameter explains itself (#641). This project's rule is that where it
       # produces JSON a schema lives beside it, with a description on every

@@ -11252,3 +11252,142 @@ evidence for it was not.
 `assert` that the thing you meant to break is actually different afterwards. A
 plant that silently does nothing produces the most expensive kind of result: a
 guard believed to be unnecessary.
+
+## Five shapes that hide a setting key from a search (#668)
+
+**30 October 2026.** Judging #668's 32 candidate settings meant answering "what
+reads this, and what writes it" for each. A plain search for the dotted key
+answers neither reliably. Five shapes, every one of them met in this repository:
+
+| shape | example |
+|---|---|
+| a nested read | `$SETTINGS['chat']['maxBodyChars']` |
+| a prefix query | `MailQueue` reads `LIKE 'mail.queue.%'` |
+| **a constant** | `AnonymousCheckins::RETENTION_KEY` |
+| a differently-scoped array | `$settings['maxUploadMb']` in `photos/upload.php` — the dotted path is gone by then |
+| seeded and read by nothing | `forms.responseRetentionDays`, `webhooks.maxRetries` (#686) |
+
+The third one is the expensive one: `attend.detailRetentionDays`, the live
+breach #668 named, appears **nowhere as a literal** in the page that writes it.
+A tripwire built on literals would have passed on the very fault it was built
+for.
+
+The fourth cost me a false claim. I reported **four** settings as seeded-but-unread
+and two of them were read — in a comment on the issue, before checking the last
+segment on its own. Search for the **last segment** as well as the whole key
+before calling a setting dead, and for a `LIKE` on its prefix.
+
+## A check that cries wolf gets switched off, so measure the false alarms (#668)
+
+`check_limit_settings_capped.py` asks which files can create a per-organisation
+settings row and whether any writes a limit-shaped key without capping it. Its
+first version produced four findings, **two of them false**, and both false ones
+were pages that write `siteID NULL` only and are global-administrator-only —
+they cannot cross the boundary the check is about at all.
+
+The cause: it asked whether the `VALUES` list **contained** a placeholder.
+Every such INSERT does — `VALUES (?, ?, ?, NULL, NOW())` contains three. It now
+pairs the column list with the values list and looks at what sits in the
+`siteID` **position**.
+
+Two more faults in the same check, both found by planting:
+
+* **It did not recognise the worked example.** `EventRecurrence::installationAllows()`
+  is the first reader built to this rule, and the check reported it as a fault
+  because it only looked for `SettingLimit::`.
+* **It found nothing at all** until adjacent string literals were joined. The
+  house style builds a statement as `'INSERT INTO t (…) ' . 'VALUES (…)'`, so
+  `INSERT … VALUES` never appears in one literal — and the one file the check
+  exists to account for is written exactly that way. A pattern spanning the two
+  matches nothing, the check reported zero writers, and then called its own
+  exception list stale.
+
+The general lesson, which #668 states and this proved twice: **count the false
+alarms before wiring a check in.** Two out of four would have been enough for
+somebody to stop trusting it, and then the real fault is unguarded.
+
+## Two readers of one setting must not disagree about what will happen (#668)
+
+`MailQueue::ownNumberCheck()` caps its four numbers against the installation by
+reading the installation's own row directly, **not** by asking `SettingLimit`,
+and that is deliberate rather than an oversight.
+
+The queue reads these numbers with a single `LIKE 'mail.queue.%'` query because
+a scheduled job sends for **many** organisations and cannot use the request's
+merged settings — there is no "current organisation" in a job. If the check that
+decides whether a value may be SAVED asked a different reader from the one that
+decides what the job DOES, the two could disagree, and an administrator would be
+told their number was accepted while the job used another. A little duplication
+is the cheaper mistake.
+
+The three-tier rule is identical either way: lower is always allowed, higher
+never, and a hard range in code caps both.
+
+## A save-time cap is not a cap (#668)
+
+**30 October 2026.** `MailQueue::ownNumberCheck()` was taught to refuse a value
+above the installation's. That stops somebody **choosing** one. It does nothing
+about a row already stored, and three ordinary things leave one:
+
+* it predates the check (the per-organisation feature shipped with #592);
+* somebody wrote it with direct SQL;
+* a **whole-database restore of an older backup** brought it back — and that is
+  the supported route, because a one-table restore of `tblSettings` is refused.
+
+Measured by the independent check: the installation's rows said 7 and 48 while
+the job used 365 and 720 for an organisation whose rows were already there. So a
+failed message's body sat on the installation's disk for a year on an
+installation that had chosen a week.
+
+Worse than the gap itself, the comment beside the new check **justified** reading
+the installation's row *there* precisely so that the save test and "what the job
+does" could not disagree. They disagreed, in the one direction the rule is about.
+A justification that the code does not honour is the #645 shape: a comment
+stating the guarantee the code forgot to implement.
+
+`numbers()` — the reader the job uses — now takes the smaller of the two as
+well. The check and the job agree because they do the same thing, not because a
+comment says they do.
+
+## The precise rule for "does this setting name look like a limit" (#668)
+
+Three versions, and the first two were wrong in opposite directions. Both were
+measured against the same twelve keys.
+
+**Too narrow** — a regex anchored on the last segment with a capitalised word
+list missed five real limits: `mail.queue.keepFailedDays` (the capital F stopped
+`[a-z0-9]*Days$` matching — and that is the key the whole package is about),
+`giving.retention.years` (lower-case `years` never matched `Years`),
+`transcription.monthlyMinutes`, `offboarding.undo_window_days` and
+`venues.renewal_lead_days` (snake_case).
+
+**Too wide** — substring matching on every segment found `min` inside
+`venues.reminder_roles`, `count` inside `org.address.countryCode`, and the
+*namespace* `retention` inside `giving.retention.hold`, `.confirmed`, `.scope`,
+`.countryCode` and `.yearEnd`. Six settings that are not limits, reported beside
+the one that is.
+
+**Right**: take the **last segment only**, split it into words on camelCase
+boundaries and underscores, lower-case them, and match **whole words** against a
+list. Both halves are load-bearing — the last segment stops the namespace
+deciding, the whole word stops "reminder" being a minimum.
+
+The cost, stated rather than hidden: a limit whose last segment uses a word not
+on the list is invisible. That is a list to extend when one turns up, not a
+pattern to loosen.
+
+## Every number in the argument can be wrong while the argument is right (#668)
+
+The tripwire's docstring justified its own design — "scoped to the files that can
+write a per-organisation row, because a list of that size is maintainable" — with
+three figures: **31 files**, of which **one** names a limit-shaped key, **directly**.
+
+Measured with the check's own functions: **seven** files (five under `web/_apps`,
+two under `web/_core`), of which **four** name a limit-shaped key, and the one it
+was thinking of is a **constant**. 31 is close to the number of files containing
+*any* `INSERT INTO tblSettings` (32), of which all but seven write `NULL`.
+
+The design was right. Every number offered in support of it was wrong, which is
+the worst way to be right: a reader who checks one figure and finds it false has
+no reason to trust the conclusion. **Measure the numbers you put in a comment
+with the same code the comment is about** — it took one short script here.
