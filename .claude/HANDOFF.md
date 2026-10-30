@@ -23,48 +23,45 @@
 ## Where we are right now
 
 **Nothing is pushed.** `origin/claude/alpha-wip` was last updated on **27 October 2026** (`0e15afd`).
-Everything since exists only on this disk — **34 commits**, plus the sign-in hotfix on
-`hotfix/sign-in-1.4.2`. That includes **migrations 224 to 231** and several harm-capable fixes. The
-owner decided on 30 October, asked directly, that **nothing is pushed until the comprehensive Codex
-review**; do not offer again, and "it is only the working branch" is not a reason.
+Everything since exists only on this disk — **36 commits**, plus the sign-in hotfix on
+`hotfix/sign-in-1.4.2`. That includes **migrations 224 to 231**. The owner decided on 30 October, asked
+directly, that **nothing is pushed until the comprehensive Codex review**; do not offer again, and "it
+is only the working branch" is not a reason.
 
 **Nothing is in flight.** The tree is clean.
 
 | # | Next up | Issue | Notes |
 |---|---|---|---|
-| 1 | Limit settings: installation caps organisation, app-wide | **#668** | The big sweep; 30+ limit-shaped settings. A known live one: `attend.detailRetentionDays` is per-organisation 0–3650 days with no installation cap |
+| 1 | Limits sweep, **part 2**: the tripwire + judge the other 30 settings | **#668** | Part 1 is `6fa3516`. The design question is answered on the issue: a tripwire works if it RESOLVES CONSTANTS, scoped to the 31 files that can write a per-organisation row |
 | 2 | #669, #670, #671, #672 | — | Not started |
-| 3 | A scheduled job sends one organisation's support address to another's members | **#683** | From #677's check. Harmless while the setting was shared; a wrong address now |
-| 4 | No page sets the installation's support address | **#684** | From #677's check; migration 231's reasoning depends on it being changeable |
-| 5 | `/error.php` has no icon; nothing guards the home-screen icons | **#682** | From #680's check |
-| 6 | Should a department approver export their own departments' claims? | **#681** | Needs the owner first |
+| 3 | Organisations already over the attendance limit | **#685** | Needs the owner: cap the reader, or show the installation's administrator who is over |
+| 4 | A job sends one organisation's support address to another's members | **#683** | From #677's check |
+| 5 | No page sets the installation's support address | **#684** | From #677's check |
+| 6 | `/error.php` has no icon; home-screen icons unguarded | **#682** | From #680's check |
+| 7 | Should a department approver export their departments' claims? | **#681** | Needs the owner first |
 
 **Migrations:** the highest in `web/_sql/` is **231**. Allocate **232 upward**.
 
-**Throwaway database:** container `p675-mysql` on port 33675 (root password `p675pw`) holds several
-`selftest_*` databases loaded from `full_schema.sql`. Remove it with `docker rm -vf p675-mysql` and
-name the next one after its own work.
+**Throwaway database:** container `p675-mysql`, port 33675, root password `p675pw`, several
+`selftest_*` databases loaded from `full_schema.sql`. `docker rm -vf p675-mysql` when done; name the
+next one after its own work.
 
-### The lesson from the last two packages, which cost the most time
+### The four lessons from this run, in the order they cost the most
 
-**Run the EXISTING tests of the page you are changing, not only the one you write.** #677 shipped to
-its independent check with `portal-address-selftest.php` failing 5 of 93 — a test that covers that
-exact card and runs on every pull request — while the package's own new section passed throughout.
-Nothing in the mechanical gate catches that, because the gate is `php -l` plus
-`tools/audit-checks/`; the self-tests are not in it. Before calling a package done:
-`ls tools/*selftest*.php`, find the ones that touch your files, and run them.
-
-Three more, all from 30 October and all found by tests rather than review:
-
-* **A page inherits only `$mysqli` and `$SETTINGS`.** Reading `$SETTINGS_INSTALLATION` in an app page
-  gives null, silently, and the page then states the opposite of the truth. Use
-  `InstallationSettings::layer()`.
-* **A form that saves ONE level must not prefill from the merged array** — true in both directions.
-  #674 is the installation-wide case; #677 hit the mirror, where a no-op Save pins the inherited
-  value as the organisation's own.
-* **A guard can be satisfied by text that never runs**, for the third time (#623, then this check's
-  own commented-out require, then #680). `printed_markup()` closes comments and strings; `if (false)`
-  and an early `return` still get past it, and that is now written down.
+1. **Run the EXISTING tests of the page you are changing, not only the one you write.** #677 reached
+   its independent check with `portal-address-selftest.php` failing 5 of 93 — a CI-wired test of that
+   exact card — while the package's own new test passed throughout. The mechanical gate cannot catch
+   it: it is `php -l` plus `tools/audit-checks/`, and the self-tests are not in it. Do
+   `ls tools/*selftest*.php`, find the ones touching your files, run them.
+2. **A text check passes on a disabled gate.** Four shapes, all measured: `if (false)`, `&& false`
+   added, a refusal that logs "nothing was saved" then writes anyway, and one that silently clamps.
+   Pin the WHOLE condition; require the block to `exit()`; require it not to assign to the value.
+3. **Check that a planted fault actually applied.** A plant whose replacement string had a trailing
+   newline the sliced block did not left the file unchanged, the test green, and the guard recorded as
+   unnecessary. Third time this month.
+4. **A page inherits only `$mysqli` and `$SETTINGS`.** `$SETTINGS_INSTALLATION` reads as null in a
+   page, silently, and the page then states the opposite of the truth. Use
+   `InstallationSettings::layer()` — or `SettingLimit`, which does it for you.
 
 ---
 
