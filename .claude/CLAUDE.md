@@ -620,7 +620,7 @@ Set by the owner on 24 September 2026, after a background agent's "finished" not
 tools/watchdog.sh quiet .claude-work/resume/<that agent's report>.md 900 14400
 ```
 
-This repository commits its own copy, `tools/watchdog.sh`, so the rule works on any machine; the owner's Mac also has `~/.claude/bin/watchdog.sh`, and the two copies' logic is kept identical. Other modes: `exists <file>`, `contains <file> <text>`, `pid <pid>`; every mode has a hard deadline (four hours by default). When it fires, **look** — it cannot tell "finished" from "stalled" — then act, or start it again if the work is still going. **When a step finishes, start the next in the same turn.**
+This repository commits its own copy, `tools/watchdog.sh`, so the rule works on any machine. **There is no `~/.claude/bin/watchdog.sh` on this Mac — checked 30 October 2026.** This line used to say there was one and that the two copies were kept identical; that was false, so use the repository's copy and do not go looking for a second. **And the `-L` fix approved on 25 September 2026 (#564) is still not applied**: `mtime()` reads the shortcut's age, not the real file's, so a watchdog pointed at a symbolic link fires immediately. Point `quiet` at the real file until that lands. Other modes: `exists <file>`, `contains <file> <text>`, `pid <pid>`; every mode has a hard deadline (four hours by default). When it fires, **look** — it cannot tell "finished" from "stalled" — then act, or start it again if the work is still going. **When a step finishes, start the next in the same turn.**
 
 ## Throwaway databases and containers are removed, data included
 
