@@ -84,6 +84,26 @@ computed the way the router computes them instead of all saying `GET, POST`; 32 
 operations gained the rate-limit refusal they had never documented; and `events/{id}` stopped
 calling itself the only v1 resource with a detail route.
 
+**The independent check found two real problems in part 3, both mine.** The `Allow` fix ADDED the
+computed example beside the stale one instead of replacing it, so all 48 headers briefly carried two
+contradicting values — **the original fault survived and three documents claimed it was gone**. And
+`/api/noticeboard/list`'s new schema was UNSATISFIABLE: it composed `V1SuccessEnvelope`, which fixes
+`data` as an object, with a branch declaring an array, demanding both at once. Both fixed; the
+envelope is now written out for that operation and its v1 twin.
+
+**NOTHING HERE GUARDS WHAT PART 3 CHANGED.** The two checks compare which addresses exist and
+whether every property has words; neither can tell a declared response shape from what the handler
+sends, nor spot a stale example. The checker proved it by planting three of part 3's own corrections
+in reverse and watching both checks stay green. These corrections will go stale the way the originals
+did unless something calls each endpoint and compares the reply with its schema, which no harness
+here does.
+
+**AND I REPEATED MY OWN MISTAKE FROM PART 1.** A multi-step patch script aborted partway — one
+replacement did not match because the text wrapped differently — and the commit that followed was
+not chained to it, so part 3 was committed WITHOUT this paragraph's correction. That is the second
+time in one session. **When a patch script aborts, re-run the remaining steps explicitly, and never
+put a commit in the same block as an unverified patch.**
+
 **The reusable lesson from part 3:** working out which endpoints a bearer key can reach, a text
 search for `ApiAuth::requireWrite` returned 46 against a true 45 — the extra was a handler whose
 COMMENT, added by this very package, says a bearer key cannot reach it. Searching for the text of a
