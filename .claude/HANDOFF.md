@@ -23,44 +23,48 @@
 ## Where we are right now
 
 **Nothing is pushed.** `origin/claude/alpha-wip` was last updated on **27 October 2026** (`0e15afd`).
-Everything since exists only on this disk — **31 commits**, plus the sign-in hotfix on
-`hotfix/sign-in-1.4.2`. That includes **migrations 224 to 230** and several harm-capable fixes. The owner
-decided on 30 October, asked directly, that **nothing is pushed until the comprehensive Codex review**; do
-not offer again, and do not treat "it is only the working branch" as a reason.
+Everything since exists only on this disk — **34 commits**, plus the sign-in hotfix on
+`hotfix/sign-in-1.4.2`. That includes **migrations 224 to 231** and several harm-capable fixes. The
+owner decided on 30 October, asked directly, that **nothing is pushed until the comprehensive Codex
+review**; do not offer again, and "it is only the working branch" is not a reason.
 
-**Nothing is in flight.** The tree is clean and the queue is free to start.
+**Nothing is in flight.** The tree is clean.
 
 | # | Next up | Issue | Notes |
 |---|---|---|---|
-| 1 | One organisation's address written installation-wide | **#677** | Decided 30 Oct: per-organisation rows **and a migration copying installation values down**. `portal.support.email` is a separate question. Needs migration **231** |
-| 2 | Limit settings: installation caps organisation, app-wide | **#668** | The big sweep; 30+ limit-shaped settings |
-| 3 | #669, #670, #671, #672 | — | Not started |
-| 4 | The login page links no icon, so `/favicon.ico` 404s | **#680** | Found by the #569 browser audit on its first run |
-| 5 | Should a department approver export their own departments' claims? | **#681** | Split out of #675; needs the owner first |
+| 1 | Limit settings: installation caps organisation, app-wide | **#668** | The big sweep; 30+ limit-shaped settings. A known live one: `attend.detailRetentionDays` is per-organisation 0–3650 days with no installation cap |
+| 2 | #669, #670, #671, #672 | — | Not started |
+| 3 | A scheduled job sends one organisation's support address to another's members | **#683** | From #677's check. Harmless while the setting was shared; a wrong address now |
+| 4 | No page sets the installation's support address | **#684** | From #677's check; migration 231's reasoning depends on it being changeable |
+| 5 | `/error.php` has no icon; nothing guards the home-screen icons | **#682** | From #680's check |
+| 6 | Should a department approver export their own departments' claims? | **#681** | Needs the owner first |
 
-**Migrations:** the highest in `web/_sql/` is **230**. Allocate **231 upward**; never let two packages
-claim one number.
+**Migrations:** the highest in `web/_sql/` is **231**. Allocate **232 upward**.
 
-**Throwaway database:** container `p675-mysql` on port 33675 (root password `p675pw`) may still be up,
-holding `webms` and `selftest_export` loaded from `full_schema.sql`. Remove it with
-`docker rm -vf p675-mysql` and name the next one after its own work.
+**Throwaway database:** container `p675-mysql` on port 33675 (root password `p675pw`) holds several
+`selftest_*` databases loaded from `full_schema.sql`. Remove it with `docker rm -vf p675-mysql` and
+name the next one after its own work.
 
-### What #675 taught, carried because it will happen again
+### The lesson from the last two packages, which cost the most time
 
-Committed `d6f3e32`; the issue is closed with `status: done`. **All three of its headline claims were
-false**, and measuring rather than reading is the only reason that was found. Four traps worth keeping:
+**Run the EXISTING tests of the page you are changing, not only the one you write.** #677 shipped to
+its independent check with `portal-address-selftest.php` failing 5 of 93 — a test that covers that
+exact card and runs on every pull request — while the package's own new section passed throughout.
+Nothing in the mechanical gate catches that, because the gate is `php -l` plus
+`tools/audit-checks/`; the self-tests are not in it. Before calling a package done:
+`ls tools/*selftest*.php`, find the ones that touch your files, and run them.
 
-* **A grep for the wrong string reads exactly like nothing-to-fix.** The issue said nothing linked the
-  export, on the strength of `grep -rn "expenses/export"`. The address is `expenses/api/export`.
-* **A file in an `api` folder may be served by the ORDINARY router**, through `tblRoutes`, with neither
-  the `api.*.enabled` row nor the app's API-folder switch in front of it — two fewer gates than the
-  folder implies. There is exactly one, and check I of `check_api_spec_matches_code.py` now names it.
-* **My own fix was then wrong in the SILENT direction, and the independent check caught it.** A `;`
-  inside a `--` comment ended a DELETE span early, so a deleted key read as a seed and check G passed on
-  an endpoint answering 403 to everybody — while the docstring called that case harmless. Read
-  `read_install_script()` before touching anything that parses `full_schema.sql`.
-* **A harness helper can hide the fault you are testing for.** The "approval still works after the
-  download" check used `post()`, which fetches a *fresh* form token, so it passed on the broken code.
+Three more, all from 30 October and all found by tests rather than review:
+
+* **A page inherits only `$mysqli` and `$SETTINGS`.** Reading `$SETTINGS_INSTALLATION` in an app page
+  gives null, silently, and the page then states the opposite of the truth. Use
+  `InstallationSettings::layer()`.
+* **A form that saves ONE level must not prefill from the merged array** — true in both directions.
+  #674 is the installation-wide case; #677 hit the mirror, where a no-op Save pins the inherited
+  value as the organisation's own.
+* **A guard can be satisfied by text that never runs**, for the third time (#623, then this check's
+  own commented-out require, then #680). `printed_markup()` closes comments and strings; `if (false)`
+  and an early `return` still get past it, and that is now written down.
 
 ---
 
