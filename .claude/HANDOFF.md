@@ -22,48 +22,45 @@
 
 ## Where we are right now
 
-**Nothing is pushed.** `origin/claude/alpha-wip` was last updated on **27 October 2026**
-(`0e15afd`). Everything since exists only on this disk — **27 commits over three days**, plus the
-sign-in hotfix on `hotfix/sign-in-1.4.2`. That includes **migrations 224 to 229** and several
-harm-capable fixes. The owner decided on 30 October, asked directly, that **nothing is pushed until
-the comprehensive Codex review**; do not offer again, and do not treat "it is only the working
-branch" as a reason.
+**Nothing is pushed.** `origin/claude/alpha-wip` was last updated on **27 October 2026** (`0e15afd`).
+Everything since exists only on this disk — **31 commits**, plus the sign-in hotfix on
+`hotfix/sign-in-1.4.2`. That includes **migrations 224 to 230** and several harm-capable fixes. The owner
+decided on 30 October, asked directly, that **nothing is pushed until the comprehensive Codex review**; do
+not offer again, and do not treat "it is only the working branch" as a reason.
 
 **Nothing is in flight.** The tree is clean and the queue is free to start.
 
 | # | Next up | Issue | Notes |
 |---|---|---|---|
-| 1 | Browser/visual audit half of the look-and-feel rule | **#569** | Harness built and proven; needs moving into `tools/` and wiring in |
-| 2 | Dead API switches; `expenses/export` answers 403 | **#675** | Decided 30 Oct: seed it, document it, **add a test**; delete the four orphan switches by migration |
-| 3 | Organisation address written installation-wide | **#677** | Decided 30 Oct: per-organisation rows, **and a migration copying installation values down** |
-| 4 | Limit settings: installation caps organisation, app-wide | **#668** | The big sweep; 30+ limit-shaped settings |
-| 5 | #669, #670, #671, #672 | — | Not started |
+| 1 | One organisation's address written installation-wide | **#677** | Decided 30 Oct: per-organisation rows **and a migration copying installation values down**. `portal.support.email` is a separate question. Needs migration **231** |
+| 2 | Limit settings: installation caps organisation, app-wide | **#668** | The big sweep; 30+ limit-shaped settings |
+| 3 | #669, #670, #671, #672 | — | Not started |
+| 4 | The login page links no icon, so `/favicon.ico` 404s | **#680** | Found by the #569 browser audit on its first run |
+| 5 | Should a department approver export their own departments' claims? | **#681** | Split out of #675; needs the owner first |
 
-**Migrations:** the highest in `web/_sql/` is **229**. #675 and #677 both need one and #676 may.
-Allocate **230 upward**; never let two packages claim one number.
+**Migrations:** the highest in `web/_sql/` is **230**. Allocate **231 upward**; never let two packages
+claim one number.
 
-### #676 is done, and it was FIVE writers not three
+**Throwaway database:** container `p675-mysql` on port 33675 (root password `p675pw`) may still be up,
+holding `webms` and `selftest_export` loaded from `full_schema.sql`. Remove it with
+`docker rm -vf p675-mysql` and name the next one after its own work.
 
-Committed; see `CHANGELOG.md`. Worth carrying forward because the independent check found the
-premise itself too narrow: besides the two API endpoints and the CSV importer,
-**`calendar/manage/save.php` — the main admin event form — took `$_POST['status']` straight into the
-INSERT and UPDATE with no allow-list at all**, and `calendar/submit-save.php` supplies `status` as a
-literal inside its INSERT's `VALUES` list, a shape the new check could not see until taught to. The
-CSV page's on-screen help also still told the user to send `archived`.
+### What #675 taught, carried because it will happen again
 
-**Migration numbers:** the highest is now **230**. #675 and #677 both need one — allocate 231 upward.
+Committed `d6f3e32`; the issue is closed with `status: done`. **All three of its headline claims were
+false**, and measuring rather than reading is the only reason that was found. Four traps worth keeping:
 
-### The #569 harness is built but not committed
-
-Drafted in the session scratchpad. Edge headless driven over the DevTools protocol using **node's
-own built-in `WebSocket`** — no Playwright, no Puppeteer, no `npm install`. On fixtures it found six
-real faults and raised no false alarm on a clean page.
-
-> **The trap in it, measured before it was written.** With `mobile: true`, Chromium **widens the
-> layout viewport to fit the content**: a 900px page asked to render at 390 reports `innerWidth` of
-> 900. So `scrollWidth > window.innerWidth` is **permanently false** and the obvious overflow check
-> can never fail. Compare against **the width the driver asked for**. Planting the naive version
-> proved it: it missed the 320px and 390px overflows and caught only 768.
+* **A grep for the wrong string reads exactly like nothing-to-fix.** The issue said nothing linked the
+  export, on the strength of `grep -rn "expenses/export"`. The address is `expenses/api/export`.
+* **A file in an `api` folder may be served by the ORDINARY router**, through `tblRoutes`, with neither
+  the `api.*.enabled` row nor the app's API-folder switch in front of it — two fewer gates than the
+  folder implies. There is exactly one, and check I of `check_api_spec_matches_code.py` now names it.
+* **My own fix was then wrong in the SILENT direction, and the independent check caught it.** A `;`
+  inside a `--` comment ended a DELETE span early, so a deleted key read as a seed and check G passed on
+  an endpoint answering 403 to everybody — while the docstring called that case harmless. Read
+  `read_install_script()` before touching anything that parses `full_schema.sql`.
+* **A harness helper can hide the fault you are testing for.** The "approval still works after the
+  download" check used `post()`, which fetches a *fresh* form token, so it passed on the broken code.
 
 ---
 
