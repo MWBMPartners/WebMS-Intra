@@ -2,6 +2,41 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — the sign-in page had no icon, so every visitor's first request 404ed (#680)**
+  - **What was wrong.** With no `<link rel="icon">` a browser falls back to `/favicon.ico` by
+    convention. There is no such file in the web root and nothing answers that address. The three icon
+    links were written by `header.php`, and **`auth/login/index.php` draws its own `<head>`**, so it
+    reached none of them — on the page every visitor sees first, because `/` redirects to `/login`.
+    Found by the browser audit (`tools/visual-audit.php`) on its first real run, as a console error
+    nobody had been looking for.
+  - **Fixed for the whole class, not one page.** The icon links moved into **`head-meta.php`**, which
+    every own-`<head>` page already requires and which `check_page_head_tags.py` already fails a non-exempt page
+    for not requiring. One require that is already in place, already guarded, closes the class —
+    rather than a new partial for the next own-head page to forget. `header.php` keeps working out
+    `$siteFavicon` and `$brandIconPath`; `head-meta.php` takes them with `??=` so there is still
+    exactly one copy of the resolution chain.
+  - **The pages on that check's exempt list deliberately still have no icon** (no count written down: the
+    first version of this entry said 13 when there were 12) — printouts, e-mail
+    previews, wall displays and kiosk screens, none of them a browser tab anybody looks at. `admin/maintenance/backup.php` is the careful one, and my
+    first comment got both halves of it wrong: that file requires `header.php` on both ordinary paths,
+    so it reaches `head-meta.php` every normal request — it is its CLOSED-DATABASE RECOVERY BRANCH that
+    must not. And the reason is not the icon code: `Site::branding()` reads the row already in memory
+    from bootstrap. The reason is the pre-existing `PortalAddress` query in that file.
+  - **Guarded, because nothing else would notice those three lines going.** Every page would still
+    require the partial and still pass while every visitor fell back to a 404. `check_page_head_tags.py`
+    now fails when `head-meta.php` stops printing a `rel="icon"` link — **read through
+    `printed_markup()`**, which is load-bearing: the first version read the raw file and **passed on the
+    link commented out inside `<?php /* … */ ?>`**, every character still present and nothing printed.
+    That is the #623 QR-guard mistake for a third time. Two shapes still get past it — the links wrapped
+    in `if (false)`, and an early `return` before them — both measured, both now written into that
+    check's "WHAT THIS CHECK CANNOT SEE" list, and the first of them caught by section F over HTTP. Also
+    recorded there: **nothing guards the two `apple-touch-icon` links at all** (#682).
+  - **Tests.** Section **F** of `tools/page-head-selftest.php`, over real HTTP (15 → 19 checks): the
+    sign-in page links an icon; **following that link really returns 200**; `/favicon.ico` still 404s,
+    so the link is genuinely needed; and **an ordinary page has not lost its icon** in the move, which
+    is one require away from being a regression for every page in the portal rather than a fix for a
+    few. Putting the links back in `header.php` alone turns F01 and F02 red while F04 stays green.
+    The browser audit that found the fault now reports no problems and exits 0.
 - **Fixed — one organisation's postal address was every organisation's (#677, migration 231)**
   - **What was wrong.** `admin/settings/organisation/save.php` wrote all nine `org.*` keys — address
     lines, town, region, postcode, country, latitude, longitude, what3words — plus

@@ -459,6 +459,90 @@ if ($after === $before || $after === null) {
     }
 }
 
+echo "\n=== F. The browser-tab icon, on a page that draws its own <head> (#680) ===\n";
+// -----------------------------------------------------------------------------
+// WHY THIS IS HERE. With no `<link rel="icon">` a browser falls back to
+// `/favicon.ico` by convention. There is no such file in the web root and
+// nothing answers that address, so the request 404s. Until 30 October 2026 the
+// icon links were written by `header.php`, which a page drawing its own
+// `<head>` never reaches — and that was live on the SIGN-IN PAGE, which is the
+// first page any visitor sees, because `/` redirects to `/login`.
+//
+// It is checked over real HTTP rather than by reading the template, because the
+// question is what a browser actually receives. And the file the link POINTS AT
+// is checked on disk, because a link to a missing picture is the same 404 with
+// an extra step — which is the whole fault being fixed.
+$signIn = $get('/login');
+if ($signIn === '') {
+    bad('F01', 'the sign-in page could not be fetched at all, so nothing here was checked');
+} else {
+    preg_match('#<link[^>]*\brel\s*=\s*"icon"[^>]*>#i', $signIn, $iconTag);
+    $hasIcon = $iconTag !== [];
+    if ($hasIcon === true) {
+        ok('F01', 'the sign-in page links a browser-tab icon: ' . trim($iconTag[0]));
+    } else {
+        bad('F01', 'the sign-in page links NO icon, so every visitor\'s browser asks for /favicon.ico and gets a 404', 'no <link rel="icon"> in the page it served');
+    }
+
+    // F02: FOLLOW the link. Asking the server for it, rather than looking for
+    //      the file on disk, is deliberate twice over: it is what a browser
+    //      actually does, and the first version of this check reached for
+    //      PORTAL_WEBROOT, a constant that exists inside the portal and not in
+    //      this test's own process — so it died rather than reporting
+    //      anything. A link pointing at a missing picture is the same 404 the
+    //      whole fix is about, one step later.
+    //
+    //      WHAT IT ASSUMES: a root-relative href. `tblSites.faviconPath` is a
+    //      free-text field, so an organisation that put a WHOLE address there
+    //      would make this fetch `http://127.0.0.1:port/https://…` and go red
+    //      on a portal that works perfectly. No fixture does that, and the
+    //      admin form turns an empty value into NULL rather than '', but if
+    //      this check ever fails with a nonsense address in the message, that
+    //      is the reason — not a missing icon.
+    $status = static function (string $path) use ($port): int {
+        $ch = curl_init('http://127.0.0.1:' . $port . $path);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 15, CURLOPT_NOBODY => true]);
+        curl_exec($ch);
+
+        return (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    };
+    if ($hasIcon === true && preg_match('#href\s*=\s*"([^"]+)"#i', $iconTag[0], $href) === 1) {
+        $iconStatus = $status($href[1]);
+        if ($iconStatus === 200) {
+            ok('F02', 'and the picture it names really is served: ' . $href[1]);
+        } else {
+            bad('F02', 'the icon link points at something the server will not give, which is the same 404 one step later', $href[1] . ' answered HTTP ' . $iconStatus);
+        }
+    } else {
+        bad('F02', 'the icon link has no href to follow');
+    }
+
+    // F03: /favicon.ico really does 404 — the premise of the whole fix. If a
+    //      file were ever added there this check would go red, which is the
+    //      right outcome: the note above would then be out of date.
+    $fallbackStatus = $status('/favicon.ico');
+    if ($fallbackStatus === 404) {
+        ok('F03', 'and /favicon.ico is still unanswered (404), which is why the link above has to be there');
+    } else {
+        bad('F03', 'something now answers /favicon.ico, so the reason for this section has changed and its note is stale', 'HTTP ' . $fallbackStatus);
+    }
+
+    // F04: AN ORDINARY PAGE MUST NOT HAVE LOST IT. The icon links moved OUT of
+    //      header.php, which is where every ordinary page got them, and into
+    //      head-meta.php, which header.php requires. That is one require away
+    //      from being a regression for every page in the portal rather than a
+    //      fix for a few, so it is checked rather than assumed — and checked on
+    //      a page that goes through the shared header, not through its own head.
+    $ordinary = $get('/help');
+    if ($ordinary === '') {
+        bad('F04', 'an ordinary page could not be fetched, so this half was not checked');
+    } elseif (preg_match('#<link[^>]*\brel\s*=\s*"icon"[^>]*>#i', $ordinary) === 1) {
+        ok('F04', 'an ordinary page, through the shared header, still carries the icon too');
+    } else {
+        bad('F04', 'an ordinary page has LOST its icon: moving the links into head-meta.php broke the ordinary path');
+    }
+}
+
 echo "\n=== Z. Clean-up ===\n";
 $clearSetting('site.url');
 $clearSetting('visitors.public_capture_enabled');

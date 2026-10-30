@@ -45,6 +45,23 @@ WHAT THIS CHECK CANNOT SEE — read this before trusting a pass
    those pages do not write a <title> of their own.
 4. It cannot see a <title> built by a function called from elsewhere, nor one
    written inside a heredoc.
+5. THE ICON GUARD (#680) proves only that a `rel="icon"` link is PRESENT in the
+   markup head-meta.php prints, with PHP strings and comments stripped. Two
+   shapes leave the text exactly there and print nothing, and both were
+   measured, not guessed:
+     * the links wrapped in `<?php if (false === true): ?> … <?php endif; ?>`;
+     * a `<?php return; ?>` placed before them.
+   Both pass `php -l` and both leave this check GREEN. Section F of
+   `tools/page-head-selftest.php` catches the first over real HTTP — it fetches
+   the sign-in page and looks at what arrived — and both this check and that
+   test run on every pull request. **But `.githooks/pre-push` runs only
+   `tools/audit-checks/`**, so on this machine the hard gate passes on a page
+   that serves no icon. Do not read a green pre-push as "the icon is served".
+6. Nothing guards the two `apple-touch-icon` links at all. Deleting them leaves
+   this check green and section F green, because both look for `rel="icon"`.
+   That was true while they lived in `header.php` too, so #680 carried the gap
+   over rather than creating it; it is written down here so the next person
+   does not have to find it again.
 
    An EARLIER VERSION of this list claimed, as its first limitation, that a
    page mentioning `header.php` anywhere was let through. That was true of the
@@ -115,6 +132,13 @@ EXEMPT = {
 }
 
 SHARED_PARTIAL = "head-meta.php"
+
+# 🔖 A really-printed browser-tab icon link. `rel` may come before or after
+#    `type`, and the quote style may change, so the two facts are required in
+#    one tag rather than as independent patterns anywhere in the file — the
+#    mistake the QR guard made twice (#623), where a name and an address found
+#    separately passed on a commented-out function.
+ICON_LINK = re.compile(r"<link[^>]*\brel\s*=\s*[\"']icon[\"'][^>]*>", re.IGNORECASE)
 
 
 def printed_markup(text: str) -> str:
@@ -294,6 +318,33 @@ def main() -> int:
             "web/_core/templates/header.php no longer requires "
             f"{SHARED_PARTIAL}, so every ordinary page has lost its "
             "description, canonical address and preview card"
+        )
+    elif ICON_LINK.search(printed_markup(shared_partial.read_text(encoding="utf-8", errors="replace"))) is None:
+        # 🔖 The same blind spot one level down, and the reason for #680.
+        #    Since 30 October 2026 the browser-tab icon is written by
+        #    head-meta.php rather than header.php, precisely so that a page
+        #    drawing its own <head> gets one. Nothing else in this check would
+        #    notice those three lines being deleted: every page would still
+        #    require the partial and still pass, while every visitor's browser
+        #    fell back to /favicon.ico — which no file and no address answers,
+        #    so it 404s. That was live on the SIGN-IN PAGE, the first page any
+        #    visitor sees. The markup is pinned rather than the variable name,
+        #    because what matters is that a `rel="icon"` link is PRESENT in the
+        #    markup this file prints — which is not the same as proving the
+        #    browser gets one, and limitations 5 and 6 above say exactly where
+        #    the difference bites.
+        #
+        #    **Through printed_markup(), and that is load-bearing.** Reading
+        #    the raw file passed on the link COMMENTED OUT inside
+        #    `<?php /* ... */ ?>` — every character still present, nothing
+        #    printed. Measured by planting it, not reasoned about. That is the
+        #    #623 QR-guard mistake and this check's own third mistake, both of
+        #    which were satisfied by text that never runs.
+        header_fault = (
+            f"web/_core/templates/{SHARED_PARTIAL} no longer writes a "
+            "`rel=\"icon\"` link, so every page — including the sign-in page, "
+            "which draws its own <head> — falls back to /favicon.ico, and "
+            "nothing answers that address (#680)"
         )
 
     for path in sorted(APPS.rglob("*.php")):

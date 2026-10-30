@@ -188,3 +188,64 @@ $headMetaImage     = (
     <meta name="twitter:image"       content="<?php echo htmlspecialchars($headMetaImage, ENT_QUOTES, 'UTF-8'); ?>">
 <?php   endif; ?>
 <?php endif; ?>
+
+<?php
+// 🔖 ---------------------------------------------------------------------------
+// THE BROWSER-TAB AND HOME-SCREEN ICONS (#680)
+// -----------------------------------------------------------------------------
+// WHY THEY ARE HERE AND NOT IN header.php, WHERE THEY LIVED UNTIL 30 OCTOBER
+// 2026. A page that draws its own `<head>` never reaches header.php, so it got
+// no icon link at all — and with none, a browser falls back to `/favicon.ico`
+// by convention. There is no such file in the web root and nothing answers
+// that address, so every such page cost its visitor a 404.
+//
+// That was live on the SIGN-IN PAGE, which is the first page any visitor sees:
+// `/` redirects to `/login`, and `web/_apps/auth/login/index.php` draws its
+// own head. Found by the browser audit (`tools/visual-audit.php`) on its first
+// real run, as a console error nobody had been looking for.
+//
+// Putting them here rather than in a new partial is the whole point: an
+// own-head page that is NOT on the exemption list already requires this file,
+// and `tools/audit-checks/check_page_head_tags.py` already fails one that does
+// not. So one require that is already in place, already guarded, closes the
+// class — instead of a second thing for the next own-head page to forget.
+//
+// THESE ARE OUTSIDE THE BLOCK ABOVE ON PURPOSE. The sharing tags are skipped
+// when there is no trustworthy whole address to put in them; an icon needs no
+// address and belongs on every page either way.
+//
+// `??=`: header.php works both of these out at the top of itself, before
+// requiring this file, so an ordinary page reuses its answer and a page with
+// its own head gets it worked out here. Keep the two spellings identical —
+// there are TWO of them, here and in header.php, and no third.
+//
+// WHAT IS DELIBERATELY NOT FIXED HERE: the pages named in that check's EXEMPT
+// list still have no icon, and should not get one from this file. (No count is
+// written down on purpose — count them from the code; a number here went stale
+// within the hour, saying 13 when there were 12.) They are printouts, e-mail
+// previews, wall displays and kiosk screens — no browser tab anybody looks at.
+//
+// `admin/maintenance/backup.php` is the careful one, and the first version of
+// this comment got BOTH halves of it wrong. It is not the whole file that must
+// avoid this partial: that file requires `header.php` on both of its ordinary
+// paths, so it reaches this one every normal request. It is its CLOSED-DATABASE
+// RECOVERY BRANCH, which prints its own `<head>`, that must not. And the reason
+// is not the icon code below — `Site::branding()` reads `self::$currentSite`,
+// the row already in memory from bootstrap, and touches no database. The reason
+// is the PRE-EXISTING read higher up this file: `PortalAddress` queries
+// `tblSettings`, which is exactly what that branch exists for the absence of.
+// So do not "simplify" by adding the icon lines to that branch on the strength
+// of them being harmless — the require as a whole is what it must avoid.
+// `$activeAssetFolder` is NOT worked out again here. It is already set
+// unconditionally further up this same file, for the sharing picture, so a
+// second copy of that closure could never run — and a divergence in dead code
+// is invisible. (It was written twice in the first version of this block, which
+// is how that was noticed.)
+// address-check: allow — the end of a file name under /assets/, which the web
+// server answers itself; not a page.
+$brandIconPath ??= '/assets/images/brandkit/assets/' . $activeAssetFolder . '/icon.svg';
+$siteFavicon   ??= \Portal\Core\Site::branding('favicon') ?? $brandIconPath;
+?>
+    <link rel="icon" type="image/svg+xml" href="<?php echo htmlspecialchars($siteFavicon, ENT_QUOTES, 'UTF-8'); ?>">
+    <link rel="apple-touch-icon" href="<?php echo htmlspecialchars($brandIconPath, ENT_QUOTES, 'UTF-8'); ?>">
+    <link rel="apple-touch-icon" href="/assets/images/icon-192.svg">

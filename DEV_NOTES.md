@@ -11127,3 +11127,48 @@ Two things make this worth a note rather than a shrug:
 Read the rows first, put exactly those back — including "there was no row",
 restored by leaving none — and assert it, which is now the last check of the
 part.
+
+## A shared template is the right place for a thing every page needs — pick the one already required (#680)
+
+**30 October 2026.** The browser-tab icon links lived in `header.php`. A page
+that draws its own `<head>` never reaches that file, so it had no icon — and
+with none a browser falls back to `/favicon.ico`, which no file and no address
+answers. That was live on the **sign-in page**, the first page any visitor sees.
+
+The tempting fix is a new partial, `head-icons.php`, required by both. The
+better one is to put the links in **`head-meta.php`**, because:
+
+* every own-`<head>` page **already requires it**, and
+* `tools/audit-checks/check_page_head_tags.py` **already fails a page that does
+  not**, naming the 13 exemptions one by one.
+
+So the class closes with no new thing to remember and no new list. A new partial
+would have been a second thing for the next own-head page to forget.
+
+Two details that make it work rather than nearly work:
+
+* The links go **outside** the sharing-tag block in that file. Those tags are
+  skipped when there is no trustworthy whole address to put in them (a canonical
+  built from a host the requester chose points search engines at a name an
+  outsider picked); an icon needs no address and belongs on every page either
+  way.
+* `$siteFavicon` and `$brandIconPath` are taken with **`??=`**. `header.php`
+  works both out at the top of itself, before requiring the partial, so an
+  ordinary page reuses its answer and an own-head page gets it worked out there.
+  One copy of the resolution chain, two entry points.
+
+**And check the direction you did not change.** Moving the links out of
+`header.php` is one require away from being a regression for *every* page in the
+portal rather than a fix for a few. Section F of `page-head-selftest.php` checks
+an ordinary page still carries the icon (F04) as well as the sign-in page (F01),
+and when the original fault is planted F01 and F02 go red while F04 stays green
+— which is how you know the two checks are testing different things.
+
+**A guard on a shared template has to read what is PRINTED.** The first version
+of the new check read the raw file for `rel="icon"`, and passed on the link
+commented out inside `<?php /* … */ ?>` — every character still there, nothing
+served. Measured by planting, not reasoned about. It now reads
+`printed_markup()`. That is the third time in this repository a guard has been
+satisfied by text that never runs (the QR host function, #623; a commented-out
+`require` in this very check), so treat "the text is present" as evidence of
+nothing.

@@ -269,9 +269,13 @@ header("Content-Security-Policy: default-src 'self'; "
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="<?php echo htmlspecialchars($productName, ENT_QUOTES, 'UTF-8'); ?>">
     <link rel="manifest" href="<?php echo '/manifest.json'; // address-check: allow — one description of the installable app for the whole installation: manifest.php starts the app at the top address, and sw.js and the sign-out page keep it under this exact name (#536) ?>">
-    <link rel="icon" type="image/svg+xml" href="<?php echo htmlspecialchars($siteFavicon, ENT_QUOTES, 'UTF-8'); ?>">
-    <link rel="apple-touch-icon" href="<?php echo htmlspecialchars($brandIconPath, ENT_QUOTES, 'UTF-8'); ?>">
-    <link rel="apple-touch-icon" href="/assets/images/icon-192.svg">
+    <?php /* 🔖 The three icon links used to be written HERE. They moved into
+             head-meta.php on 30 October 2026 (#680), which this file requires
+             about thirty lines above, so there is still exactly one copy —
+             and every page that draws its OWN <head> now gets them too.
+             `$siteFavicon` and `$brandIconPath` are still worked out at the
+             top of this file; head-meta.php takes them with `??=` rather than
+             working them out again. */ ?>
     <title><?php echo htmlspecialchars($pageTitle . ' - ' . $siteName, ENT_QUOTES, 'UTF-8'); ?></title>
 
     <!-- 🎨 Stylesheets (CDN with local fallback, RTL variant if needed) -->
