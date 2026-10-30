@@ -1178,6 +1178,21 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_api_spec_matches_code.py
 
+      # A form that SAVES a setting installation-wide must not PREFILL it from
+      # the merged settings (#674, #668). $SETTINGS has already merged the
+      # installation's rows with the open organisation's, so a box filled from
+      # it shows the ORGANISATION's value while Save writes the INSTALLATION's.
+      # A global administrator opens the page while in an organisation that has
+      # its own value, sees it, and presses Save without touching anything - it
+      # is now everyone's. That is the wrong direction across a boundary between
+      # two parties, which may be a hosting provider and its customers.
+      # Fifteen pages had this shape; the pending list beside the check names
+      # the fourteen still to fix, so no NEW page can join them.
+      - name: 'No form prefills an installation-wide setting from the merged array (hard gate, #674)'
+        id: install_wide_prefill
+        if: always()
+        run: python3 -I tools/audit-checks/check_install_wide_prefill.py
+
       # The API description satisfies its own schema, and every property and
       # parameter explains itself (#641). This project's rule is that where it
       # produces JSON a schema lives beside it, with a description on every

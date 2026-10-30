@@ -63,7 +63,26 @@ if (App::isAdmin() === false) {
 }
 
 $siteId     = Site::id();
-$settings   = App::settings()['transcription'] ?? [];
+// 🏛️ EVERY field on this form is written INSTALLATION-WIDE by save.php — the
+//    row with `siteID IS NULL` — so every one is read back from the
+//    installation's OWN layer, never from $SETTINGS (#674).
+//
+//    WHY THAT MATTERS, because it is not obvious from reading either file
+//    alone. $SETTINGS has already merged the installation's rows with the open
+//    organisation's by the time this page runs. Filling these boxes from it
+//    showed THIS ORGANISATION's value while Save wrote the INSTALLATION's, so a
+//    global administrator who opened the page while in an organisation holding
+//    its own override — and pressed Save without touching anything — made that
+//    override everyone's. **It needed no mistake by anybody**, and it is the
+//    wrong direction across a boundary between two parties: the installation's
+//    administrator may be a hosting provider and the organisations its
+//    customers (#668, owner 29 October 2026).
+//
+//    Section S of tools/transcription-pages-selftest.php proves it: with the
+//    merged read put back, S04 records the installation's provider changing
+//    from `openai` to `assemblyai` on a Save that touched nothing.
+$installed  = InstallationSettings::layer()['transcription'] ?? [];
+$settings   = $installed;
 $isGlobal   = App::isRootAdmin() === true;
 $enabled    = (string) ($settings['enabled'] ?? '0') === '1';
 $provider   = (string) ($settings['provider'] ?? 'openai');
@@ -73,7 +92,45 @@ $hasOaKey   = ((string) ($settings['openai']['apiKey'] ?? '')) !== '';
 $oaModel    = (string) ($settings['openai']['model'] ?? 'whisper-1');
 $hasAaKey   = ((string) ($settings['assemblyai']['apiKey'] ?? '')) !== '';
 $localBin   = (string) ($settings['local']['binPath'] ?? '');
-$ready      = Transcription::providerIsReady($settings);
+
+// ⚖️ TWO LAYERS, TWO DIFFERENT QUESTIONS, and the page must not confuse them.
+//
+//    The BOXES above show the INSTALLATION's settings, because that is what
+//    Save writes (#674). But anything that says what a RUN WILL DO has to read
+//    the MERGED value, because that is what `/admin/transcription/run` and
+//    `recordings/transcribe` read — `run.php`'s own comment says readiness is
+//    "the same question the page asks… one place decides, both ask it".
+//
+//    Judging readiness on the installation layer broke exactly that. With no
+//    installation key but an organisation row holding one, the page said "no
+//    transcription company is set up" and drew the button `disabled`, while a
+//    posted run would have worked; and "Process next N" showed a different N
+//    from the number a run would take. Found by the independent check of
+//    30 October 2026.
+$merged     = App::settings()['transcription'] ?? [];
+$ready      = Transcription::providerIsReady($merged);
+$batchInRun = (int) ($merged['batchSize'] ?? 5);
+$differing  = [];
+$flatten    = static function (array $from, string $prefix = '') use (&$flatten): array {
+    $flat = [];
+    foreach ($from as $key => $value) {
+        $name = $prefix === '' ? (string) $key : $prefix . '.' . (string) $key;
+        if (is_array($value) === true) {
+            $flat = array_merge($flat, $flatten($value, $name));
+            continue;
+        }
+        $flat[$name] = (string) $value;
+    }
+    return $flat;
+};
+$flatInstalled = $flatten($installed);
+foreach ($flatten($merged) as $name => $value) {
+    // Only the NAME of a differing setting is ever shown: a value here could be
+    // an API key.
+    if (($flatInstalled[$name] ?? null) !== $value) {
+        $differing[] = $name;
+    }
+}
 
 // 💳 The budget. `capFrom()` is the ONE place the two layers are weighed
 //    against each other: the installation's value CAPS this organisation's and
@@ -135,6 +192,26 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php endif; ?>
 
 <h1 class="mb-3"><i class="fa-solid fa-closed-captioning me-2"></i>Transcription</h1>
+
+<?php // 🏛️ Every box on this page is the INSTALLATION's setting, and this says so
+      //    when the organisation you are in holds a row of its own that the
+      //    boxes therefore do not show. Nothing in the portal writes such a
+      //    row, so its presence means somebody put it there — and everything
+      //    that actually runs a transcription reads the merged value, so the
+      //    difference is a real difference in behaviour, not a display quirk.
+      //    Only the KEY NAMES are listed: a value here could be an API key.
+      //    (#674; the boundary it protects is #668.) ?>
+<?php if ($differing !== []): ?>
+    <div class="alert alert-info">
+        <strong>This organisation has its own value for
+        <?php echo count($differing) === 1 ? 'one of these settings' : 'some of these settings'; ?>.</strong>
+        The boxes below show <em>the installation's</em> settings, which is what Saving writes — so
+        they are not what this organisation is currently using. The
+        <?php echo count($differing) === 1 ? 'setting that differs is' : 'settings that differ are'; ?>:
+        <?php foreach ($differing as $i => $name): ?><code><?php echo htmlspecialchars('transcription.' . $name, ENT_QUOTES, 'UTF-8'); ?></code><?php echo $i < count($differing) - 1 ? ', ' : ''; ?><?php endforeach; ?>.
+        Nothing in the portal creates an organisation-level row for these, so one is worth looking into.
+    </div>
+<?php endif; ?>
 
 <?php // 🚦 Nothing here does anything until a company has been set up. Said at
       //    the top rather than left for somebody to work out from a queue that
@@ -203,10 +280,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/transcription/run'), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <button class="btn btn-outline-success" type="submit" <?php echo $ready === false ? 'disabled' : ''; ?>>
-                    <i class="fa-solid fa-play me-1"></i>Process next <?php echo (int) $batch; ?>
+                    <i class="fa-solid fa-play me-1"></i>Process next <?php echo (int) $batchInRun; ?>
                 </button>
                 <div class="form-text">
-                    Sends up to <?php echo (int) $batch; ?> of your organisation's waiting recordings to the
+                    Sends up to <?php echo (int) $batchInRun; ?> of your organisation's waiting recordings to the
                     transcription company, which charges for each one. This can take several minutes and the
                     page will wait for it. Nothing happens on its own: the queue only moves when somebody
                     presses this.
@@ -248,7 +325,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 ?></div></div>
                 <div class="row py-1 border-bottom"><div class="col-md-4 text-muted">Account key</div><div class="col-md-8"><?php echo $ready === true ? 'Set' : 'Not set'; ?></div></div>
                 <div class="row py-1 border-bottom"><div class="col-md-4 text-muted">Language</div><div class="col-md-8"><?php echo htmlspecialchars($language, ENT_QUOTES, 'UTF-8'); ?></div></div>
-                <div class="row py-1 border-bottom"><div class="col-md-4 text-muted">Recordings per run</div><div class="col-md-8"><?php echo (int) $batch; ?></div></div>
+                <div class="row py-1 border-bottom"><div class="col-md-4 text-muted">Recordings per run</div><div class="col-md-8"><?php echo (int) $batchInRun; ?></div></div>
                 <div class="row py-1"><div class="col-md-4 text-muted">Monthly budget</div><div class="col-md-8">&pound;<?php echo number_format($capPence / 100, 2); ?></div></div>
             </div>
         <?php else: ?>

@@ -109,7 +109,40 @@ search for `ApiAuth::requireWrite` returned 46 against a true 45 — the extra w
 COMMENT, added by this very package, says a bearer key cannot reach it. Searching for the text of a
 call finds the text, not the call; strip comments with the tokenizer.
 
+## 30 October 2026 — a form could push one organisation's setting to every organisation (#674, #668)
+
+**What changed.** Admin, Transcription filled its boxes from the merged `$SETTINGS` while its Save
+writes installation-wide, so a global administrator in an organisation holding its own value saw
+that value and **pressing Save without touching anything made it the installation's, for everyone.**
+Every box now reads `InstallationSettings::layer()`, and the page NAMES any setting where the
+organisation differs — the difference is real, because everything that runs a transcription reads the
+merged value, and nothing in the portal creates such a row, so one being there is worth knowing.
+
+**It is FIFTEEN admin forms, not the one the issue named.** New hard gate
+`tools/audit-checks/check_install_wide_prefill.py`, with the fourteen outstanding on a pending list
+so the check gates from today and no new page can join them. They are deliberately not swept in one
+go: each page needs reading field by field, and a page may legitimately show a merged value beside an
+installation one. The list names which keys each page touches, including several API keys and two
+money limits.
+
+**The check reported its own fix as a fault**, which is why it has a term you would not expect: it
+skips a page that reads the installation layer at all, because a fixed page often reads both
+deliberately. Stated cost: a page fixed for one field and not another passes.
+
+**Section S proves the harm rather than arguing it** — the old read put back makes S04 record the
+installation's provider changing from `openai` to `assemblyai` on a Save that touched nothing.
+149 checks in that file now, all passing against a real MySQL 8.0.36 with the full schema and every
+migration replayed.
+
+**A mistake worth recording:** undoing that plant with `git checkout --` wiped the uncommitted fix,
+because the fix was not committed yet. **Restore a planted file from saved BYTES, never from git,
+while the work is still uncommitted.**
+
 **Next.** The browser/visual half of #569 — layouts at many widths, and how pages actually look.
+**It is blocked:** there is no Playwright, Chromium or Chrome on this machine, and a visual audit also
+needs a running portal (a MySQL container plus the built-in server). Installing a browser is the
+owner's call. The static half is already covered and clean —
+`check_mobile_readiness.py` reports nothing.
 
 ## 29 OCTOBER 2026, LATEST — transcription you can actually reach (#276, migration 229)
 

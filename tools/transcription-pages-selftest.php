@@ -2086,6 +2086,165 @@ q('DELETE FROM tblTranscript WHERE recordingID BETWEEN 921100 AND 921199');
 // =============================================================================
 // 🅿️ P. Nothing fell over on the way
 // =============================================================================
+// =============================================================================
+// 🏛️ S. The form shows the INSTALLATION's settings, not this organisation's (#674)
+// =============================================================================
+//
+// WHY THIS SECTION EXISTS. `admin/transcription/save.php` writes every field on
+// that form installation-wide — the row with `siteID IS NULL`. The page used to
+// fill its boxes from `$SETTINGS`, which has ALREADY merged the installation's
+// rows with the open organisation's. So a global administrator who opened the
+// page while in an organisation holding its own value saw that value, and
+// pressing Save without touching anything made it the INSTALLATION's, for every
+// organisation on it. It needed no mistake by anybody.
+//
+// Nothing in the portal writes an organisation-level row for these keys, so this
+// section has to create one to test the behaviour at all — which is also why the
+// page now REPORTS such a row rather than hiding it.
+head('S. The form shows the installation settings, not this organisation (#674)');
+
+$setOrgRow = static function (string $key, string $value): void {
+    q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID = ?', 'si', [$key, ORG]);
+    q(
+        'INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) '
+        . 'VALUES (?, ?, ?, ?, 0)',
+        'isss',
+        [ORG, $key, $value, $value]
+    );
+};
+
+// The installation says one thing; this organisation says another.
+installSetting('transcription.provider', 'openai');
+installSetting('transcription.language', 'en');
+$setOrgRow('transcription.provider', 'assemblyai');
+
+$s1 = req($jar['global'], 'GET', '/admin/transcription');
+ok(
+    'S01 the page is still answered with an organisation-level row present',
+    $s1['status'] === 200,
+    'status ' . $s1['status']
+);
+
+// 🧪 EVERY box the form submits must show the INSTALLATION's value — not just
+//    the provider. The first version of this section checked `provider` alone,
+//    and the independent check proved what that was worth: putting the merged
+//    read back on `language` and `batchSize` left all 149 checks PASSING and the
+//    audit gate green. One pinned field out of nine is one guard and eight
+//    unguarded fields.
+//
+//    Each control is given a DIFFERENT installation value and organisation
+//    value, so a box showing either one identifies which layer it read.
+$boxes = [
+    // [setting key, control name, installation value, this organisation's value]
+    ['transcription.provider',     'provider',  'openai',          'assemblyai'],
+    ['transcription.language',     'language',  'en',              'cy'],
+    ['transcription.batchSize',    'batchSize', '7',               '23'],
+    ['transcription.openai.model', 'oa_model',  'whisper-1',       'whisper-SELFTEST'],
+    ['transcription.local.binPath', 'local_bin', '/usr/bin/instal', '/usr/bin/orgonly'],
+];
+foreach ($boxes as [$key, $control, $installValue, $orgValue]) {
+    installSetting($key, $installValue);
+    $setOrgRow($key, $orgValue);
+}
+$sBoxes = req($jar['global'], 'GET', '/admin/transcription');
+
+// Read the PARSED document: which option carries `selected`, and what an input
+// holds, are exactly the things a regular expression gets wrong on attribute
+// order. `getAttribute()` returns NULL for a missing attribute, not ''.
+$valueOf = static function (string $html, string $control): ?string {
+    if (class_exists('Dom\HTMLDocument') === false) {
+        return null;
+    }
+    $doc = Dom\HTMLDocument::createFromString(
+        '<!doctype html><html><body>' . $html . '</body></html>',
+        LIBXML_NOERROR
+    );
+    foreach ($doc->getElementsByTagName('input') as $input) {
+        if ((string) $input->getAttribute('name') === $control) {
+            return (string) $input->getAttribute('value');
+        }
+    }
+    foreach ($doc->getElementsByTagName('select') as $select) {
+        if ((string) $select->getAttribute('name') !== $control) {
+            continue;
+        }
+        foreach ($select->getElementsByTagName('option') as $option) {
+            if ($option->getAttribute('selected') !== null) {
+                return (string) $option->getAttribute('value');
+            }
+        }
+        return '';   // a select with nothing selected
+    }
+    return null;
+};
+
+foreach ($boxes as $i => [$key, $control, $installValue, $orgValue]) {
+    $shown = $valueOf($sBoxes['body'], $control);
+    ok(
+        sprintf('S02%s the %s box shows the INSTALLATION value, not this organisation override',
+            chr(97 + $i), $control),
+        $shown === $installValue,
+        sprintf('shows %s; the installation holds %s and this organisation holds %s',
+            var_export($shown, true), var_export($installValue, true), var_export($orgValue, true))
+    );
+}
+
+$selected = $valueOf($sBoxes['body'], 'provider');
+
+ok(
+    'S03 and the page SAYS this organisation has its own value, naming the setting',
+    str_contains($s1['body'], 'transcription.provider')
+        && str_contains(text($s1['body']), 'own value'),
+    'the notice must name the key, because hiding the difference is how the old fault stayed invisible'
+);
+
+// Saving without touching anything must not promote the organisation value.
+$beforeSave = one(
+    'SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL',
+    's',
+    ['transcription.provider']
+);
+$s4 = req($jar['global'], 'POST', '/admin/transcription/save', [
+    'csrf_token' => freshToken($jar['global']),
+    'enabled'    => '1',
+    'provider'   => $selected ?? 'openai',
+    'language'   => 'en',
+    'batchSize'  => '5',
+]);
+$afterSave = one(
+    'SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL',
+    's',
+    ['transcription.provider']
+);
+ok(
+    'S04 saving the form as shown leaves the installation value alone',
+    $afterSave !== null && (string) $afterSave['settingValue'] === 'openai',
+    'before ' . var_export($beforeSave['settingValue'] ?? null, true)
+        . ', after ' . var_export($afterSave['settingValue'] ?? null, true)
+        . ' (status ' . $s4['status'] . ')'
+);
+ok(
+    'S05 and this organisation own row is untouched by that save',
+    (static function (): bool {
+        $row = one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = ?', 'si',
+            ['transcription.provider', ORG]);
+        return $row !== null && (string) $row['settingValue'] === 'assemblyai';
+    })(),
+    'the save writes installation-wide only; it must not reach into an organisation row'
+);
+
+// 🚫 S03 would pass on a page that always shows that notice, so prove it does
+//    not: with the override gone, the notice must go too.
+foreach ($boxes as [$key, $control, $installValue, $orgValue]) {
+    q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID = ?', 'si', [$key, ORG]);
+}
+$s6 = req($jar['global'], 'GET', '/admin/transcription');
+ok(
+    'S06 with no organisation row, the notice is GONE (S03 is not vacuous)',
+    str_contains(text($s6['body']), 'own value') === false,
+    'a notice that is always shown says nothing'
+);
+
 head('P. The server logged no fault');
 
 $errorLog = $child . $sep . 'php-errors.log';

@@ -10276,6 +10276,57 @@ reading as a set because none of them would fail a test:
   occurrences; `users/api/create.php` has two, which is how an earlier draft of this note said
   "nine handlers") — but the justification was the opposite of what the code does.
 
+### A form that saves installation-wide must not prefill from the merged array (#674, 30 October 2026)
+
+`$SETTINGS` is already merged by the time a page runs. So a box filled from `App::settings()` shows
+the OPEN ORGANISATION's value, while a Save handler writing `settingKey = ? AND siteID IS NULL`
+writes the INSTALLATION's. **The failure needs no mistake:** a global administrator opens the page
+while in an organisation that has its own row, sees that row's value, presses Save without touching
+anything, and it is now the installation's — for every organisation on it.
+
+`Portal\Core\InstallationSettings::layer()` holds the installation-wide rows alone and is what such
+a form must read. `admin/settings/repeats` and `transcription.monthCapPence` already did, which is
+what made the inconsistency on the rest of that page visible.
+
+**It is fifteen admin forms, not one.** `tools/audit-checks/check_install_wide_prefill.py` finds them
+by pairing a page that writes with `siteID IS NULL` against the other pages in its own folder.
+Fourteen are on a pending list so the check can gate immediately; `--strict` fails while any remain.
+They are not fixed in one sweep because each page needs reading field by field — a page may
+legitimately show a merged value BESIDE an installation one — and changing fifteen pages on a guess
+is how a sweep adds more faults than it removes.
+
+**Two things about the check are worth keeping.** It requires a `<form>` on the page, because a
+runner, an OAuth callback or a webhook handler in the same folder reads the merged value *because it
+needs the effective value to work* — measured, five such files would otherwise be reported out of
+nineteen (the first draft of this note said twenty-one), and a check that cries wolf gets switched
+off. And it skips a page that reads the
+installation layer **at all**, because a page that has reckoned with the two layers often reads both
+on purpose: the fixed transcription page reads the layer for its boxes and the merged array once more
+to REPORT a difference. **The check reported that fix as a fault before that term existed** — it was
+telling somebody to undo the correction. The cost, stated in its header: a page fixed for one field
+and not another now passes.
+
+**Four things the independent check found, and the first is the one to remember.** **A test that
+pins one field out of nine is one guard and eight unguarded fields:** section S originally checked
+`provider` alone, and putting the merged read back on `language` and `batchSize` left all 149 checks
+passing. It now pins every box the form submits, each with a different installation and organisation
+value, so a wrong box names which layer it read. **Reading the layer for an OPERATIONAL question was
+a new fault, not a fix:** judging readiness on it made the page say "no transcription company is set
+up" and disable the button while a posted run would have worked, because `run.php` reads the merged
+value — so the boxes now show the installation's settings and anything describing what a run WILL DO
+reads the merged one. **The check's write pattern was wrong twice**, believing one spelling existed
+where three savers insert straight into the column, and counting a `SELECT … siteID IS NULL` as a
+write — which produced a false accusation against a page whose paired saver only reads. **And its
+list of limits omitted two blind spots, one hiding a live instance:** a read through the inherited
+`$SETTINGS`, and a page that is its own saver, which `maintenance/backup.php` is.
+
+**The harm is demonstrated, not argued.** Section S of `tools/transcription-pages-selftest.php` puts
+the old merged read back and watches the installation's provider change from `openai` to
+`assemblyai` on a Save that touched nothing. S06 then removes the organisation's row and requires the
+new notice to disappear, so the notice cannot be one that is simply always shown.
+
+
+
 ### Five replies that described the inside of the envelope as the whole reply (#641, 30 October 2026)
 
 `events/list`, `events/detail`, `noticeboard/list` and both Event Team Hub operations declared their

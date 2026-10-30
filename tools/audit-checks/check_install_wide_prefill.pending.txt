@@ -1,0 +1,63 @@
+# Forms that prefill a merged setting their own Save writes installation-wide (#674).
+#
+# Each line is a page that already had this shape when the check was written on
+# 30 October 2026. The check gates from the start so that NO NEW page can join
+# them; `--strict` fails while any line remains, which is what stops this list
+# becoming permanent.
+#
+# WHY THEY ARE NOT ALL FIXED AT ONCE. The fault is one line of reasoning repeated
+# fifteen times, but the fix is not mechanical: each page has to be read field by
+# field to see which boxes its own Save really writes installation-wide, and a
+# page may legitimately show a merged value BESIDE an installation one ("your
+# organisation currently uses..."). Changing fifteen pages on a guess is how a
+# sweep introduces more faults than it removes.
+#
+# THE SHAPE OF THE FAULT, so each line can be judged without re-deriving it:
+# `$SETTINGS` is already merged by the time a page runs, so a box filled from
+# `App::settings()` shows the OPEN ORGANISATION's value while Save writes the row
+# with `siteID IS NULL` -- the INSTALLATION's. A global administrator opens the
+# page while in an organisation that has its own override, sees that override,
+# and presses Save without touching anything. It is now everyone's.
+#
+# THE FIX, which one field already demonstrates: read from
+# `Portal\Core\InstallationSettings::layer()`, which holds the installation-wide
+# rows alone. `admin/settings/repeats` and `transcription.monthCapPence` do this.
+#
+# Delete a line when that page reads every installation-wide field from the
+# layer. The check FAILS on a line that no longer has the fault, so this list
+# cannot quietly go stale.
+
+web/_apps/admin/ai-assist/index.php                        # ai_assist — includes monthCapPence, a MONEY limit, so this one is also a live #668 instance
+web/_apps/admin/captcha/index.php                          # auth — the bot-check keys for the whole installation
+web/_apps/admin/hymns.php                                  # hymns, service_plans
+web/_apps/admin/integrations/cloudflare-stream/index.php   # cfstream — includes an API token
+web/_apps/admin/integrations/geocoding/index.php           # geo — includes an API key
+web/_apps/admin/integrations/monitoring/index.php          # monitoring — includes the error-reporting address
+web/_apps/admin/integrations/index.php                     # mail — the Microsoft 365 mailbox fields
+web/_apps/admin/integrations/push/index.php                # push
+web/_apps/admin/integrations/what3words/index.php          # w3w — includes an API key
+web/_apps/admin/integrations/zoom/index.php                # zoom — includes a client secret and a webhook secret
+web/_apps/admin/maintenance/offsite-backup.php             # backup — its saver is backup.php, which writes backup.schedule.* straight into the siteID column
+web/_apps/admin/settings/organisation/index.php            # org, portal — needs reading FIRST: a page named for an organisation that writes installation-wide may be mislabelled rather than mis-prefilled
+web/_apps/admin/sms/index.php                              # sms — includes credentials and dailyCap, another limit
+web/_apps/admin/translation/index.php                      # translation — includes API keys
+
+# ── NOT ON THIS LIST, AND THE CHECK CANNOT SEE EITHER OF THEM ────────────────
+#
+# `web/_apps/admin/maintenance/backup.php` HAS this fault and is absent above on
+# purpose: it is its OWN saver, and the check skips a page paired with itself.
+# Measured on 30 October 2026 — it prefills `$SETTINGS['backup']['schedule']
+# ['frequency']` and `['keep']` into its form, and writes `backup.schedule.*`
+# installation-wide in the same file. An earlier version of this list accused it
+# of a DIFFERENT, non-existent fault (a `portal` prefill paired with
+# demo-data.php, which only READS with that clause), so whoever had deleted that
+# line would have recorded the page as clean. Both found by the independent
+# check.
+#
+# `web/_apps/admin/integrations/index.php` and `backup.php` also read settings
+# through the inherited `$SETTINGS` variable rather than `App::settings()`, which
+# `reads_merged()` does not match. The `mail` finding above catches the first by
+# its other reads; nothing catches a page that uses only `$SETTINGS`.
+#
+# Both limits are now stated in the check's own header. They are recorded here
+# as well because this is the file somebody works through.

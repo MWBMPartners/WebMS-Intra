@@ -2,6 +2,56 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — a form could push one organisation's setting to every organisation on the installation (#674, #668)**
+  - **What was wrong, and it needed no mistake by anybody.** `$SETTINGS` has already merged the
+    installation-wide settings with the open organisation's own by the time any page runs. Admin,
+    Transcription filled its boxes from that merged array while its Save writes **installation-wide**.
+    So a global administrator who opened the page while in an organisation holding its own value saw
+    that value in the box, and **pressing Save without touching anything made it the installation's,
+    for every organisation on it.**
+  - **Why that direction matters.** The installation's administrator may be a hosting provider and
+    the organisations its customers, so this is a boundary between two parties rather than one person
+    wearing two hats. One customer's choice quietly becoming everyone's default is the wrong way
+    across it.
+  - **Fixed, and the page now says when the two differ.** Every box reads the installation's own
+    layer. Where the organisation you are in holds a row of its own, the page names the settings that
+    differ — because everything that actually runs a transcription reads the merged value, so the
+    difference is real, and because nothing in the portal creates such a row, so one being there is
+    worth knowing. Only the key names are shown: a value could be an API key.
+  - **The harm is now demonstrated rather than argued.** Section S of the transcription page test
+    puts the old read back and records the installation's provider changing from `openai` to
+    `assemblyai` on a Save that touched nothing. Six checks, and S06 proves the new notice is not
+    simply always shown.
+  - **It is fifteen pages, not one.** A new check, `check_install_wide_prefill.py`, found the same
+    shape on fifteen admin forms — captcha keys, Zoom's client secret, the Cloudflare Stream token,
+    the what3words and geocoding keys, the SMS credentials and daily cap, the AI-assist monthly
+    budget (a money limit, so a #668 instance in its own right), translation keys, monitoring,
+    push, hymns and the Microsoft 365 mailbox fields. **Fourteen are named on a pending list so the
+    check can gate from today and no new page can join them**; `--strict` fails while any remain.
+    They are not all fixed at once because the fix is not mechanical — each page needs reading field
+    by field, and a page may legitimately show a merged value beside an installation one.
+  - **The independent check came back NOT CLEAN with eight real problems, all fixed.** Four are worth
+    recording. **The test pinned one field out of nine** — putting the merged read back on `language`
+    and `batchSize` left all 149 checks passing and the gate green, so section S now pins every box
+    the form submits, each with a different installation and organisation value so a wrong box names
+    which layer it read. **Judging readiness on the installation layer broke the page's agreement
+    with the queue runner**, which reads the merged value: with no installation key but an
+    organisation row holding one, the page said "no transcription company is set up" and disabled
+    the button while a posted run would have worked. The boxes now show the installation's settings
+    and the statements about what a run will do read the merged value, which is the distinction that
+    was missing. **The check's own write pattern was wrong twice** — it believed there was one
+    spelling when three savers insert straight into the column, and it treated a `SELECT … siteID IS
+    NULL` as a write, which produced a false accusation against a page whose paired "saver" only
+    reads. And **two blind spots were missing from its list of limits**, one of them hiding a live
+    instance: a read through the inherited `$SETTINGS` variable, and a page that is its own saver —
+    which `maintenance/backup.php` is, and really does have the fault.
+  - **I deleted two documentation headings with a replace that should have been an insert**, for the
+    third time in this run. Both restored. The rule is in the handoff: find the exact text first, and
+    never chain a commit to an unverified patch.
+  - **The check cried wolf on its own fix, which is why it has one more term than you would expect.**
+    A page that has reckoned with the two layers often reads both deliberately. So it reports only a
+    form that reads the merged array and **never reads the installation layer at all**. The cost is
+    stated in its header: a page fixed for one field and not another passes.
 - **Fixed — the API description's last untrue statements, including five replies that left out the envelope (#641 part 3)**
   - **Five operations declared their payload where the envelope belongs.** `events/list`,
     `events/detail`, `noticeboard/list` and both Event Team Hub operations described the inside of
