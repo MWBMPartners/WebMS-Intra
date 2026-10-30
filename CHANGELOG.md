@@ -2,6 +2,84 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — one organisation's postal address was every organisation's (#677, migration 231)**
+  - **What was wrong.** `admin/settings/organisation/save.php` wrote all nine `org.*` keys — address
+    lines, town, region, postcode, country, latitude, longitude, what3words — plus
+    `portal.support.email` through one helper whose INSERT put **NULL in `siteID`**: the row every
+    organisation on the installation uses. The page is called Organisation settings and sits under
+    Admin → Settings → Organisation, so nothing about it suggested that is what Saving did.
+  - **Be precise about what it cost, because the issue overstated it and measuring corrected that.**
+    #677 said a second organisation's pages "would display the first organisation's address". They
+    would not have: searched on 30 October 2026, **nothing outside that admin page reads any of the
+    nine `org.*` keys** — not a member page, not a public page, not an e-mail. `GivingRetention` only
+    *mentions* `org.address.countryCode`, in a comment explaining why it deliberately does not read
+    it. The support e-mail **was** read, by `Mailer`, and did appear in every organisation's e-mail
+    footer. So the real cost was an address stored at the wrong level, a Save button that lied, and a
+    fault that would have become a leak the moment anything read it.
+  - **Each organisation now holds its own**, and `$upsert()` takes the level as an argument **with no
+    default** — a default here would be the same mistake waiting for the next caller. Migration 231
+    copies each non-empty installation-wide value down to every organisation, so a single-organisation
+    installation (almost all of them) keeps exactly the address it had. An empty value is not copied.
+  - **`portal.support.email` is per-organisation with a FALLBACK to the installation's** (owner,
+    30 October 2026), which is why migration 231 deliberately leaves that row alone: copying it down
+    would mean changing the installation's support address later reached nobody. **An empty box
+    therefore REMOVES the organisation's row** rather than storing an empty string: the merge falls
+    back only where there is no row at all, so a stored `''` wins and would have masked the
+    installation's address for ever with no way back from the page.
+  - **`Mailer` needed no change for anything sent from a web request**, and the limit of that is worth
+    stating rather than discovering: `renderBase()` runs **before** `MailQueue::add()`, so a message's
+    footer is built by the sending request and a queued copy keeps it. **A scheduled job is the
+    exception** — `cron/event-reminders.php` and `cron/giving-statements.php` select across every
+    organisation while `$SETTINGS` was merged once, so one organisation's support address reaches
+    another's members. Harmless while the setting was installation-wide; a wrong address now. Raised
+    as **#683**, with the measurement.
+  - **No page sets the INSTALLATION's support address any more** — only the installer and the generic
+    dot-notation editor. Raised as **#684**, because migration 231's justification depends on that
+    value being changeable.
+  - **The global-administrator gate narrows to the one setting that really is shared.** An ordinary
+    administrator may now set their own organisation's address and support e-mail; `site.url`, which
+    decides where every e-mailed link points (#500), stays with a global administrator, and a request
+    that sends it anyway is **refused with the reason**, never quietly ignored.
+  - **The fault my own first attempt introduced, found by the new test and not by reading.** I guarded
+    *who may send* the portal-address field but then wrote the result regardless. The page disables
+    that box for an ordinary administrator, **a disabled control is not submitted**, so `?? ''` gave
+    an empty string, `PortalAddress::check()` reads empty as "no address", and an ordinary
+    administrator saving their **support address** therefore **cleared `site.url` for every
+    organisation** — after which every e-mailed link would have been built from whatever host the next
+    request arrived at, which a visitor can choose. The handler now asks whether each field *arrived*,
+    never what it contains. That is the #667 shape for the second time in a month.
+  - **The check went blind to its own fix, which was the worst part.** Passing the level as a
+    parameter stopped `check_install_wide_prefill.py` matching the literal `NULL` it looks for, so the
+    saver stopped being a saver and **the whole folder stopped being examined** — proved by planting an
+    installation-wide write back and watching nothing notice. That matters because passing the level in
+    is exactly the pattern the fourteen pages still on its pending list should adopt: each one fixed
+    that way would have left the check's view and the list would have emptied while the coverage
+    emptied with it. Such savers are now named in `LEVEL_CHOSEN_AT_RUN_TIME` with the reason the fault
+    cannot arise, failing **both** ways. Measured first: exactly two files have that shape, so the list
+    is two lines, not fifty.
+  - **I did not run the one existing test of this page, and it was failing.** `portal-address-selftest.php`
+    runs on every pull request and covers this exact card; five of its 93 checks went red, and the
+    package's own new test passed throughout. Four were **stale assertions** reading `siteID IS NULL`
+    for a key that is now the organisation's, and one was the card's contract, which this package
+    changed on purpose. It now has `storedForSite()` / `rowsOfForSite()` helpers, and each rewritten
+    assertion says what it used to require and why that changed. **The fifth was behaviour**, not
+    staleness: it is what traced the stored-empty-string masking above.
+  - **Three more of my own faults, each caught by a test rather than by reading.** The support box
+    prefilled from the merged array while Save wrote the organisation's row — so one press of Save on
+    an untouched form would have pinned the installation's value as the organisation's own, which is
+    exactly the outcome migration 231 refuses to cause. It now reads the organisation's own row and
+    shows the inherited address beside it. That inherited address was read from
+    `$SETTINGS_INSTALLATION`, which **a page does not inherit** (`.claude/rules/app-pages.md`: only
+    `$mysqli` and `$SETTINGS`), so the help text silently took its "nothing to fall back to" branch
+    and told administrators the opposite of the truth; it reads `InstallationSettings::layer()` now.
+    And section O deleted the four installation-wide rows it borrowed instead of restoring them,
+    leaving the fixture poorer than it found it while the suite's own clean-up check could not see it.
+  - **Tests.** Section **O** of `tools/access-pages-selftest.php`, 14 checks over real HTTP (320 → 334),
+    including the two things most likely to be got wrong again: an ordinary administrator's save must
+    not touch `site.url`, and an organisation that has set no support address must still be shown the
+    installation's. Both planted faults turn it red. Migration 231 was proved on a two-organisation
+    database — copied down, did not overwrite an organisation's own value, byte-identical on a second
+    run — and the **end-to-end migration harness passes all 42 checks and all seven phases** with it.
 - **Fixed — a visible Export button on a money page that refused most of the people it was shown to (#675)**
   - **What #675 said, and why all three of its claims were wrong.** The issue reported `expenses/export` as
     a handler that had "never answered a request", that "nothing links to it", and that four

@@ -251,7 +251,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 320;
+const EXPECTED_CHECKS = 334;
 
 function refuse(string $why): never
 {
@@ -2816,6 +2816,157 @@ ok(
     'save HTTP ' . $saved['status'] . '; carried: ' . json_encode($carried($fields)) . '; stored: ' . json_encode($storedChoices())
 );
 q('UPDATE tblUsers SET notifyPrefs = NULL WHERE userID = ?', 'i', [ADM]);
+
+// =============================================================================
+head('O. #677 — each organisation has its OWN postal address and support e-mail');
+// =============================================================================
+/**
+ * THE ACCEPTANCE TEST FOR #677, which is a question about two parties rather
+ * than one setting: "two organisations on one installation can each hold their
+ * own address, and neither sees the other's".
+ *
+ * All nine `org.*` keys and `portal.support.email` used to be written with
+ * nothing in `siteID` — the row EVERY organisation uses — on a page called
+ * Organisation settings. Only the portal's own web address (`site.url`) really
+ * is shared, because it decides where every e-mailed link points (#500).
+ *
+ * Two things here are easy to get wrong and are checked deliberately:
+ *
+ *   * **An ordinary administrator's Save must not touch `site.url`.** The page
+ *     disables that box for them, and a disabled control IS NOT SUBMITTED, so
+ *     the handler sees no `portalAddress` field. Had it read the value instead
+ *     of asking whether the field arrived, an absent box would read as empty,
+ *     `PortalAddress::check()` accepts empty as "clear it", and an ordinary
+ *     administrator pressing Save would have wiped the portal's address for
+ *     every organisation. That is the #667 shape, and it is what the second
+ *     group of checks below exists for.
+ *   * **The support e-mail falls back to the installation's value.** An
+ *     organisation that has not set one must still get a Support link in its
+ *     e-mails, which is why migration 231 leaves the installation's row alone
+ *     rather than copying it down to everybody.
+ */
+$orgPage = ADDR_A . '/admin/settings/organisation';
+$orgSave = ADDR_A . '/admin/settings/organisation/save';
+$bOrgPage = ADDR_B . '/admin/settings/organisation';
+$bOrgSave = ADDR_B . '/admin/settings/organisation/save';
+
+/** One setting's value at one level, read straight out of the database. */
+$settingAt = static function (string $key, ?int $site): string {
+    $row = $site === null
+        ? one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$key])
+        : one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = ?', 'si', [$key, $site]);
+
+    return $row === null ? '(no row)' : (string) $row['settingValue'];
+};
+
+/** Post the postal-address form as `$who`, on `$page`/`$save`. */
+$savePostal = static function (string $who, string $page, string $save, string $line1, string $city) use (&$jar): array {
+    return post($jar[$who], $page, $save, [
+        'addressLine1' => $line1,
+        'addressLine2' => '',
+        'city'         => $city,
+        'region'       => '',
+        'postcode'     => 'CB1 1AA',
+        'countryCode'  => 'GB',
+        'latitude'     => '',
+        'longitude'    => '',
+        'what3words'   => '',
+    ]);
+};
+
+// Start from a known installation-wide value, so "unchanged" means something.
+//
+// WHAT IS PUT BACK, AND WHY IT HAS TO BE. These four rows are SEEDED by
+// full_schema.sql, so they belong to the database this test was handed rather
+// than to the made-up world it builds. The first version of this part simply
+// deleted them at the end, which left the four rows ABSENT — a fresh install
+// has them and the database did not any more. Worse, the suite's closing
+// clean-up check could not see it: that check compares only the keys recorded
+// by the `setting()` helper, and this part writes with raw `q()`, so the run
+// still reported every check passing while the fixture had been quietly made
+// poorer. Found by the independent check of 30 October 2026.
+//
+// So: read whatever is there first, and put exactly that back at the end —
+// including "there was no row", which is restored by leaving none.
+$installRowsBefore = [];
+foreach (['site.url', 'portal.support.email', 'org.address.line1', 'org.address.city'] as $key) {
+    $row = one('SELECT settingValue, defaultValue, isSensitive FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$key]);
+    $installRowsBefore[$key] = $row;
+}
+q("DELETE FROM tblSettings WHERE settingKey IN ('site.url', 'portal.support.email', 'org.address.line1', 'org.address.city') AND siteID IS NULL");
+q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES "
+    . "(NULL, 'site.url', 'https://installation.invalid', '', 0), "
+    . "(NULL, 'portal.support.email', 'installation@selftest.invalid', '', 0), "
+    . "(NULL, 'org.address.line1', 'INSTALLATION LINE ONE', '', 0), "
+    . "(NULL, 'org.address.city', 'INSTALLATION CITY', '', 0)");
+
+// --- each organisation keeps its own address --------------------------------
+$answer = $savePostal('adm', $orgPage, $orgSave, 'A STREET', 'A CITY');
+ok('A\'s administrator — not a global one — may save their own organisation\'s address', $answer['status'] === 302 && $answer['location'] === $orgPage, 'HTTP ' . $answer['status'] . ' Location: ' . ($answer['location'] === '' ? 'none' : $answer['location']));
+ok('…and it is stored against A, not installation-wide', $settingAt('org.address.line1', ORG_A) === 'A STREET' && $settingAt('org.address.line1', null) === 'INSTALLATION LINE ONE', 'A: ' . $settingAt('org.address.line1', ORG_A) . ' | installation: ' . $settingAt('org.address.line1', null));
+
+$answer = $savePostal('badm', $bOrgPage, $bOrgSave, 'B STREET', 'B CITY');
+ok('B\'s administrator saves a different address on B\'s own address', $answer['status'] === 302 && $settingAt('org.address.line1', ORG_B) === 'B STREET', 'HTTP ' . $answer['status'] . ' | B: ' . $settingAt('org.address.line1', ORG_B));
+ok('…and A\'s address is untouched by it — THE WHOLE POINT OF #677', $settingAt('org.address.line1', ORG_A) === 'A STREET' && $settingAt('org.address.city', ORG_A) === 'A CITY', 'A line1: ' . $settingAt('org.address.line1', ORG_A) . ' | A city: ' . $settingAt('org.address.city', ORG_A));
+
+$page = req($jar['adm'], 'GET', $orgPage)['body'];
+ok('A\'s page shows A\'s address and no trace of B\'s', str_contains($page, 'A STREET') === true && str_contains($page, 'B STREET') === false);
+$page = req($jar['badm'], 'GET', $bOrgPage)['body'];
+ok('B\'s page shows B\'s address and no trace of A\'s', str_contains($page, 'B STREET') === true && str_contains($page, 'A STREET') === false);
+
+// --- the portal's own address stays installation-wide and untouched ---------
+ok('an ordinary administrator saving the address did NOT touch the portal\'s web address', $settingAt('site.url', null) === 'https://installation.invalid', 'site.url is now: ' . $settingAt('site.url', null));
+$answer = post($jar['adm'], $orgPage, $orgSave, ['form' => 'web-addresses', 'supportEmail' => 'a-support@selftest.invalid']);
+ok('an ordinary administrator may set their OWN organisation\'s support e-mail address', $answer['status'] === 302 && $settingAt('portal.support.email', ORG_A) === 'a-support@selftest.invalid', 'HTTP ' . $answer['status'] . ' | A: ' . $settingAt('portal.support.email', ORG_A));
+ok('…and the installation\'s support address is left as it was, so organisations without one still have a Support link', $settingAt('portal.support.email', null) === 'installation@selftest.invalid' && $settingAt('portal.support.email', ORG_B) === '(no row)', 'installation: ' . $settingAt('portal.support.email', null) . ' | B: ' . $settingAt('portal.support.email', ORG_B));
+// 🚨 THE REGRESSION GUARD FOR THE BUG THIS SECTION ACTUALLY FOUND. The save
+//    just above carried a support address and NO portal-address box, because
+//    the page disables that box for an ordinary administrator and a disabled
+//    control is not submitted. The first version of the #677 handler guarded
+//    only who may SEND that field and then wrote the result regardless, so
+//    `?? ''` gave an empty string, PortalAddress::check() read empty as "no
+//    address", and this save WIPED `site.url` for every organisation. Every
+//    e-mailed link would then have been built from whatever host the next
+//    request happened to arrive at, which a visitor can choose (#500).
+ok('…and that support-only save did NOT clear the portal\'s web address (it sent no such box)', $settingAt('site.url', null) === 'https://installation.invalid', 'site.url is now: [' . $settingAt('site.url', null) . ']');
+$page = req($jar['badm'], 'GET', $bOrgPage)['body'];
+ok('B, which has set none, is shown the installation\'s support address as the one in use', str_contains($page, 'installation@selftest.invalid') === true && str_contains($page, 'a-support@selftest.invalid') === false);
+
+// --- and the one setting that really is shared ------------------------------
+// A forged request: an ordinary administrator sending the field the page does
+// not give them. It must be refused outright, with nothing saved — never
+// quietly ignored, because this is a boundary between two parties (#668).
+$answer = post($jar['adm'], $orgPage, $orgSave, ['form' => 'web-addresses', 'portalAddress' => 'https://hijacked.invalid', 'supportEmail' => 'x@selftest.invalid']);
+ok('an ordinary administrator who SENDS the portal address anyway is refused, and nothing is saved', $answer['status'] === 302 && $settingAt('site.url', null) === 'https://installation.invalid' && $settingAt('portal.support.email', ORG_A) === 'a-support@selftest.invalid', 'HTTP ' . $answer['status'] . ' | site.url: ' . $settingAt('site.url', null) . ' | A support: ' . $settingAt('portal.support.email', ORG_A));
+$answer = post($jar['gadm'], $orgPage, $orgSave, ['form' => 'web-addresses', 'portalAddress' => 'https://chosen.invalid', 'supportEmail' => 'g@selftest.invalid']);
+ok('a GLOBAL administrator may change the portal\'s web address, and it is stored installation-wide', $answer['status'] === 302 && $settingAt('site.url', null) === 'https://chosen.invalid', 'HTTP ' . $answer['status'] . ' | site.url: ' . $settingAt('site.url', null));
+
+// Put the four installation-wide rows back EXACTLY as they were found, values
+// and all — see the note where they were read. A key that had no row keeps
+// none. The organisation-level rows this part created go with the made-up
+// world, which removeWorld() takes away by siteID.
+q("DELETE FROM tblSettings WHERE settingKey IN ('site.url', 'portal.support.email', 'org.address.line1', 'org.address.city') AND siteID IS NULL");
+foreach ($installRowsBefore as $key => $row) {
+    if ($row === null) {
+        continue;
+    }
+    q(
+        'INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (NULL, ?, ?, ?, ?)',
+        'sssi',
+        [$key, (string) $row['settingValue'], (string) $row['defaultValue'], (int) $row['isSensitive']]
+    );
+}
+$putBack = 0;
+foreach (array_keys($installRowsBefore) as $key) {
+    $now  = one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$key]);
+    $then = $installRowsBefore[$key];
+    $same = ($now === null && $then === null)
+        || ($now !== null && $then !== null && (string) $now['settingValue'] === (string) $then['settingValue']);
+    if ($same === true) {
+        $putBack++;
+    }
+}
+ok('clean-up: the four installation-wide rows this part borrowed are back exactly as they were', $putBack === 4, $putBack . ' of 4 match');
 
 // =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');

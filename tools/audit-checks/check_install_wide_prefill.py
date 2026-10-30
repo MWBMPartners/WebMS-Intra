@@ -157,6 +157,53 @@ WRITES_INSTALL_WIDE = re.compile(
     r"|UPDATE[^;]*?`?tblSettings`?[^;]*?siteID\s+IS\s+NULL",
     re.IGNORECASE | re.DOTALL)
 
+# 🎚️ A saver that decides the LEVEL AT RUN TIME, by binding siteID as a
+#    parameter instead of writing a literal NULL.
+#
+#    WHY THIS EXISTS, and it is a fault this check developed rather than one it
+#    found (#677, 30 October 2026). `admin/settings/organisation/save.php` was
+#    changed so that one helper writes either level, with the level passed in:
+#
+#        INSERT INTO tblSettings (… siteID …) VALUES (?, ?, 0, ?, NOW())
+#
+#    WRITES_INSTALL_WIDE looks for a literal NULL in that VALUES list, so it
+#    stopped matching, the file stopped being a saver, and the whole folder
+#    stopped being examined. Proved by planting: putting one key back to
+#    installation-wide went completely unnoticed.
+#
+#    That is the worst possible direction, because **passing the level in is
+#    exactly the pattern the fourteen pages still on the pending list should
+#    adopt.** Every one of them fixed that way would quietly leave this check's
+#    view, and the list would empty while the coverage emptied with it.
+#
+#    So such a file is NAMED here with the reason the fault cannot arise in it,
+#    and an unlisted one FAILS. This check cannot judge which of a run-time
+#    saver's keys go installation-wide — that is decided by an argument at each
+#    call site, not by the SQL — so the entry has to carry the argument a reader
+#    would otherwise have to reconstruct. It fails BOTH ways: a file that has
+#    stopped having this shape fails too, so an entry cannot quietly go stale.
+#
+#    Measured before this was written: exactly two files under admin/ have this
+#    shape and no literal-NULL write as well. Twenty have both, so they are
+#    still examined by the ordinary branch and need no line here.
+WRITES_LEVEL_AT_RUN_TIME = re.compile(
+    r"INSERT\s+INTO\s+`?tblSettings`?[^;]*?\bsiteID\b[^;]*?VALUES[^;]*?\?",
+    re.IGNORECASE | re.DOTALL)
+
+LEVEL_CHOSEN_AT_RUN_TIME = {
+    "web/_apps/admin/settings/organisation/save.php":
+        "#677 — one $upsert() helper, with the level as its last argument and no default. "
+        "Nine org.* keys and portal.support.email go to the organisation's own row; `site.url` "
+        "alone goes installation-wide. Its sibling page cannot have the fault this check looks "
+        "for, because it does not read `site.url` from the merged array at all: it reads it "
+        "through PortalAddress, which queries `siteID IS NULL` directly (#500).",
+    "web/_apps/admin/settings/repeats/save.php":
+        "#668 — writes a per-organisation limit that the installation's value caps. Both it and "
+        "its sibling page read `InstallationSettings::layer()`, so `reads_layer()` would skip "
+        "the page in any case; this line records that the saver is understood rather than "
+        "unexamined.",
+}
+
 # 🚫 Groups that are not settings at all -- these come from `require` lines such
 #    as `header.php`, which match the dotted-name pattern.
 NOT_SETTING_GROUPS = {"footer", "header", "index", "save"}
@@ -208,12 +255,12 @@ def reads_layer(code: str) -> bool:
     return "InstallationSettings::layer" in code
 
 
-def findings() -> tuple[list[tuple[str, str, str]], str | None]:
+def findings() -> tuple[list[tuple[str, str, str]], str | None, list[str]]:
     if ADMIN.is_dir() is False:
-        return [], "%s is missing, so there is nothing to check." % ADMIN.relative_to(REPO)
+        return [], "%s is missing, so there is nothing to check." % ADMIN.relative_to(REPO), []
     if subprocess.run(["php", "-v"], capture_output=True).returncode != 0:
         return [], ("php is not runnable, and this check strips comments with PHP's own "
-                    "tokenizer rather than a regular expression. It cannot run without it.")
+                    "tokenizer rather than a regular expression. It cannot run without it."), []
 
     # 🗂️ The comment-stripping helper goes in a temporary directory, NOT in this
     #    folder: a run killed part way used to leave an untracked `.php` file in
@@ -222,9 +269,16 @@ def findings() -> tuple[list[tuple[str, str, str]], str | None]:
         helper = Path(scratch) / "_strip_php_comments.php"
         helper.write_text(PHP_STRIP, encoding="utf-8")
         out: list[tuple[str, str, str]] = []
+        runtime: list[str] = []
         for saver in sorted(ADMIN.rglob("*.php")):
             code = without_comments(saver, helper)
             if WRITES_INSTALL_WIDE.search(code) is None:
+                # 🎚️ Not a literal-NULL writer. It may still write tblSettings
+                #    at a level chosen at run time, which this check cannot
+                #    judge -- so say so rather than pass over it in silence.
+                #    See LEVEL_CHOSEN_AT_RUN_TIME.
+                if WRITES_LEVEL_AT_RUN_TIME.search(code) is not None:
+                    runtime.append(saver.relative_to(REPO).as_posix())
                 continue
             groups = groups_written(code)
             if not groups:
@@ -242,7 +296,7 @@ def findings() -> tuple[list[tuple[str, str, str]], str | None]:
                     out.append((page.relative_to(REPO).as_posix(),
                                 saver.relative_to(REPO).as_posix(),
                                 ", ".join(hit)))
-        return out, None
+        return out, None, runtime
 
 
 def pending() -> set[str]:
@@ -254,7 +308,7 @@ def pending() -> set[str]:
 
 
 def main() -> int:
-    found, why = findings()
+    found, why, runtime = findings()
     if why is not None:
         print("✗ " + why, file=sys.stderr)
         return 1
@@ -269,6 +323,11 @@ def main() -> int:
         for page, saver, groups in found:
             print("   %-52s groups: %-16s saved by %s" % (page, groups, saver))
         print("\nOn the pending list: %d" % len(waiting))
+        print("\nSavers that choose the level at run time, so this check cannot judge them: %d"
+              % len(runtime))
+        for saver in sorted(runtime):
+            listed = LEVEL_CHOSEN_AT_RUN_TIME.get(saver)
+            print("   %-52s %s" % (saver, "named" if listed is not None else "NOT NAMED"))
         return 0
 
     problems: list[str] = []
@@ -287,6 +346,29 @@ def main() -> int:
             "`InstallationSettings::layer()` instead — the layer holding the installation-wide rows "
             "alone — as `admin/settings/repeats` and `transcription.monthCapPence` already do."
             % (len(new), "\n".join(lines)))
+
+    # 🎚️ Savers whose level is an argument. Both directions, for the reason in
+    #    LEVEL_CHOSEN_AT_RUN_TIME: an unnamed one has left this check's view
+    #    without anybody saying why that is safe, and a named one that no
+    #    longer has the shape means the entry is describing nothing.
+    unnamed = sorted(set(runtime) - set(LEVEL_CHOSEN_AT_RUN_TIME))
+    if unnamed:
+        problems.append(
+            "✗ %d saver(s) write tblSettings at a level chosen AT RUN TIME, and are not named in "
+            "this check's own list:\n%s\n   Binding siteID as a parameter takes a file out of the "
+            "branch above, so nothing here can tell which of its keys go installation-wide and the "
+            "whole folder stops being examined. That is how the fix for #677 silently removed its "
+            "own page from this check. Add a line to LEVEL_CHOSEN_AT_RUN_TIME saying which keys go "
+            "to which level and why the merged-prefill fault cannot arise in the sibling page."
+            % (len(unnamed), "\n".join("      " + u for u in unnamed)))
+    gone = sorted(set(LEVEL_CHOSEN_AT_RUN_TIME) - set(runtime))
+    if gone:
+        problems.append(
+            "✗ %d entry(ies) in LEVEL_CHOSEN_AT_RUN_TIME no longer have that shape:\n%s\n   "
+            "Delete each line. A named exception that has stopped describing anything is worse "
+            "than none, because it is believed."
+            % (len(gone), "\n".join("      %s  —  listed as: %s" % (g, LEVEL_CHOSEN_AT_RUN_TIME[g])
+                                     for g in gone)))
 
     stale = sorted(waiting - set(by_page))
     if stale:

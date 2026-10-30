@@ -31,10 +31,18 @@
  * ----------------------
  * Each organisation sets its own country (`giving.retention.countryCode`),
  * which is empty until it does. It is deliberately NOT read from
- * `org.address.countryCode`: that is one value for the whole installation and
- * it is "GB" unless somebody changes it, so every organisation would look
- * British and be offered the United Kingdom's figure as if it were theirs.
- * (The first plan read it, and the owner chose a country per organisation.)
+ * `org.address.countryCode`, and the DECISION stands while its original reason
+ * no longer does — which is worth saying plainly rather than leaving a stale
+ * sentence here. The reason used to be that `org.address.countryCode` was one
+ * value for the whole installation, seeded "GB", so every organisation would
+ * have looked British and been offered the United Kingdom's figure as if it
+ * were its own. Since #677 that key IS per-organisation, so that argument has
+ * gone. The decision is kept because the owner chose a country per
+ * organisation (the first plan read the postal address, and they said no), and
+ * because the two questions are genuinely different: where an organisation's
+ * office is does not decide which country's giving-record law it keeps records
+ * under. An organisation with a postal address in one country and its charity
+ * registration in another is an ordinary case, not an exotic one.
  *
  * EVERYTHING HERE IS A DATE ON A CALENDAR
  * ---------------------------------------

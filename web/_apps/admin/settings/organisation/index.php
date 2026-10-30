@@ -32,6 +32,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Auth;
 use Portal\Core\PortalAddress;
 use Portal\Core\Router;
@@ -70,7 +71,65 @@ $addressSaved       = PortalAddress::saved();
 $addressInUse       = PortalAddress::fromRequest();
 $addressForHere     = PortalAddress::base();
 $ownAddressEach     = Site::isMultisiteEnabled() === true && Site::detectionMode() === Site::MODE_HOST;
-$supportEmail       = trim((string) (App::settings('portal.support.email') ?? ''));
+// 📧 The support e-mail address, read from THIS ORGANISATION'S OWN ROW — and
+//    deliberately NOT from the merged settings.
+//
+//    WHY, because reading the merged value here looks right and is the #674
+//    fault mirrored. The merged value is the organisation's own where it has
+//    one and the INSTALLATION'S where it has not. Save writes the
+//    organisation's row. So an organisation with no row of its own would open
+//    the card, see the installation's address sitting in the box, press Save
+//    without touching anything — and now hold its own copy of it. The hosting
+//    provider changes the installation's address later and it reaches that
+//    organisation never again. One press of Save per organisation produces
+//    exactly the outcome migration 231 refuses to cause by copying rows down.
+//    Found by the independent check of 30 October 2026, not by reading.
+//
+//    So the BOX holds only what this organisation has set, and what it would
+//    inherit is shown beside it as words. An empty box therefore means
+//    "inherit", not "show none" — see the handler, which deletes the row.
+$supportOwnRow = (static function (): ?string {
+    $stmt = App::db()->prepare('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = ? LIMIT 1');
+    if ($stmt === false) {
+        return null;
+    }
+    $key  = 'portal.support.email';
+    $site = Site::id();
+    $stmt->bind_param('si', $key, $site);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    return $row === null ? null : trim((string) $row['settingValue']);
+})();
+$supportEmail       = $supportOwnRow ?? '';
+// What this organisation would fall back to.
+//
+//    THROUGH InstallationSettings::layer(), NOT `$SETTINGS_INSTALLATION`. The
+//    settings loader does keep that array beside `$SETTINGS` — but **a page
+//    inherits only `$mysqli` and `$SETTINGS`** and nothing else, which is the
+//    standing rule in `.claude/rules/app-pages.md`. So reading it here gave
+//    `null` every time, the help text silently took its "there is nothing to
+//    fall back to" branch, and the page told administrators the opposite of
+//    the truth. It looked right in review and was caught by a failing check in
+//    section O of access-pages-selftest.php — which is the only reason this
+//    comment can be specific.
+$supportInherited   = trim((string) (InstallationSettings::layer()['portal']['support']['email'] ?? ''));
+
+// 🔒 ONE lock, on ONE of the two boxes, because this card now holds settings at
+//    two levels (#677). The portal's own web address is installation-wide and
+//    decides where every e-mailed link points, so it stays with a global
+//    administrator (#500). The support e-mail address belongs to the
+//    organisation, so any administrator of it may set it and its box is never
+//    locked — there is deliberately no second variable for that, because a
+//    constant empty string reads like a switch somebody could turn.
+//
+//    Remember that **a disabled control is not submitted at all**, which is
+//    what makes this safe rather than merely tidy: an ordinary administrator's
+//    Save carries no `portalAddress` field, the handler sees it was not sent
+//    and leaves `site.url` alone. Were it merely read-only instead of
+//    disabled, the browser would send the value back and the handler would
+//    rewrite a setting that person may not change.
 $addressesLocked    = $mayChangeAddresses === false ? ' disabled' : '';
 $e                  = static fn (string $text): string => htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
 
@@ -100,8 +159,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <h1 class="mb-3"><i class="fa-solid fa-house-chimney me-2"></i>Organisation Address</h1>
 <p class="text-secondary">
-    The organisation's physical HQ address — feeds public pages, feeds, and branding that need a
-    location for this install.
+    <?php /* This said the address "feeds public pages, feeds, and branding ... for this install".
+              Both halves were wrong by #677: searched on 30 October 2026, NOTHING outside this page
+              reads any of the nine `org.*` keys, and the address belongs to this organisation rather
+              than to the installation. Said plainly instead, so nobody fills it in expecting it to
+              appear somewhere. */ ?>
+    This organisation's postal address and map position. They are recorded here for its own
+    records; nothing in the portal displays them to members yet.
 </p>
 
 <div class="card mb-4">
@@ -144,7 +208,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card-body">
         <h2 class="h5"><i class="fa-solid fa-globe me-2"></i>Web addresses</h2>
         <p class="text-secondary small">
-            These two are for the whole installation: every organisation on it uses them.
+            <?php /* This said "These two are for the whole installation: every organisation on it
+                      uses them." Since #677 that is true of the portal's address and FALSE of the
+                      support address, which belongs to this organisation — and the old sentence sat
+                      a few lines above the new note saying the opposite. */ ?>
+            The address of the portal is for the whole installation: every organisation on it uses it.
+            The support e-mail address is this organisation's own.
         </p>
 
         <?php if ($addressState === PortalAddress::STATE_UNUSABLE): ?>
@@ -196,19 +265,34 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="col-12 col-lg-6">
                     <label for="supportEmail" class="form-label">Support e-mail address</label>
                     <input type="email" class="form-control" id="supportEmail" name="supportEmail" maxlength="254"
-                           autocomplete="off" value="<?php echo $e($supportEmail); ?>" aria-describedby="supportEmailHelp"<?php echo $addressesLocked; ?>>
+                           autocomplete="off" value="<?php echo $e($supportEmail); ?>" aria-describedby="supportEmailHelp">
                     <div id="supportEmailHelp" class="form-text">
-                        Shown on the Help page "Getting Support" and at the foot of e-mails the portal sends.
-                        Leave it empty to show none; the Help page then tells people to ask an administrator.
+                        Shown on the Help page "Getting Support" and at the foot of e-mails the portal sends,
+                        for this organisation.
+                        <?php if ($supportInherited !== ''): ?>
+                            Leave it empty and this organisation uses the installation's address,
+                            <code><?php echo $e($supportInherited); ?></code>.
+                        <?php else: ?>
+                            Leave it empty to show none: the installation has no address to fall back to,
+                            so the Help page then tells people to ask an administrator.
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
             <div class="mt-3">
-                <?php if ($mayChangeAddresses === true): ?>
-                    <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk me-1"></i>Save web addresses</button>
-                <?php else: ?>
-                    <p class="text-secondary small mb-0">
-                        Only a global administrator can change these, because they apply to every organisation on this installation.
+                <?php /* 💾 The button is here for every administrator now (#677), because the
+                          support e-mail address on this card belongs to the organisation. Before,
+                          the whole card was read-only for anybody but a global administrator, so
+                          an administrator could not set the support address their own members are
+                          told to write to. The portal's address above is still theirs alone, and
+                          the note says so rather than leaving somebody to wonder why one box is
+                          greyed out. */ ?>
+                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk me-1"></i>Save web addresses</button>
+                <?php if ($mayChangeAddresses === false): ?>
+                    <p class="text-secondary small mb-0 mt-2">
+                        The support e-mail address is this organisation's own, so you can change it here.
+                        The address of the portal applies to every organisation on this installation,
+                        so only a global administrator can change that one.
                     </p>
                 <?php endif; ?>
             </div>

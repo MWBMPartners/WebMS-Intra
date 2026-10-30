@@ -955,8 +955,19 @@ another repo, ever**.
   included once per map-bearing page).
 - Admin pages: `/admin/integrations/what3words`,
   `/admin/integrations/geocoding` (both with a "Test connection" action),
-  `/admin/settings/organisation` (site-HQ address, nine `org.*` settings —
-  the `portal.sabbath.location_lat/lng` precedent).
+  `/admin/settings/organisation` (the organisation's address, nine `org.*`
+  settings — the `portal.sabbath.location_lat/lng` precedent). **Each
+  organisation holds its own address, map position, what3words address and
+  support e-mail (#677, migration 231), and any administrator of it may set
+  them.** Until 30 October 2026 all ten were written installation-wide, so one
+  organisation's address was every organisation's. The support e-mail falls back
+  to the installation's where an organisation has set **no row of its own** —
+  so clearing the box means "use the installation's", not "show none", and an
+  e-mail carries a Support link whenever either level has one. (An e-mail sent
+  by a scheduled job can still carry the wrong organisation's: #683.) The one setting still shared is the portal's own web
+  address (`site.url`), which decides where every e-mailed link points — a
+  global administrator only, and a request that tries to set it without being
+  one is refused with the reason.
 - Two session-authed AJAX proxies (`/geo/w3w-suggest`, `/geo/lookup`) —
   deliberately outside `api/*` so the browser never sees either API key.
 - **Wired into (Chunk A, non-PII):** Venues (structured address +

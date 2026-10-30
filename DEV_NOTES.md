@@ -10985,3 +10985,145 @@ Three things that fell out of doing it properly:
 
 Both faults are now committed plants in `tools/api-spec-check-selftest.py`, which
 is why they are safe to forget.
+
+## A setting written at the wrong LEVEL, and the check that went blind to its own fix (#677)
+
+**30 October 2026.** `admin/settings/organisation/save.php` wrote nine `org.*`
+keys and `portal.support.email` with `siteID` NULL — the row every organisation
+uses — on a page called Organisation settings. The fix is ordinary: each
+organisation holds its own, migration 231 copies the installation's values down,
+and `$upsert()` takes the level as an argument **with no default**, because a
+default is the same mistake waiting for the next caller.
+
+Three things from it are worth keeping.
+
+### Ask whether a field ARRIVED, never what it contains
+
+The page disables the portal-address box for anybody who may not change it, and
+**a disabled control is not submitted at all**. The first version of the handler
+guarded only *who may send* that field and then wrote the result regardless:
+
+```php
+$checked = PortalAddress::check($text($_POST['portalAddress'] ?? ''));   // '' when absent
+$upsert($db, PortalAddress::SETTING, $checked['address'], null);         // writes ''
+```
+
+`PortalAddress::check()` accepts empty as "no address", so an ordinary
+administrator saving their **support** address cleared `site.url` **for every
+organisation** — after which every e-mailed link is built from whatever host the
+next request arrives at, which a visitor can choose (#500). Found by the new
+section O of `access-pages-selftest.php` on its first run, not by reading.
+
+This is the #667 shape again — a `disabled` control that would silently have
+switched a payment provider — and it is the second time in a month. The rule:
+where a form holds fields at two different levels, or for two different kinds of
+person, each write is conditional on **`array_key_exists()`**, not on the value.
+
+### A check can go blind to exactly the shape of its own fix
+
+`check_install_wide_prefill.py` finds savers by looking for a literal `NULL` in
+an `INSERT INTO tblSettings (… siteID …) VALUES (…)`. Passing the level as a
+bound parameter stopped it matching, so the file stopped being a saver and **the
+whole folder stopped being examined.** Proved by planting one key back to
+installation-wide: nothing noticed.
+
+That is the worst possible direction, because binding the level **is the pattern
+the fourteen pages still on its pending list should adopt.** Each one fixed that
+way would quietly leave the check's view, and the pending list would have emptied
+while the coverage emptied with it — a list of fixed pages and a check guarding
+nothing.
+
+The cure is the house pattern: a named list, `LEVEL_CHOSEN_AT_RUN_TIME`, each
+entry saying which keys go to which level and why the merged-prefill fault cannot
+arise in the sibling page, failing **both** ways. **Measure before adding a list
+like this:** exactly two files under `admin/` have that shape and no literal-NULL
+write as well (twenty have both, so the ordinary branch still covers them), which
+is what makes a two-line list proportionate rather than a fifty-line chore
+nobody maintains.
+
+### A `\b` in a non-raw Python string is a BACKSPACE
+
+Writing that new regex into the check with a generator script whose own literal
+was not raw turned `\bsiteID\b` into `\x08siteID\x08`. The check parsed, ran,
+reported no problems, and **could never match anything**. Python warns about
+`\s`, which is left alone; it does not warn about `\b`, which is a real escape.
+The symptom was a detector that found 0 files where a standalone test of the same
+pattern found 2. `grep -c $'\x08'` over a file is the one-line check.
+
+### What is NOT recorded anywhere else
+
+`renderBase()` runs **before** `MailQueue::add()`, so an e-mail's footer — and
+therefore its support address — is rendered in the request that created the
+message, with that organisation's merged settings. A queued message keeps the
+right one. Nothing had to change in `Mailer` or the queue for the support address
+to become per-organisation, and that is why.
+
+## A per-organisation setting with a fallback has three traps, and I hit all three (#677)
+
+**30 October 2026.** Making `portal.support.email` per-organisation "with a
+fallback to the installation's value" sounds like one line of work. It is three
+separate decisions, and getting any of them wrong is invisible on the page.
+
+### 1. An empty value is not the same as no row
+
+The merge falls back to the installation's row **only when the organisation has
+none**. A stored empty string is a value, and it wins. So an organisation that
+had ever cleared the box would have masked the installation's support address
+for ever, with no way back from the page — which is not "falling back" at all.
+
+Clearing the box therefore **deletes the row**. Said another way: for a setting
+with a fallback, "empty" has to mean *inherit*, and the only way to express
+inherit is the absence of a row.
+
+This was traced from a real failing assertion in
+`portal-address-selftest.php`, whose part H sets the installation's address and
+then reads the Help page — and got "no support e-mail address has been set up"
+while the installation had one.
+
+### 2. A form that saves one level must not prefill from the merged array
+
+This is #674 mirrored, and it defeats the thing the migration was careful about.
+The box showed the merged value — the organisation's own, or the installation's
+where it had none. Save wrote the organisation's row. So an organisation with no
+row of its own would open the card, see the installation's address sitting in the
+box, press Save without touching anything, and now hold **its own copy** of it.
+The hosting provider changes the installation's address later and it reaches that
+organisation never again.
+
+One press of Save per organisation produces exactly the outcome migration 231
+refuses to cause by copying rows down. The box must show **only what this
+organisation has set**, with the inherited value beside it as words.
+
+Note that `check_install_wide_prefill.py` cannot see this direction: it looks for
+merged-prefill plus an installation-wide *write*. Here the write is
+per-organisation and the harm runs the other way.
+
+### 3. `$SETTINGS_INSTALLATION` is not available in a page
+
+The settings loader really does keep it beside `$SETTINGS` — and **a page
+inherits only `$mysqli` and `$SETTINGS`**, which is the standing rule in
+`.claude/rules/app-pages.md`. Reading it in an app page gives `null` every time.
+
+The symptom was perfect: the help text silently took its "the installation has
+no address to fall back to" branch and told administrators the opposite of the
+truth, on a page that rendered without a warning. `InstallationSettings::layer()`
+is the supported reader. Caught by a check in section O, not by review.
+
+## A test that only deletes what it borrowed leaves the fixture poorer (#677)
+
+Section O of `access-pages-selftest.php` needed four known installation-wide
+values, so it deleted whatever was there and inserted its own. At the end it
+deleted again — and those four rows are **seeded by `full_schema.sql`**, so the
+database was left without rows a fresh install has.
+
+Two things make this worth a note rather than a shrug:
+
+* The suite's own closing clean-up check could not see it. That check compares
+  the keys recorded by its `setting()` helper, and this part wrote with raw
+  `q()`, so the run reported every check passing while the fixture decayed.
+* The next test to run against that database inherits the damage, and the
+  failure will look like that test's fault.
+
+Read the rows first, put exactly those back — including "there was no row",
+restored by leaving none — and assert it, which is now the last check of the
+part.

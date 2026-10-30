@@ -10505,3 +10505,70 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('228_backup_download_import_sch
 --    column correctly, so there is nothing here to repair (#676).
 INSERT INTO `tblMigrations` (`filename`) VALUES ('230_event_status_repair.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 231_organisation_address_per_site.sql (#677) ────────────────────────
+-- The organisation's postal address, map position and what3words address are
+-- EACH ORGANISATION'S OWN from 30 October 2026. They used to be written with
+-- nothing in `siteID`, so one organisation's address was every organisation's,
+-- on a page called Organisation settings.
+--
+-- This is the SAME statement as the migration, word for word, so an upgraded
+-- database and a fresh one cannot drift. On a fresh install it moves exactly
+-- one row: the seeded organisation (`default`) gets its own
+-- `org.address.countryCode` of 'GB', because that is the only one of the nine
+-- keys seeded with a value. The other eight are seeded empty and empty values
+-- are deliberately not copied.
+--
+-- `portal.support.email` is NOT copied down, here or in the migration. It is
+-- per-organisation WITH A FALLBACK to the installation's value (owner,
+-- 30 October 2026), and a fallback only works while the installation's row is
+-- the one left standing.
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`)
+SELECT `src`.`siteID`,
+       `src`.`settingKey`,
+       `src`.`settingValue`,
+       `src`.`defaultValue`,
+       `src`.`isSensitive`
+  FROM (
+           SELECT `s`.`siteID`      AS `siteID`,
+                  `inst`.`settingKey`   AS `settingKey`,
+                  `inst`.`settingValue` AS `settingValue`,
+                  `inst`.`defaultValue` AS `defaultValue`,
+                  `inst`.`isSensitive`  AS `isSensitive`
+             FROM (
+                      SELECT `settingKey`, `settingValue`, `defaultValue`, `isSensitive`
+                        FROM `tblSettings`
+                       WHERE `siteID` IS NULL
+                         AND `settingKey` IN (
+                             'org.address.line1',
+                             'org.address.line2',
+                             'org.address.city',
+                             'org.address.region',
+                             'org.address.postcode',
+                             'org.address.countryCode',
+                             'org.latitude',
+                             'org.longitude',
+                             'org.what3words'
+                         )
+                         AND `settingValue` <> ''
+                  ) AS `inst`
+            CROSS JOIN `tblSites` AS `s`
+       ) AS `src`
+-- `settingID`, not `settingKey`, and the REASON matters because the first
+-- version of this comment stated a false one. It claimed a table-qualified
+-- left side was also ERROR 1064. It is not: measured on MySQL 8.0.36,
+-- `ON DUPLICATE KEY UPDATE `tblSettings`.`settingKey` = …` is accepted. The
+-- 1064 in that earlier draft came from the CROSS JOIN described above, not
+-- from the qualification, and the two were run together and confused.
+--
+-- The real reason is simply ambiguity: unqualified `settingKey` matches a
+-- column of the derived table as well, which is ERROR 1052. `settingID`
+-- exists only on the target table, so it needs no qualifying and cannot be
+-- ambiguous, and setting it to itself is a true no-op. That is what makes the
+-- migration safe to run twice AND what protects an organisation that has
+-- already set its own value from being overwritten.
+ON DUPLICATE KEY UPDATE `settingID` = `settingID`;
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('231_organisation_address_per_site.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;

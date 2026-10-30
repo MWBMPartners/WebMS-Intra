@@ -38,7 +38,6 @@ web/_apps/admin/integrations/push/index.php                # push
 web/_apps/admin/integrations/what3words/index.php          # w3w — includes an API key
 web/_apps/admin/integrations/zoom/index.php                # zoom — includes a client secret and a webhook secret
 web/_apps/admin/maintenance/offsite-backup.php             # backup — its saver is backup.php, which writes backup.schedule.* straight into the siteID column
-web/_apps/admin/settings/organisation/index.php            # org, portal — needs reading FIRST: a page named for an organisation that writes installation-wide may be mislabelled rather than mis-prefilled
 web/_apps/admin/sms/index.php                              # sms — includes credentials and dailyCap, another limit
 web/_apps/admin/translation/index.php                      # translation — includes API keys
 

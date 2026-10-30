@@ -279,6 +279,11 @@ function one(string $sql, string $types = '', array $params = []): ?array
 // 🗺️ The made-up world
 // =============================================================================
 /** The accounts. */
+/** The only organisation in this test's made-up world. Named rather than written as 1 in six places,
+ *  because since #677 some settings this test checks belong to an organisation and not to the
+ *  installation, and a bare number in an assertion gives a reader nothing to go on. */
+const ONLY_SITE = 1;
+
 const PEOPLE = [
     'root'     => 941001, // a global administrator
     'orgadmin' => 941002, // an administrator of the default organisation, and nothing more
@@ -487,6 +492,36 @@ function stored(string $key): string
     $row = one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$key]);
 
     return $row === null ? '(no row)' : (string) $row['settingValue'];
+}
+
+/**
+ * One setting as ONE ORGANISATION has it, '(no row)' when it has none.
+ *
+ * WHY THIS EXISTS (#677, 30 October 2026). `portal.support.email` used to be
+ * written installation-wide by the Web addresses card, so `stored()` above was
+ * the right reader for it. It is now the ORGANISATION's, falling back to the
+ * installation's where an organisation has set none — so reading
+ * `siteID IS NULL` answers the fallback and says nothing about what the card
+ * just saved. Four assertions in part C read the wrong level for a whole
+ * afternoon before anybody ran this test, which is the useful part of the
+ * story: the page's own new test passed throughout.
+ *
+ * THE DIFFERENCE BETWEEN '' AND NO ROW IS LOAD-BEARING HERE. The merge only
+ * falls back when there is NO row; a stored empty string wins and masks the
+ * installation's address for ever. So this returns '(no row)' rather than ''
+ * for a missing row, and part C checks for it by name.
+ */
+function storedForSite(string $key, int $siteId): string
+{
+    $row = one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = ?', 'si', [$key, $siteId]);
+
+    return $row === null ? '(no row)' : (string) $row['settingValue'];
+}
+
+/** How many rows one organisation has for a setting. More than one is the settings-table trap. */
+function rowsOfForSite(string $key, int $siteId): int
+{
+    return (int) one('SELECT COUNT(*) AS n FROM tblSettings WHERE settingKey = ? AND siteID = ?', 'si', [$key, $siteId])['n'];
 }
 
 /** How many installation-wide rows a setting has. More than one is the settings-table trap. */
@@ -1591,11 +1626,12 @@ $answer = $saveCard($rootJar, 1, ['portalAddress' => ' HTTPS://Portal.F4.Selftes
 $said   = $flash($rootJar, 1);
 $record = one("SELECT activityDescription FROM tblActivityLogs WHERE activityType = 'PortalAddressSaved' AND userID = ? ORDER BY 1 DESC LIMIT 1", 'i', [PEOPLE['root']]);
 ok(
-    'C4 a usable address is saved TIDIED, with the support address, in ONE installation-wide row each; the postal address on the same page is not touched; and the activity log records it without the support address',
-    $answer['status'] === 302 && str_ends_with($answer['location'], '#web-addresses') === true && stored('site.url') === SET && rowsOf('site.url') === 1 && stored('portal.support.email') === 'help@f4.selftest.invalid'
-        && rowsOf('portal.support.email') === 1 && stored('org.address.line1') === 'Selftest Street 1' && $said === 'success: Web addresses saved.'
+    'C4 a usable address is saved TIDIED installation-wide, the support address against THIS ORGANISATION, one row each; the postal address on the same page is not touched; and the activity log records it without the support address',
+    $answer['status'] === 302 && str_ends_with($answer['location'], '#web-addresses') === true && stored('site.url') === SET && rowsOf('site.url') === 1
+        && storedForSite('portal.support.email', ONLY_SITE) === 'help@f4.selftest.invalid' && rowsOfForSite('portal.support.email', ONLY_SITE) === 1
+        && stored('org.address.line1') === 'Selftest Street 1' && $said === 'success: Web addresses saved.'
         && $record !== null && str_contains((string) $record['activityDescription'], SET) === true && str_contains((string) $record['activityDescription'], 'help@') === false,
-    'HTTP ' . $answer['status'] . ' to ' . $answer['location'] . '; stored "' . stored('site.url') . '" (' . rowsOf('site.url') . ' row) / "' . stored('portal.support.email') . '"; postal line "' . stored('org.address.line1') . '"; said: ' . $said . '; record: ' . json_encode($record)
+    'HTTP ' . $answer['status'] . ' to ' . $answer['location'] . '; stored "' . stored('site.url') . '" (' . rowsOf('site.url') . ' row) / organisation "' . storedForSite('portal.support.email', ONLY_SITE) . '"; postal line "' . stored('org.address.line1') . '"; said: ' . $said . '; record: ' . json_encode($record)
 );
 $page = req($rootJar, 'GET', $cardPage, null, ['ip' => ip(1)]);
 ok(
@@ -1606,30 +1642,51 @@ ok(
 );
 $answer = $saveCard($rootJar, 1, ['portalAddress' => 'https://other.f4.selftest.invalid', 'supportEmail' => 'not an address']);
 $said   = $flash($rootJar, 1);
-ok('C6 a support address that is not an e-mail address is refused, and the portal\'s address typed beside it is NOT saved either', stored('site.url') === SET && stored('portal.support.email') === 'help@f4.selftest.invalid' && str_contains($said, 'not an e-mail address') === true,
-    'stored "' . stored('site.url') . '" / "' . stored('portal.support.email') . '"; said: ' . $said);
+ok('C6 a support address that is not an e-mail address is refused, and the portal\'s address typed beside it is NOT saved either', stored('site.url') === SET && storedForSite('portal.support.email', ONLY_SITE) === 'help@f4.selftest.invalid' && str_contains($said, 'not an e-mail address') === true,
+    'stored "' . stored('site.url') . '" / organisation "' . storedForSite('portal.support.email', ONLY_SITE) . '"; said: ' . $said);
 $answer = $saveCard($orgJar, 2, ['portalAddress' => 'https://' . EVIL, 'supportEmail' => 'thief@f4.selftest.invalid']);
 $said   = $flash($orgJar, 2);
 $page   = req($orgJar, 'GET', $cardPage, null, ['ip' => ip(2)]);
 $card   = preg_match('#<div class="card mb-4" id="web-addresses">(.*?)</form>#s', $page['body'], $m) === 1 ? $m[1] : '';
 ok(
-    'C7 an administrator of ONE organisation cannot save it: refused with the reason, nothing changed; and their card has no Save button and its two boxes are switched off',
-    stored('site.url') === SET && stored('portal.support.email') === 'help@f4.selftest.invalid' && str_contains($said, 'Only a global administrator can change them') === true
-        && $card !== '' && str_contains($card, 'Save web addresses') === false && substr_count($card, ' disabled>') === 2 && str_contains(words($card), 'Only a global administrator can change these') === true,
-    'stored "' . stored('site.url') . '"; said: ' . $said . '; card: ' . mb_substr(words($card), -200)
+    'C7 an administrator of ONE organisation cannot change the PORTAL\'S address: refused with the reason, nothing changed; their card now HAS a Save button and ONE switched-off box, because the support address on it is their own (#677)',
+    stored('site.url') === SET && storedForSite('portal.support.email', ONLY_SITE) === 'help@f4.selftest.invalid'
+        && str_contains($said, 'only a global administrator can change it') === true
+        // 🔁 WHAT THIS ASSERTION USED TO SAY, because the change was deliberate
+        //    and somebody will wonder. It required NO Save button, TWO
+        //    ` disabled>` boxes, and the words "Only a global administrator can
+        //    change these". All three were right while every setting on the card
+        //    was installation-wide. Since #677 the support address belongs to the
+        //    organisation, so an ordinary administrator must be able to save it:
+        //    the button is there, exactly ONE box (the portal's address) is
+        //    switched off, and the note says which is which. A `disabled` control
+        //    is not submitted, which is what keeps the other setting safe.
+        && $card !== '' && str_contains($card, 'Save web addresses') === true && substr_count($card, ' disabled>') === 1
+        && str_contains(words($card), 'The support e-mail address is this organisation\'s own, so you can change it here.') === true
+        && str_contains(words($card), 'only a global administrator can change that one') === true,
+    'stored "' . stored('site.url') . '"; said: ' . $said . '; card: ' . mb_substr(words($card), -260)
 );
 $answer = $saveCard($rootJar, 1, ['portalAddress' => 'https://' . EVIL, 'supportEmail' => ''], false);
-ok('C8 a global administrator\'s own request with no form token is refused and changes nothing', $answer['status'] === 400 && stored('site.url') === SET && stored('portal.support.email') === 'help@f4.selftest.invalid', 'HTTP ' . $answer['status'] . '; stored "' . stored('site.url') . '"');
+ok('C8 a global administrator\'s own request with no form token is refused and changes nothing', $answer['status'] === 400 && stored('site.url') === SET && storedForSite('portal.support.email', ONLY_SITE) === 'help@f4.selftest.invalid', 'HTTP ' . $answer['status'] . '; stored "' . stored('site.url') . '"');
 $saveCard($rootJar, 1, ['portalAddress' => 'http://plain.f4.selftest.invalid', 'supportEmail' => 'help@f4.selftest.invalid']);
 $saidHttp = $flash($rootJar, 1);
 $httpWas  = stored('site.url');
 $saveCard($rootJar, 1, ['portalAddress' => '', 'supportEmail' => '']);
 $saidNone = $flash($rootJar, 1);
 ok(
-    'C9 an http address is saved with a warning that it is not https; clearing both boxes stores empty values (still one row each) and says links will go by the request again',
+    'C9 an http address is saved with a warning that it is not https; clearing the portal\'s address stores an empty value (still one row) while clearing the support box REMOVES the organisation\'s row, so it inherits again (#677)',
     $httpWas === 'http://plain.f4.selftest.invalid' && str_starts_with($saidHttp, 'warning:') === true && str_contains($saidHttp, 'not https') === true
-        && stored('site.url') === '' && stored('portal.support.email') === '' && rowsOf('site.url') === 1 && str_starts_with($saidNone, 'warning:') === true && str_contains($saidNone, 'is not set') === true,
-    'http: "' . $httpWas . '" said ' . $saidHttp . '; cleared: "' . stored('site.url') . '" said ' . $saidNone
+        && stored('site.url') === '' && rowsOf('site.url') === 1
+        // 🧹 '(no row)', not ''. This used to assert an empty VALUE, and it passed
+        //    for the wrong reason after #677 — it was reading the installation's
+        //    row, which the card no longer writes. The difference matters: the
+        //    merge falls back to the installation only when there is NO row, so a
+        //    stored empty string would mask the installation's support address
+        //    for ever with no way back from the page. Clearing the box therefore
+        //    deletes the row.
+        && storedForSite('portal.support.email', ONLY_SITE) === '(no row)'
+        && str_starts_with($saidNone, 'warning:') === true && str_contains($saidNone, 'is not set') === true,
+    'http: "' . $httpWas . '" said ' . $saidHttp . '; cleared: "' . stored('site.url') . '" / organisation support: "' . storedForSite('portal.support.email', ONLY_SITE) . '" said ' . $saidNone
 );
 
 // =============================================================================
@@ -1736,7 +1793,14 @@ $saidOrg   = $flash($orgJar, 2);
 ok(
     'N7 the button\'s request changes NOTHING when it comes without its form token (HTTP 400), with an address the check refuses in place of the one offered ("Nothing was saved", with the reason), or from an administrator of one organisation (refused, with the reason)',
     $fields !== [] && $noToken['status'] === 400 && $keptOne === $junk && $refused['status'] === 302 && $keptTwo === $junk && str_starts_with($saidWhy, 'danger: Nothing was saved.') === true && str_contains($saidWhy, 'folder') === true
-        && $byOrg['status'] === 302 && stored('site.url') === $junk && str_contains($saidOrg, 'Only a global administrator can change them') === true && stored('portal.support.email') === 'help@f4.selftest.invalid',
+        // 📍 stored(), the INSTALLATION's row — not storedForSite(), which part C
+        //    uses. Both are right in their own place and the difference caught a
+        //    mistake of mine: part N sets this value with the `setting()` helper,
+        //    which writes installation-wide, and the button sends no support
+        //    field at all, so what must be unchanged here is the installation's
+        //    row. Changing this to the organisation's level made it ask for a
+        //    value part C had already cleared, and the test said so.
+        && $byOrg['status'] === 302 && stored('site.url') === $junk && str_contains($saidOrg, 'only a global administrator can change it') === true && stored('portal.support.email') === 'help@f4.selftest.invalid',
     'no token: HTTP ' . $noToken['status'] . ', stored "' . $keptOne . '"; refused address: HTTP ' . $refused['status'] . ', stored "' . $keptTwo . '", said: ' . $saidWhy . '; organisation administrator: HTTP ' . $byOrg['status'] . ', stored "' . stored('site.url') . '", said: ' . $saidOrg
 );
 // The press itself: exactly the fields the dashboard wrote, sent where its form points. The dashboard is read
