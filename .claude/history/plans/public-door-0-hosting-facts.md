@@ -1,3 +1,24 @@
+<!-- ---------------------------------------------------------------------------
+ TERMINAL STATUS: HISTORICAL REFERENCE, and still factually useful: what DreamHost shared hosting allows, checked 11 September 2026. Re-check before relying on it.
+ Assigned 30 October 2026 during the records clean-up (#678).
+
+ THIS IS HISTORY, NOT A LIVE PLAN. It is kept because it explains WHY a
+ decision was taken, not because anything is still to be done from it.
+
+ Where to look instead:
+   * what is and is not done  -> the GitHub issues
+   * what shipped             -> CHANGELOG.md
+   * technical lessons        -> DEV_NOTES.md
+   * where the work is now    -> .claude/HANDOFF.md
+
+ Assigned from the COMMIT HISTORY, not from issue state: finished issues were
+ never closed here, so an open issue does not mean outstanding work (#678).
+
+ Do NOT cite this file by line number. Every line-number citation between
+ these documents was already dangling, because the files they pointed at had
+ been rewritten. Cite issue numbers and commit SHAs, which do not move.
+---------------------------------------------------------------------------- -->
+
 # What DreamHost shared hosting actually allows (checked 11 September 2026)
 
 These decide which publishing mechanisms are possible at all, so they belong in

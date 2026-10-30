@@ -155,13 +155,27 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    one of Codex's own global rules in `~/.codex/AGENTS.md`. Full text:
    `.claude/CLAUDE.md` → "When one system runs out".)*
 
-5. **The handoff (`.claude/HANDOFF.md`) is kept current as the work
-   happens**, not tidied up at the end — updated before anything long
-   starts, after each step, and the moment something important is learned.
-   It is what makes rule 4 possible at all: a fallback can only work if the
-   situation it needs is written down somewhere. Read its top section before
-   starting any work here. *(`.claude/CLAUDE.md` → "When one system runs
-   out" and "Working with the owner".)*
+5. **One job per document, and NOTHING NOT-DONE LIVES ONLY IN PROSE
+   (owner, 30 October 2026, #678).** GitHub issues are the record of what is
+   and is not done **and of every deferral or open decision**;
+   `.claude/HANDOFF.md` holds where the work is RIGHT NOW and is
+   **overwritten, never appended** (current state only, about one screen, no
+   history); `CHANGELOG.md` is what shipped; `DEV_NOTES.md` is the technical
+   lessons; a plan in `.claude/plans/` is point-in-time thinking that gets a
+   terminal status line and moves to `.claude/history/plans/` when the work
+   lands. **A deferral or open question gets an issue in the same action that
+   decides it** — if it is not worth an issue it is not worth recording,
+   because nothing checks prose. The handoff is still kept current AS THE WORK
+   HAPPENS, which is what makes rule 4 possible: a fallback only works if the
+   situation it needs is written down. Read its top before starting work.
+   **Never cite another document by line number** — cite issue numbers and
+   commit SHAs, which do not move; every line-number citation between these
+   files was already dangling. **Closing an issue is two actions:** always try
+   `gh issue close` AND add the `status: done` label, because a refused close
+   is otherwise invisible. Note the mistake that came with this rule: one
+   refused close was reported as a standing block and as the reason finished
+   issues were open; retried, it worked, and the real reason was that nobody
+   had closed them. One failure is not a standing block. *(`.claude/CLAUDE.md` → "One job per document".)*
 
 6. **After every finished piece of work:** create the GitHub issue first if
    there is not one already, with a description, its scope, and acceptance

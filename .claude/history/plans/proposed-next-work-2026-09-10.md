@@ -1,3 +1,24 @@
+<!-- ---------------------------------------------------------------------------
+ TERMINAL STATUS: SUPERSEDED by the roll-out plan of 11 October 2026. One of three documents that each claimed to be the queue; the handoff and the issues hold it now.
+ Assigned 30 October 2026 during the records clean-up (#678).
+
+ THIS IS HISTORY, NOT A LIVE PLAN. It is kept because it explains WHY a
+ decision was taken, not because anything is still to be done from it.
+
+ Where to look instead:
+   * what is and is not done  -> the GitHub issues
+   * what shipped             -> CHANGELOG.md
+   * technical lessons        -> DEV_NOTES.md
+   * where the work is now    -> .claude/HANDOFF.md
+
+ Assigned from the COMMIT HISTORY, not from issue state: finished issues were
+ never closed here, so an open issue does not mean outstanding work (#678).
+
+ Do NOT cite this file by line number. Every line-number citation between
+ these documents was already dangling, because the files they pointed at had
+ been rewritten. Cite issue numbers and commit SHAs, which do not move.
+---------------------------------------------------------------------------- -->
+
 # Proposed next work — 10 September 2026
 
 Everything here comes from reading the code, not from commit messages or

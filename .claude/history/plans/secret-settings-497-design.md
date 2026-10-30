@@ -1,3 +1,24 @@
+<!-- ---------------------------------------------------------------------------
+ TERMINAL STATUS: HISTORICAL: the work it planned SHIPPED in 3740abe, 'secrets saved in Settings are stored encrypted, never shown back, and read correctly'. Portal\Core\SecretSettings is now the one place a stored secret is judged. NOTE: this file cites the handoff by line number five times -- all dangling (#678).
+ Assigned 30 October 2026 during the records clean-up (#678).
+
+ THIS IS HISTORY, NOT A LIVE PLAN. It is kept because it explains WHY a
+ decision was taken, not because anything is still to be done from it.
+
+ Where to look instead:
+   * what is and is not done  -> the GitHub issues
+   * what shipped             -> CHANGELOG.md
+   * technical lessons        -> DEV_NOTES.md
+   * where the work is now    -> .claude/HANDOFF.md
+
+ Assigned from the COMMIT HISTORY, not from issue state: finished issues were
+ never closed here, so an open issue does not mean outstanding work (#678).
+
+ Do NOT cite this file by line number. Every line-number citation between
+ these documents was already dangling, because the files they pointed at had
+ been rewritten. Cite issue numbers and commit SHAs, which do not move.
+---------------------------------------------------------------------------- -->
+
 # Secret settings are never decrypted (#497) — Stage 3: the design
 
 Date: 13 September 2026. Written by Fable 5.1 (stage 3 of the `pkg5-secret-settings` run).

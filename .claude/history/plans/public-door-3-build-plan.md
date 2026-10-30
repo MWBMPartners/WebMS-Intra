@@ -1,3 +1,24 @@
+<!-- ---------------------------------------------------------------------------
+ TERMINAL STATUS: SUPERSEDED. Its own banner already warned that a review found faults in it, including a self-test that could never pass. Read public-door-4-fable-3-corrections.md, then public-door-6.
+ Assigned 30 October 2026 during the records clean-up (#678).
+
+ THIS IS HISTORY, NOT A LIVE PLAN. It is kept because it explains WHY a
+ decision was taken, not because anything is still to be done from it.
+
+ Where to look instead:
+   * what is and is not done  -> the GitHub issues
+   * what shipped             -> CHANGELOG.md
+   * technical lessons        -> DEV_NOTES.md
+   * where the work is now    -> .claude/HANDOFF.md
+
+ Assigned from the COMMIT HISTORY, not from issue state: finished issues were
+ never closed here, so an open issue does not mean outstanding work (#678).
+
+ Do NOT cite this file by line number. Every line-number citation between
+ these documents was already dangling, because the files they pointed at had
+ been rewritten. Cite issue numbers and commit SHAs, which do not move.
+---------------------------------------------------------------------------- -->
+
 > ⚠️ **READ `public-door-4-fable-3-corrections.md` BEFORE BUILDING ANYTHING FROM THIS PLAN.**
 > A Fable review on 13 September 2026 found faults in it — including a safety self-test that
 > could never pass, a Step 2 change that would break every error page on the management

@@ -576,6 +576,57 @@ Detailed comments in the code you write or change — HTML, PHP, CSS, JavaScript
 
 Where this project produces or consumes JSON or XML, a JSON Schema file (`*.schema.json`) or an XSD lives beside it, with a `description` on every property — the schema is the documentation as well as the validator. Wire the validation into a check so it actually runs; a schema nothing executes is a document, not a check.
 
+## One job per document, and nothing not-done lives only in prose (#678)
+
+**Set by the owner on 30 October 2026**, after they asked why finished handoff entries were being
+archived rather than deleted. The answer turned out to be that the handoff was doing three jobs at
+once, and the fix is to stop that rather than to archive more carefully.
+
+| Document | Its ONE job | Lifecycle |
+|---|---|---|
+| **GitHub issues** | The record of what is and is not done, **and every deferral or open decision** | Authoritative; closed when done |
+| **`.claude/HANDOFF.md`** | Where we are **right now** — pick up where we left off | **OVERWRITTEN, never appended.** Current state only, about one screen. No history |
+| **`CHANGELOG.md`** | What shipped | Append-only |
+| **`DEV_NOTES.md`** | Technical lessons worth keeping | Append-only |
+| **`.claude/plans/`** | Point-in-time thinking | Terminal status line, then `.claude/history/plans/` (see its README) |
+
+**The rule that makes it work: anything NOT-DONE gets a GitHub issue in the same action that
+decides it.** A deferral, an open question, a "moved to the next package" — an issue, there and
+then. If it is not worth an issue, it is not worth recording. Nothing checks prose.
+
+**Why, with the actual example.** The handoff entry titled "PACKAGE A2a IS COMMITTED" carried, in
+its body, "NOT BUILT, moved to package B2: ending an erased person's open session" and "Decisions
+still open: `tblWorkflowSteps.assigneeValue`". So a FINISHED entry was the only record of
+unfinished work, which is what made deleting old entries look dangerous. Checked on 30 October:
+the session item **had** been built (`Auth::ensureSession()` calls
+`Auth::endSessionOfInactiveAccount()` on every request), so the handoff was claiming an unfixed
+security hole that no longer existed — the worse direction for a stale claim to point. The
+`assigneeValue` question was still genuinely open and had no issue anywhere.
+
+**Never cite another document by line number.** Cite **issue numbers and commit SHAs**, which do
+not move. Two plans cited the handoff as "HANDOFF line 264", "line 214", "lines 68-73", "line 185",
+"lines 100-102" and "line 138"; every one was already dangling, because the handoff had been
+rewritten and archived twice. That fragility is what made the archives look load-bearing.
+
+**Closing an issue is TWO actions, deliberately (owner, 30 October 2026).** Always try
+`gh issue close`, **and** also add the `status: done` label — belt and braces, so a close that is
+refused is still visible.
+
+**And beware the diagnosis that went with this.** On 30 October 2026 one `gh issue close` was
+refused by the permission classifier, and that single refusal was reported as a standing block —
+the reason "every issue these files describe as built is still open". **That was wrong.** Tried
+again the same day, `gh issue close` worked, and 17 finished issues were closed in one go. The
+real reason they were open is simply that **nobody had closed them**. One failure is not a
+standing block: try it before concluding, and never generalise a permission refusal into a
+capability you do not have.
+
+**A document may not claim a setting or guard is in force without it being checked.** On 30 October
+2026 three settings recorded as "DONE and PROVED" did not exist: the deny rules for force-push and
+hard reset, the deny rules for `docker volume prune` / `docker system prune`, and
+`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=6`. `~/.claude/settings.json` had no `permissions` block and
+no `env` block at all. The written rules had been followed, so no harm came of it — what was
+missing was the backstop, not the practice. Tracked as #678.
+
 ## The documentation sweep is a standing task
 
 After each real body of work, and before its pull request is opened, update the
