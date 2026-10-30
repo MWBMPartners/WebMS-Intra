@@ -10201,6 +10201,81 @@ years and says why; `tools/mail-queue-selftest.php` uses 400 days;
 only one asking for two changes inside 366 days of now.
 
 
+### The API description had never been executed against the code (#641)
+
+`web/_core/api-spec.json` is served to customers' developers by `/api-docs/`. Until 30 October 2026
+nothing compared it with the handlers, and the drift was invisible from either file alone: you have
+to hold both at once. `tools/audit-checks/check_api_spec_matches_code.py` does that, and it is a
+hard gate in `pr-security.yml`.
+
+**What it found on the day it was written:** 17 reachable endpoints absent from the description,
+two more documented only under their REST address while the text denied their legacy address
+existed, one handler whose switch was never seeded, and four seeded switches with no handler.
+
+**Reachability comes from the router's own rules, not from a list.** `ApiRouter::dispatch()` requires
+exactly three path parts and checks the last two against `^[a-z0-9\-]+$`. The check uses that same
+pattern, so `_apps/assets/api/_coerce.php` — shared code that `create.php` and `update.php` require —
+is excluded by the very convention that already makes it unreachable. **A hand-written list of "files
+that are not really endpoints" would need a new line for every helper somebody added, and would go
+red on the day they forgot.**
+
+**The `api/v1/` facade has to be resolved, or the check cries wolf.** Four tables in `ApiRouter`
+(`V1_RESOURCES` plus the create/update/delete name overrides) decide which handler a REST address
+lands on. They are read out of the file, with comments stripped first so a commented-out resource
+cannot be read as live. Without this, `noticeboard/save` and `leadership/assign` would have been
+reported as documented-but-missing. A `**Legacy alias:**` line is also counted as documentation,
+for the 40 legacy addresses described that way inside the v1 operation that shares their handler.
+
+**That second part is NOT load-bearing, and the first version of this note claimed it was.** It said
+ignoring aliases would report 28 undocumented endpoints against a true figure of 19. Measured against
+the check's own sets, `aliases - targets` is EMPTY and removing the parse leaves the check green: an
+alias line sits inside the v1 operation that already resolves to the same (app, action) pair, so it
+can never contribute a pair `targets` lacks. The 28 came from a different model that did not resolve
+the facade at all. The parse is kept for the one case it would catch — an alias naming a pair no v1
+path resolves to — and the false measurement was caught by the independent check, which is the point:
+an overstated guarantee is worse than none, including in a comment justifying a check.
+
+**The three named lists fail BOTH ways.** `UNREACHABLE_ON_PURPOSE`, `UNSEEDED_ON_PURPOSE` and
+`ORPHAN_SEEDS_ON_PURPOSE` name each known-and-deliberate state with its reason. Something unlisted is
+a new fault; something **listed but no longer true** is also a failure, because a named exception that
+has stopped describing anything is worse than none — it is believed. That is the exact shape that bit
+the end-to-end migration harness on 29 October 2026, when three of its exceptions had quietly stopped
+being true and nobody was told, because the workflow that would have said so only runs on a pull
+request.
+
+**What the check deliberately does not do.** It compares which addresses exist, not whether what the
+description says about them is true — a documented parameter the handler ignores, a response field
+never sent or a wrong status code all pass. The one exception is the "Legacy alias: none" sentence,
+and that works only because it happens to be a claim about an address. It also does not try to
+work out which HTTP verbs a handler accepts: that is decided at run time by `ApiAuth::requireMethod()`,
+which `PORTAL_API_V1` deliberately relaxes, and guessing it from the text of a file would be wrong in
+both directions.
+
+**Five endpoints do not use the portal's envelope, and that is now written down.** `worship/state`,
+`worship/advance`, `livestream/ping`, `push/subscribe` and `push/unsubscribe` answer their own flat
+JSON, set none of `ApiResponse`'s security headers, and some open CORS to any origin on purpose
+because they serve an embedded player on other people's sites. **`worship/advance` and the two push
+endpoints return the replacement form token as a TOP-LEVEL field, not `meta.csrfToken`** — the
+operator's console is drawn once and posts repeatedly, so without carrying it forward every control
+works exactly once.
+
+**Three comments stated guarantees the code had forgotten to implement** — the #645 shape, and worth
+reading as a set because none of them would fail a test:
+
+- `livechat/api/prompt-publish.php` said "pasting curl with the bearer-token-or-session would also
+  work". A bearer key is accepted only by `ApiAuth::requireWrite()`/`requireRead()`, and the file
+  calls neither.
+- `tours/api/active.php` said it offered only tours whose version is at or below the running
+  `PORTAL_VERSION`. Nothing in the file reads `PORTAL_VERSION`; the `ORDER BY` takes the highest
+  version there is, so a tour seeded for a later release would be offered. A real gap, left as it
+  stands because fixing it changes which tour people see.
+- `noticeboard/api/save.php` and `noticeboard/api/upload.php` said their `App::isSiteAdmin()` check
+  "fails closed for bearer keys too". The condition is `ApiAuth::source() === 'session' && …`, which
+  **skips** the test for a key rather than failing it closed. The behaviour is the house convention —
+  a key's authority is its scope, and **eight files** under `web/_apps` contain that same test (nine
+  occurrences; `users/api/create.php` has two, which is how an earlier draft of this note said
+  "nine handlers") — but the justification was the opposite of what the code does.
+
 ## Ten checks and two tests that ran nowhere (#646, 28 October 2026)
 
 Found while wiring up a new check for #640, after an independent review pointed

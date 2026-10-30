@@ -26,10 +26,21 @@ $body = ApiAuth::requireWrite('noticeboard:write', sessionNeedsAdmin: false);
 
 // 🛡️ Site-admin gate — kept verbatim. This is a distinct, finer-grained check
 // than ApiAuth's sessionNeedsAdmin (isSiteAdmin(), not isAdmin()), so it stays
-// here rather than folding into the ApiAuth call. Because App::isSiteAdmin()
-// reads App::user() (session-only), it also fails closed for bearer keys —
-// see #323 Phase 2 B3 report for the follow-up needed to let a scoped bearer
-// key through (e.g. a site-pinned key implicitly counted as site-admin here).
+// here rather than folding into the ApiAuth call.
+//
+// WHAT THIS DOES NOT DO, because the comment here used to say the opposite
+// (corrected 30 October 2026, #641): it does NOT apply to a bearer key. The
+// `ApiAuth::source() === 'session'` term SKIPS the whole test for a key, so a
+// key holding `noticeboard:write` passes with no organisation-administrator
+// check at all. That is the house convention - a key's authority is its scope,
+// and seven other files under _apps contain this same source() test - but the old wording
+// claimed App::isSiteAdmin() being session-only meant it "fails closed for
+// bearer keys too", which is the opposite of what the condition does: the
+// test is not failed for a key, it is never reached.
+//
+// The #323 Phase 2 B3 report's follow-up still stands - deciding whether a
+// site-pinned key should count as a site admin here - but it is a question
+// about what the gate SHOULD do, not a description of what it does.
 if (ApiAuth::source() === 'session' && App::isSiteAdmin() === false) {
     ApiResponse::error('Admin access required', 403);
 }

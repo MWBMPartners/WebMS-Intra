@@ -9,7 +9,15 @@
  *
  * Admin OR Auth::isCoordinatorOf(eventID). Same-origin (admin tab); CSRF on
  * POST. Composer card on the host console event dashboard is the primary
- * caller; pasting curl with the bearer-token-or-session would also work.
+ * caller.
+ *
+ * A SESSION ONLY - an API key cannot reach this. This used to say that
+ * "pasting curl with the bearer-token-or-session would also work", which was
+ * never true: a bearer key is accepted only by ApiAuth::requireWrite() /
+ * requireRead(), and this file calls neither (only noteCsrfRotation(), which
+ * publishes the replacement form token). Anything arriving without a session
+ * is refused by ApiResponse::requireAuth() with 401. Corrected 30 October
+ * 2026 while documenting this endpoint for #641.
  *
  * @link https://github.com/MWBMPartners/WebMS-Intra/issues/317
  * @link https://github.com/MWBMPartners/WebMS-Intra/issues/313

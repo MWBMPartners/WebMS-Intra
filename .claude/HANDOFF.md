@@ -6,6 +6,57 @@
 
 ---
 
+## 30 October 2026 — the API description now has a check, and 17 missing endpoints are described (#641 part 1)
+
+**What changed.** `web/_core/api-spec.json` had never been compared with the code that answers it.
+Added `tools/audit-checks/check_api_spec_matches_code.py` (a hard gate in `pr-security.yml`),
+documented the 17 reachable endpoints that were absent, gave the two described only under their
+`api/v1/` address a legacy path of their own, corrected three operations that denied a legacy
+address which works, and corrected three code comments that promised behaviour the code does
+not have. The spec change is **purely additive** apart from those three descriptions — proved
+structurally (19 paths and 6 schemas added, none removed, top-level blocks untouched) rather than by
+reading a 7,944-line diff, 765 lines of which are pure reformatting.
+
+**THREE independent check rounds, every one NOT CLEAN — 16 real problems in all (7, then 5, then
+4), every one fixed and re-proved.** The rounds converged: round 1 found structural gaps in the
+check itself, round 2 mostly wrong figures and a schema attached to the wrong responses, round 3
+only untrue sentences in descriptions. **Round 3's fixes were verified by me against the code
+rather than by a fourth round** — each was a factual claim checkable with a grep, and three rounds
+is already past what this project likes; a fourth would have gone on finding wording. The four
+worth carrying forward: check F could not see a handler at
+`_apps/api/{sub}/{action}.php`, which is exactly where `push/subscribe`, `push/unsubscribe` and both
+tours handlers sat before #322 and #363 moved them, so the one guard meant to spot an endpoint
+parked out of reach would have missed all three real cases. My docstring justified the alias parse
+with a FALSE MEASUREMENT (`aliases - targets` is empty; it changes nothing). And **a patch script of
+mine aborted on an assertion partway through and I treated a follow-up fix for one file as having
+finished the job** — two instruction files kept their wrong figures until round two found them. When
+a multi-step patch aborts, re-run the remaining steps explicitly. Also: my own planting harness deleted a PHP file and
+restored only the three files it watched — caught by its own closing "is it green again?" step. **A
+plant that adds or deletes a file must back that file up too.**
+
+**Checks run.** `php -l` on four files, all 39 audit scripts (0 failures, and the two that report
+while exiting 0 were READ), Ruby YAML parse of the workflow (26 steps, no truncated names), spec
+valid with no dangling `$ref`. **No database change, so the migration harness was not run. No HTTP
+test of the 19 endpoints** — the descriptions come from reading the handlers, not from calling them.
+
+**Still open on #641:** the JSON Schema beside the description (item 2), a `description` on every
+property (item 4), and the remaining untrue statements in the issue's section 3. Note three
+different counts of undescribed properties exist (181 in the issue, 274 and 286 from two traversals
+here); none has been written down as fact.
+
+**Raised.** #675 — `expenses/export` is a working CSV export whose switch was never seeded, so it has
+always answered 403, and four more switches are seeded for handlers that do not exist. Both need the
+owner's decision; named in the check, which fails if either stops being true.
+
+**One more thing the third round taught, and it is the useful one.** The selftest asserted only
+that the expected check fired, which cannot tell "caught by G" from "caught by G and also A". It now
+compares the WHOLE SET of checks each plant trips, and declaring the set immediately exposed two
+more impure plants that the old test had hidden. One was fixed; one is honestly declared as `AG`,
+because seeding a handler's switch cannot help also making it reachable-and-undocumented. **A plant
+that trips two checks is evidence about neither until you say so.**
+
+**Next.** #641 items 2 and 4, then the browser/visual half of #569.
+
 ## 29 OCTOBER 2026, LATEST — transcription you can actually reach (#276, migration 229)
 
 **State: built, verified, independently checked (NOT CLEAN → all fixed), committed.**

@@ -78,6 +78,30 @@
       "description": "Asset Tracker register — physical & digital assets (#406)"
     },
     {
+      "name": "Live Chat",
+      "description": "Chat and host prompts alongside a livestream. All of these use the portal's usual {status, data, meta} envelope; some need no sign-in, because the embedded player runs on other people's websites."
+    },
+    {
+      "name": "Worship",
+      "description": "Running a service plan on screen, and searching hymns and songs while building one."
+    },
+    {
+      "name": "Tours",
+      "description": "The guided tours the portal offers a person: any active tour they have not yet completed, including a \"what's new\" tour after an upgrade."
+    },
+    {
+      "name": "Livestream",
+      "description": "Keeping track of who is watching a livestream."
+    },
+    {
+      "name": "Venues",
+      "description": "Checking what is booked before an event is saved."
+    },
+    {
+      "name": "Push",
+      "description": "Registering a device for push notifications and switching it off again. Both answer with their own flat JSON rather than the portal's usual envelope."
+    },
+    {
       "name": "Legacy Alias",
       "description": "Pre-v1 endpoint path (`/api/{app}/{action}`). Still fully supported and documented — the /api/v1/{resource} path for the same operation is a thin facade over the identical handler file and enablement flag."
     }
@@ -316,12 +340,32 @@
           "address": {
             "type": "object",
             "properties": {
-              "line1": { "type": "string", "nullable": true },
-              "line2": { "type": "string", "nullable": true },
-              "city": { "type": "string", "nullable": true },
-              "region": { "type": "string", "nullable": true },
-              "postcode": { "type": "string", "nullable": true },
-              "countryCode": { "type": "string", "nullable": true, "example": "GB", "description": "ISO 3166-1 alpha-2, uppercase." }
+              "line1": {
+                "type": "string",
+                "nullable": true
+              },
+              "line2": {
+                "type": "string",
+                "nullable": true
+              },
+              "city": {
+                "type": "string",
+                "nullable": true
+              },
+              "region": {
+                "type": "string",
+                "nullable": true
+              },
+              "postcode": {
+                "type": "string",
+                "nullable": true
+              },
+              "countryCode": {
+                "type": "string",
+                "nullable": true,
+                "example": "GB",
+                "description": "ISO 3166-1 alpha-2, uppercase."
+              }
             }
           },
           "latitude": {
@@ -1004,85 +1048,389 @@
         "type": "object",
         "description": "A single asset row as returned by list/detail (#406). `licenseKey` and `publicToken` are ALWAYS stripped before this leaves the API (ApiResponse::filterSensitive()) — neither ever appears in a response, on any endpoint. `categoryName`/`locationName` are joined convenience fields.",
         "properties": {
-          "assetID": { "type": "integer" },
-          "siteID": { "type": "integer" },
-          "assetKind": { "type": "string", "enum": ["physical", "digital"] },
-          "name": { "type": "string" },
-          "description": { "type": "string", "nullable": true },
-          "categoryID": { "type": "integer", "nullable": true },
-          "categoryName": { "type": "string", "nullable": true, "description": "Joined convenience field (list/detail only)." },
-          "locationID": { "type": "integer", "nullable": true },
-          "locationName": { "type": "string", "nullable": true, "description": "Joined convenience field (list/detail only)." },
-          "manufacturer": { "type": "string", "nullable": true },
-          "model": { "type": "string", "nullable": true },
-          "serialNumber": { "type": "string", "nullable": true },
-          "assetTagCode": { "type": "string", "nullable": true, "description": "UNIQUE per site when set." },
-          "conditionState": { "type": "string", "enum": ["new", "excellent", "good", "fair", "poor", "broken"] },
-          "status": { "type": "string", "enum": ["in-service", "in-repair", "on-loan", "borrowed", "in-storage", "retired", "disposed", "lost", "stolen"] },
-          "purchaseDate": { "type": "string", "format": "date", "nullable": true },
-          "purchaseStore": { "type": "string", "nullable": true },
-          "purchaseCostPence": { "type": "integer", "nullable": true, "description": "Integer minor units (pence) — house money convention #266." },
-          "currency": { "type": "string", "example": "GBP" },
-          "warrantyExpiry": { "type": "string", "format": "date", "nullable": true },
-          "warrantyDetails": { "type": "string", "nullable": true },
-          "licenseSeats": { "type": "integer", "nullable": true },
-          "renewalDate": { "type": "string", "format": "date", "nullable": true },
-          "accessUrl": { "type": "string", "nullable": true },
-          "depreciationMethod": { "type": "string", "enum": ["none", "straight-line", "reducing-balance"] },
-          "usefulLifeMonths": { "type": "integer", "nullable": true },
-          "salvageValuePence": { "type": "integer", "nullable": true },
-          "currentValuePence": { "type": "integer", "nullable": true, "description": "Last computed/valued book value, in pence." },
-          "insurerName": { "type": "string", "nullable": true },
-          "insurancePolicyNumber": { "type": "string", "nullable": true },
-          "insuredValuePence": { "type": "integer", "nullable": true },
-          "insuranceRenewalDate": { "type": "string", "format": "date", "nullable": true },
-          "isConfidential": { "type": "boolean", "description": "When true the asset is hidden from non-privileged callers: list/detail/qr return it only to a logged-in session admin or asset_manager (detail/qr also to a responsible owner-party) — never to a bearer key or an ordinary logged-in user. Non-privileged callers get a uniform 404, not a 403." },
-          "publicPageEnabled": { "type": "boolean" },
-          "labelSymbology": { "type": "string", "enum": ["qr", "code128", "ean13", "ean8", "upca", "upce", "itf14", "qr+code128"] },
-          "parentAssetID": { "type": "integer", "nullable": true },
-          "createdByID": { "type": "integer" },
-          "createdAt": { "type": "string", "format": "date-time" },
-          "updatedAt": { "type": "string", "format": "date-time" }
+          "assetID": {
+            "type": "integer"
+          },
+          "siteID": {
+            "type": "integer"
+          },
+          "assetKind": {
+            "type": "string",
+            "enum": [
+              "physical",
+              "digital"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "categoryID": {
+            "type": "integer",
+            "nullable": true
+          },
+          "categoryName": {
+            "type": "string",
+            "nullable": true,
+            "description": "Joined convenience field (list/detail only)."
+          },
+          "locationID": {
+            "type": "integer",
+            "nullable": true
+          },
+          "locationName": {
+            "type": "string",
+            "nullable": true,
+            "description": "Joined convenience field (list/detail only)."
+          },
+          "manufacturer": {
+            "type": "string",
+            "nullable": true
+          },
+          "model": {
+            "type": "string",
+            "nullable": true
+          },
+          "serialNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "assetTagCode": {
+            "type": "string",
+            "nullable": true,
+            "description": "UNIQUE per site when set."
+          },
+          "conditionState": {
+            "type": "string",
+            "enum": [
+              "new",
+              "excellent",
+              "good",
+              "fair",
+              "poor",
+              "broken"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in-service",
+              "in-repair",
+              "on-loan",
+              "borrowed",
+              "in-storage",
+              "retired",
+              "disposed",
+              "lost",
+              "stolen"
+            ]
+          },
+          "purchaseDate": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "purchaseStore": {
+            "type": "string",
+            "nullable": true
+          },
+          "purchaseCostPence": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Integer minor units (pence) — house money convention #266."
+          },
+          "currency": {
+            "type": "string",
+            "example": "GBP"
+          },
+          "warrantyExpiry": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "warrantyDetails": {
+            "type": "string",
+            "nullable": true
+          },
+          "licenseSeats": {
+            "type": "integer",
+            "nullable": true
+          },
+          "renewalDate": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "accessUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "depreciationMethod": {
+            "type": "string",
+            "enum": [
+              "none",
+              "straight-line",
+              "reducing-balance"
+            ]
+          },
+          "usefulLifeMonths": {
+            "type": "integer",
+            "nullable": true
+          },
+          "salvageValuePence": {
+            "type": "integer",
+            "nullable": true
+          },
+          "currentValuePence": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Last computed/valued book value, in pence."
+          },
+          "insurerName": {
+            "type": "string",
+            "nullable": true
+          },
+          "insurancePolicyNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "insuredValuePence": {
+            "type": "integer",
+            "nullable": true
+          },
+          "insuranceRenewalDate": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "isConfidential": {
+            "type": "boolean",
+            "description": "When true the asset is hidden from non-privileged callers: list/detail/qr return it only to a logged-in session admin or asset_manager (detail/qr also to a responsible owner-party) — never to a bearer key or an ordinary logged-in user. Non-privileged callers get a uniform 404, not a 403."
+          },
+          "publicPageEnabled": {
+            "type": "boolean"
+          },
+          "labelSymbology": {
+            "type": "string",
+            "enum": [
+              "qr",
+              "code128",
+              "ean13",
+              "ean8",
+              "upca",
+              "upce",
+              "itf14",
+              "qr+code128"
+            ]
+          },
+          "parentAssetID": {
+            "type": "integer",
+            "nullable": true
+          },
+          "createdByID": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "AssetCreate": {
         "type": "object",
-        "required": ["name"],
+        "required": [
+          "name"
+        ],
         "description": "Unlike the HTML `save.php` form this mirrors, money fields here are PENCE INTEGERS (not pounds-decimal strings), and an invalid ENUM value (assetKind/conditionState/status/currency/depreciationMethod/labelSymbology) 400s rather than silently defaulting — see `_apps/assets/api/_coerce.php`. `licenseKey` travels as PLAINTEXT in the request body only — it is encrypted at rest and NEVER echoed back by any response. On update (PUT/PATCH), only fields present in the JSON body are touched; everything else keeps its current value.",
         "properties": {
-          "name": { "type": "string", "maxLength": 255, "example": "Conference room projector" },
-          "assetKind": { "type": "string", "enum": ["physical", "digital"], "default": "physical" },
-          "description": { "type": "string", "nullable": true },
-          "categoryID": { "type": "integer", "nullable": true, "description": "Site-scoped FK; silently dropped (NULL) if it doesn't resolve on this site." },
-          "locationID": { "type": "integer", "nullable": true, "description": "Site-scoped FK; silently dropped (NULL) if it doesn't resolve on this site." },
-          "manufacturer": { "type": "string", "nullable": true },
-          "model": { "type": "string", "nullable": true },
-          "serialNumber": { "type": "string", "nullable": true },
-          "assetTagCode": { "type": "string", "nullable": true, "description": "UNIQUE per site — a collision returns 409." },
-          "conditionState": { "type": "string", "enum": ["new", "excellent", "good", "fair", "poor", "broken"], "default": "good" },
-          "status": { "type": "string", "enum": ["in-service", "in-repair", "on-loan", "borrowed", "in-storage", "retired", "disposed", "lost", "stolen"], "default": "in-service" },
-          "purchaseDate": { "type": "string", "format": "date", "nullable": true },
-          "purchaseStore": { "type": "string", "nullable": true },
-          "purchaseCostPence": { "type": "integer", "nullable": true, "description": "PENCE, not pounds — house money convention #266." },
-          "currency": { "type": "string", "default": "GBP", "example": "GBP" },
-          "warrantyExpiry": { "type": "string", "format": "date", "nullable": true },
-          "warrantyDetails": { "type": "string", "nullable": true },
-          "licenseKey": { "type": "string", "description": "PLAINTEXT on write only. Blank/absent leaves it unchanged on update; blank means \"no key\" on create." },
-          "licenseSeats": { "type": "integer", "nullable": true },
-          "renewalDate": { "type": "string", "format": "date", "nullable": true },
-          "accessUrl": { "type": "string", "nullable": true, "description": "http(s) scheme only." },
-          "depreciationMethod": { "type": "string", "enum": ["none", "straight-line", "reducing-balance"], "default": "none" },
-          "usefulLifeMonths": { "type": "integer", "nullable": true },
-          "salvageValuePence": { "type": "integer", "nullable": true },
-          "insurerName": { "type": "string", "nullable": true },
-          "insurancePolicyNumber": { "type": "string", "nullable": true },
-          "insuredValuePence": { "type": "integer", "nullable": true },
-          "insuranceRenewalDate": { "type": "string", "format": "date", "nullable": true },
-          "isConfidential": { "type": "boolean", "default": false },
-          "publicPageEnabled": { "type": "boolean", "default": true },
-          "labelSymbology": { "type": "string", "enum": ["qr", "code128", "ean13", "ean8", "upca", "upce", "itf14", "qr+code128"], "default": "qr" },
-          "parentAssetID": { "type": "integer", "nullable": true },
-          "csrf_token": { "type": "string", "description": "CSRF token (or use X-CSRF-TOKEN header)" }
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "example": "Conference room projector"
+          },
+          "assetKind": {
+            "type": "string",
+            "enum": [
+              "physical",
+              "digital"
+            ],
+            "default": "physical"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "categoryID": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Site-scoped FK; silently dropped (NULL) if it doesn't resolve on this site."
+          },
+          "locationID": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Site-scoped FK; silently dropped (NULL) if it doesn't resolve on this site."
+          },
+          "manufacturer": {
+            "type": "string",
+            "nullable": true
+          },
+          "model": {
+            "type": "string",
+            "nullable": true
+          },
+          "serialNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "assetTagCode": {
+            "type": "string",
+            "nullable": true,
+            "description": "UNIQUE per site — a collision returns 409."
+          },
+          "conditionState": {
+            "type": "string",
+            "enum": [
+              "new",
+              "excellent",
+              "good",
+              "fair",
+              "poor",
+              "broken"
+            ],
+            "default": "good"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in-service",
+              "in-repair",
+              "on-loan",
+              "borrowed",
+              "in-storage",
+              "retired",
+              "disposed",
+              "lost",
+              "stolen"
+            ],
+            "default": "in-service"
+          },
+          "purchaseDate": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "purchaseStore": {
+            "type": "string",
+            "nullable": true
+          },
+          "purchaseCostPence": {
+            "type": "integer",
+            "nullable": true,
+            "description": "PENCE, not pounds — house money convention #266."
+          },
+          "currency": {
+            "type": "string",
+            "default": "GBP",
+            "example": "GBP"
+          },
+          "warrantyExpiry": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "warrantyDetails": {
+            "type": "string",
+            "nullable": true
+          },
+          "licenseKey": {
+            "type": "string",
+            "description": "PLAINTEXT on write only. Blank/absent leaves it unchanged on update; blank means \"no key\" on create."
+          },
+          "licenseSeats": {
+            "type": "integer",
+            "nullable": true
+          },
+          "renewalDate": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "accessUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "http(s) scheme only."
+          },
+          "depreciationMethod": {
+            "type": "string",
+            "enum": [
+              "none",
+              "straight-line",
+              "reducing-balance"
+            ],
+            "default": "none"
+          },
+          "usefulLifeMonths": {
+            "type": "integer",
+            "nullable": true
+          },
+          "salvageValuePence": {
+            "type": "integer",
+            "nullable": true
+          },
+          "insurerName": {
+            "type": "string",
+            "nullable": true
+          },
+          "insurancePolicyNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "insuredValuePence": {
+            "type": "integer",
+            "nullable": true
+          },
+          "insuranceRenewalDate": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "isConfidential": {
+            "type": "boolean",
+            "default": false
+          },
+          "publicPageEnabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "labelSymbology": {
+            "type": "string",
+            "enum": [
+              "qr",
+              "code128",
+              "ean13",
+              "ean8",
+              "upca",
+              "upce",
+              "itf14",
+              "qr+code128"
+            ],
+            "default": "qr"
+          },
+          "parentAssetID": {
+            "type": "integer",
+            "nullable": true
+          },
+          "csrf_token": {
+            "type": "string",
+            "description": "CSRF token (or use X-CSRF-TOKEN header)"
+          }
         }
       },
       "EventHubResource": {
@@ -1165,6 +1513,175 @@
           },
           "sortOrder": {
             "type": "integer"
+          }
+        }
+      },
+      "LiveChatMessage": {
+        "type": "object",
+        "description": "One approved chat message.",
+        "properties": {
+          "messageID": {
+            "type": "integer",
+            "description": "The message's own number. Use the largest one you have seen as `sinceID` to fetch only what is new."
+          },
+          "displayName": {
+            "type": "string",
+            "description": "The name the sender gave, as tidied by the portal when the message was accepted."
+          },
+          "body": {
+            "type": "string",
+            "description": "The message itself, already shortened to the installation's maximum length when it was accepted."
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "When the message was sent, as the database stores it. This is NOT formatted or converted to the reader's time zone by this endpoint."
+          }
+        }
+      },
+      "WorshipDisplayState": {
+        "type": "object",
+        "description": "Where a running service plan has got to. A flat object: this is NOT the portal's usual {status, data, meta} envelope.",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "True on a successful read.",
+            "example": true
+          },
+          "currentItemID": {
+            "type": "integer",
+            "nullable": true,
+            "description": "The item being shown, or null when the plan has no saved position yet. **Blanking or blacking the screen does NOT null this** -- the item is kept so the operator can return to it, so `isBlank` and `isBlack` are the only reliable test for a blank screen. A client that treated null as \"blank\" would go on showing the slide the operator just blanked."
+          },
+          "currentSlideIndex": {
+            "type": "integer",
+            "description": "Which slide of the current item is showing, counting from zero."
+          },
+          "totalSlides": {
+            "type": "integer",
+            "description": "How many slides the current item has. Always 1 for anything that is not a song."
+          },
+          "isBlank": {
+            "type": "boolean",
+            "description": "True when the operator has blanked the screen, leaving the display's own background."
+          },
+          "isBlack": {
+            "type": "boolean",
+            "description": "True when the operator has blacked the screen out entirely."
+          },
+          "slideTitle": {
+            "type": "string",
+            "description": "The current slide's heading. Empty when there is no current item."
+          },
+          "body": {
+            "type": "string",
+            "description": "The current slide's text. Empty when there is no current item."
+          },
+          "itemType": {
+            "type": "string",
+            "description": "What kind of item is showing, for example a song or a reading. Empty when there is no current item."
+          }
+        }
+      },
+      "WorshipAdvanceResult": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WorshipDisplayState"
+          },
+          {
+            "type": "object",
+            "description": "The plan's new position, plus the replacement form token. Note the token is a TOP-LEVEL field here, not `meta.csrfToken`, because this handler does not use the portal's usual envelope. A console drawn once and used repeatedly must carry it into the next request.",
+            "required": [
+              "csrfToken"
+            ],
+            "properties": {
+              "csrfToken": {
+                "type": "string",
+                "description": "The replacement form token. Send this with your next request; the one you just used is now dead."
+              }
+            }
+          }
+        ]
+      },
+      "Tour": {
+        "type": "object",
+        "description": "A guided tour of part of the portal.",
+        "properties": {
+          "tourID": {
+            "type": "integer",
+            "description": "The tour's own number. Send it back to `POST /api/tours/complete` when the person finishes."
+          },
+          "tourKey": {
+            "type": "string",
+            "description": "A short name for the tour, for example `welcome`."
+          },
+          "version": {
+            "type": "string",
+            "description": "Which version of the portal this tour was written for."
+          },
+          "title": {
+            "type": "string",
+            "description": "The tour's name, as shown to the person."
+          },
+          "steps": {
+            "type": "array",
+            "description": "The tour's steps, in order, as stored when the tour was written. The portal checks only that this is a non-empty list.",
+            "items": {
+              "type": "object",
+              "description": "One step of the tour."
+            }
+          }
+        }
+      },
+      "HymnSearchResult": {
+        "type": "object",
+        "description": "One hymn or song found by a search. The fields present depend on where it came from -- read `source` first.",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "hymnal",
+              "song",
+              "remote"
+            ],
+            "description": "`hymnal` is this organisation's own hymn book, `song` its song library, `remote` an outside catalogue."
+          },
+          "songID": {
+            "type": "integer",
+            "description": "The song library's own number. Present for `song` results."
+          },
+          "title": {
+            "type": "string",
+            "description": "The hymn or song's title."
+          },
+          "author": {
+            "type": "string",
+            "nullable": true,
+            "description": "Who wrote it, where that is known."
+          },
+          "ccliNumber": {
+            "type": "string",
+            "nullable": true,
+            "description": "The song's CCLI number, used for usage reporting, where it is known."
+          },
+          "hymnalCode": {
+            "type": "string",
+            "nullable": true,
+            "description": "Which hymn book it is in."
+          },
+          "hymnNumber": {
+            "type": "string",
+            "nullable": true,
+            "description": "Its number in that hymn book. Present on `song` rows; a `hymnal` or `remote` row carries its own fields from the hymn book it came from, which this schema does not list."
+          }
+        }
+      },
+      "FlatError": {
+        "type": "object",
+        "description": "A refusal from one of the handlers that answers OUTSIDE the portal's usual {status, data, meta} envelope and sends no `ok` field with it. Test the HTTP status, not a field.",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "What went wrong. **Its style differs by endpoint, so do not show it blindly and do not match on it.** The livestream ping sends a short machine word (`method`, `json`, `token`, `event`); the push endpoints send a sentence meant for a person, such as \"Please sign in to turn notifications on for this device.\" Decide behaviour from the HTTP status, not from this text."
           }
         }
       }
@@ -1884,114 +2401,298 @@
     },
     "/api/assets/list": {
       "get": {
-        "tags": ["Assets", "Legacy Alias"],
+        "tags": [
+          "Assets",
+          "Legacy Alias"
+        ],
         "summary": "List assets for the current site",
         "description": "Requires scope `assets:read` (bearer) or an authenticated session. Confidential assets are returned only to a logged-in session admin/asset_manager — never to a bearer key or an ordinary user (see the `Asset` schema note). **v1 equivalent:** `GET /api/v1/assets`.",
         "parameters": [
-          { "name": "page", "in": "query", "schema": { "type": "integer", "minimum": 1, "default": 1 } },
-          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 } },
-          { "name": "status", "in": "query", "schema": { "type": "string" } },
-          { "name": "categoryID", "in": "query", "schema": { "type": "integer" } },
-          { "name": "assetKind", "in": "query", "schema": { "type": "string", "enum": ["physical", "digital"] } },
-          { "name": "search", "in": "query", "schema": { "type": "string" }, "description": "Matches name, serial number, or asset tag code." }
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "categoryID",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "assetKind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "physical",
+                "digital"
+              ]
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Matches name, serial number, or asset tag code."
+          }
         ],
         "responses": {
-          "200": { "description": "OK" },
-          "401": { "description": "Auth required" },
-          "403": { "description": "Endpoint disabled or missing scope" }
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Auth required"
+          },
+          "403": {
+            "description": "Endpoint disabled or missing scope"
+          }
         }
       }
     },
     "/api/assets/detail": {
       "get": {
-        "tags": ["Assets", "Legacy Alias"],
+        "tags": [
+          "Assets",
+          "Legacy Alias"
+        ],
         "summary": "Fetch a single asset by id",
         "description": "Requires scope `assets:read` (bearer) or an authenticated session. **v1 equivalent:** `GET /api/v1/assets/{id}`.",
         "parameters": [
-          { "name": "id", "in": "query", "required": true, "schema": { "type": "integer" } }
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "OK" },
-          "400": { "description": "id is required" },
-          "401": { "description": "Auth required" },
-          "404": { "description": "Not found — including a cross-site id probe, which never confirms another tenant's asset exists" }
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "id is required"
+          },
+          "401": {
+            "description": "Auth required"
+          },
+          "404": {
+            "description": "Not found — including a cross-site id probe, which never confirms another tenant's asset exists"
+          }
         }
       }
     },
     "/api/assets/create": {
       "post": {
-        "tags": ["Assets", "Legacy Alias"],
+        "tags": [
+          "Assets",
+          "Legacy Alias"
+        ],
         "summary": "Create a new asset",
         "description": "Requires scope `assets:write` (bearer) or an admin/asset_manager session. Every field is validated/coerced exactly like the `save.php` HTML form (see the `AssetCreate` schema). **v1 equivalent:** `POST /api/v1/assets`.",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AssetCreate" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetCreate"
+              }
+            }
+          }
         },
         "responses": {
-          "201": { "description": "Created" },
-          "400": { "description": "Validation error" },
-          "401": { "description": "Auth required" },
-          "403": { "description": "Endpoint disabled, missing scope, or not a manager" },
-          "409": { "description": "assetTagCode already in use on this site" }
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Auth required"
+          },
+          "403": {
+            "description": "Endpoint disabled, missing scope, or not a manager"
+          },
+          "409": {
+            "description": "assetTagCode already in use on this site"
+          }
         }
       }
     },
     "/api/assets/update": {
       "post": {
-        "tags": ["Assets", "Legacy Alias"],
+        "tags": [
+          "Assets",
+          "Legacy Alias"
+        ],
         "summary": "Update asset fields — only fields present in the body are touched",
         "description": "Requires scope `assets:write` (bearer) or an admin/asset_manager session. **v1 equivalent:** `PUT`/`PATCH /api/v1/assets/{id}`.",
         "parameters": [
-          { "name": "id", "in": "query", "required": true, "schema": { "type": "integer" } }
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "description": "Subset of AssetCreate fields." } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Subset of AssetCreate fields."
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "description": "OK" },
-          "400": { "description": "Validation error" },
-          "401": { "description": "Auth required" },
-          "404": { "description": "Not found" },
-          "409": { "description": "assetTagCode already in use on this site" }
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Auth required"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "assetTagCode already in use on this site"
+          }
         }
       }
     },
     "/api/assets/delete": {
       "post": {
-        "tags": ["Assets", "Legacy Alias"],
+        "tags": [
+          "Assets",
+          "Legacy Alias"
+        ],
         "summary": "Soft-delete an asset (isDeleted = 1 — never a hard DELETE)",
         "description": "Requires scope `assets:write` (bearer) or an admin/asset_manager session. **v1 equivalent:** `DELETE /api/v1/assets/{id}`.",
         "parameters": [
-          { "name": "id", "in": "query", "required": true, "schema": { "type": "integer" } }
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "OK" },
-          "400": { "description": "assetID is required" },
-          "401": { "description": "Auth required" },
-          "404": { "description": "Not found or already deleted" }
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "assetID is required"
+          },
+          "401": {
+            "description": "Auth required"
+          },
+          "404": {
+            "description": "Not found or already deleted"
+          }
         }
       }
     },
     "/api/assets/qr": {
       "get": {
-        "tags": ["Assets"],
+        "tags": [
+          "Assets"
+        ],
         "summary": "Stream one asset's label image (QR or barcode) — not part of the v1 CRUD facade",
         "description": "Requires scope `assets:read` (bearer) or an authenticated session; gated by `api.assets.qr.enabled`. Returns a raw image (`image/svg+xml` or `image/png`), never JSON. Encodes ONLY the public lost-and-found URL (QR) or the asset's own tag code/GS1 identifier value (barcode) — no other asset data leaks. Falls back to the QR image (with an `X-Label-Fallback` response header) if the requested barcode symbology has no usable source value — never fatal.",
         "parameters": [
-          { "name": "id", "in": "query", "required": true, "schema": { "type": "integer" } },
-          { "name": "format", "in": "query", "schema": { "type": "string", "enum": ["svg", "png"], "default": "svg" } },
-          { "name": "symbology", "in": "query", "schema": { "type": "string", "enum": ["qr", "code128", "ean13", "ean8", "upca", "upce", "itf14"] }, "description": "Defaults to the asset's own labelSymbology." }
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "svg",
+                "png"
+              ],
+              "default": "svg"
+            }
+          },
+          {
+            "name": "symbology",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "qr",
+                "code128",
+                "ean13",
+                "ean8",
+                "upca",
+                "upce",
+                "itf14"
+              ]
+            },
+            "description": "Defaults to the asset's own labelSymbology."
+          }
         ],
         "responses": {
           "200": {
             "description": "The label image",
-            "content": { "image/svg+xml": {}, "image/png": {} }
+            "content": {
+              "image/svg+xml": {},
+              "image/png": {}
+            }
           },
-          "400": { "description": "Missing/invalid id, format, or symbology" },
-          "401": { "description": "Auth required" },
-          "403": { "description": "Endpoint disabled or missing scope" },
-          "404": { "description": "Asset not found" }
+          "400": {
+            "description": "Missing/invalid id, format, or symbology"
+          },
+          "401": {
+            "description": "Auth required"
+          },
+          "403": {
+            "description": "Endpoint disabled or missing scope"
+          },
+          "404": {
+            "description": "Asset not found"
+          }
         }
       }
     },
@@ -2018,7 +2719,12 @@
                     },
                     "channelSource": {
                       "type": "string",
-                      "enum": ["environment", "file", "folder", "assumed"],
+                      "enum": [
+                        "environment",
+                        "file",
+                        "folder",
+                        "assumed"
+                      ],
                       "description": "How the release channel in `env` was decided: the PORTAL_ENV setting, the .channel file, the web folder's name (public_html, public_html_beta or public_html_dev), or assumed (nothing says, so the portal treats itself as live).",
                       "example": "file"
                     },
@@ -7244,7 +7950,7 @@
           "Users"
         ],
         "summary": "Create a user (v1, deferral item 3 — highest blast-radius surface)",
-        "description": "Admin ALWAYS required in both modes — bearer additionally needs `users:write` **and** the `api.users.create.enabled` flag, seeded `'false'` (default-off; an admin must consciously enable it). Passwords are never accepted — see `UserCreate`. There is no DELETE for this resource in v1. **Legacy alias:** none — this endpoint is new in v1, exposed only at this path.",
+        "description": "Admin ALWAYS required in both modes — bearer additionally needs `users:write` **and** the `api.users.create.enabled` flag, seeded `'false'` (default-off; an admin must consciously enable it). Passwords are never accepted — see `UserCreate`. There is no DELETE for this resource in v1. **Legacy alias:** `POST /api/users/create`, which reaches the same handler and the same `api.users.create.enabled` switch.",
         "security": [
           {
             "bearerAuth": []
@@ -7362,7 +8068,7 @@
           "Users"
         ],
         "summary": "Update a user (v1; PATCH-style)",
-        "description": "Admin ALWAYS required in both modes — bearer additionally needs `users:write` **and** the `api.users.update.enabled` flag, seeded `'false'`. Email and password are excluded from v1. A session caller can never deactivate their own account through this endpoint. **Legacy alias:** none — new in v1.",
+        "description": "Admin ALWAYS required in both modes — bearer additionally needs `users:write` **and** the `api.users.update.enabled` flag, seeded `'false'`. Email and password are excluded from v1. A session caller can never deactivate their own account through this endpoint. **Legacy alias:** `POST /api/users/update?id={id}`, which reaches the same handler and the same `api.users.update.enabled` switch.",
         "security": [
           {
             "bearerAuth": []
@@ -7489,7 +8195,7 @@
           "Users"
         ],
         "summary": "Update a user (v1; PATCH-style)",
-        "description": "Admin ALWAYS required in both modes — bearer additionally needs `users:write` **and** the `api.users.update.enabled` flag, seeded `'false'`. Email and password are excluded from v1. A session caller can never deactivate their own account through this endpoint. **Legacy alias:** none — new in v1.",
+        "description": "Admin ALWAYS required in both modes — bearer additionally needs `users:write` **and** the `api.users.update.enabled` flag, seeded `'false'`. Email and password are excluded from v1. A session caller can never deactivate their own account through this endpoint. **Legacy alias:** `POST /api/users/update?id={id}`, which reaches the same handler and the same `api.users.update.enabled` switch.",
         "security": [
           {
             "bearerAuth": []
@@ -8358,6 +9064,1924 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/livechat/list": {
+      "get": {
+        "tags": [
+          "Live Chat"
+        ],
+        "summary": "Messages approved for a livestream's chat",
+        "description": "Returns up to 100 approved messages for one event, oldest first. Only messages with status `approved` are ever returned, so anything waiting, hidden or flagged is invisible here.\n\n**Who may read it.** The handler itself asks for no sign-in. What a caller may see is decided per event: a public event is readable by anybody, and an internal one only by a signed-in person who may see it AND whose request came from one of the portal's own pages. An event the caller may not see returns 200 with an empty list, exactly as a made-up event number does, so the answer never reveals that an event exists.\n\n**Polling.** Pass the `lastID` you were last given as `sinceID` to fetch only what is new. The portal sets no interval and enforces none.\n\nRefused with 403 while the `chat.enabled` setting is not `true`.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "eventID",
+            "in": "query",
+            "required": true,
+            "description": "The event whose chat to read. Must be greater than zero.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "sinceID",
+            "in": "query",
+            "required": false,
+            "description": "Return only messages with a higher `messageID` than this. Use the `lastID` from your previous call; 0 means from the beginning.",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The messages, or an empty list for an event the caller may not see.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "messages": {
+                              "type": "array",
+                              "description": "Approved messages, oldest first, at most 100.",
+                              "items": {
+                                "$ref": "#/components/schemas/LiveChatMessage"
+                              }
+                            },
+                            "lastID": {
+                              "type": "integer",
+                              "description": "The `messageID` of the last message returned, or the `sinceID` you sent when there were none. Send it back as `sinceID` next time."
+                            },
+                            "count": {
+                              "type": "integer",
+                              "description": "How many messages are in `messages`."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`eventID` was missing or not greater than zero."
+          },
+          "403": {
+            "description": "Chat is switched off for this installation."
+          },
+          "405": {
+            "description": "Only GET is accepted."
+          }
+        }
+      }
+    },
+    "/api/livechat/send": {
+      "post": {
+        "tags": [
+          "Live Chat"
+        ],
+        "summary": "Post a message to a livestream's chat",
+        "description": "Adds one message to an event's chat.\n\n**No sign-in and no form token are asked for**, because the embedded player runs on other people's websites. Four other things stand in their place: chat must be switched on; the event must be one the caller may see; the `sessionToken` must already exist for this organisation and event, having been created by a livestream ping; and the FIRST message from a given token must pass the bot check when one is configured.\n\n**Over-long text is shortened, not refused.** `body` is trimmed to the installation's maximum and only then refused if nothing is left.\n\n**The message may not appear at once.** The reply's `status` says which happened: `approved` is live immediately, `pending` is waiting for a moderator, and `flagged` was caught by the profanity check -- which marks the message rather than refusing it.\n\nA missing event, an event in another organisation and an event the caller may not see all answer 401 `Unknown session`, deliberately, so the reply is not an existence oracle.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "eventID": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The event being watched."
+                  },
+                  "sessionToken": {
+                    "type": "string",
+                    "description": "The viewer's livestream session token, as created by `POST /api/livestream/ping`. It must already exist for this organisation and event."
+                  },
+                  "displayName": {
+                    "type": "string",
+                    "description": "The name to show beside the message. Tidied by the portal; a value that tidies to nothing is refused."
+                  },
+                  "body": {
+                    "type": "string",
+                    "description": "The message. Shortened to the installation's maximum length rather than refused, then refused only if nothing remains."
+                  }
+                },
+                "required": [
+                  "eventID",
+                  "sessionToken",
+                  "displayName",
+                  "body"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The message was stored. Read `status` to learn whether it is visible yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "messageID": {
+                              "type": "integer",
+                              "description": "The new message's number."
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "approved",
+                                "pending",
+                                "flagged"
+                              ],
+                              "description": "`approved` is visible now; `pending` awaits a moderator; `flagged` was caught by the profanity check and is held."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Answer to a cross-origin pre-flight (OPTIONS). No body."
+          },
+          "400": {
+            "description": "`eventID`, `displayName` or `body` missing, `sessionToken` malformed, or the bot check failed."
+          },
+          "401": {
+            "description": "The session token is unknown for this organisation and event, or the event is not one the caller may see. The two are deliberately indistinguishable."
+          },
+          "403": {
+            "description": "Chat is switched off for this installation."
+          },
+          "405": {
+            "description": "Only POST (and OPTIONS) are accepted."
+          },
+          "429": {
+            "description": "Too many messages from this session token or this address. No `Retry-After` is sent."
+          },
+          "503": {
+            "description": "The message could not be stored, or the bot check is configured but its keys cannot be read."
+          }
+        }
+      }
+    },
+    "/api/livechat/moderate": {
+      "post": {
+        "tags": [
+          "Live Chat"
+        ],
+        "summary": "Approve, hide or flag a chat message",
+        "description": "Sets one message's status. For a signed-in administrator, or somebody holding the `stream_moderator` role, in the organisation that owns the message.\n\n**This answer carries a replacement form token in `meta.csrfToken`, and a page that moderates more than one message must keep it**: the portal replaces the token every time it accepts one, so a console drawn once and used repeatedly stops working after the first action without it. The replacement is also returned on every refusal raised after the token check.\n\nA message in another organisation is reported as 404, the same as one that does not exist.\n\n**Re-applying the status a message already has answers 200, not 404.** The refusal is decided by whether a row changed, and the same statement also stamps who moderated the message and when, so a repeat still changes the row. (The one exception is the same moderator repeating inside the same second, when nothing differs and the answer is 404.)",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "messageID": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The message to act on."
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "approve",
+                      "hide",
+                      "flag"
+                    ],
+                    "description": "`approve` makes it visible, `hide` removes it from view, `flag` marks it for attention."
+                  },
+                  "csrf_token": {
+                    "type": "string",
+                    "description": "The form token. May be sent in the `X-CSRF-TOKEN` header instead, which wins when both are present."
+                  }
+                },
+                "required": [
+                  "messageID",
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The message's status is as asked. Also the answer when it already had that status, because the row still changes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "messageID": {
+                              "type": "integer",
+                              "description": "The message acted on, echoed back."
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "approved",
+                                "hidden",
+                                "flagged"
+                              ],
+                              "description": "The status now stored."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`action` was not one of the three, or `messageID` was not greater than zero."
+          },
+          "401": {
+            "description": "Not signed in."
+          },
+          "403": {
+            "description": "Not an administrator or `stream_moderator`, or the form token was wrong."
+          },
+          "404": {
+            "description": "No such message in this organisation — or the same moderator repeating the same status inside the same second, when nothing in the row differs."
+          },
+          "405": {
+            "description": "Only POST is accepted."
+          }
+        }
+      }
+    },
+    "/api/livechat/prompts": {
+      "get": {
+        "tags": [
+          "Live Chat"
+        ],
+        "summary": "Prompts currently showing for an event",
+        "description": "Returns the prompts a host has published to an event's viewers -- a question, a link, a call to action.\n\nWho may read it is decided exactly as for `GET /api/livechat/list`: an event the caller may not see returns 200 with an empty list, indistinguishable from a made-up event number. Refused with 403 while `chat.enabled` is not `true`. Meant to be polled; the portal sets no interval and enforces none.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "eventID",
+            "in": "query",
+            "required": true,
+            "description": "The event whose prompts to read. Must be greater than zero.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The active prompts, or an empty list for an event the caller may not see.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "prompts": {
+                              "type": "array",
+                              "description": "The prompts still active: not expired and not withdrawn.",
+                              "items": {
+                                "type": "object",
+                                "description": "One published prompt. Its fields are those stored by the prompt publisher."
+                              }
+                            },
+                            "count": {
+                              "type": "integer",
+                              "description": "How many prompts are in `prompts`."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`eventID` was missing or not greater than zero."
+          },
+          "403": {
+            "description": "Chat is switched off for this installation."
+          },
+          "405": {
+            "description": "Only GET is accepted."
+          }
+        }
+      }
+    },
+    "/api/livechat/prompt-publish": {
+      "post": {
+        "tags": [
+          "Live Chat"
+        ],
+        "summary": "Publish a prompt to an event's viewers",
+        "description": "Publishes one prompt to everybody watching an event. For a signed-in administrator, or the event's own coordinator.\n\n**A session only — an API key cannot reach this.** Returns a replacement form token in `meta.csrfToken`; a console that publishes more than once must keep it.\n\n**The form token is checked BEFORE the role is**, so a caller who is neither an administrator nor the coordinator, and whose token is also stale, is told the token was wrong rather than that they lack permission.\n\nAn event that is missing, deleted, in another organisation, or imported from an outside calendar all answer 404: imported events are read-only here, on purpose.",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "eventID": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The event to publish to."
+                  },
+                  "promptType": {
+                    "type": "string",
+                    "description": "Which kind of prompt this is. The permitted values are enforced by the prompt publisher, which refuses an unknown one with 400."
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "The prompt's heading."
+                  },
+                  "body": {
+                    "type": "string",
+                    "description": "The prompt's text."
+                  },
+                  "ctaLabel": {
+                    "type": "string",
+                    "description": "Wording for the prompt's button, where it has one."
+                  },
+                  "ctaUrl": {
+                    "type": "string",
+                    "description": "Where the prompt's button leads."
+                  },
+                  "expirySeconds": {
+                    "type": "integer",
+                    "nullable": true,
+                    "description": "How long the prompt stays active. Omit to use the publisher's own default."
+                  },
+                  "csrf_token": {
+                    "type": "string",
+                    "description": "The form token. May be sent in the `X-CSRF-TOKEN` header instead."
+                  }
+                },
+                "required": [
+                  "eventID"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The prompt was published.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "prompt": {
+                              "type": "object",
+                              "description": "The prompt as stored, as the prompt publisher returns it."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`eventID` was missing, or the prompt publisher refused a value. The message says which."
+          },
+          "401": {
+            "description": "Not signed in."
+          },
+          "403": {
+            "description": "Chat is switched off, the form token was wrong, or the caller is neither an administrator nor the event's coordinator."
+          },
+          "404": {
+            "description": "No such event in this organisation, or it is an imported event, which cannot take a prompt."
+          },
+          "405": {
+            "description": "Only POST is accepted."
+          },
+          "503": {
+            "description": "The prompt could not be published."
+          }
+        }
+      }
+    },
+    "/api/worship/state": {
+      "get": {
+        "tags": [
+          "Worship"
+        ],
+        "summary": "What a service-plan display should be showing now",
+        "description": "The current position of a running service plan, for a projector screen or an operator's console to poll.\n\n**This endpoint does NOT use the portal's usual `{status, data, meta}` envelope.** It answers its own flat object, and sets `Access-Control-Allow-Origin: *` so a display on another machine can read it. It carries none of the portal's usual security headers.\n\n**It needs no sign-in.** The 64-character display token in `t` is the whole of the authority, and it is tied to one active plan in one organisation -- a token from another organisation answers 404.\n\n**Polling:** the display polls about twice a second and the operator's console about once every one and a half seconds. Nothing is rate limited, so be careful what you point at it.\n\n`totalSlides` is 1 for anything that is not a song.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "t",
+            "in": "query",
+            "required": true,
+            "description": "The plan's display token: exactly 64 lowercase hexadecimal characters.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The plan's current position. A flat object, not the usual envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorshipDisplayState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A flat refusal of this handler's own making.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Always false on a refusal.",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "description": "A short word naming the reason, meant for the page's own script rather than for a person to read."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A flat refusal of this handler's own making.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Always false on a refusal.",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "description": "A short word naming the reason, meant for the page's own script rather than for a person to read."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/worship/advance": {
+      "post": {
+        "tags": [
+          "Worship"
+        ],
+        "summary": "Move a running service plan on",
+        "description": "Moves a service plan to another item, or blanks the screen. For a signed-in administrator of the organisation, or the plan's event's coordinator.\n\n**This endpoint does NOT use the portal's usual `{status, data, meta}` envelope**, and the replacement form token comes back as a **top-level `csrfToken`**, not as `meta.csrfToken`. A console that is drawn once and then used repeatedly MUST carry that value forward into its next request: without it every control works exactly once.\n\n**What it changes is shared.** Every projector and console watching the same plan sees the move on its next poll of `/api/worship/state`. Moving into a song also records one line of song-usage reporting.\n\n**Which refusals carry the replacement token:** it is absent from the 405, the 401, and the 400 raised by a failed token check, because all three are decided before a new token is issued. It is present on every other refusal -- the 400 for an unknown `action` or a bad `itemID`, the 403, and both 404s.",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "csrf_token": {
+                    "type": "string",
+                    "description": "The form token. Read from the form body only; this handler does not accept the `X-CSRF-TOKEN` header."
+                  },
+                  "planID": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The running plan to move. A plan that is not active in this organisation answers 404."
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "next",
+                      "prev",
+                      "goto",
+                      "blank",
+                      "black",
+                      "show"
+                    ],
+                    "description": "`next`/`prev` step through the plan; `goto` jumps to `itemID`; `blank` shows an empty slide; `black` blacks the screen out; `show` returns to the content."
+                  },
+                  "itemID": {
+                    "type": "integer",
+                    "description": "Required only when `action` is `goto`. Must be an item of this same plan."
+                  }
+                },
+                "required": [
+                  "csrf_token",
+                  "planID",
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The plan moved. A flat object carrying a top-level `csrfToken`, not the usual envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorshipAdvanceResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A flat refusal of this handler's own making.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Always false on a refusal.",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "description": "A short word naming the reason, meant for the page's own script rather than for a person to read."
+                    },
+                    "csrfToken": {
+                      "type": "string",
+                      "description": "The replacement form token. Present on this refusal, because it is decided after a new token has been issued -- carry it into your next request."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A flat refusal of this handler's own making.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Always false on a refusal.",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "description": "A short word naming the reason, meant for the page's own script rather than for a person to read."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A flat refusal of this handler's own making.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Always false on a refusal.",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "description": "A short word naming the reason, meant for the page's own script rather than for a person to read."
+                    },
+                    "csrfToken": {
+                      "type": "string",
+                      "description": "The replacement form token. Present on this refusal, because it is decided after a new token has been issued -- carry it into your next request."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A flat refusal of this handler's own making.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Always false on a refusal.",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "description": "A short word naming the reason, meant for the page's own script rather than for a person to read."
+                    },
+                    "csrfToken": {
+                      "type": "string",
+                      "description": "The replacement form token. Present on this refusal, because it is decided after a new token has been issued -- carry it into your next request."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A flat refusal of this handler's own making.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Always false on a refusal.",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "description": "A short word naming the reason, meant for the page's own script rather than for a person to read."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tours/active": {
+      "get": {
+        "tags": [
+          "Tours"
+        ],
+        "summary": "The guided tour to offer this person next",
+        "description": "Returns the one tour the signed-in person should be shown next, or `null` when there is nothing to show. A tour already completed is never returned.\n\nThe welcome tour comes first when it is switched on, then the newest other tour. A tour limited to particular roles is offered to somebody holding one of them **or to any administrator**, who is never filtered out by the role test.\n\n**It answers 200 with `data: null` rather than an error when it cannot read the tours at all**, so a portal with the tours table missing simply offers no tour. The only refusal is 401.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tour to offer, or `null` when there is none.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "nullable": true,
+                          "allOf": [
+                            {
+                              "$ref": "#/components/schemas/Tour"
+                            }
+                          ],
+                          "description": "The tour to offer, or `null` when there is nothing to show."
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in."
+          }
+        }
+      }
+    },
+    "/api/tours/complete": {
+      "post": {
+        "tags": [
+          "Tours"
+        ],
+        "summary": "Record that this person finished a tour",
+        "description": "Marks one tour as completed for the signed-in person, so it is not offered again. Always for the caller's own account: a tour cannot be completed on somebody else's behalf.\n\n**Safe to call twice** -- a repeat leaves the original completion time alone.\n\nReturns a replacement form token in `meta.csrfToken`, which a page that calls this more than once must keep. The 401, 405 and 403 below are decided before the token is issued, so they do not carry it.\n\n**The sign-in check runs before the method check**, so a GET from a caller who is not signed in answers 401 rather than 405.",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "csrf_token": {
+                    "type": "string",
+                    "description": "The form token. Read from the form body only."
+                  },
+                  "tourID": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The tour that was finished. It is not checked for existence beforehand."
+                  }
+                },
+                "required": [
+                  "csrf_token",
+                  "tourID"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The completion was recorded, or was already there.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "completed": {
+                              "type": "boolean",
+                              "description": "Always true.",
+                              "example": true
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`tourID` was missing or not greater than zero."
+          },
+          "401": {
+            "description": "Not signed in."
+          },
+          "403": {
+            "description": "The form token was missing or wrong."
+          },
+          "405": {
+            "description": "Only POST is accepted."
+          },
+          "500": {
+            "description": "The completion could not be recorded."
+          }
+        }
+      }
+    },
+    "/api/livestream/ping": {
+      "post": {
+        "tags": [
+          "Livestream"
+        ],
+        "summary": "Tell the portal a viewer is still watching",
+        "description": "Opens or refreshes a viewer's watching session, and closes it when they leave. This is what creates the `sessionToken` that `POST /api/livechat/send` needs.\n\n**This endpoint does NOT use the portal's usual `{status, data, meta}` envelope**; it answers a flat `{\"ok\":true}`. It sets `Access-Control-Allow-Origin: *` on purpose, because the embedded player runs on other people's websites, and it carries none of the portal's usual security headers.\n\n**No sign-in and no form token are asked for.** A ping naming no event is accepted from anybody. A ping naming an event must name one the caller may see -- for an internal event that means a signed-in person whose request came from one of the portal's own pages. An internal, draft, other-organisation or made-up event all answer 404 alike, so the reply does not say which.\n\n**A `leaving` ping skips the event check entirely**, because it only closes the caller's own session row. Note it matches on the token alone and is not scoped to an organisation.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionToken": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{32,64}$",
+                    "description": "The viewer's own token: 32 to 64 lowercase hexadecimal characters, which the caller generates and then reuses for every ping and chat message."
+                  },
+                  "token": {
+                    "type": "string",
+                    "description": "The older embed snippet's name for `sessionToken`. `sessionToken` wins when both are sent."
+                  },
+                  "eventID": {
+                    "type": "integer",
+                    "description": "The event being watched. Omit, or send 0, for a ping that names no event."
+                  },
+                  "leaving": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Send exactly `true` (not `\"true\"`, not 1) to close this watching session. Anything else counts as false."
+                  }
+                },
+                "required": [
+                  "sessionToken"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The ping was recorded. A flat object, not the usual envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Always true.",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Answer to a cross-origin pre-flight (OPTIONS). No body."
+          },
+          "400": {
+            "description": "A flat refusal of this handler's own making.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlatError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A flat refusal of this handler's own making.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlatError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A flat refusal of this handler's own making.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlatError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/venues/availability": {
+      "get": {
+        "tags": [
+          "Venues"
+        ],
+        "summary": "What is booked, day by day, across a date range",
+        "description": "Returns the bookings for one venue, or for every venue, across a range of dates. For any signed-in person who may view venues; an API key cannot reach this.\n\n**These are calendar dates, not moments.** `from` and `to` are read as plain dates and no time zone is applied to them.\n\n**No cost information is ever returned** by this endpoint.\n\n**One refusal covers four different causes.** A caller who may not view venues, a malformed or backwards date range, a range longer than 400 days, and a venue that does not belong to this organisation ALL answer 400 with the same `invalid-range` message -- deliberately, so the reply cannot be used to discover which venues exist.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "description": "First date to report on, as `YYYY-MM-DD`.",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "description": "Last date to report on, as `YYYY-MM-DD`. Must not be before `from`, and the range must be 400 days or fewer.",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "venueID",
+            "in": "query",
+            "required": false,
+            "description": "Limit to one venue. Omit, or send 0, for every venue this organisation has.",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The bookings, grouped by date.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "days": {
+                              "type": "object",
+                              "description": "One entry per date in the range, keyed by the date as `YYYY-MM-DD`.",
+                              "additionalProperties": {
+                                "type": "array",
+                                "description": "The bookings on that date.",
+                                "items": {
+                                  "type": "object",
+                                  "description": "One booking. Cost columns are never included."
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not permitted to view venues, a malformed or backwards range, a range over 400 days, or a venue that is not this organisation's. All four say `invalid-range`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in."
+          }
+        }
+      }
+    },
+    "/api/venues/check": {
+      "get": {
+        "tags": [
+          "Venues"
+        ],
+        "summary": "Whether a venue and room are free for a proposed time",
+        "description": "Classifies a proposed start and end against what is already booked, for the event editor to warn on a clash before anything is saved. For any signed-in person; an API key cannot reach this.\n\n**`start` and `end` are readings on a clock, not moments in history**, and are used together with `tz`. **`tz` defaults to `Europe/London` and is NOT the organisation's own time zone** -- send it explicitly for any organisation that is not in the United Kingdom, or the answer will be an hour or more out.\n\n**This endpoint does not refuse much.** A caller without permission to view venues, and an unknown venue, both answer 200 reporting that there is no venue to check, so it cannot be used to discover which venues exist. An unknown **room** is different: it falls back to classifying the venue as a whole rather than reporting nothing. It also does NOT check that `end` is after `start`.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "start",
+            "in": "query",
+            "required": true,
+            "description": "The proposed start, as a reading on a clock: `YYYY-MM-DDTHH:MM`.",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}$"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "description": "The proposed end, in the same form. May be left empty, which means no end is being proposed. Not checked against `start`.",
+            "schema": {
+              "type": "string",
+              "pattern": "^(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2})?$"
+            }
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "required": false,
+            "description": "The time zone `start` and `end` are readings in, as a zone name such as `Europe/London` or `America/New_York`. **Defaults to `Europe/London`, not to the organisation's own zone.**",
+            "schema": {
+              "type": "string",
+              "default": "Europe/London"
+            }
+          },
+          {
+            "name": "venueID",
+            "in": "query",
+            "required": false,
+            "description": "The venue to check. When omitted the `venues.calendar_default_venue` setting is used, which an organisation may set for itself.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "roomID",
+            "in": "query",
+            "required": false,
+            "description": "A room within the venue. Omit to check the venue as a whole.",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "How the proposed time compares with what is booked. Also the answer when the caller may not view venues, or the venue or room is unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "description": "The classification of the proposed time against existing bookings."
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`start` missing or malformed, `end` present but malformed, or `tz` is not a zone name the server knows. All say `invalid-range`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in."
+          }
+        }
+      }
+    },
+    "/api/users/create": {
+      "post": {
+        "tags": [
+          "Users",
+          "Legacy Alias"
+        ],
+        "summary": "Create a member account",
+        "description": "The legacy address of `POST /api/v1/users`, reaching the same handler. **This address does work** -- the handler's own method gate names POST, and that gate is only relaxed, never tightened, when the request arrives through the v1 facade.\n\n**A signed-in caller must be an administrator.** A bearer key is gated by the `users:write` scope alone -- nothing in the key path performs an administrator test -- plus the `api.users.create.enabled` switch, **which ships switched off**.\n\n**No password is set.** The new account gets an unusable one, so the person must use the existing forgot-password flow to choose their own.\n\n**`isAdmin` is only honoured for a signed-in global administrator** and is silently ignored for a bearer key.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The account was created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "userID": {
+                              "type": "integer",
+                              "description": "The new account's number."
+                            },
+                            "fullName": {
+                              "type": "string",
+                              "description": "The name as stored."
+                            },
+                            "emailAddress": {
+                              "type": "string",
+                              "description": "The address as stored, lower-cased and trimmed."
+                            },
+                            "isActive": {
+                              "type": "integer",
+                              "enum": [
+                                0,
+                                1
+                              ],
+                              "description": "1 when the account may sign in."
+                            },
+                            "isAdmin": {
+                              "type": "integer",
+                              "enum": [
+                                0,
+                                1
+                              ],
+                              "description": "1 when the account administers the whole portal."
+                            },
+                            "isSiteAdmin": {
+                              "type": "integer",
+                              "enum": [
+                                0,
+                                1
+                              ],
+                              "description": "1 when the account administers this organisation."
+                            },
+                            "siteID": {
+                              "type": "integer",
+                              "description": "The organisation the account was given membership of."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`emailAddress` missing or not a valid address, or `fullName` missing or over 255 characters."
+          },
+          "401": {
+            "description": "Not signed in, or the bearer key is invalid or expired."
+          },
+          "403": {
+            "description": "Not an administrator, the bearer key lacks `users:write`, the form token was wrong, or `isAdmin` was asked for by somebody who is not a global administrator."
+          },
+          "409": {
+            "description": "That e-mail address is already in use, or is in use somewhere the caller cannot see."
+          },
+          "429": {
+            "description": "Too many address checks from this administrator or key. A `Retry-After` header says how long to wait."
+          },
+          "500": {
+            "description": "The account could not be created; nothing was written."
+          }
+        }
+      }
+    },
+    "/api/users/update": {
+      "post": {
+        "tags": [
+          "Users",
+          "Legacy Alias"
+        ],
+        "summary": "Change a member account",
+        "description": "The legacy address of `PUT`/`PATCH /api/v1/users/{id}`, reaching the same handler. **This address does work**, with the account number in `?id=` or as `userID` in the body.\n\n**A signed-in caller must be an administrator.** A bearer key is gated by the `users:write` scope alone -- nothing in the key path performs an administrator test -- plus the `api.users.update.enabled` switch, **which ships switched off**.\n\nAt least one of `fullName`, `isActive`, `isAdmin` or `isSiteAdmin` must be sent. **`isAdmin` is read only for a signed-in caller** and ignored for a bearer key -- so a key sending only `isAdmin` is refused for having sent nothing to change.\n\n**A request that changes nothing writes nothing** and answers 200 with the stored values, on purpose, so re-sending a value cannot overwrite somebody else's concurrent change. Note the limit this leaves: a field that IS changing is read and then written two statements apart, without locking the row.\n\n**`emailAddress` and any password field are silently ignored.** You cannot deactivate your own account through this endpoint.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": false,
+            "description": "The account to change. May be sent as `userID` in the body instead.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The account as it now stands. Also the answer when nothing differed and nothing was written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "userID": {
+                              "type": "integer",
+                              "description": "The account's number."
+                            },
+                            "fullName": {
+                              "type": "string",
+                              "description": "The name as stored."
+                            },
+                            "isActive": {
+                              "type": "integer",
+                              "enum": [
+                                0,
+                                1
+                              ],
+                              "description": "1 when the account may sign in."
+                            },
+                            "isAdmin": {
+                              "type": "integer",
+                              "enum": [
+                                0,
+                                1
+                              ],
+                              "description": "1 when the account administers the whole portal."
+                            },
+                            "isSiteAdmin": {
+                              "type": "integer",
+                              "enum": [
+                                0,
+                                1
+                              ],
+                              "description": "1 when the account administers this organisation."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No account number, nothing sent that can be changed, `fullName` empty or over 255 characters, or an attempt to deactivate your own account."
+          },
+          "401": {
+            "description": "Not signed in, or the bearer key is invalid or expired."
+          },
+          "403": {
+            "description": "Not an administrator, the bearer key lacks `users:write`, the form token was wrong, or this account is beyond the caller's reach for the change asked for."
+          },
+          "404": {
+            "description": "No such account with active membership of this organisation, or it is beyond the caller's reach. The two are deliberately indistinguishable."
+          },
+          "429": {
+            "description": "The bearer key's rate limit. A `Retry-After` header says how long to wait."
+          },
+          "500": {
+            "description": "The change could not be written; nothing was changed."
+          }
+        }
+      }
+    },
+    "/api/push/subscribe": {
+      "post": {
+        "tags": [
+          "Push"
+        ],
+        "summary": "Register this device for push notifications",
+        "description": "Stores a browser's push details so the portal can notify this device.\n\n**A signed-in person is required** -- this was not always so, and a request that is not signed in is now refused with 401 before anything else is read. A form token is required too.\n\n**This endpoint does NOT use the portal's usual `{status, data, meta}` envelope.** It answers a flat object, and the replacement form token arrives as a top-level `csrf_token`, not as `meta.csrfToken`. Its answers carry none of the portal's usual security headers.\n\n**Re-registering a device re-points it at whoever is signed in now**, because the stored row is keyed on the endpoint. A channel the portal does not recognise is dropped in silence rather than refused; if that leaves nothing, the default pair is used.\n\n**Rate limited to 30 requests an hour per address, shared with `POST /api/push/unsubscribe`** -- the two endpoints count against one allowance. No `Retry-After` is sent.",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "endpoint": {
+                    "type": "string",
+                    "description": "The browser's push address, as the browser itself supplies it. Must belong to a push service the portal recognises."
+                  },
+                  "keys": {
+                    "type": "object",
+                    "description": "The browser's encryption keys, as it supplies them.",
+                    "required": [
+                      "p256dh",
+                      "auth"
+                    ],
+                    "properties": {
+                      "p256dh": {
+                        "type": "string",
+                        "description": "The device's public key, base64url, decoding to exactly 65 bytes."
+                      },
+                      "auth": {
+                        "type": "string",
+                        "description": "The device's authentication secret, base64url, decoding to exactly 16 bytes."
+                      }
+                    }
+                  },
+                  "channels": {
+                    "type": "array",
+                    "description": "Which kinds of notification this device wants. Anything the portal does not recognise is dropped silently. Defaults to `livestream` and `reminders`.",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "livestream",
+                        "reminders",
+                        "announcements"
+                      ]
+                    }
+                  },
+                  "csrf_token": {
+                    "type": "string",
+                    "description": "The form token. May be sent in the `X-CSRF-TOKEN` header instead."
+                  }
+                },
+                "required": [
+                  "endpoint",
+                  "keys"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The device is registered. A flat object, not the usual envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Always true.",
+                      "example": true
+                    },
+                    "channels": {
+                      "type": "array",
+                      "description": "The channels actually stored, after any the portal does not recognise were dropped.",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "csrf_token": {
+                      "type": "string",
+                      "description": "The replacement form token. Use it on your next request; the one you just sent is dead."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The form token was wrong, a field was missing, a key was the wrong length, or the endpoint is not a push service the portal recognises.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlatError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlatError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Only POST is accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlatError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "More than 30 requests from this address in an hour, counting unsubscribes too.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlatError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The registration could not be stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlatError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Push notifications are switched off for this installation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlatError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/push/unsubscribe": {
+      "post": {
+        "tags": [
+          "Push"
+        ],
+        "summary": "Stop push notifications to this device",
+        "description": "Switches one device's push registration off. The row is kept and marked inactive rather than deleted.\n\n**No sign-in is required**, deliberately: knowing the device's own push address is treated as proof enough, so a device whose person has gone can still switch itself off. A form token is still required.\n\n**This endpoint does NOT use the portal's usual envelope**; the replacement form token arrives as a top-level `csrf_token`.\n\n**It answers `ok: true` even when the address matched nothing**, and it is not scoped to an organisation -- a known address is switched off whichever organisation the request arrived at. Unlike subscribing, the address is not checked against the push services the portal recognises.\n\n**Rate limited to 30 requests an hour per address, shared with `POST /api/push/subscribe`.** No `Retry-After` is sent.",
+        "security": [
+          {
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "endpoint": {
+                    "type": "string",
+                    "description": "The browser's push address to switch off. Checked only for being non-empty."
+                  },
+                  "csrf_token": {
+                    "type": "string",
+                    "description": "The form token. May be sent in the `X-CSRF-TOKEN` header instead; note an EMPTY header is used as given and the body is not then consulted."
+                  }
+                },
+                "required": [
+                  "endpoint"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Taken. Also the answer when the address matched no stored device.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Always true, including when the address matched no stored device.",
+                      "example": true
+                    },
+                    "csrf_token": {
+                      "type": "string",
+                      "description": "The replacement form token. Use it on your next request; the one you just sent is dead."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The form token was wrong, or `endpoint` was missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlatError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Only POST is accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlatError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "More than 30 requests from this address in an hour, counting subscribes too.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlatError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/assets/stocktake-scan": {
+      "post": {
+        "tags": [
+          "Assets"
+        ],
+        "summary": "Record a scanned asset during a stocktake",
+        "description": "Records one scan against an open stocktake run -- the same action the stocktake screen performs, so a hand-held scanner can use it directly.\n\nNeeds the `assets:write` scope for a bearer key, or a signed-in administrator with a form token.\n\n**A confidential asset is reported back without its name or number to a bearer key** -- `assetName` becomes `(confidential asset)` and `assetID` is left out altogether. `verifyStatus` is always returned and the scan is always recorded, so hiding the identity never hides that a scan happened.\n\n**Every failure answers 404**: an unknown run, a run already closed and a code that is not recognised are deliberately indistinguishable. The message says which in words, but the status does not.\n\n**For a bearer key the scan is recorded against no person**, because a key is not somebody.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "stocktakeID": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The open stocktake run to record against."
+                  },
+                  "code": {
+                    "type": "string",
+                    "description": "The code that was scanned, as read from the label."
+                  },
+                  "foundLocationID": {
+                    "type": "integer",
+                    "nullable": true,
+                    "description": "Where the asset was actually found. A value that does not resolve is dropped rather than refused."
+                  },
+                  "csrf_token": {
+                    "type": "string",
+                    "description": "The form token, for a signed-in caller. May be sent in the `X-CSRF-TOKEN` header instead. Not used by a bearer key."
+                  }
+                },
+                "required": [
+                  "stocktakeID",
+                  "code"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The scan was recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "verifyStatus": {
+                              "type": "string",
+                              "description": "What the scan established about the asset, for example that it was found where it was expected. Always present."
+                            },
+                            "assetID": {
+                              "type": "integer",
+                              "description": "The asset that was scanned. **Left out entirely** when a bearer key scans a confidential asset."
+                            },
+                            "assetName": {
+                              "type": "string",
+                              "description": "The asset's name, or the fixed text `(confidential asset)` when a bearer key scans a confidential asset."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`stocktakeID` was not greater than zero, or `code` was empty."
+          },
+          "401": {
+            "description": "Not signed in, or the bearer key is invalid or expired."
+          },
+          "403": {
+            "description": "Not an administrator, the bearer key lacks `assets:write`, or the form token was wrong."
+          },
+          "404": {
+            "description": "No such stocktake run, the run is already closed, or the code is not recognised. The three are deliberately indistinguishable by status."
+          },
+          "405": {
+            "description": "Only POST is accepted."
+          },
+          "429": {
+            "description": "The bearer key's rate limit. A `Retry-After` header says how long to wait."
+          }
+        }
+      }
+    },
+    "/api/noticeboard/upload": {
+      "post": {
+        "tags": [
+          "Noticeboard"
+        ],
+        "summary": "Upload a picture or video for a noticeboard poster",
+        "description": "Takes one picture or video and stores it outside the web root, returning the address to show it at.\n\n**Send it as `multipart/form-data`, and put the form token in the `X-CSRF-TOKEN` header** -- it CANNOT go in the body here, because the body is the file rather than JSON.\n\n**The file's type is decided by inspecting its contents**, never from its name or the type the caller declares. Only PNG, JPEG, GIF, WebP, MP4 and WebM are accepted. The stored name is generated by the portal and the caller's filename is never used.\n\n**The returned address is built for this organisation** and the picture is then served by a public address that needs no sign-in, because posters are shared by QR code.\n\nThe size limit is the installation's `noticeboard.upload.maxBytes`, falling back to 15 MB if that is not usable, so the cap can never be switched off. Note the web server's own upload limits apply first and produce a 400 of their own.\n\nA signed-in caller must be an administrator of this organisation. A bearer key needs the `noticeboard:write` scope, and the organisation-administrator test does not apply to it: a key's authority is its scope.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The picture or video. Its real type is sniffed from the contents; the filename and declared type are ignored."
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The file was stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "url": {
+                              "type": "string",
+                              "description": "Where to show the file. Built for this organisation, and served by an address that needs no sign-in."
+                            },
+                            "mediaType": {
+                              "type": "string",
+                              "enum": [
+                                "image",
+                                "video"
+                              ],
+                              "description": "Which of the two kinds it turned out to be, from the sniffed type."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No file was sent, the upload failed or was cut short, the file was empty, it was over the size limit, or its sniffed type is not one of the six allowed. The message says which."
+          },
+          "401": {
+            "description": "Not signed in, or the bearer key is invalid or expired."
+          },
+          "403": {
+            "description": "Not an administrator of this organisation, the bearer key lacks `noticeboard:write`, or the form token was wrong or was not sent in the `X-CSRF-TOKEN` header."
+          },
+          "405": {
+            "description": "Only POST is accepted."
+          },
+          "429": {
+            "description": "The bearer key's rate limit. A `Retry-After` header says how long to wait."
+          },
+          "500": {
+            "description": "The file could not be read, inspected, saved, or recorded. When recording fails the saved file is removed again."
+          }
+        }
+      }
+    },
+    "/api/service-plans/hymn-search": {
+      "get": {
+        "tags": [
+          "Worship"
+        ],
+        "summary": "Search hymns and songs while building a service plan",
+        "description": "Searches this organisation's hymn book and song library, and an outside catalogue when one is configured, for the service-plan editor's type-ahead. Any signed-in person; an API key cannot reach this.\n\n**Read `source` on each result to know where it came from** -- the three groups are returned one after another in a single list, local hymn book first.\n\n**Nothing here is refused for being too long or too large.** `q` is shortened to 100 characters and `limit` is forced into the range 1 to 25, both silently. An empty `q` returns an empty list at once.\n\n**It degrades quietly rather than failing.** A problem reading the song library leaves that group simply missing from an otherwise normal 200, and an outside catalogue that cannot be reached is skipped while `remoteAttempted` still reports true. So `remoteAttempted` tells you the outside search was switched on, NOT that it succeeded.\n\nThe organisation is always taken from the session; it can never be chosen by the caller.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "What to search for. Shortened to 100 characters rather than refused. Empty returns an empty list.",
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "How many results to return per group. Forced into the range 1 to 25 rather than refused.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 25,
+              "default": 15
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The results, or an empty list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "results": {
+                              "type": "array",
+                              "description": "The matches, local hymn book first, then the song library, then the outside catalogue.",
+                              "items": {
+                                "$ref": "#/components/schemas/HymnSearchResult"
+                              }
+                            },
+                            "remoteAttempted": {
+                              "type": "boolean",
+                              "description": "True when searching the outside catalogue is switched on. It does NOT mean that search succeeded -- a failure is skipped in silence."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in."
           }
         }
       }

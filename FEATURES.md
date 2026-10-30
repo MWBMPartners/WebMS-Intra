@@ -792,6 +792,8 @@ Read-only JSON list endpoints over `Portal\Core\ApiRouter`.
 
 **Gaps:** #95 was closed as "REST API expansion — CRUD for all modules" but only list endpoints exist. Full CRUD would still be additional work.
 
+**The description is now checked against the code (#641, 30 October 2026).** `tools/audit-checks/check_api_spec_matches_code.py` is a hard gate, with `tools/api-spec-check-selftest.py` as the test of that check. It found 17 reachable endpoints absent from `_core/api-spec.json` — the whole of live chat, the service-plan display and its controls, guided tours, livestream pings, venue availability, push sign-up, noticeboard uploads, hymn search and stocktake scanning — all now described, along with the two user write endpoints whose legacy address the file had denied. **Still open:** a JSON Schema beside the description, and a `description` on every property.
+
 ---
 
 ### ⚙️ Settings — `/settings/` ✅

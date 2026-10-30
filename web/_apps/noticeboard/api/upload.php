@@ -83,8 +83,15 @@ ApiAuth::requireWrite('noticeboard:write', sessionNeedsAdmin: false);
 
 // 🛡️ Site-admin gate — kept verbatim from save.php (see that file's comment
 // for why this stays a distinct, finer-grained check rather than folding
-// into ApiAuth's sessionNeedsAdmin: App::isSiteAdmin() reads App::user()
-// (session-only), so it fails closed for bearer keys too).
+// into ApiAuth's sessionNeedsAdmin: it tests isSiteAdmin(), not isAdmin()).
+//
+// It does NOT apply to a bearer key: the `source() === 'session'` term skips
+// the test entirely, so a key holding `noticeboard:write` uploads with no
+// organisation-administrator check. That is deliberate, and seven other files
+// under _apps contain this same source() test; this comment claimed the
+// opposite until 30 October 2026
+// (#641) - that isSiteAdmin() being session-only made it "fail closed for
+// bearer keys too". It does not fail closed; it is not reached.
 if (ApiAuth::source() === 'session' && App::isSiteAdmin() === false) {
     ApiResponse::error('Admin access required', 403);
 }

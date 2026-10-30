@@ -10,8 +10,15 @@
  * Priority order:
  *   1. The welcome tour (tourKey='welcome') if portal.tours.welcome_active
  *      and not completed.
- *   2. The newest whats_new_X.Y.Z tour (by version) not completed, whose
- *      version is <= the running PORTAL_VERSION.
+ *   2. The newest whats_new_X.Y.Z tour (by version) not completed.
+ *
+ * NOT limited to versions at or below the running PORTAL_VERSION, although
+ * this comment claimed it was until 30 October 2026 (#641). Nothing in this
+ * file reads PORTAL_VERSION or compares t.version against it: the ORDER BY
+ * takes the highest version there is. So a tour seeded for a LATER release
+ * than the one running would be offered. That is a real gap rather than a
+ * deliberate choice, but fixing it changes which tour people are shown, so
+ * it is left as it stands and only described correctly here.
  *
  * Role-gated: a tour with a non-empty forRoles CSV only surfaces to users
  * holding one of those roles.

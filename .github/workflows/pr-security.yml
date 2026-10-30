@@ -1163,6 +1163,33 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_page_head_tags.py
 
+      # The API description must agree with the code that answers it (#641).
+      # Nothing had ever compared the two, so they drifted for as long as the
+      # file existed: 17 endpoints that answer real requests appeared nowhere
+      # in it, two more were described only under their api/v1 address, and
+      # three operations said in so many words that a legacy address did not
+      # exist when it did. The drift is invisible from either
+      # file alone - you have to hold both at once, which is what this does.
+      # It reads the router's own name pattern and its api/v1 tables, so a
+      # helper file such as _coerce.php needs no exemption and a handler
+      # reachable only through the REST facade is not cried wolf over.
+      - name: 'The API description agrees with the code (hard gate, #641)'
+        id: api_spec_matches_code
+        if: always()
+        run: python3 -I tools/audit-checks/check_api_spec_matches_code.py
+
+      # The test OF that test (#641, #646). The check above is the only thing
+      # keeping the API description and the code together, and adding
+      # `and False` to any of its conditions leaves it green - measured, not
+      # supposed. This plants 18 faults into the real files, requires each to be
+      # caught BY THE EXPECTED check, and restores every file byte-for-byte.
+      # It is wired here rather than left in an evidence folder because a proof
+      # that runs once is not a guard: that is the whole lesson of #646.
+      - name: 'That check actually catches things (hard gate, #641)'
+        id: api_spec_check_selftest
+        if: always()
+        run: python3 -I tools/api-spec-check-selftest.py
+
       # =====================================================================
       # Summary in the Actions UI
       # =====================================================================

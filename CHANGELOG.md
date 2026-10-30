@@ -2,6 +2,48 @@
 
 
 ## [Unreleased] (alpha)
+- **Added — the API description is now checked against the code, and 17 endpoints that were missing from it are described (#641)**
+  - **What was wrong.** `web/_core/api-spec.json` is what a customer's developer reads before writing
+    anything against this portal, and the browsable page at `/api-docs/` serves it. **Nothing in the
+    repository had ever compared it with the code**, so the two had drifted for as long as the file
+    existed. 17 endpoints that answer real requests appeared nowhere in it — the whole of live chat,
+    the service-plan display and its controls, guided tours, livestream pings, venue availability,
+    push notification sign-up, noticeboard uploads, hymn search and stocktake scanning. A developer
+    reading the description simply never learned they existed. Two more — creating and changing
+    a member account — had their handler described under its REST address while the description
+    explicitly denied that their legacy address existed, so 19 addresses were documented in all.
+  - **Three operations stated the opposite of the truth.** `POST /api/v1/users` and both update verbs
+    said "**Legacy alias:** none — this endpoint is new in v1, exposed only at this path". Both
+    handlers are on disk with their switches seeded, and the method gate is only *relaxed* under the
+    REST facade, never tightened, so the legacy addresses reach them perfectly well. Corrected to
+    name the real address.
+  - **There is now a check, and it reads the router's own rules rather than a list.** It decides what
+    is reachable from the same `^[a-z0-9-]+$` pattern `ApiRouter` uses, which is why the shared helper
+    `_coerce.php` needs no exemption — the leading underscore that already makes it unreachable is the
+    same thing that excludes it. It resolves the `api/v1/` facade through the four tables in
+    `ApiRouter`, read out of the file, so a handler documented only under its REST address is not
+    cried wolf over. Proved by planting 12 faults, every one caught.
+  - **The description now says where an endpoint does NOT behave like the others.** Five of them
+    answer with their own flat JSON rather than the portal's usual envelope, and two of those
+    return the replacement form token as a top-level field instead of in `meta` — so a console drawn
+    once and used repeatedly has to carry it forward or every control works exactly once. That is
+    now written down for each, because describing them with the standard envelope would have been
+    one more untrue statement.
+  - **Three code comments that promised something the code did not do.** Live chat's prompt publisher
+    said an API key would work, and no key can reach it. The guided-tour endpoint said it only offered
+    tours at or below the running version, and nothing in it reads the version at all. Both
+    noticeboard upload handlers said their organisation-administrator check "fails closed for bearer
+    keys too", when the condition in fact skips it entirely for a key. All three corrected to say
+    what happens; no behaviour was changed.
+  - **Found and left for the owner (#675).** `expenses/export` is a complete, working CSV export whose
+    switch was never seeded, so it has answered 403 to everybody since it was written, and nothing
+    links to it. Four more switches are seeded for handlers that do not exist. Both need a decision
+    rather than a quiet fix, so they are named in the check — which **fails if either state stops
+    being true**, so neither can be resolved silently.
+  - **Still open on #641:** the JSON Schema beside the description, and a `description` on every
+    property. Also worth knowing: the issue counted 181 properties without one, an earlier pass here
+    counted 274, and the traversal used here counts 286. They recurse differently; none of the three
+    has been written down as fact.
 - **Added — transcription you can actually reach, and that cannot charge you twice (#276, migration 229)**
   - **What was wrong.** Transcription looked finished. There was an app switch, a choice of three
     transcription companies, somewhere to enter an account key, a page that shows a transcript, and a
