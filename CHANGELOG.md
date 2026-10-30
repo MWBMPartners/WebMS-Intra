@@ -2,6 +2,38 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — the API description's last untrue statements, including five replies that left out the envelope (#641 part 3)**
+  - **Five operations declared their payload where the envelope belongs.** `events/list`,
+    `events/detail`, `noticeboard/list` and both Event Team Hub operations described the inside of
+    `data` as though it were the whole reply. So a developer reading the description would look for
+    `eventID` at the top level when it is at `data.eventID`, and for the event itself at `data` when
+    it is at `data.event`. All five now describe what the handler really sends, and each says what it
+    used to claim, so somebody who built against the old text can see what changed.
+  - **`PaginatedListResponse` is removed.** It described flat paging and an array called `items`;
+    its one user nests paging under `data.pagination` and calls its array `events`, and also sends
+    `hasNext` and `hasPrev`, which the schema never declared. Rather than keep a shape nothing
+    returns, that operation now describes its real reply and the schema is gone. **A schema that
+    documents a reply nobody sends is worse than none, because it looks authoritative.**
+  - **All 48 `Allow` examples said `GET, POST`.** The real header is built by the router from the
+    handler files that exist on disk, so it differs by resource — and now each example is computed
+    the same way rather than written by hand. **Worth recording because the first attempt made it
+    worse:** it ADDED the computed example beside the stale one instead of replacing it, so every
+    one of the 48 briefly carried two contradicting values, and the entry describing the fix was
+    untrue while it did. An edit that adds where it meant to replace leaves the original fault in
+    place AND a claim that it is gone. They range from `GET, POST` for the noticeboard to
+    `GET, POST, PUT, PATCH, DELETE` for events; prayer requests have no DELETE, and expenses and
+    leadership have no PUT or PATCH.
+  - **Thirty-two operations a bearer key can reach did not document being refused for too many
+    requests**, although every such request is rate-limited and answered with a `Retry-After`.
+    They do now. A sign-in session is not rate-limited this way, which the new wording says.
+  - **`GET /api/v1/events/{id}` called itself "the only v1 resource with a detail route".** Assets
+    has one too.
+  - **A measurement trap worth recording.** The list of endpoints a bearer key can reach was first
+    taken by searching the handlers for `ApiAuth::requireWrite`. That matched a COMMENT this very
+    package had added to `livechat/api/prompt-publish.php` — a comment explaining that a bearer key
+    **cannot** reach it — giving 46 where the answer is 45. Reading it with PHP's tokenizer, so
+    comments are stripped, is the only honest way; it is the same trap as a check that searches for
+    the text of a guard.
 - **Added — the API description now has a schema that is executed, and every property explains itself (#641 part 2)**
   - **What was wrong.** This project's rule is that where it produces JSON, a JSON Schema lives
     beside it with a `description` on every property, wired into a check "so it actually runs; a

@@ -77,8 +77,19 @@ readers at it — both now corrected.
 allowed by both writers and refused by the database (a 500), while `postponed` is returned by the
 API and cannot be set through it. Not fixed because either correction changes behaviour.
 
-**Next.** The remaining #641 item 5 statements (the four response shapes, the `Allow` header
-examples, the 48 missing `429`s), then the browser/visual half of #569.
+**Part 3 finished #641.** Five operations described the inside of `data` as the whole reply, so
+every field name was right and every path to it was wrong; `PaginatedListResponse` was deleted
+rather than corrected, because it described a reply nobody sends; all 48 `Allow` examples are now
+computed the way the router computes them instead of all saying `GET, POST`; 32 bearer-reachable
+operations gained the rate-limit refusal they had never documented; and `events/{id}` stopped
+calling itself the only v1 resource with a detail route.
+
+**The reusable lesson from part 3:** working out which endpoints a bearer key can reach, a text
+search for `ApiAuth::requireWrite` returned 46 against a true 45 — the extra was a handler whose
+COMMENT, added by this very package, says a bearer key cannot reach it. Searching for the text of a
+call finds the text, not the call; strip comments with the tokenizer.
+
+**Next.** The browser/visual half of #569 — layouts at many widths, and how pages actually look.
 
 ## 29 OCTOBER 2026, LATEST — transcription you can actually reach (#276, migration 229)
 

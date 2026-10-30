@@ -10276,6 +10276,48 @@ reading as a set because none of them would fail a test:
   occurrences; `users/api/create.php` has two, which is how an earlier draft of this note said
   "nine handlers") — but the justification was the opposite of what the code does.
 
+### Five replies that described the inside of the envelope as the whole reply (#641, 30 October 2026)
+
+`events/list`, `events/detail`, `noticeboard/list` and both Event Team Hub operations declared their
+payload as the 200 body. Every one of those handlers answers through `ApiResponse::success()`, which
+wraps what it is given in `{status, data, meta}` — so the description told a reader to find `eventID`
+at the top level when it is at `data.eventID`, and the event itself at `data` when the handler nests
+it at `data.event`. **This is the quiet kind of documentation error: every field name is right, and
+every path to it is wrong.**
+
+`PaginatedListResponse` was deleted rather than corrected. It described flat paging and an array
+called `items`; its only user nests paging under `data.pagination`, calls its array `events`, and
+sends `hasNext`/`hasPrev` that it never declared. **A schema that documents a reply nobody sends is
+worse than no schema, because it looks authoritative** — and this project's rule is to delete what no
+longer applies rather than explain that it no longer applies.
+
+**The `Allow` examples are now computed, not written — at the second attempt.** The first edit
+added the computed example beside the stale one rather than replacing it, so all 48 held two
+contradicting values and the note claiming they were fixed was false while that stood. Found by the
+independent check. **An edit that adds where it meant to replace is worse than no edit: the original
+fault survives and a claim that it is gone arrives beside it.** All 48 said `GET, POST`. The real header comes
+from `ApiRouter::v1AllowHeader()`, which inspects the handler files on disk, so it differs by
+resource — the noticeboard really is `GET, POST`, while events is `GET, POST, PUT, PATCH, DELETE`,
+prayer requests has no DELETE, and expenses and leadership have no PUT or PATCH. Each example is now
+derived the same way the router derives it.
+
+**NOTHING GUARDS ANY OF THIS, and that is worth knowing before trusting it.** The two checks
+compare which addresses exist and whether every property has words. **Neither can tell whether a
+declared response shape matches what the handler sends, whether a status code is documented, or
+whether an example is stale** — `check_api_spec_matches_code.py` says so in its own header. The
+independent check proved it by planting three part-3 regressions at once (an `Allow` example reverted
+to `GET, POST`, a real `429` deleted, and the noticeboard array put back as the whole body) and both
+checks stayed green. These corrections were made by reading handlers and they will go stale the same
+way the originals did; catching that would need a test that calls each endpoint and compares the
+reply with its schema, which no harness here does.
+
+**And a measurement trap, which is the most reusable thing here.** Working out which endpoints a
+bearer key can reach, the first pass searched each handler for `ApiAuth::requireWrite`. It returned
+46; the answer is 45. The extra was `livechat/api/prompt-publish.php`, which this same package had
+just given a comment saying a bearer key **cannot** reach it — and the comment contains the call's
+name. Stripping comments with PHP's tokenizer gives 45. It is exactly the shape that has bitten the
+audit checks repeatedly: **searching for the text of a call finds the text, not the call.**
+
 ### The API description's own schema, and why its validator is hand-written (#641, 30 October 2026)
 
 `web/_core/api-spec.schema.json` describes the shape `api-spec.json` must have, and

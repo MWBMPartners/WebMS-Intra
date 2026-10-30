@@ -162,58 +162,6 @@
           }
         }
       },
-      "PaginatedListResponse": {
-        "type": "object",
-        "required": [
-          "status",
-          "data"
-        ],
-        "properties": {
-          "status": {
-            "type": "string",
-            "description": "Always the text \"ok\" on a successful answer. This example read \"success\" until 27 October 2026, which the portal has never sent: ApiResponse::success() writes 'status' => 'ok'.",
-            "example": "ok"
-          },
-          "data": {
-            "type": "object",
-            "properties": {
-              "count": {
-                "type": "integer",
-                "example": 12,
-                "description": "How many rows are in THIS page — not the total. **No handler returns the shape this schema describes.** It is referenced only by `GET /api/events/list`, which nests its paging inside `data.pagination` and names its array `events` — and also sends `hasNext` and `hasPrev`, which this schema does not declare. The flat shape here is what the documents and tasks list endpoints return instead. Recorded as part of #641; do not write a client against this schema without checking the endpoint you are calling."
-              },
-              "page": {
-                "type": "integer",
-                "example": 1,
-                "description": "Which page was served, counting from 1. A value below 1, or one that is not a number, is quietly moved to 1 rather than refused."
-              },
-              "limit": {
-                "type": "integer",
-                "example": 20,
-                "description": "How many rows a page may hold. Between 1 and 100, default 20; a larger number is **quietly reduced to 100** rather than refused."
-              },
-              "totalItems": {
-                "type": "integer",
-                "example": 142,
-                "description": "How many rows match in total, across every page. Counted under the SAME visibility rule as the rows themselves, so the total can never promise rows the caller may not see."
-              },
-              "totalPages": {
-                "type": "integer",
-                "example": 8,
-                "description": "How many pages the whole result takes. **Never less than 1** — an empty result still reports one page, not zero."
-              },
-              "items": {
-                "type": "array",
-                "items": {
-                  "type": "object"
-                },
-                "description": "The rows of this page. **No handler returns the shape this schema describes.** It is referenced only by `GET /api/events/list`, which nests its paging inside `data.pagination` and names its array `events` — and also sends `hasNext` and `hasPrev`, which this schema does not declare. The flat shape here is what the documents and tasks list endpoints return instead. Recorded as part of #641; do not write a client against this schema without checking the endpoint you are calling."
-              }
-            },
-            "description": "The payload of a paged list. **No handler returns the shape this schema describes.** It is referenced only by `GET /api/events/list`, which nests its paging inside `data.pagination` and names its array `events` — and also sends `hasNext` and `hasPrev`, which this schema does not declare. The flat shape here is what the documents and tasks list endpoints return instead. Recorded as part of #641; do not write a client against this schema without checking the endpoint you are calling."
-          }
-        }
-      },
       "Event": {
         "type": "object",
         "properties": {
@@ -1907,7 +1855,59 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PaginatedListResponse"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "description": "The page of events, with the paging figures nested beside them. **This operation used to point at a shared `PaginatedListResponse` shape that nothing actually returned** — flat paging and an array called `items`. That shape was removed on 30 October 2026; the real reply is below.",
+                          "properties": {
+                            "events": {
+                              "type": "array",
+                              "description": "The events on this page. Each omits `description`, `locationWebURL`, `locationPhone` and `locationEmail`, which come only from `detail`.",
+                              "items": {
+                                "$ref": "#/components/schemas/Event"
+                              }
+                            },
+                            "pagination": {
+                              "type": "object",
+                              "description": "The paging figures for this answer. **Note they are nested here, not flat beside the rows.**",
+                              "properties": {
+                                "page": {
+                                  "type": "integer",
+                                  "description": "Which page was served, counting from 1."
+                                },
+                                "limit": {
+                                  "type": "integer",
+                                  "description": "How many rows a page holds."
+                                },
+                                "totalItems": {
+                                  "type": "integer",
+                                  "description": "How many rows match in all, counted under the same visibility rule as the rows themselves."
+                                },
+                                "totalPages": {
+                                  "type": "integer",
+                                  "description": "How many pages the whole result takes."
+                                },
+                                "hasNext": {
+                                  "type": "boolean",
+                                  "description": "Whether a page follows this one."
+                                },
+                                "hasPrev": {
+                                  "type": "boolean",
+                                  "description": "Whether a page comes before this one."
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1924,6 +1924,24 @@
           },
           "403": {
             "description": "Endpoint disabled"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -1960,13 +1978,54 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Event"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "description": "The payload. **The event is nested under `event`** — read `data.event.eventID`. This operation declared the bare `Event` shape as the whole body until 30 October 2026, which left out both the envelope and this key.",
+                          "properties": {
+                            "event": {
+                              "description": "The event. See the note on the `Event` shape: `detail` also returns about thirty-five fields that shape does not declare.",
+                              "allOf": [
+                                {
+                                  "$ref": "#/components/schemas/Event"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "404": {
             "description": "Not found"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -1997,6 +2056,24 @@
           },
           "403": {
             "description": "Admin required or CSRF failed"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2038,6 +2115,24 @@
           },
           "404": {
             "description": "Event not found"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2065,6 +2160,24 @@
           },
           "404": {
             "description": "Event not found or already deleted"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2094,20 +2207,33 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "eventID": {
-                      "type": "integer",
-                      "description": "Which event these belong to — simply the number you asked for, echoed back so an answer can be matched to its request. It is not read from the database."
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
                     },
-                    "resources": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/EventHubResource"
-                      },
-                      "description": "The event's resources — its links and notes, in the order the team page shows them. **May be empty:** an event with nothing attached is a normal answer, not a 404. Everything is returned at once; there is no paging."
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "eventID": {
+                              "type": "integer",
+                              "description": "Which event these belong to — simply the number you asked for, echoed back so an answer can be matched to its request. It is not read from the database."
+                            },
+                            "resources": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/EventHubResource"
+                              },
+                              "description": "The event's resources — its links and notes, in the order the team page shows them. **May be empty:** an event with nothing attached is a normal answer, not a 404. Everything is returned at once; there is no paging."
+                            }
+                          },
+                          "description": "The payload. **These fields sit inside `data`** — read `data.eventID`, not `eventID`. This operation declared them as the whole body until 30 October 2026, leaving out the envelope."
+                        }
+                      }
                     }
-                  }
+                  ]
                 }
               }
             }
@@ -2130,6 +2256,24 @@
           },
           "404": {
             "description": "Event not found (including: exists, but on a different tenant's site; or, for a session, an event that person may not see or is not on the team of)"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2159,20 +2303,33 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "eventID": {
-                      "type": "integer",
-                      "description": "Which event these belong to — the number you asked for, echoed back."
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
                     },
-                    "videos": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/EventHubVideo"
-                      },
-                      "description": "The event's video grid, in display order. **May be empty.** Only the non-secret columns are listed by name, so adding a column to the table can never widen this answer, and no signing key or playback token is ever included. No paging."
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "eventID": {
+                              "type": "integer",
+                              "description": "Which event these belong to — the number you asked for, echoed back."
+                            },
+                            "videos": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/EventHubVideo"
+                              },
+                              "description": "The event's video grid, in display order. **May be empty.** Only the non-secret columns are listed by name, so adding a column to the table can never widen this answer, and no signing key or playback token is ever included. No paging."
+                            }
+                          },
+                          "description": "The payload. **These fields sit inside `data`** — read `data.eventID`, not `eventID`. This operation declared them as the whole body until 30 October 2026, leaving out the envelope."
+                        }
+                      }
                     }
-                  }
+                  ]
                 }
               }
             }
@@ -2195,6 +2352,24 @@
           },
           "404": {
             "description": "Event not found (including: exists, but on a different tenant's site; or, for a session, an event that person may not see or is not on the team of)"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2232,6 +2407,24 @@
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2246,6 +2439,24 @@
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2264,9 +2475,41 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/NoticeboardPoster"
+                  "type": "object",
+                  "description": "The portal's usual envelope, written out here rather than composed from `V1SuccessEnvelope` **because this endpoint's `data` is an ARRAY and that shape fixes `data` as an object** — composing the two would demand both at once and nothing could satisfy it. This operation declared the bare array as the whole body until 30 October 2026, leaving out the envelope around it.",
+                  "required": [
+                    "status",
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "description": "Always the text `ok`.",
+                      "example": "ok"
+                    },
+                    "data": {
+                      "type": "array",
+                      "description": "The board's posters. **The array is `data` itself — it is not nested under a key.**",
+                      "items": {
+                        "$ref": "#/components/schemas/NoticeboardPoster"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "description": "The same block every other answer carries: `timestamp` and `version`, and `csrfToken` on a write made with a sign-in session.",
+                      "properties": {
+                        "timestamp": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When the portal built this answer, in UTC, to the second with an explicit `+00:00`."
+                        },
+                        "version": {
+                          "type": "string",
+                          "description": "The portal's own version number."
+                        }
+                      }
+                    }
                   }
                 }
               }
@@ -2284,6 +2527,24 @@
           },
           "403": {
             "description": "Endpoint disabled"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2334,6 +2595,24 @@
           },
           "422": {
             "description": "Missing/oversized data parameter, or data does not resolve to this host"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2422,6 +2701,24 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2446,6 +2743,24 @@
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2513,7 +2828,67 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "description": "The payload. **This endpoint's paging is FLAT and carries no totals** — unlike the events, assets, attendance and expenses lists, which nest theirs under `pagination` and include `totalItems`/`totalPages`. There is nothing here to tell you how many pages exist; ask for the next page until you get fewer rows than you asked for.",
+                          "properties": {
+                            "count": {
+                              "type": "integer",
+                              "description": "How many rows are on THIS page — not the total."
+                            },
+                            "page": {
+                              "type": "integer",
+                              "description": "Which page was served, counting from 1."
+                            },
+                            "limit": {
+                              "type": "integer",
+                              "description": "How many rows a page holds."
+                            },
+                            "items": {
+                              "type": "array",
+                              "description": "The tasks on this page.",
+                              "items": {
+                                "type": "object",
+                                "description": "One task, as the portal stores it."
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2547,6 +2922,24 @@
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2591,7 +2984,67 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "description": "The payload. **This endpoint's paging is FLAT and carries no totals** — unlike the events, assets, attendance and expenses lists, which nest theirs under `pagination` and include `totalItems`/`totalPages`. There is nothing here to tell you how many pages exist; ask for the next page until you get fewer rows than you asked for.",
+                          "properties": {
+                            "count": {
+                              "type": "integer",
+                              "description": "How many rows are on THIS page — not the total."
+                            },
+                            "page": {
+                              "type": "integer",
+                              "description": "Which page was served, counting from 1."
+                            },
+                            "limit": {
+                              "type": "integer",
+                              "description": "How many rows a page holds."
+                            },
+                            "items": {
+                              "type": "array",
+                              "description": "The documents on this page.",
+                              "items": {
+                                "type": "object",
+                                "description": "One document, as the portal stores it."
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2609,6 +3062,24 @@
           },
           "403": {
             "description": "Admin required"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2748,6 +3219,24 @@
           },
           "403": {
             "description": "Endpoint disabled or missing scope"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2813,6 +3302,24 @@
           },
           "404": {
             "description": "Not found — including a cross-site id probe, which never confirms another tenant's asset exists"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2850,6 +3357,24 @@
           },
           "409": {
             "description": "assetTagCode already in use on this site"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2899,6 +3424,24 @@
           },
           "409": {
             "description": "assetTagCode already in use on this site"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -2934,6 +3477,24 @@
           },
           "404": {
             "description": "Not found or already deleted"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -3005,6 +3566,24 @@
           },
           "404": {
             "description": "Asset not found"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -3155,6 +3734,24 @@
           },
           "404": {
             "description": "Not found"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -3237,6 +3834,24 @@
           },
           "404": {
             "description": "Not found"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -3282,6 +3897,24 @@
           },
           "404": {
             "description": "Not found"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -3350,6 +3983,24 @@
           },
           "404": {
             "description": "Not found"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -3398,6 +4049,24 @@
           },
           "409": {
             "description": "The task is already completed. Its `taskID` description says so; this status was missing from the list until 30 October 2026."
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -3443,6 +4112,24 @@
           },
           "404": {
             "description": "Not found"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -3564,6 +4251,24 @@
           },
           "404": {
             "description": "Not found"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -3636,6 +4341,24 @@
           },
           "404": {
             "description": "Not found"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -3686,6 +4409,24 @@
           },
           "404": {
             "description": "Not found"
+          },
+          "429": {
+            "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
+            "headers": {
+              "Retry-After": {
+                "description": "How many seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -3771,11 +4512,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -3877,11 +4618,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -3912,7 +4653,7 @@
         "tags": [
           "Events"
         ],
-        "summary": "Fetch a single event by id (v1) — the only v1 resource with a detail route",
+        "summary": "Fetch a single event by id (v1)",
         "description": "Requires scope `events:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/events/detail?id={id}`. **Who sees which events (#514):** a signed-in session sees what the calendar would show that person — public events, members-only events of an organisation they are an active member of (or administer), and events imported from outside calendars by their own level. An API key sees the organisation's own published events as before, and an event imported from an outside calendar exactly when a signed-out visitor could see it, in the same detail — unless its calendar, or a choice or rule covering it, is set 'Don't show via API'. Details are limited where `detailsLimited` is true (only title, date and time are sent). An event the caller may not see is simply absent: the reply is the same 404 as for an id that matches nothing.",
         "security": [
           {
@@ -3986,11 +4727,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -4114,11 +4855,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -4242,11 +4983,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -4349,11 +5090,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -4437,11 +5178,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -4584,11 +5325,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -4751,11 +5492,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -4858,11 +5599,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -5023,11 +5764,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -5134,11 +5875,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -5240,11 +5981,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -5369,11 +6110,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -5476,11 +6217,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -5603,11 +6344,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -5691,11 +6432,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH"
               }
             }
           },
@@ -5823,11 +6564,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH"
               }
             }
           },
@@ -5970,11 +6711,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH"
               }
             }
           },
@@ -6115,11 +6856,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH"
               }
             }
           },
@@ -6234,11 +6975,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -6340,11 +7081,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -6469,11 +7210,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -6576,11 +7317,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -6703,11 +7444,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -6814,11 +7555,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, DELETE"
               }
             }
           },
@@ -6920,11 +7661,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, DELETE"
               }
             }
           },
@@ -7029,11 +7770,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, DELETE"
               }
             }
           },
@@ -7137,11 +7878,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, DELETE"
               }
             }
           },
@@ -7279,11 +8020,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, DELETE"
               }
             }
           },
@@ -7415,11 +8156,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, DELETE"
               }
             }
           },
@@ -7547,11 +8288,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -7685,11 +8426,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -7806,11 +8547,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -7913,11 +8654,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -8032,11 +8773,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -8084,7 +8825,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                  "type": "object",
+                  "description": "The portal's usual envelope, written out here rather than composed from `V1SuccessEnvelope` **because this endpoint's `data` is an ARRAY and that shape fixes `data` as an object** — composing the two would demand both at once and nothing could satisfy it. This address runs the same handler as `GET /api/noticeboard/list`, and declared only the generic envelope until 30 October 2026, which says `data` is an object.",
+                  "required": [
+                    "status",
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "description": "Always the text `ok`.",
+                      "example": "ok"
+                    },
+                    "data": {
+                      "type": "array",
+                      "description": "The board's posters. **The array is `data` itself.**",
+                      "items": {
+                        "$ref": "#/components/schemas/NoticeboardPoster"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "description": "The same block every other answer carries: `timestamp` and `version`, and `csrfToken` on a write made with a sign-in session.",
+                      "properties": {
+                        "timestamp": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When the portal built this answer, in UTC, to the second with an explicit `+00:00`."
+                        },
+                        "version": {
+                          "type": "string",
+                          "description": "The portal's own version number."
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -8120,11 +8896,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST"
               }
             }
           },
@@ -8238,11 +9014,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST"
               }
             }
           },
@@ -8336,11 +9112,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH"
               }
             }
           },
@@ -8442,11 +9218,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH"
               }
             }
           },
@@ -8581,11 +9357,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH"
               }
             }
           },
@@ -8708,11 +9484,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH"
               }
             }
           },
@@ -8907,11 +9683,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -9013,11 +9789,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -9155,11 +9931,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -9283,11 +10059,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -9421,11 +10197,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
@@ -9538,11 +10314,11 @@
             },
             "headers": {
               "Allow": {
-                "description": "Comma-separated list of supported HTTP verbs.",
+                "description": "The verbs this resource really accepts. **ApiRouter builds this from the handler files that exist on disk**, so it differs from resource to resource — it is not a fixed list.",
                 "schema": {
-                  "type": "string",
-                  "example": "GET, POST"
-                }
+                  "type": "string"
+                },
+                "example": "GET, POST, PUT, PATCH, DELETE"
               }
             }
           },
