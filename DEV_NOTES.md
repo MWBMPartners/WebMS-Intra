@@ -10699,3 +10699,133 @@ A third small fault of the same family: moving the `--selftest` dispatch out of
 `main()` while changing its signature meant `--selftest` silently ran the
 ordinary check and reported success. It is dispatched from `__main__` now, with
 a note saying why.
+## An event status the column never had, and the row that vanished (#676, migration 230, 30 October 2026)
+
+`tblEvents.status` is `ENUM('draft','published','cancelled','postponed')`.
+Three writers allowed **`archived`** — a word the column has never had — and
+omitted **`postponed`**, which it has:
+
+| File | Shape |
+|---|---|
+| `web/_apps/events/api/create.php` | inline list; falls back to `draft`, never refuses |
+| `web/_apps/events/api/update.php` | list **assigned to `$validStatuses`**; answers 400 |
+| `web/_apps/calendar/manage/import.php` | inline list; row-level error |
+
+### The cost depended entirely on the server, and that is the point
+
+Both halves measured on MySQL 8.0.36, not reasoned about:
+
+**Strict** (every connection since #593, 12 October 2026):
+
+```
+INSERT INTO t (status) VALUES ('archived');
+ERROR 1265 (01000): Data truncated for column 'status' at row 1
+```
+
+A 500 to the caller. Nothing stored, so nothing wrong in the database.
+
+**Not strict** (any installation older than #593):
+
+```
+SET SESSION sql_mode='';
+INSERT INTO t (status) VALUES ('archived');     -- accepted
+SELECT CONCAT('[', status, ']') ...  ->  []     -- status = '' is TRUE
+```
+
+An ENUM keeps the empty string in its **index 0, "invalid" slot**. It is not
+one of the four words, so **no status filter can find it**:
+`WHERE status = 'draft'` and `status IN ('published', …)` both miss it.
+
+**Be precise about the damage — the first draft of this section was not, and
+the independent check caught it.** It said the event was "invisible on every
+screen" and "cannot be found, edited or deleted through the interface". Neither
+is true. `calendar/manage/index.php:190` builds its conditions as
+`['e.isDeleted = 0', 'e.siteID = ?', 'e.externalFeedID IS NULL']` and adds a
+status condition **only when one is chosen**; its badge at `:455` is a `match`
+with a `default` arm, so nothing throws. The event **is** listed, **is** in the
+count, and **can** be opened, edited and deleted there — it shows a grey badge
+with a blank label, and opening it preselects Draft, so a Save repairs it by
+hand. Measured: of 130 places that read `tblEvents`, **86 never mention status
+at all**.
+
+What is actually wrong is narrower and still worth repairing: a status no
+filter matches, a blank badge in an administrator's list, and a value the
+column itself calls invalid.
+
+And `postponed` could not be set **through the API or the importer**, while the
+API returned it in `Event.status`. It has always been settable from the
+ordinary admin event form (`_event_form.php:83`) and the series bulk editor
+(`series-edit.php:121`) — saying "through any route" was wrong.
+
+### Migration 230 repairs, it does not restore
+
+Every such event becomes `draft`. The owner chose that on 30 October 2026
+because it **never publishes anything** and never asserts an event was
+**cancelled** — it hands the event back to an administrator, visible to them
+and not to members, which is the closest guess at what somebody sending
+`archived` wanted. It also matches what `create.php` already does with a word
+it does not recognise.
+
+**What was intended cannot be recovered.** MySQL stored the empty string, not
+the text it rejected. There is no schema change: the column was right and the
+code was wrong, so the migration is a data repair and
+`full_schema.sql` carries only its mark.
+
+### An untrue comment that would have been a 500
+
+`admin/calendar/moderate.php`'s header said **"Reject = status='archived'"**.
+The code has always written `draft` (line 68, with `isPublic = 0`). Had it done
+what the comment said, **every rejection of a submitted event would have been a
+500.** An overstated comment is bad; a comment describing a crash the code
+avoids is worse, because somebody will one day make the code match it.
+
+### The tripwire was wrong twice, and planting found both
+
+`tools/audit-checks/check_event_status_matches_column.py` reads the ENUM out of
+`full_schema.sql` and compares it with every allow-list, every status written
+straight into an events statement, and the API description.
+
+**Version 1 cried wolf 14 times.** It checked every file under `web/_apps` that
+merely *mentioned* `tblEvents`, and every one of the 14 was false:
+`status = 'confirmed'` is an **RSVP's** status, `'pending_review'` an **erasure
+request's**, `'processing'` the **retention sweep's**, and
+`service-plans/save.php`'s list of `draft/published/archived` is the **service
+plan's** status, whose column really is `ENUM('draft','published','archived')`.
+Several of those files only JOIN to events. **"The file mentions the table" is
+not "this writes the table's column"** — it is now scoped to files holding an
+`INSERT INTO`/`UPDATE tblEvents`, AND half B looks for a literal only inside a
+400-character window after such a statement.
+
+**Do not credit the scoping with all fourteen.** Measured on the shipped check:
+removing the file scoping alone brings back **one**, not fourteen, because the
+window already puts an unrelated `status = 'confirmed'` out of reach. The two
+changes went in together and the narrower window does most of the work. An
+earlier draft of this section credited the scoping for all of it — the same
+shape as the #641 "28 versus 19" figure, a number carried into the record that
+the artefact does not support.
+
+**Version 2 read only lists written INLINE** inside the `in_array` call. But
+`events/api/update.php` — one of the three files this issue is about — assigns
+`$validStatuses = [...]` first. So it was **never examined**, and putting
+`archived` back into it left the check **green while it printed "3 allow-list(s)"
+checked**. False assurance is the worst failure a check can have, and only
+planting the fault found it. It now reads both shapes, and the count went 3 → 4.
+
+**A third fault was in a test fixture, not the check:** a case meant to prove an
+unrelated status far from the events write is ignored used 120 comment lines as
+padding. The tokeniser strips comments, so the padding vanished and the case
+went red. When a fixture needs distance, pad with code.
+
+Its `--selftest` is **17 cases**: both list shapes, correct and faulty; comments
+and doc blocks that mention `archived`; the concatenated `UPDATE` shape that
+`moderate.php` uses; a bound `?` that is not a literal; and **five cases in the
+cry-wolf direction** — another table's column, a service-plan list, an RSVP
+status beside an events JOIN, an unrelated list, and a distant statement.
+
+**What it cannot see**, stated because an overstated guarantee is worse than
+none: a status chosen at run time and bound; a list built by concatenation or
+read from a setting; a list holding neither `draft` nor `published`, since that
+is how it recognises one; and a literal status inside an `INSERT`'s `VALUES`
+list. That last was checked rather than assumed — all four
+`INSERT INTO tblEvents` statements name `status` in their column list and bind
+it with `?`, so the shape does not occur today.

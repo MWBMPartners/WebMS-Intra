@@ -489,10 +489,11 @@
             "enum": [
               "draft",
               "published",
-              "cancelled"
+              "cancelled",
+              "postponed"
             ],
             "default": "draft",
-            "description": "What state to create the event in. **Read this before using it: the portal, the database and this description have disagreed, and the fault is recorded as #676.** The database stores `draft`, `published`, `cancelled` or `postponed`. The two writers allow `draft`, `published`, `cancelled` or `archived` instead, which has two consequences, both measured: **`archived` is allowed by the writer and then refused by the database, giving a 500**; and `postponed` — a real stored value this API returns in `Event.status` — **cannot be set here at all** (create silently stores `draft` instead, update refuses with 400). Until #676 is settled, send only `draft`, `published` or `cancelled`. Note too that create silently falls back to `draft` for an unrecognised value while update refuses it with 400."
+            "description": "What state to create the event in. The database stores `draft`, `published`, `cancelled` or `postponed`, and all four may now be sent — `postponed` for the first time. **Note this does not refuse an unrecognised value: it quietly stores `draft` instead.** The update operation differs here and answers 400; the two are inconsistent, and nobody has decided to make them agree. Until #676 was fixed on 30 October 2026 **the code behind this field** allowed `archived`, which the database has never had — this description never listed it, and the distinction matters: sending it reached the INSERT and MySQL refused it, giving a 500, and on an installation older than #593 (12 October 2026) the column stored the EMPTY STRING instead, leaving an event that **no status filter can find** (it is still listed on the manage page, with a blank status badge). Migration 230 gives any such event back as a draft."
           },
           "isPublic": {
             "type": "boolean",

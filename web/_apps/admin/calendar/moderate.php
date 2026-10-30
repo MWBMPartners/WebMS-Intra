@@ -5,8 +5,13 @@
  * Admin — Calendar Submission Moderation Action Handler 🛡️ (#326)
  * -----------------------------------------------------------------------------
  * POST endpoint. Approve = flip status='published', isPublic=1,
- * submissionStatus='approved'. Reject = status='archived',
+ * submissionStatus='approved'. Reject = status='draft', isPublic=0,
  * submissionStatus='rejected'. Stamps moderatedBy/At.
+ *
+ * ⚠️ This used to say "Reject = status='archived'", which was never true: the
+ *    code has always written 'draft' (see the UPDATE below), and the column has
+ *    never had an 'archived' value at all, so had it done what the comment
+ *    said, every rejection would have been a 500. Corrected under #676.
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)

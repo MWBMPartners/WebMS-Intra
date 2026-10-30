@@ -76,7 +76,12 @@ $columnMap = [
     'locationPhone'   => 's',
     'locationEmail'   => 's',
 ];
-$validStatuses = ['draft', 'published', 'cancelled', 'archived'];
+// ⚠️ Exactly `tblEvents.status`'s ENUM. This list used to offer `archived`,
+//    which the column has never had, and omit `postponed`, which it has — so
+//    the 400 message told a developer that `archived` was valid and then the
+//    UPDATE failed with a 500 when they used it (#676). Checked against the
+//    column by tools/audit-checks/check_event_status_matches_column.py.
+$validStatuses = ['draft', 'published', 'cancelled', 'postponed'];
 
 $set    = [];
 $types  = '';

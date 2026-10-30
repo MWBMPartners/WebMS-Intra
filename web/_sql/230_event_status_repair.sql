@@ -1,0 +1,111 @@
+-- =============================================================================
+-- Path: _sql/230_event_status_repair.sql
+-- Migration 230 — events left with NO STATUS AT ALL are given back to the
+-- administrator as drafts (#676)
+--
+-- @package   Portal\Sql
+-- @author    MWBM Partners Ltd (t/a MWservices)
+-- @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
+-- @license   All Rights Reserved
+-- @version   1.0.0
+-- @link      https://github.com/MWBMPartners/WebMS-Intra/issues/676
+-- =============================================================================
+--
+-- WHAT WAS WRONG
+--   `tblEvents.status` is `ENUM('draft','published','cancelled','postponed')`,
+--   but three places that write an event allowed the word `archived`, which the
+--   column has never had:
+--
+--     web/_apps/events/api/create.php        (the API's create endpoint)
+--     web/_apps/events/api/update.php        (the API's update endpoint)
+--     web/_apps/calendar/manage/import.php   (the CSV importer)
+--
+--   What happened next depended entirely on the server's settings, and that is
+--   the point of this migration.
+--
+--   SINCE #593 (12 October 2026) `DbServer::connect()` makes every connection
+--   STRICT, so the write fails outright — measured on MySQL 8.0.36:
+--
+--       ERROR 1265 (01000): Data truncated for column 'status' at row 1
+--
+--   which reaches the caller as a 500. Nothing is stored, so nothing is wrong
+--   in the database. Unpleasant, but safe.
+--
+--   BEFORE #593 the connection was NOT strict, and MySQL did something worse
+--   than refusing: it stored the EMPTY STRING. Also measured, same server, with
+--   `sql_mode=''`:
+--
+--       INSERT INTO t (status) VALUES ('archived');
+--       SELECT CONCAT('[', status, ']') ... -> []    (status = '' is TRUE)
+--
+--   An ENUM keeps that empty string as index 0, the "invalid" slot. It is not
+--   one of the four permitted words, so **no status filter can find it**:
+--   `WHERE status = 'draft'`, `status IN ('published', ...)` and the like all
+--   miss it.
+--
+--   BE PRECISE ABOUT THE DAMAGE, because an earlier draft of this comment
+--   overstated it and the independent check caught that. It said the event was
+--   "invisible on every screen" and "cannot be found, edited or deleted
+--   through the interface". NOT TRUE. `calendar/manage/index.php` adds a
+--   status condition ONLY when one is chosen, and its status badge is a `match`
+--   with a `default` arm, so the event IS listed, IS in the count, and CAN be
+--   opened, edited and deleted there — it shows a grey badge with a blank
+--   label. Opening it preselects Draft in the form, so a Save repairs it by
+--   hand. Measured: of 130 places that read `tblEvents`, 86 never mention
+--   status at all.
+--
+--   So what is actually wrong is narrower, and still worth a migration: an
+--   event with a status no filter matches, a blank badge in an administrator's
+--   list, and a value the column itself calls invalid.
+--
+-- WHAT THIS DOES, AND WHY `draft`
+--   Gives every such event the status `draft`. The owner chose that on
+--   30 October 2026 over the alternatives, and the reasons are worth keeping:
+--
+--     * It NEVER PUBLISHES ANYTHING. A repair that guessed `published` could
+--       put an event in front of members, and on a public calendar, that
+--       nobody has approved.
+--     * It never asserts the event was CANCELLED. `cancelled` is closer to
+--       "archived" in spirit, but it is shown to members as a statement of
+--       fact, and we do not know that it is true.
+--     * `draft` hands the event back to an administrator: visible and editable
+--       to them, invisible to members. That is as close as we can get to what
+--       somebody sending `archived` probably wanted.
+--     * It matches what `create.php` already does with a word it does not
+--       recognise — it quietly falls back to `draft`.
+--
+--   We CANNOT recover what was intended. The original word is gone: MySQL
+--   stored the empty string, not the text that was rejected. So this is a
+--   repair to a safe, visible state, not a restoration.
+--
+-- SAFE TO RUN TWICE
+--   The `WHERE status = ''` clause matches nothing on the second run, because
+--   the first run left no empty values. There is no schema change here at all,
+--   so there is nothing to make conditional.
+--
+-- WHY THERE IS NO CHANGE TO THE COLUMN
+--   The column was always right; the code was wrong. The owner chose on
+--   30 October 2026 to make the three writers match the column rather than add
+--   `archived` to it. So this migration repairs data and the code change does
+--   the rest. One consequence, stated plainly rather than left to be
+--   discovered: an event CANNOT be archived, and `postponed` becomes settable
+--   through the API and the importer for the first time. (It has always been
+--   settable from the ordinary admin event form and the series bulk editor —
+--   so "postponed could not be set at all" would be wrong, and was.)
+--
+-- A FRESH INSTALL HAS NOTHING TO REPAIR
+--   `full_schema.sql` creates the column correctly and seeds no events, so a
+--   new database can hold no empty status. It records this migration as already
+--   executed, which is why there is a matching `tblMigrations` line there.
+-- =============================================================================
+
+-- 🔧 Give every event with no status at all back to the administrator as a
+--    draft. Only the empty string can be wrong here: an ENUM accepts its four
+--    permitted words or the empty "invalid" slot, and nothing else.
+UPDATE `tblEvents`
+   SET `status` = 'draft'
+ WHERE `status` = '';
+
+-- 📋 Record that this migration has run.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('230_event_status_repair.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;

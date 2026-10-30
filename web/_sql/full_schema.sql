@@ -10499,3 +10499,9 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('229_transcription_reachable.sq
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 INSERT INTO `tblMigrations` (`filename`) VALUES ('228_backup_download_import_schedule.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
+-- 📋 230 repairs events left with NO STATUS AT ALL (the empty string), which a
+--    pre-#593 install could store when something sent the word `archived` that
+--    the column has never had. A fresh database seeds no events and creates the
+--    column correctly, so there is nothing here to repair (#676).
+INSERT INTO `tblMigrations` (`filename`) VALUES ('230_event_status_repair.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;

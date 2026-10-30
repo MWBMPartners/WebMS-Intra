@@ -100,7 +100,20 @@ $isAllDay      = isset($_POST['isAllDay']) === true ? 1 : 0;
 $categoryID    = ((int) ($_POST['categoryID'] ?? 0)) ?: null;
 $typeID        = ((int) ($_POST['typeID'] ?? 0)) ?: null;
 $seriesID      = ((int) ($_POST['seriesID'] ?? 0)) ?: null;
-$status        = $_POST['status'] ?? 'draft';
+$status        = (string) ($_POST['status'] ?? 'draft');
+// ⚠️ This went in UNCHECKED until #676: whatever was posted was bound straight
+//    into the INSERT and the UPDATE. The form offers only the four valid
+//    options, but a `<select>` is a courtesy to whoever fills it in, not a
+//    boundary -- anything can be posted. So `status=archived` reached the
+//    database, where (strict since #593) it failed with "Data truncated for
+//    column 'status'", and on an older installation stored the EMPTY STRING,
+//    which leaves an event with a blank status badge that no status filter can
+//    find. These four are exactly `tblEvents.status`'s ENUM; an unrecognised
+//    word becomes a draft, which is what this page has always done with a
+//    missing one.
+if (in_array($status, ['draft', 'published', 'cancelled', 'postponed'], true) === false) {
+    $status = 'draft';
+}
 $isPublic      = isset($_POST['isPublic']) === true ? 1 : 0;
 $isFeatured    = isset($_POST['isFeatured']) === true ? 1 : 0;
 

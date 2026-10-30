@@ -10,7 +10,7 @@
  *
  * Required columns: eventName, startDateTime
  * Optional columns: endDateTime, isAllDay, locationName, description,
- *                   status (draft|published|cancelled|archived), category,
+ *                   status (draft|published|cancelled|postponed), category,
  *                   type, isPublic, isFeatured
  *
  * @package   Portal\Calendar
@@ -138,8 +138,11 @@ $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli): array {
                 $rowErr[] = 'endDateTime not parseable / before start';
             }
         }
-        if ($status !== '' && in_array($status, ['draft', 'published', 'cancelled', 'archived'], true) === false) {
-            $rowErr[] = 'status must be draft|published|cancelled|archived';
+        // ⚠️ Exactly `tblEvents.status`'s ENUM — see #676. `archived` was
+        //    accepted here and the column has never had it, so a CSV row
+        //    carrying it passed validation and then failed on the insert.
+        if ($status !== '' && in_array($status, ['draft', 'published', 'cancelled', 'postponed'], true) === false) {
+            $rowErr[] = 'status must be draft|published|cancelled|postponed';
         }
         $catId  = $catName !== ''  ? ($catMap[$catName]  ?? null) : null;
         $typeId = $typeName !== '' ? ($typeMap[$typeName] ?? null) : null;
@@ -367,7 +370,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card shadow-sm mb-3">
         <div class="card-body">
             <h2 class="h5">CSV format</h2>
-            <p class="small">Required columns: <code>eventName</code>, <code>startDateTime</code>. Optional: <code>endDateTime</code>, <code>isAllDay</code>, <code>locationName</code>, <code>description</code>, <code>status</code> (draft|published|cancelled|archived), <code>category</code>, <code>type</code>, <code>isPublic</code>, <code>isFeatured</code>. First row must be the header.</p>
+            <p class="small">Required columns: <code>eventName</code>, <code>startDateTime</code>. Optional: <code>endDateTime</code>, <code>isAllDay</code>, <code>locationName</code>, <code>description</code>, <code>status</code> (draft|published|cancelled|postponed), <code>category</code>, <code>type</code>, <code>isPublic</code>, <code>isFeatured</code>. First row must be the header.</p>
             <p class="small text-muted mb-0">
                 Excel users: open your file in Excel, choose <em>File → Save As → CSV (Comma delimited) (.csv)</em>.
             </p>

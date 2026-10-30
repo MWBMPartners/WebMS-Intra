@@ -2,6 +2,52 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — three places let you set an event status the database has never had (#676, migration 230)**
+  - **What was wrong.** `tblEvents.status` is `ENUM('draft','published','cancelled','postponed')`. Three
+    writers allowed **`archived`**, which the column has never had, and left out **`postponed`**, which it
+    has: the API's create and update endpoints, and the CSV importer. Nothing compared the two.
+  - **What it cost depended on the server, and both halves were measured on MySQL 8.0.36.** Since #593
+    (12 October 2026) every connection is strict, so the write failed with `ERROR 1265 Data truncated for
+    column 'status'` — a **500** to the caller. **Before #593 it was worse:** MySQL stored the **empty
+    string**, which an ENUM keeps in its "invalid" slot, so **no status filter can find it**.
+    *(An earlier draft of this entry said such an event was "unfindable, uneditable and undeletable
+    through the interface". That was wrong and the independent check caught it:
+    `calendar/manage/index.php` adds a status condition only when one is chosen, and its badge is a
+    `match` with a `default` arm, so the event **is** listed, counted and editable there — with a blank
+    status badge. Measured: 86 of the 130 places that read `tblEvents` never mention status.)*
+  - **And `postponed` could not be set through the API or the importer**, while the API happily returned
+    it in `Event.status`. *(It has always been settable from the ordinary admin event form and the series
+    bulk editor — an earlier draft said "through any route", which was wrong.)*
+  - **It was FIVE writers, not three.** The independent check found two the premise had missed:
+    `calendar/manage/save.php` — **the main admin event form** — took `$_POST['status']` and bound it
+    straight into the INSERT and the UPDATE **with no allow-list at all**, and
+    `calendar/submit-save.php` supplies `status` as a literal `"draft"` inside its INSERT's `VALUES`
+    list, a shape the new check could not see until it was taught to. The CSV page's **on-screen help**
+    also still told the user to send `archived`.
+  - **Fixed by making the code match the column** (the owner's choice on 30 October 2026 over adding
+    `archived` to the database). All five lists are now the column's four words. `postponed` becomes
+    settable for the first time, and **an event cannot be archived** — said plainly rather than left to be
+    discovered.
+  - **Migration 230 gives the vanished events back as drafts.** `draft` was chosen because it never
+    publishes anything and never asserts an event was cancelled: it hands the event to an administrator,
+    visible to them and not to members. What was originally intended **cannot** be recovered — MySQL
+    stored the empty string, not the word it rejected. Proved on a real database: an event with no status
+    came back as `draft`, `published` and `postponed` rows were untouched, and a second run changed nothing.
+  - **An untrue comment, fixed.** `admin/calendar/moderate.php`'s header said "Reject = status='archived'"
+    for weeks. The code has always written `draft`; had it done what the comment said, **every rejection
+    would have been a 500.**
+  - **A tripwire, and it took three goes to make it honest.** `check_event_status_matches_column.py` reads
+    the column out of the install script and compares it with every allow-list, every status written
+    straight into an events statement, and the API description. **Version 1 cried wolf 14 times** — all
+    false: `confirmed` is an RSVP's status, `pending_review` an erasure request's, and service plans' own
+    column really is `draft/published/archived`. **Measured on the shipped check, removing the file
+    scoping alone brings back one of those, not fourteen** — the narrower search window does most of that
+    work, so crediting the scoping with all of it would be the #641 "28 versus 19" mistake again.
+    **Version 2 read only lists written inline**, so
+    `events/api/update.php` — one of the three files this issue is about — was never examined, and putting
+    `archived` back into it left the check **green while it reported three lists checked.** Both were found
+    by planting the fault. It now reads both shapes, is scoped to files that write `tblEvents`, and its
+    17-case `--selftest` pins the cry-wolf direction as well as the fault.
 - **Fixed — 37 calls that PHP 8.5 deprecated, each one writing to the error log (#673)**
   - **What was wrong.** `curl_close()` has done nothing since PHP 8.0, when the cURL handle became
     an object that is freed when it goes out of scope. PHP 8.5 deprecates it. The portal called it

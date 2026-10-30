@@ -1254,6 +1254,35 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_no_curl_close.py --selftest
 
+      # Every list of permitted event statuses matches what tblEvents.status
+      # actually accepts (#676). Three writers allowed "archived", which the
+      # column has never had, and omitted "postponed", which it has. Strict
+      # since #593 that is a 500; BEFORE #593 the column stored the EMPTY
+      # STRING, which no status filter can find - it still shows on the manage
+      # list, with a blank badge (migration 230 gives those back as drafts).
+      # It is scoped to files that WRITE tblEvents, and looks for a literal
+      # status only in a window after such a statement. An earlier version did
+      # neither and reported 14 faults, all false - "confirmed" is an RSVP's
+      # status, "pending_review" an erasure request's. Measured on the SHIPPED
+      # check: removing the file scoping alone brings back ONE, not 14, so the
+      # window is what does most of that work. A check that cries wolf gets
+      # switched off.
+      - name: 'Event statuses match the database column (hard gate, #676)'
+        id: event_status_matches_column
+        if: always()
+        run: python3 -I tools/audit-checks/check_event_status_matches_column.py
+
+      # The test OF that check (#646). It reads BOTH shapes a list can take -
+      # inline in the in_array call, and assigned to a variable first. The
+      # first version read only the inline shape, so events/api/update.php,
+      # one of the three files #676 is about, was never examined and putting
+      # "archived" back into it left the check GREEN while it reported three
+      # lists checked. Planting the fault is what found that.
+      - name: 'That check actually catches things (hard gate, #676)'
+        id: event_status_selftest
+        if: always()
+        run: python3 -I tools/audit-checks/check_event_status_matches_column.py --selftest
+
       # =====================================================================
       # Summary in the Actions UI
       # =====================================================================

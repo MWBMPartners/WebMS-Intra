@@ -33,30 +33,25 @@ branch" as a reason.
 
 | # | Next up | Issue | Notes |
 |---|---|---|---|
-| 1 | Events `status`: allow-lists do not match the column | **#676** | Planned, buildable. See the traps below |
-| 2 | Browser/visual audit half of the look-and-feel rule | **#569** | Harness built and proven; needs moving into `tools/` and wiring in |
-| 3 | Dead API switches; `expenses/export` answers 403 | **#675** | Decided 30 Oct: seed it, document it, **add a test**; delete the four orphan switches by migration |
-| 4 | Organisation address written installation-wide | **#677** | Decided 30 Oct: per-organisation rows, **and a migration copying installation values down** |
-| 5 | Limit settings: installation caps organisation, app-wide | **#668** | The big sweep; 30+ limit-shaped settings |
-| 6 | #669, #670, #671, #672 | — | Not started |
+| 1 | Browser/visual audit half of the look-and-feel rule | **#569** | Harness built and proven; needs moving into `tools/` and wiring in |
+| 2 | Dead API switches; `expenses/export` answers 403 | **#675** | Decided 30 Oct: seed it, document it, **add a test**; delete the four orphan switches by migration |
+| 3 | Organisation address written installation-wide | **#677** | Decided 30 Oct: per-organisation rows, **and a migration copying installation values down** |
+| 4 | Limit settings: installation caps organisation, app-wide | **#668** | The big sweep; 30+ limit-shaped settings |
+| 5 | #669, #670, #671, #672 | — | Not started |
 
 **Migrations:** the highest in `web/_sql/` is **229**. #675 and #677 both need one and #676 may.
 Allocate **230 upward**; never let two packages claim one number.
 
-### #676 is wider than its issue says
+### #676 is done, and it was FIVE writers not three
 
-- **Three** allow-lists accept `archived`, not two — `web/_apps/calendar/manage/import.php:141` as
-  well as the two API writers.
-- The column is `ENUM('draft','published','cancelled','postponed')`, so `archived` is refused and
-  `postponed` can never be set.
-- `web/_apps/admin/calendar/moderate.php:8` says "Reject = status='archived'" but line 63 writes
-  `"draft"` — an untrue comment, which counts as a real problem here.
-- `api-spec.json` contradicts itself: one `status` enum lists three values, another four.
-- **Do NOT claim "archived was never storable".** True only from **#593** (12 October 2026), when
-  `DbServer::connect()` made every connection strict. Before that a non-strict install stored the
-  **empty string** instead of erroring, leaving events with no status, invisible to any
-  `status IN (...)` filter. Check `SELECT status, COUNT(*) FROM tblEvents GROUP BY status` on a real
-  database first; a repair migration may be needed.
+Committed; see `CHANGELOG.md`. Worth carrying forward because the independent check found the
+premise itself too narrow: besides the two API endpoints and the CSV importer,
+**`calendar/manage/save.php` — the main admin event form — took `$_POST['status']` straight into the
+INSERT and UPDATE with no allow-list at all**, and `calendar/submit-save.php` supplies `status` as a
+literal inside its INSERT's `VALUES` list, a shape the new check could not see until taught to. The
+CSV page's on-screen help also still told the user to send `archived`.
+
+**Migration numbers:** the highest is now **230**. #675 and #677 both need one — allocate 231 upward.
 
 ### The #569 harness is built but not committed
 
@@ -91,13 +86,12 @@ real faults and raised no false alarm on a clean page.
 4. **The public history rewrite** — settled in principle, not done. See the 13 October decision
    below. It happens ONCE, just before the pull request.
 
-**Open technical questions with no issue yet** (they should get one — #678):
-`tblWorkflowSteps.assigneeValue` (an approval step given to one named person: what should it become
-when they are erased?); five `KNOWN_STILL_NAMED` columns that cannot currently be empty
-(`tblAssetLicenseAssignments.linkedByID`, `tblAssetLoans.requestedByID`,
-`tblOffboarding.offboardedByID`, `tblResourceBooking.bookedByID`,
-`tblRotaSwapRequest.requestedByID`); and `tblInvitation.acceptedByID`, whose row holds the invited
-person's own e-mail address.
+**The erasure questions are now resolved or raised.** Checked against the code on 30 October rather
+than trusting the prose that carried them: **two of the three were already built on 12 October
+2026** — the five columns the database would not let be empty were made emptiable, and
+`tblInvitation.acceptedByID` is deleted with its person. The live record is `KNOWN_STILL_NAMED` in
+`tools/gdpr-eraser-selftest.php`, which lists just ONE such column (`tblExpenseClaims.userID`).
+Only `tblWorkflowSteps.assigneeValue` was genuinely open, and it is now **#679**.
 
 ---
 

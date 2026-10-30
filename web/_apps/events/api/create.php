@@ -107,7 +107,21 @@ $isPublic     = isset($body['isPublic']) === false || (bool) $body['isPublic'] =
 $isFeatured   = isset($body['isFeatured']) === true && (bool) $body['isFeatured'] === true ? 1 : 0;
 $locationName = trim((string) ($body['locationName'] ?? ''));
 $status       = (string) ($body['status'] ?? 'draft');
-if (in_array($status, ['draft', 'published', 'cancelled', 'archived'], true) === false) {
+// ⚠️ These four are exactly `tblEvents.status`'s ENUM, and they must stay that
+//    way. The list used to read `archived`, which the column has NEVER had, and
+//    `postponed`, which it HAS, was missing. Since #593 made every connection
+//    strict, sending `archived` got as far as the INSERT and MySQL refused it
+//    with "Data truncated for column 'status'" — a 500 to the caller. Before
+//    #593 it was worse: the column stored the EMPTY STRING, and such an event
+//    matches no filter the portal writes, so it vanished from every screen
+//    while still sitting in the table (#676; migration 230 repairs those).
+//    `tools/audit-checks/check_event_status_matches_column.py` now compares
+//    this list with the column and fails if they drift apart.
+if (in_array($status, ['draft', 'published', 'cancelled', 'postponed'], true) === false) {
+    // Note this does NOT refuse — an unrecognised word quietly becomes a
+    // draft, which is long-standing behaviour and is what the API description
+    // says. `update.php` answers 400 instead; the two differ on purpose only
+    // in so far as nobody has decided to make them agree.
     $status = 'draft';
 }
 $categoryId = isset($body['categoryID']) === true && $body['categoryID'] !== null && $body['categoryID'] !== ''

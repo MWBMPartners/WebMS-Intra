@@ -315,8 +315,11 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # unchanged both times. Moving the entry by hand is the point: see this
     # list's own comment above. (This comment said "477" and "one `use` line"
     # while the key below said 478 — corrected after the independent check
-    # noticed it contradicted its own entry.)
-    ("_apps/calendar/manage/save.php", 478): (
+    # noticed it contradicted its own entry. Moved 478 -> 491 on 30 October
+    # 2026: #676 added an eleven-line status allow-list above it, and keying
+    # this list by LINE NUMBER is exactly why that shows up here as a stale
+    # entry rather than as a silent pass.)
+    ("_apps/calendar/manage/save.php", 491): (
         "SELECT eventID FROM tblEvents WHERE eventSlug = ? AND siteID = ?",
         "the slug-uniqueness probe on event CREATE must search every event, imported ones included, so two events can never share a slug regardless of origin",
     ),
