@@ -2,6 +2,28 @@
 
 
 ## [Unreleased] (alpha)
+- **Decided and closed — a repeating series' feed falls back rather than publishing exceptions (#670)**
+  - **The issue's premise was stale.** It said the feed "sends the pattern only", so cancelling, moving
+    or editing one date was invisible to subscribers. Measured over real HTTP: all three were already
+    handled. `calendar/export.php` expands the stored pattern, compares it against the dates the viewer
+    may actually see **and** every detail the published entry carries, and publishes the series one date
+    at a time when they differ. That guard arrived with #569's independent check — the same check that
+    found the two faults #670 credits it with — and it covers all three symptoms, not two.
+  - **The owner's decision, 30 October 2026: the fallback IS the answer.** `EXDATE` and
+    `RECURRENCE-ID` overrides are not wanted. So FEATURES.md no longer says the feed "cannot yet"
+    show a changed date; it says the behaviour is deliberate, and states what it costs — a year-long
+    weekly service with one cancelled date becomes about fifty entries in a subscriber's calendar
+    rather than one.
+  - **Four checks added**, because two of the three symptoms had none: N20–N23 of
+    `event-repeat-pages-selftest.php` now cover **cancelling** and **renaming** one date alongside the
+    existing move and delete, each starting from a series the feed really does collapse so none can
+    pass vacuously (126 → 130 checks).
+  - **What N21 proves, precisely.** Two things stop the collapse when a date is cancelled and **they
+    mask each other**: `status` is one of the compared columns, and the feed's status filter drops a
+    cancelled event before the comparison sees it. Planting proved it — with `status` removed from the
+    compared list N21 still passes, because the cancelled row is simply absent and the date lists
+    differ instead. So N21 proves the behaviour, not which half carries it. `export.php`'s own note
+    says the same of the pair, and the first version of my comment claimed the wrong one.
 - **Fixed — the mail queue's four numbers were the live half of the limits rule, and a tripwire now guards the lot (#668, part 2)**
   - **Every one of #668's 32 candidate settings is judged**, and the answer is narrower than the list
     suggests. All 32 are seeded installation-wide, and `_apps/settings/save.php` **refuses to add a

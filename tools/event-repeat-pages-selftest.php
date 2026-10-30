@@ -1781,6 +1781,75 @@ ok(
 );
 
 // -----------------------------------------------------------------------------
+// N6 — #670's two remaining symptoms, measured rather than assumed.
+// -----------------------------------------------------------------------------
+// #670 says a repeating series' feed "sends the pattern only", so cancelling,
+// moving or renaming ONE date is invisible to a subscriber. N06 to N08 above
+// already disprove that for MOVING and REMOVING. These two cover the rest, so
+// the whole of that issue is answered by something that runs rather than by
+// reading `$patternStillTrue`:
+//
+//   • CANCELLING one date. TWO things would stop the collapse and they MASK
+//     EACH OTHER, which is worth stating because it decides what N21 actually
+//     proves: `status` is one of the columns the guard requires to be
+//     identical across the run, AND the feed's own status filter drops a
+//     cancelled event before the guard sees it. Measured by planting: with
+//     `status` taken out of the compared list, N21 still passes — the
+//     cancelled row simply is not in the run, so the date lists differ and the
+//     collapse fails on that instead. So N21 proves the BEHAVIOUR (a
+//     subscriber is not left seeing a cancelled date) and not which of the two
+//     carries it. `export.php`'s own note says the same thing about the pair,
+//     and it is right: removing either alone changes nothing observable.
+//   • RENAMING one date — the rendered-field comparison should break the
+//     collapse, because the collapsed entry would otherwise carry row 0's name
+//     and speak for a date that no longer has it.
+//
+// Each starts from a series the feed really does collapse, so neither check can
+// pass vacuously — the mistake N05 and N09 exist to rule out.
+createEvent($jar['admin'], 'EVREP Guard cancelled', '2029-10-14T10:00', '2029-10-14T11:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '4',
+    'isPublic'        => '1',
+]);
+$cancelledSeries = seriesOf('EVREP Guard cancelled')[0] ?? 0;
+$beforeCancel    = feedRrules($jar['admin']);
+ok(
+    'N20 the cancelled-date series starts out collapsed, so the next check is not vacuous',
+    count(array_filter($beforeCancel, static fn (string $l): bool => str_contains($l, 'COUNT=4') === true)) >= 1,
+    implode(' | ', $beforeCancel)
+);
+q("UPDATE tblEvents SET status = 'cancelled' WHERE seriesID = ? ORDER BY startDateTime DESC LIMIT 1", 'i', [$cancelledSeries]);
+$afterCancel = feedRrules($jar['admin']);
+ok(
+    'N21 #670: CANCELLING one date of a series stops the pattern being published, so a subscriber is not left seeing it',
+    count(array_filter($afterCancel, static fn (string $l): bool => str_contains($l, 'COUNT=4') === true)) === 0,
+    implode(' | ', $afterCancel)
+);
+
+createEvent($jar['admin'], 'EVREP Guard renamed', '2029-10-21T10:00', '2029-10-21T11:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '4',
+    'isPublic'        => '1',
+]);
+$renamedSeries = seriesOf('EVREP Guard renamed')[0] ?? 0;
+$beforeRename  = feedRrules($jar['admin']);
+ok(
+    'N22 the renamed-date series starts out collapsed too',
+    count(array_filter($beforeRename, static fn (string $l): bool => str_contains($l, 'COUNT=4') === true)) >= 1,
+    implode(' | ', $beforeRename)
+);
+q("UPDATE tblEvents SET eventName = 'EVREP Guard renamed ONE DATE' WHERE seriesID = ? ORDER BY startDateTime DESC LIMIT 1", 'i', [$renamedSeries]);
+$feedBody = req($jar['admin'], 'GET', '/calendar/export?all=1')['body'];
+ok(
+    'N23 #670: RENAMING one date stops the pattern being published, and the new name really reaches the subscriber',
+    count(array_filter(feedRrules($jar['admin']), static fn (string $l): bool => str_contains($l, 'COUNT=4') === true)) === 0
+        && str_contains($feedBody, 'SUMMARY:EVREP Guard renamed ONE DATE') === true
+        && substr_count($feedBody, 'SUMMARY:EVREP Guard renamed') === 4,
+    'entries carrying the series name: ' . substr_count($feedBody, 'SUMMARY:EVREP Guard renamed')
+        . '; the changed one is ' . (str_contains($feedBody, 'SUMMARY:EVREP Guard renamed ONE DATE') === true ? 'present' : 'MISSING')
+);
+
+// -----------------------------------------------------------------------------
 // N5 — the third leg of the invariant in the save handler: if a date cannot be
 //      created, the rule is withdrawn. Round 3 found this leg had NO check at
 //      all — replacing it with `if (false)` left all 81 green, because nothing

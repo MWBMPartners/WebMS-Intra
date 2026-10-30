@@ -327,9 +327,14 @@ Events, series, RSVP, exports, and seven view modes.
   same finishing times and the same title, description, location, map position, status, time zone and
   all-day setting. The feed checks that every time by expanding the pattern
   and comparing, against the dates that reader is allowed to see. So a series can never publish a date
-  it has not got, nor hide one it has, nor name one somebody may not see. **What it cannot yet do
-  (#670) is show a single cancelled, moved or edited date as a change to the pattern:** instead that
-  whole series goes back to being listed one date at a time. Accurate, just less tidy.
+  it has not got, nor hide one it has, nor name one somebody may not see. **A single cancelled, moved or edited date is
+  deliberately NOT published as a change to the pattern** (the owner decided this on 30 October 2026,
+  closing #670): that whole series simply goes back to being listed one date at a time. Always
+  accurate, just less tidy — the alternative was `EXDATE` and per-date overrides, which keeps the
+  series as one tidy entry and costs a great deal more, including a way to know that an occurrence
+  was edited, which nothing records today. The cost of the choice, said plainly: a year-long weekly
+  service with one date cancelled becomes about fifty entries in a subscriber's calendar rather than
+  one, until somebody edits the series back into shape.
   - **The time on the clock is what repeats.** "Every Sunday at 10:00" is 10:00 through both clock
     changes. A date landing in the hour that does not exist moves forward and keeps its length.
   - **The repeat chosen wins over the date typed**, and the first date moves onto the pattern if they
