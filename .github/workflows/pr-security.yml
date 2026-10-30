@@ -1222,6 +1222,38 @@ jobs:
         if: always()
         run: python3 -I tools/api-spec-check-selftest.py
 
+      # No call to a cURL close function PHP 8.5 deprecated (#673). Each one
+      # wrote a "Deprecated" line to the error log every time it ran, which
+      # buries real faults in noise. NOT every outside call the portal makes:
+      # SafeFetch, WebPush, MailerGoogle and Auth had already removed theirs,
+      # so fetching a typed address, sending a push and sending mail were
+      # never affected - saying otherwise overstates it.
+      # It reads the code through PHP's own tokeniser, not by searching text,
+      # because 21 comment lines across 19 files MENTION curl_close to explain
+      # why there is no call, and a text search reports every one as a fault.
+      # (It was 6 before this package; the package added the other 15 notes.)
+      # It covers BOTH spellings: curl_close() and \curl_close(), which PHP
+      # tokenises differently, in any mix of capitals. The first version missed
+      # the backslash form and so reported clean on a real deprecation - a
+      # leading backslash is ordinary style in namespaced code, and 14 of the
+      # 15 files this package changed are namespace Portal\Core.
+      # curl_multi_close() is deliberately NOT covered: measured on 8.5.11, it
+      # raises no notice, and flagging it would make the check cry wolf.
+      - name: 'No deprecated cURL close call (hard gate, #673)'
+        id: no_curl_close
+        if: always()
+        run: python3 -I tools/audit-checks/check_no_curl_close.py
+
+      # The test OF that check, in both directions (#646). A guard that only
+      # ever says "clean" is worse than none, because it is believed. This
+      # proves a real call IS refused and that a comment, a doc block, a string
+      # and a method of the same name are NOT - and that scanning nothing is
+      # treated as a failure rather than a pass.
+      - name: 'That check actually catches things (hard gate, #673)'
+        id: no_curl_close_selftest
+        if: always()
+        run: python3 -I tools/audit-checks/check_no_curl_close.py --selftest
+
       # =====================================================================
       # Summary in the Actions UI
       # =====================================================================

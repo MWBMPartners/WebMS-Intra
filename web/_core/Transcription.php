@@ -916,7 +916,9 @@ class Transcription
         curl_setopt($ch, CURLOPT_TIMEOUT, 600);
         $resp = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        // No curl_close() here: the handle has been an object since PHP 8.0 and is
+        // freed when it goes out of scope. The call has done nothing since then,
+        // and PHP 8.5 raises a "deprecated" notice every time it runs (#673).
         if ($resp === false || $code < 200 || $code >= 300) {
             return ['ok' => false, 'error' => 'openai-http-' . $code];
         }
@@ -975,7 +977,6 @@ class Transcription
         curl_setopt($ch, CURLOPT_TIMEOUT, 600);
         $resp = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
         fclose($fh);
         if ($resp === false || $code !== 200) {
             return ['ok' => false, 'error' => 'assemblyai-upload-' . $code];
@@ -994,7 +995,6 @@ class Transcription
         curl_setopt($ch, CURLOPT_HTTPHEADER, ['authorization: ' . $key, 'content-type: application/json']);
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         $resp = curl_exec($ch);
-        curl_close($ch);
         $job = json_decode((string) $resp, true);
         $jobId = is_array($job) === true ? (string) ($job['id'] ?? '') : '';
         if ($jobId === '') {
@@ -1010,7 +1010,6 @@ class Transcription
             curl_setopt($ch, CURLOPT_HTTPHEADER, ['authorization: ' . $key]);
             curl_setopt($ch, CURLOPT_TIMEOUT, 30);
             $resp = curl_exec($ch);
-            curl_close($ch);
             $status = json_decode((string) $resp, true);
             if (is_array($status) === false) {
                 continue;

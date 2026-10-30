@@ -216,7 +216,9 @@ class Translation
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         $resp = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        // No curl_close() here: the handle has been an object since PHP 8.0 and is
+        // freed when it goes out of scope. The call has done nothing since then,
+        // and PHP 8.5 raises a "deprecated" notice every time it runs (#673).
         if ($resp === false || $code < 200 || $code >= 300) {
             return null;
         }
@@ -263,7 +265,6 @@ class Translation
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         $resp = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
         if ($resp === false || $code < 200 || $code >= 300) {
             return null;
         }
@@ -302,7 +303,6 @@ class Translation
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         $resp = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
         if ($resp === false || $code < 200 || $code >= 300) {
             return null;
         }
@@ -341,7 +341,6 @@ class Translation
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         $resp = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
         if ($resp === false || $code < 200 || $code >= 300) {
             return null;
         }
@@ -375,7 +374,6 @@ class Translation
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         $resp = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
         if ($resp === false || $code < 200 || $code >= 300) {
             return null;
         }

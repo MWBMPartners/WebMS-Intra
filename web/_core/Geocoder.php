@@ -197,7 +197,9 @@ class Geocoder
         $raw      = curl_exec($ch);
         $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $curlErrNo = curl_errno($ch);
-        curl_close($ch);
+        // No curl_close() here: the handle has been an object since PHP 8.0 and is
+        // freed when it goes out of scope. The call has done nothing since then,
+        // and PHP 8.5 raises a "deprecated" notice every time it runs (#673).
 
         if ($raw === false) {
             Logger::errorPlatform(
@@ -296,7 +298,6 @@ class Geocoder
         $raw      = curl_exec($ch);
         $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $curlErrNo = curl_errno($ch);
-        curl_close($ch);
 
         if ($raw === false) {
             Logger::errorPlatform(

@@ -2,6 +2,48 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — 37 calls that PHP 8.5 deprecated, each one writing to the error log (#673)**
+  - **What was wrong.** `curl_close()` has done nothing since PHP 8.0, when the cURL handle became
+    an object that is freed when it goes out of scope. PHP 8.5 deprecates it. The portal called it
+    **37 times across 15 files**, and each call wrote a `Deprecated` line to the error log every
+    time it ran — payments, text messages, Zoom, geocoding, transcription, translation, the
+    webhook sender, the asset register and the hymnal among them. **Not every outside call the
+    portal makes:** `SafeFetch`, `WebPush`, `MailerGoogle` and `Auth` had already removed theirs,
+    so fetching an address a person typed, sending a push and sending mail were never affected.
+  - **Why it mattered more than tidiness.** The error log is where a real fault is found. A portal
+    that writes a deprecation line every time it talks to a payment provider buries the one line
+    that matters under hundreds that do not.
+  - **Fixed.** Every call removed; the handle is freed when it goes out of scope, which is what four
+    files (`SafeFetch`, `WebPush`, `MailerGoogle` and `Auth`) had already worked out and documented.
+    Each of the fifteen now carries the same short note in place of its first call.
+  - **The issue's own figures were wrong, and are corrected here.** It said 43 calls across 19 files.
+    Six of those lines were **comments mentioning `curl_close`** in the four files that had already
+    removed it. Counted with PHP's tokeniser rather than by searching text: **37 calls, 15 files.**
+  - **A tripwire, and `curl_multi_close` is deliberately not covered.**
+    `check_no_curl_close.py` refuses `curl_close()` and `curl_share_close()`. Measured on PHP 8.5.11
+    rather than assumed: **`curl_multi_close()` raises no notice**, so flagging it would make the
+    check cry wolf, and a check that cries wolf gets switched off. It has **no exemption list** —
+    there is never a reason to call these — and it reads the code through PHP's own tokeniser,
+    because a text search would report all six of those explanatory comments as faults.
+  - **It covers both spellings, and the first version did not.** PHP tokenises a bare
+    `curl_close` and a fully-qualified `\curl_close` as *different* token types. The check looked
+    only at the first, so it reported **clean on a real, live deprecation** — found by the
+    independent check, which planted `\curl_close($ch);` into a namespaced file. That spelling is
+    not exotic: a leading backslash is ordinary style in namespaced code, and **fourteen of the
+    fifteen files this package changed are `namespace Portal\Core;`**. A name still holding a `\`
+    after the leading one, such as `\Vendor\curl_close`, is somebody else's function and passes.
+    *(Two claims in an earlier draft of this entry were wrong and were corrected by the second
+    review round: "every file under `web/_core/`" — it holds 190 PHP files, of which 105 are
+    `namespace Portal\Core;`, 15 are `MWBM\Mail` and **70 declare no namespace at all**; and that
+    php-cs-fixer's `native_function_invocation` rule writes `\curl_close(` by itself — its default
+    `include` is `@compiler_optimized`, which does not list `curl_close`, and there is no
+    php-cs-fixer here to settle it. Neither claim was needed.)*
+  - **It fails rather than passes when it cannot run** (the #646 lesson): a missing `php`, a
+    tokeniser that answers nothing, or a scan that reads zero files is a failure. Its `--selftest`
+    runs **17 cases** — thirteen on the scan and **four on the verdict itself**, because changing
+    `len(hits) == 0` to `>= 0` once left all thirteen green while the check reported clean on a
+    tree holding a real call. Both plants were confirmed caught at the right file and line, then
+    the files restored from saved bytes.
 - **Fixed — a form could push one organisation's setting to every organisation on the installation (#674, #668)**
   - **What was wrong, and it needed no mistake by anybody.** `$SETTINGS` has already merged the
     installation-wide settings with the open organisation's own by the time any page runs. Admin,

@@ -10548,3 +10548,154 @@ planted fault and watching it go red**. That needs a push, which is the owner's.
 What is proved here is: every step exists as the YAML parses it, none is skipped
 by its own condition, none has an escape hatch, each check passes on the current
 code, and three of the ten refuse the exact fault they guard.
+## 37 deprecated cURL calls, and the one that is not deprecated (#673, 30 October 2026)
+
+`curl_close()` has done nothing since PHP 8.0. The handle stopped being a
+resource then and became an object, freed when it goes out of scope. **PHP 8.5
+deprecates the call**, so every one of them writes a `Deprecated` line to the
+error log.
+
+The portal called it **37 times across 15 files** — `Payments` eight times,
+`Translation` five, `Zoom` and `Transcription` four each, `Sms` and
+`AiAssistant` three, `Geocoder` twice, and one each in `Hymnal`, `Qr`,
+`ErrorMonitor`, `AssetRegister`, `WebhookDispatcher`, `What3Words`,
+`CloudflareStream` and the Integrations page. So talking to a payment provider,
+sending a text, starting a Zoom meeting, geocoding an address, transcribing a
+recording or translating a string each added a line to the log that said
+nothing.
+
+**Not every outside call the portal makes, and saying so would overstate it.**
+`SafeFetch` (every fetch of an address a person typed, calendar imports
+included), `WebPush`, `MailerGoogle` and `Auth` had already removed theirs, so
+sending a push and sending mail never wrote one. An earlier draft of this
+section said "every outside call" and listed push among them; the independent
+check caught it, and it is the #487 shape — a claim about the blast radius that
+is wider than the fault.
+
+**Why that is worth a package rather than a tidy-up.** The error log is where a
+real fault is found. Hundreds of deprecation lines per hour is how the one line
+that matters gets missed.
+
+### Four files had already worked it out
+
+`SafeFetch`, `WebPush`, `MailerGoogle` and `Auth` had removed the call and left
+a note saying why. `SafeFetch` also does `unset($handle)` inside its retry
+loop, which is a real need — the variable is reused — and not the same thing as
+closing it. The other fifteen now carry the same short note in place of their
+first call.
+
+### The issue's own figures were wrong
+
+#673 said 43 calls across 19 files. **Six of those lines were the comments in
+those four files**, each mentioning `curl_close` to explain why there is no
+call. Counted with PHP's tokeniser: **37 calls, 15 files.** Searching for the
+text of a call finds the text, not the call — the same lesson as #641.
+
+### `curl_multi_close()` is NOT deprecated, and that matters
+
+Measured on PHP 8.5.11 rather than assumed, because getting it wrong in this
+direction is what makes a check unusable:
+
+| Function | PHP 8.5 | Guarded |
+|---|---|---|
+| `curl_close()` | deprecated since 8.5 | refused |
+| `curl_share_close()` | deprecated since 8.5 | refused |
+| `curl_multi_close()` | **no notice at all** | allowed, not flagged |
+
+A check that refused all three would report a call PHP is perfectly happy with.
+A check that cries wolf gets switched off, and then it catches nothing.
+
+### The tripwire, and why it does not search text
+
+`tools/audit-checks/check_no_curl_close.py` asks PHP's own tokeniser through
+`php -r`. A text search would report **all 21 comment lines, across 19 files,** that
+mention `curl_close` under `web/` as faults — it was 6 before this package, and
+this package added the other 15 notes itself, so the figure more than trebled in
+the same change (an earlier draft of this sentence still said six). Count it
+rather than trusting the number here:
+`grep -rn curl_close web --include="*.php" | wc -l`. A text search would also hit
+and would also report `$fn = 'curl_close';` — a string, not a call. Hand-rolled
+comment stripping has been got wrong three times on this project: an apostrophe
+in `// don't` puts every later quote out of step. So the tokeniser is used
+rather than re-implemented.
+
+**It must accept TWO token types, and the first version accepted one.** PHP
+tokenises a bare `curl_close` as `T_STRING` but a fully-qualified
+`\curl_close` as `T_NAME_FULLY_QUALIFIED`. Reading only `T_STRING` made the
+check report **clean on a real, live deprecation** — proved by planting
+`\curl_close($ch);` into `Zoom.php`, which is `namespace Portal\Core;`, as are
+**fourteen of the fifteen files this package changed** (the fifteenth,
+`web/_apps/admin/integrations/index.php`, has no namespace). That spelling is
+not a curiosity: it is ordinary style in namespaced code. **This is the most
+likely way the fault comes back, and the guard that exists to stop it was blind
+to it.** A name that still holds a `\` once the leading one is stripped —
+`\Vendor\curl_close` — is a different function and is deliberately allowed, so
+the fix does not cry wolf.
+
+**Two claims in the first draft of this section were wrong, and the second
+review round caught both.** They are recorded because each is a shape this
+project keeps hitting:
+
+* **"every file under `web/_core/` is `namespace Portal\Core;`"** — false.
+  It holds **190** PHP files: **105** are `namespace Portal\Core;`, **15** are
+  `MWBM\Mail`, and **70 declare no namespace at all** (everything under
+  `_core/apps/`, `_core/templates/`, `_core/partials/`, plus `bootstrap.php`,
+  `version.php`, `brand-defaults.php` and a few more). The substance survived —
+  fourteen of the fifteen changed files really are `namespace Portal\Core;` —
+  but the sentence as written was a sweeping claim nobody had counted.
+* **"php-cs-fixer's `native_function_invocation` writes `\curl_close(` by
+  itself"** — DROPPED, not corrected, because it cannot be settled here. That
+  rule's default `include` is `@compiler_optimized`: roughly 39 functions the
+  Zend compiler special-cases, and `curl_close` is not among them. So it holds
+  only when the rule is configured `@all` or `@internal`. There is no
+  php-cs-fixer on this machine (no `vendor/`, no `.php-cs-fixer*`, which is
+  consistent with "no CLI, no Composer"), so the claim rested on nothing that
+  had been run. **The argument never needed it.**
+
+**And one fold in the check cannot be pinned by any test, which is said out
+loud rather than papered over.** The scan lowercases both the list of refused
+names and each token it finds. The token side is now pinned by three cases
+(`CURL_CLOSE`, `\CURL_CLOSE`, `Curl_Close` — all real deprecations, since PHP
+function names are case-insensitive), and removing it correctly turns the
+selftest red. The *list* side is a no-op, because `REFUSED` is already
+lowercase: removing it was measured and changed **not one hit**. The review
+round reported its removal as an unguarded fault; it is not a fault, it is a
+plant that changes no behaviour, and believing such a plant is how a check gets
+"fixed" for a problem it never had.
+
+It has **no exemption list**, deliberately: there is never a reason to call
+these, and a list would need a line per caller and go stale the first time
+somebody forgot.
+
+**It fails rather than passes when it cannot run.** A missing `php`, a
+tokeniser that answers nothing, or a scan that reads zero files is a failure,
+not a pass — that is the #646 lesson, where twelve guards looked wired and ran
+nowhere.
+
+### What it cannot see, and how both directions were proved
+
+A call assembled at run time (`$fn = 'curl_' . 'close'; $fn($ch);`) is a
+variable call, not a named one, so the tokeniser does not report it. Nothing
+here does that.
+
+`--selftest` runs **17 cases**. Thirteen exercise the scan: a plain call, a
+`curl_share_close`, a fully-qualified call, one inside a namespace and a
+fully-qualified share must all be refused; a comment, a doc block, the name in
+a string, `curl_multi_close`, a **method** of the same name, `\Vendor\Http\curl_close`
+and a relative `Vendor\curl_close` must not; and an apostrophe before a real
+call must still be caught.
+
+**Four exercise `main()` itself, and that was added because the first
+`--selftest` could not see the half that matters.** The independent check
+showed that changing `if len(hits) == 0` to `>= 0`, or deleting the vacuity
+guard, left **all** the scan-level cases green while the check reported clean
+on a tree holding a real call. The untested half was precisely the half a
+one-character edit could neuter. `main()` now takes its root as a parameter so
+the selftest can call it and assert its exit code: 1 for a real call, 1 for the
+backslash form, 0 for a clean file, 2 for an empty folder. Both mutants are now
+caught.
+
+A third small fault of the same family: moving the `--selftest` dispatch out of
+`main()` while changing its signature meant `--selftest` silently ran the
+ordinary check and reported success. It is dispatched from `__main__` now, with
+a note saying why.
