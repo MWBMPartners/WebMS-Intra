@@ -2,6 +2,38 @@
 
 
 ## [Unreleased] (alpha)
+- **Added — the browser half of the look-and-feel audit, which was never blocked (#569)**
+  - **What this is.** `tools/visual-audit.php` stands a real portal up over HTTP — copies `web/`, writes a
+    throwaway `auth_creds.php` and key, starts PHP's own server behind a router imitating `.htaccess` —
+    and drives `tools/layout-audit.mjs`, which looks at every page at **320, 390, 768, 1024 and 1440**
+    pixels wide and writes a screenshot of each. One command, because a check somebody has to assemble by
+    hand is a check that does not get run.
+  - **Nothing is installed.** Microsoft Edge is driven over the DevTools protocol using **node's own
+    built-in `WebSocket`** — no Playwright, no Puppeteer, no `npm install`. This was reported as blocked
+    for want of a headless browser; that was simply wrong, and Edge was already on the machine.
+  - **It found a real fault on its first run:** `/login` draws its own `<head>` and links **no icon**, so
+    every visitor's browser falls back to `/favicon.ico`, which 404s — on the first page anyone sees
+    (**#680**). It also reports 10 tap targets under 44px across the signed-out pages.
+  - **The trap that makes the obvious overflow test useless, measured before anything was written.** With
+    `mobile: true`, Chromium **widens the layout viewport to fit the content**: a 900px page asked to
+    render at 390 reports `innerWidth` of 900. So `scrollWidth > window.innerWidth` is **permanently
+    false**. Everything is compared against the width the driver asked for.
+  - **Four ways it passed on a broken page, every one found by planting.** The test router served every
+    static file as `text/html`, so the logo rendered broken and controls measured 4px short while the
+    audit said "no problems" — **it nearly shipped a false defect report about the sign-in page's logo**.
+    A guard for that asked for *zero* stylesheets when the real failure was partial. That guard then
+    counted raw `<link>` elements, so a page legitimately linking one file twice was hard-failed. And an
+    independent check found a fourth: **a page whose JavaScript dies still renders, still has a title, and
+    passed** — the #625 shape exactly. It now reports the browser's own errors and failed requests.
+  - **Five more from that check, all fixed:** a page regressing to a 500 was skipped while the run exited
+    0; the navigation result was never read, so pointing at a dead port **measured Chromium's own error
+    page and reported it as the page**; Edge was left running on every failure path, and with a fixed port
+    the *next* run silently attached to the leftover browser; `Ctrl-C` left a 22 MB copy of `web/` on disk
+    **including the database password**; and `php-errors.log` cannot see a fatal at all, because the
+    portal sends uncaught exceptions to `tblErrors` and swallows them — so it now reads both.
+  - **Honest about its reach.** It audits **four distinct pages** of roughly thirty signed-out ones, covers
+    **no page behind a sign-in**, and checks neither favicon, Open Graph, canonical nor social preview.
+    All of that is written in its header rather than left to be discovered.
 - **Fixed — three places let you set an event status the database has never had (#676, migration 230)**
   - **What was wrong.** `tblEvents.status` is `ENUM('draft','published','cancelled','postponed')`. Three
     writers allowed **`archived`**, which the column has never had, and left out **`postponed`**, which it
