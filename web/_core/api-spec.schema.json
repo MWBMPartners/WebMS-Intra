@@ -1,0 +1,655 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MWBMPartners/WebMS-Intra/web/_core/api-spec.schema.json",
+  "title": "WebMS Intra API description",
+  "description": "The shape `web/_core/api-spec.json` must have. This is NOT a copy of the whole OpenAPI 3.0 meta-schema: it describes the subset this portal uses, and it enforces the house conventions that a general OpenAPI validator would not know about — above all that EVERY property carries a `description`, because this project's rule is that a schema is the documentation as well as the validator. Executed by tools/audit-checks/check_api_spec_schema.py, which carries its own small validator because no JSON Schema library is installed on the development machine and every other check here uses the standard library only.",
+  "$comment": "JSON has no comments, so maintainer notes live in `$comment` and reader-facing text in `description` — the rule in .claude/CLAUDE.md. Keywords this schema actually uses, measured with the check's own walker rather than listed from memory (an earlier version of this line named four it does not use and left out five it does, which matters because this is the declared contract for what the validator must implement): $comment, $defs, $id, $ref, $schema, additionalProperties, allOf, anyOf, description, enum, items, minItems, minLength, minProperties, pattern, properties, propertyNames, required, title, type. Adding one the validator does not implement makes that part of the schema decorative, which is the exact failure the project rule about schemas warns against — so check_api_spec_schema.py FAILS on a keyword outside its UNDERSTOOD list. Note that guard catches a keyword that is MISSING, not one implemented wrongly: `oneOf` was folded into `allOf` until 30 October 2026 and the guard could not have told.",
+  "type": "object",
+  "required": [
+    "openapi",
+    "info",
+    "servers",
+    "security",
+    "tags",
+    "components",
+    "paths"
+  ],
+  "properties": {
+    "openapi": {
+      "description": "Which version of the OpenAPI specification this file is written to. Pinned to the 3.0 line because the browsable viewer shipped in web/public_html/api-docs/ renders 3.0, and because `nullable` (used throughout this file) is 3.0 spelling that 3.1 replaced with a type union.",
+      "type": "string",
+      "pattern": "^3\\.0\\.[0-9]+$"
+    },
+    "info": {
+      "description": "Who and what this API is, shown at the top of the browsable page.",
+      "type": "object",
+      "required": [
+        "title",
+        "description",
+        "version"
+      ],
+      "properties": {
+        "title": {
+          "description": "The API's name, as a developer sees it.",
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "description": "How the API works as a whole: the two ways of authenticating, the per-organisation switches, and the app-level switches. This is the one place a developer reads before anything else, so it must stay true.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "version": {
+          "description": "The portal version this description was written against. It tracks web/_core/version.php, which is the single source of truth.",
+          "type": "string",
+          "minLength": 1
+        },
+        "license": {
+          "description": "The licence the API description is published under.",
+          "type": "object",
+          "properties": {
+            "name": {
+              "description": "The licence's name.",
+              "type": "string"
+            },
+            "url": {
+              "description": "Where the licence can be read.",
+              "type": "string"
+            }
+          }
+        },
+        "contact": {
+          "description": "Who to approach about this API.",
+          "type": "object",
+          "properties": {
+            "name": {
+              "description": "The responsible party's name.",
+              "type": "string"
+            },
+            "url": {
+              "description": "A web address for them.",
+              "type": "string"
+            },
+            "email": {
+              "description": "An e-mail address for them.",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "servers": {
+      "description": "Where the API lives. WebMS Intra is a product installed by many customers, so this must stay a relative, same-origin entry and must NEVER name a customer's host — the rule in .claude/CLAUDE.md, enforced separately by check_no_hardcoded_domains.py.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "url",
+          "description"
+        ],
+        "properties": {
+          "url": {
+            "description": "The base address. Relative, so it resolves against whichever installation is serving the page.",
+            "type": "string",
+            "pattern": "^/"
+          },
+          "description": {
+            "description": "What that address means, in words.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "security": {
+      "description": "The ways of authenticating that apply to every operation unless the operation says otherwise. An operation that needs none declares an empty list of its own.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/securityRequirement"
+      }
+    },
+    "tags": {
+      "description": "The groups the browsable page sorts operations into. Every tag an operation names must appear here, which the check enforces separately because JSON Schema cannot express a cross-reference.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "description"
+        ],
+        "properties": {
+          "name": {
+            "description": "The tag's name, exactly as operations spell it.",
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "description": "What this group of operations is for. Required, not optional: an unexplained group is the same failure as an undescribed property.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "components": {
+      "description": "The reusable pieces: the ways of authenticating, and the shared schemas.",
+      "type": "object",
+      "required": [
+        "securitySchemes",
+        "schemas"
+      ],
+      "properties": {
+        "securitySchemes": {
+          "description": "Each way a caller may prove who they are.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "type",
+              "description"
+            ],
+            "properties": {
+              "type": {
+                "description": "Which kind of scheme this is.",
+                "type": "string",
+                "enum": [
+                  "apiKey",
+                  "http",
+                  "oauth2",
+                  "openIdConnect"
+                ]
+              },
+              "description": {
+                "description": "How a caller uses it, and what it does and does not protect.",
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "name": {
+                "description": "For an apiKey scheme, the name of the header, query parameter or cookie it travels in.",
+                "type": "string"
+              },
+              "in": {
+                "description": "For an apiKey scheme, where it travels.",
+                "type": "string",
+                "enum": [
+                  "header",
+                  "query",
+                  "cookie"
+                ]
+              },
+              "scheme": {
+                "description": "For an http scheme, the HTTP authentication scheme, such as `bearer`.",
+                "type": "string"
+              },
+              "bearerFormat": {
+                "description": "For a bearer scheme, a hint about the token's shape.",
+                "type": "string"
+              }
+            }
+          }
+        },
+        "schemas": {
+          "description": "The shared data shapes operations point at. Every one of their properties must carry a description.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/schemaObject"
+          }
+        },
+        "responses": {
+          "description": "Reusable responses, if any are ever added.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/response"
+          }
+        }
+      }
+    },
+    "paths": {
+      "description": "Every address this API answers. A key must be one of the two shapes ApiRouter can serve — `/api/{app}/{action}` or `/api/v1/{resource}[/{id}]` — or `/health`, which the router answers itself. That the set matches the handlers on disk is checked separately, by check_api_spec_matches_code.py.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^(/health|/api/v1/[a-z0-9-]+(/\\{id\\})?|/api/(?!v1/)[a-z0-9-]+/[a-z0-9-]+)$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/pathItem"
+      }
+    }
+  },
+  "$defs": {
+    "securityRequirement": {
+      "description": "One acceptable combination of security schemes. An empty object means no authentication is needed.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "pathItem": {
+      "description": "The operations available at one address.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "get",
+          "post",
+          "put",
+          "patch",
+          "delete",
+          "head",
+          "options",
+          "parameters",
+          "summary",
+          "description"
+        ]
+      },
+      "properties": {
+        "get": {
+          "$ref": "#/$defs/operation"
+        },
+        "post": {
+          "$ref": "#/$defs/operation"
+        },
+        "put": {
+          "$ref": "#/$defs/operation"
+        },
+        "patch": {
+          "$ref": "#/$defs/operation"
+        },
+        "delete": {
+          "$ref": "#/$defs/operation"
+        },
+        "head": {
+          "$ref": "#/$defs/operation"
+        },
+        "options": {
+          "$ref": "#/$defs/operation"
+        }
+      }
+    },
+    "operation": {
+      "description": "One thing a caller can do at an address.",
+      "type": "object",
+      "required": [
+        "tags",
+        "summary",
+        "responses"
+      ],
+      "properties": {
+        "tags": {
+          "description": "Which group this operation belongs to. Every name must be declared in the top-level `tags`.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "summary": {
+          "description": "One short line naming what the operation does, shown in the list on the browsable page.",
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "description": "The full account: who may call it, what it does, what it refuses, and anything surprising about it. Where an endpoint does not behave like the others — a different envelope, a form token in a different place, open cross-origin access — it must say so here.",
+          "type": "string"
+        },
+        "operationId": {
+          "description": "A unique machine name for the operation, where one is given.",
+          "type": "string"
+        },
+        "deprecated": {
+          "description": "True when callers should stop using this address.",
+          "type": "boolean"
+        },
+        "security": {
+          "description": "The ways of authenticating that apply to THIS operation, replacing the file-wide list. An empty array means no authentication is needed.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/securityRequirement"
+          }
+        },
+        "parameters": {
+          "description": "What the caller may send in the path or query string.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/parameter"
+          }
+        },
+        "requestBody": {
+          "$ref": "#/$defs/requestBody"
+        },
+        "responses": {
+          "description": "Every answer this operation can give, keyed by HTTP status. Each needs a description saying what that status means HERE, not in general.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^([1-5][0-9][0-9]|default)$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/response"
+          }
+        }
+      }
+    },
+    "parameter": {
+      "description": "One value a caller sends in the path or query string.",
+      "type": "object",
+      "required": [
+        "name",
+        "in",
+        "description",
+        "schema"
+      ],
+      "properties": {
+        "name": {
+          "description": "The parameter's name, exactly as it is sent.",
+          "type": "string",
+          "minLength": 1
+        },
+        "in": {
+          "description": "Where it travels.",
+          "type": "string",
+          "enum": [
+            "query",
+            "path",
+            "header",
+            "cookie"
+          ]
+        },
+        "description": {
+          "description": "What it means and what it accepts. Required: a parameter with no explanation is the commonest way this file goes stale.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "required": {
+          "description": "True when the request fails without it. A path parameter is always required.",
+          "type": "boolean"
+        },
+        "schema": {
+          "$ref": "#/$defs/schemaObject"
+        },
+        "example": {
+          "description": "A value a reader can copy."
+        }
+      }
+    },
+    "requestBody": {
+      "description": "What the caller sends in the body.",
+      "type": "object",
+      "required": [
+        "content"
+      ],
+      "properties": {
+        "required": {
+          "description": "True when the request fails without a body.",
+          "type": "boolean"
+        },
+        "description": {
+          "description": "What the body is for, where that is not obvious from its schema.",
+          "type": "string"
+        },
+        "content": {
+          "$ref": "#/$defs/content"
+        }
+      }
+    },
+    "response": {
+      "description": "One answer, with what it means and what it carries.",
+      "type": "object",
+      "required": [
+        "description"
+      ],
+      "properties": {
+        "description": {
+          "description": "What this status means for THIS operation — which condition produces it. A bare \"OK\" or \"Bad request\" tells a developer nothing they did not already know.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "content": {
+          "$ref": "#/$defs/content"
+        },
+        "headers": {
+          "description": "Headers this answer sets that a caller must read, such as `Retry-After` on a refusal for too many requests.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "description"
+            ],
+            "properties": {
+              "description": {
+                "description": "What the header means.",
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "schema": {
+                "$ref": "#/$defs/schemaObject"
+              }
+            }
+          }
+        }
+      }
+    },
+    "content": {
+      "description": "The body, keyed by media type.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "schema": {
+            "$ref": "#/$defs/schemaObject"
+          },
+          "example": {
+            "description": "A whole body a reader can copy."
+          },
+          "examples": {
+            "description": "Several named bodies a reader can copy.",
+            "type": "object"
+          }
+        }
+      }
+    },
+    "schemaObject": {
+      "description": "A data shape. **Every entry under `properties` must carry a non-empty `description`** — that is the house rule this file exists to enforce, and it is why `describedProperty` below is separate from this definition.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "Which kind of value this is.",
+          "type": "string",
+          "enum": [
+            "object",
+            "array",
+            "string",
+            "integer",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        "format": {
+          "description": "A finer shape for the type, such as `date`, `date-time` or `binary`. Note a plain MySQL DATETIME is not RFC 3339, so do not claim `date-time` for one.",
+          "type": "string"
+        },
+        "description": {
+          "description": "What this value means.",
+          "type": "string"
+        },
+        "nullable": {
+          "description": "True when the value may be null. OpenAPI 3.0 spelling.",
+          "type": "boolean"
+        },
+        "enum": {
+          "description": "The exact set of permitted values, taken from the code rather than from memory.",
+          "type": "array",
+          "minItems": 1
+        },
+        "const": {
+          "description": "The single permitted value."
+        },
+        "default": {
+          "description": "What the portal uses when the caller sends nothing."
+        },
+        "example": {
+          "description": "A value a reader can copy."
+        },
+        "pattern": {
+          "description": "A regular expression the value must match.",
+          "type": "string"
+        },
+        "minLength": {
+          "description": "The shortest permitted text.",
+          "type": "integer"
+        },
+        "maxLength": {
+          "description": "The longest permitted text. Say in the description whether going over is REFUSED or silently shortened — the two are very different for a caller.",
+          "type": "integer"
+        },
+        "minimum": {
+          "description": "The smallest permitted number.",
+          "type": "number"
+        },
+        "maximum": {
+          "description": "The largest permitted number.",
+          "type": "number"
+        },
+        "minItems": {
+          "description": "The fewest permitted entries.",
+          "type": "integer"
+        },
+        "maxItems": {
+          "description": "The most permitted entries.",
+          "type": "integer"
+        },
+        "minProperties": {
+          "description": "The fewest permitted members.",
+          "type": "integer"
+        },
+        "required": {
+          "description": "Which members must be present.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "properties": {
+          "description": "The members of an object. Each one must explain itself.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/describedProperty"
+          }
+        },
+        "additionalProperties": {
+          "description": "What any further members may look like, or false to forbid them."
+        },
+        "patternProperties": {
+          "description": "Members whose names match a pattern.",
+          "type": "object"
+        },
+        "propertyNames": {
+          "description": "A constraint on the member NAMES rather than their values.",
+          "type": "object"
+        },
+        "items": {
+          "$ref": "#/$defs/schemaObject"
+        },
+        "allOf": {
+          "description": "The value must satisfy every one of these. Used here to add fields to a shared envelope.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/schemaObject"
+          }
+        },
+        "anyOf": {
+          "description": "The value must satisfy at least one of these.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/schemaObject"
+          }
+        },
+        "oneOf": {
+          "description": "The value must satisfy exactly one of these.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/schemaObject"
+          }
+        },
+        "not": {
+          "$ref": "#/$defs/schemaObject"
+        },
+        "$ref": {
+          "description": "A pointer to a shared schema. That it resolves is checked separately, because JSON Schema cannot express it.",
+          "type": "string"
+        },
+        "readOnly": {
+          "description": "True when the portal returns this but never accepts it.",
+          "type": "boolean"
+        },
+        "writeOnly": {
+          "description": "True when the portal accepts this but never returns it — a licence key, for instance.",
+          "type": "boolean"
+        },
+        "deprecated": {
+          "description": "True when callers should stop sending or reading this.",
+          "type": "boolean"
+        },
+        "title": {
+          "description": "A short name for the shape.",
+          "type": "string"
+        },
+        "$comment": {
+          "description": "A note for whoever maintains this file. Never shown to a reader.",
+          "type": "string"
+        }
+      }
+    },
+    "describedProperty": {
+      "description": "A schema that is a member of an object, and therefore MUST explain itself. This is the whole point of the file: a property with no description leaves a developer guessing, and guessing is what the portal's own rule forbids. A property that is ONLY a `$ref` is exempt, because the shape it points at carries the description. **A property carrying `allOf` is NOT exempt** — it was until 30 October 2026, which meant wrapping a property in `allOf` and dropping its words stayed green. Nothing used that exemption, and `allOf` with a sibling `description` is the idiom this file uses precisely so a caveat renders under OpenAPI 3.0, where a sibling of `$ref` is ignored.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/schemaObject"
+        },
+        {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "description"
+              ],
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "\\S"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "$ref"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

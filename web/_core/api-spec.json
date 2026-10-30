@@ -102,6 +102,10 @@
       "description": "Registering a device for push notifications and switching it off again. Both answer with their own flat JSON rather than the portal's usual envelope."
     },
     {
+      "name": "Health",
+      "description": "Whether the installation is answering. Needs no sign-in, and today it tests the database and nothing else."
+    },
+    {
       "name": "Legacy Alias",
       "description": "Pre-v1 endpoint path (`/api/{app}/{action}`). Still fully supported and documented — the /api/v1/{resource} path for the same operation is a thin facade over the identical handler file and enablement flag."
     }
@@ -175,31 +179,38 @@
             "properties": {
               "count": {
                 "type": "integer",
-                "example": 12
+                "example": 12,
+                "description": "How many rows are in THIS page — not the total. **No handler returns the shape this schema describes.** It is referenced only by `GET /api/events/list`, which nests its paging inside `data.pagination` and names its array `events` — and also sends `hasNext` and `hasPrev`, which this schema does not declare. The flat shape here is what the documents and tasks list endpoints return instead. Recorded as part of #641; do not write a client against this schema without checking the endpoint you are calling."
               },
               "page": {
                 "type": "integer",
-                "example": 1
+                "example": 1,
+                "description": "Which page was served, counting from 1. A value below 1, or one that is not a number, is quietly moved to 1 rather than refused."
               },
               "limit": {
                 "type": "integer",
-                "example": 20
+                "example": 20,
+                "description": "How many rows a page may hold. Between 1 and 100, default 20; a larger number is **quietly reduced to 100** rather than refused."
               },
               "totalItems": {
                 "type": "integer",
-                "example": 142
+                "example": 142,
+                "description": "How many rows match in total, across every page. Counted under the SAME visibility rule as the rows themselves, so the total can never promise rows the caller may not see."
               },
               "totalPages": {
                 "type": "integer",
-                "example": 8
+                "example": 8,
+                "description": "How many pages the whole result takes. **Never less than 1** — an empty result still reports one page, not zero."
               },
               "items": {
                 "type": "array",
                 "items": {
                   "type": "object"
-                }
+                },
+                "description": "The rows of this page. **No handler returns the shape this schema describes.** It is referenced only by `GET /api/events/list`, which nests its paging inside `data.pagination` and names its array `events` — and also sends `hasNext` and `hasPrev`, which this schema does not declare. The flat shape here is what the documents and tasks list endpoints return instead. Recorded as part of #641; do not write a client against this schema without checking the endpoint you are calling."
               }
-            }
+            },
+            "description": "The payload of a paged list. **No handler returns the shape this schema describes.** It is referenced only by `GET /api/events/list`, which nests its paging inside `data.pagination` and names its array `events` — and also sends `hasNext` and `hasPrev`, which this schema does not declare. The flat shape here is what the documents and tasks list endpoints return instead. Recorded as part of #641; do not write a client against this schema without checking the endpoint you are calling."
           }
         }
       },
@@ -208,28 +219,32 @@
         "properties": {
           "eventID": {
             "type": "integer",
-            "example": 1234
+            "example": 1234,
+            "description": "The event's own number, and the key `GET /api/events/detail?id=` takes. Assigned by the database; never sent by a caller."
           },
           "eventName": {
             "type": "string",
-            "example": "Sunday Service"
+            "example": "Sunday Service",
+            "description": "The event's title as people see it. The one field never hidden from a caller whose details are limited."
           },
           "eventSlug": {
             "type": "string",
-            "example": "sunday-service"
+            "example": "sunday-service",
+            "description": "The address-safe short name, so an event can be fetched by name instead of by number (`?slug=sunday-service`). Built by the portal from the title and unique within the organisation; a caller cannot choose it. **There is no collision handling:** two events given the same title in one organisation produce the same short name, and the second is refused by the database as a 500 rather than with a clear message."
           },
           "description": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The event's long text — an order of service, notes, what to bring. **Returned by `detail` only: `list` does not include it.** Emptied to null when `detailsLimited` is true."
           },
           "startDateTime": {
             "type": "string",
-            "format": "date-time"
+            "description": "**A reading on a clock, not a moment in history.** It is the time as written on the clock of the zone named in `timezone`; it is not UTC and carries no offset, so turning it into an instant means reading it in that zone. When the event starts. Returned as `YYYY-MM-DD HH:MM:SS` — a space, no `T`, no offset. (`format: date-time` was declared here until 30 October 2026 and was untrue: that means RFC 3339, which this is not.)"
           },
           "endDateTime": {
             "type": "string",
-            "format": "date-time",
-            "nullable": true
+            "nullable": true,
+            "description": "**A reading on a clock, not a moment in history.** It is the time as written on the clock of the zone named in `timezone`; it is not UTC and carries no offset, so turning it into an instant means reading it in that zone. When the event ends. Null when no end time was recorded. Returned as `YYYY-MM-DD HH:MM:SS` — a space, no `T`, no offset. (`format: date-time` was declared here until 30 October 2026 and was untrue: that means RFC 3339, which this is not.)"
           },
           "timezone": {
             "type": "string",
@@ -241,11 +256,13 @@
             "enum": [
               0,
               1
-            ]
+            ],
+            "description": "1 when the event runs the whole day, so the clock times should not be shown. Sent as the number 1 or 0, never `true` or `false`."
           },
           "locationName": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The place in words — \"Main Hall\", \"Zoom\". Free text with no link to the venue records. Emptied to null when `detailsLimited` is true."
           },
           "status": {
             "type": "string",
@@ -270,43 +287,52 @@
             "enum": [
               0,
               1
-            ]
+            ],
+            "description": "1 when the event is promoted — pinned to the top of a listing, or shown on a highlights panel."
           },
           "categoryName": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The name of the category the event is filed under (\"Worship\", \"Youth\"). Null when it has no category, or the category was deleted. Deliberately NOT hidden from a caller whose details are limited."
           },
           "typeName": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The name of the event type (\"Sunday Service\", a preaching-plan entry). Null when none is set or the type was deleted. Also not hidden from a limited caller."
           },
           "locationAddress": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The address as free text, exactly as somebody typed it — it may run to several lines and is not broken into parts. Emptied to null when `detailsLimited` is true."
           },
           "locationWebURL": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "A web link for the place or the event — a venue page, or a joining link for an online meeting. **`detail` only.** Not checked for being a valid address. Emptied when `detailsLimited` is true."
           },
           "locationPhone": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "A telephone number for the place or the organiser. **`detail` only.** Not checked for format. Emptied when `detailsLimited` is true."
           },
           "locationEmail": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "An e-mail address for the place or the organiser. **`detail` only.** Not checked for format. Emptied when `detailsLimited` is true."
           },
           "locationGeoLat": {
             "type": "number",
             "format": "double",
             "nullable": true,
-            "example": 52.2053
+            "example": 52.2053,
+            "description": "The latitude of the place in decimal degrees, positive north, to seven decimal places. Kept only as a pair with `locationGeoLng` — one without the other is never stored. **Comes back as a string**, such as `\"52.2053000\"`, because the column is a decimal. Emptied when `detailsLimited` is true."
           },
           "locationGeoLng": {
             "type": "number",
             "format": "double",
             "nullable": true,
-            "example": 0.1218
+            "example": 0.1218,
+            "description": "The longitude in decimal degrees, positive east, to seven decimal places. The partner of `locationGeoLat`. Also comes back as a string. Emptied when `detailsLimited` is true."
           },
           "locationW3W": {
             "type": "string",
@@ -316,8 +342,12 @@
             "description": "Bare canonical form, no leading ///."
           },
           "location": {
-            "$ref": "#/components/schemas/Location",
-            "description": "Canonical cross-repo location object (#456) — additive; the legacy location* fields above are kept for backward compatibility."
+            "description": "Canonical cross-repo location object (#456) — additive; the legacy location* fields above are kept for backward compatibility.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Location"
+              }
+            ]
           },
           "imported": {
             "type": "boolean",
@@ -327,7 +357,8 @@
             "type": "boolean",
             "description": "True when this caller may see only the event's title, date and time (#514). Its description, every location field, the location object's contents, host and partner names, images and venue are then null. Only ever true for an imported event; the organisation's own events are always sent in full to a caller who may see them."
           }
-        }
+        },
+        "description": "\n\n**This shape is not everything `detail` returns.** That endpoint reads the event record directly and so also sends about thirty-five fields this shape does not declare — among them the series, host and partner organisations, the pictures, capacity and registration settings, submission and moderation state, the venue and room numbers, and the created and updated stamps. `list` conversely returns FEWER fields than this shape: it omits `description`, `locationWebURL`, `locationPhone` and `locationEmail`, which come only from `detail`."
       },
       "Location": {
         "type": "object",
@@ -335,30 +366,36 @@
         "properties": {
           "name": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The place's name in words, from the event's `locationName`. An empty value in the database comes back as null."
           },
           "address": {
             "type": "object",
             "properties": {
               "line1": {
                 "type": "string",
-                "nullable": true
+                "nullable": true,
+                "description": "The street or building line. **For an event this holds the WHOLE free-text address**, which may run to several lines — it is not a first line in the postal sense."
               },
               "line2": {
                 "type": "string",
-                "nullable": true
+                "nullable": true,
+                "description": "A second address line — a flat, building or estate. **Always null when the place came from an event.** An event keeps only four location columns, and no event endpoint joins to the venue records, so this part of the shared shape is never filled by this API. The field exists because the shape is shared unchanged with ProjectBookIT and ProjectEPass, where venues do carry it."
               },
               "city": {
                 "type": "string",
-                "nullable": true
+                "nullable": true,
+                "description": "The town or city. **Always null when the place came from an event.** An event keeps only four location columns, and no event endpoint joins to the venue records, so this part of the shared shape is never filled by this API. The field exists because the shape is shared unchanged with ProjectBookIT and ProjectEPass, where venues do carry it."
               },
               "region": {
                 "type": "string",
-                "nullable": true
+                "nullable": true,
+                "description": "The county, state or region. **Always null when the place came from an event.** An event keeps only four location columns, and no event endpoint joins to the venue records, so this part of the shared shape is never filled by this API. The field exists because the shape is shared unchanged with ProjectBookIT and ProjectEPass, where venues do carry it."
               },
               "postcode": {
                 "type": "string",
-                "nullable": true
+                "nullable": true,
+                "description": "The postcode or ZIP code. **Always null when the place came from an event.** An event keeps only four location columns, and no event endpoint joins to the venue records, so this part of the shared shape is never filled by this API. The field exists because the shape is shared unchanged with ProjectBookIT and ProjectEPass, where venues do carry it."
               },
               "countryCode": {
                 "type": "string",
@@ -366,19 +403,22 @@
                 "example": "GB",
                 "description": "ISO 3166-1 alpha-2, uppercase."
               }
-            }
+            },
+            "description": "The address split into parts. Always present as an object, even when every member inside it is null. For an event only `line1` is ever filled."
           },
           "latitude": {
             "type": "number",
             "format": "double",
             "nullable": true,
-            "example": 52.2053
+            "example": 52.2053,
+            "description": "The latitude in decimal degrees, positive north, to seven decimal places. The same value as `Event.locationGeoLat`, given here as a number rather than a string."
           },
           "longitude": {
             "type": "number",
             "format": "double",
             "nullable": true,
-            "example": 0.1218
+            "example": 0.1218,
+            "description": "The longitude in decimal degrees, positive east, to seven decimal places. The same value as `Event.locationGeoLng`, given here as a number."
           },
           "what3words": {
             "type": "string",
@@ -390,7 +430,8 @@
           "geocodedAt": {
             "type": "string",
             "format": "date-time",
-            "nullable": true
+            "nullable": true,
+            "description": "When the latitude and longitude were last worked out by a look-up. **This one really is a moment in history, in UTC**, written RFC 3339 with a `Z` — unlike the event times, which are readings on a clock. **Always null when the place came from an event.** An event keeps only four location columns, and no event endpoint joins to the venue records, so this part of the shared shape is never filled by this API. The field exists because the shape is shared unchanged with ProjectBookIT and ProjectEPass, where venues do carry it."
           },
           "geocodeSource": {
             "type": "string",
@@ -400,7 +441,8 @@
               "nominatim",
               "manual",
               "w3w"
-            ]
+            ],
+            "description": "Which service produced the coordinates. Checked against the permitted list on the way IN but passed through unchanged on the way out, so a value stored before that check existed is returned as it stands. **Always null when the place came from an event.** An event keeps only four location columns, and no event endpoint joins to the venue records, so this part of the shared shape is never filled by this API. The field exists because the shape is shared unchanged with ProjectBookIT and ProjectEPass, where venues do carry it."
           }
         }
       },
@@ -413,17 +455,18 @@
         "properties": {
           "eventName": {
             "type": "string",
-            "example": "Worship Service"
+            "example": "Worship Service",
+            "description": "The event's title. Required. Blank or spaces only is refused with 400. **Not shortened and not length-checked by the portal**, so a value longer than the column allows fails in the database and comes back as a 500 rather than a clear refusal."
           },
           "startDateTime": {
             "type": "string",
-            "format": "date-time",
-            "example": "2026-06-01T10:00:00"
+            "example": "2026-06-01T10:00:00",
+            "description": "Required. When the event starts, **written on the clock of `timezone`** — or of the organisation's own zone when `timezone` is left out. Any date text PHP can read is accepted, not only ISO 8601, and it is stored to the second. A value carrying its own offset is read as a moment and stored as that clock's reading at that moment. Unreadable text is refused with 400."
           },
           "endDateTime": {
             "type": "string",
-            "format": "date-time",
-            "nullable": true
+            "nullable": true,
+            "description": "When the event ends, on the same clock as the start. Leave it out, or send an empty value, for an event with no end time. It must read as a date AND be no earlier than `startDateTime`, or the request is refused with 400; equal start and end is accepted."
           },
           "timezone": {
             "type": "string",
@@ -432,11 +475,13 @@
           },
           "isAllDay": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Say the event runs the whole day, so clock times need not be shown. Note the asymmetry: sent as a true/false value, but returned by `Event.isAllDay` as the number 1 or 0."
           },
           "locationName": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The place in words. **Left out, it is stored as an empty string rather than null**, and the reply echoes that empty value. **Not shortened and not length-checked by the portal**, so a value longer than the column allows fails in the database and comes back as a 500 rather than a clear refusal."
           },
           "locationAddress": {
             "type": "string",
@@ -445,15 +490,18 @@
           },
           "locationWebURL": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "A web link for the place, or a joining link for an online meeting. Silently shortened to 500 characters rather than refused, and **not checked for being a valid address**."
           },
           "locationPhone": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "A telephone number for the place or the organiser. Silently shortened to 50 characters rather than refused. Not checked for format."
           },
           "locationEmail": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "An e-mail address for the place or the organiser. Silently shortened to 255 characters rather than refused, and **not checked for being a valid address**."
           },
           "locationGeoLat": {
             "type": "number",
@@ -468,7 +516,8 @@
             "format": "double",
             "nullable": true,
             "minimum": -180,
-            "maximum": 180
+            "maximum": 180,
+            "description": "The longitude in decimal degrees, positive east. The compulsory partner of `locationGeoLat`: neither is stored without the other, and **sending one alone drops the pair in silence rather than refusing it**."
           },
           "locationW3W": {
             "type": "string",
@@ -479,33 +528,38 @@
           },
           "categoryID": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "The number of the category to file the event under (\"Worship\", \"Youth\"). **Not checked against the organisation's categories**, so a number that does not exist fails on the database link and comes back as a 500 rather than a clear refusal. Send null or an empty value for no category."
           },
           "typeID": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "The number of the event type (\"Sunday Service\", a preaching-plan entry). **Not checked**, with the same 500 consequence as `categoryID`. Send null or an empty value for no type."
           },
           "status": {
             "type": "string",
             "enum": [
               "draft",
               "published",
-              "cancelled",
-              "archived"
+              "cancelled"
             ],
-            "default": "draft"
+            "default": "draft",
+            "description": "What state to create the event in. **Read this before using it: the portal, the database and this description have disagreed, and the fault is recorded as #676.** The database stores `draft`, `published`, `cancelled` or `postponed`. The two writers allow `draft`, `published`, `cancelled` or `archived` instead, which has two consequences, both measured: **`archived` is allowed by the writer and then refused by the database, giving a 500**; and `postponed` — a real stored value this API returns in `Event.status` — **cannot be set here at all** (create silently stores `draft` instead, update refuses with 400). Until #676 is settled, send only `draft`, `published` or `cancelled`. Note too that create silently falls back to `draft` for an unrecognised value while update refuses it with 400."
           },
           "isPublic": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Whether a signed-out visitor may see the event on the public calendar. **Defaults to true when the field is absent.** Note the portal reads this loosely, so the text `\"false\"` counts as TRUE — send a real true/false value."
           },
           "isFeatured": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Promote the event — pin it to the top of a listing, or show it on a highlights panel."
           },
           "description": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The event's long text — an order of service, notes, what to bring. Left out, it is stored as an empty string rather than null. **Not shortened and not length-checked by the portal**, so a value longer than the column allows fails in the database and comes back as a 500 rather than a clear refusal."
           },
           "csrf_token": {
             "type": "string",
@@ -523,7 +577,8 @@
             "description": "Client-facing id; the literal string \"p\" + posterID."
           },
           "title": {
-            "type": "string"
+            "type": "string",
+            "description": "The poster's headline — the main line of text on the tile. Never empty: a poster saved with a blank title is skipped rather than stored."
           },
           "kicker": {
             "type": "string",
@@ -531,14 +586,16 @@
           },
           "category": {
             "type": "string",
-            "example": "Community"
+            "example": "Community",
+            "description": "The free-text grouping word the board shows and can filter by. Free text, not a fixed list; defaults to `Other`."
           },
           "schedule": {
             "type": "string",
             "enum": [
               "once",
               "weekly"
-            ]
+            ],
+            "description": "Whether this poster is a single dated occasion or a weekly one — read `date` for `once`, `weekday` for `weekly`."
           },
           "date": {
             "type": "string",
@@ -556,7 +613,8 @@
             "description": "24-hour HH:MM, or empty string if not set."
           },
           "location": {
-            "type": "string"
+            "type": "string",
+            "description": "Where the thing happens, as free text for people to read. An empty value means none was set."
           },
           "link": {
             "type": "string",
@@ -616,11 +674,13 @@
             "description": "Required — rows with an empty/whitespace-only title are silently skipped."
           },
           "kicker": {
-            "type": "string"
+            "type": "string",
+            "description": "The short line printed above the poster's title — an \"eyebrow\" such as \"This Sunday\" or \"Youth\". Decoration only; nothing acts on it. Left out, it is stored as an empty value rather than null."
           },
           "category": {
             "type": "string",
-            "default": "Other"
+            "default": "Other",
+            "description": "A free-text grouping word the board shows and can filter by, such as \"Community\". **Free text, not a fixed list** — nothing checks it against anything. Defaults to `Other`."
           },
           "schedule": {
             "type": "string",
@@ -628,7 +688,8 @@
               "once",
               "weekly"
             ],
-            "default": "once"
+            "default": "once",
+            "description": "Whether this poster is one dated occasion (`once`, read with `date`) or something that happens every week (`weekly`, read with `weekday`). **Anything that is not exactly `weekly` quietly becomes `once`** rather than being refused."
           },
           "date": {
             "type": "string",
@@ -643,10 +704,12 @@
           },
           "time": {
             "type": "string",
-            "example": "19:30"
+            "example": "19:30",
+            "description": "The start time written on the clock as `HH:MM`, 24-hour. A reading on a clock with no zone attached; send hours and minutes only. **Not checked** — a value the database cannot read as a time gives a 500 rather than a clear refusal."
           },
           "location": {
-            "type": "string"
+            "type": "string",
+            "description": "Where the thing on the poster happens, as free text for people to read. Not a venue reference and not linked to the venue records."
           },
           "link": {
             "type": "string",
@@ -669,19 +732,23 @@
             "description": "Canva embed/share URL. Must start with https://www.canva.com/ or it is discarded."
           },
           "thumb": {
-            "type": "string"
+            "type": "string",
+            "description": "An optional smaller picture to show on the board in place of the poster itself — used for designs whose embed cannot be drawn as a tile. Only a full `http://`/`https://` address or one starting with `/` is kept; anything else is stored as empty."
           },
           "colorIndex": {
             "type": "integer",
-            "default": 0
+            "default": 0,
+            "description": "Which accent colour the board paints this tile in — a position in the board's own palette, not a colour value. **Not range-checked**, so a number outside what the column holds gives a 500."
           },
           "aspect": {
             "type": "string",
-            "default": "4/5"
+            "default": "4/5",
+            "description": "The shape of the poster tile as a ratio, such as `4/5`, `3/4` or `1/1`. Free text passed straight to the board's styling; the format is not checked."
           },
           "serif": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Which title font the poster uses: true for the editorial serif face, false for bold sans-serif. **Read loosely — any truthy value counts as true, so the text `\"false\"` would switch it ON.**"
           }
         }
       },
@@ -696,7 +763,8 @@
         "properties": {
           "status": {
             "type": "string",
-            "example": "ok"
+            "example": "ok",
+            "description": "Always the text `ok`. A fixed marker that the call succeeded, not a value that varies; a failure arrives in the error envelope instead."
           },
           "data": {
             "type": "object",
@@ -707,18 +775,21 @@
             "properties": {
               "timestamp": {
                 "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "description": "The moment the portal built this answer, always in UTC, written as ISO 8601 to the second with an explicit `+00:00` — never a `Z` and never fractions of a second. It is the time of the ANSWER, not of the thing being described."
               },
               "version": {
                 "type": "string",
-                "example": "1.4.0"
+                "example": "1.4.0",
+                "description": "The portal's own version number, so a caller can tell which release answered. It comes from the single source of truth in the portal's code, not from the database and not from this description."
               },
               "csrfToken": {
                 "type": "string",
                 "description": "Present ONLY on a write (POST/PUT/PATCH/DELETE) that was authenticated by the caller's login session and passed its anti-forgery check. The portal issues a brand-new anti-forgery token every time it accepts one, so the token you just sent is now dead. Use this replacement on your next write, or you will be refused with \"CSRF check failed\". Requests authenticated with a bearer API key never receive this field, because they carry no session for a token to protect.",
                 "example": "9f2c1d7b4a8e0f36c5b1d9e2a7f40c83b6e5d4a1c2f9b8e7d6a5c4b3a2f1e0d9"
               }
-            }
+            },
+            "description": "Information about the answer itself rather than the thing asked for. Always carries `timestamp` and `version`, and additionally `csrfToken` on a write made with a sign-in session."
           }
         }
       },
@@ -732,11 +803,13 @@
         "properties": {
           "status": {
             "type": "string",
-            "example": "error"
+            "example": "error",
+            "description": "Always the text `error`. The HTTP status carries what kind of failure it was."
           },
           "message": {
             "type": "string",
-            "example": "Forbidden"
+            "example": "Forbidden",
+            "description": "A short sentence a person can read. **It is not a machine-readable code and not from a fixed list** — each handler supplies its own wording, so do not match on it; decide behaviour from the HTTP status."
           },
           "detail": {
             "type": "string",
@@ -748,18 +821,21 @@
             "properties": {
               "timestamp": {
                 "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "description": "The moment the portal built this answer, always in UTC, written as ISO 8601 to the second with an explicit `+00:00` — never a `Z` and never fractions of a second. It is the time of the ANSWER, not of the thing being described."
               },
               "version": {
                 "type": "string",
-                "example": "1.4.0"
+                "example": "1.4.0",
+                "description": "The portal's own version number, so a caller can tell which release answered. It comes from the single source of truth in the portal's code, not from the database and not from this description."
               },
               "csrfToken": {
                 "type": "string",
                 "description": "Present ONLY on a write (POST/PUT/PATCH/DELETE) that was authenticated by the caller's login session and passed its anti-forgery check. The portal issues a brand-new anti-forgery token every time it accepts one, so the token you just sent is now dead. Use this replacement on your next write, or you will be refused with \"CSRF check failed\". Requests authenticated with a bearer API key never receive this field, because they carry no session for a token to protect.",
                 "example": "9f2c1d7b4a8e0f36c5b1d9e2a7f40c83b6e5d4a1c2f9b8e7d6a5c4b3a2f1e0d9"
               }
-            }
+            },
+            "description": "The same block a successful answer carries: `timestamp` and `version` always, and `csrfToken` when a session write had already replaced the token before the refusal was decided."
           }
         }
       },
@@ -773,16 +849,19 @@
           "groupLabel": {
             "type": "string",
             "maxLength": 100,
-            "example": "Adults"
+            "example": "Adults",
+            "description": "The name of the group being counted — an age band or category such as \"Adults\", \"Children\" or \"Visitors\". Free text chosen by whoever records the count, not a fixed list. **Going over the length shown is REFUSED with 400**, not shortened."
           },
           "headcount": {
             "type": "integer",
             "minimum": 0,
-            "example": 120
+            "example": 120,
+            "description": "How many people were counted in that group. Zero is allowed; a missing or negative value is refused with 400."
           },
           "sortOrder": {
             "type": "integer",
-            "example": 1
+            "example": 1,
+            "description": "What order the groups are listed in on screen, lowest first. **Left out, it defaults to the entry's position in the list you sent** — not to 0 for every entry."
           }
         }
       },
@@ -800,7 +879,8 @@
           "sessionDate": {
             "type": "string",
             "format": "date",
-            "example": "2026-07-19"
+            "example": "2026-07-19",
+            "description": "The date the service or gathering being counted took place, on the organisation's own calendar. A plain date — no time, no zone. Must be exactly `YYYY-MM-DD`: a value such as `2026-7-19` or `19/07/2026` is refused with 400."
           },
           "sessionTime": {
             "type": "string",
@@ -814,13 +894,15 @@
           },
           "notes": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "A free-text remark about this one count — why the number was unusual, what else was on. For people to read; nothing acts on it. An empty or blank value is stored as null."
           },
           "counts": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/AttendanceCountItem"
-            }
+            },
+            "description": "The breakdown of the headcount by group — one entry per group. May be left out or empty, which records a session with no breakdown. **Anything that is not a list is ignored in silence**, while a list containing something that is not an object refuses the whole request with 400."
           }
         }
       },
@@ -829,29 +911,35 @@
         "description": "PATCH-style — only fields present are touched. When `counts` is present, ALL existing headcount rows for the session are replaced (delete + re-insert).",
         "properties": {
           "serviceTypeID": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Which kind of service or gathering this count belongs to. Only acted on when the field is present. It must already exist for your own organisation, or the request is refused with 400."
           },
           "eventID": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "The diary event this count belongs to, if any. **Send null to detach the count** and leave it standing alone. A number must be an event of your organisation, not deleted, and **not imported from an outside calendar**."
           },
           "sessionDate": {
             "type": "string",
-            "format": "date"
+            "format": "date",
+            "description": "The date the service or gathering took place — a plain date on the organisation's own calendar. Must be exactly `YYYY-MM-DD` when present."
           },
           "sessionTime": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The start time written on the clock as `HH:MM`, 24-hour. **Send null, or an empty value, to clear it.** When a value is given it must be exactly `HH:MM`."
           },
           "notes": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "A free-text remark about this count. Send null, or an empty value, to clear it — an empty value is stored as null rather than as empty text."
           },
           "counts": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/AttendanceCountItem"
-            }
+            },
+            "description": "The breakdown by group. **This REPLACES the lot:** when the field is present every existing breakdown row for the session is deleted and these are put in its place, so sending an empty list wipes the breakdown entirely. Leave the field out to keep what is stored. **A value that is not a list is ignored in silence** rather than refused, so a malformed request can look as though it succeeded while changing nothing."
           }
         }
       },
@@ -865,11 +953,13 @@
         "properties": {
           "title": {
             "type": "string",
-            "maxLength": 255
+            "maxLength": 255,
+            "description": "The name the document is listed and searched under — what a member sees, not the file's own name on disk. **Going over the length shown is REFUSED with 400**, not shortened."
           },
           "description": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "A longer note about what the document is, shown beside the title in the list. An empty or blank value is stored as null."
           },
           "categoryID": {
             "type": "integer",
@@ -878,11 +968,13 @@
           },
           "eventID": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "Ties the document to one diary event, so it appears with that event as well as in the general library. It must be an event of your organisation, not deleted, and **not imported from an outside calendar**."
           },
           "isPublished": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Whether members can see the document yet. False keeps it uploaded but hidden. **Defaults to true when the field is absent.** Because this endpoint also accepts a posted form, a text value is read loosely: it is trimmed and lower-cased first, so `0`, `false`, `False`, `FALSE`, `no` and empty all mean false, and any other text means true. A real true/false value is taken as itself. A JSON number `0` is not text and does not take that route — it is read as false."
           },
           "fileName": {
             "type": "string",
@@ -901,22 +993,27 @@
         "properties": {
           "title": {
             "type": "string",
-            "maxLength": 255
+            "maxLength": 255,
+            "description": "The name the document is listed under. Only touched when the field is present, and it may not be set blank. **Going over the length shown is REFUSED with 400**, not shortened."
           },
           "description": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The longer note about the document. Send null, or an empty value, to clear it."
           },
           "categoryID": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "Which library category the document sits in. **Send null to take it out of every category.** A number must be a category of your own organisation."
           },
           "eventID": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "The one diary event the document belongs to. **Send null to detach it.** A number must be an event of your organisation, not deleted and not imported."
           },
           "isPublished": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether members can see the document. **Stricter than on create:** here any truthy value means true, with no list of accepted texts."
           }
         }
       },
@@ -930,31 +1027,37 @@
         "properties": {
           "itemName": {
             "type": "string",
-            "maxLength": 255
+            "maxLength": 255,
+            "description": "What was bought, in a few words — this line's description on the claim. **Going over the length shown is REFUSED with 400**, not shortened."
           },
           "description": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "A longer note about this one line, where the name is not enough. For a person to read. An empty or blank value is stored as null."
           },
           "unitCost": {
             "type": "number",
             "format": "double",
             "minimum": 0,
-            "example": 12.5
+            "example": 12.5,
+            "description": "The price of ONE of this thing, in whole currency units and hundredths — **12.50 means twelve pounds fifty, not twelve and a half pence**. Rounded to two decimal places by the portal. Note there is no currency field anywhere on a claim, so which currency it is in is not recorded. Must be a number and not negative; zero is allowed."
           },
           "quantity": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "description": "How many of the thing were bought. Multiplied by `unitCost` by the portal to give this line's total. **Must be at least 1 — zero is refused.**"
           },
           "purchaseDate": {
             "type": "string",
             "format": "date",
-            "nullable": true
+            "nullable": true,
+            "description": "The date this particular thing was bought — the receipt's date, separate from the claim's own `claimDate`. `YYYY-MM-DD` when given."
           },
           "supplier": {
             "type": "string",
             "maxLength": 255,
-            "nullable": true
+            "nullable": true,
+            "description": "Who it was bought from — the shop or company's name, as free text. **Going over the length shown is REFUSED with 400**, not shortened."
           }
         }
       },
@@ -974,11 +1077,13 @@
           },
           "claimTitle": {
             "type": "string",
-            "maxLength": 255
+            "maxLength": 255,
+            "description": "A short name for the whole claim, so a treasurer can tell it apart in a list — \"Youth weekend supplies\", say. **Going over the length shown is REFUSED with 400**, not shortened."
           },
           "claimDate": {
             "type": "string",
-            "format": "date"
+            "format": "date",
+            "description": "The date the claim itself is made — the date on the claim form, **not** the date anything was bought; each item carries its own `purchaseDate`. Must be exactly `YYYY-MM-DD`. Not checked for being in the past."
           },
           "userID": {
             "type": "integer",
@@ -989,7 +1094,8 @@
             "minItems": 1,
             "items": {
               "$ref": "#/components/schemas/ExpenseItem"
-            }
+            },
+            "description": "The lines of the claim, one entry per thing bought. **At least one is required** — an empty list is refused with 400. The claim's total is added up from these by the portal; nothing a caller sends can set it."
           }
         }
       },
@@ -1003,15 +1109,18 @@
         "properties": {
           "emailAddress": {
             "type": "string",
-            "format": "email"
+            "format": "email",
+            "description": "The person's e-mail address. It is both how they are contacted and their sign-in name. Stored in lower case. **It must be unique across the WHOLE installation, not just your organisation**, so a clash is refused with 409 — and the wording is deliberately vaguer for an address that is in use somewhere you cannot see. Checking addresses is limited to a few attempts an hour, after which you are refused with 429 and a `Retry-After`."
           },
           "fullName": {
             "type": "string",
-            "maxLength": 255
+            "maxLength": 255,
+            "description": "The person's name as it is shown throughout the portal. One field — there is no separate first and last name. **Going over the length shown is REFUSED with 400**, not shortened."
           },
           "isActive": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Whether the account may be used. False creates it suspended — present, but unable to sign in. **Defaults to true when the field is absent.**"
           },
           "isAdmin": {
             "type": "boolean",
@@ -1020,7 +1129,8 @@
           },
           "isSiteAdmin": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Administrator rights for THIS ONE organisation — managing its members, settings and data. **This is the one administrator flag a bearer API key may set**; the portal-wide `isAdmin` is not. It is stored against the membership, not the account, so it says nothing about any other organisation."
           }
         }
       },
@@ -1030,78 +1140,91 @@
         "properties": {
           "fullName": {
             "type": "string",
-            "maxLength": 255
+            "maxLength": 255,
+            "description": "The person's displayed name. Only touched when the field is present. Changing it on a protected account — a global administrator, a portal-wide administrator, or somebody who belongs to another organisation — is refused with 403 unless you are a global administrator on a sign-in session. **Going over the length shown is REFUSED with 400**, not shortened."
           },
           "isActive": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether the account may be used; false suspends it. **You can never switch off your own account here** — that is refused with 400. The same protection as `fullName` otherwise applies."
           },
           "isAdmin": {
             "type": "boolean",
             "description": "Administrator rights across the whole portal (every organisation). Honoured only for a signed-in (session) request from a global administrator; from anyone else a request asking for it is refused with 403. Ignored for API-key requests."
           },
           "isSiteAdmin": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Administrator rights for this one organisation, stored against the membership. The write happens only when the value actually changes. Changing it on a global or portal-wide administrator is refused with 403, and **an API key never counts as a global administrator**."
           }
         }
       },
       "Asset": {
         "type": "object",
-        "description": "A single asset row as returned by list/detail (#406). `licenseKey` and `publicToken` are ALWAYS stripped before this leaves the API (ApiResponse::filterSensitive()) — neither ever appears in a response, on any endpoint. `categoryName`/`locationName` are joined convenience fields.",
+        "description": "An asset as the portal returns it. **Two things to know before relying on this shape.** `list` returns a SUBSET: it selects 20 columns and one of them is stripped before the reply, so **19 fields** arrive — everything about warranties, licences, insurance, writing-down, labels and parentage is absent from it and comes only from `detail`. Conversely `detail`, `create` and `update` read the record with no join, so they do NOT carry `categoryName` or `locationName`, and they DO carry four fields this schema does not declare: `features` and `ownershipTerms` (both free text), `valuationDate`, and `isDeleted`. `licenseKey` and the public page's token are the only two stored fields deliberately removed from every answer.",
         "properties": {
           "assetID": {
-            "type": "integer"
+            "type": "integer",
+            "description": "The asset's own permanent number on this installation, assigned by the database."
           },
           "siteID": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Which organisation on this installation owns the asset. Always set from the signed-in organisation, or from the API key's own organisation — never from anything a caller sends. Absent from `list`."
           },
           "assetKind": {
             "type": "string",
             "enum": [
               "physical",
               "digital"
-            ]
+            ],
+            "description": "Whether this is a tangible item (`physical`) or a software licence, subscription or domain (`digital`)."
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "description": "What the asset is called — the one thing every asset must have."
           },
           "description": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "A free-text description of the asset."
           },
           "categoryID": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "The category the asset is filed under, within the same organisation. Becomes null if that category is later deleted."
           },
           "categoryName": {
             "type": "string",
             "nullable": true,
-            "description": "Joined convenience field (list/detail only)."
+            "description": "The category's name, joined in for convenience. **Returned by `list` only.** `detail`, `create` and `update` read the asset row directly with no join, so this field is absent from them — the schema said \"list/detail only\" until 30 October 2026, which was wrong."
           },
           "locationID": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "Where the asset is kept or deployed, within the same organisation. Becomes null if that location is later deleted."
           },
           "locationName": {
             "type": "string",
             "nullable": true,
-            "description": "Joined convenience field (list/detail only)."
+            "description": "The location's name, joined in for convenience. **Returned by `list` only.** `detail`, `create` and `update` read the asset row directly with no join, so this field is absent from them — the schema said \"list/detail only\" until 30 October 2026, which was wrong."
           },
           "manufacturer": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "Who made it."
           },
           "model": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The maker's model name or number."
           },
           "serialNumber": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The maker's serial number. Searchable, but **not unique** — two assets may carry the same one."
           },
           "assetTagCode": {
             "type": "string",
             "nullable": true,
-            "description": "UNIQUE per site when set."
+            "description": "The code printed on the asset's own label — what somebody reads off the sticker and types into a search. Unique within the organisation, although any number of assets may have none."
           },
           "conditionState": {
             "type": "string",
@@ -1112,7 +1235,8 @@
               "fair",
               "poor",
               "broken"
-            ]
+            ],
+            "description": "What physical state the asset is in."
           },
           "status": {
             "type": "string",
@@ -1126,47 +1250,56 @@
               "disposed",
               "lost",
               "stolen"
-            ]
+            ],
+            "description": "Where the asset stands in its working life — in use, away for repair, lent out, borrowed in, in storage, retired, disposed of, lost or stolen."
           },
           "purchaseDate": {
             "type": "string",
             "format": "date",
-            "nullable": true
+            "nullable": true,
+            "description": "The date the asset was bought."
           },
           "purchaseStore": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "Where it was bought — the shop or supplier's name."
           },
           "purchaseCostPence": {
             "type": "integer",
             "nullable": true,
-            "description": "Integer minor units (pence) — house money convention #266."
+            "description": "What the asset cost, **in pence (minor units)** — send 89999 for £899.99, never a pounds-and-pence string. The currency is whatever `currency` says."
           },
           "currency": {
             "type": "string",
-            "example": "GBP"
+            "example": "GBP",
+            "description": "The ISO 4217 three-letter code every money field on this asset is stated in, such as `GBP`."
           },
           "warrantyExpiry": {
             "type": "string",
             "format": "date",
-            "nullable": true
+            "nullable": true,
+            "description": "The date the maker's or supplier's warranty runs out."
           },
           "warrantyDetails": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "Free-text notes about what the warranty covers."
           },
           "licenseSeats": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "For a digital asset, how many seats — users or devices — the licence covers. **Null means the licence is not counted in seats**, not that it has none."
           },
           "renewalDate": {
             "type": "string",
             "format": "date",
-            "nullable": true
+            "nullable": true,
+            "description": "When the subscription or licence next falls due."
           },
           "accessUrl": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The sign-in or administration address for a digital asset."
           },
           "depreciationMethod": {
             "type": "string",
@@ -1174,44 +1307,53 @@
               "none",
               "straight-line",
               "reducing-balance"
-            ]
+            ],
+            "description": "How the asset's book value is written down over time: not at all, evenly across its life, or by a fixed share of what is left each period."
           },
           "usefulLifeMonths": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "How many months the asset is expected to last, used as the period over which it is written down."
           },
           "salvageValuePence": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "What the asset is expected to be worth at the end of its useful life, **in pence (minor units)** — send 89999 for £899.99, never a pounds-and-pence string. The currency is whatever `currency` says. Writing-down never takes the value below this."
           },
           "currentValuePence": {
             "type": "integer",
             "nullable": true,
-            "description": "Last computed/valued book value, in pence."
+            "description": "The book value as at the last valuation run, in pence (minor units) — 89999 means £899.99. **Read-only: no API call sets it**, and `readOnly` is declared here, so do not send it. Only the portal's own valuation job writes it, and only for assets written down evenly or by a share of the remainder. **Null therefore means \"never valued\", not \"worth nothing\"**, and an asset the job cannot work out is left untouched rather than zeroed.",
+            "readOnly": true
           },
           "insurerName": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The insurance company's name."
           },
           "insurancePolicyNumber": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The policy or reference number for the cover."
           },
           "insuredValuePence": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "The sum the asset is insured for, **in pence (minor units)** — send 89999 for £899.99, never a pounds-and-pence string. The currency is whatever `currency` says."
           },
           "insuranceRenewalDate": {
             "type": "string",
             "format": "date",
-            "nullable": true
+            "nullable": true,
+            "description": "When the insurance next falls due. This is the date the portal's reminder job reads."
           },
           "isConfidential": {
             "type": "boolean",
-            "description": "When true the asset is hidden from non-privileged callers: list/detail/qr return it only to a logged-in session admin or asset_manager (detail/qr also to a responsible owner-party) — never to a bearer key or an ordinary logged-in user. Non-privileged callers get a uniform 404, not a 403."
+            "description": "Marks the asset as one not to be shown openly. **The effect is wider than hiding it from the public page:** `list` returns a confidential asset only to a signed-in administrator or asset manager — never to an API key and never to an ordinary member — and `detail` also allows a responsible owner. Anybody else gets a plain 404, not a 403, so the reply does not reveal that the asset exists."
           },
           "publicPageEnabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether this asset's public \"lost and found\" page may be shown at its scan address. **Not sufficient on its own:** the page appears only when the installation-wide setting is on AND this is 1 AND `isConfidential` is 0."
           },
           "labelSymbology": {
             "type": "string",
@@ -1224,22 +1366,26 @@
               "upce",
               "itf14",
               "qr+code128"
-            ]
+            ],
+            "description": "Which barcode is printed on the asset's label: `qr` (links to the public lost-and-found page), `code128` (the asset tag code), `ean13`, `ean8`, `upca`, `upce` or `itf14` (that asset's own identifier of the kind named), or `qr+code128` for both."
           },
           "parentAssetID": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "The asset this one is part of — used for kits, bundles and components. Always another asset in the same organisation; an asset can never be its own parent."
           },
           "createdByID": {
-            "type": "integer"
+            "type": "integer",
+            "description": "The member who created the record. **An empty value means that person has asked to be forgotten** — the record is kept and only the name is removed — or that the record was made with an API key, which is not a person.",
+            "nullable": true
           },
           "createdAt": {
             "type": "string",
-            "format": "date-time"
+            "description": "When the record was created. Returned as `YYYY-MM-DD HH:MM:SS` on the server's own clock, with no offset — **not RFC 3339**, despite what `format` said here until 30 October 2026."
           },
           "updatedAt": {
             "type": "string",
-            "format": "date-time"
+            "description": "When the record was last changed. Also the order `list` sorts by, newest first. Same `YYYY-MM-DD HH:MM:SS` form, no offset."
           }
         }
       },
@@ -1248,12 +1394,13 @@
         "required": [
           "name"
         ],
-        "description": "Unlike the HTML `save.php` form this mirrors, money fields here are PENCE INTEGERS (not pounds-decimal strings), and an invalid ENUM value (assetKind/conditionState/status/currency/depreciationMethod/labelSymbology) 400s rather than silently defaulting — see `_apps/assets/api/_coerce.php`. `licenseKey` travels as PLAINTEXT in the request body only — it is encrypted at rest and NEVER echoed back by any response. On update (PUT/PATCH), only fields present in the JSON body are touched; everything else keeps its current value.",
+        "description": "Unlike the HTML `save.php` form this mirrors, money fields here are PENCE INTEGERS (not pounds-decimal strings), and an invalid ENUM value (assetKind/conditionState/status/depreciationMethod/labelSymbology) 400s rather than silently defaulting — **`currency` is the exception and is NOT in that list: an unusable code is quietly replaced with `GBP`** — see `_apps/assets/api/_coerce.php`. `licenseKey` travels as PLAINTEXT in the request body only — it is encrypted at rest and NEVER echoed back by any response. On update (PUT/PATCH), only fields present in the JSON body are touched; everything else keeps its current value.",
         "properties": {
           "name": {
             "type": "string",
             "maxLength": 255,
-            "example": "Conference room projector"
+            "example": "Conference room projector",
+            "description": "What the asset is called. **The only required field.** Blank, or longer than 255 characters, is refused with 400. On an update, sending it blank is refused; leaving it out keeps the stored name."
           },
           "assetKind": {
             "type": "string",
@@ -1261,38 +1408,43 @@
               "physical",
               "digital"
             ],
-            "default": "physical"
+            "default": "physical",
+            "description": "Whether this is a tangible item or a software licence, subscription or domain. An unlisted value is refused with 400."
           },
           "description": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "A free-text description. Note the cap is counted in characters while the column is measured in bytes, so a very long description in a non-Latin script can still be refused by the database."
           },
           "categoryID": {
             "type": "integer",
             "nullable": true,
-            "description": "Site-scoped FK; silently dropped (NULL) if it doesn't resolve on this site."
+            "description": "The category to file the asset under. It must already exist **in your own organisation**; an id that does not resolve is **quietly turned into null rather than refused**."
           },
           "locationID": {
             "type": "integer",
             "nullable": true,
-            "description": "Site-scoped FK; silently dropped (NULL) if it doesn't resolve on this site."
+            "description": "Where the asset is kept. Same rule as `categoryID`: it must exist in your own organisation, and an id that does not resolve is quietly turned into null."
           },
           "manufacturer": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "Who made it. Silently shortened rather than refused if it is longer than 150 characters."
           },
           "model": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The maker's model name or number. Silently shortened rather than refused if it is longer than 150 characters."
           },
           "serialNumber": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The maker's serial number. Silently shortened rather than refused if it is longer than 150 characters. **Not checked for being unique.**"
           },
           "assetTagCode": {
             "type": "string",
             "nullable": true,
-            "description": "UNIQUE per site — a collision returns 409."
+            "description": "The code printed on the asset's label. Silently shortened rather than refused if it is longer than 50 characters. It must be unique within your organisation: a clash refuses the whole request with 409."
           },
           "conditionState": {
             "type": "string",
@@ -1304,7 +1456,8 @@
               "poor",
               "broken"
             ],
-            "default": "good"
+            "default": "good",
+            "description": "What physical state the asset is in. An unlisted value is refused with 400."
           },
           "status": {
             "type": "string",
@@ -1319,53 +1472,62 @@
               "lost",
               "stolen"
             ],
-            "default": "in-service"
+            "default": "in-service",
+            "description": "Where the asset stands in its working life. An unlisted value is refused with 400."
           },
           "purchaseDate": {
             "type": "string",
             "format": "date",
-            "nullable": true
+            "nullable": true,
+            "description": "The date the asset was bought, as `YYYY-MM-DD`. Anything unreadable is refused with 400; an empty value clears it."
           },
           "purchaseStore": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "Where it was bought. Silently shortened rather than refused if it is longer than 255 characters."
           },
           "purchaseCostPence": {
             "type": "integer",
             "nullable": true,
-            "description": "PENCE, not pounds — house money convention #266."
+            "description": "What the asset cost, **in pence (minor units)** — send 89999 for £899.99, never a pounds-and-pence string. The currency is whatever `currency` says. **Unlike the form this endpoint mirrors, it takes pence directly.** A value that is not a number, or is negative, is refused with 400; a decimal is accepted and its fraction dropped."
           },
           "currency": {
             "type": "string",
             "default": "GBP",
-            "example": "GBP"
+            "example": "GBP",
+            "description": "The ISO 4217 three-letter code the money fields are in; it is upper-cased for you. **An unusable value is silently replaced with `GBP` rather than refused** — this is the one field in this body that does not refuse a bad value, and the schema's own summary wrongly listed it among those that do until 30 October 2026."
           },
           "warrantyExpiry": {
             "type": "string",
             "format": "date",
-            "nullable": true
+            "nullable": true,
+            "description": "When the warranty runs out, as `YYYY-MM-DD`. Unreadable is refused with 400."
           },
           "warrantyDetails": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "Free-text notes about the warranty cover. Silently shortened rather than refused if it is longer than 500 characters."
           },
           "licenseKey": {
             "type": "string",
-            "description": "PLAINTEXT on write only. Blank/absent leaves it unchanged on update; blank means \"no key\" on create."
+            "description": "The licence key or activation code for a digital asset. **Write-only: it is sent as plain text, stored encrypted, and never returned by any endpoint.** Leaving it out, or sending it blank, means \"leave the stored key alone\" on an update and \"no key\" on a create — **so a key can never be cleared through this API**. Note the stored form is longer than what you send, so a very long key can be refused by the database.",
+            "writeOnly": true
           },
           "licenseSeats": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "How many seats the licence covers. Null means it is not counted in seats. **Not range-checked**, so a negative number is accepted."
           },
           "renewalDate": {
             "type": "string",
             "format": "date",
-            "nullable": true
+            "nullable": true,
+            "description": "When the subscription or licence next falls due, as `YYYY-MM-DD`. Anything unreadable is refused with 400."
           },
           "accessUrl": {
             "type": "string",
             "nullable": true,
-            "description": "http(s) scheme only."
+            "description": "The sign-in or administration address for a digital asset. Silently shortened rather than refused if it is longer than 500 characters. It must begin `http://` or `https://`, or the request is refused with 400."
           },
           "depreciationMethod": {
             "type": "string",
@@ -1374,40 +1536,49 @@
               "straight-line",
               "reducing-balance"
             ],
-            "default": "none"
+            "default": "none",
+            "description": "How the book value should be written down. Only `straight-line` and `reducing-balance` are picked up by the valuation job that fills `currentValuePence`; `none` leaves it alone for ever."
           },
           "usefulLifeMonths": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "Expected life in months, used as the period to write the value down over. **Not range-checked.**"
           },
           "salvageValuePence": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "What the asset should be worth at the end of its life, **in pence (minor units)** — send 89999 for £899.99, never a pounds-and-pence string. The currency is whatever `currency` says. Not a number, or negative, is refused with 400."
           },
           "insurerName": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The insurance company's name. Silently shortened rather than refused if it is longer than 150 characters."
           },
           "insurancePolicyNumber": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The policy or reference number. Silently shortened rather than refused if it is longer than 100 characters."
           },
           "insuredValuePence": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "The sum to insure the asset for, **in pence (minor units)** — send 89999 for £899.99, never a pounds-and-pence string. The currency is whatever `currency` says. Not a number, or negative, is refused with 400."
           },
           "insuranceRenewalDate": {
             "type": "string",
             "format": "date",
-            "nullable": true
+            "nullable": true,
+            "description": "When the insurance next falls due, as `YYYY-MM-DD`. Anything unreadable is refused with 400."
           },
           "isConfidential": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Hide the asset from the public lost-and-found page, and from anybody who is not a signed-in administrator, an asset manager, or (on `detail`) a responsible owner. **Read loosely: any value the portal considers truthy counts as true, so the text `\"false\"` would switch it ON** — send a real true/false value."
           },
           "publicPageEnabled": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Allow this asset's public lost-and-found page to be shown. **Defaults to true.** Not sufficient on its own — the installation-wide setting must also be on and `isConfidential` must be false. Read loosely, as `isConfidential` is."
           },
           "labelSymbology": {
             "type": "string",
@@ -1421,11 +1592,13 @@
               "itf14",
               "qr+code128"
             ],
-            "default": "qr"
+            "default": "qr",
+            "description": "Which barcode to print on the label. An unlisted value is refused with 400."
           },
           "parentAssetID": {
             "type": "integer",
-            "nullable": true
+            "nullable": true,
+            "description": "The kit or bundle this asset is part of. It must be an existing, undeleted asset in your own organisation, and cannot be the asset itself; **anything else is quietly turned into null rather than refused**."
           },
           "csrf_token": {
             "type": "string",
@@ -1438,7 +1611,8 @@
         "description": "One row from an event's Team Hub Resources list (GET /api/calendar/hub-resources) — a link or a free-text note, grouped into a free-text section label.",
         "properties": {
           "resourceID": {
-            "type": "integer"
+            "type": "integer",
+            "description": "The portal's own number for this one entry in the event's resources list. Use it to tell entries apart; it means nothing outside this installation."
           },
           "section": {
             "type": "string",
@@ -1450,10 +1624,12 @@
             "enum": [
               "link",
               "note"
-            ]
+            ],
+            "description": "Whether this entry is a link to somewhere else (`link` — read `url`) or a note kept in the portal (`note` — read `body`)."
           },
           "title": {
-            "type": "string"
+            "type": "string",
+            "description": "The entry's own heading — the words shown for the link, or the note's title."
           },
           "url": {
             "type": "string",
@@ -1466,7 +1642,8 @@
             "description": "Set when resourceType=note. Markdown source (unrendered)."
           },
           "sortOrder": {
-            "type": "integer"
+            "type": "integer",
+            "description": "What order entries appear in within their section, lowest first. Several entries may share a number, and those fall back to the order they were created in."
           }
         }
       },
@@ -1475,7 +1652,8 @@
         "description": "One row from an event's Team Hub video grid (GET /api/calendar/hub-videos). NEVER includes signing keys, playback tokens, or any cfstream.* credential — videoRef is the public provider ID/UID a player embeds against.",
         "properties": {
           "videoID": {
-            "type": "integer"
+            "type": "integer",
+            "description": "The portal's own number for this video in the event's grid. Local to this installation — **it is not the video service's own identifier**, which is `videoRef`."
           },
           "provider": {
             "type": "string",
@@ -1483,14 +1661,16 @@
               "youtube",
               "vimeo",
               "cloudflare"
-            ]
+            ],
+            "description": "Which video service the video lives on, which tells a player how to read `videoRef`."
           },
           "videoRef": {
             "type": "string",
             "description": "YouTube 11-char ID / Vimeo numeric ID / Cloudflare Stream 32-hex UID — the public reference a player embeds against, never a secret."
           },
           "title": {
-            "type": "string"
+            "type": "string",
+            "description": "The name shown under the video in the grid. Chosen by whoever added it, not fetched from the video service."
           },
           "requiresSignedUrl": {
             "type": "boolean",
@@ -1509,10 +1689,12 @@
               "processing",
               "ready",
               "error"
-            ]
+            ],
+            "description": "How the video got here and whether it is ready to watch. `external` means somebody pasted a reference and there is no upload to wait for; the others are the stages of an upload made through the portal."
           },
           "sortOrder": {
-            "type": "integer"
+            "type": "integer",
+            "description": "What order videos appear in on the grid, lowest first. Ties fall back to the order they were added in."
           }
         }
       },
@@ -1704,7 +1886,8 @@
               "type": "integer",
               "minimum": 1,
               "default": 1
-            }
+            },
+            "description": "Which page of the result to fetch, counting from 1. **A number below 1, or one that is not a number, is quietly moved to 1 rather than refused.**"
           },
           {
             "name": "limit",
@@ -1714,7 +1897,8 @@
               "minimum": 1,
               "maximum": 100,
               "default": 20
-            }
+            },
+            "description": "How many rows to return per page. **A number outside the permitted range is quietly brought inside it rather than refused**, so asking for 5,000 gives you the maximum and not an error. Read `pagination.totalPages` in the answer to know how many pages there are."
           }
         ],
         "responses": {
@@ -1758,14 +1942,16 @@
             "in": "query",
             "schema": {
               "type": "integer"
-            }
+            },
+            "description": "Which event to read, by number. Give either this or `slug`. An event you may not see and one that does not exist both answer 404, so the reply is never an existence oracle."
           },
           {
             "name": "slug",
             "in": "query",
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Fetch the event by its address-safe short name instead of by number — `?slug=sunday-service`. Give either this or `id`."
           }
         ],
         "responses": {
@@ -1898,7 +2084,8 @@
             "required": true,
             "schema": {
               "type": "integer"
-            }
+            },
+            "description": "Which event to read. It must be an event you are allowed to see; one you may not see, and one that does not exist, both answer 404 alike, so the reply never reveals that an event exists."
           }
         ],
         "responses": {
@@ -1910,13 +2097,15 @@
                   "type": "object",
                   "properties": {
                     "eventID": {
-                      "type": "integer"
+                      "type": "integer",
+                      "description": "Which event these belong to — simply the number you asked for, echoed back so an answer can be matched to its request. It is not read from the database."
                     },
                     "resources": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/EventHubResource"
-                      }
+                      },
+                      "description": "The event's resources — its links and notes, in the order the team page shows them. **May be empty:** an event with nothing attached is a normal answer, not a 404. Everything is returned at once; there is no paging."
                     }
                   }
                 }
@@ -1960,7 +2149,8 @@
             "required": true,
             "schema": {
               "type": "integer"
-            }
+            },
+            "description": "Which event to read. It must be an event you are allowed to see; one you may not see, and one that does not exist, both answer 404 alike, so the reply never reveals that an event exists."
           }
         ],
         "responses": {
@@ -1972,13 +2162,15 @@
                   "type": "object",
                   "properties": {
                     "eventID": {
-                      "type": "integer"
+                      "type": "integer",
+                      "description": "Which event these belong to — the number you asked for, echoed back."
                     },
                     "videos": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/EventHubVideo"
-                      }
+                      },
+                      "description": "The event's video grid, in display order. **May be empty.** Only the non-secret columns are listed by name, so adding a column to the table can never widen this answer, and no signing key or playback token is ever included. No paging."
                     }
                   }
                 }
@@ -2020,16 +2212,21 @@
             "in": "query",
             "schema": {
               "type": "integer",
-              "default": 1
-            }
+              "default": 1,
+              "minimum": 1
+            },
+            "description": "Which page of the result to fetch, counting from 1. **A number below 1, or one that is not a number, is quietly moved to 1 rather than refused.**"
           },
           {
             "name": "limit",
             "in": "query",
             "schema": {
               "type": "integer",
-              "default": 20
-            }
+              "default": 20,
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "How many rows to return per page. **A number outside the permitted range is quietly brought inside it rather than refused**, so asking for 5,000 gives you the maximum and not an error. Read `pagination.totalPages` in the answer to know how many pages there are."
           }
         ],
         "responses": {
@@ -2163,7 +2360,8 @@
                     "type": "array",
                     "items": {
                       "$ref": "#/components/schemas/PosterInput"
-                    }
+                    },
+                    "description": "**The whole desired state of the board, not a change set.** Every poster you want to keep must be in this list: any poster of your organisation whose number is missing is hidden. **Sending an empty list therefore hides the entire board.** A poster with a blank title is skipped in silence rather than refused."
                   }
                 }
               }
@@ -2180,16 +2378,19 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "example": "ok"
+                      "example": "ok",
+                      "description": "The envelope's fixed success marker."
                     },
                     "data": {
                       "type": "object",
                       "properties": {
                         "saved": {
                           "type": "boolean",
-                          "example": true
+                          "example": true,
+                          "description": "**Always true, and so carries no information beyond the HTTP status** — a failure never reaches this field; it comes back as a refusal instead. Note the reply gives no poster numbers and does not say which posters were skipped or hidden; call `GET /api/noticeboard/list` to see the result."
                         }
-                      }
+                      },
+                      "description": "The payload for this call. The fields below sit inside it, alongside the envelope's own `status` and `meta`."
                     }
                   }
                 }
@@ -2277,7 +2478,8 @@
                 "all"
               ],
               "default": "open"
-            }
+            },
+            "description": "Which tasks to return: those still to do, those finished, or both."
           },
           {
             "name": "userID",
@@ -2292,16 +2494,21 @@
             "in": "query",
             "schema": {
               "type": "integer",
-              "default": 1
-            }
+              "default": 1,
+              "minimum": 1
+            },
+            "description": "Which page of the result to fetch, counting from 1. **A number below 1, or one that is not a number, is quietly moved to 1 rather than refused.**"
           },
           {
             "name": "limit",
             "in": "query",
             "schema": {
               "type": "integer",
-              "default": 20
-            }
+              "default": 20,
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "How many rows to return per page. **A number outside the permitted range is quietly brought inside it rather than refused**, so asking for 5,000 gives you the maximum and not an error. **This endpoint sends no page totals** — it answers with `count`, `page`, `limit` and `items` only, so there is nothing to tell you how many pages there are; ask for the next page until you get fewer rows than you asked for."
           }
         ],
         "responses": {
@@ -2333,7 +2540,8 @@
                 "all"
               ],
               "default": "active"
-            }
+            },
+            "description": "Which requests to return by where they have got to. Note a caller who is not a moderator never sees requests still waiting, whatever is asked for here."
           }
         ],
         "responses": {
@@ -2356,23 +2564,29 @@
             "in": "query",
             "schema": {
               "type": "integer"
-            }
+            },
+            "description": "Return only rows filed under this one category. Leave it out for every category."
           },
           {
             "name": "page",
             "in": "query",
             "schema": {
               "type": "integer",
-              "default": 1
-            }
+              "default": 1,
+              "minimum": 1
+            },
+            "description": "Which page of the result to fetch, counting from 1. **A number below 1, or one that is not a number, is quietly moved to 1 rather than refused.**"
           },
           {
             "name": "limit",
             "in": "query",
             "schema": {
               "type": "integer",
-              "default": 20
-            }
+              "default": 20,
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "How many rows to return per page. **A number outside the permitted range is quietly brought inside it rather than refused**, so asking for 5,000 gives you the maximum and not an error. **This endpoint sends no page totals** — it answers with `count`, `page`, `limit` and `items` only, so there is nothing to tell you how many pages there are; ask for the next page until you get fewer rows than you asked for."
           }
         ],
         "responses": {
@@ -2415,7 +2629,8 @@
               "type": "integer",
               "minimum": 1,
               "default": 1
-            }
+            },
+            "description": "Which page of the result to fetch, counting from 1. **A number below 1, or one that is not a number, is quietly moved to 1 rather than refused.**"
           },
           {
             "name": "limit",
@@ -2425,21 +2640,24 @@
               "minimum": 1,
               "maximum": 100,
               "default": 20
-            }
+            },
+            "description": "How many rows to return per page. **A number outside the permitted range is quietly brought inside it rather than refused**, so asking for 5,000 gives you the maximum and not an error. Read `pagination.totalPages` in the answer to know how many pages there are."
           },
           {
             "name": "status",
             "in": "query",
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Return only assets at this point in their working life, such as `in-service` or `on-loan`. Leave it out for all of them."
           },
           {
             "name": "categoryID",
             "in": "query",
             "schema": {
               "type": "integer"
-            }
+            },
+            "description": "Return only rows filed under this one category. Leave it out for every category."
           },
           {
             "name": "assetKind",
@@ -2450,7 +2668,8 @@
                 "physical",
                 "digital"
               ]
-            }
+            },
+            "description": "Return only tangible items (`physical`) or only software licences, subscriptions and domains (`digital`). Leave it out for both."
           },
           {
             "name": "search",
@@ -2463,7 +2682,66 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "description": "The page of assets, with the paging figures beside them.",
+                          "properties": {
+                            "assets": {
+                              "type": "array",
+                              "description": "Each entry is a SUBSET of the `Asset` shape — `list` selects 20 columns and one of them is stripped before the reply, so 19 fields arrive, and the warranty, licence, insurance, writing-down, label and parentage fields come only from `detail`.",
+                              "items": {
+                                "$ref": "#/components/schemas/Asset"
+                              }
+                            },
+                            "pagination": {
+                              "type": "object",
+                              "description": "The paging figures for this answer: which page was served, how many rows a page holds, how many rows match in all, and how many pages that makes.",
+                              "properties": {
+                                "page": {
+                                  "type": "integer",
+                                  "description": "Which page was served, counting from 1."
+                                },
+                                "limit": {
+                                  "type": "integer",
+                                  "description": "How many rows a page holds."
+                                },
+                                "totalItems": {
+                                  "type": "integer",
+                                  "description": "How many rows match in all, counted under the same visibility rule as the rows themselves."
+                                },
+                                "totalPages": {
+                                  "type": "integer",
+                                  "description": "How many pages the whole result takes. Never less than 1."
+                                },
+                                "hasNext": {
+                                  "type": "boolean",
+                                  "description": "Whether a page follows this one."
+                                },
+                                "hasPrev": {
+                                  "type": "boolean",
+                                  "description": "Whether a page comes before this one."
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "401": {
             "description": "Auth required"
@@ -2489,12 +2767,43 @@
             "required": true,
             "schema": {
               "type": "integer"
-            }
+            },
+            "description": "Which asset to read. **A confidential asset answers 404 rather than 403** to anybody not allowed to see it, so the reply does not reveal that it exists."
           }
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "description": "The payload. **The asset is nested under `asset`** — read `data.asset.assetID`, not `data.assetID`. Note the list endpoints nest theirs under `assets`, so the two are not interchangeable.",
+                          "properties": {
+                            "asset": {
+                              "description": "The asset. See the caveats on the `Asset` shape itself: this reply carries four fields that shape does not declare, and does not carry the joined category and location names.",
+                              "allOf": [
+                                {
+                                  "$ref": "#/components/schemas/Asset"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "id is required"
@@ -2560,7 +2869,8 @@
             "required": true,
             "schema": {
               "type": "integer"
-            }
+            },
+            "description": "Which asset to change. May be sent as `assetID` in the body instead."
           }
         ],
         "requestBody": {
@@ -2608,7 +2918,8 @@
             "required": true,
             "schema": {
               "type": "integer"
-            }
+            },
+            "description": "Which asset to remove."
           }
         ],
         "responses": {
@@ -2641,7 +2952,8 @@
             "required": true,
             "schema": {
               "type": "integer"
-            }
+            },
+            "description": "Which asset to draw the label for."
           },
           {
             "name": "format",
@@ -2653,7 +2965,8 @@
                 "png"
               ],
               "default": "svg"
-            }
+            },
+            "description": "Which picture format to return the label in."
           },
           {
             "name": "symbology",
@@ -2698,6 +3011,9 @@
     },
     "/health": {
       "get": {
+        "tags": [
+          "Health"
+        ],
         "summary": "Healthcheck (no auth required)",
         "description": "Uptime probe with DB ping. Returns 200/`ok` on full health, 503/`degraded` when the DB is unreachable.",
         "security": [],
@@ -2711,11 +3027,13 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "example": "ok"
+                      "example": "ok",
+                      "description": "The one-word verdict for the whole installation. **Today it is decided by the database alone** — nothing else is tested. Treat any answer that is not HTTP 200 as a failure."
                     },
                     "env": {
                       "type": "string",
-                      "example": "prod"
+                      "example": "prod",
+                      "description": "Which release channel this installation is: the live one, or one of the pre-release ones. Useful for telling a staging copy from the real thing."
                     },
                     "channelSource": {
                       "type": "string",
@@ -2730,23 +3048,28 @@
                     },
                     "version": {
                       "type": "string",
-                      "example": "1.0.0"
+                      "example": "1.0.0",
+                      "description": "The portal's own version number, from the single source of truth in its code."
                     },
                     "phpVersion": {
                       "type": "string",
-                      "example": "8.5.5"
+                      "example": "8.5.5",
+                      "description": "The PHP version the web server is running, exactly as PHP reports it — so it may carry a packaging suffix. **It is not a judgement about whether that version is supported or patched.**"
                     },
                     "siteID": {
                       "type": "integer",
-                      "example": 1
+                      "example": 1,
+                      "description": "Which organisation's record the request was resolved to. Local to this installation."
                     },
                     "db": {
                       "type": "string",
-                      "example": "ok"
+                      "example": "ok",
+                      "description": "Whether the database answered a one-line ping. **This is the only thing this check actually tests, and it is what sets `status`.** Nothing about why it failed is returned, deliberately — that goes only to the log."
                     },
                     "time": {
                       "type": "string",
-                      "format": "date-time"
+                      "format": "date-time",
+                      "description": "The moment the check answered, always in UTC, to the second with an explicit `+00:00` offset."
                     }
                   }
                 }
@@ -2778,10 +3101,12 @@
                 ],
                 "properties": {
                   "title": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The announcement's headline. It is also what the address-safe short name is built from, and **that short name is never rebuilt afterwards**, so renaming an announcement leaves its address matching the old title."
                   },
                   "body": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The announcement's text, shown on the announcements page and the dashboard."
                   },
                   "priority": {
                     "type": "string",
@@ -2789,21 +3114,26 @@
                       "normal",
                       "important",
                       "urgent"
-                    ]
+                    ],
+                    "description": "How prominently the announcement is treated. **An unrecognised value is quietly changed to `normal` rather than refused** — note this differs from the update endpoint, which refuses it with 400."
                   },
                   "isPinned": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Keeps the announcement at the top of the list and on the dashboard."
                   },
                   "isPublished": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Whether members can see it, rather than it being held as a draft. **Defaults to TRUE when the field is absent**, which differs from the stored default. When the approvals workflow is switched on for the organisation, a request that would publish is held back and an approval is started instead — the reply then also carries `isPublished`, `approvalStatus` and `message`."
                   },
                   "publishAt": {
                     "type": "string",
-                    "format": "date-time"
+                    "format": "date-time",
+                    "description": "When the announcement should start being shown. Leave it out for straight away. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\"."
                   },
                   "expiresAt": {
                     "type": "string",
-                    "format": "date-time"
+                    "format": "date-time",
+                    "description": "When it should stop being shown. Leave it out for never. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\". **Not checked against `publishAt`.**"
                   }
                 }
               }
@@ -2847,13 +3177,16 @@
                 ],
                 "properties": {
                   "announcementID": {
-                    "type": "integer"
+                    "type": "integer",
+                    "description": "Which announcement to act on. May be sent as `?id=` in the address instead. The announcement must belong to your organisation and not already be deleted."
                   },
                   "title": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The announcement's headline. It is also what the address-safe short name is built from, and **that short name is never rebuilt afterwards**, so renaming an announcement leaves its address matching the old title. Leaving it out keeps the stored title."
                   },
                   "body": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The announcement's text, shown on the announcements page and the dashboard."
                   },
                   "priority": {
                     "type": "string",
@@ -2861,23 +3194,28 @@
                       "normal",
                       "important",
                       "urgent"
-                    ]
+                    ],
+                    "description": "How prominently the announcement is treated. **An unrecognised value is refused with 400** — note this differs from the create endpoint, which quietly substitutes `normal`."
                   },
                   "isPinned": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Keeps the announcement at the top of the list and on the dashboard."
                   },
                   "isPublished": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Publish or withdraw the announcement. When the approvals workflow is switched on, a genuine move from unpublished to published is **held back** and an approval started instead; editing something already published, or withdrawing it, goes straight through."
                   },
                   "publishAt": {
                     "type": "string",
                     "format": "date-time",
-                    "nullable": true
+                    "nullable": true,
+                    "description": "When the announcement should start being shown. Leave it out for straight away. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\". **Send null to clear it.**"
                   },
                   "expiresAt": {
                     "type": "string",
                     "format": "date-time",
-                    "nullable": true
+                    "nullable": true,
+                    "description": "When it should stop being shown. Leave it out for never. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\". **Not checked against `publishAt`.** **Send null to clear it.**"
                   }
                 }
               }
@@ -2921,7 +3259,8 @@
                 ],
                 "properties": {
                   "announcementID": {
-                    "type": "integer"
+                    "type": "integer",
+                    "description": "Which announcement to remove. **This hides it rather than erasing it** — the record stays and stops being shown. May be sent as `?id=` instead. **Deleting one that is already deleted answers 404**, because the test is whether a row changed."
                   }
                 }
               }
@@ -2965,13 +3304,16 @@
                 ],
                 "properties": {
                   "title": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "What the task is — the single line shown in task lists."
                   },
                   "description": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Longer detail about the task. Left out, it is stored as empty text rather than null."
                   },
                   "assignedToID": {
-                    "type": "integer"
+                    "type": "integer",
+                    "description": "The member the task is for. **Left out, it falls to whoever is calling — and a bearer API key is nobody, so a key that omits this creates a task assigned to no one.** Not checked against the member list, so a wrong number fails as a 500."
                   },
                   "priority": {
                     "type": "string",
@@ -2980,11 +3322,13 @@
                       "normal",
                       "high",
                       "urgent"
-                    ]
+                    ],
+                    "description": "How urgent the task is. **An unrecognised value is quietly changed to `normal` rather than refused.**"
                   },
                   "dueDate": {
                     "type": "string",
-                    "format": "date"
+                    "format": "date",
+                    "description": "The day the task is due. A calendar day, not a moment. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\". Leave it out for no due date."
                   }
                 }
               }
@@ -3028,7 +3372,8 @@
                 ],
                 "properties": {
                   "taskID": {
-                    "type": "integer"
+                    "type": "integer",
+                    "description": "Which task to mark finished. May be sent as `?id=` instead. **On a sign-in session only the task's assignee or an organisation administrator may complete it**; a bearer key holding the write scope may complete any task in its organisation. A task already completed answers **409**."
                   }
                 }
               }
@@ -3050,6 +3395,9 @@
           },
           "404": {
             "description": "Not found"
+          },
+          "409": {
+            "description": "The task is already completed. Its `taskID` description says so; this status was missing from the list until 30 October 2026."
           }
         }
       }
@@ -3072,7 +3420,8 @@
                 ],
                 "properties": {
                   "taskID": {
-                    "type": "integer"
+                    "type": "integer",
+                    "description": "Which task to remove. **This really erases it** — unlike announcements, the record is gone, not hidden. May be sent as `?id=` instead. On a sign-in session only the task's creator or an organisation administrator may delete it; a bearer key with the write scope may delete any task in its organisation. Deleting a repeating task's parent leaves its children behind with no parent rather than refusing."
                   }
                 }
               }
@@ -3117,20 +3466,24 @@
                 ],
                 "properties": {
                   "subject": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "A short title for the request — the line shown in a list. **Its length is not checked by the portal**, so an over-long one fails in the database as a 500 rather than a clear refusal."
                   },
                   "body": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The request itself, in full — what is being asked for."
                   },
                   "visibility": {
                     "type": "string",
                     "enum": [
                       "leadership",
                       "congregation"
-                    ]
+                    ],
+                    "description": "Who may see the request once it is published: `leadership` keeps it to the leadership team, `congregation` lets the whole congregation see it. **An unrecognised value quietly becomes `leadership` rather than being refused.**"
                   },
                   "isAnonymous": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Show the request as being from \"Anonymous\". **It hides the NAME only** — the submitting account is still recorded, and so is their network address."
                   }
                 }
               }
@@ -3175,7 +3528,8 @@
                 ],
                 "properties": {
                   "requestID": {
-                    "type": "integer"
+                    "type": "integer",
+                    "description": "Which prayer request to act on. It must belong to your organisation and be a request rather than a praise item, or the answer is 404."
                   },
                   "status": {
                     "type": "string",
@@ -3183,10 +3537,12 @@
                       "active",
                       "answered",
                       "archived"
-                    ]
+                    ],
+                    "description": "Where the request should now sit: `active` is published and being prayed for, `answered` records that it has been answered, `archived` puts it away. **`pending` — the state a new request starts in — cannot be set here**, so a request cannot be put back to waiting."
                   },
                   "testimony": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "A short note of praise to attach when a request is answered. **Written only when `status` is `answered`**: sent with either of the other two it does nothing at all. And when `status` IS `answered`, **leaving it out overwrites any existing note with an empty one** rather than keeping it."
                   }
                 }
               }
@@ -3230,28 +3586,35 @@
                 ],
                 "properties": {
                   "roleID": {
-                    "type": "integer"
+                    "type": "integer",
+                    "description": "**The ROLE being filled — not the assignment.** Get it from `GET /api/leadership/list`. The row this request creates has its own, different number, returned in the reply. The role must be active and belong to your organisation."
                   },
                   "userID": {
                     "type": "integer",
-                    "nullable": true
+                    "nullable": true,
+                    "description": "The portal member who holds the role. **Leave it out when the holder has no portal account**, and name them in `personName` instead. Note it is not checked against the member list, so a wrong number fails as a 500 rather than a clear refusal."
                   },
                   "personName": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The holder's name when they have no portal account. **Required whenever `userID` is left out.** Left out for a portal member, it is stored as empty text rather than null."
                   },
                   "personEmail": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The holder's e-mail address when they have no portal account. **Not checked for format at all.** Left out, it is stored as empty text rather than null."
                   },
                   "startDate": {
                     "type": "string",
-                    "format": "date"
+                    "format": "date",
+                    "description": "The first day of this person's term in the role. A calendar day, not a moment. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\"."
                   },
                   "endDate": {
                     "type": "string",
-                    "format": "date"
+                    "format": "date",
+                    "description": "The last day of the term. Leave it out to mark the term as still running. A calendar day, not a moment. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\". **Not compared with `startDate`**, and setting it here does not stop the assignment being created as current."
                   },
                   "notes": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Free text about the term — what it covers, or how the person was appointed. Left out, it is stored as empty text rather than null."
                   }
                 }
               }
@@ -3295,11 +3658,13 @@
                 ],
                 "properties": {
                   "assignmentID": {
-                    "type": "integer"
+                    "type": "integer",
+                    "description": "**The ASSIGNMENT's own number — not a role and not a member.** Get it from the reply to `POST /api/leadership/assign`, or from `GET /api/leadership/list`. May be sent as `?id=` instead. **It also answers 404 when the row exists but nothing changed**, so re-ending an assignment with the same date reports \"not found\"."
                   },
                   "endDate": {
                     "type": "string",
-                    "format": "date"
+                    "format": "date",
+                    "description": "The last day of the term being ended. A calendar day, not a moment. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\". **Defaults to today.** Note a future date does NOT postpone the end: the assignment is marked as finished at once whatever date you give."
                   }
                 }
               }
@@ -3349,7 +3714,8 @@
               "type": "integer",
               "minimum": 1,
               "default": 1
-            }
+            },
+            "description": "Which page of the result to fetch, counting from 1. **A number below 1, or one that is not a number, is quietly moved to 1 rather than refused.**"
           },
           {
             "name": "limit",
@@ -3359,7 +3725,8 @@
               "minimum": 1,
               "maximum": 100,
               "default": 20
-            }
+            },
+            "description": "How many rows to return per page. **A number outside the permitted range is quietly brought inside it rather than refused**, so asking for 5,000 gives you the maximum and not an error. Read `pagination.totalPages` in the answer to know how many pages there are."
           }
         ],
         "responses": {
@@ -4126,10 +4493,12 @@
                 ],
                 "properties": {
                   "title": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The announcement's headline. It is also what the address-safe short name is built from, and **that short name is never rebuilt afterwards**, so renaming an announcement leaves its address matching the old title."
                   },
                   "body": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The announcement's text, shown on the announcements page and the dashboard."
                   },
                   "priority": {
                     "type": "string",
@@ -4137,21 +4506,26 @@
                       "normal",
                       "important",
                       "urgent"
-                    ]
+                    ],
+                    "description": "How prominently the announcement is treated. **An unrecognised value is quietly changed to `normal` rather than refused** — note this differs from the update endpoint, which refuses it with 400."
                   },
                   "isPinned": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Keeps the announcement at the top of the list and on the dashboard."
                   },
                   "isPublished": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Whether members can see it, rather than it being held as a draft. **Defaults to TRUE when the field is absent**, which differs from the stored default. When the approvals workflow is switched on for the organisation, a request that would publish is held back and an approval is started instead — the reply then also carries `isPublished`, `approvalStatus` and `message`."
                   },
                   "publishAt": {
                     "type": "string",
-                    "format": "date-time"
+                    "format": "date-time",
+                    "description": "When the announcement should start being shown. Leave it out for straight away. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\"."
                   },
                   "expiresAt": {
                     "type": "string",
-                    "format": "date-time"
+                    "format": "date-time",
+                    "description": "When it should stop being shown. Leave it out for never. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\". **Not checked against `publishAt`.**"
                   }
                 }
               }
@@ -4276,10 +4650,12 @@
                 "description": "PATCH-style — only fields present are touched.",
                 "properties": {
                   "title": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The announcement's headline. It is also what the address-safe short name is built from, and **that short name is never rebuilt afterwards**, so renaming an announcement leaves its address matching the old title. Leaving it out keeps the stored title."
                   },
                   "body": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The announcement's text, shown on the announcements page and the dashboard."
                   },
                   "priority": {
                     "type": "string",
@@ -4287,21 +4663,26 @@
                       "normal",
                       "important",
                       "urgent"
-                    ]
+                    ],
+                    "description": "How prominently the announcement is treated. **An unrecognised value is refused with 400** — note this differs from the create endpoint, which quietly substitutes `normal`."
                   },
                   "isPinned": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Keeps the announcement at the top of the list and on the dashboard."
                   },
                   "isPublished": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Publish or withdraw the announcement. When the approvals workflow is switched on, a genuine move from unpublished to published is **held back** and an approval started instead; editing something already published, or withdrawing it, goes straight through."
                   },
                   "publishAt": {
                     "type": "string",
-                    "format": "date-time"
+                    "format": "date-time",
+                    "description": "When the announcement should start being shown. Leave it out for straight away. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\". **Send null to clear it.**"
                   },
                   "expiresAt": {
                     "type": "string",
-                    "format": "date-time"
+                    "format": "date-time",
+                    "description": "When it should stop being shown. Leave it out for never. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\". **Not checked against `publishAt`.** **Send null to clear it.**"
                   }
                 }
               }
@@ -4541,10 +4922,12 @@
                 "description": "PATCH-style — only fields present are touched.",
                 "properties": {
                   "title": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The announcement's headline. It is also what the address-safe short name is built from, and **that short name is never rebuilt afterwards**, so renaming an announcement leaves its address matching the old title. Leaving it out keeps the stored title."
                   },
                   "body": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The announcement's text, shown on the announcements page and the dashboard."
                   },
                   "priority": {
                     "type": "string",
@@ -4552,21 +4935,26 @@
                       "normal",
                       "important",
                       "urgent"
-                    ]
+                    ],
+                    "description": "How prominently the announcement is treated. **An unrecognised value is refused with 400** — note this differs from the create endpoint, which quietly substitutes `normal`."
                   },
                   "isPinned": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Keeps the announcement at the top of the list and on the dashboard."
                   },
                   "isPublished": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Publish or withdraw the announcement. When the approvals workflow is switched on, a genuine move from unpublished to published is **held back** and an approval started instead; editing something already published, or withdrawing it, goes straight through."
                   },
                   "publishAt": {
                     "type": "string",
-                    "format": "date-time"
+                    "format": "date-time",
+                    "description": "When the announcement should start being shown. Leave it out for straight away. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\". **Send null to clear it.**"
                   },
                   "expiresAt": {
                     "type": "string",
-                    "format": "date-time"
+                    "format": "date-time",
+                    "description": "When it should stop being shown. Leave it out for never. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\". **Not checked against `publishAt`.** **Send null to clear it.**"
                   }
                 }
               }
@@ -4689,7 +5077,8 @@
               "type": "integer",
               "minimum": 1,
               "default": 1
-            }
+            },
+            "description": "Which page of the result to fetch, counting from 1. **A number below 1, or one that is not a number, is quietly moved to 1 rather than refused.**"
           },
           {
             "name": "limit",
@@ -4699,7 +5088,8 @@
               "minimum": 1,
               "maximum": 100,
               "default": 20
-            }
+            },
+            "description": "How many rows to return per page. **A number outside the permitted range is quietly brought inside it rather than refused**, so asking for 5,000 gives you the maximum and not an error. Read `pagination.totalPages` in the answer to know how many pages there are."
           }
         ],
         "responses": {
@@ -5357,20 +5747,24 @@
                 ],
                 "properties": {
                   "subject": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "A short title for the request — the line shown in a list. **Its length is not checked by the portal**, so an over-long one fails in the database as a 500 rather than a clear refusal."
                   },
                   "body": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The request itself, in full — what is being asked for."
                   },
                   "visibility": {
                     "type": "string",
                     "enum": [
                       "leadership",
                       "congregation"
-                    ]
+                    ],
+                    "description": "Who may see the request once it is published: `leadership` keeps it to the leadership team, `congregation` lets the whole congregation see it. **An unrecognised value quietly becomes `leadership` rather than being refused.**"
                   },
                   "isAnonymous": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Show the request as being from \"Anonymous\". **It hides the NAME only** — the submitting account is still recorded, and so is their network address."
                   }
                 }
               }
@@ -5502,10 +5896,12 @@
                       "active",
                       "answered",
                       "archived"
-                    ]
+                    ],
+                    "description": "Where the request should now sit: `active` is published and being prayed for, `answered` records that it has been answered, `archived` puts it away. **`pending` — the state a new request starts in — cannot be set here**, so a request cannot be put back to waiting."
                   },
                   "testimony": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "A short note of praise to attach when a request is answered. **Written only when `status` is `answered`**: sent with either of the other two it does nothing at all. And when `status` IS `answered`, **leaving it out overwrites any existing note with an empty one** rather than keeping it."
                   }
                 }
               }
@@ -5645,10 +6041,12 @@
                       "active",
                       "answered",
                       "archived"
-                    ]
+                    ],
+                    "description": "Where the request should now sit: `active` is published and being prayed for, `answered` records that it has been answered, `archived` puts it away. **`pending` — the state a new request starts in — cannot be set here**, so a request cannot be put back to waiting."
                   },
                   "testimony": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "A short note of praise to attach when a request is answered. **Written only when `status` is `answered`**: sent with either of the other two it does nothing at all. And when `status` IS `answered`, **leaving it out overwrites any existing note with an empty one** rather than keeping it."
                   }
                 }
               }
@@ -5769,7 +6167,8 @@
             "in": "query",
             "schema": {
               "type": "integer"
-            }
+            },
+            "description": "Return only rows filed under this one category. Leave it out for every category."
           },
           {
             "name": "page",
@@ -5778,7 +6177,8 @@
               "type": "integer",
               "minimum": 1,
               "default": 1
-            }
+            },
+            "description": "Which page of the result to fetch, counting from 1. **A number below 1, or one that is not a number, is quietly moved to 1 rather than refused.**"
           },
           {
             "name": "limit",
@@ -5788,7 +6188,8 @@
               "minimum": 1,
               "maximum": 100,
               "default": 20
-            }
+            },
+            "description": "How many rows to return per page. **A number outside the permitted range is quietly brought inside it rather than refused**, so asking for 5,000 gives you the maximum and not an error. **This endpoint sends no page totals** — it answers with `count`, `page`, `limit` and `items` only, so there is nothing to tell you how many pages there are; ask for the next page until you get fewer rows than you asked for."
           }
         ],
         "responses": {
@@ -6356,7 +6757,8 @@
               "type": "integer",
               "minimum": 1,
               "default": 1
-            }
+            },
+            "description": "Which page of the result to fetch, counting from 1. **A number below 1, or one that is not a number, is quietly moved to 1 rather than refused.**"
           },
           {
             "name": "limit",
@@ -6366,7 +6768,8 @@
               "minimum": 1,
               "maximum": 100,
               "default": 20
-            }
+            },
+            "description": "How many rows to return per page. **A number outside the permitted range is quietly brought inside it rather than refused**, so asking for 5,000 gives you the maximum and not an error. Read `pagination.totalPages` in the answer to know how many pages there are."
           }
         ],
         "responses": {
@@ -6789,28 +7192,35 @@
                 ],
                 "properties": {
                   "roleID": {
-                    "type": "integer"
+                    "type": "integer",
+                    "description": "**The ROLE being filled — not the assignment.** Get it from `GET /api/leadership/list`. The row this request creates has its own, different number, returned in the reply. The role must be active and belong to your organisation."
                   },
                   "userID": {
                     "type": "integer",
-                    "nullable": true
+                    "nullable": true,
+                    "description": "The portal member who holds the role. **Leave it out when the holder has no portal account**, and name them in `personName` instead. Note it is not checked against the member list, so a wrong number fails as a 500 rather than a clear refusal."
                   },
                   "personName": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The holder's name when they have no portal account. **Required whenever `userID` is left out.** Left out for a portal member, it is stored as empty text rather than null."
                   },
                   "personEmail": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The holder's e-mail address when they have no portal account. **Not checked for format at all.** Left out, it is stored as empty text rather than null."
                   },
                   "startDate": {
                     "type": "string",
-                    "format": "date"
+                    "format": "date",
+                    "description": "The first day of this person's term in the role. A calendar day, not a moment. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\"."
                   },
                   "endDate": {
                     "type": "string",
-                    "format": "date"
+                    "format": "date",
+                    "description": "The last day of the term. Leave it out to mark the term as still running. A calendar day, not a moment. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\". **Not compared with `startDate`**, and setting it here does not stop the assignment being created as current."
                   },
                   "notes": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Free text about the term — what it covers, or how the person was appointed. Left out, it is stored as empty text rather than null."
                   }
                 }
               }
@@ -6935,7 +7345,8 @@
                 "properties": {
                   "endDate": {
                     "type": "string",
-                    "format": "date"
+                    "format": "date",
+                    "description": "The last day of the term being ended. A calendar day, not a moment. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\". **Defaults to today.** Note a future date does NOT postpone the end: the assignment is marked as finished at once whatever date you give."
                   }
                 }
               }
@@ -7061,7 +7472,8 @@
                 "all"
               ],
               "default": "open"
-            }
+            },
+            "description": "Which tasks to return: those still to do, those finished, or both."
           },
           {
             "name": "userID",
@@ -7078,7 +7490,8 @@
               "type": "integer",
               "minimum": 1,
               "default": 1
-            }
+            },
+            "description": "Which page of the result to fetch, counting from 1. **A number below 1, or one that is not a number, is quietly moved to 1 rather than refused.**"
           },
           {
             "name": "limit",
@@ -7088,7 +7501,8 @@
               "minimum": 1,
               "maximum": 100,
               "default": 20
-            }
+            },
+            "description": "How many rows to return per page. **A number outside the permitted range is quietly brought inside it rather than refused**, so asking for 5,000 gives you the maximum and not an error. **This endpoint sends no page totals** — it answers with `count`, `page`, `limit` and `items` only, so there is nothing to tell you how many pages there are; ask for the next page until you get fewer rows than you asked for."
           }
         ],
         "responses": {
@@ -7188,13 +7602,16 @@
                 ],
                 "properties": {
                   "title": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "What the task is — the single line shown in task lists."
                   },
                   "description": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Longer detail about the task. Left out, it is stored as empty text rather than null."
                   },
                   "assignedToID": {
-                    "type": "integer"
+                    "type": "integer",
+                    "description": "The member the task is for. **Left out, it falls to whoever is calling — and a bearer API key is nobody, so a key that omits this creates a task assigned to no one.** Not checked against the member list, so a wrong number fails as a 500."
                   },
                   "priority": {
                     "type": "string",
@@ -7203,11 +7620,13 @@
                       "normal",
                       "high",
                       "urgent"
-                    ]
+                    ],
+                    "description": "How urgent the task is. **An unrecognised value is quietly changed to `normal` rather than refused.**"
                   },
                   "dueDate": {
                     "type": "string",
-                    "format": "date"
+                    "format": "date",
+                    "description": "The day the task is due. A calendar day, not a moment. Any date text the portal can read is accepted, not only ISO 8601, and an unreadable value is refused with 400. **It is stored as a reading on the clock of the organisation the ADDRESS resolved to — which for a bearer API key is not necessarily the key's own organisation.** On an installation serving several organisations, send an unambiguous value rather than relying on \"today\". Leave it out for no due date."
                   }
                 }
               }
@@ -7759,7 +8178,8 @@
                     "type": "array",
                     "items": {
                       "$ref": "#/components/schemas/PosterInput"
-                    }
+                    },
+                    "description": "**The whole desired state of the board, not a change set.** Every poster you want to keep must be in this list: any poster of your organisation whose number is missing is hidden. **Sending an empty list therefore hides the entire board.** A poster with a blank title is skipped in silence rather than refused. Identical in every respect to `POST /api/noticeboard/save`, which is the same handler."
                   }
                 }
               }
@@ -8342,7 +8762,8 @@
               "type": "integer",
               "minimum": 1,
               "default": 1
-            }
+            },
+            "description": "Which page of the result to fetch, counting from 1. **A number below 1, or one that is not a number, is quietly moved to 1 rather than refused.**"
           },
           {
             "name": "limit",
@@ -8352,21 +8773,24 @@
               "minimum": 1,
               "maximum": 100,
               "default": 20
-            }
+            },
+            "description": "How many rows to return per page. **A number outside the permitted range is quietly brought inside it rather than refused**, so asking for 5,000 gives you the maximum and not an error. Read `pagination.totalPages` in the answer to know how many pages there are."
           },
           {
             "name": "status",
             "in": "query",
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Return only assets at this point in their working life, such as `in-service` or `on-loan`. Leave it out for all of them."
           },
           {
             "name": "categoryID",
             "in": "query",
             "schema": {
               "type": "integer"
-            }
+            },
+            "description": "Return only rows filed under this one category. Leave it out for every category."
           },
           {
             "name": "assetKind",
@@ -8377,7 +8801,8 @@
                 "physical",
                 "digital"
               ]
-            }
+            },
+            "description": "Return only tangible items (`physical`) or only software licences, subscriptions and domains (`digital`). Leave it out for both."
           },
           {
             "name": "search",
@@ -8394,7 +8819,59 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "description": "The page of assets, with the paging figures beside them.",
+                          "properties": {
+                            "assets": {
+                              "type": "array",
+                              "description": "Each entry is a SUBSET of the `Asset` shape — `list` selects 20 columns and one of them is stripped before the reply, so 19 fields arrive, and the warranty, licence, insurance, writing-down, label and parentage fields come only from `detail`.",
+                              "items": {
+                                "$ref": "#/components/schemas/Asset"
+                              }
+                            },
+                            "pagination": {
+                              "type": "object",
+                              "description": "The paging figures for this answer: which page was served, how many rows a page holds, how many rows match in all, and how many pages that makes.",
+                              "properties": {
+                                "page": {
+                                  "type": "integer",
+                                  "description": "Which page was served, counting from 1."
+                                },
+                                "limit": {
+                                  "type": "integer",
+                                  "description": "How many rows a page holds."
+                                },
+                                "totalItems": {
+                                  "type": "integer",
+                                  "description": "How many rows match in all, counted under the same visibility rule as the rows themselves."
+                                },
+                                "totalPages": {
+                                  "type": "integer",
+                                  "description": "How many pages the whole result takes. Never less than 1."
+                                },
+                                "hasNext": {
+                                  "type": "boolean",
+                                  "description": "Whether a page follows this one."
+                                },
+                                "hasPrev": {
+                                  "type": "boolean",
+                                  "description": "Whether a page comes before this one."
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -8600,7 +9077,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "assetID"
+            "description": "Which asset to act on — the number from `assetID`. An asset belonging to another organisation answers 404, so the reply does not reveal that it exists. **A confidential asset also answers 404 rather than 403** to anybody not allowed to see it, for the same reason."
           }
         ],
         "responses": {
@@ -8609,7 +9086,30 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/V1SuccessEnvelope"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "description": "The payload. **The asset is nested under `asset`** — read `data.asset.assetID`, not `data.assetID`. Note the list endpoints nest theirs under `assets`, so the two are not interchangeable.",
+                          "properties": {
+                            "asset": {
+                              "description": "The asset. See the caveats on the `Asset` shape itself: this reply carries four fields that shape does not declare, and does not carry the joined category and location names.",
+                              "allOf": [
+                                {
+                                  "$ref": "#/components/schemas/Asset"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -8707,7 +9207,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "assetID"
+            "description": "Which asset to act on — the number from `assetID`. An asset belonging to another organisation answers 404, so the reply does not reveal that it exists. **Note the confidentiality gate is on the READ path only:** this operation does not test `isConfidential`, so a caller holding `assets:write` changes or removes a confidential asset exactly as it would any other. A caller without that scope is refused with 403, never 404."
           }
         ],
         "requestBody": {
@@ -8845,7 +9345,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "assetID"
+            "description": "Which asset to act on — the number from `assetID`. An asset belonging to another organisation answers 404, so the reply does not reveal that it exists. **Note the confidentiality gate is on the READ path only:** this operation does not test `isConfidential`, so a caller holding `assets:write` changes or removes a confidential asset exactly as it would any other. A caller without that scope is refused with 403, never 404."
           }
         ],
         "requestBody": {
@@ -8983,7 +9483,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "assetID"
+            "description": "Which asset to act on — the number from `assetID`. An asset belonging to another organisation answers 404, so the reply does not reveal that it exists. **Note the confidentiality gate is on the READ path only:** this operation does not test `isConfidential`, so a caller holding `assets:write` changes or removes a confidential asset exactly as it would any other. A caller without that scope is refused with 403, never 404."
           }
         ],
         "responses": {
@@ -9129,7 +9629,8 @@
                               "type": "integer",
                               "description": "How many messages are in `messages`."
                             }
-                          }
+                          },
+                          "description": "The payload for this call. The fields below sit inside it, alongside the envelope's own `status` and `meta`."
                         }
                       }
                     }
@@ -9222,7 +9723,8 @@
                               ],
                               "description": "`approved` is visible now; `pending` awaits a moderator; `flagged` was caught by the profanity check and is held."
                             }
-                          }
+                          },
+                          "description": "The payload for this call. The fields below sit inside it, alongside the envelope's own `status` and `meta`."
                         }
                       }
                     }
@@ -9331,7 +9833,8 @@
                               ],
                               "description": "The status now stored."
                             }
-                          }
+                          },
+                          "description": "The payload for this call. The fields below sit inside it, alongside the envelope's own `status` and `meta`."
                         }
                       }
                     }
@@ -9406,7 +9909,8 @@
                               "type": "integer",
                               "description": "How many prompts are in `prompts`."
                             }
-                          }
+                          },
+                          "description": "The payload for this call. The fields below sit inside it, alongside the envelope's own `status` and `meta`."
                         }
                       }
                     }
@@ -9509,7 +10013,8 @@
                               "type": "object",
                               "description": "The prompt as stored, as the prompt publisher returns it."
                             }
-                          }
+                          },
+                          "description": "The payload for this call. The fields below sit inside it, alongside the envelope's own `status` and `meta`."
                         }
                       }
                     }
@@ -9907,7 +10412,8 @@
                               "description": "Always true.",
                               "example": true
                             }
-                          }
+                          },
+                          "description": "The payload for this call. The fields below sit inside it, alongside the envelope's own `status` and `meta`."
                         }
                       }
                     }
@@ -10100,7 +10606,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "The payload for this call. The fields below sit inside it, alongside the envelope's own `status` and `meta`."
                         }
                       }
                     }
@@ -10310,7 +10817,8 @@
                               "type": "integer",
                               "description": "The organisation the account was given membership of."
                             }
-                          }
+                          },
+                          "description": "The payload for this call. The fields below sit inside it, alongside the envelope's own `status` and `meta`."
                         }
                       }
                     }
@@ -10427,7 +10935,8 @@
                               ],
                               "description": "1 when the account administers this organisation."
                             }
-                          }
+                          },
+                          "description": "The payload for this call. The fields below sit inside it, alongside the envelope's own `status` and `meta`."
                         }
                       }
                     }
@@ -10784,7 +11293,8 @@
                               "type": "string",
                               "description": "The asset's name, or the fixed text `(confidential asset)` when a bearer key scans a confidential asset."
                             }
-                          }
+                          },
+                          "description": "The payload for this call. The fields below sit inside it, alongside the envelope's own `status` and `meta`."
                         }
                       }
                     }
@@ -10878,7 +11388,8 @@
                               ],
                               "description": "Which of the two kinds it turned out to be, from the sniffed type."
                             }
-                          }
+                          },
+                          "description": "The payload for this call. The fields below sit inside it, alongside the envelope's own `status` and `meta`."
                         }
                       }
                     }
@@ -10971,7 +11482,8 @@
                               "type": "boolean",
                               "description": "True when searching the outside catalogue is switched on. It does NOT mean that search succeeded -- a failure is skipped in silence."
                             }
-                          }
+                          },
+                          "description": "The payload for this call. The fields below sit inside it, alongside the envelope's own `status` and `meta`."
                         }
                       }
                     }

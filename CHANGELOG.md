@@ -2,6 +2,62 @@
 
 
 ## [Unreleased] (alpha)
+- **Added — the API description now has a schema that is executed, and every property explains itself (#641 part 2)**
+  - **What was wrong.** This project's rule is that where it produces JSON, a JSON Schema lives
+    beside it with a `description` on every property, wired into a check "so it actually runs; a
+    schema nothing executes is a document, not a check". `web/_core/api-spec.json` **had no schema
+    at all**, and 286 of its properties and 42 of its query parameters said nothing about
+    themselves. A developer reading it had to guess what a field meant, which units it was in, and
+    whether a limit refused a value or quietly changed it.
+  - **There is now `web/_core/api-spec.schema.json`**, and `check_api_spec_schema.py` executes it as
+    a hard gate. The validator is **dependency-free on purpose**: there is no JSON Schema library on
+    the development machine and every other check here uses the standard library only, so bringing
+    one in would mean the check could not be run before pushing — the #646 failure over again. The
+    cost is stated in its own header: it implements the keywords the schema uses and would ignore
+    any other, so it **fails when the schema uses a keyword it cannot see**, rather than letting
+    that part of the schema become decorative.
+  - **All 286 properties and 42 parameters now say what they mean**, written from the code rather
+    than from the field names. What that turned up is the useful part: money fields that are in
+    **pence** and ones that are in **pounds**, limits that **quietly shorten or clamp a value rather
+    than refusing it**, fields that are **write-only** (a licence key can be set and never read
+    back, and never cleared), a breakdown list that **replaces rather than adds to** what is stored,
+    a poster list that is **the whole board** so an empty one hides everything, and an identifier
+    that is the **assignment** rather than the role it fills.
+  - **Three more things in the description were untrue, and are corrected.** `format: date-time`
+    promised RFC 3339 on fields that return a plain database timestamp with no offset.
+    `PaginatedListResponse` describes a shape **no handler returns** — its one user nests its paging
+    differently and names its array differently — which is now said in the schema rather than left
+    to be discovered. And the `Asset` shape, which the prose sent readers to while **nothing pointed
+    at it**, is now used by the four endpoints that return it, with the two caveats measured: `list`
+    returns a subset of it, and `detail` returns four fields it never declared.
+  - **The test of the checks now covers both**, with 26 planted faults. Eight are new and aim at the
+    schema check: a removed description, a removed parameter description, a missing tag or summary,
+    a `$ref` that resolves to nothing, a tag nothing declares, an unreadable file, and a schema
+    keyword the validator cannot see. Every one is caught, and every file is restored
+    byte-for-byte. Sabotage was measured rather than assumed: `and False` on any of eight separate
+    conditions across the two checks leaves the check itself green, and the selftest goes red on all
+    eight.
+  - **The independent check came back NOT CLEAN with nine real problems, all fixed.** Every one was
+    a statement that was untrue rather than anything broken, which is what a description package
+    fails at. The four worth recording: the `AssetCreate` summary still said `currency` refuses a
+    bad value while the field's own new text said that had been corrected — **so the file documented
+    a fix that never happened**; the shared `limit` text told callers to read a page total that four
+    of the eleven endpoints never send; `DocumentCreate.isPublished` picked `False` as its example of
+    a value meaning true, and that is the one value that means false, because the handler lower-cases
+    first; and both asset `detail` operations declared the asset at `data` when the handler nests it
+    at `data.asset`. Also found: `oneOf` was implemented as `allOf` in the new validator, so it
+    meant "every branch" — nothing used it, but the file claimed to implement what it listed, and
+    **a keyword enforced WRONGLY does not trip the guard that catches a keyword that is missing**.
+  - **Two improvements that came out of that round.** The selftest now runs 35 cases against the
+    validator directly, in both directions, because an end-to-end plant cannot reach a keyword the
+    description does not happen to use — measured: neutering the validator's `enum` test left both
+    the check and the selftest green. And a `$ref` with a sibling `description` is **ignored by
+    OpenAPI 3.0 tooling**, so the carefully written caveats would never have reached a reader of
+    `/api-docs/`; they are now wrapped in `allOf`, which does render.
+  - **Found and raised: #676.** The events API's status allow-list does not match the database.
+    `archived` is allowed by both writers and then refused by the column, so it gives a **500**;
+    `postponed` is a real stored value this API returns but **cannot be set** through it. Not fixed
+    here because correcting either list changes behaviour.
 - **Added — the API description is now checked against the code, and 17 endpoints that were missing from it are described (#641)**
   - **What was wrong.** `web/_core/api-spec.json` is what a customer's developer reads before writing
     anything against this portal, and the browsable page at `/api-docs/` serves it. **Nothing in the

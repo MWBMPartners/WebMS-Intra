@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-The test of the test: does check_api_spec_matches_code.py actually catch things?
+The test of the tests: do the two api-spec checks actually catch things?
 
 Path: tools/api-spec-check-selftest.py
 
 WHY THIS EXISTS
 ---------------
-`tools/audit-checks/check_api_spec_matches_code.py` is the only thing standing
-between the API description and the code drifting apart again. A check that
-cannot fail is worse than no check, because it is believed -- and this project
-has been bitten by that shape repeatedly, most recently when a guard searched
-for the TEXT of a condition and stayed green after `&& false` was added to it.
+Two checks stand between the API description and the code drifting apart
+again: `check_api_spec_matches_code.py` (the addresses agree) and
+`check_api_spec_schema.py` (the file satisfies its own schema, and every
+property and parameter explains itself). A check that cannot fail is worse than
+no check, because it is believed -- and this project has been bitten by that
+shape repeatedly, most recently when a guard searched for the TEXT of a
+condition and stayed green after `&& false` was added to it.
 
 The independent check of 30 October 2026 made the point concretely: adding
 `and False` to check A, or to any of the three named lists, leaves the whole
@@ -52,6 +54,7 @@ Version:   1.0.0
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import re
 import subprocess
@@ -59,7 +62,9 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-CHECK = ["python3", "-I", "tools/audit-checks/check_api_spec_matches_code.py"]
+MATCHES = "tools/audit-checks/check_api_spec_matches_code.py"
+SCHEMA_CHECK = "tools/audit-checks/check_api_spec_schema.py"
+SCHEMA_FILE = REPO / "web/_core/api-spec.schema.json"
 SPEC = REPO / "web/_core/api-spec.json"
 ROUTER = REPO / "web/_core/ApiRouter.php"
 SQL = REPO / "web/_sql/full_schema.sql"
@@ -67,7 +72,7 @@ TRANSLATE = REPO / "web/_apps/api/translate.php"
 
 # Every file a plant may edit or delete. Backed up and restored as one set, so a
 # plant cannot leave one of them changed -- see point 2 in the header.
-WATCHED = [SPEC, ROUTER, SQL, TRANSLATE]
+WATCHED = [SPEC, ROUTER, SQL, TRANSLATE, SCHEMA_FILE]
 
 VERBOSE = "--verbose" in sys.argv
 
@@ -76,8 +81,8 @@ def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else "(absent)"
 
 
-def run_check() -> tuple[int, str]:
-    done = subprocess.run(CHECK, capture_output=True, text=True, cwd=REPO)
+def run_check(script: str = MATCHES) -> tuple[int, str]:
+    done = subprocess.run(["python3", "-I", script], capture_output=True, text=True, cwd=REPO)
     return done.returncode, done.stdout + done.stderr
 
 
@@ -103,6 +108,10 @@ def add_path(path_key: str):
         {path_key: {"get": {"responses": {"200": {"description": "OK"}}}}})
 
 
+class _Done(Exception):
+    """Internal: this plant has been judged, skip the letter-set comparison."""
+
+
 class Plant:
     """
     One planted fault: what it does, and the EXACT set of checks that must
@@ -117,10 +126,15 @@ class Plant:
     2026 found exactly that in plant A#1, by reading it rather than running it.
     """
 
-    def __init__(self, name: str, letters: str, apply, creates=()) -> None:
+    def __init__(self, name: str, letters: str, apply, creates=(),
+                 script: str = MATCHES, expect: str | None = None) -> None:
         self.name = name
         self.letters = set(letters)
         self.apply, self.creates = apply, creates
+        self.script = script
+        # For the schema check, which reports in sentences rather than letters,
+        # `expect` is a phrase its output must contain.
+        self.expect = expect
 
 
 def new_file(rel: str):
@@ -233,7 +247,152 @@ def plants() -> list[Plant]:
         line = next(ln for ln in text.splitlines() if ln.startswith(anchor))
         replace_once(SQL, line, line + "\n" + line.replace("venues.check", "venues.teapot"))
     out.append(Plant("a seeded switch with no handler", "H", h_orphan_seed))
+
+    # ---- and now the schema check -----------------------------------------
+    def strip(pointer, keyword):
+        """Take one keyword off one node of api-spec.json."""
+        def apply() -> None:
+            spec = json.loads(SPEC.read_text(encoding="utf-8"))
+            node = spec
+            for part in pointer:
+                node = node[part]
+            assert keyword in node, "nothing to remove at %r" % (pointer,)
+            del node[keyword]
+            SPEC.write_text(json.dumps(spec, indent=2, ensure_ascii=False) + "\n",
+                            encoding="utf-8")
+        return apply
+
+    def schema_plant(name, expect, apply):
+        out.append(Plant(name, "", apply, script=SCHEMA_CHECK, expect=expect))
+
+    schema_plant("a property's description removed", "carry no `description`",
+                 strip(["components", "schemas", "Asset", "properties", "name"], "description"))
+    schema_plant("a parameter's description removed", "`description` is required",
+                 strip(["paths", "/api/events/list", "get", "parameters", 0], "description"))
+    schema_plant("an operation's tags removed", "`tags` is required",
+                 strip(["paths", "/api/events/list", "get"], "tags"))
+    schema_plant("an operation's summary removed", "`summary` is required",
+                 strip(["paths", "/api/events/list", "get"], "summary"))
+
+    def dangling_ref() -> None:
+        spec = json.loads(SPEC.read_text(encoding="utf-8"))
+        spec["paths"]["/health"]["get"]["responses"]["200"].setdefault("content", {})\
+            .setdefault("application/json", {})["schema"] = {"$ref": "#/components/schemas/NoSuch"}
+        SPEC.write_text(json.dumps(spec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    schema_plant("a $ref that resolves to nothing", "does not resolve", dangling_ref)
+
+    def undeclared_tag() -> None:
+        spec = json.loads(SPEC.read_text(encoding="utf-8"))
+        spec["paths"]["/health"]["get"]["tags"] = ["NotATagAnybodyDeclared"]
+        SPEC.write_text(json.dumps(spec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    schema_plant("a tag used but never declared", "is not declared", undeclared_tag)
+
+    def unknown_keyword() -> None:
+        # The guard that stops the schema becoming decorative: a keyword the
+        # validator cannot see would be silently ignored.
+        schema = json.loads(SCHEMA_FILE.read_text(encoding="utf-8"))
+        schema["$defs"]["schemaObject"]["unevaluatedProperties"] = False
+        SCHEMA_FILE.write_text(json.dumps(schema, indent=2, ensure_ascii=False) + "\n",
+                               encoding="utf-8")
+    schema_plant("a schema keyword the validator cannot see",
+                 "does not implement", unknown_keyword)
+
+    def broken_json() -> None:
+        SPEC.write_text(SPEC.read_text(encoding="utf-8").replace("{", "{{", 1), encoding="utf-8")
+    schema_plant("api-spec.json made unreadable", "not valid JSON", broken_json)
     return out
+
+
+# ---------------------------------------------------------------------------
+# The validator, keyword by keyword
+# ---------------------------------------------------------------------------
+
+# 🧪 Each case is (name, schema, instance, should_fail). Both directions are
+#    required on purpose: a validator that reports a failure for everything
+#    passes every "does it catch X" test and is useless, and a planted fault in
+#    api-spec.json cannot reach a keyword the file does not happen to use.
+#
+#    This exists because the independent check of 30 October 2026 measured that
+#    `and False` on the validator's `enum` condition left BOTH the check and
+#    this selftest green: the end-to-end plants could not reach it, because
+#    nothing in the schema used `enum` in a way a spec fault would trip.
+VALIDATOR_CASES = [
+    ("required present", {"type": "object", "required": ["a"]}, {"a": 1}, False),
+    ("required missing", {"type": "object", "required": ["a"]}, {"b": 1}, True),
+    ("enum member", {"enum": ["x", "y"]}, "x", False),
+    ("enum outsider", {"enum": ["x", "y"]}, "z", True),
+    ("pattern matches", {"type": "string", "pattern": "^a+$"}, "aaa", False),
+    ("pattern fails", {"type": "string", "pattern": "^a+$"}, "bbb", True),
+    ("minLength ok", {"type": "string", "minLength": 2}, "ab", False),
+    ("minLength short", {"type": "string", "minLength": 2}, "a", True),
+    ("non-whitespace ok", {"type": "string", "pattern": "\\S"}, " x ", False),
+    ("non-whitespace blank", {"type": "string", "pattern": "\\S"}, "   ", True),
+    ("propertyNames ok", {"type": "object", "propertyNames": {"pattern": "^[a-z]+$"}}, {"ab": 1}, False),
+    ("propertyNames bad", {"type": "object", "propertyNames": {"pattern": "^[a-z]+$"}}, {"AB": 1}, True),
+    ("additionalProperties false, clean",
+     {"type": "object", "properties": {"a": {}}, "additionalProperties": False}, {"a": 1}, False),
+    ("additionalProperties false, extra",
+     {"type": "object", "properties": {"a": {}}, "additionalProperties": False}, {"a": 1, "b": 2}, True),
+    ("minItems ok", {"type": "array", "minItems": 2}, [1, 2], False),
+    ("minItems short", {"type": "array", "minItems": 2}, [1], True),
+    ("minProperties ok", {"type": "object", "minProperties": 1}, {"a": 1}, False),
+    ("minProperties empty", {"type": "object", "minProperties": 1}, {}, True),
+    ("items ok", {"type": "array", "items": {"type": "integer"}}, [1, 2], False),
+    ("items wrong", {"type": "array", "items": {"type": "integer"}}, [1, "x"], True),
+    ("type integer, bool refused", {"type": "integer"}, True, True),
+    ("type integer, int ok", {"type": "integer"}, 3, False),
+    ("nullable null ok", {"type": "string", "nullable": True}, None, False),
+    ("not nullable null refused", {"type": "string"}, None, True),
+    ("allOf both met",
+     {"allOf": [{"type": "object", "required": ["a"]}, {"type": "object", "required": ["b"]}]},
+     {"a": 1, "b": 2}, False),
+    ("allOf one unmet",
+     {"allOf": [{"type": "object", "required": ["a"]}, {"type": "object", "required": ["b"]}]},
+     {"a": 1}, True),
+    ("anyOf one met",
+     {"anyOf": [{"type": "object", "required": ["a"]}, {"type": "object", "required": ["b"]}]},
+     {"b": 1}, False),
+    ("anyOf none met",
+     {"anyOf": [{"type": "object", "required": ["a"]}, {"type": "object", "required": ["b"]}]},
+     {"c": 1}, True),
+    # oneOf shared allOf's loop until 30 October 2026, so it meant "every
+    # branch". Nothing in the schema uses it, which is exactly why only a direct
+    # case like this can hold it honest.
+    ("oneOf exactly one",
+     {"oneOf": [{"type": "object", "required": ["a"]}, {"type": "object", "required": ["b"]}]},
+     {"a": 1}, False),
+    ("oneOf both", 
+     {"oneOf": [{"type": "object", "required": ["a"]}, {"type": "object", "required": ["b"]}]},
+     {"a": 1, "b": 2}, True),
+    ("oneOf neither",
+     {"oneOf": [{"type": "object", "required": ["a"]}, {"type": "object", "required": ["b"]}]},
+     {"c": 1}, True),
+    ("const met", {"const": 5}, 5, False),
+    ("const unmet", {"const": 5}, 6, True),
+    ("$ref resolves", {"$ref": "#/$defs/num"}, 1, False),
+    ("$ref dangling", {"$ref": "#/$defs/nope"}, 1, True),
+]
+
+
+def validator_cases() -> list[tuple[str, str, bool, str]]:
+    """Run the validator directly, in this process, on the cases above."""
+    where = REPO / "tools/audit-checks/check_api_spec_schema.py"
+    spec = importlib.util.spec_from_file_location("_api_spec_check", where)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    root = {"$defs": {"num": {"type": "integer"}}}
+    rows = []
+    for name, schema, instance, should_fail in VALIDATOR_CASES:
+        errs: list[str] = []
+        merged = dict(root, **schema) if "$ref" in schema else schema
+        module.validate(instance, merged, dict(root, **merged), "case", errs)
+        failed = bool(errs)
+        ok = failed == should_fail
+        why = "" if ok else (
+            "expected a failure and got none" if should_fail
+            else "reported a failure it should not have: " + errs[0])
+        rows.append(("validator: " + name, "fail" if should_fail else "pass", ok, why))
+    return rows
 
 
 def main() -> int:
@@ -244,18 +403,42 @@ def main() -> int:
             return 1
 
     before = {p: sha(p) for p in WATCHED}
-    code, out = run_check()
-    if code != 0:
-        print("✗ The check is ALREADY failing, so no plant below would prove "
-              "anything. Fix that first.\n\n" + out, file=sys.stderr)
-        return 1
+    for script in (MATCHES, SCHEMA_CHECK):
+        code, out = run_check(script)
+        if code != 0:
+            print("✗ %s is ALREADY failing, so no plant below would prove anything. "
+                  "Fix that first.\n\n%s" % (script, out), file=sys.stderr)
+            return 1
 
     rows: list[tuple[str, str, bool, str]] = []
     for plant in plants():
         snapshot = {p: (p.read_bytes() if p.exists() else None) for p in WATCHED}
         try:
             plant.apply()
-            code, out = run_check()
+            code, out = run_check(plant.script)
+            if plant.expect is not None:
+                # Exactly ONE complaint block, and it must be the expected one.
+                # Substring-matching alone let a plant that also tripped a
+                # second complaint pass, while this file claims each plant is
+                # caught by the expected check and by nothing else. Found by the
+                # independent check of 30 October 2026.
+                #
+                # What this still cannot see, said plainly: one block may report
+                # several instances ("3 property(ies) carry no description"), so
+                # this counts complaint KINDS, not instances.
+                blocks = [line for line in out.splitlines() if line.startswith("✗ ")]
+                caught = code == 1 and len(blocks) == 1 and plant.expect in out
+                if caught:
+                    why = ""
+                elif code != 1:
+                    why = "the check did not fail at all (exit %d)" % code
+                elif len(blocks) != 1:
+                    why = ("tripped %d complaints, not 1, so it is no evidence about one of them: %s"
+                           % (len(blocks), " / ".join(b[:60] for b in blocks)))
+                else:
+                    why = "%r is not in what it said" % plant.expect
+                rows.append((plant.name, plant.expect[:18], caught, why))
+                raise _Done
             got = {line[2] for line in out.splitlines()
                    if line.startswith("✗ ") and len(line) > 3 and line[3] == ":"}
             caught = code == 1 and got == plant.letters
@@ -269,6 +452,8 @@ def main() -> int:
                 why = "also tripped %s, which makes this no evidence about %s" % (
                     sorted(got - plant.letters), sorted(plant.letters))
             rows.append((plant.name, "".join(sorted(plant.letters)), caught, why))
+        except _Done:
+            pass
         finally:
             for path, data in snapshot.items():
                 if data is None:
@@ -291,6 +476,8 @@ def main() -> int:
                       % (path.relative_to(REPO), plant.name), file=sys.stderr)
                 return 1
 
+    rows += validator_cases()
+
     width = max(len(r[0]) for r in rows)
 
     missed = [r for r in rows if r[2] is False]
@@ -301,19 +488,22 @@ def main() -> int:
             print("%-*s  %-6s  %s" % (width, name, letter, "yes" if caught else "NO — " + why))
         print("-" * (width + 20))
 
-    code, out = run_check()
-    if code != 0:
-        print("✗ The check does not pass again after every plant was undone:\n\n" + out,
-              file=sys.stderr)
-        return 1
+    for script in (MATCHES, SCHEMA_CHECK):
+        code, out = run_check(script)
+        if code != 0:
+            print("✗ %s does not pass again after every plant was undone:\n\n%s"
+                  % (script, out), file=sys.stderr)
+            return 1
 
     if missed:
         print("\n✗ %d of %d planted fault(s) were NOT caught. The check is not "
               "guarding what it claims to guard." % (len(missed), len(rows)), file=sys.stderr)
         return 1
 
-    print("✓ All %d planted faults were caught, each by the expected check, and every "
-          "file was restored byte-for-byte." % len(rows))
+    planted = len(rows) - len(VALIDATOR_CASES)
+    print("✓ All %d planted faults were caught, each by the expected check, and every file was "
+          "restored byte-for-byte. The validator also got all %d keyword cases right, in both "
+          "directions." % (planted, len(VALIDATOR_CASES)))
     return 0
 
 

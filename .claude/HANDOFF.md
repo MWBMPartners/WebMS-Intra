@@ -39,10 +39,12 @@ while exiting 0 were READ), Ruby YAML parse of the workflow (26 steps, no trunca
 valid with no dangling `$ref`. **No database change, so the migration harness was not run. No HTTP
 test of the 19 endpoints** — the descriptions come from reading the handlers, not from calling them.
 
-**Still open on #641:** the JSON Schema beside the description (item 2), a `description` on every
-property (item 4), and the remaining untrue statements in the issue's section 3. Note three
-different counts of undescribed properties exist (181 in the issue, 274 and 286 from two traversals
-here); none has been written down as fact.
+**Still open on #641 at the end of part 1:** the JSON Schema beside the description (item 2), a
+`description` on every property (item 4), and the remaining untrue statements in the issue's
+section 3. **Items 2 and 4 then landed in part 2, below.** On the counting: three traversals gave
+181, 274 and 286 undescribed properties, and **286 is the figure that stands** — the schema check's
+independently written validator measures the same 286 against the committed file, which is why it
+is now stated in the instruction files rather than left open.
 
 **Raised.** #675 — `expenses/export` is a working CSV export whose switch was never seeded, so it has
 always answered 403, and four more switches are seeded for handlers that do not exist. Both need the
@@ -55,7 +57,28 @@ more impure plants that the old test had hidden. One was fixed; one is honestly 
 because seeding a handler's switch cannot help also making it reachable-and-undocumented. **A plant
 that trips two checks is evidence about neither until you say so.**
 
-**Next.** #641 items 2 and 4, then the browser/visual half of #569.
+**Part 2 then landed the same day.** `web/_core/api-spec.schema.json` plus
+`check_api_spec_schema.py` (a third hard gate), and all 286 properties and 42 parameters described
+from the handlers. The validator is hand-written because no JSON Schema library exists here, and it
+**fails when the schema uses a keyword it cannot implement** — otherwise an unknown keyword would be
+ignored and that part of the schema would be decoration. The selftest now plants 26 faults across
+both checks; `and False` on any of eight conditions leaves a check green and the selftest red,
+measured.
+
+**What writing the descriptions found, which is the lasting value:** asset money is in PENCE and
+expense money in POUNDS with no currency recorded anywhere; a great many limits **quietly shorten or
+clamp a value rather than refusing it**; `licenseKey` is write-only and can never be cleared; the
+attendance breakdown and the noticeboard poster list are **whole-state**, so an empty list wipes
+them; and leadership's `assignmentID` is the assignment, not the role. `PaginatedListResponse`
+describes a shape no handler returns, and `Asset` was referenced by nothing while the prose pointed
+readers at it — both now corrected.
+
+**Raised #676:** the events API's `status` allow-list does not match the column, so `archived` is
+allowed by both writers and refused by the database (a 500), while `postponed` is returned by the
+API and cannot be set through it. Not fixed because either correction changes behaviour.
+
+**Next.** The remaining #641 item 5 statements (the four response shapes, the `Allow` header
+examples, the 48 missing `429`s), then the browser/visual half of #569.
 
 ## 29 OCTOBER 2026, LATEST — transcription you can actually reach (#276, migration 229)
 

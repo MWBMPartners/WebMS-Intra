@@ -10276,6 +10276,79 @@ reading as a set because none of them would fail a test:
   occurrences; `users/api/create.php` has two, which is how an earlier draft of this note said
   "nine handlers") — but the justification was the opposite of what the code does.
 
+### The API description's own schema, and why its validator is hand-written (#641, 30 October 2026)
+
+`web/_core/api-spec.schema.json` describes the shape `api-spec.json` must have, and
+`tools/audit-checks/check_api_spec_schema.py` executes it. It is deliberately **not** a copy of the
+OpenAPI 3.0 meta-schema: it covers the subset this portal uses and enforces the house conventions a
+general validator would know nothing about — above all a `description` on every property and every
+parameter.
+
+**Why the validator is written out by hand instead of using a library.** There is no `jsonschema`
+on the development machine, and every other script in `tools/audit-checks/` uses the standard
+library only. A check that needs something the machine has not got cannot be run before pushing,
+which is exactly what #646 was about. So the keywords the schema uses are implemented in the check,
+in about 150 lines.
+
+**The honest cost, and the guard on it.** That validator is not a conformant JSON Schema
+implementation, and it would **silently ignore** a keyword it does not know — which would quietly
+turn part of the schema into decoration. `UNDERSTOOD` is the list of keywords it implements, and the
+check **fails when the schema uses one outside that list**, so the failure is loud. The schema's own
+`$comment` records the same contract from the other side.
+
+**What writing 286 descriptions actually found.** The descriptions were written from the handlers,
+not from the field names, and the pattern worth knowing is how often a limit does not refuse:
+
+- **Money is in two different units** depending on the app. Assets are in **pence** (`89999` is
+  £899.99); expenses are in **pounds and pence** (`12.50` is twelve pounds fifty). Nothing in the
+  data says which, and there is no currency field on an expense claim at all.
+- **Many limits quietly change a value rather than refusing it.** Most asset strings are shortened
+  to fit; `limit` is brought inside range; an asset's `currency` falls back to `GBP`; a category or
+  parent that does not resolve becomes null; an unrecognised `priority` or `visibility` becomes the
+  default. Each of those is now stated, because "max 150" reads as "151 is refused" and it is not.
+- **Two fields replace rather than add.** An attendance breakdown and the noticeboard's poster list
+  are both whole-state: sending an empty list wipes the breakdown, or hides the whole board.
+- **`licenseKey` is write-only and cannot be cleared** — blank means "leave it alone".
+- **An identifier that is easy to get wrong**: leadership's `assignmentID` is the assignment, not
+  the role, and the role goes on existing after it is used.
+
+**Three untrue statements corrected.** `format: date-time` claims RFC 3339, which a plain database
+timestamp with no offset is not. `PaginatedListResponse` describes a shape **no handler returns**;
+its only user nests paging under `data.pagination` and calls its array `events`, and also sends
+`hasNext`/`hasPrev`, which the schema never declared — so the schema now says so rather than leaving
+it to be found. And `Asset` was referenced by nothing while the prose pointed readers at it; it is
+now used by the four endpoints that return it, stating that `list` gives a subset and `detail` gives
+four fields the shape does not declare.
+
+**What the independent check found, because it is the shape this kind of package fails in.** Nine
+real problems, every one a statement that was untrue rather than anything broken. Three are worth
+carrying:
+
+- The `AssetCreate` summary still said `currency` refuses a bad value, while the field's own new
+  description said that summary had been corrected. **The file documented a fix that had not
+  happened** — worse than the original error, because it reads as settled.
+- A shared parameter description is only as true as its least similar endpoint. The `limit` text
+  said to read a page total; four of the eleven endpoints carrying it send no totals at all.
+- An example chosen to make a rule memorable has to be checked like any other claim.
+  `DocumentCreate.isPublished` offered `False` as a value meaning true. The handler lower-cases
+  first, so `False` is the one value that means false.
+
+**And two things about the validator.** `oneOf` shared `allOf`'s loop, so it meant "every branch"
+rather than "exactly one". Nothing in the schema used it, so nothing was wrong — but the file
+claimed to implement everything it listed, and **the `UNDERSTOOD` guard catches a keyword that is
+MISSING, never one implemented wrongly**. That is why the selftest now runs the validator directly
+against 35 keyword cases in both directions: an end-to-end plant can only reach keywords the
+description happens to use, and neutering the validator's `enum` test left both the check and the
+selftest green. Finally, **a `$ref` with a sibling `description` is ignored by OpenAPI 3.0
+tooling** — the version this document is pinned to — so a caveat written beside a reference never
+reaches a reader. Wrapping the reference in `allOf` is the idiom that renders.
+
+**A counting lesson, again.** Three traversals gave 181, 274 and 286 undescribed properties. The
+check's independent implementation also says 286, which is the first time two separate
+implementations have agreed — that agreement is the reason to trust the figure, not the figure
+itself. And adding checks moved the "38 audit checks" line in two instruction files twice in one
+day, so that line now names no number and says how to count them.
+
 ## Ten checks and two tests that ran nowhere (#646, 28 October 2026)
 
 Found while wiring up a new check for #640, after an independent review pointed

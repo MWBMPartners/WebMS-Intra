@@ -1178,14 +1178,31 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_api_spec_matches_code.py
 
-      # The test OF that test (#641, #646). The check above is the only thing
-      # keeping the API description and the code together, and adding
-      # `and False` to any of its conditions leaves it green - measured, not
-      # supposed. This plants 18 faults into the real files, requires each to be
-      # caught BY THE EXPECTED check, and restores every file byte-for-byte.
-      # It is wired here rather than left in an evidence folder because a proof
-      # that runs once is not a guard: that is the whole lesson of #646.
-      - name: 'That check actually catches things (hard gate, #641)'
+      # The API description satisfies its own schema, and every property and
+      # parameter explains itself (#641). This project's rule is that where it
+      # produces JSON a schema lives beside it, with a description on every
+      # property, wired into a check "so it actually runs; a schema nothing
+      # executes is a document, not a check". api-spec.json had no schema at
+      # all, which is part of how 286 undescribed properties accumulated.
+      # The validator is dependency-free on purpose: there is no jsonschema
+      # library on the development machine, and a check that cannot be run
+      # before pushing is the #646 failure over again.
+      - name: 'The API description satisfies its own schema (hard gate, #641)'
+        id: api_spec_schema
+        if: always()
+        run: python3 -I tools/audit-checks/check_api_spec_schema.py
+
+      # The test OF both checks above (#641, #646). Adding `and False` to any of
+      # their conditions leaves the check itself green - measured on eight
+      # separate conditions, not supposed. This plants 26 faults into the real
+      # files, requires each to be caught BY THE EXPECTED check and by nothing
+      # else, restores every file byte-for-byte, and then runs 35 cases against
+      # the hand-written validator directly, in both directions - because an
+      # end-to-end plant cannot reach a keyword api-spec.json does not happen to
+      # use, which is how a neutered `enum` check once left both green.
+      # Wired here rather than left in an evidence folder because a proof that
+      # runs once is not a guard: that is the whole lesson of #646.
+      - name: 'Those checks actually catch things (hard gate, #641)'
         id: api_spec_check_selftest
         if: always()
         run: python3 -I tools/api-spec-check-selftest.py
