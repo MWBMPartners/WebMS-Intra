@@ -2,6 +2,59 @@
 
 
 ## [Unreleased] (alpha)
+- **Added — the installation caps the organisation, and the first live breach fixed (#668, part 1)**
+  - **The rule** (owner, 29 October 2026, application-wide): for a setting that is a **limit**, an
+    organisation may hold itself to a **lower** one but may **never** raise its own above what the
+    installation allows. One installation serves many organisations and the two levels of administrator
+    may be **different people**, so this is a boundary between parties. `$SETTINGS` has already merged
+    the two layers by the time a page runs, so the merged array cannot express it.
+  - **`Portal\Core\SettingLimit` is the general resolver** — three tiers, each able to tighten the one
+    above it and none able to loosen it: a hard maximum in code, then the installation, then the
+    organisation. `EventRecurrence::limitsFrom()` stays as it is; it resolves two limits at once from
+    arrays it is handed, which suits its callers.
+  - **The rule is one line, and that is the useful finding.** `min(merged, installation)`, with no query
+    to discover whether an organisation has a row of its own — because the merged value already **is**
+    the organisation's own where it has one and the installation's where it has not. The independent
+    check tried to break that and could not. It makes the remaining sweep far more tractable than the
+    issue's 31-setting list suggests.
+  - **The live breach:** `/admin/settings/attendance` accepted 0–3650 days **per organisation with no
+    installation cap**, so an organisation could keep attendance personal data for ten years on an
+    installation whose administrator intended ninety days. It now refuses with the reason, **records the
+    refusal** (a request to exceed another party's limit crosses a line), and the form offers only what
+    the installation allows.
+  - **ZERO IS THE TRAP, and it was wrong in both directions until the independent check broke it.** For
+    this setting `0` means "keep for ever" — the **largest** value there is, not the smallest — so
+    compared as a number it sails through any limit, because 0 is less than everything. The first
+    version converted only the **posted** number, in the handler, which was worse than not converting:
+    an installation that chose "for ever" (offered by its own form) got a ceiling of 0 and **refused
+    every organisation save, including a tighter one** — 30 days refused on an installation allowing for
+    ever, with the organisation's two visibility settings blocked too, because the refusal exits before
+    all three writes. And an installation that chose 3650 let an organisation store 0 and keep the data
+    **for ever**, which is strictly longer, because `3650 > 3650` is false. The rule now lives in the
+    class, read at **both** levels, and is stated once: **"for ever" is allowed only when the
+    installation itself allows for ever.**
+  - **The issue's own list was a starting point, not the answer — exactly as it warned.** Four shapes no
+    key-name search can see: nested-array reads, a `LIKE 'mail.queue.%'` query, keys referenced through
+    **constants** (which is how `attend.detailRetentionDays` hid from every grep), and four settings
+    seeded but read nowhere by name. Measured, only **one** dedicated page names a limit key directly, so
+    a tripwire has to resolve constants — which answers the issue's open question with evidence rather
+    than a guess, and is part 2.
+  - **Four self-test faults of my own, every one a check that passed on broken code.** Three were `strpos`
+    offsets measuring the wrong region — a bare function name found its own **definition**, and one slice
+    swept in the very code it was meant to exclude. The fourth was worse: section D asked only whether
+    certain *text* was present, so it passed on **four different disabled gates** — `if (false)`,
+    `&& false` added to the condition, a refusal that logs "nothing was saved" and then writes anyway, and
+    a refusal that silently clamps. `.claude/CLAUDE.md` names the `&& false` shape twice and this file
+    walked into it regardless. It now pins the whole condition, requires the refusal block to end the
+    request, and requires it not to assign to the number on the way past.
+  - **And a planted fault that never applied**, giving a false pass: the plant's replacement string had a
+    trailing newline the sliced block did not. Checking that a plant produced the state you meant is a
+    rule in this repository and this is the third time this month it earned its place.
+  - **Tests:** `tools/setting-limit-selftest.php`, 47 checks — the rule's whole table by hand, zero in
+    both directions at both levels, refusing versus clamping, and the handler read as text. Deliberately
+    **not** the tripwire or the other 30 settings; that is part 2. **#685** carries the half part 1 does
+    not fix: an organisation that *already* stored more than the installation allows keeps it, because
+    the clear-out job reads the uncapped value.
 - **Fixed — the sign-in page had no icon, so every visitor's first request 404ed (#680)**
   - **What was wrong.** With no `<link rel="icon">` a browser falls back to `/favicon.ico` by
     convention. There is no such file in the web root and nothing answers that address. The three icon

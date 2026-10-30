@@ -252,7 +252,13 @@ def reads_layer(code: str) -> bool:
     a page would be telling somebody to undo the fix, which is exactly what this
     check did to the #674 fix before this term existed.
     """
-    return "InstallationSettings::layer" in code
+    # 🚧 `SettingLimit::` counts too (#668). A page converted to the limit
+    #    sweep asks SettingLimit, which reads the installation layer for it, so
+    #    it HAS reckoned with the two layers being different — but it never
+    #    mentions InstallationSettings by name. Without this, every page the
+    #    sweep fixes would start being reported as a fault, which is the
+    #    "telling somebody to undo the fix" failure this term exists to prevent.
+    return "InstallationSettings::layer" in code or "SettingLimit::" in code
 
 
 def findings() -> tuple[list[tuple[str, str, str]], str | None, list[str]]:

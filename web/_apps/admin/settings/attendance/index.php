@@ -71,6 +71,8 @@ use Portal\Core\Auth;
 use Portal\Core\AttendanceAccess;
 use Portal\Core\Router;
 use Portal\Core\Site;
+use Portal\Core\SettingLimit;
+use Portal\Core\InstallationSettings;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -284,14 +286,71 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <label class="form-label" for="retentionDays">
                     Keep the technical detail for this many days
                 </label>
-                <input type="number" min="0" max="3650" class="form-control form-control-sm"
+                <?php
+                // 🚧 The `max` follows what THE INSTALLATION allows, not the hard
+                //    maximum in code (#668). It used to be max="3650" — ten years —
+                //    on a page whose Save handler now refuses anything above the
+                //    installation's figure, which would have been a box offering a
+                //    number it then rejects. That is the #675 shape: a control
+                //    somebody is given and then refused, with no explanation on the
+                //    way in.
+                //
+                //    It is a COURTESY, not the boundary. A `max` attribute is a hint
+                //    to whoever is filling the form in; anything can be posted, so
+                //    the handler asks SettingLimit::whyNotAllowed() and refuses
+                //    there. Never move this rule into the markup.
+                //    TWO QUESTIONS, NOT ONE. "What is the ceiling in days" and "may
+                //    this organisation choose for ever" are different, and a page
+                //    needs both: 0 is the LARGEST value for this setting, so a box
+                //    with min="0" offers for-ever whatever the max says. Offering it
+                //    where the installation forbids it is a control whose own Save
+                //    refuses it — the #675 fault, and the first version of this page
+                //    had exactly that.
+                $installationAllowsDays = SettingLimit::installationAllows(
+                    AnonymousCheckins::RETENTION_KEY,
+                    AnonymousCheckins::DEFAULT_RETENTION_DAYS,
+                    AnonymousCheckins::MAX_RETENTION_DAYS,
+                    true
+                );
+                $mayChooseForEver = SettingLimit::installationAllowsForEver(
+                    AnonymousCheckins::RETENTION_KEY,
+                    AnonymousCheckins::DEFAULT_RETENTION_DAYS,
+                    AnonymousCheckins::MAX_RETENTION_DAYS
+                );
+                //    The value shown must never be one this box forbids. An
+                //    organisation that chose 1000 days while that was allowed would
+                //    otherwise be shown value="1000" against max="90", which the
+                //    browser refuses to submit at all — a dead Save button, taking
+                //    the two visibility settings down with it. SettingLimit::effective()
+                //    is the capped answer and exists for exactly this.
+                $retentionShown = SettingLimit::effective(
+                    AnonymousCheckins::RETENTION_KEY,
+                    AnonymousCheckins::DEFAULT_RETENTION_DAYS,
+                    AnonymousCheckins::MAX_RETENTION_DAYS,
+                    true
+                );
+                ?>
+                <input type="number" min="<?php echo $mayChooseForEver === true ? 0 : 1; ?>" max="<?php echo $installationAllowsDays; ?>" class="form-control form-control-sm"
                        id="retentionDays" name="retentionDays"
-                       value="<?php echo (int) $effectiveRetention; ?>">
+                       value="<?php echo (int) $retentionShown; ?>">
                 <div class="form-text">
                     The technical detail is a scrambled version of the sender's internet address. It
                     is never shown anywhere. After this many days it is emptied out, while the counts,
                     the headcounts, how each check-in arrived and when it happened all stay exactly as
-                    they are. Enter <strong>0</strong> to keep the detail for ever.
+                    they are.
+                    <?php if ($mayChooseForEver === true): ?>
+                        Enter <strong>0</strong> to keep the detail for ever.
+                    <?php else: ?>
+                        <?php /* "appears to allow" when start-up never handed the installation layer
+                                  over. SettingLimit then falls back to the built-in default, which is the
+                                  SAFE direction for a refusal — allowing less is recoverable — but printing
+                                  it as a fact about another party's limit would be stating something this
+                                  page cannot know. The refusal still applies either way. */ ?>
+                        <br><strong>This installation <?php echo InstallationSettings::known() === true ? 'allows' : 'appears to allow'; ?>
+                        at most <?php echo $installationAllowsDays; ?> days</strong>,
+                        so keeping the detail for ever is not available here. You can choose any number up to
+                        that. Ask whoever runs this installation if you need longer.
+                    <?php endif; ?>
                 </div>
             </div>
 

@@ -72,6 +72,7 @@ use Portal\Core\AttendanceAccess;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
+use Portal\Core\SettingLimit;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -224,7 +225,7 @@ if (preg_match('/^\d{1,4}$/', $rawDays) !== 1) {
     exit();
 }
 $days = (int) $rawDays;
-if ($days < 0 || $days > 3650) {
+if ($days < 0 || $days > AnonymousCheckins::MAX_RETENTION_DAYS) {
     $_SESSION['flash_msg']  = 'The number of days has to be a whole number between 0 and 3650. '
         . 'Nothing was saved.';
     $_SESSION['flash_type'] = 'danger';
@@ -261,6 +262,51 @@ if ($scope === 'global') {
     $_SESSION['flash_msg']  = 'The installation-wide default was saved. Organisations that have chosen '
         . 'a setting of their own keep it.';
     $_SESSION['flash_type'] = 'success';
+    header('Location: ' . Site::url('admin/settings/attendance'));
+    exit();
+}
+
+// 🚧 THE INSTALLATION CAPS THE ORGANISATION (#668). An organisation may hold
+//    itself to a SHORTER retention than the installation allows; it may never
+//    choose a longer one. Retention is a limit of exactly this shape and the
+//    privacy-relevant direction is an organisation choosing LONGER: this is
+//    personal data, and before 30 October 2026 an organisation's administrator
+//    could keep it for ten years on an installation whose administrator
+//    intended ninety days. The 0-to-3650 check above is a HARD MAXIMUM IN
+//    CODE, which is a different thing and does not express this rule.
+//
+//    This is asked ONLY on the organisation's branch. The installation-wide
+//    branch above is a global administrator setting the ceiling itself, which
+//    is the thing being capped against, so capping it against itself would
+//    stop them raising it.
+//
+//    IT REFUSES AND SAYS SO; it does not quietly shorten the number. Silently
+//    reducing a number somebody else typed is how a person comes to believe a
+//    limit is in force when it is not. And the refusal is RECORDED, because a
+//    request to exceed the installation's limit crosses a line between two
+//    parties who may be two different people.
+//
+//    0 means "keep for ever" here, so it is the LARGEST value there is rather
+//    than the smallest. THE POSTED NUMBER GOES IN EXACTLY AS TYPED and the
+//    last argument — `$zeroIsLargest` — tells SettingLimit to read it that
+//    way, at BOTH levels. Converting it here instead was wrong in both
+//    directions and the independent check found both within minutes: an
+//    installation that chose "for ever" refused every organisation save,
+//    including a tighter one, and an installation that chose ten years let an
+//    organisation store "for ever", which is longer. Never convert it in a
+//    handler; the rule is stated once, in that class.
+$retentionAllowed = SettingLimit::installationAllows(AnonymousCheckins::RETENTION_KEY, AnonymousCheckins::DEFAULT_RETENTION_DAYS, AnonymousCheckins::MAX_RETENTION_DAYS, true);
+$retentionRefusal = SettingLimit::whyNotAllowed($days, AnonymousCheckins::RETENTION_KEY, AnonymousCheckins::DEFAULT_RETENTION_DAYS, AnonymousCheckins::MAX_RETENTION_DAYS, true);
+if ($retentionRefusal !== '') {
+    Logger::activity(
+        'AttendanceRetentionRefused',
+        'Organisation ' . $siteId . ' asked to keep technical detail for '
+        . ($days === 0 ? 'ever' : $days . ' days')
+        . ', which is more than this installation allows (' . $retentionAllowed . ' days). Nothing was saved.',
+        $userId > 0 ? $userId : null
+    );
+    $_SESSION['flash_msg']  = SettingLimit::refusalWords($retentionRefusal, $retentionAllowed, 'days');
+    $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('admin/settings/attendance'));
     exit();
 }

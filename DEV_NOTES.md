@@ -11172,3 +11172,83 @@ served. Measured by planting, not reasoned about. It now reads
 satisfied by text that never runs (the QR host function, #623; a commented-out
 `require` in this very check), so treat "the text is present" as evidence of
 nothing.
+
+## A limit where 0 means "no limit" is the largest value, not the smallest (#668)
+
+**30 October 2026.** `min(merged, installation)` is the whole rule for a limit
+an organisation may tighten but not loosen, and it is correct — the merged value
+already is the organisation's own where it has a row and the installation's where
+it has not, so no query is needed to tell the two apart.
+
+Zero breaks it, and it is not a corner case: several of these settings use 0 for
+"keep for ever" or "no limit". Compared as a number it passes every limit,
+because 0 is less than everything.
+
+**Converting it in the handler is worse than not converting it.** The first
+version of this work converted only the POSTED number, in the one page, and the
+independent check broke it in both directions within minutes:
+
+* an installation that chose 0 — "keep for ever", which its own form offers —
+  got a ceiling of **0**, so every organisation save was refused, **including a
+  tighter one**. Thirty days was refused on an installation that allowed for
+  ever. And because the refusal ends the request before all three writes, the
+  organisation could not change its other two settings either.
+* an installation that chose 3650 — ten years, the most its form offers — let an
+  organisation store 0 and keep the data **for ever**, which is strictly longer,
+  because `3650 > 3650` is false.
+
+So the rule is stated once, in `SettingLimit`, read at **both** levels, and it
+cannot be expressed as arithmetic: **"for ever" is allowed only when the
+installation itself allows for ever.** Everything else is compared as days, with
+for-ever standing in as the hard maximum.
+
+Two consequences for a page:
+
+* **"What is the ceiling" and "may this organisation choose for ever" are
+  different questions**, and a page needs both. A box with `min="0"` offers
+  for-ever whatever its `max` says, so offering it where the installation forbids
+  it is a control whose own Save refuses it — the #675 fault.
+* **Never prefill a value the box's own `max` forbids.** An organisation that
+  chose 1000 days while that was allowed would be shown `value="1000"` against
+  `max="90"`, and the browser then refuses to submit the whole form — a dead Save
+  button with only a tooltip to explain it, taking every other setting on the
+  page down with it.
+
+## Four ways a text check passes on a gate that does nothing (#668)
+
+Section D of `setting-limit-selftest.php` reads the save handler as text, because
+sections A to C exercise the rule and cannot tell you a handler still calls it.
+Asking only whether the text is PRESENT passed on all four of these, each planted
+on its own and each measured:
+
+```
+if (false) { … }                     the whole gate off
+if ($refusal !== '' && false) { … }  the condition weakened
+refusal logs, never exits            it records "nothing was saved", then writes
+refusal clamps: $days = $allowed     it silently shortens instead of refusing
+```
+
+The third is the worst, because the activity log actively lies. The second is the
+shape `.claude/CLAUDE.md` names twice — and this file walked into it anyway,
+which is the argument for planting every time rather than trusting the warning.
+
+What closes it: pin the **whole condition** with a pattern, require the refusal
+block's own text to contain `exit();`, and require it NOT to assign to the number
+on the way past. Note `preg_match('/\$days\s*=/')` matches `$days === 0`, so an
+assignment test needs `=(?!=)` — that one failed on correct code first.
+
+And a text check still cannot prove the behaviour. This page has no HTTP test at
+all; `event-repeat-pages-selftest.php` K06–K08 does exactly that for the repeats
+page, and this handler deserves the same.
+
+## Check that a planted fault actually applied (#668)
+
+Third time this month. A plant removed `"    exit();\n"` from a block that had
+been sliced to END at the newline — so the string never matched, the file was
+unchanged, the test passed, and the plant was recorded as "not caught" when it had
+never been tried. The fix to the check it was testing was real and needed; the
+evidence for it was not.
+
+`assert` that the thing you meant to break is actually different afterwards. A
+plant that silently does nothing produces the most expensive kind of result: a
+guard believed to be unnecessary.

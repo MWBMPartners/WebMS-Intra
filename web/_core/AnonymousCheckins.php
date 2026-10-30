@@ -159,6 +159,29 @@ class AnonymousCheckins
      */
     public const DEFAULT_RETENTION_DAYS = 90;
 
+    /**
+     * 🚧 The most days this may ever be kept for, whatever is stored or posted.
+     *
+     * Ten years. A hard maximum IN CODE, which is a different thing from what
+     * an installation allows (#668): this stops a slip of the keyboard storing
+     * a nonsense number, while the installation's own value is what caps an
+     * ORGANISATION. The settings handler used the number 3650 in FOUR places
+     * before this constant existed (an earlier version of this line said
+     * three, counted wrong); it is named here so the handler, the limit check
+     * and any later reader cannot drift apart.
+     *
+     * TWO OF THOSE FOUR ARE STILL LITERAL, on purpose: the two messages that
+     * tell somebody "a whole number between 0 and 3650". A sentence reads
+     * better with the number in it than with a constant interpolated, and a
+     * message that disagreed with the constant would be a wording fault rather
+     * than a behaviour one. So this constant does NOT yet stop those two
+     * drifting; do not read the sentence above as saying it does.
+     *
+     * Note 0 means "keep for ever", so for any COMPARISON 0 has to be read as
+     * this number rather than as the smallest value. See the save handler.
+     */
+    public const MAX_RETENTION_DAYS = 3650;
+
     // -------------------------------------------------------------------------
     // 🧭 Who may see the figures
     // -------------------------------------------------------------------------
