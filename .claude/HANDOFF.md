@@ -23,45 +23,45 @@
 ## Where we are right now
 
 **Nothing is pushed.** `origin/claude/alpha-wip` was last updated on **27 October 2026** (`0e15afd`).
-Everything since exists only on this disk — **36 commits**, plus the sign-in hotfix on
-`hotfix/sign-in-1.4.2`. That includes **migrations 224 to 231**. The owner decided on 30 October, asked
-directly, that **nothing is pushed until the comprehensive Codex review**; do not offer again, and "it
-is only the working branch" is not a reason.
+Everything since exists only on this disk — **38 commits**, plus the sign-in hotfix on
+`hotfix/sign-in-1.4.2`, including **migrations 224 to 231**. The owner decided on 30 October, asked
+directly, that **nothing is pushed until the comprehensive Codex review**; do not offer again, and
+"it is only the working branch" is not a reason.
 
-**Nothing is in flight.** The tree is clean.
+**Nothing is in flight.** The tree is clean. **#668 is closed** (`6fa3516`, `d3b5889`).
 
 | # | Next up | Issue | Notes |
 |---|---|---|---|
-| 1 | Limits sweep, **part 2**: the tripwire + judge the other 30 settings | **#668** | Part 1 is `6fa3516`. The design question is answered on the issue: a tripwire works if it RESOLVES CONSTANTS, scoped to the 31 files that can write a per-organisation row |
-| 2 | #669, #670, #671, #672 | — | Not started |
-| 3 | Organisations already over the attendance limit | **#685** | Needs the owner: cap the reader, or show the installation's administrator who is over |
-| 4 | A job sends one organisation's support address to another's members | **#683** | From #677's check |
-| 5 | No page sets the installation's support address | **#684** | From #677's check |
-| 6 | `/error.php` has no icon; home-screen icons unguarded | **#682** | From #680's check |
-| 7 | Should a department approver export their departments' claims? | **#681** | Needs the owner first |
+| 1 | A repeating series' feed sends the pattern only, so a cancelled or moved single date is invisible to subscribers | **#670** | A correctness bug: wrong data reaching people outside the portal |
+| 2 | Offsite backup needs a command line and rclone, so it does nothing on shared hosting | **#671** | Against the product's whole premise — no CLI, no Composer |
+| 3 | Change the pattern of an existing repeating series | **#669** | A feature |
+| 4 | Nothing drains the transcription queue | **#672** | An enhancement |
+| 5 | Decisions waiting on the owner | **#681, #685, #687** | See "Waiting on the owner" below |
+| 6 | Found and raised, not built | **#682, #683, #684, #686** | Each has its own issue |
 
 **Migrations:** the highest in `web/_sql/` is **231**. Allocate **232 upward**.
 
 **Throwaway database:** container `p675-mysql`, port 33675, root password `p675pw`, several
-`selftest_*` databases loaded from `full_schema.sql`. `docker rm -vf p675-mysql` when done; name the
-next one after its own work.
+`selftest_*` databases loaded from `full_schema.sql`. `docker rm -vf p675-mysql` when done.
 
-### The four lessons from this run, in the order they cost the most
+### The five lessons from this run, worst first
 
-1. **Run the EXISTING tests of the page you are changing, not only the one you write.** #677 reached
-   its independent check with `portal-address-selftest.php` failing 5 of 93 — a CI-wired test of that
-   exact card — while the package's own new test passed throughout. The mechanical gate cannot catch
-   it: it is `php -l` plus `tools/audit-checks/`, and the self-tests are not in it. Do
-   `ls tools/*selftest*.php`, find the ones touching your files, run them.
-2. **A text check passes on a disabled gate.** Four shapes, all measured: `if (false)`, `&& false`
-   added, a refusal that logs "nothing was saved" then writes anyway, and one that silently clamps.
-   Pin the WHOLE condition; require the block to `exit()`; require it not to assign to the value.
-3. **Check that a planted fault actually applied.** A plant whose replacement string had a trailing
-   newline the sliced block did not left the file unchanged, the test green, and the guard recorded as
-   unnecessary. Third time this month.
-4. **A page inherits only `$mysqli` and `$SETTINGS`.** `$SETTINGS_INSTALLATION` reads as null in a
-   page, silently, and the page then states the opposite of the truth. Use
-   `InstallationSettings::layer()` — or `SettingLimit`, which does it for you.
+1. **Run the EXISTING tests of what you change, not only the one you write.** #677 reached its
+   independent check with `portal-address-selftest.php` failing 5 of 93 — a CI-wired test of that
+   exact page. The mechanical gate cannot catch it: it is `php -l` plus `tools/audit-checks/`, and
+   the self-tests are not in it. `ls tools/*selftest*.php`, find the ones touching your files, run
+   them.
+2. **A text check passes on a disabled gate**, in four shapes: `if (false)`, `&& false`, a refusal
+   that logs "nothing was saved" then writes anyway, and one that silently clamps. Pin the WHOLE
+   condition; require the block to `exit()`; require it not to assign to the value.
+3. **A check that cries wolf gets switched off** — so count the false alarms before wiring one in.
+   The #668 tripwire produced four across three versions, two of them pages that cannot commit the
+   fault at all.
+4. **Check that a planted fault actually applied.** Twice this run a plant silently did nothing and
+   the guard was recorded as unnecessary.
+5. **Every number in a justification can be wrong while the justification is right.** A docstring
+   argued its design with three figures and all three were false. Measure them with the code the
+   comment is about.
 
 ---
 
