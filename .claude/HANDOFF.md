@@ -22,74 +22,77 @@
 
 ## Where we are right now
 
+**The tree is clean and nothing is in flight.** Pick up at #671.
+
 **Nothing is pushed.** `origin/claude/alpha-wip` was last updated on **27 October 2026** (`0e15afd`).
-Everything since exists only on this disk — **38 commits**, plus the sign-in hotfix on
+Everything since exists only on this disk — **40 commits**, plus the sign-in hotfix on
 `hotfix/sign-in-1.4.2`, including **migrations 224 to 231**. The owner decided on 30 October, asked
 directly, that **nothing is pushed until the comprehensive Codex review**; do not offer again, and
 "it is only the working branch" is not a reason.
 
-**Nothing is in flight.** The tree is clean. **#668 is closed** (`6fa3516`, `d3b5889`).
+### The queue
 
 | # | Next up | Issue | Notes |
 |---|---|---|---|
-| 1 | A repeating series' feed sends the pattern only, so a cancelled or moved single date is invisible to subscribers | **#670** | A correctness bug: wrong data reaching people outside the portal |
-| 2 | Offsite backup needs a command line and rclone, so it does nothing on shared hosting | **#671** | Against the product's whole premise — no CLI, no Composer |
-| 3 | Change the pattern of an existing repeating series | **#669** | A feature |
-| 4 | Nothing drains the transcription queue | **#672** | An enhancement |
-| 5 | Decisions waiting on the owner | **#681, #685, #687** | See "Waiting on the owner" below |
-| 6 | Found and raised, not built | **#682, #683, #684, #686** | Each has its own issue |
+| 1 | **Offsite backup needs a command line and rclone, so it does nothing on shared hosting** | **#671** | Not started. Against the product's whole premise — no CLI, no Composer |
+| 2 | Change the pattern of a repeating series that already exists | **#669** | Not started. A feature |
+| 3 | Nothing drains the transcription queue on its own | **#672** | Not started |
+| 4 | Then the wider open list | #660–#667 and below | Nothing from this run is left half-done |
+
+**Closed this run:** #673, #678, #676, #569, #675, #677, #680, #668 (both parts), #670.
+**Raised this run and not built:** #681, #682, #683, #684, #685, #686, #687 — each has its own issue.
 
 **Migrations:** the highest in `web/_sql/` is **231**. Allocate **232 upward**.
 
-**Throwaway database:** container `p675-mysql`, port 33675, root password `p675pw`, several
-`selftest_*` databases loaded from `full_schema.sql`. `docker rm -vf p675-mysql` when done.
+**A throwaway database is still up:** container `p675-mysql`, port 33675, root password `p675pw`,
+holding several `selftest_*` databases loaded from `full_schema.sql`. Remove it with
+`docker rm -vf p675-mysql` (that `-v` matters: a plain `docker rm` leaves the data behind). Name the
+next one after its own work. Dangling volumes were 0 at the end of this run.
 
 ### The five lessons from this run, worst first
 
 1. **Run the EXISTING tests of what you change, not only the one you write.** #677 reached its
    independent check with `portal-address-selftest.php` failing 5 of 93 — a CI-wired test of that
-   exact page. The mechanical gate cannot catch it: it is `php -l` plus `tools/audit-checks/`, and
-   the self-tests are not in it. `ls tools/*selftest*.php`, find the ones touching your files, run
-   them.
-2. **A text check passes on a disabled gate**, in four shapes: `if (false)`, `&& false`, a refusal
-   that logs "nothing was saved" then writes anyway, and one that silently clamps. Pin the WHOLE
-   condition; require the block to `exit()`; require it not to assign to the value.
-3. **A check that cries wolf gets switched off** — so count the false alarms before wiring one in.
+   exact page — while my own new test passed throughout. The mechanical gate cannot catch it: it is
+   `php -l` plus `tools/audit-checks/`, and the self-tests are NOT in it. Do
+   `ls tools/*selftest*.php`, find the ones touching your files, and run them before calling a
+   package done.
+2. **A text check passes on a disabled gate**, in four measured shapes: `if (false)`, `&& false`
+   added to the condition, a refusal that logs "nothing was saved" and then writes anyway, and one
+   that silently clamps. Pin the WHOLE condition; require the block to `exit()`; require it not to
+   assign to the value on the way past.
+3. **A check that cries wolf gets switched off — so count the false alarms before wiring one in.**
    The #668 tripwire produced four across three versions, two of them pages that cannot commit the
    fault at all.
 4. **Check that a planted fault actually applied.** Twice this run a plant silently did nothing and
    the guard was recorded as unnecessary.
 5. **Every number in a justification can be wrong while the justification is right.** A docstring
-   argued its design with three figures and all three were false. Measure them with the code the
-   comment is about.
+   argued its design with three figures and all three were false. Measure them with the same code
+   the comment is about.
 
 ---
 
 ## Waiting on the owner
 
-1. **Apply the proposed `~/.claude/settings.json`** — prepared in this session's scratchpad with a
-   README. It restores **three guards recorded as "DONE and PROVED" on 5 October 2026 that do not
-   exist**: the deny rules for force-push and hard reset, the deny rules for `docker volume prune`
-   and `docker system prune`, and `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=6`. There is no
-   `permissions` block and no `env` block in that file at all. It also pre-approves
-   `gh issue close`. **I cannot write it — refused as self-modification, which is correct.** Needs a
-   restart to take effect. Tracked as **#678**.
-2. **#564: a two-character fix, approved 25 September, never applied.** `tools/watchdog.sh:63` has
-   no `-L`, so a watchdog pointed at a symbolic link fires immediately. It waited five weeks because
-   the session that recorded the approval was a cloud session that could not reach this Mac. Also
+1. **Apply the proposed `~/.claude/settings.json`** — prepared in a session scratchpad with a README.
+   It restores **three guards recorded as "DONE and PROVED" on 5 October 2026 that do not exist**:
+   the deny rules for force-push and hard reset, the deny rules for `docker volume prune` and
+   `docker system prune`, and `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=6`. That file has no
+   `permissions` block and no `env` block at all. **I cannot write it — refused as
+   self-modification, which is correct.** Needs a restart. Tracked as **#678**.
+2. **#564: a two-character fix, approved 25 September, never applied.** `tools/watchdog.sh` has no
+   `-L`, so a watchdog pointed at a symbolic link fires immediately. Also
    **`~/.claude/bin/watchdog.sh` does not exist**, so "keep both copies identical" has one copy.
-3. **Close the rest of the finished issues.** 17 were closed on 30 October. **Not** closed, because
+3. **Three decisions raised this run**, each with its own issue and the options written out:
+   **#687** (may a hosting provider bound how long an organisation keeps donor names and addresses —
+   the one case where capping is the DANGEROUS direction), **#685** (organisations already over the
+   attendance retention limit), **#681** (may a department approver export their own departments'
+   claims). **#679** is still open from before.
+4. **Close the rest of the finished issues.** 17 were closed on 30 October. **Not** closed, because
    I could not verify every part had landed: the roll-out set (#510, #535, #545, #547, #568, #570,
    #563, #478, #534, #488) and #499 / #500 / #502. They need a check, not a guess.
-4. **The public history rewrite** — settled in principle, not done. See the 13 October decision
+5. **The public history rewrite** — settled in principle, not done. See the 13 October decision
    below. It happens ONCE, just before the pull request.
-
-**The erasure questions are now resolved or raised.** Checked against the code on 30 October rather
-than trusting the prose that carried them: **two of the three were already built on 12 October
-2026** — the five columns the database would not let be empty were made emptiable, and
-`tblInvitation.acceptedByID` is deleted with its person. The live record is `KNOWN_STILL_NAMED` in
-`tools/gdpr-eraser-selftest.php`, which lists just ONE such column (`tblExpenseClaims.userID`).
-Only `tblWorkflowSteps.assigneeValue` was genuinely open, and it is now **#679**.
 
 ---
 
@@ -97,6 +100,16 @@ Only `tblWorkflowSteps.assigneeValue` was genuinely open, and it is now **#679**
 
 Newest first. **Policy, never archived.** Full original wording for anything before 30 October is in
 `.claude/history/HANDOFF-archive-to-2026-10-30.md`.
+
+**30 October 2026 (later) — six answers, do not re-ask.** **#675:** leave
+`api.expenses.export.enabled` unseeded and document the working page route; fix the Export button's
+visibility so it is offered only to people the download serves. **#677:** the nine `org.*` keys and
+`portal.support.email` become per-organisation with a migration copying the installation's values
+down, the support address falling back to the installation's; an ordinary administrator may save the
+address card while `site.url` stays global-administrator-only. **#670:** the calendar feed's
+FALLBACK is the answer — a series whose dates no longer match its pattern is published one date at a
+time, and `EXDATE`/`RECURRENCE-ID` overrides are NOT wanted. Three more are written up as issues
+rather than decided: #681, #685, #687.
 
 **30 October 2026 — records, and four queue answers.** One job per document and nothing not-done in
 prose only (#678; written into `.claude/CLAUDE.md`). #675: seed `expenses/export`, document it **and
