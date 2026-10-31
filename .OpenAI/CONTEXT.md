@@ -800,6 +800,103 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     `import-notifier-selftest.php`. The technical record is DEV_NOTES.md,
     "Outside calendars (#514)".
 
+    **Changing a repeating series' pattern (#669, migration 232).**
+    `Portal\Core\SeriesRepattern` is the ONE place that decides what a
+    pattern change does: it takes FACTS and returns a plan (re-time, add,
+    remove, leave alone with a reason), opens no connection and has no clock
+    of its own, so the preview page and the handler that applies it cannot
+    disagree. **A date that stays is UPDATED IN PLACE — only its start and
+    finish — and that is the whole design:** it keeps a hand-changed title,
+    venue or description safe without having to detect those changes at all,
+    and re-creating instead would destroy every attached record through the
+    CASCADE rules. **Pairing is by the DAY, never the time**, which is why
+    one rule covers all four operations. `patternStart` AND `patternEnd`
+    record where the pattern put each date, so "moved by hand" is WORKED OUT
+    rather than remembered; **both are compared, and comparing the start
+    alone let a hand-lengthened service be silently shortened again** while
+    the docblock promised it caught "a changed TIME". A move must write BOTH
+    or every date reads as hand-edited next time and the page stops working
+    after one use. `updatedAt` cannot stand in, because `ON UPDATE
+    CURRENT_TIMESTAMP` means the bulk-edit page already moves it. Neither
+    column is backfilled — claiming every existing date is untouched would
+    move exactly the dates they protect — and an unrecorded date falls back
+    to re-reading the series' current rule, which judges the START only and
+    is the only reason the feature works on an installation that already has
+    series. **The recorded origin wins over the rule when both could
+    answer.** `SeriesRepattern::ATTACHMENTS` names all **34** tables that
+    NAME an event and is the only thing stopping a change hiding a date that
+    carries a register; it LOOKS complete whatever is in it, so
+    `tools/audit-checks/check_series_attachments_complete.py` is a hard gate
+    failing BOTH ways. **A FOREIGN KEY IS NOT HOW EVERY TABLE SAYS IT, and
+    building the list from the schema's keys is how the two most sensitive
+    tables were missed:** `tblEventRSVPs` (`eventID INT NOT NULL`, no key,
+    holding every member's going/maybe/no answer — the thing the owner's
+    decision names out loud) and `tblZoomMeeting`. The check now looks for
+    the `eventID` COLUMN, excluding a table whose own auto-increment key is
+    called that (`tblWebhookEvent`). Its docstring had asserted "nothing in
+    this schema does that today (checked)" — written WITHOUT checking, and
+    false. Two parsing traps too, each got wrong first: a key can be
+    declared by `ALTER TABLE` (that is how `tblAttendanceSessions` gets its,
+    and a walk-back-to-CREATE parser blamed `tblEvents` AND missed it), and
+    comments must be stripped before matching. **With no foreign key the
+    schema never stops an event row being deleted out from under these two.
+    Be precise about what that costs, measured rather than reasoned: this
+    page SOFT-deletes, no ON DELETE rule fires on an UPDATE, so all three
+    values behave IDENTICALLY here - every attached row survives pointing at
+    a date nobody can see, for all 34 tables. `'no rule'` is the worst of
+    the three only if something later really DELETEs the row.** A date the
+    pattern ADDS takes the series' name, venue and settings and NONE of one
+    date's own history: never born cancelled, and carrying no cancellation
+    reason, moderation note or submitter name and e-mail — the copy took
+    every column but four, and `GdprEraser` clears neither `submitterName`
+    nor `submitterEmail` on `tblEvents`, so those copies could not have been
+    erased on request. **Its address is asked of the database, never built
+    from the date's position in the add list:** `uq_event_site_slug` covers
+    SOFT-DELETED rows, so a day removed and re-added collided and the whole
+    change was rolled back for ever, intermittently. The old rule row is
+    ALWAYS removed and a new one written only when the series then holds
+    exactly the pattern's dates — otherwise subscribers see each date on its
+    own (#670), which is the usual outcome and is said in the success
+    message. The remedy link for a date left alone is `?edit=`, because
+    `calendar/manage/index.php` reads that and reads `eventID` NOWHERE.
+    **`(string)` on a numeric array key is load-bearing:** PHP makes `'1'
+    =>` an INT, and under `strict_types` `htmlspecialchars(int)` is a
+    TypeError — the page rendered most of its form, threw, and the error
+    handler printed the footer, so the answer was HTTP 200 ending in an
+    ordinary `</html>` with the preview silently missing, invisible to `php
+    -l` and to every audit script. **And the gap worth keeping: removing the
+    "did they press confirm" test failed NOTHING**, because the only request
+    carrying a plan fingerprint was one that also confirmed — yet the hidden
+    fingerprint sits in the same form, so a real browser's second "Show me
+    what would change" would have applied the change. A guard never
+    exercised alone is not covered. A date the pattern ADDS also takes NO
+    registration window - the template's `registrationClosesAt` is a moment
+    just before the TEMPLATE's own date, so a date added weeks later arrived
+    with registration already closed, and both register pages treat that
+    column as a hard gate. `registrationEnabled` is given its DEFAULT and
+    not NULL, because it is `NOT NULL` and binding null fails the whole
+    INSERT. The added date's `timezone` is the zone the READINGS were made
+    in, never the template's. **And never say a hidden date can be put back:
+    there is no restore path anywhere in this repository (#691), only
+    `FeedImporter` ever clears `isDeleted`.** Tests:
+    `tools/series-repattern-selftest.php` (72, no database) and sections R
+    and S of `tools/event-repeat-pages-selftest.php` (247 over HTTP; it
+    needed a third, non-administrator account because both existing ones are
+    admins). **SIX of its checks were VACUOUS and planting found every
+    one:** two passed on the rule row written at CREATION time; one pinned
+    the recorded finish on a change that re-timed nothing; the slug check
+    removed dates the SAVE HANDLER had named, whose addresses cannot collide
+    with the page's; the "last entry in the constant" claim was false
+    (`tblEventRSVPs` is 33rd of 34, so a loop stopping ONE table short still
+    passed); the zone check could not fail while every event in the test
+    world shared one zone; and the Zoom check attached a record to a date an
+    earlier check had already removed. First, 33rd and LAST entries are
+    exercised now - a loop skipping a MIDDLE table is still not caught, and
+    the wording says so. Nothing covers two administrators racing on one
+    series; the attachment list is re-asked inside the transaction, which
+    closes the administrator-versus-door-steward window only. The technical
+    record is DEV_NOTES.md, "Changing a repeating series' pattern (#669)".
+
     **The installer asks for an ownership code (#499, #500).**
     `web/_install/owner_code.php` is the ONE place a code is written, counted
     and compared (`hash_equals()`); nothing is shown or acted on without it, and

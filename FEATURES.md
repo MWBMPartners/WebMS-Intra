@@ -345,9 +345,38 @@ Events, series, RSVP, exports, and seven view modes.
     (`/admin/settings/repeats`): a number of dates and how far ahead. Whichever is reached first stops it,
     and the person is told it was cut short so they can extend it later. **The installation's limit caps an
     organisation's** — an organisation may choose lower, never higher (#668).
-  - **Not yet:** changing the PATTERN of a series that already exists (shifting or extending a whole run).
-    Repeats are offered on creation only, rather than half-offered. Custom rules are storable but nothing
-    generates dates from them.
+  - **Changing the pattern of a series that already exists** (#669), at
+    `/admin` → Calendar → Manage → Series → the repeat button, or
+    `/calendar/manage/series-repattern`. Shift every future date half an hour later, go weekly to
+    fortnightly, extend a run that stopped at the ceiling, or cut the rest of one short — all from the
+    one rule that pairs an existing date with a new one **by the day**.
+    - **Nothing is written until a preview has been confirmed.** The preview is four lists: re-timed,
+      added, removed, and left exactly as they are with the reason for each. The confirmation carries
+      a fingerprint of the preview it was given, so if anybody touches the series in between the
+      change is refused and the new preview is shown instead.
+    - **A future date with anything attached to it is never moved and never removed** — attendance,
+      an open register, a registration, an invitation, a booked room, a child checked in, a service
+      plan, a roster, a stream, a document, equipment booked out — and whether people have said they
+      are coming. Thirty-four tables name an event, every one of them is on the list, and an
+      automatic check keeps that list honest against the schema. Such a date is listed with what is
+      attached to it and a link to change it by hand.
+    - **A date somebody moved by hand is left alone too.** Which dates those are is *worked out*
+      rather than remembered: migration 232 records the moment the pattern produced each date, and
+      anything that no longer sits there was moved by a person. Dates created before that migration
+      are judged against the series' own stored pattern instead, so this works on an installation
+      that already has series in it.
+    - **A date that stays is re-timed in place** — only its start and finish change, so a
+      hand-changed title, venue or description is never at risk. **A date that goes is hidden, not
+      deleted**, so nothing cascades and an administrator can put it back.
+    - **A date the pattern adds starts clean.** It takes the series' name, venue, category and
+      settings, and none of what belongs to one date's own history: it is never created already
+      cancelled, and carries no cancellation reason, moderation note or submitter details.
+    - Two dates of one series on the same day are both left alone: there is no honest way to say
+      which one the pattern means. A pattern date in the past is never back-filled.
+    - Afterwards the series keeps its published repeating rule **only if it now holds exactly the
+      dates that pattern makes**. Otherwise the rule is withdrawn and subscribers see each date on
+      its own — the #670 decision, and the usual outcome for any series that has already started.
+  - **Not yet:** custom rules are storable but nothing generates dates from them.
 - RSVP system (#88) — capacity, waitlist, confirmation emails.
 - iCal export (`/calendar/export`). The feed people subscribe to and the download carry each event's own time
   zone and its stored time; a personal feed is on the holder's own organisation's clock (#604).

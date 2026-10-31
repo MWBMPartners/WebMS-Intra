@@ -278,6 +278,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                    class="btn btn-sm btn-outline-success" title="Bulk edit events in this series">
                     <i class="fa-solid fa-pen-ruler"></i>
                 </a>
+                <!-- 🔁 Changing the whole series' pattern (#669). A separate
+                     page from the bulk edit beside it, because it adds and
+                     removes dates rather than changing fields on the ones
+                     that are there, and so has to be previewed first. -->
+                <a href="<?php echo htmlspecialchars(Site::url('calendar/manage/series-repattern'), ENT_QUOTES, 'UTF-8'); ?>?seriesID=<?php echo (int) $s['seriesID']; ?>"
+                   class="btn btn-sm btn-outline-info" title="Change how often this series repeats">
+                    <i class="fa-solid fa-repeat"></i>
+                </a>
                 <button class="btn btn-sm btn-outline-primary portal-edit-series-btn" data-bs-toggle="modal" data-bs-target="#editSeriesModal"
                         data-id="<?php echo (int) $s['seriesID']; ?>"
                         data-name="<?php echo htmlspecialchars($s['seriesName'], ENT_QUOTES, 'UTF-8'); ?>"

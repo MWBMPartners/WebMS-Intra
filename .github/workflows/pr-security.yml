@@ -1303,6 +1303,31 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_event_status_matches_column.py --selftest
 
+      # Every table that points at an event must be named in
+      # SeriesRepattern::ATTACHMENTS (#669). That constant is the only thing
+      # stopping a series pattern change from hiding a date which carries
+      # somebody's attendance, a booked room, a child's check-in or a
+      # registration — and it is the worst possible shape for a safety list,
+      # because it LOOKS complete whatever is in it. Add a table with an
+      # eventID COLUMN and say nothing, and its rows become invisible to that
+      # page: the first pattern change afterwards hides the dates they hang
+      # off, nothing fails, and nothing is logged.
+      #
+      # THE COLUMN, NOT A FOREIGN KEY. The first version of this list was built
+      # from the schema's foreign keys, and two tables name an event without
+      # one - tblEventRSVPs, which holds every member's going/maybe/no answer,
+      # and tblZoomMeeting. Both were missing from it as a result.
+      #
+      # A hard gate, because there is nothing to weigh up. The check fails
+      # BOTH ways — a table missing from the constant, and an entry naming a
+      # table that no longer has such a key — and the second direction is the
+      # one that makes a list rot quietly, which is how the migration
+      # harness's own exception lists went stale unnoticed.
+      - name: 'Every table pointing at an event is accounted for (hard gate, #669)'
+        id: series_attachments_complete
+        if: always()
+        run: python3 -I tools/audit-checks/check_series_attachments_complete.py
+
       # =====================================================================
       # Summary in the Actions UI
       # =====================================================================

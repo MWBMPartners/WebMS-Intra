@@ -33,8 +33,11 @@
  *
  * WHAT IT DOES NOT COVER, said plainly
  * -----------------------------------------------------------------------------
- *   • Changing the pattern of a series that already exists. The form offers
- *     repeats on CREATION only, deliberately, so there is nothing to test.
+ *   • Two administrators changing the same series' pattern at the same moment.
+ *     Section R checks that a confirmation is refused when the series has moved
+ *     under it, but it does so by moving the series ITSELF between the two
+ *     requests — the built-in server runs one worker here, so a genuine overlap
+ *     is impossible and a test of one would pass on broken code.
  *   • Two people creating the same series at once. The built-in server runs
  *     with one worker here (PHP_CLI_SERVER_WORKERS is unset), so two requests
  *     never overlap and such a test would pass on broken code.
@@ -161,6 +164,7 @@ const OTHER = 918002;   // another organisation on the same installation, whose 
 const OTHER_SERIES = 918501;
 const ADMIN = 918011;   // an administrator of the organisation: creates the events
 const PLAIN = 918012;   // an ordinary administrator for the settings-page checks
+const MEMBER = 918013;  // NOT an administrator at all: section R checks the page refuses them
 const ZONE  = 'Europe/London';
 
 /**
@@ -405,6 +409,20 @@ foreach ([ADMIN => 'Ada Admin', PLAIN => 'Pat Plain'] as $id => $name) {
         [$id, ORG]
     );
 }
+// 👤 An ordinary member, deliberately NOT an administrator. Section R checks
+//    that the pattern page refuses them — both the page and a post straight at
+//    it, because a gate that only hides a button is not a gate (#675).
+q(
+    'INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, 0)',
+    'iss',
+    [MEMBER, 'Mo Member', 'u' . MEMBER . '.evrep@selftest.invalid']
+);
+q(
+    'INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)',
+    'ii',
+    [MEMBER, ORG]
+);
+
 siteSetting(ORG, 'calendar.enabled', 'true');
 
 // 🌐 Organisations told apart by the first part of the address, so this run's
@@ -422,7 +440,7 @@ foreach (['multisite.enabled' => 'true', 'multisite.detectionMode' => 'path'] as
 
 $password = bin2hex(random_bytes(12)) . 'Aa1!';
 $hash     = password_hash($password, PASSWORD_DEFAULT);
-foreach (['admin' => ADMIN, 'plain' => PLAIN] as $who => $id) {
+foreach (['admin' => ADMIN, 'plain' => PLAIN, 'member' => MEMBER] as $who => $id) {
     q(
         'INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified) VALUES (?, ?, ?, 1)',
         'iss',
@@ -562,7 +580,7 @@ $signIn = static function (string $who) use (&$jar, $child, $sep, $password): ar
         'password'   => $password,
     ]);
 };
-foreach (['admin', 'plain'] as $who) {
+foreach (['admin', 'plain', 'member'] as $who) {
     $in = $signIn($who);
     if ($in['status'] !== 302 || str_contains($in['location'], 'login') === true) {
         refuse("signing in as selftest-evrep-{$who} did not work (HTTP {$in['status']} {$in['location']})");
@@ -2386,6 +2404,1063 @@ ok(
     && str_contains($allBody, 'UID:event-' . (int) ($uidRun[3]['eventID'] ?? 0) . '@') === false,
     'the entry is identified by a later occurrence, so it will change as dates pass'
 );
+
+// =============================================================================
+// R. Changing the pattern of a series that already exists (#669)
+// =============================================================================
+// Repeats used to be offered on CREATION only, so this section is the other
+// half of the feature. It drives /calendar/manage/series-repattern over real
+// HTTP and then reads the rows back out of the database, because a preview can
+// say anything — what matters is what is in the diary afterwards.
+//
+// `tools/series-repattern-selftest.php` proves the DECISION with no database:
+// which dates may be moved, added, removed or left alone. This section proves
+// the page really does what the decision says, and that nothing is written
+// before somebody confirms it.
+head('R. Changing the pattern of a series that already exists (#669)');
+
+/** Every row of a named series, soft-deleted ones included. */
+function repatRows(string $name): array
+{
+    return q(
+        'SELECT eventID, eventName, eventSlug, startDateTime, endDateTime, patternStart, patternEnd, isDeleted, '
+        . 'deletedAt, seriesID, locationName, categoryID, timezone, status '
+        . 'FROM tblEvents WHERE siteID = ? AND eventName = ? ORDER BY startDateTime, eventID',
+        'is',
+        [ORG, $name]
+    );
+}
+
+/** Just the starts of the rows still live. */
+function repatLiveStarts(string $name): array
+{
+    $out = [];
+    foreach (repatRows($name) as $row) {
+        if ((int) $row['isDeleted'] === 0) {
+            $out[] = (string) $row['startDateTime'];
+        }
+    }
+
+    return $out;
+}
+
+/** Open the repattern page for one series, with a fresh form token. */
+function repatOpen(string $jar, int $seriesId): array
+{
+    $page = req($jar, 'GET', '/calendar/manage/series-repattern?seriesID=' . $seriesId);
+
+    return [
+        'status' => $page['status'],
+        'body'   => $page['body'],
+        'token'  => token($page['body']),
+        'digest' => preg_match('/name="planDigest" value="([0-9a-f]{64})"/', $page['body'], $m) === 1 ? $m[1] : '',
+    ];
+}
+
+/**
+ * Post a pattern to the page.
+ *
+ * The token is taken fresh from the page first, every time, because
+ * `Auth::verifyCsrf()` replaces it on every acceptance.
+ *
+ * @param array<string,string> $fields
+ */
+function repatPost(string $jar, int $seriesId, array $fields, bool $confirm = false, ?string $digest = null): array
+{
+    $page = repatOpen($jar, $seriesId);
+    $post = array_merge(
+        ['csrf_token' => $page['token'], 'seriesID' => (string) $seriesId],
+        $fields
+    );
+    if ($confirm === true) {
+        $post['confirm']    = '1';
+        $post['planDigest'] = $digest ?? '';
+    }
+    $sent = req($jar, 'POST', '/calendar/manage/series-repattern', $post);
+
+    return [
+        'status'   => $sent['status'],
+        'location' => $sent['location'],
+        'body'     => $sent['body'],
+        'digest'   => preg_match('/name="planDigest" value="([0-9a-f]{64})"/', $sent['body'], $m) === 1 ? $m[1] : '',
+    ];
+}
+
+/** The series number a named set of events belongs to. */
+function repatSeries(string $name): int
+{
+    $row = one(
+        'SELECT seriesID FROM tblEvents WHERE siteID = ? AND eventName = ? AND seriesID IS NOT NULL LIMIT 1',
+        'is',
+        [ORG, $name]
+    );
+
+    return $row === null ? 0 : (int) $row['seriesID'];
+}
+
+// -----------------------------------------------------------------------------
+// R1 — the create handler records where the pattern put each date.
+// -----------------------------------------------------------------------------
+// Migration 232's column, filled by the save handler. Without it every date
+// would read as "origin not recorded" and the page would fall back to
+// re-reading the rule — which works, but is the weaker of the two answers.
+createEvent($jar['admin'], 'EVREP Repat shift', '2029-01-07T10:00', '2029-01-07T11:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '4',
+]);
+$shiftRows = repatRows('EVREP Repat shift');
+ok('R01 the weekly series was created with four dates', count($shiftRows) === 4, (string) count($shiftRows));
+$allMarked = true;
+foreach ($shiftRows as $row) {
+    if ((string) $row['patternStart'] !== (string) $row['startDateTime']) {
+        $allMarked = false;
+    }
+}
+ok('R02 every date records where the pattern put it, equal to its own start', $allMarked,
+    implode(' | ', array_map(static fn (array $r): string => (string) $r['patternStart'] . ' vs ' . (string) $r['startDateTime'], $shiftRows)));
+
+$shiftSeries = repatSeries('EVREP Repat shift');
+ok('R03 those dates belong to a series', $shiftSeries > 0, (string) $shiftSeries);
+
+// -----------------------------------------------------------------------------
+// R4 — the page opens, and offers the controls the handler reads.
+// -----------------------------------------------------------------------------
+$open = repatOpen($jar['admin'], $shiftSeries);
+ok('R04 the page opens for an administrator', $open['status'] === 200, 'HTTP ' . $open['status']);
+foreach (['patternStart', 'patternEnd', 'repeatFrequency', 'repeatCount', 'repeatUntil', 'repeatDays[]', 'repeatMonthlyMode', 'repeatWeekOfMonth'] as $field) {
+    ok("R05 the form offers {$field}", str_contains($open['body'], 'name="' . $field . '"'));
+}
+ok('R06 it says plainly that only future dates change',
+    str_contains(text($open['body']), 'Only dates in the future are ever changed'));
+
+// -----------------------------------------------------------------------------
+// R7 — A PREVIEW WRITES NOTHING. The whole design rests on this.
+// -----------------------------------------------------------------------------
+$before  = repatRows('EVREP Repat shift');
+$preview = repatPost($jar['admin'], $shiftSeries, [
+    'patternStart'    => '2029-01-07T10:30',
+    'patternEnd'      => '2029-01-07T11:30',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '4',
+]);
+ok('R07 the preview answers 200', $preview['status'] === 200, 'HTTP ' . $preview['status']);
+if (getenv('EVREP_DEBUG_R') !== false) {
+    echo "---- preview body alerts ----\n";
+    if (preg_match_all('/<div class="alert alert-(\w+)[^"]*">(.*?)<\/div>/s', $preview['body'], $mm, PREG_SET_ORDER) > 0) {
+        foreach ($mm as $hit) { echo '  [' . $hit[1] . '] ' . mb_substr(trim(text($hit[2])), 0, 300) . "\n"; }
+    } else { echo "  (no alert boxes)\n"; }
+    echo '  has "What would change": ' . (str_contains($preview['body'], 'What would change') ? 'yes' : 'no') . "\n";
+    echo '  has the form at all: ' . (str_contains($preview['body'], 'name="repeatFrequency"') ? 'yes' : 'no') . "\n";
+    echo '  body length: ' . strlen($preview['body']) . "\n";
+    echo '  selected frequency: ' . (preg_match('/value="(\w+)"\s*selected/', $preview['body'], $sf) === 1 ? $sf[1] : '?') . "\n";
+    echo '  patternStart value shown: ' . (preg_match('/id="patternStart"[^>]*value="([^"]*)"/', $preview['body'], $ps) === 1 ? $ps[1] : '?') . "\n";
+    echo "---- end ----\n";
+}
+ok('R08 the preview says four dates would be re-timed',
+    preg_match('/Re-timed\s*<span class="badge bg-primary">4<\/span>/', $preview['body']) === 1);
+ok('R09 the preview offers a confirm button', str_contains($preview['body'], 'Make these changes'));
+ok('R10 THE PREVIEW CHANGED NOTHING IN THE DATABASE', repatRows('EVREP Repat shift') === $before);
+ok('R11 the preview carries a fingerprint of itself', $preview['digest'] !== '');
+
+// 🧠 A SECOND PREVIEW MUST STILL WRITE NOTHING, even though it carries the
+//    first preview's fingerprint. This is not a contrived case: the hidden
+//    fingerprint field sits inside the SAME form as the pattern boxes, so a
+//    real browser pressing "Show me what would change" again posts it — and
+//    does NOT post `confirm`, because that is the name of the other button.
+//
+//    Added after planting: dropping the `confirm` requirement altogether was
+//    caught by NOTHING in this section, because the only request carrying a
+//    fingerprint was one that also asked to confirm. The fingerprint check was
+//    quietly doing both jobs, so the gate that is supposed to mean "they
+//    pressed the right button" could be removed without a single check
+//    noticing.
+$beforeSecond = repatRows('EVREP Repat shift');
+$second       = repatPost($jar['admin'], $shiftSeries, [
+    'patternStart'    => '2029-01-07T10:30',
+    'patternEnd'      => '2029-01-07T11:30',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '4',
+    'planDigest'      => $preview['digest'],
+]);
+ok('R11b a second preview carrying the fingerprint WRITES NOTHING, because it did not confirm',
+    repatRows('EVREP Repat shift') === $beforeSecond);
+ok('R11c and it shows the preview again rather than a success message',
+    str_contains($second['body'], 'Make these changes'));
+
+// -----------------------------------------------------------------------------
+// R12 — confirming applies it, and only the times move.
+// -----------------------------------------------------------------------------
+// Taken BEFORE the change, so R18b can tell a rule this page wrote from the
+// one the create handler left behind.
+$ruleBeforeShift = (int) (ruleOfSeries($shiftSeries)['ruleID'] ?? 0);
+$done = repatPost($jar['admin'], $shiftSeries, [
+    'patternStart'    => '2029-01-07T10:30',
+    'patternEnd'      => '2029-01-07T11:30',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '4',
+], true, $preview['digest']);
+ok('R12 confirming redirects away from the form', $done['status'] === 302, 'HTTP ' . $done['status']);
+$after = repatRows('EVREP Repat shift');
+ok('R13 all four dates now start at 10:30',
+    repatLiveStarts('EVREP Repat shift') === ['2029-01-07 10:30:00', '2029-01-14 10:30:00', '2029-01-21 10:30:00', '2029-01-28 10:30:00'],
+    implode(', ', repatLiveStarts('EVREP Repat shift')));
+ok('R14 each date ends at 11:30 too',
+    count(array_filter($after, static fn (array $r): bool => str_ends_with((string) $r['endDateTime'], '11:30:00'))) === 4);
+// 🧠 The recorded origin MOVES WITH the date. If it did not, every date would
+//    read as hand-moved the next time somebody changed the pattern, and the
+//    second change would silently do nothing at all.
+ok('R15 the recorded origin moved with the dates',
+    count(array_filter($after, static fn (array $r): bool => (string) $r['patternStart'] === (string) $r['startDateTime'])) === 4,
+    implode(' | ', array_map(static fn (array $r): string => (string) $r['patternStart'], $after)));
+// 🧠 AND THE RECORDED FINISH, which is the half a vacuous check missed. The
+//    first attempt at this pinned it on a series whose pattern change re-timed
+//    NOTHING, so leaving `patternEnd` behind on a move passed every check. It
+//    belongs here, on the one change that really does re-time four dates and
+//    give them a new finish — 11:30 where they ended at 11:00.
+//
+//    Getting this wrong is the opposite fault to the one comparing the finish
+//    was added to fix: a stale `patternEnd` makes every date this page re-times
+//    read as hand-edited next time, so the page would silently stop working
+//    after one use.
+ok('R15b the recorded FINISH moved with them too',
+    count(array_filter($after, static fn (array $r): bool => (string) $r['patternEnd'] === (string) $r['endDateTime'])) === 4,
+    implode(' | ', array_map(static fn (array $r): string => (string) $r['patternEnd'] . ' vs ' . (string) $r['endDateTime'], $after)));
+// Not vacuous: the finish really did change, so R15b is comparing against a
+// value that moved rather than one that happened to stay put.
+ok('R15c and that finish is the new one, not the old',
+    count(array_filter($after, static fn (array $r): bool => str_ends_with((string) $r['patternEnd'], '11:30:00'))) === 4);
+ok('R16 the name and venue were not touched',
+    count(array_filter($after, static fn (array $r): bool => (string) $r['locationName'] === 'The selftest hall')) === 4);
+ok('R17 nothing was removed', count(array_filter($after, static fn (array $r): bool => (int) $r['isDeleted'] === 1)) === 0);
+// The series holds exactly the new pattern's dates, so the feed may still
+// publish one repeating entry.
+//
+// 🧠 THE ROW'S IDENTITY, NOT ITS MERE EXISTENCE. The first version of these two
+// checks asked only whether a rule was there and whether it promised four
+// dates — and both passed while the page was broken, because the rule written
+// when the series was CREATED was still sitting there saying exactly that. A
+// check satisfied by a row the change never touched is not a check. So the old
+// row's number is taken first, and the new one must be a different row.
+$shiftRule = ruleOfSeries($shiftSeries);
+ok('R18 the series keeps a rule, because it holds exactly the pattern\'s dates', $shiftRule !== null);
+ok('R18b and it is a NEW rule row, written by this change rather than left over',
+    $shiftRule !== null && (int) $shiftRule['ruleID'] > $ruleBeforeShift,
+    ($shiftRule === null ? 'no rule' : 'ruleID ' . (string) $shiftRule['ruleID']) . ', was ' . $ruleBeforeShift);
+ok('R19 and that rule promises four dates, not more',
+    $shiftRule !== null && (int) $shiftRule['maxOccurrences'] === 4,
+    $shiftRule === null ? 'no rule' : (string) $shiftRule['maxOccurrences']);
+ok('R19b and its first date is the re-timed one',
+    $shiftRule !== null && (string) $shiftRule['startDate'] === '2029-01-07',
+    $shiftRule === null ? 'no rule' : (string) $shiftRule['startDate']);
+
+// -----------------------------------------------------------------------------
+// R20 — A DATE WITH ATTENDANCE AGAINST IT IS NEVER REMOVED.
+// -----------------------------------------------------------------------------
+// The headline refusal. Over thirty tables cascade off an event, so removing a
+// date takes its attendance register with it.
+createEvent($jar['admin'], 'EVREP Repat attached', '2029-02-04T09:00', '2029-02-04T10:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+]);
+$attachedRows   = repatRows('EVREP Repat attached');
+$attachedSeries = repatSeries('EVREP Repat attached');
+ok('R20 the series for the attachment check has three dates', count($attachedRows) === 3, (string) count($attachedRows));
+
+$secondDate = (int) $attachedRows[1]['eventID'];
+// tblEventAttendance is keyed by the EVENT, not by the organisation, and has
+// no status column — the row's existence is the attendance.
+q(
+    'INSERT INTO tblEventAttendance (eventID, userID, dayDate, markedByID) VALUES (?, ?, ?, ?)',
+    'iisi',
+    [$secondDate, ADMIN, '2029-02-11', ADMIN]
+);
+ok('R21 one attendance mark now exists against the middle date',
+    (int) one('SELECT COUNT(*) AS n FROM tblEventAttendance WHERE eventID = ?', 'i', [$secondDate])['n'] === 1);
+
+// Cut the run to ONE date: the pattern now wants neither of the other two.
+$shrink = repatPost($jar['admin'], $attachedSeries, [
+    'patternStart'    => '2029-02-04T09:00',
+    'patternEnd'      => '2029-02-04T10:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '1',
+]);
+ok('R22 the preview says only ONE date would be removed, not two',
+    preg_match('/Removed\s*<span class="badge bg-danger">1<\/span>/', $shrink['body']) === 1);
+ok('R23 and it names the record that protects the other one',
+    str_contains(text($shrink['body']), 'attendance has been marked'));
+
+repatPost($jar['admin'], $attachedSeries, [
+    'patternStart'    => '2029-02-04T09:00',
+    'patternEnd'      => '2029-02-04T10:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '1',
+], true, $shrink['digest']);
+$attachedAfter = repatRows('EVREP Repat attached');
+ok('R24 THE DATE CARRYING ATTENDANCE IS STILL LIVE',
+    count(array_filter($attachedAfter, static fn (array $r): bool => (int) $r['eventID'] === $secondDate && (int) $r['isDeleted'] === 0)) === 1);
+ok('R25 its attendance mark survived',
+    (int) one('SELECT COUNT(*) AS n FROM tblEventAttendance WHERE eventID = ?', 'i', [$secondDate])['n'] === 1);
+ok('R26 the third date was removed', count(array_filter($attachedAfter, static fn (array $r): bool => (int) $r['isDeleted'] === 1)) === 1);
+// 🧠 REMOVED MEANS HIDDEN, NOT DELETED. The row is still there, so nothing
+//    cascaded and an administrator can put it back.
+ok('R27 the removed date is still a row, with a deletion time',
+    count($attachedAfter) === 3
+    && count(array_filter($attachedAfter, static fn (array $r): bool => (int) $r['isDeleted'] === 1 && $r['deletedAt'] !== null)) === 1);
+ok('R28 the rule was withdrawn, because the series no longer matches one pattern',
+    ruleOfSeries($attachedSeries) === null);
+
+// -----------------------------------------------------------------------------
+// R29 — a date somebody moved by hand is not dragged back onto the pattern.
+// -----------------------------------------------------------------------------
+createEvent($jar['admin'], 'EVREP Repat byhand', '2029-03-04T09:00', '2029-03-04T10:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+]);
+$byHandRows   = repatRows('EVREP Repat byhand');
+$byHandSeries = repatSeries('EVREP Repat byhand');
+$movedByHand  = (int) $byHandRows[1]['eventID'];
+// Moved to a different time of day, leaving its recorded origin alone — which
+// is exactly what the ordinary edit page does.
+q('UPDATE tblEvents SET startDateTime = ?, endDateTime = ? WHERE eventID = ?', 'ssi',
+    ['2029-03-11 18:00:00', '2029-03-11 19:00:00', $movedByHand]);
+
+$byHand = repatPost($jar['admin'], $byHandSeries, [
+    'patternStart'    => '2029-03-04T09:30',
+    'patternEnd'      => '2029-03-04T10:30',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+]);
+ok('R29 the preview says the hand-moved date is left alone',
+    str_contains(text($byHand['body']), 'it was moved by hand'));
+ok('R30 only the other two would be re-timed',
+    preg_match('/Re-timed\s*<span class="badge bg-primary">2<\/span>/', $byHand['body']) === 1);
+repatPost($jar['admin'], $byHandSeries, [
+    'patternStart'    => '2029-03-04T09:30',
+    'patternEnd'      => '2029-03-04T10:30',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+], true, $byHand['digest']);
+$byHandAfter = one('SELECT startDateTime FROM tblEvents WHERE eventID = ?', 'i', [$movedByHand]);
+ok('R31 THE HAND-MADE CHANGE SURVIVED THE PATTERN CHANGE',
+    (string) $byHandAfter['startDateTime'] === '2029-03-11 18:00:00',
+    (string) $byHandAfter['startDateTime']);
+
+// -----------------------------------------------------------------------------
+// R32 — extending a run, and the dates it adds are full copies.
+// -----------------------------------------------------------------------------
+createEvent($jar['admin'], 'EVREP Repat extend', '2029-04-01T14:00', '2029-04-01T15:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '2',
+]);
+$extendSeries = repatSeries('EVREP Repat extend');
+$extend       = repatPost($jar['admin'], $extendSeries, [
+    'patternStart'    => '2029-04-01T14:00',
+    'patternEnd'      => '2029-04-01T15:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '4',
+]);
+ok('R32 the preview says two dates would be added',
+    preg_match('/Added\s*<span class="badge bg-success">2<\/span>/', $extend['body']) === 1);
+repatPost($jar['admin'], $extendSeries, [
+    'patternStart'    => '2029-04-01T14:00',
+    'patternEnd'      => '2029-04-01T15:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '4',
+], true, $extend['digest']);
+$extendAfter = repatRows('EVREP Repat extend');
+ok('R33 the series now holds four dates',
+    repatLiveStarts('EVREP Repat extend') === ['2029-04-01 14:00:00', '2029-04-08 14:00:00', '2029-04-15 14:00:00', '2029-04-22 14:00:00'],
+    implode(', ', repatLiveStarts('EVREP Repat extend')));
+// 🧠 A NEW DATE IS A FULL EVENT, not a stub. The column list for the copy is
+//    read from the database rather than typed, so this check is what proves
+//    that really happens — a stub would be missing the venue and the category.
+$newOnes = array_values(array_filter($extendAfter, static fn (array $r): bool => in_array((string) $r['startDateTime'], ['2029-04-15 14:00:00', '2029-04-22 14:00:00'], true)));
+ok('R34 both new dates exist', count($newOnes) === 2, (string) count($newOnes));
+ok('R35 each new date carries the venue',
+    count(array_filter($newOnes, static fn (array $r): bool => (string) $r['locationName'] === 'The selftest hall')) === 2);
+ok('R36 each new date carries the time zone',
+    count(array_filter($newOnes, static fn (array $r): bool => (string) $r['timezone'] === ZONE)) === 2);
+ok('R37 each new date is in the same series',
+    count(array_filter($newOnes, static fn (array $r): bool => (int) $r['seriesID'] === $extendSeries)) === 2);
+ok('R38 each new date ends an hour after it starts',
+    count(array_filter($newOnes, static fn (array $r): bool => str_ends_with((string) $r['endDateTime'], '15:00:00'))) === 2);
+ok('R39 each new date records where the pattern put it',
+    count(array_filter($newOnes, static fn (array $r): bool => (string) $r['patternStart'] === (string) $r['startDateTime'])) === 2);
+ok('R40 each new date has its own address',
+    count(array_unique(array_map(static fn (array $r): string => (string) $r['eventSlug'], $extendAfter))) === count($extendAfter));
+ok('R41 and none of them is hidden',
+    count(array_filter($newOnes, static fn (array $r): bool => (int) $r['isDeleted'] === 0)) === 2);
+
+// -----------------------------------------------------------------------------
+// R42 — the confirmation is checked against the preview it was given.
+// -----------------------------------------------------------------------------
+// Two administrators on one series is the ordinary case. The person agreed to a
+// SPECIFIC list of changes, so if the series moves under them the change must
+// be refused rather than applied to a different world.
+createEvent($jar['admin'], 'EVREP Repat race', '2029-05-06T08:00', '2029-05-06T09:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+]);
+$raceSeries = repatSeries('EVREP Repat race');
+$racePrev   = repatPost($jar['admin'], $raceSeries, [
+    'patternStart'    => '2029-05-06T08:30',
+    'patternEnd'      => '2029-05-06T09:30',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+]);
+ok('R42 the preview says three dates would be re-timed',
+    preg_match('/Re-timed\s*<span class="badge bg-primary">3<\/span>/', $racePrev['body']) === 1);
+// Somebody else hides one of them in the meantime.
+$raceRows = repatRows('EVREP Repat race');
+q('UPDATE tblEvents SET isDeleted = 1, deletedAt = NOW() WHERE eventID = ?', 'i', [(int) $raceRows[2]['eventID']]);
+$raceStale = repatPost($jar['admin'], $raceSeries, [
+    'patternStart'    => '2029-05-06T08:30',
+    'patternEnd'      => '2029-05-06T09:30',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+], true, $racePrev['digest']);
+ok('R43 a confirmation that no longer matches is refused', $raceStale['status'] === 200, 'HTTP ' . $raceStale['status']);
+ok('R44 and it says the series changed while they were looking at it',
+    str_contains(text($raceStale['body']), 'changed while you were looking at it'));
+ok('R45 NOTHING WAS WRITTEN by the refused confirmation',
+    repatLiveStarts('EVREP Repat race') === ['2029-05-06 08:00:00', '2029-05-13 08:00:00'],
+    implode(', ', repatLiveStarts('EVREP Repat race')));
+// 🧠 An EMPTY fingerprint must be refused too, not treated as "no check
+//    needed". `hash_equals('', '')` is true, which is exactly how the OAuth
+//    `state` hole of 27 October 2026 worked.
+$raceEmpty = repatPost($jar['admin'], $raceSeries, [
+    'patternStart'    => '2029-05-06T08:30',
+    'patternEnd'      => '2029-05-06T09:30',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+], true, '');
+ok('R46 a confirmation with an EMPTY fingerprint is refused',
+    str_contains(text($raceEmpty['body']), 'changed while you were looking at it'));
+ok('R47 and that wrote nothing either',
+    repatLiveStarts('EVREP Repat race') === ['2029-05-06 08:00:00', '2029-05-13 08:00:00'],
+    implode(', ', repatLiveStarts('EVREP Repat race')));
+
+// -----------------------------------------------------------------------------
+// R48 — the refusals that keep the page honest.
+// -----------------------------------------------------------------------------
+// A pattern anchored in the past can change nothing, because a date that has
+// happened is always left alone. Refusing says so; allowing it would show an
+// empty preview and look like a fault.
+$pastAnchor = repatPost($jar['admin'], $shiftSeries, [
+    'patternStart'    => '2020-01-05T10:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+]);
+ok('R48 a pattern starting in the past is refused with the reason',
+    str_contains(text($pastAnchor['body']), 'has to start in the future'));
+ok('R49 and it offers no confirm button', str_contains($pastAnchor['body'], 'Make these changes') === false);
+
+// A frequency the generator cannot use.
+$noFreq = repatPost($jar['admin'], $shiftSeries, [
+    'patternStart'    => '2029-06-03T10:00',
+    'repeatFrequency' => 'whenever',
+    'repeatCount'     => '3',
+]);
+ok('R50 a frequency the portal does not know is refused',
+    str_contains(text($noFreq['body']), 'Choose how often'));
+
+// Another organisation's series. There is no foreign key tying a series to an
+// organisation, so the database would accept this.
+$foreign = repatOpen($jar['admin'], OTHER_SERIES);
+ok('R51 another organisation\'s series cannot be opened', $foreign['status'] === 302, 'HTTP ' . $foreign['status']);
+ok('R52 and the refusal does not say whether it exists',
+    str_contains($foreign['body'], 'Other org series') === false);
+$foreignPost = req($jar['admin'], 'POST', '/calendar/manage/series-repattern', [
+    'csrf_token'      => $open['token'],
+    'seriesID'        => (string) OTHER_SERIES,
+    'patternStart'    => '2029-07-01T10:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '2',
+    'confirm'         => '1',
+]);
+ok('R53 posting another organisation\'s series number changes nothing there',
+    (int) one('SELECT COUNT(*) AS n FROM tblEvents WHERE seriesID = ?', 'i', [OTHER_SERIES])['n'] === 0
+    && $foreignPost['status'] === 302,
+    'HTTP ' . $foreignPost['status']);
+
+// A form token that is missing or wrong.
+$noToken = req($jar['admin'], 'POST', '/calendar/manage/series-repattern', [
+    'seriesID'        => (string) $shiftSeries,
+    'patternStart'    => '2029-08-05T10:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '2',
+]);
+ok('R54 a post with no form token is refused', str_contains(text($noToken['body']), 'had expired'));
+ok('R55 and the series was not touched',
+    repatLiveStarts('EVREP Repat shift') === ['2029-01-07 10:30:00', '2029-01-14 10:30:00', '2029-01-21 10:30:00', '2029-01-28 10:30:00'],
+    implode(', ', repatLiveStarts('EVREP Repat shift')));
+
+// -----------------------------------------------------------------------------
+// R56 — a series holding an imported event is not ours to re-pattern.
+// -----------------------------------------------------------------------------
+// `FeedImporter` is the ONE writer of an imported event (#514). The guard is
+// in the page's own SELECT, so it is proved here by making one.
+$importFeed = (int) (one('SELECT MAX(feedID) AS m FROM tblExternalFeeds')['m'] ?? 0) + 1;
+q(
+    "INSERT INTO tblExternalFeeds (feedID, siteID, name, url, isActive) VALUES (?, ?, 'EVREP repat feed', 'https://example.invalid/r.ics', 1)",
+    'ii',
+    [$importFeed, ORG]
+);
+q(
+    'UPDATE tblEvents SET externalFeedID = ?, externalUid = ? WHERE eventID = ?',
+    'isi',
+    [$importFeed, 'evrep-repat-imported', (int) $byHandRows[2]['eventID']]
+);
+$withImported = repatOpen($jar['admin'], $byHandSeries);
+ok('R56 a series holding an imported date cannot be re-patterned', $withImported['status'] === 302, 'HTTP ' . $withImported['status']);
+q('UPDATE tblEvents SET externalFeedID = NULL, externalUid = NULL WHERE eventID = ?', 'i', [(int) $byHandRows[2]['eventID']]);
+q('DELETE FROM tblExternalFeeds WHERE feedID = ?', 'i', [$importFeed]);
+ok('R57 and it opens again once that date is no longer imported',
+    repatOpen($jar['admin'], $byHandSeries)['status'] === 200);
+
+// -----------------------------------------------------------------------------
+// R58 — somebody who is not an administrator cannot reach it at all.
+// -----------------------------------------------------------------------------
+// #675's lesson: a page with no gate beyond being signed in gave four of six
+// account kinds a bare refusal only when they pressed the button. This page
+// adds and removes events in bulk, so the gate is worth pinning.
+$asMember = repatOpen($jar['member'], $shiftSeries);
+ok('R58 an ordinary member is refused the page', $asMember['status'] === 403, 'HTTP ' . $asMember['status']);
+$memberPost = req($jar['member'], 'POST', '/calendar/manage/series-repattern', [
+    'csrf_token'      => $open['token'],
+    'seriesID'        => (string) $shiftSeries,
+    'patternStart'    => '2029-09-02T10:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '2',
+    'confirm'         => '1',
+]);
+ok('R59 and a member POSTING straight to it is refused too', $memberPost['status'] === 403, 'HTTP ' . $memberPost['status']);
+ok('R60 which wrote nothing',
+    repatLiveStarts('EVREP Repat shift') === ['2029-01-07 10:30:00', '2029-01-14 10:30:00', '2029-01-21 10:30:00', '2029-01-28 10:30:00'],
+    implode(', ', repatLiveStarts('EVREP Repat shift')));
+
+// -----------------------------------------------------------------------------
+// R61 — the series list offers the page at all.
+// -----------------------------------------------------------------------------
+// A feature nothing links to is a feature nobody has. #675 again.
+$seriesList = req($jar['admin'], 'GET', '/calendar/manage/series');
+ok('R61 the series list links to the pattern page',
+    str_contains($seriesList['body'], 'calendar/manage/series-repattern'));
+
+// =============================================================================
+// S. What the independent check of 31 October 2026 found, now guarded (#669)
+// =============================================================================
+// Six real problems, five of them reachable over HTTP. Every check in this
+// section exists because the first version of this page got that thing wrong,
+// so each one is a tripwire over a fault that really happened rather than a
+// hypothetical.
+head('S. What the independent check found, now guarded (#669)');
+
+// -----------------------------------------------------------------------------
+// S1 — A DATE CARRYING AN RSVP IS NEVER REMOVED.
+// -----------------------------------------------------------------------------
+// The headline finding. `SeriesRepattern::ATTACHMENTS` was built from the
+// schema's FOREIGN KEY declarations, and `tblEventRSVPs` has NO foreign key —
+// its `eventID` is a plain NOT NULL column. So the list that exists to protect
+// records silently missed the table holding every member's going/maybe/no
+// answer, which is one of the things the owner's decision of 31 October names
+// out loud. The page offered to remove such a date with no reason beside it.
+//
+// 🧠 THIS CHECK DOES A SECOND JOB, and it is the reason the table was chosen.
+//    Section R only ever creates a `tblEventAttendance` row, which is the FIRST
+//    entry in the constant — so a one-line
+//    `if ($table !== 'tblEventAttendance') { continue; }` in the page's
+//    attachment loop passed all 202 checks while making thirty-odd kinds of
+//    record invisible to it.
+//
+//    BE EXACT ABOUT THE COVERAGE, because the first version of this comment was
+//    not: it claimed `tblEventRSVPs` was the LAST entry and that protecting a
+//    date through it was what made such a plant fail. `tblEventRSVPs` is entry
+//    33 of 34; the last is `tblZoomMeeting`, and a loop stopping ONE table
+//    short still passed every check. Measured by the independent check, which
+//    planted exactly that.
+//
+//    So three entries are exercised now — the FIRST (`tblEventAttendance`, in
+//    section R), the 33rd (`tblEventRSVPs`, here) and the LAST
+//    (`tblZoomMeeting`, below). WHAT IS STILL NOT COVERED: a loop that skips
+//    some table in the MIDDLE. Nothing here can see that, and no honest wording
+//    pretends otherwise — `check_series_attachments_complete.py` guards the
+//    LIST against the schema, not the page against the list.
+createEvent($jar['admin'], 'EVREP Repat rsvp', '2029-06-03T09:00', '2029-06-03T10:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+]);
+$rsvpRows   = repatRows('EVREP Repat rsvp');
+$rsvpSeries = repatSeries('EVREP Repat rsvp');
+ok('S01 the series for the RSVP check has three dates', count($rsvpRows) === 3, (string) count($rsvpRows));
+
+$rsvpDate = (int) $rsvpRows[1]['eventID'];
+q(
+    'INSERT INTO tblEventRSVPs (eventID, userID, siteID, response, guestCount, status) '
+    . "VALUES (?, ?, ?, 'going', 0, 'confirmed')",
+    'iii',
+    [$rsvpDate, ADMIN, ORG]
+);
+ok('S02 one RSVP now exists against the middle date',
+    (int) one('SELECT COUNT(*) AS n FROM tblEventRSVPs WHERE eventID = ?', 'i', [$rsvpDate])['n'] === 1);
+
+$rsvpShrink = repatPost($jar['admin'], $rsvpSeries, [
+    'patternStart'    => '2029-06-03T09:00',
+    'patternEnd'      => '2029-06-03T10:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '1',
+]);
+ok('S03 the preview offers to remove only ONE date, not two',
+    preg_match('/Removed\s*<span class="badge bg-danger">1<\/span>/', $rsvpShrink['body']) === 1);
+ok('S04 and it names the RSVPs as what protects the other',
+    str_contains(text($rsvpShrink['body']), 'people have said whether they are coming'));
+
+repatPost($jar['admin'], $rsvpSeries, [
+    'patternStart'    => '2029-06-03T09:00',
+    'patternEnd'      => '2029-06-03T10:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '1',
+], true, $rsvpShrink['digest']);
+ok('S05 THE DATE CARRYING AN RSVP IS STILL LIVE',
+    (int) one('SELECT isDeleted FROM tblEvents WHERE eventID = ?', 'i', [$rsvpDate])['isDeleted'] === 0);
+// 🧠 With no foreign key nothing cascades, so the RSVP row does not even go: it
+//    would be left pointing at a date nobody can see. That is why 'no rule' is
+//    the most dangerous of the three ON DELETE values, not the mildest.
+ok('S06 and its RSVP still points at a date that is really there',
+    (int) one(
+        'SELECT COUNT(*) AS n FROM tblEventRSVPs r JOIN tblEvents e ON e.eventID = r.eventID '
+        . 'WHERE r.eventID = ? AND e.isDeleted = 0',
+        'i',
+        [$rsvpDate]
+    )['n'] === 1);
+
+// 🔚 AND THE LAST ENTRY IN THE CONSTANT, `tblZoomMeeting`. A booked Zoom
+//    meeting also names its event with no foreign key, so it is the other half
+//    of the same fault — and being last, it is what a loop stopping one table
+//    short would miss.
+$zoomAccount = (int) (one('SELECT MAX(accountID) AS m FROM tblZoomAccount')['m'] ?? 0) + 1;
+q(
+    "INSERT INTO tblZoomAccount (accountID, siteID, zoomUserId, refreshTokenEnc) VALUES (?, ?, 'evrep-zoom', 'x')",
+    'ii',
+    [$zoomAccount, ORG]
+);
+// 🧠 ITS OWN SERIES, deliberately. The first version attached the meeting to the
+//    third date of the RSVP series — which the shrink just above had already
+//    removed — so the check was asking about a date that was hidden before it
+//    began. An ordering coupling between two checks in one section is the
+//    quietest way to make both meaningless.
+createEvent($jar['admin'], 'EVREP Repat zoom', '2029-06-05T20:00', '2029-06-05T21:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '2',
+]);
+$zoomSeries = repatSeries('EVREP Repat zoom');
+$zoomRows   = repatRows('EVREP Repat zoom');
+$zoomDate   = (int) $zoomRows[1]['eventID'];
+q(
+    "INSERT INTO tblZoomMeeting (siteID, eventID, accountID, zoomMeetingId, joinUrl, isRecurring) "
+    . "VALUES (?, ?, ?, '900900900', 'https://example.invalid/j/900900900', 0)",
+    'iii',
+    [ORG, $zoomDate, $zoomAccount]
+);
+ok('S06b a Zoom meeting now exists against the second date of its own series',
+    (int) one('SELECT COUNT(*) AS n FROM tblZoomMeeting WHERE eventID = ?', 'i', [$zoomDate])['n'] === 1);
+
+$zoomShrink = repatPost($jar['admin'], $zoomSeries, [
+    'patternStart'    => '2029-06-05T20:00',
+    'patternEnd'      => '2029-06-05T21:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '1',
+]);
+ok('S06c the preview names the Zoom meeting as what protects that date',
+    str_contains(text($zoomShrink['body']), 'a Zoom meeting is booked for it'));
+ok('S06d and so it offers to remove nothing at all',
+    preg_match('/Removed\s*<span class="badge bg-danger">/', $zoomShrink['body']) !== 1);
+repatPost($jar['admin'], $zoomSeries, [
+    'patternStart'    => '2029-06-05T20:00',
+    'patternEnd'      => '2029-06-05T21:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '1',
+], true, $zoomShrink['digest']);
+ok('S06e THE DATE CARRYING A ZOOM MEETING IS STILL LIVE',
+    (int) one('SELECT isDeleted FROM tblEvents WHERE eventID = ?', 'i', [$zoomDate])['isDeleted'] === 0);
+
+// -----------------------------------------------------------------------------
+// S7 — SHORTEN THEN EXTEND AGAIN. The address of a removed date is kept.
+// -----------------------------------------------------------------------------
+// `uq_event_site_slug (siteID, eventSlug)` applies to soft-deleted rows too, and
+// a date this page hides keeps its address for ever. The first version built an
+// address from the series' stem, the date and the date's POSITION in the add
+// list, so re-adding a day that had been removed collided: the whole change was
+// rolled back and the administrator was told "Something went wrong … please try
+// again", which retrying could never cure. It was intermittent, because the
+// position in the list changes from one run to the next.
+createEvent($jar['admin'], 'EVREP Repat slug', '2029-07-01T11:00', '2029-07-01T12:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '2',
+]);
+$slugSeries = repatSeries('EVREP Repat slug');
+$slugFields = [
+    'patternStart'    => '2029-07-01T11:00',
+    'patternEnd'      => '2029-07-01T12:00',
+    'repeatFrequency' => 'weekly',
+];
+
+/** Apply one pattern to the slug series: preview, then confirm it. */
+$slugApply = static function (string $count) use ($jar, $slugSeries, $slugFields): array {
+    $prev = repatPost($jar['admin'], $slugSeries, $slugFields + ['repeatCount' => $count]);
+    return repatPost($jar['admin'], $slugSeries, $slugFields + ['repeatCount' => $count], true, $prev['digest']);
+};
+
+// 🧠 THE ORDER OF THESE THREE CHANGES IS THE WHOLE POINT, and getting it wrong
+//    is why the first version of this section caught NOTHING.
+//
+//    The collision is between two addresses THIS PAGE builds. A date created by
+//    the save handler gets `<slug>-2`, `<slug>-3` … so removing one of those and
+//    re-adding the day cannot clash — the page's own address for that day has a
+//    different shape. Planting the old position-based address back passed all
+//    226 checks against a series whose removed dates came from the save handler.
+//
+//    So the series must be EXTENDED first, which is what gives two days an
+//    address built by this page; then shortened, which hides them while they keep
+//    those addresses for ever; then extended again over the same two days.
+$slugApply('4');
+ok('S07 extending to four dates worked',
+    repatLiveStarts('EVREP Repat slug') === ['2029-07-01 11:00:00', '2029-07-08 11:00:00', '2029-07-15 11:00:00', '2029-07-22 11:00:00'],
+    implode(', ', repatLiveStarts('EVREP Repat slug')));
+$pageBuilt = [];
+foreach (repatRows('EVREP Repat slug') as $row) {
+    if (in_array((string) $row['startDateTime'], ['2029-07-15 11:00:00', '2029-07-22 11:00:00'], true) === true) {
+        $pageBuilt[] = (string) $row['eventSlug'];
+    }
+}
+ok('S08 the two added dates have addresses this page built', count($pageBuilt) === 2, implode(', ', $pageBuilt));
+
+$slugApply('2');
+ok('S09 shortening back to two dates worked',
+    repatLiveStarts('EVREP Repat slug') === ['2029-07-01 11:00:00', '2029-07-08 11:00:00'],
+    implode(', ', repatLiveStarts('EVREP Repat slug')));
+ok('S10 and the two hidden dates kept those addresses',
+    count(array_filter(
+        repatRows('EVREP Repat slug'),
+        static fn (array $r): bool => (int) $r['isDeleted'] === 1 && in_array((string) $r['eventSlug'], $pageBuilt, true)
+    )) === 2);
+
+$regrown = $slugApply('4');
+ok('S11 RE-EXTENDING OVER THE SAME TWO DAYS SUCCEEDS', $regrown['status'] === 302, 'HTTP ' . $regrown['status']);
+ok('S12 and the series really holds four live dates again',
+    repatLiveStarts('EVREP Repat slug') === ['2029-07-01 11:00:00', '2029-07-08 11:00:00', '2029-07-15 11:00:00', '2029-07-22 11:00:00'],
+    implode(', ', repatLiveStarts('EVREP Repat slug')));
+ok('S12b every address in that series is unique, hidden rows included',
+    count(array_unique(array_map(static fn (array $r): string => (string) $r['eventSlug'], repatRows('EVREP Repat slug'))))
+    === count(repatRows('EVREP Repat slug')));
+// 🧠 Not vacuous: the failure mode being guarded is a rolled-back change, so
+//    prove the page did not merely refuse quietly. Six rows means four live and
+//    the two originally hidden — the re-added days are NEW rows, because the
+//    hidden ones keep their own addresses.
+ok('S12c the two days really came back as new rows rather than being un-hidden',
+    count(repatRows('EVREP Repat slug')) === 6, (string) count(repatRows('EVREP Repat slug')));
+
+// -----------------------------------------------------------------------------
+// S13 — A NEW DATE IS NEVER BORN CANCELLED, and carries nobody's details.
+// -----------------------------------------------------------------------------
+// The copy took EVERY column of the template row but four. So an administrator
+// who had cancelled one week by hand — the ordinary reason to cancel one week —
+// then extended the run and silently got new dates that were ALREADY CANCELLED,
+// carrying that date's cancellation reason and the name of whoever cancelled it.
+//
+// And the privacy half: `submitterName`/`submitterEmail` are free text for a
+// member of the public who submitted an event, and `GdprEraser::catalogue()`
+// clears neither column on `tblEvents` — so the copies could not have been
+// erased on request.
+createEvent($jar['admin'], 'EVREP Repat history', '2029-08-05T19:00', '2029-08-05T20:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '2',
+]);
+$histSeries = repatSeries('EVREP Repat history');
+$histRows   = repatRows('EVREP Repat history');
+q(
+    "UPDATE tblEvents SET status = 'cancelled', cancelReason = ?, statusChangedByID = ?, statusChangedAt = NOW(), "
+    . "submissionStatus = 'approved', submitterName = ?, submitterEmail = ?, submittedAt = NOW(), moderatedByID = ?, "
+    . 'moderationNote = ? WHERE eventID = ?',
+    'sissisi',
+    [
+        'Boiler broken this week only',
+        ADMIN,
+        'Jo Public',
+        'jo.public@selftest.invalid',
+        ADMIN,
+        'let through on the nod',
+        (int) $histRows[0]['eventID'],
+    ]
+);
+ok('S13 the first date is now cancelled by hand, with a submitter against it',
+    (string) one('SELECT status FROM tblEvents WHERE eventID = ?', 'i', [(int) $histRows[0]['eventID']])['status'] === 'cancelled');
+
+$histFields = [
+    'patternStart'    => '2029-08-05T19:00',
+    'patternEnd'      => '2029-08-05T20:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '4',
+];
+$histPrev = repatPost($jar['admin'], $histSeries, $histFields);
+repatPost($jar['admin'], $histSeries, $histFields, true, $histPrev['digest']);
+
+$born = q(
+    'SELECT eventID, status, cancelReason, statusChangedByID, statusChangedAt, submissionStatus, submitterName, '
+    . 'submitterEmail, submittedAt, moderatedByID, moderationNote, createdByID '
+    . 'FROM tblEvents WHERE siteID = ? AND eventName = ? AND startDateTime IN (?, ?)',
+    'isss',
+    [ORG, 'EVREP Repat history', '2029-08-19 19:00:00', '2029-08-26 19:00:00']
+);
+ok('S14 the two new dates were created', count($born) === 2, (string) count($born));
+ok('S15 NEITHER NEW DATE IS CANCELLED',
+    count(array_filter($born, static fn (array $r): bool => (string) $r['status'] === 'published')) === 2,
+    implode(', ', array_map(static fn (array $r): string => (string) $r['status'], $born)));
+ok('S16 neither carries the other date\'s cancellation trail',
+    count(array_filter($born, static fn (array $r): bool => $r['cancelReason'] === null
+        && $r['statusChangedByID'] === null && $r['statusChangedAt'] === null)) === 2);
+// 🧠 The privacy half, checked as its own thing: a name and an e-mail address
+//    belonging to a member of the public must not be copied onto rows they had
+//    nothing to do with, because nothing erases those two columns.
+ok('S17 NEITHER CARRIES THE SUBMITTER\'S NAME OR E-MAIL',
+    count(array_filter($born, static fn (array $r): bool => $r['submitterName'] === null
+        && $r['submitterEmail'] === null && $r['submissionStatus'] === null
+        && $r['submittedAt'] === null && $r['moderatedByID'] === null
+        && $r['moderationNote'] === null)) === 2);
+ok('S18 and each one is recorded as created by whoever made the change',
+    count(array_filter($born, static fn (array $r): bool => (int) $r['createdByID'] === ADMIN)) === 2);
+
+// -----------------------------------------------------------------------------
+// S18b — A NEW DATE DOES NOT INHERIT ANOTHER DATE'S REGISTRATION WINDOW.
+// -----------------------------------------------------------------------------
+// The second round of the independent check measured this: the copy took every
+// column but a listed few, so `registrationClosesAt` came across from the
+// template — a moment just before the TEMPLATE's own date. A date added four
+// weeks later therefore arrived with registration ALREADY CLOSED, and both
+// `calendar/event-register.php` and `event-register-save.php` treat that column
+// as a hard gate, so a member opening the new date was simply told registration
+// had closed, with nothing to explain it.
+//
+// 🧠 `registrationEnabled` is in the same list for a reason worth keeping: the
+//    CREATE handler writes none of these columns, so every date it made has
+//    them empty. A copy carrying them would differ from its own siblings.
+createEvent($jar['admin'], 'EVREP Repat regwin', '2030-01-06T19:00', '2030-01-06T20:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '2',
+]);
+$regSeries = repatSeries('EVREP Repat regwin');
+$regRows   = repatRows('EVREP Repat regwin');
+q(
+    'UPDATE tblEvents SET registrationEnabled = 1, registrationOpensAt = ?, registrationClosesAt = ?, '
+    . 'capacityCount = 12, registrationRetentionDays = 7 WHERE eventID = ?',
+    'ssi',
+    ['2029-12-01 00:00:00', '2030-01-05 23:59:59', (int) $regRows[0]['eventID']]
+);
+ok('S18b the first date now has a registration window that closes before the others',
+    (string) one('SELECT registrationClosesAt FROM tblEvents WHERE eventID = ?', 'i', [(int) $regRows[0]['eventID']])['registrationClosesAt']
+    === '2030-01-05 23:59:59');
+
+$regFields = [
+    'patternStart'    => '2030-01-06T19:00',
+    'patternEnd'      => '2030-01-06T20:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '4',
+];
+$regPrev = repatPost($jar['admin'], $regSeries, $regFields);
+repatPost($jar['admin'], $regSeries, $regFields, true, $regPrev['digest']);
+
+$regNew = q(
+    'SELECT startDateTime, registrationEnabled, registrationOpensAt, registrationClosesAt, capacityCount, '
+    . 'registrationRetentionDays, patternStart, patternEnd, endDateTime, timezone '
+    . 'FROM tblEvents WHERE siteID = ? AND eventName = ? AND startDateTime IN (?, ?)',
+    'isss',
+    [ORG, 'EVREP Repat regwin', '2030-01-20 19:00:00', '2030-01-27 19:00:00']
+);
+ok('S18c the two new dates were created', count($regNew) === 2, (string) count($regNew));
+ok('S18d NEITHER INHERITED A REGISTRATION WINDOW THAT HAD ALREADY CLOSED',
+    count(array_filter($regNew, static fn (array $r): bool => $r['registrationClosesAt'] === null
+        && $r['registrationOpensAt'] === null)) === 2,
+    implode(' | ', array_map(static fn (array $r): string => (string) $r['registrationClosesAt'], $regNew)));
+ok('S18e nor the rest of that one date\'s registration settings',
+    count(array_filter($regNew, static fn (array $r): bool => (int) $r['registrationEnabled'] === 0
+        && $r['capacityCount'] === null && $r['registrationRetentionDays'] === null)) === 2);
+// 🧠 A check of its own for the recorded FINISH on an ADDED date. It had none:
+//    planting that branch away only failed the slug checks, by accident of this
+//    section's order, so re-ordering section S would have lost the coverage.
+ok('S18f each new date records BOTH origins, matching its own readings',
+    count(array_filter($regNew, static fn (array $r): bool =>
+        (string) $r['patternStart'] === (string) $r['startDateTime']
+        && (string) $r['patternEnd'] === (string) $r['endDateTime'])) === 2,
+    implode(' | ', array_map(static fn (array $r): string => (string) $r['patternEnd'] . ' vs ' . (string) $r['endDateTime'], $regNew)));
+ok('S18g and the zone the readings were made in',
+    count(array_filter($regNew, static fn (array $r): bool => (string) $r['timezone'] === ZONE)) === 2);
+
+// -----------------------------------------------------------------------------
+// S18h — the added date's zone must be the one its READING was made in.
+// -----------------------------------------------------------------------------
+// 🧠 S18g ON ITS OWN PROVES NOTHING ABOUT THIS, and planting showed it: every
+//    event in this made-up world carries the same zone, so taking the zone from
+//    the template row gives the identical answer and the check passes either
+//    way. It was the fifth vacuous check found in this package.
+//
+//    The readings in the plan are all generated in the zone of the series'
+//    EARLIEST date. The copy used to take `timezone` from the TEMPLATE row,
+//    which is a different row whenever the earliest date is one the page may
+//    not touch. So this builds exactly that: the earliest date is pinned by an
+//    RSVP (making it untouchable, so the template moves to the second date),
+//    and the second date is given a different zone by hand. The two sources
+//    then disagree, and only one answer keeps the stored reading meaning what
+//    it says.
+createEvent($jar['admin'], 'EVREP Repat zones', '2030-03-03T10:00', '2030-03-03T11:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+]);
+$zoneSeries = repatSeries('EVREP Repat zones');
+$zoneRows   = repatRows('EVREP Repat zones');
+// The earliest date is pinned, so it cannot be the template...
+q(
+    'INSERT INTO tblEventRSVPs (eventID, userID, siteID, response, guestCount, status) '
+    . "VALUES (?, ?, ?, 'going', 0, 'confirmed')",
+    'iii',
+    [(int) $zoneRows[0]['eventID'], ADMIN, ORG]
+);
+// ...and the date that WILL be the template is given a different zone.
+q('UPDATE tblEvents SET timezone = ? WHERE eventID = ?', 'si', ['Europe/Paris', (int) $zoneRows[1]['eventID']]);
+ok('S18h the template date and the earliest date now hold different zones',
+    (string) one('SELECT timezone FROM tblEvents WHERE eventID = ?', 'i', [(int) $zoneRows[1]['eventID']])['timezone'] === 'Europe/Paris'
+    && (string) one('SELECT timezone FROM tblEvents WHERE eventID = ?', 'i', [(int) $zoneRows[0]['eventID']])['timezone'] === ZONE);
+
+$zoneFields = [
+    'patternStart'    => '2030-03-03T10:00',
+    'patternEnd'      => '2030-03-03T11:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '5',
+];
+$zonePrev = repatPost($jar['admin'], $zoneSeries, $zoneFields);
+repatPost($jar['admin'], $zoneSeries, $zoneFields, true, $zonePrev['digest']);
+$zoneNew = q(
+    'SELECT startDateTime, timezone FROM tblEvents WHERE siteID = ? AND eventName = ? AND startDateTime IN (?, ?)',
+    'isss',
+    [ORG, 'EVREP Repat zones', '2030-03-24 10:00:00', '2030-03-31 10:00:00']
+);
+ok('S18i the two dates were added', count($zoneNew) === 2, (string) count($zoneNew));
+ok('S18j EACH ONE CARRIES THE ZONE ITS READING WAS MADE IN, not the template\'s',
+    count(array_filter($zoneNew, static fn (array $r): bool => (string) $r['timezone'] === ZONE)) === 2,
+    implode(' | ', array_map(static fn (array $r): string => (string) $r['timezone'], $zoneNew)));
+
+// -----------------------------------------------------------------------------
+// S19 — A HAND-CHANGED FINISH TIME IS A HAND EDIT.
+// -----------------------------------------------------------------------------
+// The class compared the recorded origin with the START only, while its own
+// docblock promised it caught "a changed TIME". So somebody who lengthened one
+// future service from an hour to three had it silently shortened again by the
+// next pattern change, and the preview called that date "re-timed" rather than
+// leaving it alone — the owner's rule 2 broken.
+createEvent($jar['admin'], 'EVREP Repat endedit', '2029-09-02T15:00', '2029-09-02T16:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+]);
+$endSeries = repatSeries('EVREP Repat endedit');
+$endRows   = repatRows('EVREP Repat endedit');
+$lengthened = (int) $endRows[1]['eventID'];
+// Lengthened by hand, exactly as the ordinary edit page would: the finish moves
+// and the recorded origin is left alone.
+q('UPDATE tblEvents SET endDateTime = ? WHERE eventID = ?', 'si', ['2029-09-09 18:00:00', $lengthened]);
+
+$endFields = [
+    'patternStart'    => '2029-09-02T15:00',
+    'patternEnd'      => '2029-09-02T16:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+];
+$endPrev = repatPost($jar['admin'], $endSeries, $endFields);
+ok('S19 the preview reports the lengthened date as left alone, not re-timed',
+    str_contains(text($endPrev['body']), 'it was moved by hand'));
+repatPost($jar['admin'], $endSeries, $endFields, true, $endPrev['digest']);
+ok('S20 THE HAND-CHANGED FINISH TIME SURVIVED',
+    (string) one('SELECT endDateTime FROM tblEvents WHERE eventID = ?', 'i', [$lengthened])['endDateTime']
+    === '2029-09-09 18:00:00',
+    (string) one('SELECT endDateTime FROM tblEvents WHERE eventID = ?', 'i', [$lengthened])['endDateTime']);
+// 🧠 And the opposite direction, so this guard cannot over-reach: the OTHER
+//    dates of the same series — the ones nobody touched — must still be
+//    treated as the pattern's own.
+//
+//    WHAT THIS CHECK DOES NOT PROVE, stated because its first version claimed
+//    it did: this pattern re-times nothing (the readings are unchanged), so it
+//    says nothing about whether a move keeps the recorded finish in step. That
+//    is R15b, on a change that really does re-time.
+$untouched = one(
+    'SELECT startDateTime, endDateTime, patternStart, patternEnd FROM tblEvents WHERE eventID = ?',
+    'i',
+    [(int) $endRows[2]['eventID']]
+);
+ok('S21 the dates nobody edited still read as the pattern\'s own',
+    (string) $untouched['patternStart'] === (string) $untouched['startDateTime']
+    && (string) $untouched['patternEnd'] === (string) $untouched['endDateTime'],
+    (string) $untouched['patternStart'] . ' / ' . (string) $untouched['patternEnd']);
+
+// -----------------------------------------------------------------------------
+// S21b — two dates on one day: the sentence a person really sees.
+// -----------------------------------------------------------------------------
+// 🧠 `plan()` used to build this sentence itself while `reasonWords()` held a
+//    second copy that nothing reached, and the class self-test exercised only
+//    the unreachable one — "a test holding its own copy of the thing it tests",
+//    in miniature. The wording is shared now, and this is the check that reads
+//    what the PAGE prints.
+//
+//    It also pins the other half of the fix: a same-day pair gets no "change
+//    this one by hand" link, because opening the editor is not the answer when
+//    the question is which of two dates the pattern means.
+createEvent($jar['admin'], 'EVREP Repat sameday', '2030-05-05T09:00', '2030-05-05T10:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+]);
+$sameSeries = repatSeries('EVREP Repat sameday');
+$sameRows   = repatRows('EVREP Repat sameday');
+// Moved by hand onto the FIRST date's day, so that day now holds two.
+q('UPDATE tblEvents SET startDateTime = ?, endDateTime = ? WHERE eventID = ?', 'ssi',
+    ['2030-05-05 19:00:00', '2030-05-05 20:00:00', (int) $sameRows[1]['eventID']]);
+$samePrev = repatPost($jar['admin'], $sameSeries, [
+    'patternStart'    => '2030-05-05T09:30',
+    'patternEnd'      => '2030-05-05T10:30',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+]);
+ok('S21b the page says more than one date falls on that day, naming the day',
+    str_contains(text($samePrev['body']), 'more than one date of this series falls on 2030-05-05'));
+ok('S21c and it does not call that "moved by hand"',
+    substr_count(text($samePrev['body']), 'it was moved by hand') === 0);
+ok('S21d neither of the two is re-timed or removed',
+    preg_match('/Re-timed\s*<span class="badge bg-primary">1<\/span>/', $samePrev['body']) === 1
+    && preg_match('/Removed\s*<span class="badge bg-danger">/', $samePrev['body']) !== 1);
+// Not vacuous: prove the kept list really holds those two, so S21c cannot pass
+// because nothing was listed at all.
+ok('S21e and both are listed as left alone',
+    preg_match('/Left exactly as they are\s*<span class="badge bg-secondary">2<\/span>/', $samePrev['body']) === 1);
+
+// -----------------------------------------------------------------------------
+// S22 — the remedy the page offers actually works.
+// -----------------------------------------------------------------------------
+// The only thing the page offers for a date it refuses to touch is a link, and
+// that link was built as `?eventID=`. `calendar/manage/index.php` reads
+// `$_GET['edit']` and reads `eventID` NOWHERE, so it opened the unfiltered list
+// with no event selected. This is the repository's own "name things by the
+// right identifier" trap, and nothing in 202 checks looked at the href.
+$keepPage = repatPost($jar['admin'], $rsvpSeries, [
+    'patternStart'    => '2029-06-03T09:00',
+    'patternEnd'      => '2029-06-03T10:00',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '1',
+]);
+ok('S22 the by-hand link addresses the event the way that page reads it',
+    preg_match('/calendar\/manage\?edit=' . $rsvpDate . '"/', $keepPage['body']) === 1
+    || str_contains($keepPage['body'], 'calendar/manage?edit=' . $rsvpDate));
+ok('S23 and it does NOT use the name that page ignores',
+    str_contains($keepPage['body'], '?eventID=') === false);
+// 🧠 Not vacuous: prove the link is really drawn for this date, so S23 cannot
+//    pass because the whole block is missing. The #645 shape in a check.
+ok('S24 the link is really there to be checked',
+    str_contains($keepPage['body'], 'change this one by hand'));
 
 // =============================================================================
 // J. Nothing fell over on the way

@@ -176,6 +176,20 @@ jobs:
         if: ${{ !cancelled() && steps.php.outcome == 'success' }}
         run: php tools/event-recurrence-selftest.php
 
+      # 🔁 What changing an existing series' pattern would do (#669). Needs no
+      #    database and no server, which is also a test of that promise: the
+      #    class takes facts and returns a plan, so if somebody gives it a
+      #    query this step stops working.
+      #
+      #    The checks worth knowing about are the REFUSALS — a future date
+      #    carrying somebody's attendance, a booked room or a registration is
+      #    never moved and never removed, and over thirty tables cascade off an
+      #    event, so getting that wrong destroys the register with the date.
+      #    A test that only ever proves dates get moved proves almost nothing.
+      - name: 'Series pattern change self-test (#669)'
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/series-repattern-selftest.php
+
 
       # 🔳 The portal's own QR pictures (#623). Needs no database and no server.
       #

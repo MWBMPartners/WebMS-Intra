@@ -723,6 +723,41 @@ if ($action === 'create') {
             }
         }
 
+        // 📌 WHERE THE PATTERN PUT THIS DATE, recorded on the first occurrence
+        //    (#669, migration 232). Written for BOTH cases — the date that was
+        //    moved onto the pattern a moment ago and the one that already
+        //    matched it — because the question it answers later is "is this
+        //    date still where the pattern put it", and an unrecorded origin
+        //    makes `SeriesRepattern` fall back to re-reading the rule.
+        //
+        //    A SEPARATE STATEMENT rather than a column on the move above, so
+        //    the date that needed no moving is recorded too. Wrapped for the
+        //    same reason every other statement in this block is: it runs after
+        //    the event row is committed, and a lock-wait timeout here must not
+        //    show an error page for an event that exists perfectly well.
+        if ($firstWanted !== null) {
+            $markFirst = $mysqli->prepare(
+                'UPDATE tblEvents SET patternStart = startDateTime, patternEnd = endDateTime '
+                . 'WHERE eventID = ? AND externalFeedID IS NULL'
+            );
+            if ($markFirst !== false) {
+                $markFirst->bind_param('i', $newEventId);
+                try {
+                    $markFirst->execute();
+                } catch (\Throwable $e) {
+                    Logger::errorPlatform(
+                        'Calendar',
+                        'Warning',
+                        'REPEAT_PATTERN_ORIGIN_UNRECORDED',
+                        'the first date of a repeating series could not be marked with where its pattern put it, so a '
+                        . 'later pattern change will fall back to re-reading the series rule for that date',
+                        'eventID=' . $newEventId
+                    );
+                }
+                $markFirst->close();
+            }
+        }
+
         $extra = array_slice($generated, 1);
 
         if ($extra !== []) {
@@ -1005,9 +1040,21 @@ if ($action === 'create') {
                 // 📋 The copy. Every column the form writes, taken from the row
                 //    just created, with the three that must differ replaced.
                 $copyColumns = $insertColumns;
+                // 📌 WHERE THE PATTERN PUT THIS DATE (#669, migration 232).
+                //    Added here rather than to `$insertColumns`, because that
+                //    list is what the FORM writes and a one-off event has no
+                //    pattern — only a generated copy does.
+                $copyColumns[] = 'patternStart';
+                // 🕰️ And the finish the pattern gave it. BOTH are compared when
+                //    a later pattern change asks "has anybody moved this date",
+                //    because a move writes both — recording only the start let a
+                //    hand-lengthened service be silently shortened again (#669).
+                $copyColumns[] = 'patternEnd';
                 $selectParts = [];
                 foreach ($copyColumns as $column) {
-                    if ($column === 'startDateTime' || $column === 'endDateTime' || $column === 'eventSlug') {
+                    if ($column === 'startDateTime' || $column === 'endDateTime' || $column === 'eventSlug'
+                        || $column === 'patternStart' || $column === 'patternEnd'
+                    ) {
                         $selectParts[] = '?';
                         continue;
                     }
@@ -1041,6 +1088,15 @@ if ($action === 'create') {
                                 $params[] = $occSlug;
                             } elseif ($column === 'seriesID') {
                                 $params[] = $seriesIdForRule;
+                            } elseif ($column === 'patternStart') {
+                                // The same reading as the start, because the
+                                // pattern is what put it there. They only
+                                // differ once somebody moves the date by hand,
+                                // which is exactly what makes the comparison
+                                // worth storing.
+                                $params[] = $occStart;
+                            } elseif ($column === 'patternEnd') {
+                                $params[] = $occEnd;
                             }
                         }
                         $params[] = $newEventId;

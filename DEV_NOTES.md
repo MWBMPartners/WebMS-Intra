@@ -11718,3 +11718,237 @@ All four now read `Portal\Core\OffsiteSettings`. Worth noticing how it
 happened: the class was created to stop the PAGE and the BRIDGE drifting, and
 two more copies were left in place in the same file, because they did not look
 like the thing being fixed.
+
+---
+
+## Changing a repeating series' pattern (#669)
+
+### The design, and the one choice everything else follows from
+
+A repeating series here is **not** one row with a rule attached: every date is an ordinary
+`tblEvents` row, and `tblRecurrenceRules` only *describes* them so `calendar/export.php` can
+publish one repeating entry instead of twenty. So changing a pattern means adding, moving and
+removing real event rows, each of which may have somebody's attendance or a booked room hanging
+off it.
+
+`Portal\Core\SeriesRepattern` is the ONE place that decides what such a change would do. It takes
+facts and returns a plan; it opens no connection and runs no query, so the whole decision is
+testable without a database **and** the page that previews it cannot disagree with the handler that
+applies it — they are handed the same plan object.
+
+**The choice that makes the rest safe: a date the new pattern still wants is UPDATED IN PLACE,
+touching only its start and end.** It is never deleted and re-created. That single decision is what
+keeps a hand-changed title, venue, description or poster safe *without the comparison having to
+detect those changes at all* — they are simply never written. The only hand edit left to catch is a
+changed **time**, which is exactly what `patternStart` answers. Re-creating instead would also
+destroy every attached record through the CASCADE rules, for a date the person expected to keep.
+
+**Pairing is by the DAY, never by the time.** All four things #669 asked for fall out of that one
+rule: a time shift pairs every date with itself and re-times it; weekly→fortnightly leaves half the
+days unpaired and removes them; extending leaves new days unpaired and adds them; shortening removes
+the tail. No special case per operation.
+
+### "Edited by hand" is worked out, not remembered
+
+Migration 232 adds `tblEvents.patternStart` — the moment the pattern produced that date, as a
+reading of the event's own clock. Equal to `startDateTime` means nobody moved it. Same shape as
+`externalRecurrenceKey` for imported events, and for the same reason: **a comparison cannot be
+forgotten by a new writer, and a flag can.**
+
+`updatedAt` cannot do this job, and it is the obvious wrong answer: it carries
+`ON UPDATE CURRENT_TIMESTAMP`, so `calendar/manage/series-edit` already moves it on rows nobody
+edited by hand — one bulk status change would report a whole series as hand-edited.
+
+**It is deliberately NOT backfilled, and the reason runs both ways.** Setting
+`patternStart = startDateTime` for every existing series date would *claim* every one of them is
+untouched, hand-moved dates included, and the first pattern change would then move exactly the dates
+the column exists to protect. But leaving it empty would normally make the feature useless on every
+existing installation — #671's first lesson, that a fix which only works on a fresh installation is a
+fix for the one case where the fault is invisible. It does not here, because an unrecorded date falls
+back to re-generating the series' **current** rule and asking whether the date is one of its dates.
+So empty means "ask the rule", not "give up", and a date is only left alone for want of an origin
+when there is no rule row either (a real state: the create handler deletes a series' rule when
+ordinary dates join it).
+
+**The recorded origin wins over the rule when both could answer**, and that case is pinned by a
+check. Somebody who moves a date *onto* another of the pattern's dates has still moved it; the rule
+would say "untouched", and the honest answer is "a person did this".
+
+### A foreign key is not how every table says it — the worst fault in this package
+
+`ATTACHMENTS` was first built from the schema's `FOREIGN KEY` declarations, and the audit script
+beside it said in its own docstring: *"A table that points at an event WITHOUT a foreign key.
+Nothing in this schema does that today (checked)."* **That claim was written without checking and it
+was false.** Asked of a loaded database, two tables name an event with no constraint at all:
+
+| Table | Column | Why it matters |
+|---|---|---|
+| `tblEventRSVPs` | `eventID INT NOT NULL`, `uq_event_user (eventID, userID)` | Every member's going / maybe / no answer. One of the things the owner's decision names out loud. |
+| `tblZoomMeeting` | `eventID INT NULL` | Written by the seeded `/calendar/zoom-create`. |
+
+So the list that exists to protect records missed the most sensitive table in the set, and the page
+offered to remove a date while every member's answer sat against it, with no reason shown.
+
+**And be precise about `'no rule'`, because the first version of this note was not and the difference was MEASURED on MySQL 8.0.36 rather than reasoned about.** This page SOFT-deletes, and no ON DELETE rule fires on an UPDATE — so all three values behave identically here: every attached row survives, pointing at a date nobody can see. That is the real harm and it is the same for all 34 tables. The rule only decides what a later real DELETE does, and only then is 'no rule' the worst (CASCADE takes the rows, SET NULL blanks the link, no key leaves a reference to nothing). Giving the soft-delete consequence as the reason for a claim that holds only under hard deletion welded two scenarios together.
+
+The check now looks for the `eventID` **column**, which is what "points at an event" actually means,
+with one real exclusion: a table whose own `AUTO_INCREMENT` primary key is called `eventID` is not
+pointing at anything (`tblWebhookEvent`). Verified the right way round afterwards — the constant
+against `information_schema` on a loaded database, 34 and 34 with nothing missing either way — rather
+than against the SQL text the check itself reads.
+
+**The lesson is not about foreign keys.** It is that a safety list keyed on the *tidier half* of a
+schema looks complete and is not, and that writing "(checked)" in a comment is not checking. Ask the
+database.
+
+### The attachment list is the dangerous shape
+
+`SeriesRepattern::ATTACHMENTS` names every table with an `eventID` **column** — **34 of them** — with the plain words for what a row in it means. It is the only thing stopping a pattern
+change from hiding a date that carries a register.
+
+It is the worst possible shape for a safety list, because **it looks complete whatever is in it**.
+Add a table with an `eventID` key and say nothing, and its rows become invisible to the page: the
+first pattern change afterwards hides the dates they hang off, nothing fails, and nothing is logged.
+`tools/audit-checks/check_series_attachments_complete.py` is what makes the constant trustworthy —
+a hard gate that fails BOTH ways (a table missing from the list, and an entry naming a table that no
+longer points at an event; the second direction is how the migration harness's own exception lists
+went stale unnoticed).
+
+**Two parsing traps in that check, both found by getting them wrong first.** A foreign key is not
+always inside its own `CREATE TABLE`: `tblAttendanceSessions` gets its `eventID` key through an
+`ALTER TABLE` in the file's tail, and a parser that walks back to the nearest `CREATE TABLE`
+attributed it to whichever table was created last — reporting `tblEvents` as pointing at itself AND
+missing `tblAttendanceSessions` entirely, wrong in both directions at once. And comments must be
+stripped before anything is matched, or a commented-out key counts as live (#675's lesson).
+
+Asking the tables is **one query per table across the whole series**, not one per date: a 200-date
+series would otherwise need six thousand queries. The table names come from the code constant, which
+is what makes building the statement text from them safe; the event numbers are still bound. **A
+table that will not answer stops the page** — carrying on without it would make every date it
+protects look unattached.
+
+### Two numeric-key traps, one of which took the page down
+
+**`(string) $value` on a numeric array key is load-bearing.** The "which week" dropdown looped over
+`['1' => 'First', '2' => 'Second', …]`. PHP turns a numeric array key into an **integer**, and with
+`declare(strict_types=1)` handing an int to `htmlspecialchars()` is a TypeError, not a quiet
+conversion.
+
+What that looked like is the part worth remembering: the page rendered its heading, its explanation
+and most of its form, threw there, and the error handler printed the footer — so the response was
+**HTTP 200 ending in a perfectly ordinary `</html>`, with the preview silently missing**. `php -l`
+cannot see it and no audit script here can either. Only asking for the page found it. The `===`
+comparison against a posted string needs the same cast, or nothing is ever pre-selected.
+
+### The rule row, and why it is usually withdrawn
+
+`export.php` collapses a series with a rule into ONE repeating entry and then **skips every other
+event of that series**. So a rule that over-promises does not merely look untidy — it sends every
+subscriber dates the diary does not hold AND hides the ones it does.
+
+A rule may therefore survive a repattern only when the series afterwards holds **exactly** the dates
+the new pattern makes. In practice that means a series with no past dates and nothing left alone, so
+the usual outcome is: old rule removed, no new one, subscribers see each date on its own. That is the
+#670 decision applied to this page, and it is said in plain words in the success message rather than
+left for somebody to notice. `export.php` has its own `$patternStillTrue` guard, so this is the
+second of two defences — but it is the one that stops a false rule being *written*, and a stored
+falsehood that one reader happens to catch is still a stored falsehood.
+
+### The confirmation is checked against the preview, and the gap that hid
+
+The confirmation posts a fingerprint of the previewed plan; the handler works the plan out again and
+compares. If the series moved in between, the change is refused and the new preview shown — the
+person agreed to a *specific* list of changes. An **empty** fingerprint is refused too, because
+`hash_equals('', '')` is true: the shape of the OAuth `state` hole of 27 October 2026.
+
+**The gap planting found, and it is the most useful thing in this package.** Removing the "did they
+press the confirm button" test altogether — `$confirmed = $isPost === true` — failed **nothing**.
+The fingerprint check was quietly doing both jobs, because the only request in the test that carried
+a fingerprint was one that also confirmed. That matters because the hidden fingerprint field sits
+inside the **same form** as the pattern boxes, so a real browser pressing "Show me what would change"
+a second time posts it and does *not* post `confirm` (the name of the other button) — under the
+planted code, that second preview would silently apply the change. Checks R11b and R11c exist for
+exactly that request. **A guard that is never exercised alone is not covered, however many checks
+pass around it.**
+
+### Four more faults the independent check found, each with its own shape
+
+1. **A soft-deleted row keeps its address for ever.** `uq_event_site_slug (siteID, eventSlug)` covers
+   hidden rows, so a day this page removed and later re-added collided on the unique key: the whole
+   change rolled back, the administrator was told "Something went wrong … please try again", and
+   retrying could never cure it. It was **intermittent**, because the first version built the address
+   from the date's position in the add list, which changes between runs. The address is now asked of
+   the database, probing for a free one, bounded at 50 tries — and that probe deliberately reads
+   **every** row including imported and hidden ones, because the unique key does not care who owns
+   them. Narrowing it to portal-owned rows would reintroduce the collision; there is a comment saying
+   so, because the visibility audit script flags that query and the honest answer is "this needs no
+   guard", not "add one".
+
+2. **A copy inherits history that cannot be true of a new thing.** The dynamic INSERT took every
+   column of its template but four, so extending a run whose next date had been cancelled by hand
+   created new dates that were **already cancelled**, carrying that date's cancellation reason and the
+   name of whoever cancelled it. Two kinds of harm from one line: wrong data, and privacy — the copy
+   also duplicated `submitterName` and `submitterEmail`, a member of the public's name and e-mail,
+   onto rows they had nothing to do with, and **`GdprEraser::catalogue()` clears neither column on
+   `tblEvents`** (checked, not assumed), so those copies could not have been erased on request. The
+   rule that came out of it: **when you copy a row, list the columns that describe one instance's own
+   history and clear them.** A status of `cancelled` or `postponed` means "this particular occurrence
+   is not happening", which cannot be true of a date that did not exist until now, so those map to
+   `published`; `draft` and `published` describe the series and are inherited.
+
+3. **An overstated guarantee, again.** `followsPattern()` compared the START only, while the class
+   docblock promised "the only hand edit the comparison has to catch is a changed TIME". A move writes
+   the start **and** the finish, so both are hand-editable — and a service lengthened by hand from one
+   hour to three was silently shortened again, reported as "re-timed" rather than left alone. That is
+   the owner's rule 2 broken by a comment the code had not implemented. `patternEnd` now records the
+   finish and both are compared. Its companion fault matters as much: **a move must write both**, or
+   every date the page re-times reads as hand-edited next time and the page quietly stops working
+   after one use.
+
+4. **The remedy was a link that did not work.** The only thing the page offers for a date it refuses
+   to touch was `?eventID=`, and `calendar/manage/index.php` reads `$_GET['edit']` and reads `eventID`
+   nowhere. The repository's own "name things by the right identifier" trap, in the one place the
+   feature hands the problem back to a person — and nothing in 202 checks looked at an `href`.
+
+### Four checks that were vacuous, and how each was found
+
+All four passed while the thing they named was broken. Planting found every one; reading found none.
+
+- **Two were satisfied by a row the change never touched.** "The series keeps a rule" and "that rule
+  promises four dates" were both true of the rule row written when the series was *created*, so they
+  passed while the page wrote nothing at all. Fixed by capturing the pre-change `ruleID` and requiring
+  a different row.
+- **One pinned a value on a change that never altered it.** The recorded finish was checked after a
+  pattern change that re-timed nothing, so leaving `patternEnd` stale on a move passed. Moved to the
+  one change that really re-times four dates and gives them a new finish.
+- **One removed the wrong dates.** The slug-collision check shortened a series whose removed dates had
+  been created by the *save handler*, whose addresses have a different shape (`<slug>-2`, `<slug>-3`)
+  from the page's. Those cannot collide with anything the page builds, so the old position-based
+  address passed all 226 checks. The series has to be **extended first** — which is what gives two
+  days an address this page built — then shortened, then extended again over the same days.
+
+**The general rule, which is worth more than the four cases:** for each guard, ask what request
+exercises it *with the other guards satisfied*. Removing the "did they press confirm" test failed
+nothing because the plan fingerprint absorbed it — the only request in the suite carrying a
+fingerprint was one that also confirmed. A guard never exercised alone is not covered, however many
+checks pass around it.
+
+### Tests
+
+- `tools/series-repattern-selftest.php` — 60 checks, no database, no server. The refusals are the
+  point: a test that only ever proves dates get moved proves almost nothing. Its section I checks the
+  class really has no dependencies (no query, no connection, no settings, no logger, **no clock of its
+  own** — the caller passes the moment in, which is what keeps every case exact and stops the class
+  reading the server's zone instead of the event's).
+- Section R of `tools/event-repeat-pages-selftest.php` — 72 checks over real HTTP, reading the rows
+  back out of the database. It needed a third account: both existing ones are administrators, so
+  nothing could have proved the page refuses anybody.
+- **Two checks there passed for the wrong reason at first** and had to be tightened: "the series keeps
+  a rule" and "that rule promises four dates" were both satisfied by the rule row written when the
+  series was *created*, while the page was broken. The pre-change `ruleID` is now captured so the new
+  row must be a different row. A check satisfied by a row the change never touched is not a check.
+- **Not covered:** two administrators changing one series at the same moment. The harness runs the
+  built-in server with one worker, so two requests never overlap and such a test would pass on broken
+  code. The attachment list **is** re-asked inside the transaction before anything is hidden, which
+  closes a different and more likely window — an administrator confirming while a door steward marks
+  attendance — but nothing here holds a lock on the series, and no test can prove either way.

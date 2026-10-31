@@ -43,6 +43,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#defaults" class="badge text-bg-secondary text-decoration-none">Default view</a>
             <a href="#admin-categories" class="badge text-bg-secondary text-decoration-none">For admins — categories</a>
             <a href="#admin-themes" class="badge text-bg-secondary text-decoration-none">For admins — month themes</a>
+            <a href="#repeats" class="badge text-bg-secondary text-decoration-none">For admins &mdash; repeating events</a>
             <a href="#anon-checkins" class="badge text-bg-secondary text-decoration-none">Anonymous check-ins at the door</a>
             <a href="#imported" class="badge text-bg-secondary text-decoration-none">Imported calendars</a>
         </div>
@@ -165,6 +166,77 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </p>
     <p class="text-muted small">
         Strap-lines are per-site, so each site under an umbrella org can run its own themes independently.
+    </p>
+</section>
+
+<!-- 🔁 Repeating events, and changing a pattern afterwards (#569, #669) -->
+<section id="repeats" class="mb-5">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-repeat me-2"></i>For admins &mdash; repeating events</h2>
+
+    <p>
+        When you create an event you can make it repeat: every week, fortnight, month, quarter or year.
+        Weekly and fortnightly take any set of weekdays; monthly, quarterly and yearly go either by the
+        same date each time or by the same weekday (the second Tuesday, the last Sunday). Say how many
+        dates you want, or a date to stop after.
+    </p>
+    <p>
+        <strong>Each date becomes an ordinary event of its own.</strong> That is why you can move or
+        cancel one week of a service without touching the rest &mdash; just open that date and edit it
+        like any other event.
+    </p>
+    <p class="text-muted small">
+        Two things that surprise people. The repeat you choose wins over the date you typed: tick
+        "Thursday" above a Wednesday and you get Thursdays, including the first one, and the page tells
+        you the date moved. And the time on the clock is what repeats &mdash; a 10:00 service is at 10:00
+        on both sides of a clock change.
+    </p>
+
+    <h3 class="h6 mt-4">Changing the whole pattern later</h3>
+    <p>
+        Go to <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('calendar/manage/series'), ENT_QUOTES, 'UTF-8'); ?>">Manage &rarr; Series</a>
+        and press the repeat button beside a series. Use it to shift every future date (the service moves
+        from 10:00 to 10:30 from next month), change weekly to fortnightly, extend a run that stopped
+        early, or cut the rest of a run short.
+    </p>
+    <p>
+        <strong>You always see exactly what will happen before anything changes.</strong> The page shows
+        four lists &mdash; dates it would re-time, dates it would add, dates it would remove, and dates it
+        is leaving exactly as they are, each with the reason. Nothing is written until you press
+        <em>Make these changes</em>.
+    </p>
+    <ul>
+        <li><strong>Dates that have already happened are never changed.</strong></li>
+        <li>
+            <strong>A date with anything attached to it is left alone</strong> &mdash; attendance that has
+            been marked, people who have said they are coming, somebody registered, invitations sent, a
+            room booked, a child checked in, a service plan, a rota. The page says what is attached and
+            gives you a link to that date, so you can deal with it yourself if you want to.
+        </li>
+        <li>
+            <strong>A date you have already moved by hand is left alone too.</strong> If you shifted the
+            Christmas service to a different evening, changing the pattern will not drag it back.
+        </li>
+        <li>
+            A date that stays keeps <em>everything</em> about it except its time &mdash; its name, venue
+            and description are untouched. If you have already changed one date's time by hand, that
+            is left alone too.
+        </li>
+        <li>
+            A date the pattern <em>adds</em> is never created already cancelled, and never carries
+            another date's cancellation reason or the details of somebody who submitted an event.
+        </li>
+        <li>
+            A date that is removed is <strong>hidden rather than deleted</strong>, so nothing attached to it
+            is destroyed. <strong>There is no button to bring one back</strong>, though, so treat removing a
+            date as final.
+        </li>
+    </ul>
+    <p class="text-muted small">
+        One thing to expect afterwards: people who subscribe to your calendar in Google, Apple or Outlook
+        will usually start seeing each date of that series on its own, instead of one repeating entry.
+        That is deliberate. Once a series has dates that no single pattern describes &mdash; which is true
+        of any series that has already started &mdash; listing each date is the only way the feed can stay
+        truthful. Everything still shows at the right time; there are just more entries.
     </p>
 </section>
 

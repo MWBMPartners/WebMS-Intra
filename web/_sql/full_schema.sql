@@ -1101,6 +1101,12 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `eventID`       INT          NOT NULL AUTO_INCREMENT,
     `siteID`        INT          NOT NULL DEFAULT 1 COMMENT 'FK → tblSites.siteID',
     `seriesID`      INT          DEFAULT NULL COMMENT 'FK → tblEventSeries (NULL if standalone)',
+    -- 🔁 from 232_series_repattern.sql (#669) — placed HERE, immediately after
+    --    seriesID, so a fresh install ends with the columns in the same order
+    --    as a database brought up to date by the migration, which adds it
+    --    `AFTER seriesID`.
+    `patternStart`  DATETIME     DEFAULT NULL COMMENT 'The moment a repeat pattern produced this date, as a reading of the event''s own clock in its own timezone - NEVER a UTC moment. Equal to startDateTime means nobody has moved it; different means somebody has. NULL means the origin is not recorded (created before migration 232, or not made by a pattern at all), and SeriesRepattern then falls back to the series rule. Written only by the calendar save handler and the series repattern page.',
+    `patternEnd`    DATETIME     DEFAULT NULL COMMENT 'The finish time a repeat pattern produced for this date, beside patternStart and read only with it. A move writes both, so both must still match for the date to count as untouched - comparing the start alone let a hand-lengthened service be silently shortened again (found 31 October 2026). NULL means no finish time, or an origin that is not recorded.',
     `categoryID`    INT          DEFAULT NULL COMMENT 'FK → tblEventCategories',
     `typeID`        INT          DEFAULT NULL COMMENT 'FK → tblEventTypes',
     `eventName`     VARCHAR(255) NOT NULL,
@@ -2617,6 +2623,15 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('calendar/manage/series-edit', 'calendar/manage/series-edit.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+-- 🔁 from 232_series_repattern.sql (#669) — changing a whole series' pattern.
+--    The page handles its own form posts, like series-edit above, so there is
+--    no separate save address: the preview and the change must be worked out by
+--    the same code from the same facts, or somebody could confirm one thing and
+--    have another happen.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('calendar/manage/series-repattern', 'calendar/manage/series-repattern.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('calendar/manage/types', 'calendar/manage/types.php', 1)
@@ -10571,4 +10586,14 @@ SELECT `src`.`siteID`,
 ON DUPLICATE KEY UPDATE `settingID` = `settingID`;
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('231_organisation_address_per_site.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 232_series_repattern.sql (#669) ─────────────────────────────────────
+-- Nothing to do here: the `patternStart` column is in the `tblEvents` block
+-- above and the `calendar/manage/series-repattern` address is in the route
+-- seeds, so a fresh install already has both. The mark is written
+-- UNCONDITIONALLY — there is no "do this once" work to test for, unlike
+-- migration 220's — and it is only here so the installer's replay of every
+-- numbered migration finds nothing left to do.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('232_series_repattern.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;

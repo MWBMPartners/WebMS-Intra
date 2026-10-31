@@ -2,6 +2,126 @@
 
 
 ## [Unreleased] (alpha)
+- **Added — the pattern of a repeating series can be changed after it exists (#669, migration 232)**
+  - Repeating events have shipped since #569 but **on creation only**, deliberately rather than
+    half-offered. The new page `/calendar/manage/series-repattern`, reached from the series list, does
+    the four things that were missing: shift every future date (the service moves from 10:00 to 10:30),
+    go weekly to fortnightly, extend a run that stopped at the ceiling, and cut the rest of a run short.
+    All four fall out of one rule — an existing date is paired with a new one **by the day**, never by
+    the time.
+  - **Nothing is written without a preview.** `Portal\Core\SeriesRepattern` is the ONE place that
+    decides what a change would do; it takes facts and returns a plan of four named lists (re-timed,
+    added, removed, left alone with the reason), so the page that shows the preview and the handler
+    that applies it cannot disagree about what is about to happen. The confirmation carries a
+    fingerprint of the previewed plan: if the series has moved in between, the change is refused and
+    the new preview is shown. An EMPTY fingerprint is refused too, because `hash_equals('', '')` is
+    true — the shape of the OAuth `state` hole of 27 October 2026.
+  - **A future date with anything attached is never moved and never removed.** The owner chose this on
+    31 October 2026 over a tick-box per attached date: the worst case here is a date that needs a
+    manual fix, the worst case there is a lost attendance register, and that tick-box can only be as
+    safe as the list of what-would-be-lost written beside it. `SeriesRepattern::ATTACHMENTS` names all
+    **32** tables with an `eventID` foreign key, and
+    `tools/audit-checks/check_series_attachments_complete.py` compares it against `full_schema.sql`
+    and fails BOTH ways — a table missing from it, and an entry naming a table that no longer points
+    at an event.
+  - **"Edited by hand" is worked out, not remembered.** Migration 232 adds `tblEvents.patternStart`:
+    the moment the pattern produced that date. Equal to its start means nobody moved it. `updatedAt`
+    could not do this job — it carries `ON UPDATE CURRENT_TIMESTAMP`, so the existing bulk-edit page
+    already moves it on rows nobody edited. The column is deliberately **not backfilled** (claiming
+    every existing date is untouched would move exactly the dates it exists to protect); instead an
+    unrecorded date is judged against the series' own stored rule, which is what makes the feature
+    work on an installation that already has series in it rather than only on a fresh one.
+  - **A date that stays is updated in place** — only its start and end — which is what keeps a
+    hand-changed title, venue or description safe without having to detect those changes at all. **A
+    date that goes is soft-deleted**, so nothing cascades and it can be put back. The whole change
+    runs in one transaction: a half-applied pattern is the worst outcome, because the diary would then
+    hold some dates on the old pattern and some on the new with no way to tell which.
+  - Afterwards the old rule row is always removed, and a new one written only when the series holds
+    exactly the dates the new pattern makes. Otherwise subscribers see each date on its own, which is
+    the #670 decision and the usual outcome for a series that has already started.
+  - **A real bug the HTTP test caught that nothing else could.** The "which week" dropdown looped over
+    `['1' => 'First', …]`; PHP turns a numeric array key into an **integer**, and with
+    `declare(strict_types=1)` handing an int to `htmlspecialchars()` is a TypeError. The page rendered
+    its heading, its explanation and most of its form, threw there, and the error handler printed the
+    footer — so the answer was HTTP 200 ending in an ordinary `</html>` with the preview silently
+    missing. `php -l` cannot see it and no audit script here can either.
+  - **The independent check found six real problems, and the worst was in the safety list itself.**
+    `ATTACHMENTS` was built from the schema's FOREIGN KEY declarations, and **two tables name an event
+    with no foreign key at all** — `tblEventRSVPs`, whose `eventID` is `NOT NULL` and which holds
+    every member's going/maybe/no answer, and `tblZoomMeeting`. So the list that exists to protect
+    records silently missed the table holding the very thing the owner's decision names out loud, and
+    the page offered to remove such a date with no reason beside it. And be precise about what that costs,
+    because an earlier wording here was not: this page SOFT-deletes, no ON DELETE rule fires on an
+    UPDATE, so all three values behave identically here — every attached row survives, pointing at a
+    date nobody can see. `'no rule'` is the worst of the three only if something later really DELETEs
+    the event row. Measured on MySQL 8.0.36. The check now looks for the
+    `eventID` COLUMN, excluding a table whose own auto-increment key is called that
+    (`tblWebhookEvent`), and the constant now matches what MySQL itself reports — 34 and 34, verified
+    against a loaded database rather than against the SQL. **Its docstring had asserted "Nothing in
+    this schema does that today (checked)", which was written without checking and was false.**
+  - The other five: a day removed and then re-added collided on `eventSlug`, because
+    `uq_event_site_slug` covers soft-deleted rows — the whole change rolled back with "Something went
+    wrong … please try again", which retrying could never cure, and **intermittently**, because the
+    address was built from the date's position in the add list. The address is now asked of the
+    database. A date the pattern ADDS copied every column of its template but four, so extending a run
+    whose next date had been cancelled by hand created new dates that were **already cancelled**,
+    carrying that date's reason — and copied `submitterName`/`submitterEmail`, a private individual's
+    name and e-mail, onto rows they had nothing to do with, which `GdprEraser` clears on neither
+    column. `followsPattern()` compared the START only while promising it caught "a changed TIME", so
+    a service lengthened by hand was silently shortened again (`patternEnd` now records the finish and
+    both are compared). The one remedy the page offers for a date it refuses to touch was a link built
+    as `?eventID=`, which `calendar/manage/index.php` reads nowhere — the repository's own "name
+    things by the right identifier" trap. And 31 of the 32 attachment tables were never exercised by
+    any test, so a one-line edit making thirty kinds of record invisible passed all 202 checks.
+  - Also fixed from the lesser findings: the attachment list is **re-asked inside the transaction**
+    before anything is hidden, so a register created while somebody was confirming cannot be orphaned
+    (and that refusal has its own honest message, not "something went wrong"); two dates on one day
+    get their own reason rather than being called "moved by hand"; a stored `custom` frequency no
+    longer prefills a form the page then refuses; and the fingerprint's comment now says what it is
+    for — guarding against a mistake, not against intent.
+  - Tests: `tools/series-repattern-selftest.php` (72 checks, no database — the class has no
+    dependencies and that is checked too) and sections R and S of
+    `tools/event-repeat-pages-selftest.php` (230 in all over real HTTP, reading the rows back out of
+    the database). Both are wired into the workflows, and the audit check is a hard gate. Twenty-two
+    faults were planted, each proved applied, caught and reversed byte-identically — **and four of
+    them were not caught at first, which is the most useful thing in this package.** Dropping the "did
+    they press the confirm button" requirement failed nothing, because the only request carrying a
+    fingerprint was one that also confirmed; the hidden fingerprint sits in the same form, so a real
+    browser's second press of the preview button would have applied the change. Two checks passed on
+    the rule row written when the series was *created*. One pinned the recorded finish on a pattern
+    change that re-timed nothing. And the slug check removed dates the *save handler* had named, whose
+    addresses cannot collide with the page's. **A check satisfied by state the change never touched is
+    not a check, and a guard never exercised alone is not covered.**
+  - **A second, narrow check of the fix round found four more**, which is why it was run. The safety
+    list's own documentation still said "every table with an `eventID` **foreign key** — 32 of them" in
+    three places, restating the exact false premise the round had just corrected. The claim that
+    section S covered the list's **last** entry was wrong — `tblEventRSVPs` is the 33rd of 34, and a
+    loop stopping one table short passed all 230 checks (the real last entry, `tblZoomMeeting`, is
+    covered now, and the wording says plainly that a loop skipping a MIDDLE table still is not). A date
+    the pattern adds was inheriting its template's **registration window**, whose closing moment is
+    just before the template's own date — so a date added weeks later arrived with registration already
+    closed, which both register pages treat as a hard gate. And three places promised "an administrator
+    can put it back" about a hidden date when **no restore path exists anywhere in this repository**
+    (#691); the only code that ever clears `isDeleted` is inside `FeedImporter`.
+  - Two silent false negatives in the audit check were measured and fixed: an `eventID` column declared
+    `INTEGER` was not matched at all (`INT` listed first consumed its leading three letters), and the
+    word `AUTO_INCREMENT` inside the column's **own comment** excluded the whole table, because SQL
+    string literals were not blanked. Both made a table vanish from the comparison while the check
+    still passed.
+  - **`registrationEnabled` is given its default rather than NULL**, and that was found by the test
+    rather than by reading: it is `TINYINT(1) NOT NULL`, so binding null to it failed every add. The
+    first round's note that "every one of these columns is nullable" was true of the original eleven
+    only.
+  - **Three more vacuous checks, found by planting — six in all across the package.** The zone check
+    could not fail while every event in the made-up world shared one zone (it now builds a series whose
+    template and earliest date hold different zones). The Zoom check attached a record to a date an
+    earlier check in the same section had already removed. And nothing read the sentence a person
+    actually sees for two dates on one day, because `plan()` held its own copy of the wording while the
+    class test exercised an unreachable second copy.
+  - **Not done, and it needs the owner:** nothing covers two administrators changing one series at the
+    same moment. `access-pages-selftest.php`-style harnesses run the built-in server with one worker,
+    so two requests never overlap and such a test would pass on broken code.
+
 - **Fixed — the off-site backup's six settings now really decide what a run does, and a run is recorded at last (#671)**
   - **The settings were decorative, on every installation.** `/admin/maintenance/offsite-backup`
     saved six `backup.offsite.*` rows and **nothing in the repository read any of them** — the sync
