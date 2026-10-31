@@ -22,59 +22,79 @@
 
 ## Where we are right now
 
-**#671 is committed and the tree is clean.** Pick up at **#669**.
+**The queue as it stood is EMPTY.** #671, #672 and #669 are all closed. Pick up from "What to do
+next" below, which needs no decision, or from the owner's answers to the questions in "Waiting on
+the owner".
 
 **Nothing is pushed.** `origin/claude/alpha-wip` was last updated on **27 October 2026** (`0e15afd`).
 Everything since exists only on this disk, plus the sign-in hotfix on `hotfix/sign-in-1.4.2`,
-including **migrations 224 to 231**. The owner decided on 30 October, asked directly, that **nothing
+including **migrations 224 to 232**. The owner decided on 30 October, asked directly, that **nothing
 is pushed until the comprehensive Codex review**; do not offer again, and "it is only the working
 branch" is not a reason.
 
-### The queue
+### Closed this run
 
-| # | Next up | Issue | Notes |
-|---|---|---|---|
-| 1 | **Change the pattern of a repeating series that already exists** | **#669** | Not started. A feature |
-| 2 | Nothing drains the transcription queue on its own | **#672** | Not started |
-| 3 | Then the wider open list | #660–#667 and below | Nothing from this run is left half-done |
+| Issue | What | Commit |
+|---|---|---|
+| **#671** | The off-site backup's six settings really decide what a run does | `ec22773` |
+| **#672** | Unattended transcription — **decided NOT wanted**, closed as not planned | (no code) |
+| **#669** | Change the pattern of a repeating series that already exists | `ffdbc08` |
 
-**Closed this run:** #671.
-**Raised this run and not built:** **#688** (no box for the S3 bucket or SFTP host, so two of the
-three destinations are only half-controlled by the page — and it asks whether those two are worth
-keeping at all, since rclone reaches both and neither prunes) and **#689**
-(`access-pages-selftest.php` counts through the server-wide `mysql.general_log`, so it fails
-spuriously beside anything else on the same MySQL server).
+### Raised this run and NOT built
 
-**Migrations:** the highest in `web/_sql/` is **231**. Allocate **232 upward**. #671 needed none.
+| Issue | What it needs |
+|---|---|
+| **#688** | Do `s3` and `sftp` get address boxes on the off-site backup page, or come off it? |
+| **#689** | `access-pages-selftest.php` counts through the server-wide `mysql.general_log`, so it must run ALONE |
+| **#690** | **Two self-tests fail at HEAD** — `gdpr-eraser-selftest.php` and `backup-restore-selftest.php`. Verified in a clean worktree, so NOT caused by #669. They run on any pull request touching `web/_sql/**`, so the next PR will be red |
+| **#691** | No way to restore a date a pattern change hid. Three sentences promising otherwise are corrected |
+| **#692** | Should a date the pattern adds be published or drafted? A product judgement |
+| **#693** | The in-transaction attachment re-check is guarded by no test (single-worker harness cannot reach it) |
+
+**Migrations:** the highest in `web/_sql/` is **232**. Allocate **233 upward**.
 
 **No throwaway database is left up.** Dangling volumes: **1 before this run, 1 after** — none added.
 Name the next one after its own work and remove it with `docker rm -vf` (the `-v` matters).
 
+### What to do next, needing no decision
+
+1. **#690 first.** Two self-tests are broken at HEAD and nothing has run them since 27 October. Every
+   later package inherits a red baseline until this is fixed, and the cause is probably something one
+   of migrations 224–232 changed.
+2. Then the wider open list (#660–#667 and below), and the verification work in item 5 under
+   "Waiting on the owner".
+
 ### The lessons from this run, worst first
 
-1. **A fix that only works on a fresh installation is a fix for the one case where the fault is
-   invisible.** "Run now" read the newest row in the whole log table with nothing tying it to the
-   run just made, so "recorded nothing" meant "the table has never held a row". It passed every
-   check because the test emptied the table first. **A test that starts from a clean state cannot
-   see a bug whose cause is state that was already there.**
-2. **Three comments of mine asserted guarantees the code did not implement**, in one package: `08`
-   "refused" (it was accepted), "each of those three cases prints a WARNING" (the first prints
-   nothing), and the length ceiling being "the second of two guards" (the other guard does not keep
-   backups working). Every one was caught by running or measuring, none by reading. This is the
-   #645 shape and it is the fault #671 itself was raised about.
-3. **Check a page's claim against the FALLBACK, not the happy path.** "Switched off, so nothing is
-   being sent" was false exactly when it mattered, because the fallback I had designed sends — and
-   this package's own setup guide said so while the page denied it.
-4. **A refusal is only a safety feature if somebody is told.** The bridge refused a bad value
-   correctly and the only record went to a column no page read, so a mistyped destination sent the
-   database somewhere nobody chose with nothing in the portal saying so.
-5. **A seeded setting that nothing reads is a lie with a Save button**, and no check here looks for
-   that shape. For every key a page writes, grep the whole repository for a reader and count the
-   ones that are not the page itself.
-6. **One rule drifted into four copies** in the same file the class was created to de-duplicate,
-   because two of them did not look like the thing being fixed.
-7. **A regex with no `s` modifier drops the WHOLE flag, not the rest of the line** — the instinct
-   that it truncates is wrong, and that silently emptied one column for every run ever recorded.
+1. **Never write "(checked)" about something you did not check.** The audit script guarding #669's
+   safety list said "Nothing in this schema does that today (checked)". One query disproved it. The
+   word makes the next reader stop looking.
+2. **A safety list keyed on the tidier half of a schema looks complete and is not.** The list was
+   built from FOREIGN KEY declarations; `tblEventRSVPs` (every member's RSVP) and `tblZoomMeeting`
+   name an event with no key at all, so the two most sensitive tables were missing. **And the check
+   verified the constant against the same SQL it parsed itself, so both agreed and both were wrong.
+   Verify against a DIFFERENT source** — loading the schema and asking `information_schema` showed 34
+   where the code said 32, immediately.
+3. **A guard never exercised ALONE is not covered**, however many checks pass around it. Removing the
+   "did they press confirm" requirement failed nothing, because the only request carrying a plan
+   fingerprint was one that also confirmed. For each guard, ask what request exercises it with the
+   other guards satisfied.
+4. **Six checks in one package were vacuous, and planting found every one; reading found none.** Two
+   were satisfied by a row the change never touched; one pinned a value on a change that never
+   altered it; one removed the wrong dates (created by a different writer, so their addresses could
+   not collide); one could not fail while every fixture shared the same time zone; one asked about a
+   date an earlier check had already removed. **A check satisfied by state the change never touched
+   is not a check.**
+5. **A comparative claim reasoned out instead of measured was wrong in both directions.** "`'no
+   rule'` is the most dangerous ON DELETE value" — measured, a SOFT delete fires no ON DELETE rule at
+   all, so all three behave identically for what that page does. I had given the soft-delete
+   consequence as the reason for a claim that only holds under hard deletion.
+6. **When you copy a row, list the columns that describe one instance's own history and clear them.**
+   A dynamic column list taken from the database carried a cancellation, a moderation trail, a
+   private individual's name and e-mail, and a registration window that had already closed.
+7. **Restore the file the plant actually edited.** A plant runner that backs up the file named in its
+   argument, while the plant script edits another, reports "did not apply" and leaves the real edit in
+   the tree.
 
 ---
 
@@ -89,20 +109,23 @@ Name the next one after its own work and remove it with `docker rm -vf` (the `-v
 2. **#564: a two-character fix, approved 25 September, never applied.** `tools/watchdog.sh` has no
    `-L`, so a watchdog pointed at a symbolic link fires immediately. Also
    **`~/.claude/bin/watchdog.sh` does not exist**, so "keep both copies identical" has one copy.
+   Noted this run: on a path under `/private/tmp/claude-501/...` the `quiet` mode fired spuriously
+   because `stat` reported a stale size and mtime for a file that was really being written.
 3. **Decisions raised and still open**, each with its own issue and the options written out:
-   **#688** (do `s3` and `sftp` get address boxes, or come off the page?), **#687** (may a hosting
-   provider bound how long an organisation keeps donor names and addresses — the one case where
-   capping is the DANGEROUS direction), **#685** (organisations already over the attendance
-   retention limit), **#681** (may a department approver export their own departments' claims).
-   **#679** is still open from before.
-4. **One thing #671 does NOT fix, and only you can decide it.** The feature still needs a command
-   line and `rclone`, so **on plain shared hosting it can never send anything** — the page now says
-   so plainly instead of implying otherwise. Making it work with no shell at all (uploading over
-   HTTPS from PHP) is option 3 of #671 and was not built: it is a feature needing a decision on
+   **#688**, **#692** (publish or draft a date the pattern adds — my recommendation is draft, with a
+   line in the preview saying so), **#687** (may a hosting provider bound how long an organisation
+   keeps donor names and addresses — the one case where capping is the DANGEROUS direction),
+   **#685** (organisations already over the attendance retention limit), **#681** (may a department
+   approver export their own departments' claims). **#679** is still open from before.
+4. **One thing #671 does NOT fix, and only you can decide it.** The off-site backup still needs a
+   command line and `rclone`, so **on plain shared hosting it can never send anything** — the page
+   now says so plainly instead of implying otherwise. Making it work with no shell at all (uploading
+   over HTTPS from PHP) is option 3 of #671 and was not built: it is a feature needing a decision on
    which storage providers to support. No issue raised, because the scope is yours to set.
-5. **Close the rest of the finished issues.** 17 were closed on 30 October. **Not** closed, because
-   I could not verify every part had landed: the roll-out set (#510, #535, #545, #547, #568, #570,
-   #563, #478, #534, #488) and #499 / #500 / #502. They need a check, not a guess.
+5. **Close the rest of the finished issues.** 17 were closed on 30 October, and #669/#671/#672 this
+   run. **Not** closed, because I could not verify every part had landed: the roll-out set (#510,
+   #535, #545, #547, #568, #570, #563, #478, #534, #488) and #499 / #500 / #502. They need a check,
+   not a guess.
 6. **The public history rewrite** — settled in principle, not done. See the 13 October decision
    below. It happens ONCE, just before the pull request.
 
@@ -112,6 +135,15 @@ Name the next one after its own work and remove it with `docker rm -vf` (the `-v
 
 Newest first. **Policy, never archived.** Full original wording for anything before 30 October is in
 `.claude/history/HANDOFF-archive-to-2026-10-30.md`.
+
+**31 October 2026 — three answers on #669, and one on #672.** A pattern change touches **future dates
+only, and a date with anything attached is never moved or removed** (chosen over a tick-box per
+attached date: the worst case under this rule is a date needing a manual fix, the worst case under
+the other is a lost attendance register). **A hand-edited date is identified by storing the moment
+the pattern produced it**, so it is worked out rather than remembered. **Nothing is written without a
+preview.** And **transcription will never send recordings unattended** — it stays two deliberate
+presses, because one API key pays for every organisation and shared hosting kills a long request
+part-way.
 
 **30 October 2026 (later) — seven answers, do not re-ask.** **#671:** the off-site backup's six
 settings are **made real** — not merely labelled with a notice, and not deleted. **#675:** leave
