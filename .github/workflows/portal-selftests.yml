@@ -20,20 +20,34 @@
 # file and their own result.
 #
 # FOUR JOBS
-#   1. PHP only            FIFTEEN tests that need no database, and two that
-#                          need no PHP either. Counted from this file on
-#                          28 October 2026 rather than adjusted: it said
-#                          "thirteen" while there were fourteen, which an
-#                          independent check caught while the two counts below
-#                          were being corrected. A count in a comment goes stale
-#                          silently, so re-count rather than add one: the deploy script's self-test
-#                          and the self-test of check 15 (bash and Python)
-#   2. PHP 8.5             the one test that needs PHP 8.5
+#   1. PHP only            the tests IN THIS FILE that need no database. Two
+#                          of them need no PHP either: the deploy script's
+#                          self-test (bash) and the self-test of the API
+#                          description's two checks (Python).
+#   2. PHP 8.5             the one test in this file that needs PHP 8.5
 #   3. The package         the installation package's own self-test
-#   4. On a database       twenty-five tests, run twice: MySQL 8.0.36 and 8.4.11
-#                          (twenty-three throwaway databases, not twenty-five:
-#                          the installer test and the strict-mode test use the
-#                          second and the loose server instead of this one.)
+#   4. On a database       the tests IN THIS FILE that need one, run twice:
+#                          MySQL 8.0.36 and 8.4.11. Not every one of them gets
+#                          a throwaway database from the step below: the
+#                          installer test and the strict-mode test use the
+#                          second and the loose server instead of this one, and
+#                          make their own.
+#
+# "IN THIS FILE" IS LOAD-BEARING, AND SAYING "EVERY TEST" WAS WRONG. An
+# independent check caught that on 31 October 2026. Other workflows hold other
+# tests, and they are NOT all database tests either: the calendar reader's test
+# needs no database and lives in calendar-selftests.yml, the restore-order test
+# needs none and lives in backup-selftest.yml, and several database tests live
+# in calendar-selftests.yml, mail-selftests.yml, backup-selftest.yml and
+# e2e-migrations.yml. #646 is exactly about believing a test is wired when it is
+# not, so a sentence here that reads as a guarantee of coverage is worse than a
+# narrower one that is true.
+#
+# NO COUNTS HERE, ON PURPOSE. This block used to carry three, and every one of
+# them went stale in silence: "thirteen" while there were fourteen, and
+# "twenty-three throwaway databases" while the loop below built twenty-six.
+# Count them from the file when you need a number — `grep -c "selftest.php" `
+# on a job, or read the loop — and do not write the answer down here.
 #
 # Almost every test is `tools/<name>-selftest.php` (the package's and the
 # deploy script's are shell scripts, check 15's is Python). Each is given
@@ -544,7 +558,7 @@ jobs:
             echo "::warning::Node.js is NOT on this machine. The site addresses' test will fail without it, and the live chat and go-live tests will pass with the page's script NOT run."
           fi
 
-      - name: Prepare the three servers and build twenty-three throwaway databases
+      - name: Prepare the three servers and build every throwaway database
         id: databases
         env:
           MYSQL_CID: ${{ job.services.mysql.id }}
@@ -574,7 +588,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_offsite; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -934,3 +948,62 @@ jobs:
         run: |
           mkdir -p "$SELFTEST_WEB_DIR"
           php -d memory_limit=512M tools/activity-log-selftest.php
+
+      # 🧮 A limit is capped by the installation (#668). WIRED ON 31 OCTOBER
+      #    2026: until then this test ran in NO workflow at all, which is the
+      #    #646 shape again — and it was built two days earlier, by the package
+      #    that fixed a LIVE breach (an organisation could keep attendance
+      #    personal data for ten years on an installation intending ninety).
+      #
+      #    Its section D is the part worth having: it passed on FOUR DISABLED
+      #    GATES before it was tightened — `if (false)`, `&& false`, a refusal
+      #    that logs "nothing was saved" and then writes, and one that silently
+      #    clamps. Needs a database and nothing else.
+      - name: 'Setting limits self-test (#668)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_limit
+        run: php -d memory_limit=512M tools/setting-limit-selftest.php
+
+      # ☁️ The off-site backup's settings really decide what a run does (#671).
+      #    WIRED ON 31 OCTOBER 2026: it had never run in any workflow either.
+      #
+      #    WHAT IT NEEDS, read out of the test rather than discovered (#646's
+      #    lesson). It REFUSES outright, exit 2, naming the missing program, if
+      #    any of bash, openssl, rclone or tar is not on the PATH. Three of
+      #    those are on GitHub's Ubuntu image; `rclone` is NOT, so it is
+      #    installed below. The test never sends anything to a real cloud
+      #    destination — rclone is pointed at a folder on the machine through a
+      #    throwaway config — so the version in Ubuntu's own archive is enough
+      #    and no installer is piped from the internet into a shell.
+      #
+      #    WHICH VERSION, AND WHY THAT IS SAFE TO SAY. Ubuntu 24.04's universe
+      #    archive carries rclone 1.60.1; this test was proved locally against
+      #    1.75.2. The script and the test between them use exactly three
+      #    rclone commands — `copyto`, `deletefile` and `lsf --files-only` —
+      #    and all three are older than 1.60, so the gap does not reach any
+      #    behaviour either of them depends on. If a later change here reaches
+      #    for something newer, this step is where it breaks, and the right
+      #    answer then is to install rclone properly rather than to widen this
+      #    comment.
+      #
+      #    It also runs real bash and real openssl against the real sync
+      #    script, which is why it lives here and not in backup-selftest.yml:
+      #    that workflow is path-filtered and does not list the off-site files,
+      #    so a change to them would have run nothing at all.
+      - name: Install rclone for the off-site backup self-test
+        id: rclone
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rclone
+          rclone version
+
+      - name: 'Off-site backup settings self-test (#671)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' && steps.rclone.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_offsite
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/offsite-settings
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/offsite-settings-selftest.php

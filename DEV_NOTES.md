@@ -11952,3 +11952,98 @@ checks pass around it.
   code. The attachment list **is** re-asked inside the transaction before anything is hidden, which
   closes a different and more likely window — an administrator confirming while a door steward marks
   attendance — but nothing here holds a lock on the series, and no test can prove either way.
+
+---
+
+## A check can name the right file and still guard nothing (31 October 2026)
+
+Three self-tests were red on the committed tree, found only by running the whole set by hand. The
+interesting part is not the three faults — it is the two ways the *fix* to one of them passed on
+broken code, both found by planting and neither by reading.
+
+### What the check is for
+
+`tools/gdpr-coverage-selftest.php` pins which pages may call
+`GdprEraser::fileRequest($siteId, $userId, true)` — the third argument means "already confirmed", so
+no e-mail link is needed and the request lands straight in an administrator's queue. In
+`after_undo_window` mode the daily sweep then carries it out with nobody looking. Getting this wrong
+destroys somebody's personal data.
+
+The #569 offboarding work added a third such caller, `_apps/offboarding/do.php`. It is legitimate: it
+needs a signed-in administrator of the organisation that is open, a POST with a valid form token, and
+`AccountGuard::check()`. So the right answer was to name all three callers **and pin those gates**,
+because what earns the third one its flag is its gates, not its name.
+
+### The two ways the first attempt passed on broken code
+
+**1. Matching the `if (...)` line does not pin the refusal.** The check contained
+`str_contains($code, 'if (App::isAdmin() === false) {')`. Emptying the block —
+
+```php
+if (App::isAdmin() === false) {
+    // the refusal deleted; the condition left exactly as it was
+}
+```
+
+— left every one of the 68 checks green, with any signed-in member able to offboard anybody. The same
+for `AccountGuard`, which is #518 reintroduced. This repository had already learnt that exact lesson
+in #668, whose section D passed on four disabled gates; a check that matches a condition and not its
+body is the same fault wearing different clothes.
+
+**2. `basename()` is not an identity.** Callers were listed as `do.php: Site::id(), $userId, true`.
+Moving the call into a brand-new, completely ungated `web/_apps/zzplant/do.php` was therefore
+indistinguishable from the gated one — and the gates were read from a hard-coded
+`offboarding/do.php` path, so they still looked present. `do.php` is a generic name. The two
+basenames in the version before this one happened to be distinctive, which made keying on the name
+*look* safe without ever being safe.
+
+### What it looks like now
+
+- Callers are named by their **path under `web/`**. The folder the walk starts from is kept in a
+  variable so the path is cut where the walk began — taking `strlen(realpath(...))` instead cuts the
+  wrong number of characters, because the iterator hands back the path as it was given
+  (`tools/../web/…`) and `realpath()` is shorter.
+- Each gate must be present **and must refuse**: from the end of the gate's own anchors, an `exit`
+  must come before the next `}`.
+- The three gates must appear **in order**. Nothing checked that before, while a comment claimed it.
+- The source is **masked**, not merely stripped of comments: every string literal becomes a run of
+  `x` of the same length. `$codeOnly()` leaves literals alone, so a `}` inside a message, or the word
+  `exit` inside one, would answer the walk's question falsely in either direction. Keeping the length
+  means the shape of a condition is still recognisable.
+
+Seven planted faults, all caught, every file restored byte-identically.
+
+## A test can compare a page with itself and still fail (31 October 2026)
+
+`mail-pages-selftest.php` and `sign-in-limits-selftest.php` both compare the page a person lands on
+after asking for a password-reset link, across four cases: an address with an account, an address with
+none, a mail server that refuses, a certificate that has expired. If those pages differ, a stranger
+can find out which addresses have accounts. Both tests were failing.
+
+The pages were **dumped and diffed** rather than reasoned about, and the only difference was one
+attribute: `nonce="…"` on the inline script `web/_core/Asset.php` writes to fall back to a local copy
+of a library. That script arrived with #625. `App::cspNonce()` is `bin2hex(random_bytes(16))` — 32
+hex characters, where the helper stripped 64. So the portal was right and the test was comparing
+noise.
+
+Two things worth keeping:
+
+- **Strip by name, not by widening the pattern.** Accepting 32 hex characters as well as 64 would
+  have blinded the comparison to any real difference of that length, and plenty of identifiers here
+  are 32 hex. Matching `nonce="[0-9a-f]+"` cannot match anything else. Proved by planting a 32-hex
+  value that is *not* a nonce on the same page and watching it still be caught.
+- **A plant that prints nothing proves nothing.** A second plant meant to simulate a real leak read
+  a session key that does not exist, so it printed an empty string and the check stayed green. That
+  is an invalid plant, not a gap in the check. A genuine end-to-end leak plant is awkward here
+  because the handler deliberately answers *before* it looks the address up (#580), so at redirect
+  time it does not know.
+
+### And a clause in the same test that could never fail
+
+"The ELEVENTH try is refused, even with a REAL link: the password is not changed and the link is not
+used up" looked the stored link up by `hash('sha256', $link)`. The portal stores
+`hash('sha256', 'reset-link-utc:' . $token)` through `Auth::resetLinkFingerprint()`. The row was
+never found; `null['usedAt']` is null; the clause passed on a row that did not exist, raising a PHP
+warning nobody read. It now calls the portal's own function and requires the row to **exist** —
+writing the prefix out in the test would be a second copy of the portal's rule, which is the same
+fault one step further on.

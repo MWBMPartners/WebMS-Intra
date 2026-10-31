@@ -22,9 +22,9 @@
 
 ## Where we are right now
 
-**The queue as it stood is EMPTY, and the broken baseline is fixed.** #671, #672, #669 and #690 are
-all closed. Pick up from "What to do next" below, which needs no decision, or from the owner's
-answers to the questions in "Waiting on the owner".
+**The whole self-test set is green for the first time on this branch: 66 tests, plus the 45 audit
+checks.** The queue as it stood is empty. Pick up from "What to do next", which needs no decision,
+or from the owner's answers in "Waiting on the owner".
 
 **Nothing is pushed.** `origin/claude/alpha-wip` was last updated on **27 October 2026** (`0e15afd`).
 Everything since exists only on this disk, plus the sign-in hotfix on `hotfix/sign-in-1.4.2`,
@@ -32,77 +32,64 @@ including **migrations 224 to 232**. The owner decided on 30 October, asked dire
 is pushed until the comprehensive Codex review**; do not offer again, and "it is only the working
 branch" is not a reason.
 
-### Closed this run
-
-| Issue | What | Commit |
-|---|---|---|
-| **#671** | The off-site backup's six settings really decide what a run does | `ec22773` |
-| **#672** | Unattended transcription — **decided NOT wanted**, closed as not planned | (no code) |
-| **#669** | Change the pattern of a repeating series that already exists | `ffdbc08` |
-| **#690** | The two self-tests that were failing at HEAD now pass (230/230 and 364/364) | `aa9936f` |
-
-### Raised this run and NOT built
-
-| Issue | What it needs |
-|---|---|
-| **#688** | Do `s3` and `sftp` get address boxes on the off-site backup page, or come off it? |
-| **#689** | `access-pages-selftest.php` counts through the server-wide `mysql.general_log`, so it must run ALONE |
-| **#694** | **Restoring a pre-27-October backup silently loses every organisation's address and support e-mail.** An old-form snapshot holds `tblSettings` back but still restores `tblSites`, and the `ON DELETE CASCADE` takes the per-organisation row. The restore warns, but names the table rather than what was lost |
-| **#691** | No way to restore a date a pattern change hid. Three sentences promising otherwise are corrected |
-| **#692** | Should a date the pattern adds be published or drafted? A product judgement |
-| **#693** | The in-transaction attachment re-check is guarded by no test (single-worker harness cannot reach it) |
-
 **Migrations:** the highest in `web/_sql/` is **232**. Allocate **233 upward**.
 
 **No throwaway database is left up.** Dangling volumes: **1 before this run, 1 after** — none added.
 Name the next one after its own work and remove it with `docker rm -vf` (the `-v` matters).
 
+### Closed, and what is open
+
+| Issue | What | Commit |
+|---|---|---|
+| **#671** | The off-site backup's six settings really decide what a run does | `ec22773` |
+| **#672** | Unattended transcription — decided NOT wanted | (no code) |
+| **#669** | Change the pattern of a repeating series that already exists | `ffdbc08` |
+| **#690** | Two self-tests that were failing at HEAD | `aa9936f` |
+| **#695** | Three more red tests, and the two that ran in no workflow | see `CHANGELOG.md` |
+
+Raised and NOT built: **#688** (S3/SFTP address boxes), **#689** (access-pages must run alone),
+**#691** (no way to restore a date a pattern change hid), **#692** (publish or draft an added date),
+**#693** (the in-transaction attachment re-check has no test), **#694** (a pre-27-October restore
+silently loses every organisation's address and support e-mail), **#695** (nothing runs the whole
+self-test set locally — my recommendation on the issue is to build the one script).
+
 ### What to do next, needing no decision
 
-1. **Run the WHOLE self-test set before starting anything new.** #690 was two tests broken by an
-   earlier package and found only by accident; the habit of running "the checks that touch what I
-   changed" cannot catch a test a DIFFERENT package broke. Nothing automated does this locally yet,
-   and it is the cheapest way to stop the next #690.
+1. **#695 is the cheapest thing on the list.** Running the set by hand found three red tests in one
+   morning; the commands are already worked out on that issue.
 2. Then the wider open list (#660–#667 and below), and the verification work in item 5 under
    "Waiting on the owner".
 
+### Running the whole set by hand, until #695 exists
+
+Three MySQL servers (`--rm`, named after the work), `full_schema.sql` loaded into a database per
+test, then each test with the environment its own workflow step gives it. Three things that cost
+time on 31 October:
+
+- **`SELFTEST_WEB_DIR` must already exist** — every workflow step does `mkdir -p` first. Without it
+  23 tests refuse before doing anything, which reads exactly like 23 failures.
+- **No test is re-runnable on a database it has used.** Drop and reload the schema before each run,
+  or the first symptom is a duplicate key that is not the fault.
+- **`access-pages-selftest.php` runs ALONE** (#689): it counts through the server-wide
+  `mysql.general_log`.
+
 ### The lessons from this run, worst first
 
-0. **A test broken by one package is invisible to the next.** #690's two tests had been red since some
-   point in migrations 224–232, and the root cause was my own #677: migration 231 created the first
-   `tblSettings` row with a non-empty `siteID`, and several long-standing expectations had been true
-   only because no such row existed. **Neither test is re-runnable on a database it has already used**,
-   which is why the first symptom (a duplicate key) was a red herring rather than the fault.
-
-1. **Never write "(checked)" about something you did not check.** The audit script guarding #669's
-   safety list said "Nothing in this schema does that today (checked)". One query disproved it. The
-   word makes the next reader stop looking.
-2. **A safety list keyed on the tidier half of a schema looks complete and is not.** The list was
-   built from FOREIGN KEY declarations; `tblEventRSVPs` (every member's RSVP) and `tblZoomMeeting`
-   name an event with no key at all, so the two most sensitive tables were missing. **And the check
-   verified the constant against the same SQL it parsed itself, so both agreed and both were wrong.
-   Verify against a DIFFERENT source** — loading the schema and asking `information_schema` showed 34
-   where the code said 32, immediately.
-3. **A guard never exercised ALONE is not covered**, however many checks pass around it. Removing the
-   "did they press confirm" requirement failed nothing, because the only request carrying a plan
-   fingerprint was one that also confirmed. For each guard, ask what request exercises it with the
-   other guards satisfied.
-4. **Six checks in one package were vacuous, and planting found every one; reading found none.** Two
-   were satisfied by a row the change never touched; one pinned a value on a change that never
-   altered it; one removed the wrong dates (created by a different writer, so their addresses could
-   not collide); one could not fail while every fixture shared the same time zone; one asked about a
-   date an earlier check had already removed. **A check satisfied by state the change never touched
-   is not a check.**
-5. **A comparative claim reasoned out instead of measured was wrong in both directions.** "`'no
-   rule'` is the most dangerous ON DELETE value" — measured, a SOFT delete fires no ON DELETE rule at
-   all, so all three behave identically for what that page does. I had given the soft-delete
-   consequence as the reason for a claim that only holds under hard deletion.
-6. **When you copy a row, list the columns that describe one instance's own history and clear them.**
-   A dynamic column list taken from the database carried a cancellation, a moderation trail, a
-   private individual's name and e-mail, and a registration window that had already closed.
-7. **Restore the file the plant actually edited.** A plant runner that backs up the file named in its
-   argument, while the plant script edits another, reports "did not apply" and leaves the real edit in
-   the tree.
+0. **A check can name the right file and still guard nothing.** The fix to the erasure-filing check
+   passed on broken code **three ways**, all found by the independent checker's plants and none by
+   reading: matching a gate's `if (...)` line left it green with the `exit` inside the braces
+   deleted; and naming callers by `basename()` made a new, completely ungated `zzplant/do.php`
+   indistinguishable from the gated `offboarding/do.php`. Pin the path, require the block to refuse,
+   check the order, and mask string literals. Full account in `DEV_NOTES.md`.
+1. **A test broken by one package is invisible to the next.** Three tests were red at HEAD and none
+   was broken by the work in hand: #569 added a third erasure-filing caller, and #625 put a
+   per-request CSP nonce on every page, which two page-comparison tests saw as a difference.
+2. **Measure the difference; do not reason about it.** Dumping the two landing pages and diffing them
+   took minutes and gave the exact answer — one attribute. Every guess beforehand was wrong.
+3. **A plant that prints nothing proves nothing.** One of mine read a session key that does not
+   exist, so the page was unchanged and the check stayed green. That is an invalid plant, not a gap.
+4. **Never write a count in a comment.** Three in one workflow header had gone stale in silence
+   ("twenty-three throwaway databases" while the loop built twenty-six).
 
 ---
 
@@ -117,25 +104,23 @@ Name the next one after its own work and remove it with `docker rm -vf` (the `-v
 2. **#564: a two-character fix, approved 25 September, never applied.** `tools/watchdog.sh` has no
    `-L`, so a watchdog pointed at a symbolic link fires immediately. Also
    **`~/.claude/bin/watchdog.sh` does not exist**, so "keep both copies identical" has one copy.
-   Noted this run: on a path under `/private/tmp/claude-501/...` the `quiet` mode fired spuriously
-   because `stat` reported a stale size and mtime for a file that was really being written.
 3. **Decisions raised and still open**, each with its own issue and the options written out:
-   **#694** (how should a restore tell somebody what it could not put back?), **#688**, **#692** (publish or draft a date the pattern adds — my recommendation is draft, with a
-   line in the preview saying so), **#687** (may a hosting provider bound how long an organisation
-   keeps donor names and addresses — the one case where capping is the DANGEROUS direction),
-   **#685** (organisations already over the attendance retention limit), **#681** (may a department
-   approver export their own departments' claims). **#679** is still open from before.
+   **#694** (how should a restore tell somebody what it could not put back?), **#688**, **#692**
+   (publish or draft a date the pattern adds — my recommendation is draft, with a line in the
+   preview saying so), **#687** (may a hosting provider bound how long an organisation keeps donor
+   names and addresses — the one case where capping is the DANGEROUS direction), **#685**
+   (organisations already over the attendance retention limit), **#681** (may a department approver
+   export their own departments' claims), **#695** (build the whole-suite runner — recommended).
+   **#679** is still open from before.
 4. **One thing #671 does NOT fix, and only you can decide it.** The off-site backup still needs a
    command line and `rclone`, so **on plain shared hosting it can never send anything** — the page
-   now says so plainly instead of implying otherwise. Making it work with no shell at all (uploading
-   over HTTPS from PHP) is option 3 of #671 and was not built: it is a feature needing a decision on
-   which storage providers to support. No issue raised, because the scope is yours to set.
-5. **Close the rest of the finished issues.** 17 were closed on 30 October, and #669/#671/#672 this
-   run. **Not** closed, because I could not verify every part had landed: the roll-out set (#510,
-   #535, #545, #547, #568, #570, #563, #478, #534, #488) and #499 / #500 / #502. They need a check,
-   not a guess.
-6. **The public history rewrite** — settled in principle, not done. See the 13 October decision
-   below. It happens ONCE, just before the pull request.
+   now says so plainly. Making it work with no shell at all (uploading over HTTPS from PHP) is
+   option 3 of #671 and was not built: it needs a decision on which storage providers to support.
+5. **Close the rest of the finished issues.** **Not** closed, because I could not verify every part
+   had landed: the roll-out set (#510, #535, #545, #547, #568, #570, #563, #478, #534, #488) and
+   #499 / #500 / #502. They need a check, not a guess.
+6. **The public history rewrite** — settled in principle, not done. It happens ONCE, just before the
+   pull request. See the 13 October decision below.
 
 ---
 

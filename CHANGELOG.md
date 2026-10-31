@@ -2,6 +2,51 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — three more self-tests that were red at HEAD, found by running the WHOLE set for the first time (#695)**
+  - The lesson from #690 was to run every self-test at the end of each package, not only the ones
+    that touch what changed. Doing that found **three red tests, none of them broken by the work in
+    hand**: `gdpr-coverage-selftest.php`, `mail-pages-selftest.php` and `sign-in-limits-selftest.php`.
+    All 66 tests now pass, together with the 45 audit checks.
+  - **The erasure coverage test** pins exactly which pages may file a data-erasure request as ALREADY
+    CONFIRMED — no e-mail link needed. It named two; the #569 offboarding work added a third,
+    `_apps/offboarding/do.php`. That caller is legitimate: it needs a signed-in administrator of the
+    open organisation, a POST with a valid form token, and `AccountGuard::check()`. So the check now
+    names all three AND pins those gates, because what makes the third one safe is its gates, not its
+    name. It matters more than most: in `after_undo_window` mode the daily sweep carries out a
+    confirmed request with nobody looking at it.
+  - **And the first attempt at pinning those gates passed on broken code, three ways** — found by the
+    independent check, by planting, the same day. It matched each gate's `if (...)` line, so deleting
+    the REFUSAL inside the braces passed; and it named callers by `basename()`, so moving the call
+    into a new, completely ungated `zzplant/do.php` was indistinguishable from the gated
+    `offboarding/do.php`. Now: callers are named by their path under `web/`, every gate must refuse
+    (an `exit` before the closing brace), the three must appear in order, and the source is masked so
+    a `}` or the word `exit` inside a message cannot answer that question falsely. Seven planted
+    faults, all caught.
+  - **The two password-reset tests** compare the page a person lands on across four cases — address
+    with an account, address with none, mail server refusing, certificate expired — to prove a
+    stranger cannot tell which addresses have accounts. Both were failing, and the pages were
+    measured rather than reasoned about: the ONLY difference was `nonce="…"` on the inline script
+    `Asset.php` writes, which arrived with #625. The portal was right and the tests were comparing
+    noise. The nonce is stripped **by name**, not by widening the hex pattern to 32 characters, which
+    would blind the comparison to any real difference of that length — proved by planting a 32-hex
+    value that is not a nonce and watching it still be caught.
+  - **A clause in the sign-in limits test could never fail.** "The ELEVENTH try is refused … and the
+    link is not used up" looked a reset link up by `hash('sha256', $link)`, while the portal stores
+    `hash('sha256', 'reset-link-utc:' . $token)`. The row was never found, `null['usedAt']` is null,
+    so it passed on a row that did not exist while raising a PHP warning nobody read. It now calls
+    the portal's own `Auth::resetLinkFingerprint()` and requires the row to exist.
+- **Fixed — two self-tests that ran in no workflow at all (#646's shape again, #671, #668)**
+  - `tools/setting-limit-selftest.php` and `tools/offsite-settings-selftest.php` were invoked by
+    nothing. Both now run in `portal-selftests.yml`, on every pull request with no path filter —
+    `backup-selftest.yml` would have been the natural home for the off-site one, but it is
+    path-filtered and does not even list the off-site files, so a change to them would have run
+    nothing. The off-site test REFUSES without `rclone`, which GitHub's image does not carry, so the
+    job installs it from Ubuntu's own archive; the three rclone commands used (`copyto`, `deletefile`,
+    `lsf --files-only`) all predate that version, and the step prints `rclone version` so the one
+    actually used is on record.
+  - Three counts came out of that workflow's header, which had gone stale in silence: it said
+    "twenty-three throwaway databases" while the loop built twenty-six.
+
 - **Fixed — two self-tests that had been failing at HEAD, and nothing had run them since 27 October (#690)**
   - `tools/gdpr-eraser-selftest.php` (now 230/230) and `tools/backup-restore-selftest.php` (now 364/364,
     25 proofs) both failed on the committed tree. Every later package inherited a red baseline, and

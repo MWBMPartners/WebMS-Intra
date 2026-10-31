@@ -1206,27 +1206,159 @@ check(
     json_encode([$toldWhenMailed, $toldWhenNotMailed, $toldWhenConfirmed])
 );
 
-// Which page may file a request as ALREADY CONFIRMED. Only "Delete my account",
-// where the person has typed the confirming phrase; "Request data erasure" has
-// no phrase and must go through the emailed link. A third caller, or the flag
-// on the wrong page, would let a request reach an administrator's queue that
-// nobody confirmed.
+// Which page may file a request as ALREADY CONFIRMED. There are two, and each
+// earns it a different way:
+//
+//   "Delete my account"  — the person has typed the confirming phrase
+//                          themselves, so there is nobody left to e-mail.
+//   Offboarding (#569)   — an ADMINISTRATOR is acting on somebody who is
+//                          leaving. There is no link for anybody to click,
+//                          and the request lands as `pending_review`; it is
+//                          the same thing the "Confirm on the person's
+//                          behalf" button does, with the administrator's own
+//                          gates in front of it.
+//
+// "Request data erasure" has no phrase and no administrator, so it must go
+// through the emailed link.
+//
+// WHY THE LIST IS PINNED WHOLE. A further caller, or the flag appearing on a
+// page that has not earned it, would let a request reach an administrator's
+// queue that nobody confirmed — and in `after_undo_window` mode the daily
+// sweep would then carry it out with no human looking at it. That is why the
+// offboarding entry is NOT simply added to the list: what makes it safe is
+// its gates, so those are pinned here too. An offboarding handler that loses
+// its administrator test, its form-token test or its AccountGuard check turns
+// this check red even though the list of callers has not changed.
+//
+// This check went red on 31 October 2026 for exactly the right reason: the
+// #569 offboarding work added the third caller, and the list said two. The
+// answer was to read the new caller's gates and pin them, not to widen the
+// list and move on.
+//
+// AND THEN THE FIRST ATTEMPT AT PINNING THEM PASSED ON BROKEN CODE, THREE
+// WAYS. An independent check found all three by planting, the same day:
+//
+//   1. It matched each gate's `if (...)` LINE and nothing else, so deleting
+//      the REFUSAL inside the braces — leaving `if (App::isAdmin() === false)
+//      { }` — passed every check. Any signed-in member could then offboard
+//      anybody. This repository has learnt that exact lesson once already
+//      (#668's section D passed on four disabled gates): pin the WHOLE
+//      condition, and require the block to refuse.
+//   2. The same for `AccountGuard`, which is #518 reintroduced: an
+//      administrator of ANY organisation reaching ANY account, now also
+//      filing a CONFIRMED erasure request.
+//   3. Callers were named by `basename()`, so moving the call into a new,
+//      completely ungated `zzplant/do.php` was indistinguishable from the
+//      gated `offboarding/do.php`. `do.php` is a generic name. The two
+//      basenames in the version before this one happened to be distinctive,
+//      so keying on the name was never safe — it merely looked it.
+//
+// So: callers are named by their path under `web/`, each gate must REFUSE,
+// and the three gates must appear IN ORDER, which is what the sentence below
+// claims and what nothing checked before.
+//
+// WHY THE SOURCE IS MASKED RATHER THAN JUST STRIPPED OF COMMENTS. The walk
+// below asks "does an `exit` come before the closing brace". A `}` inside a
+// message, or the word `exit` inside one, would answer that question falsely
+// in either direction, and `$codeOnly()` leaves string literals alone. So
+// every literal becomes a run of 'x' of the same length: the shape of the
+// code is kept, and nothing inside a message can be mistaken for code.
+
+/**
+ * One file's PHP with comments removed, every string literal replaced by the
+ * same number of 'x' characters, and runs of whitespace collapsed to a single
+ * space, so that matching does not depend on how it happens to be laid out.
+ */
+$maskedCode = static function (string $path): string {
+    $code = '';
+    foreach (token_get_all((string) @file_get_contents($path)) as $token) {
+        if (is_array($token) === false) {
+            $code .= $token;
+            continue;
+        }
+        if (in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true) === true) {
+            continue;
+        }
+        $code .= in_array($token[0], [T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE], true) === true
+            ? str_repeat('x', strlen($token[1]))
+            : $token[1];
+    }
+
+    return (string) preg_replace('/\s+/', ' ', $code);
+};
+
+/**
+ * Where one gate is, and -1 when it is not there or does not refuse.
+ *
+ * Each anchor is found after the one before it, so a gate is identified by a
+ * sequence rather than by one line. From the end of the last anchor the walk
+ * requires an `exit` BEFORE the next `}`: that is what makes an emptied
+ * block — the condition kept, the refusal deleted — fail.
+ *
+ * @param list<string> $anchors
+ */
+$gateAt = static function (string $masked, array $anchors): int {
+    $at = 0;
+    foreach ($anchors as $anchor) {
+        $found = strpos($masked, $anchor, $at);
+        if ($found === false) {
+            return -1;
+        }
+        $at = $found + strlen($anchor);
+    }
+    $after = substr($masked, $at);
+    $close = strpos($after, '}');
+    $stop  = strpos($after, 'exit');
+    if ($close === false || $stop === false || $stop > $close) {
+        return -1;
+    }
+
+    return $at;
+};
+$offboardMasked = $maskedCode(__DIR__ . '/../web/_apps/offboarding/do.php');
+$adminGate = $gateAt($offboardMasked, ['if (App::isAdmin() === false) {']);
+$tokenGate = $gateAt($offboardMasked, ['Auth::verifyCsrf(', ') === false) {']);
+$guardGate = $gateAt($offboardMasked, [
+    'AccountGuard::check($userId, AccountGuard::REACH_ACCOUNT',
+    'if ($verdict !== AccountGuard::ALLOW) {',
+]);
 $filingCalls = [];
-foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(__DIR__ . '/../web', FilesystemIterator::SKIP_DOTS)) as $file) {
+// The folder the walk starts from, kept in a variable so the path each call is
+// named by is cut at exactly the same place the walk began. Taking the length
+// of realpath() instead cut the wrong number of characters off, because the
+// iterator hands back the path as it was given — `tools/../web/…` — and
+// realpath() is shorter.
+$webBase = __DIR__ . '/../web';
+foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($webBase, FilesystemIterator::SKIP_DOTS)) as $file) {
     if ($file->getExtension() !== 'php') {
         continue;
     }
     preg_match_all('/GdprEraser::fileRequest\(([^;]*)\);/', $codeOnly((string) file_get_contents($file->getPathname())), $calls);
     foreach ($calls[1] as $arguments) {
-        $filingCalls[] = basename($file->getPathname()) . ': ' . preg_replace('/\s+/', ' ', trim($arguments));
+        // The PATH under `web/`, never the file's own name: `do.php` is a
+        // generic name, and a new ungated file called that read as the gated
+        // one (found by planting, 31 October 2026).
+        $where = str_replace(DIRECTORY_SEPARATOR, '/', substr((string) $file->getPathname(), strlen($webBase) + 1));
+        $filingCalls[] = $where . ': ' . preg_replace('/\s+/', ' ', trim($arguments));
     }
 }
 sort($filingCalls);
 check(
-    'only "Delete my account", which checks a typed phrase, files a request as already confirmed; "Request data erasure" does not',
-    $filingCalls === ['delete-confirm.php: Site::id(), $userId, true', 'erasure-request.php: $siteId, $userId']
-        && str_contains($deleteCode, "!== 'DELETE MY ACCOUNT'") === true,
+    'only the typed-phrase page and the offboarding handler file a request as already confirmed, and the offboarding handler still refuses at all three of its gates, in order',
+    $filingCalls === [
+        '_apps/account/erasure-request.php: $siteId, $userId',
+        '_apps/auth/account/delete-confirm.php: Site::id(), $userId, true',
+        '_apps/offboarding/do.php: Site::id(), $userId, true',
+    ]
+        && str_contains($deleteCode, "!== 'DELETE MY ACCOUNT'") === true
+        // Each gate must be PRESENT and must REFUSE, and they must come in
+        // this order: not an administrator, then not a valid form token, then
+        // AccountGuard. Order matters because AccountGuard moved below the
+        // work it protects would leave the sentence above untrue.
+        && $adminGate > 0 && $tokenGate > $adminGate && $guardGate > $tokenGate,
     implode(' | ', $filingCalls)
+        . '; gates at admin ' . $adminGate . ', form token ' . $tokenGate . ', AccountGuard ' . $guardGate
+        . ' (-1 means missing, or present and refusing nothing)'
 );
 
 // An administrator can confirm a waiting request on the person's behalf. The

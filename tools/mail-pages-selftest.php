@@ -632,12 +632,35 @@ function shape(array $answer): string
     return implode("\n", $lines) . "\n\n" . trim($answer['body']);
 }
 
-/** The page a person lands on after asking for a link, with its form token taken out. */
+/**
+ * The page a person lands on after asking for a link, with the two things that
+ * differ on every request taken out: the form token and the script nonce.
+ *
+ * WHY THE NONCE IS HERE (31 October 2026). This comparison is the one that
+ * proves a stranger cannot tell whether an address has an account: the page
+ * must look the same whether the e-mail went, bounced, or was never sent
+ * because nobody has that address. It started failing on every one of those
+ * cases, and the difference was ONE attribute — `nonce="…"` on the inline
+ * script `Asset.php` writes to fall back to a local copy of a library. That
+ * script arrived with #625 (buttons that did nothing because the browser
+ * refused the script behind them), and neither this test nor the sign-in
+ * limits test was re-run afterwards, so both sat red.
+ *
+ * A nonce carries nothing about the address asked for: `App::cspNonce()` is
+ * `bin2hex(random_bytes(16))`, made once per request and never from anything
+ * the request said. Taking it out loses no part of what this check is for.
+ *
+ * STRIPPED BY NAME, NOT BY WIDENING THE PATTERN. The obvious fix — accept 32
+ * hex characters as well as 64 — would blind this check to any real
+ * difference that happens to be 32 hex characters long, which is the length
+ * of plenty of identifiers in this portal. Matching the attribute is exact.
+ */
 function landing(array $sent, string $ip): string
 {
     $page = req((string) $sent['jar'], 'GET', $sent['location'] === '' ? '/forgot-password' : $sent['location'], null, $ip);
+    $body = preg_replace('/[0-9a-f]{64}/', '(token)', $page['body']);
 
-    return $page['status'] . "\n" . preg_replace('/[0-9a-f]{64}/', '(token)', $page['body']);
+    return $page['status'] . "\n" . preg_replace('/nonce="[0-9a-f]+"/', 'nonce="(nonce)"', (string) $body);
 }
 
 /** How many records of one kind one visitor address has in the activity log. */

@@ -775,12 +775,35 @@ function shape(array $answer): string
     return implode("\n", $lines) . "\n\n" . trim($answer['body']);
 }
 
-/** The page a person lands on after asking for a link, with its form token taken out. */
+/**
+ * The page a person lands on after asking for a link, with the two things that
+ * differ on every request taken out: the form token and the script nonce.
+ *
+ * WHY THE NONCE IS HERE (31 October 2026). This comparison is the one that
+ * proves a stranger cannot tell whether an address has an account: the page
+ * must look the same whether the e-mail went, bounced, or was never sent
+ * because nobody has that address. It started failing on every one of those
+ * cases, and the difference was ONE attribute — `nonce="…"` on the inline
+ * script `Asset.php` writes to fall back to a local copy of a library. That
+ * script arrived with #625 (buttons that did nothing because the browser
+ * refused the script behind them), and neither this test nor the mail pages
+ * test was re-run afterwards, so both sat red.
+ *
+ * A nonce carries nothing about the address asked for: `App::cspNonce()` is
+ * `bin2hex(random_bytes(16))`, made once per request and never from anything
+ * the request said. Taking it out loses no part of what this check is for.
+ *
+ * STRIPPED BY NAME, NOT BY WIDENING THE PATTERN. The obvious fix — accept 32
+ * hex characters as well as 64 — would blind this check to any real
+ * difference that happens to be 32 hex characters long, which is the length
+ * of plenty of identifiers in this portal. Matching the attribute is exact.
+ */
 function landing(array $sent, string $ip): string
 {
     $page = req((string) $sent['jar'], 'GET', $sent['location'] === '' ? '/forgot-password' : $sent['location'], null, $ip);
+    $body = preg_replace('/[0-9a-f]{64}/', '(token)', $page['body']);
 
-    return $page['status'] . "\n" . preg_replace('/[0-9a-f]{64}/', '(token)', $page['body']);
+    return $page['status'] . "\n" . preg_replace('/nonce="[0-9a-f]+"/', 'nonce="(nonce)"', (string) $body);
 }
 
 /** One card on the health page: "warning | Not set up | detail…", or '' when the page has no such card. */
@@ -1189,6 +1212,22 @@ $answer = tryPassword($at, login('delta'), $newPassword);
 ok('and the new password signs in once the block has ended', signedIn($answer) === true, describe($answer));
 
 // =============================================================================
+// 🔑 The portal's own Auth class, loaded here because the checks below need to
+//    find a stored reset link by the SAME fingerprint the portal writes. It is
+//    a plain class file with no code of its own at the top, so loading it early
+//    does nothing but make the class available (section S loads it again, and
+//    require_once means that costs nothing).
+//
+//    WHY THE TEST MUST ASK RATHER THAN WORK IT OUT. A reset link is stored as
+//    `hash('sha256', 'reset-link-utc:' . $token)`, not as the plain SHA-256 of
+//    the token. A check below looked for the plain hash, so it NEVER found the
+//    row — and because `null['usedAt']` is null, the clause "and the link is
+//    not used up" passed on a row that did not exist, while raising a PHP
+//    warning nobody read. Found on 31 October 2026. Writing the prefix out
+//    here would be a second copy of the portal's rule, which is the same fault
+//    one step further on, so the portal's own function is called.
+require_once $webSrc . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Auth.php';
+
 head('E. The reset limits: 5 requests, and 10 tries to use a link, per address per 15 minutes');
 // =============================================================================
 $at = ip(51);
@@ -1230,7 +1269,7 @@ $echoPassword = bin2hex(random_bytes(12)) . 'Dd4!';
 // The ten tries put at one moment, five minutes ago by the database's clock, so the wait is a known number: ten minutes.
 q('UPDATE tblApiRateLimits SET hitAt = NOW() - INTERVAL 5 MINUTE WHERE bucket = ?', 's', [bucket('use', $at)]);
 $answer = useLink($at, $link, $echoPassword);
-ok('the ELEVENTH try is refused, even with a REAL link: the password is not changed and the link is not used up', $answer['location'] === '/reset-password?token=' . $link . '&wait=10' && passwordIs('echo', $echoPassword) === false && one('SELECT usedAt FROM tblPasswordResets WHERE tokenHash = ?', 's', [hash('sha256', $link)])['usedAt'] === null, describe($answer));
+ok('the ELEVENTH try is refused, even with a REAL link: the password is not changed and the link is not used up', $answer['location'] === '/reset-password?token=' . $link . '&wait=10' && passwordIs('echo', $echoPassword) === false && ($realLink = one('SELECT usedAt FROM tblPasswordResets WHERE tokenHash = ?', 's', [\Portal\Core\Auth::resetLinkFingerprint($link)])) !== null && $realLink['usedAt'] === null, describe($answer) . '; the stored link was ' . ($realLink === null ? 'NOT FOUND' : 'found, usedAt ' . var_export($realLink['usedAt'], true)));
 $page = req(newJar(), 'GET', $answer['location'], null, $at);
 ok('the page it is sent to says, in plain words, to wait about 10 minutes and try again (the right number, in a time zone that is not the database\'s)', str_contains(said($page), 'Too many tries from this connection') === true && str_contains(said($page), 'wait about 10 minute(s)') === true, said($page));
 $other = useLink($at, $madeUp, $newPassword);
