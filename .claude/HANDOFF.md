@@ -22,9 +22,9 @@
 
 ## Where we are right now
 
-**The queue as it stood is EMPTY.** #671, #672 and #669 are all closed. Pick up from "What to do
-next" below, which needs no decision, or from the owner's answers to the questions in "Waiting on
-the owner".
+**The queue as it stood is EMPTY, and the broken baseline is fixed.** #671, #672, #669 and #690 are
+all closed. Pick up from "What to do next" below, which needs no decision, or from the owner's
+answers to the questions in "Waiting on the owner".
 
 **Nothing is pushed.** `origin/claude/alpha-wip` was last updated on **27 October 2026** (`0e15afd`).
 Everything since exists only on this disk, plus the sign-in hotfix on `hotfix/sign-in-1.4.2`,
@@ -39,6 +39,7 @@ branch" is not a reason.
 | **#671** | The off-site backup's six settings really decide what a run does | `ec22773` |
 | **#672** | Unattended transcription — **decided NOT wanted**, closed as not planned | (no code) |
 | **#669** | Change the pattern of a repeating series that already exists | `ffdbc08` |
+| **#690** | The two self-tests that were failing at HEAD now pass (230/230 and 364/364) | `aa9936f` |
 
 ### Raised this run and NOT built
 
@@ -46,7 +47,7 @@ branch" is not a reason.
 |---|---|
 | **#688** | Do `s3` and `sftp` get address boxes on the off-site backup page, or come off it? |
 | **#689** | `access-pages-selftest.php` counts through the server-wide `mysql.general_log`, so it must run ALONE |
-| **#690** | **Two self-tests fail at HEAD** — `gdpr-eraser-selftest.php` and `backup-restore-selftest.php`. Verified in a clean worktree, so NOT caused by #669. They run on any pull request touching `web/_sql/**`, so the next PR will be red |
+| **#694** | **Restoring a pre-27-October backup silently loses every organisation's address and support e-mail.** An old-form snapshot holds `tblSettings` back but still restores `tblSites`, and the `ON DELETE CASCADE` takes the per-organisation row. The restore warns, but names the table rather than what was lost |
 | **#691** | No way to restore a date a pattern change hid. Three sentences promising otherwise are corrected |
 | **#692** | Should a date the pattern adds be published or drafted? A product judgement |
 | **#693** | The in-transaction attachment re-check is guarded by no test (single-worker harness cannot reach it) |
@@ -58,13 +59,20 @@ Name the next one after its own work and remove it with `docker rm -vf` (the `-v
 
 ### What to do next, needing no decision
 
-1. **#690 first.** Two self-tests are broken at HEAD and nothing has run them since 27 October. Every
-   later package inherits a red baseline until this is fixed, and the cause is probably something one
-   of migrations 224–232 changed.
+1. **Run the WHOLE self-test set before starting anything new.** #690 was two tests broken by an
+   earlier package and found only by accident; the habit of running "the checks that touch what I
+   changed" cannot catch a test a DIFFERENT package broke. Nothing automated does this locally yet,
+   and it is the cheapest way to stop the next #690.
 2. Then the wider open list (#660–#667 and below), and the verification work in item 5 under
    "Waiting on the owner".
 
 ### The lessons from this run, worst first
+
+0. **A test broken by one package is invisible to the next.** #690's two tests had been red since some
+   point in migrations 224–232, and the root cause was my own #677: migration 231 created the first
+   `tblSettings` row with a non-empty `siteID`, and several long-standing expectations had been true
+   only because no such row existed. **Neither test is re-runnable on a database it has already used**,
+   which is why the first symptom (a duplicate key) was a red herring rather than the fault.
 
 1. **Never write "(checked)" about something you did not check.** The audit script guarding #669's
    safety list said "Nothing in this schema does that today (checked)". One query disproved it. The
@@ -112,7 +120,7 @@ Name the next one after its own work and remove it with `docker rm -vf` (the `-v
    Noted this run: on a path under `/private/tmp/claude-501/...` the `quiet` mode fired spuriously
    because `stat` reported a stale size and mtime for a file that was really being written.
 3. **Decisions raised and still open**, each with its own issue and the options written out:
-   **#688**, **#692** (publish or draft a date the pattern adds — my recommendation is draft, with a
+   **#694** (how should a restore tell somebody what it could not put back?), **#688**, **#692** (publish or draft a date the pattern adds — my recommendation is draft, with a
    line in the preview saying so), **#687** (may a hosting provider bound how long an organisation
    keeps donor names and addresses — the one case where capping is the DANGEROUS direction),
    **#685** (organisations already over the attendance retention limit), **#681** (may a department
