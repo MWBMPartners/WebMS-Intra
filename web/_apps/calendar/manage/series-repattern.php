@@ -777,19 +777,54 @@ if ($confirmed === true && $plan !== null && $problem === '') {
                         } elseif ($column === 'deletedAt') {
                             $values[] = null;
                         } elseif ($column === 'status') {
-                            // 🚦 A NEW DATE IS NEVER BORN CANCELLED OR POSTPONED.
-                            //    Those two states mean "this particular
-                            //    occurrence is not happening", which cannot be
-                            //    true of a date that did not exist until now —
-                            //    and their reason and timestamp columns are
-                            //    cleared just above, so the state would be left
-                            //    with nothing explaining it. Any other status
-                            //    (draft, published) IS inherited, because that
-                            //    describes the series rather than one date.
-                            $status   = (string) ($template['status'] ?? 'published');
-                            $values[] = in_array($status, ['cancelled', 'postponed'], true) === true
-                                ? 'published'
-                                : $status;
+                            // 🚦 A DATE THIS CHANGE ADDS IS ALWAYS A DRAFT
+                            //    (the owner's decision, #692, 31 October 2026).
+                            //    It is NOT inherited from the template, and the
+                            //    template's status is deliberately not read
+                            //    here at all.
+                            //
+                            //    WHY. An added date is a copy of the series as
+                            //    it stands, and nothing more: it has no
+                            //    registration window (the template's
+                            //    `registrationClosesAt` is a moment just before
+                            //    the TEMPLATE's own date, so a date added weeks
+                            //    later would arrive with registration already
+                            //    closed), and nothing beyond the series'
+                            //    description. Publishing that puts a
+                            //    half-finished entry in front of members the
+                            //    moment somebody presses the button.
+                            //
+                            //    A draft is one click from being right. A
+                            //    wrongly published service is not, and there is
+                            //    NO WAY in this repository to bring back a date
+                            //    that has been hidden (#691) — only
+                            //    FeedImporter ever clears `isDeleted`. So the
+                            //    recoverable mistake is the one to make.
+                            //
+                            //    WHAT WAS HERE BEFORE, so nobody puts it back
+                            //    believing it was an oversight: the added date
+                            //    inherited the template's status, with
+                            //    `cancelled` and `postponed` turned into
+                            //    `published` because a date that did not exist
+                            //    until now cannot already be "not happening"
+                            //    and its reason columns are cleared just above.
+                            //    That reasoning still holds — it is simply
+                            //    answered by always drafting, which cannot be
+                            //    `cancelled` or `postponed` either.
+                            //
+                            //    PUBLISHING THEM is already possible in one
+                            //    go, and on the very page this handler
+                            //    redirects to: `series-edit.php` lists every
+                            //    non-deleted date of the series, drafts
+                            //    included, with a checkbox each and a bulk
+                            //    `Status` control that writes `status = ?`
+                            //    across every date ticked. I first wrote here
+                            //    that it was one at a time and raised #696 for
+                            //    a bulk control; the independent check found
+                            //    the facility already existed, and #696 was
+                            //    closed. Do not raise it again without
+                            //    reading that page.
+                            $values[] = 'draft';
                         } elseif ($column === 'registrationEnabled') {
                             // Its DEFAULT, not NULL: the column refuses NULL.
                             // Off, which is what every date the create handler
@@ -906,9 +941,25 @@ if ($confirmed === true && $plan !== null && $problem === '') {
             //    ones it does. The old rule is therefore always removed, and a
             //    new one written only when the series now holds exactly the
             //    dates the new pattern makes.
-            $liveAfter = [];
+            // 📡 `status` is read too, and only for the MESSAGE. The rule row
+            //    itself is decided on the dates alone, which is right: the
+            //    pattern either describes this series' dates or it does not,
+            //    and that does not change when somebody publishes one.
+            //
+            //    But the calendar feed collapses a series into one repeating
+            //    entry only when the PUBLISHED dates match the rule
+            //    (`calendar/export.php` reads the run with
+            //    `AND e.status = 'published'`). So while any date is a draft —
+            //    which, since #692, every date this page ADDS is — a
+            //    subscriber still sees one entry per date, and the old
+            //    sentence "Anybody subscribing to this calendar now sees one
+            //    repeating entry" was FALSE for exactly the change that had
+            //    just been made. Found by the independent check on
+            //    31 October 2026.
+            $liveAfter   = [];
+            $draftsAfter = 0;
             $checkStmt = $mysqli->prepare(
-                'SELECT startDateTime FROM tblEvents '
+                'SELECT startDateTime, status FROM tblEvents '
                 . 'WHERE seriesID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL'
             );
             if ($checkStmt === false) {
@@ -919,6 +970,9 @@ if ($confirmed === true && $plan !== null && $problem === '') {
             $after = $checkStmt->get_result();
             while ($row = $after->fetch_row()) {
                 $liveAfter[] = (string) $row[0];
+                if ((string) $row[1] !== 'published') {
+                    $draftsAfter++;
+                }
             }
             $checkStmt->close();
 
@@ -1004,7 +1058,11 @@ if ($confirmed === true && $plan !== null && $problem === '') {
                 $parts[] = $moved . ' date(s) re-timed';
             }
             if ($added > 0) {
-                $parts[] = $added . ' date(s) added';
+                // 📝 "as drafts" is in the sentence on purpose. Without it the
+                //    message reads as though the dates are now in the diary,
+                //    and the first thing anybody does is go looking for them
+                //    on the public calendar, where they are not (#692).
+                $parts[] = $added . ' date(s) added as drafts';
             }
             if ($removed > 0) {
                 $parts[] = $removed . ' date(s) removed';
@@ -1024,7 +1082,16 @@ if ($confirmed === true && $plan !== null && $problem === '') {
                 : 'Pattern changed: ' . implode(', ', $parts) . '.')
                 . ($kept > 0 ? ' ' . $kept . ' date(s) were left exactly as they were.' : '')
                 . ($rulePublished === true
-                    ? ' Anybody subscribing to this calendar now sees one repeating entry.'
+                    ? ($draftsAfter === 0
+                        ? ' Anybody subscribing to this calendar now sees one repeating entry.'
+                        // 📡 THREE ANSWERS, NOT TWO. The rule row is written, so this series CAN be
+                        //    collapsed — but the feed only collapses the PUBLISHED dates, so while
+                        //    any date is still a draft a subscriber sees each date on its own. Saying
+                        //    "now sees one repeating entry" here was untrue of every change that
+                        //    added a date, which since #692 is every added date there is.
+                        : ' Anybody subscribing to this calendar still sees each date on its own, and will see'
+                          . ' one repeating entry once ' . ($draftsAfter === 1 ? 'the draft date is' : 'all '
+                          . $draftsAfter . ' draft dates are') . ' published.')
                     : ' Anybody subscribing to this calendar now sees each date on its own, because no single'
                       . ' repeating rule can describe this series truthfully.');
             $_SESSION['flash_type'] = 'success';
@@ -1311,6 +1378,19 @@ $showReading = static function (?string $reading): string {
                         settings as the next date in the diary. It does <strong>not</strong> inherit anything that
                         belongs to one date's own history: a new date is never created already cancelled, and carries
                         no cancellation reason, moderation note or submitter details.
+                    </p>
+                    <p class="small text-muted">
+                        <strong>Each new date arrives as a draft, so members will not see it yet.</strong> That is
+                        deliberate: a new date has no registration window of its own and nothing beyond this series'
+                        description, so it is not ready to be read by anybody until you have looked at it. A date
+                        that has been hidden cannot be brought back, so this way round the mistake is the
+                        recoverable one.
+                    </p>
+                    <p class="small text-muted">
+                        <strong>You will land on this series' bulk edit page, where you can publish them all at
+                        once:</strong> tick the new dates and set <em>Status</em> to Published. Until you do, anybody
+                        subscribing to this calendar sees each date on its own rather than one repeating entry,
+                        because the calendar file only collapses dates that are published.
                     </p>
                 <?php endif; ?>
 

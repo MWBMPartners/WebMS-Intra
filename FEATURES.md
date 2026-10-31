@@ -360,6 +360,16 @@ Events, series, RSVP, exports, and seven view modes.
       are coming. Thirty-four tables name an event, every one of them is on the list, and an
       automatic check keeps that list honest against the schema. Such a date is listed with what is
       attached to it and a link to change it by hand.
+    - **A date the change ADDS arrives as a draft**, so members cannot see it until somebody
+      publishes it from Manage Events (#692, the owner's decision of 31 October 2026). An added date
+      is a copy of the series and nothing more — it has no registration window of its own and nothing
+      beyond the series' description — and a date that has been hidden cannot be brought back (#691),
+      so the recoverable mistake is the one the page makes. The preview says so before anything is
+      written, and the message afterwards says how many arrived as drafts. **Publishing them all at
+      once already works** on the page the change sends you to: the series' bulk edit page lists every
+      date with a tick-box and a Status control. Until they are published, a subscriber sees each date
+      on its own rather than one repeating entry, because the calendar file only collapses published
+      dates — and the message says so.
     - **A date somebody moved by hand is left alone too.** Which dates those are is *worked out*
       rather than remembered: migration 232 records the moment the pattern produced each date, and
       anything that no longer sits there was moved by a person. Dates created before that migration

@@ -2600,6 +2600,19 @@ $done = repatPost($jar['admin'], $shiftSeries, [
     'repeatCount'     => '4',
 ], true, $preview['digest']);
 ok('R12 confirming redirects away from the form', $done['status'] === 302, 'HTTP ' . $done['status']);
+// 📡 THE OTHER BRANCH of the sentence about subscribers, and the only change in
+//    this test that reaches it: four dates RE-TIMED, none added, every one of
+//    them already published — so no drafts remain and the feed really will
+//    collapse the series into one entry. S15d covers the opposite case.
+//    Without this check the "everything is published" wording was never
+//    exercised at all, which planting found: making the page claim drafts
+//    remained when none did failed nothing.
+$shiftFlash = flashOn(req($jar['admin'], 'GET', '/calendar/manage/series-edit?seriesID=' . $shiftSeries)['body']);
+ok('R12b and the message says subscribers now see ONE repeating entry, because nothing is left in draft',
+    str_contains($shiftFlash, 'now sees one repeating entry') === true
+    && str_contains($shiftFlash, 'still sees each date on its own') === false
+    && str_contains($shiftFlash, 'added as drafts') === false,
+    $shiftFlash);
 $after = repatRows('EVREP Repat shift');
 ok('R13 all four dates now start at 10:30',
     repatLiveStarts('EVREP Repat shift') === ['2029-01-07 10:30:00', '2029-01-14 10:30:00', '2029-01-21 10:30:00', '2029-01-28 10:30:00'],
@@ -3202,8 +3215,17 @@ $histFields = [
     'repeatFrequency' => 'weekly',
     'repeatCount'     => '4',
 ];
-$histPrev = repatPost($jar['admin'], $histSeries, $histFields);
-repatPost($jar['admin'], $histSeries, $histFields, true, $histPrev['digest']);
+$histPrev    = repatPost($jar['admin'], $histSeries, $histFields);
+$histApplied = repatPost($jar['admin'], $histSeries, $histFields, true, $histPrev['digest']);
+// 🪤 The path is written out here rather than taken from the answer's own
+//    `Location`, because `req()` prefixes the organisation's part itself and
+//    the handler's `Location` already carries it: passing it straight through
+//    doubles that part and lands on a page with no message at all (#536 — "never
+//    join two built addresses"). The first version of this check did exactly
+//    that and reported "(no message shown)", which reads identically to the
+//    real fault it was looking for.
+$histLanding = req($jar['admin'], 'GET', '/calendar/manage/series-edit?seriesID=' . $histSeries);
+$histFlash   = flashOn($histLanding['body']);
 
 $born = q(
     'SELECT eventID, status, cancelReason, statusChangedByID, statusChangedAt, submissionStatus, submitterName, '
@@ -3213,9 +3235,47 @@ $born = q(
     [ORG, 'EVREP Repat history', '2029-08-19 19:00:00', '2029-08-26 19:00:00']
 );
 ok('S14 the two new dates were created', count($born) === 2, (string) count($born));
-ok('S15 NEITHER NEW DATE IS CANCELLED',
-    count(array_filter($born, static fn (array $r): bool => (string) $r['status'] === 'published')) === 2,
+// 🚦 BOTH NEW DATES ARE DRAFTS (#692, the owner's decision of 31 October 2026).
+//    This check used to require 'published', which was the old behaviour; it
+//    is written as `=== 'draft'` rather than `!== 'cancelled'` on purpose,
+//    because "not cancelled" would pass on either answer and this is the whole
+//    of what #692 changed. The two states #692 did NOT want are still
+//    impossible, since a date that is a draft is neither cancelled nor
+//    postponed.
+ok('S15 BOTH NEW DATES ARE DRAFTS, so members cannot see them yet',
+    count(array_filter($born, static fn (array $r): bool => (string) $r['status'] === 'draft')) === 2,
     implode(', ', array_map(static fn (array $r): string => (string) $r['status'], $born)));
+// 🗣️ And SAYING so is half the feature. A page that quietly creates drafts
+//    sends somebody looking for the dates on the public calendar, where they
+//    are not — which is exactly the shape of a message that is "not untrue"
+//    and still misleads. Both the preview and the message afterwards are
+//    pinned, because they are written in two different places and either could
+//    be dropped on its own.
+ok('S15b the PREVIEW says the new dates arrive as drafts, before anything is written',
+    str_contains($histPrev['body'], 'arrives as a draft') === true,
+    'the preview did not say it');
+// 📡 THE SENTENCE ABOUT SUBSCRIBERS, which was WRONG until the independent
+//    check caught it on 31 October 2026. The rule row IS written — the pattern
+//    does describe this series' dates — so the old message said "Anybody
+//    subscribing to this calendar now sees one repeating entry". But
+//    `calendar/export.php` reads a series' run with `AND e.status =
+//    'published'` and only collapses it when the PUBLISHED dates match the
+//    rule. While any date is a draft, and since #692 every added date is one,
+//    a subscriber sees each date on its own. So the message claimed the
+//    opposite of what the feed does, for exactly the change just made.
+//
+//    Pinned on the WORDS a subscriber's situation is described by, and the
+//    count, because the number of drafts is what decides the wording.
+ok('S15d and it says subscribers still see each date on its own until the drafts are published',
+    str_contains($histFlash, 'still sees each date on its own') === true
+    && str_contains($histFlash, 'will see one repeating entry once') === true
+    && str_contains($histFlash, 'draft dates are published') === true
+    && str_contains($histFlash, 'now sees one repeating entry') === false,
+    $histFlash);
+ok('S15c and the message AFTERWARDS says they were added as drafts',
+    str_contains($histFlash, 'added as drafts') === true,
+    'HTTP ' . $histLanding['status'] . ' -> ' . $histLanding['location'] . '; message: ' . $histFlash
+    . '; the page ' . (str_contains($histLanding['body'], 'Bulk Edit') === true ? 'IS' : 'is NOT') . ' the bulk edit page');
 ok('S16 neither carries the other date\'s cancellation trail',
     count(array_filter($born, static fn (array $r): bool => $r['cancelReason'] === null
         && $r['statusChangedByID'] === null && $r['statusChangedAt'] === null)) === 2);

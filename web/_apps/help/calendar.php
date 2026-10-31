@@ -222,7 +222,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             is left alone too.
         </li>
         <li>
-            A date the pattern <em>adds</em> is never created already cancelled, and never carries
+            <strong>A date the pattern <em>adds</em> arrives as a draft, so nobody can see it yet.</strong>
+            This is deliberate: a new date has no registration window of its own and nothing beyond the
+            series' own description, so it is not ready to be read by anybody until you have looked at
+            it. A date that has been hidden cannot be brought back, so this way round the mistake is
+            the one you can undo.
+            <br>
+            <strong>Publishing them is one step, not one per date.</strong> After the change you land on
+            that series' bulk edit page: tick the new dates and set <em>Status</em> to Published. Until
+            you do, anybody subscribing to the calendar sees each date on its own instead of one
+            repeating entry, because the calendar file only collapses dates that are published.
+        </li>
+        <li>
+            A date the pattern adds is also never created already cancelled, and never carries
             another date's cancellation reason or the details of somebody who submitted an event.
         </li>
         <li>
