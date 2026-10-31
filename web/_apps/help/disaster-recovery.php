@@ -78,7 +78,12 @@ must-know shortcuts.</p>
     </div></div></div>
     <div class="col-md-4"><div class="card h-100"><div class="card-body">
         <h5><i class="fa-solid fa-3 me-1"></i>Restore</h5>
-        <p class="small">Roll back to the latest snapshot. Use the off-site copy if local backups are gone.</p>
+        <p class="small">
+            Roll back to the latest snapshot. If the backups on this server are gone
+            too, use an off-site copy — but only if one was set up: it needs a command
+            line on the server, and the Off-site page says whether any copy has really
+            been sent.
+        </p>
         <a class="btn btn-outline-success btn-sm" href="<?php echo htmlspecialchars(Site::url('admin/maintenance/backup'), ENT_QUOTES, 'UTF-8'); ?>">Backups</a>
         <a class="btn btn-outline-success btn-sm" href="<?php echo htmlspecialchars(Site::url('admin/maintenance/offsite-backup'), ENT_QUOTES, 'UTF-8'); ?>">Off-site</a>
     </div></div></div>

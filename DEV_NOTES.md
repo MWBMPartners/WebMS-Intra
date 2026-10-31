@@ -11391,3 +11391,330 @@ The design was right. Every number offered in support of it was wrong, which is
 the worst way to be right: a reader who checks one figure and finds it false has
 no reason to trust the conclusion. **Measure the numbers you put in a comment
 with the same code the comment is about** — it took one short script here.
+
+## A seeded setting that nothing reads is a lie with a Save button (#671)
+
+`/admin/maintenance/offsite-backup` had six seeded settings, a form, a permission
+rule narrower than the page's, a refusal written into the activity log, and a
+read-only mode for a site administrator. All of it was careful, and **nothing in
+the repository read any of the six values.** The sync script used the variables in
+its own copy on the server; its header said so, and so did the setup guide. Only
+the page was silent, so the page was the one thing that lied — and it lied with a
+success message: "Off-site backup settings saved."
+
+**How to find this shape.** For every key a page writes, search the whole
+repository for a reader, and count the ones that are not the page itself:
+
+```bash
+grep -rn "backup\.offsite" . --include="*.php" --include="*.sql" --include="*.sh" \
+  | grep -v "full_schema.sql\|103_offsite_sync.sql\|offsite-backup"
+```
+
+That printed nothing. The three remaining mentions of `offsite` anywhere under
+`web/` were two comments citing the page as a precedent for a time limit, and one
+link from the help page.
+
+**Why it survived so long:** every automatic check passed. `check_schema_seed_parity.py`
+is happy — the keys are seeded in both places. The route exists, the file exists, the
+form posts to the right address, the permission check is right. **Nothing anywhere
+asks whether a setting is READ.** A tripwire for that is a real possibility and is
+not built: the hard part is that a legitimate setting may be read only by a shell
+script, a scheduled job, or a file that is not deployed.
+
+## A bridge from the database to a shell REFUSES; it never escapes (#671)
+
+`tools/offsite-backup/read-offsite-settings.php` hands six settings to a bash
+script. Three of them end up on a command line. A settings box is free text.
+
+The rule written into that file, and worth keeping: **a value that does not match
+its pattern is not printed at all.** The script then uses the value in its own file
+and prints a `WARNING` naming the setting. Nothing is cleaned up and passed on,
+because an escaped destination is still a destination nobody chose, and what is
+being sent is the whole database.
+
+What makes the `KEY=value` format safe without `eval` on the far side: every value
+is checked against a pattern containing no newline, no space, no quote and no shell
+character, so stored text cannot add a second line or a second key. The bash side
+re-checks every value anyway — two guards, because the bash one is the one that
+would have to hold if the bridge were replaced or edited on the server. The patterns
+on the two sides are kept deliberately identical so they can be read side by side;
+two guards that differ are worse than one.
+
+One thing measured rather than assumed: **bash does not re-read the content of a
+variable it has expanded**, so a dollar sign or a backtick inside a value is not
+dangerous in `"${VALUE}"`. The patterns are still narrow, for readability rather
+than for safety. A **leading dash** is the real hazard, and it is refused
+separately: `rclone` and `mail` would both read one as an option rather than a value.
+
+## A fixed path to the portal is wrong on every real server (#671)
+
+`log-offsite-result.php` began with:
+
+```php
+require __DIR__ . '/../../web/_core/bootstrap.php';
+```
+
+It is copied to `<portal>/_backups/`, so that resolves to
+`<parent-of-portal>/web/_core/bootstrap.php` — correct **only when the portal's
+folder is literally named `web`.** It is in a checkout of this repository, which is
+where it was tested; it is not on a customer's server, where the deploy mirrors the
+CONTENTS of `web/` into a folder the customer names (the `SFTP_PATH_…` secrets).
+
+Measured on 30 October 2026 rather than reasoned: from a folder named `portal-live`,
+`realpath()` of that path is `false`.
+
+**The consequence is the part worth remembering.** The recorder stopped before
+writing anything, so `tblOffsiteSyncLog` stayed empty on every real installation,
+and the off-site page showed "Last sync: never" and "No runs logged yet" however
+many copies had really been sent — **and a failed run was equally invisible**, since
+a failure is recorded through the same file.
+
+**And it had already been found.** `docs/offsite-backup-setup.md` said: "A run is
+recorded **only when the portal's folder is called `web`**. On any other folder name
+the copy is still sent, but the page shows nothing for it. *Tested (19).*" So it was
+observed, measured, written down as a limitation — and not treated as a bug. Writing
+a fault down accurately is not the same as deciding what to do about it, and a
+limitation that no customer could ever avoid is a bug.
+
+Both files now look for `_core/bootstrap.php` in the two places either can be
+(copied to `<portal>/_backups/`, or run from `tools/offsite-backup/` in a checkout)
+rather than assuming a name.
+
+## Stripping comments before a text check, and the two opposite ways it bites (#671)
+
+The off-site page has to answer "does the copy of the sync script on THIS server
+obey these settings?" The script is copied by hand and never deployed, so the page
+cannot assume it is current.
+
+It checks the mechanism, not a version label: the bridge file must exist, and the
+script must have a non-comment line assigning `READ_PHP` **and** a non-comment line
+calling `php "${READ_PHP}"`. A `@version` line is a claim; a customer editing the
+file keeps the claim and changes the behaviour.
+
+**Why the comments must be stripped.** The script NAMES the bridge several times in
+its own prose, explaining what it does and cannot do. So a plain search for that
+name, or for `READ_PHP`, is satisfied by a script whose call has been **commented
+out** — exactly the state the check exists to catch. Section O of
+`backup-page-selftest.php` plants that state and the page catches it; with the
+comment-stripping condition replaced by `false === true`, **four checks in that one
+section fail and no others**, so the stripping is load-bearing and the plant is pure.
+
+**The same technique failed the opposite way in the same package.** A check in
+`offsite-settings-selftest.php` asserts the recorder no longer uses the old
+`'/../../web/_core/bootstrap.php'` path. The first version searched the whole file
+and failed — because the fix's own comment **quotes the old line on purpose**, to
+stop somebody putting it back. There the naive search called a fixed thing broken;
+on the page it would have called a broken thing fixed. Both are the same mistake:
+asking the text a question only the code can answer.
+
+## A comment claimed a refusal the code never made, and only running it decided (#671)
+
+The bridge's "how many copies to keep" reader carried a comment saying `"8.5"` and
+`"08"` were both refused, "rather than rounded or read as base eight". The code
+refused `8.5` and **accepted `08`**, returning 8 — `/^[0-9]+$/` matches a leading
+nought. The self-test's own expectation was written from the comment, so the test
+caught the comment rather than the code.
+
+Accepting it turned out to be right, and the reason is worth keeping: the danger
+that made `08` worth refusing was **bash reading it as base eight**, which the
+script's own note records costing a whole silent tidy-up. That danger is gone
+through the bridge, because what the bridge prints is always a canonical decimal
+with no leading nought, and the script reads it with an explicit `10#` as well. So
+the fix was to the comment and the test, not to the behaviour — but which of the two
+was wrong was not knowable by reading either.
+
+## access-pages-selftest.php cannot run beside anything on the same MySQL server (#689)
+
+Running four CI-wired self-tests at once against one MySQL container, each with its
+own database, gave `access-pages-selftest.php` **332 passed, 2 failed**. Alone,
+against the same already-used database: **334 passed, 0 failed.**
+
+It counts the portal's account look-ups out of `mysql.general_log`, which is **one
+table for the whole server**, narrowed only by `thread_id <> CONNECTION_ID()`. So
+every statement any other test's connection runs — on any database on that server —
+is counted, and the two strictest checks go over.
+
+**The owner's rule of 12 October 2026 allows packages that share no files to run
+side by side with their "own named containers and ports". This is the case that
+shows a shared database SERVER is not enough separation, even with different
+database names.** And it fails in the dangerous direction: two failures that read
+exactly like a real regression in whatever you are checking, with nothing in the
+message pointing at another process. Re-run a surprising failure alone before
+believing it.
+
+## A pattern with no "s" drops the WHOLE flag, not the rest of the line (#671)
+
+`log-offsite-result.php` read its arguments with:
+
+```php
+if (preg_match('/^--([a-z\-]+)(=(.*))?$/', $arg, $m) === 1) { $args[$m[1]] = $m[3] ?? ''; }
+```
+
+Without the `s` modifier, `.` does not match a newline. The instinct is that a
+multi-line value would be **truncated at the newline**. It is not: the `$`
+cannot be reached, so the WHOLE pattern fails, the `if` is never entered, and
+**the flag is not recorded at all.** Measured: a multi-line `--output` stored
+NULL; the same text on one line stored fine.
+
+So `tblOffsiteSyncLog.output` was NULL for every run ever made, because a run's
+log is never one line. The column looked unused rather than broken.
+
+**Why it mattered more than a missing log.** Since #671 the settings bridge
+REFUSES a value it will not put on a command line, rather than escaping it — and
+a `WARN` line is the only thing that says which setting was refused and why. The
+only place those lines were kept was that column. So a mistyped destination left
+no trace anywhere an administrator could reach, while the page said the settings
+were in force. Splitting at the first `=` has no such trap: the name is checked
+on its own, and the value is whatever follows, newlines and all.
+
+## A refusal is only a safety feature if somebody is told (#671)
+
+The design rule "refuse rather than escape" is right, and it was half-built. The
+bridge held a bad value back correctly, the script used its own value correctly,
+and **nothing an administrator could see said so** — the warning went to a column
+no page read and to a hosting panel's e-mail. So the portal showed one
+destination and the copy went to another, which is the fault #671 was raised
+about, one step along.
+
+Two things make a refusal honest, and both are cheap: say it where the value is
+TYPED (the page asks the same question through `Portal\Core\OffsiteSettings`, so
+a typo is caught at Save), and say it where the RUN is reported (the page now
+lists each run's warnings, the newest prominently). Asking the question in two
+places was the alternative, and was rejected: two guards that can drift apart are
+worse than one.
+
+## Adding a "succeeded but did nothing" path invalidates every reader of the exit code (#671)
+
+The sync script gained a skip path: switched off on the page, it sends nothing,
+records `skipped`, and **exits 0** — deliberately, so a hosting panel does not
+e-mail a failure every week for a feature somebody turned off.
+
+`offsite-backup-run.php` read only the exit code. So it answered "Off-site sync
+completed in 1s." in green for a run that packed nothing, encrypted nothing and
+sent nothing. Before the skip path, exit 0 really did mean a copy had gone.
+
+**And that was the state of every fresh installation**, because
+`backup.offsite.enabled` is seeded `'0'` — so the first thing an administrator
+did after setting the feature up, pressing "Run now" to check it, told them it
+had worked. When you give a program a new way to succeed without doing its job,
+every existing reader of its exit code is now wrong; find them in the same change.
+
+## Check a page's claim against the FALLBACK, not the happy path (#671)
+
+The page said, in bold: **"Switched off, so nothing is being sent."** It was
+written while thinking about the normal case, where the script asks the portal and
+obeys. It is false in exactly the cases that matter, and the proof was in this
+package's own setup guide: the script's documented fallback, when it cannot reach
+the database or `php` is missing from the scheduled job's path, is the `ENABLED`
+value inside the script file — which ships as **send**, on purpose, so that a
+database problem does not quietly stop somebody's backups.
+
+So the page denied something the same package documented. The lesson is narrow
+and reusable: when a design has a fallback, every sentence about what the system
+will do has to be read twice — once for the normal path and once for the
+fallback — and the sentence has to be true of both, or say which it describes.
+
+Two more of the same shape were found in one review: the banner claiming an empty
+"Recent runs" means nothing was sent (recording is allowed to fail without
+failing the run), and "each of those three cases prints a WARNING" when a setting
+with no row stored prints nothing.
+
+## Blanking a value you cannot use turns "we cannot tell" into a decision (#671)
+
+The length guard in the bridge was first written to blank any over-long value and
+let the normal rules handle it. That is wrong for two of the six settings, and
+dangerously so for one: an **empty alert address is a real choice** meaning "do
+not e-mail", and it has to be able to override an address left in the script
+file. Blanking an over-long address would therefore have silenced failure e-mail
+on the administrator's behalf, from a value they never set.
+
+The fix is to MARK the value as unusable and let each value's own block decide
+what leaving it out means — because "leave it out" means something different for
+a destination (keep the file's), an alert address (keep the file's, never
+"silence") and `enabled` (anything that is not exactly `1` is off, which is the
+safe direction).
+
+## A very large setting value aborted every backup, and blamed the wrong line (#671)
+
+The settings boxes have no length limit — `settingValue` is MEDIUMTEXT — and the
+bridge's rclone pattern happily matches 200,000 letters and a colon. The script
+read the bridge's first line with `printf '%s\n' "${SETTINGS_OUT}" | head -n 1`.
+At about 128 KB on macOS, and about **64 KB on Linux** (which is the real
+target), that overflows the pipe: bash prints `printf: write error: Broken pipe`
+and, under `set -o pipefail`, the whole run stops **before anything is packed**.
+
+The recorded row then read `A step failed near line 399` — which is a closing
+`fi`, not the failing line, because the `ERR` trap records `LINENO` at the point
+the trap fires — and advised checking the destination for a partial copy when
+nothing had ever been sent. Every scheduled run failed the same way until
+somebody edited the box.
+
+Two guards now, and **they are not interchangeable** — the first version of
+this note implied they were, and the self-test's author disproved it. The class
+refuses anything over 256 characters, and the script takes the first line with
+`${SETTINGS_OUT%%$'\n'*}`, which is string handling inside bash with no second
+process and cannot break that way.
+
+**But the script's fix alone does not keep the backup working.** Measured on
+31 October 2026 by raising `OffsiteSettings::MAX_LENGTH` and leaving the script's
+fix in place: the run gets past the settings step and `rclone` refuses the
+200,000-character remote instead — "Failed to create file system for
+destination" — so the run still fails and no copy is sent. The pipe fix stops a
+confusing failure; the length ceiling is the only one of the two that keeps a
+copy going out. Worth stating because "we fixed it in two places" invites the
+assumption that either would do.
+
+A related precision, from the same check: an over-long ALERT ADDRESS is held
+back twice over, because `filter_var` refuses a local part beyond about 64
+characters anyway. So the length branch is belt and braces there, and raising
+the ceiling does not make a 300-character address acceptable. Both facts are now
+written beside the code, because a reader of the first version would have
+concluded the opposite of each.
+
+## "The newest row" is not "the row this run wrote" (#671)
+
+`offsite-backup-run.php` runs the sync script with `exec()` and then has to say
+what happened. It asked:
+
+```sql
+SELECT status FROM tblOffsiteSyncLog ORDER BY logID DESC LIMIT 1
+```
+
+Nothing in that ties the answer to the run just made. So "this run recorded
+nothing" really meant "the table has never held a row", and the check built on
+it worked **only on a fresh installation** — the one case where the fault cannot
+be seen. Measured on 31 October 2026 with one older `success` row on file and a
+stand-in that recorded nothing: the page answered "Off-site sync completed in
+0s." in green, for a run that packed nothing and sent nothing. Equally, a
+`skipped` or `failed` row from last week would have decided this week's message.
+
+The same misreading was already in the fallback insert beside it:
+`if ($exit !== 0 && $mostRecent === null)`, where `$mostRecent` meant "any row
+that has ever existed" — so on an installation with any history, a failed run
+that never reached its own logger recorded **nothing at all**.
+
+The fix is a high-water mark: read `MAX(logID)` BEFORE `exec()`, then ask only
+about rows after it. 0 when the table cannot be read, which makes every row
+"after" it — the safe direction, because the page may then quote an earlier run
+but can never claim a copy went when no row exists.
+
+**The testing lesson is the sharper half.** The first version of this section
+emptied the log table before pressing the button, so every check passed on the
+broken code. A test that starts from a clean state cannot see a bug whose cause
+is state that was already there. The check that pins it now (O11b) is
+deliberately the only one in that section an empty table cannot satisfy.
+
+## One rule, four copies: how a shared range drifts apart (#671)
+
+The two "copies to keep" figures were bounded in four places by the time the
+package was finished: the save handler's `max(1, min(52, …))`, the display
+clamp, the `min`/`max` on the input boxes, and the bridge that hands the figure
+to the shell script. Each was added for a good local reason, and nothing was
+wrong at any moment — but changing a constant would have left three of them
+behind, and the input's own `max` is the one that silently stops the **whole
+form** submitting when a stored value is outside it (#668).
+
+All four now read `Portal\Core\OffsiteSettings`. Worth noticing how it
+happened: the class was created to stop the PAGE and the BRIDGE drifting, and
+two more copies were left in place in the same file, because they did not look
+like the thing being fixed.

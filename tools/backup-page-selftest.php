@@ -70,6 +70,17 @@
  *      still lists them but offers no Restore button for them, says above the
  *      list which button does put them back, and a request posted past the
  *      missing button is refused in words WITHOUT closing the portal.
+ *   O. Off-site backup: the page says which of three things is true of the
+ *      script sitting on this server — the settings are in force, a script is
+ *      there that ignores them, or there is no script to obey them — judged
+ *      against the REAL shipped sync-offsite.sh.example as well as a stand-in,
+ *      and it catches a script whose call to the reader has been COMMENTED
+ *      OUT, which a plain text search for either name passes as obedient. Then
+ *      the four other ways this page can mislead: a missing RECORDER (copies
+ *      going out with nothing able to write them down), a run's own WARNING
+ *      lines in both places they are shown, a stored value the portal will not
+ *      use, a stored "copies to keep" figure outside the boxes' own range, and
+ *      "Run now" answering green for a run that sent nothing (#671).
  *
  * "IDENTICAL AFTERWARDS" IS CHECKED BY AN INDEPENDENT READER. The comparison
  * is `brs_fingerprint()` from tools/backup-restore-selftest.php: every value
@@ -1558,6 +1569,825 @@ brs_check(
     count(glob($backups . '/imported-*') ?: []) === $importedBefore,
     'and an IMPORTED snapshot is never tidied away by the scheduled job'
 );
+
+// =============================================================================
+// O. Off-site backup: does the script on THIS server obey the page? (#671)
+// =============================================================================
+// Until 30 October 2026 the six `backup.offsite.*` settings were read by
+// NOTHING: the sync script used the variables written into its own copy. An
+// administrator could set a destination and an alert address, be told "saved",
+// and nothing anywhere acted on it. The settings are real now, but the script
+// is copied to the server BY HAND and is never deployed, so the portal cannot
+// assume the copy sitting there is a current one — and telling somebody their
+// settings are in force when the script on their own server ignores them is
+// the same fault one step along.
+//
+// So the page works out, from the files on disk, which of three things is true:
+// the settings are in force, a script is there that ignores them, or there is
+// no script to obey them. This section drives the real page over HTTP through
+// all three, and through the two reasons a script can ignore them. It then
+// goes on to the four other ways this page can mislead somebody: a missing
+// RECORDER (O7), a run's own WARNING lines (O8), a stored value the portal
+// will not use (O9), a stored "copies to keep" figure outside the boxes'
+// own range (O10), and "Run now" answering green for a run that sent nothing
+// (O11).
+//
+// TWO CHECKS HERE MATTER MORE THAN THE REST.
+//
+// O2 copies the REAL shipped `tools/offsite-backup/sync-offsite.sh.example`
+// into the scratch portal's `_backups` folder, as a customer is told to, and
+// requires the page to say the settings are in force. Without that, every
+// other check in this section is about a stand-in script written a few lines
+// below — so an edit to the shipped script that the page's detection no longer
+// recognises would leave this whole section green while the page told EVERY
+// real installation that its script disobeys the page. That gap was real until
+// 31 October 2026 and was found by an independent review, not by a failing
+// test.
+//
+// O4 is the planted one. The shipped script names `read-offsite-settings.php`
+// and `READ_PHP` several times in its own comments, explaining what they do.
+// So a plain text search for either name is satisfied by a script whose CALL
+// has been commented out — which is exactly the state the page exists to
+// catch, and is why it strips comment lines first. O4 plants that state and
+// requires the page to catch it, and asserts separately that a search without
+// the comment-stripping would NOT have.
+//
+// WHAT THIS SECTION CANNOT PROVE, said plainly:
+// - That the script, once it reads the settings, uses them. Nothing here runs
+//   the shipped script: it needs a command line and a program to send with.
+//   O11 runs a stand-in that only records a result.
+// - That a "#" part way along a line is handled, because the page deliberately
+//   does not treat one as a comment, and nothing in the shipped script needs
+//   it to.
+// - That the reader itself is a matching version. Only the format number on
+//   its first line tells the script that, at run time.
+// - A call that is there but switched off by its own shell condition
+//   (`false && php "${READ_PHP}"`). The page says in its own comments that it
+//   cannot see that, and judging it needs a shell rather than a pattern.
+// - Whether a WARNING line a run printed is TRUE. O8 proves the page shows the
+//   lines a run recorded; whether the run was right to print one is the sync
+//   script's business.
+echo "\nO. Off-site backup: are the settings in force, ignored, or unobeyed?\n";
+
+$osPage = static function (string $who) use ($jar): string {
+    return bps_request($jar[$who], 'GET', '/admin/maintenance/offsite-backup')['body'];
+};
+
+// The four files the page looks for, at the paths the page looks in. The
+// scratch portal's PORTAL_ROOT is $child/web, so `_backups` here is the same
+// folder every other section in this file works in.
+$osScript   = $backups . DIRECTORY_SEPARATOR . 'sync-offsite.sh';
+$osReader   = $backups . DIRECTORY_SEPARATOR . 'read-offsite-settings.php';
+$osRecorder = $backups . DIRECTORY_SEPARATOR . 'log-offsite-result.php';
+$osKey      = $child . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . 'offsite.key';
+
+// The three files in the repository a customer is told to copy. Read from
+// their real paths, not stand-ins: if one is ever renamed or moved, the check
+// below fails and says which.
+$osScriptSource   = __DIR__ . DIRECTORY_SEPARATOR . 'offsite-backup' . DIRECTORY_SEPARATOR . 'sync-offsite.sh.example';
+$osReaderSource   = __DIR__ . DIRECTORY_SEPARATOR . 'offsite-backup' . DIRECTORY_SEPARATOR . 'read-offsite-settings.php';
+$osRecorderSource = __DIR__ . DIRECTORY_SEPARATOR . 'offsite-backup' . DIRECTORY_SEPARATOR . 'log-offsite-result.php';
+
+// 🧹 All six settings are put back at the end of the section: O5, O9 and O10
+//    change them, and the next test to use this database should find them as
+//    they were. They are all seeded installation-wide by full_schema.sql, so
+//    this is an update either way and no row is created or left behind.
+$osKeys   = ['backup.offsite.enabled', 'backup.offsite.destination', 'backup.offsite.rcloneRemote',
+    'backup.offsite.keepWeekly', 'backup.offsite.keepMonthly', 'backup.offsite.alertEmail'];
+$osBefore = [];
+foreach ($osKeys as $osSettingKey) {
+    $osBefore[$osSettingKey] = bps_setting($osSettingKey);
+}
+$osSet = static function (string $key, string $value): void {
+    Brs::$writer->prepare(
+        'INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) '
+        . 'VALUES (NULL, ?, ?, ?, 0) '
+        . 'ON DUPLICATE KEY UPDATE settingValue = VALUES(settingValue)'
+    )->execute([$key, $value, '']);
+};
+
+// 🧹 The run rows this section writes, so only this section's are removed.
+$osLogMark  = (int) Brs::$writer->query('SELECT COALESCE(MAX(logID), 0) FROM tblOffsiteSyncLog')->fetch_row()[0];
+$osRunCount = static fn (): int => (int) Brs::$writer->query('SELECT COUNT(*) FROM tblOffsiteSyncLog')->fetch_row()[0];
+
+/**
+ * Save the settings form as the global administrator and come back with the
+ * page that shows the result.
+ *
+ * Two requests either side of the POST on purpose: the form token is replaced
+ * on every acceptance (Auth::verifyCsrf), so the token has to be read fresh,
+ * and the handler answers with a redirect this harness does not follow, so the
+ * message it stored is only visible on the next GET.
+ *
+ * @return array{said: string, body: string, status: int}
+ */
+$osSave = static function (array $fields) use ($jar): array {
+    $token  = bps_token(bps_request($jar['root'], 'GET', '/admin/maintenance/offsite-backup')['body']);
+    $posted = bps_request($jar['root'], 'POST', '/admin/maintenance/offsite-backup', array_merge(
+        ['csrf_token' => $token, 'action' => 'save'],
+        $fields
+    ));
+    $after = bps_request($jar['root'], 'GET', '/admin/maintenance/offsite-backup');
+    return ['said' => bps_message($after['body']), 'body' => $after['body'], 'status' => $posted['status']];
+};
+
+/**
+ * Press "Run now" as the global administrator and come back with the page
+ * that shows the result. Same two-requests-either-side reason as $osSave.
+ *
+ * @return array{said: string, body: string, status: int}
+ */
+$osRunNow = static function () use ($jar): array {
+    $token  = bps_token(bps_request($jar['root'], 'GET', '/admin/maintenance/offsite-backup')['body']);
+    $posted = bps_request($jar['root'], 'POST', '/admin/maintenance/offsite-backup/run', ['csrf_token' => $token]);
+    $after  = bps_request($jar['root'], 'GET', '/admin/maintenance/offsite-backup');
+    return ['said' => bps_message($after['body']), 'body' => $after['body'], 'status' => $posted['status']];
+};
+
+/**
+ * The WARNING lines the page printed BESIDE A RUN in the Recent runs table,
+ * which is a different place from the notice at the top of the page.
+ *
+ * Read from the one class the page puts on them. This is not a copy of the
+ * page's own filtering — it asks what reached the HTML, so a page that stopped
+ * printing them, or printed every line rather than the WARNING ones, fails.
+ *
+ * @return string[]
+ */
+$osTableWarnings = static function (string $html): array {
+    preg_match_all('/<div class="small text-warning-emphasis">(.*?)<\/div>/s', $html, $found, PREG_SET_ORDER);
+    return array_map(static fn (array $one): string => trim(bps_text($one[1])), $found);
+};
+
+/**
+ * The NOTICE AT THE TOP of the page, on its own — empty when it is not shown.
+ *
+ * Scoped to that one block deliberately, and this was measured rather than
+ * assumed. Asking whether the warning line appeared ANYWHERE on the page was
+ * satisfied by the table's own copy of it further down: planting an empty
+ * $newestWarnings on the page left that check green while the notice had lost
+ * its quoted line altogether. The two places print the same text for different
+ * reasons, so a check about one of them has to read only that one.
+ *
+ * The block holds no nested <div>, so the first closing tag is its own.
+ */
+$osTopNotice = static function (string $html): string {
+    return preg_match('/<strong>The last run did not use everything set on this page\.<\/strong>(.*?)<\/div>/s', $html, $found) === 1
+        ? trim(bps_text($found[1])) : '';
+};
+
+// A stand-in for the shipped script. It NAMES both the reader and READ_PHP in
+// its comments on purpose, exactly as the real one does: that is what makes
+// the planted fault in O4 a real test rather than a trivial one. The real
+// shipped script is used in O2; this one exists because the plant needs ONE
+// known call line to comment out, and the shipped file's call sits inside an
+// `elif` whose other branches would have to be unpicked with it.
+$osWorkingScript = <<<'OS_SCRIPT'
+#!/usr/bin/env bash
+# Written by tools/backup-page-selftest.php for ONE run (deleted with the
+# scratch folder). Test only — it sends nothing anywhere.
+#
+# These comment lines name read-offsite-settings.php and READ_PHP deliberately,
+# the way the shipped tools/offsite-backup/sync-offsite.sh.example does when it
+# explains what the reader is for and what it cannot do.
+set -euo pipefail
+BACKUPS_DIR="$(cd "$(dirname "$0")" && pwd)"
+READ_PHP="${BACKUPS_DIR}/read-offsite-settings.php"
+SETTINGS_OUT="$(php "${READ_PHP}")"
+echo "${SETTINGS_OUT}"
+OS_SCRIPT;
+
+// The one line the plant comments out. Named once so O4 cannot quietly comment
+// out a line that was never there.
+$osCallLine = 'SETTINGS_OUT="$(php "${READ_PHP}")"';
+
+$osInForceBadge  = '<span class="badge bg-success">in force</span>';
+$osIgnoredBadge  = '<span class="badge bg-danger">ignored by the script</span>';
+$osNoScriptBadge = '<span class="badge bg-secondary">no script to obey them</span>';
+$osIgnoresAlert  = 'The script on this server ignores the settings below.';
+$osCommandLine   = 'This needs a command line on the server, and it is not set up for you.';
+$osRecorderBadge = 'log-offsite-result.php: <span class="badge bg-warning">missing</span>';
+$osCannotRecord  = 'Nothing recorded, and nothing here can record it.';
+$osNoRunsYet     = 'No runs recorded yet.';
+
+// -----------------------------------------------------------------------------
+// O1. Nothing copied to the server at all.
+// -----------------------------------------------------------------------------
+@unlink($osScript);
+@unlink($osReader);
+@unlink($osRecorder);
+@unlink($osKey);
+brs_check($osRunCount() === 0, 'no off-site run is recorded yet, so the page\'s empty-list wording is what is being read', 'rows: ' . $osRunCount());
+$page = $osPage('root');
+brs_check($page !== '' && str_contains($page, 'Off-site') === true, 'the off-site backup page opens for a global administrator');
+brs_check(
+    str_contains($page, $osNoScriptBadge) === true,
+    'with no sync-offsite.sh on the server the page says there is no script to obey the settings'
+);
+brs_check(
+    str_contains($page, 'Setup required</h5>') === true,
+    'and shows the "Setup required" card'
+);
+// 📖 "No script" must NOT be reported as "a script that ignores them": one is
+//    a job nobody has started, the other is a job somebody believes is done.
+brs_check(
+    str_contains(bps_text($page), $osIgnoresAlert) === false,
+    'and does NOT say a script is ignoring them, because there is no script'
+);
+brs_check(
+    str_contains(bps_text($page), $osCommandLine) === true,
+    'the standing warning that this needs a command line on the server is shown'
+);
+// 📝 THE RECORDER IS A FOURTH FILE AND A SEPARATE QUESTION. Nothing but
+//    log-offsite-result.php writes to tblOffsiteSyncLog, so without it copies
+//    can be going out every week and this page shows "never" — which reads
+//    exactly like "nothing has been sent". So it must not say "no runs yet".
+brs_check(
+    str_contains($page, $osRecorderBadge) === true,
+    'the status card marks log-offsite-result.php missing, because it is a fourth checked file'
+);
+brs_check(
+    str_contains(bps_text($page), $osCannotRecord) === true,
+    'and the empty list says "Nothing recorded, and nothing here can record it." rather than "no runs yet"',
+    substr(bps_text($page), max(0, (int) strpos(bps_text($page), 'Recent runs')), 320)
+);
+brs_check(
+    str_contains(bps_text($page), $osNoRunsYet) === false,
+    'and does NOT also say "No runs recorded yet.", which would be claiming something it cannot know'
+);
+
+// -----------------------------------------------------------------------------
+// O2. THE REAL SHIPPED FILES, copied as a customer is told to copy them.
+// -----------------------------------------------------------------------------
+// This is the check that ties the page's detection to the file customers
+// actually use. Everything else in this section runs against the stand-in
+// script above; if the shipped script were edited into a shape the page no
+// longer recognises, only this check would notice, and the page would be
+// telling every real installation that its script disobeys it.
+foreach (['sync-offsite.sh.example' => $osScriptSource, 'read-offsite-settings.php' => $osReaderSource,
+    'log-offsite-result.php' => $osRecorderSource] as $osName => $osFrom) {
+    brs_check(is_file($osFrom) === true, 'tools/offsite-backup/' . $osName . ' is where the page expects customers to copy it from', $osFrom);
+}
+copy($osScriptSource, $osScript);
+chmod($osScript, 0750);
+copy($osReaderSource, $osReader);
+copy($osRecorderSource, $osRecorder);
+file_put_contents($osKey, bin2hex(random_bytes(32)));
+brs_check(
+    md5_file($osScriptSource) === md5_file($osScript),
+    'the copy in _backups really is the shipped script, byte for byte',
+    'source ' . (string) md5_file($osScriptSource) . ' copy ' . (string) md5_file($osScript)
+);
+$page = $osPage('root');
+brs_check(
+    str_contains($page, $osInForceBadge) === true,
+    'THE REAL SHIPPED sync-offsite.sh.example makes the page say the settings are in force'
+);
+brs_check(
+    str_contains(bps_text($page), $osIgnoresAlert) === false,
+    'and the real shipped script is never reported as ignoring the settings'
+);
+brs_check(
+    str_contains($page, 'Setup required</h5>') === false,
+    'and the "Setup required" card is gone, now all four files are there'
+);
+brs_check(
+    str_contains(bps_text($page), $osNoRunsYet) === true
+    && str_contains(bps_text($page), $osCannotRecord) === false,
+    'with the recorder in place and no runs, the empty list says "No runs recorded yet." instead',
+    substr(bps_text($page), max(0, (int) strpos(bps_text($page), 'Recent runs')), 320)
+);
+
+// -----------------------------------------------------------------------------
+// O3. The stand-in script, which is the baseline the plant in O4 is measured
+//     against.
+// -----------------------------------------------------------------------------
+file_put_contents($osScript, $osWorkingScript);
+$page = $osPage('root');
+brs_check(
+    str_contains($page, $osInForceBadge) === true,
+    'the stand-in script, which calls the reader the same way, is also answered "in force"'
+);
+
+// -----------------------------------------------------------------------------
+// O4. THE PLANTED FAULT: the call commented out, every mention left behind.
+// -----------------------------------------------------------------------------
+$osPlanted = str_replace($osCallLine, '# ' . $osCallLine, $osWorkingScript);
+brs_check(
+    $osPlanted !== $osWorkingScript,
+    'the plant really changed the script: the line it comments out was there to comment out'
+);
+file_put_contents($osScript, $osPlanted);
+
+// 🔎 THE PLANT IS NOT A TRIVIAL ONE, AND THIS IS WHAT PROVES IT. Both names
+//    are still in the file, and a search that does NOT strip comment lines
+//    still finds the call — so anything reading the file as plain text would
+//    call this script obedient. This is deliberately the NAIVE search, not a
+//    copy of the page's own test: it is here to measure the plant, not to
+//    second-guess the answer. (A test holding its own copy of the logic it
+//    tests proves nothing; this one holds the logic the page REJECTED.)
+brs_check(
+    str_contains($osPlanted, 'read-offsite-settings.php') === true
+    && str_contains($osPlanted, 'READ_PHP') === true,
+    'the planted script still names read-offsite-settings.php and READ_PHP'
+);
+brs_check(
+    preg_match('/READ_PHP\s*=/', $osPlanted) === 1
+    && preg_match('/php\s+"?\$\{READ_PHP\}?"?/', $osPlanted) === 1,
+    'and a search WITHOUT the comment-stripping still finds both halves, so it would pass this script as obedient'
+);
+
+$page = $osPage('root');
+brs_check(
+    str_contains($page, $osIgnoredBadge) === true,
+    'but the page catches it: with the call commented out it says the script ignores the settings'
+);
+brs_check(
+    str_contains(bps_text($page), $osIgnoresAlert) === true,
+    'and shows the danger warning saying so'
+);
+brs_check(
+    str_contains(bps_text($page), 'does not call') === true,
+    'and gives the right reason of the two: the script is there and does not call the reader',
+    substr(bps_text($page), max(0, (int) strpos(bps_text($page), $osIgnoresAlert)), 320)
+);
+brs_check(
+    str_contains($page, $osInForceBadge) === false,
+    'and nothing anywhere on the page still says the settings are in force'
+);
+
+// -----------------------------------------------------------------------------
+// O5. The other reason: a script that calls a reader which is not there.
+// -----------------------------------------------------------------------------
+file_put_contents($osScript, $osWorkingScript);
+unlink($osReader);
+$page = $osPage('root');
+brs_check(
+    str_contains($page, $osIgnoredBadge) === true,
+    'a script that calls a reader which is not on the server also means the settings are ignored'
+);
+brs_check(
+    str_contains(bps_text($page), 'read-offsite-settings.php is not in the portal\'s _backups folder') === true,
+    'and the page names the missing file rather than blaming the script',
+    substr(bps_text($page), max(0, (int) strpos(bps_text($page), $osIgnoresAlert)), 320)
+);
+brs_check(
+    str_contains($page, 'read-offsite-settings.php: <span class="badge bg-warning">missing</span>') === true,
+    'and the status card marks that file missing'
+);
+
+// -----------------------------------------------------------------------------
+// O6. Switched off, with a script that would otherwise obey the page.
+// -----------------------------------------------------------------------------
+// Only said once the script really does read the settings: on an older copy the
+// tick box decides nothing, and saying a scheduled run will skip would be
+// describing a choice the server is not making.
+copy($osReaderSource, $osReader);
+$osSet('backup.offsite.enabled', '0');
+$page = $osPage('root');
+brs_check(
+    str_contains($page, $osInForceBadge) === true,
+    'with the working pair back, the settings are in force again'
+);
+brs_check(
+    str_contains(bps_text($page), 'Switched off.') === true
+    && str_contains(bps_text($page), 'records itself as skipped and sends nothing') === true,
+    'and switched off, the page says a scheduled run records itself as skipped and sends nothing',
+    substr(bps_text($page), max(0, (int) strpos(bps_text($page), 'Switched off')), 320)
+);
+$osSet('backup.offsite.enabled', '1');
+$page = $osPage('root');
+brs_check(
+    str_contains(bps_text($page), 'records itself as skipped and sends nothing') === false,
+    'switched on, that notice is gone'
+);
+brs_check(
+    str_contains($page, '<span class="badge bg-success">enabled</span>') === true,
+    'and the page says it is enabled'
+);
+
+// -----------------------------------------------------------------------------
+// O7. The recorder missing on its own, with everything else in place.
+// -----------------------------------------------------------------------------
+// O1 had nothing at all, which is the easy case. This is the dangerous one: a
+// script that runs, a reader it obeys, a key — and nothing able to write down
+// what happened. Copies really are being sent and the page can see none of
+// them, so it has to say so rather than say "no runs yet".
+unlink($osRecorder);
+$page = $osPage('root');
+brs_check(
+    str_contains($page, $osRecorderBadge) === true,
+    'with only the recorder missing, the status card still marks it missing'
+);
+brs_check(
+    str_contains($page, 'Setup required</h5>') === true,
+    'and the "Setup required" card comes back for the recorder alone'
+);
+brs_check(
+    str_contains($page, $osInForceBadge) === true,
+    'while the settings are still in force, because obeying the page and recording a run are different jobs'
+);
+brs_check(
+    str_contains(bps_text($page), $osCannotRecord) === true,
+    'and the empty list says nothing here can record a run'
+);
+copy($osRecorderSource, $osRecorder);
+$page = $osPage('root');
+brs_check(
+    str_contains($page, 'log-offsite-result.php: <span class="badge bg-success">present</span>') === true
+    && str_contains(bps_text($page), $osNoRunsYet) === true,
+    'with it copied back, the card says present and the list says "No runs recorded yet."'
+);
+
+// -----------------------------------------------------------------------------
+// O8. A run's own WARNING lines, in both the places they are shown.
+// -----------------------------------------------------------------------------
+// A WARNING line is the ONLY record that a stored setting was held back: the
+// settings bridge refuses a value it will not put on a command line rather
+// than escaping it, and says so in a line of the run's output. The page did
+// not read `output` at all at first, so a mistyped destination left no trace
+// anywhere an administrator could reach while the card said "in force".
+//
+// The lines are shown TWICE on purpose, and the two have different jobs: once
+// at the top of the page for the NEWEST run, because that is the one that
+// describes what is happening now, and once beside each run in the table,
+// because that is the history. An old warning that has since been put right
+// must not raise the notice at the top — so the third part of this check is
+// the one that would catch a page reading "any run" where it means "the
+// newest".
+$osWarnLine  = 'WARNING: the alert address on /admin/maintenance/offsite-backup was not used because it is not'
+    . ' a plain e-mail address this portal can pass to the server\'s mail program.';
+$osPlainLine = 'Step 3 of 6: packing the newest snapshot.';
+$osInsertRun = static function (string $runAt, string $status, string $output): void {
+    Brs::$writer->prepare(
+        'INSERT INTO tblOffsiteSyncLog (runAt, triggeredBy, destination, snapshotName, bundleSize, durationSec, status, errorMsg, output) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)'
+    )->execute([$runAt, 'cron', 'rclone', 'upgrade-20261030-000000', 4096, 7, $status, $output]);
+};
+// A multi-line value, because that is what a run's output really is — and a
+// single-line one would have hidden the fault in log-offsite-result.php that
+// stored NULL for every multi-line `--output`.
+$osInsertRun('2026-01-01 01:00:00', 'success', $osPlainLine . "\n" . $osWarnLine . "\nStep 4 of 6: sending it.");
+$page = $osPage('root');
+brs_check(
+    $osTopNotice($page) !== '',
+    'a run whose output holds a WARNING line raises the notice at the top of the page'
+);
+brs_check(
+    str_contains($osTopNotice($page), $osWarnLine) === true,
+    'and the notice ITSELF quotes the warning, not just the fact that there was one',
+    'the notice said: ' . $osTopNotice($page)
+);
+brs_check(
+    in_array($osWarnLine, $osTableWarnings($page), true) === true,
+    'and the same line is shown again beside that run in the Recent runs table',
+    brs_say($osTableWarnings($page))
+);
+// 📖 Only the WARNING lines. A page printing the whole of `output` would pass
+//    both checks above and bury the one line that matters in a run log.
+brs_check(
+    str_contains(bps_text($page), $osPlainLine) === false,
+    'but an ordinary line of the run\'s output is NOT printed: only the warnings are'
+);
+
+// Now a newer run with nothing wrong. The old warning is history and must stay
+// in the table while the notice at the top goes.
+$osInsertRun('2026-01-02 01:00:00', 'success', "Step 3 of 6: packing the newest snapshot.\nStep 6 of 6: done.");
+$page = $osPage('root');
+brs_check(
+    $osTopNotice($page) === '',
+    'an old warning on a run that is NO LONGER the newest does not raise the notice at the top',
+    'the notice said: ' . $osTopNotice($page)
+);
+brs_check(
+    in_array($osWarnLine, $osTableWarnings($page), true) === true,
+    'but it is still shown beside the run it happened on, because the table is the history',
+    brs_say($osTableWarnings($page))
+);
+brs_check(
+    count($osTableWarnings($page)) === 1,
+    'and the clean newer run adds no warning of its own',
+    brs_say($osTableWarnings($page))
+);
+Brs::$writer->query('DELETE FROM tblOffsiteSyncLog WHERE logID > ' . $osLogMark);
+
+// -----------------------------------------------------------------------------
+// O9. Saving a value this portal will not use.
+// -----------------------------------------------------------------------------
+// `My Remote:backups` is an ordinary typo — a space and two capitals. It used
+// to be stored, answered with a plain green "Off-site backup settings saved.",
+// shown back in the box and badged "in force", while every run quietly used the
+// remote written inside the script file. Where the customer had set that
+// fallback to a real remote — and the setup guide tells them to — the copy went
+// somewhere the administrator had not chosen and nothing in the portal said so.
+//
+// The value is still SAVED, deliberately: refusing it outright would lose the
+// other five settings on the form, and somebody half way through setting this
+// up may store a draft. What matters is that they are TOLD it will not be used.
+$osGoodFields = ['destination' => 'rclone', 'rcloneRemote' => 'b2:portal-backups', 'keepWeekly' => '8',
+    'keepMonthly' => '12', 'alertEmail' => 'backups@selftest.invalid', 'enabled' => '1'];
+$osSaved = $osSave(array_merge($osGoodFields, ['rcloneRemote' => 'My Remote:backups', 'alertEmail' => 'not an address']));
+brs_check(
+    str_starts_with($osSaved['said'], '[warning]') === true,
+    'saving a remote and an address this portal will not use answers with a WARNING, not a green "saved"',
+    $osSaved['said']
+);
+brs_check(
+    str_contains($osSaved['said'], 'The rclone remote will not be used because') === true
+    && str_contains($osSaved['said'], 'a space or a capital letter in the wrong place') === true,
+    'and says which setting and why, in the words of the one class that decides it',
+    $osSaved['said']
+);
+brs_check(
+    str_contains($osSaved['said'], 'The alert address will not be used because') === true,
+    'and names the alert address separately, because two bad values are two problems',
+    $osSaved['said']
+);
+brs_check(
+    str_contains($osSaved['said'], 'fall back to the value written inside the script file') === true,
+    'and says what a run will use instead, which is the part that makes it actionable',
+    $osSaved['said']
+);
+brs_check(
+    bps_setting('backup.offsite.rcloneRemote') === 'My Remote:backups'
+    && bps_setting('backup.offsite.alertEmail') === 'not an address',
+    'the values are still STORED: a warning is not a refusal, so the rest of the form is not lost',
+    'remote "' . bps_setting('backup.offsite.rcloneRemote') . '" alert "' . bps_setting('backup.offsite.alertEmail') . '"'
+);
+// 🚫 And the page says it again every time it is opened, not only after a save:
+//    a value can also arrive from a restored database or from SQL by hand.
+brs_check(
+    str_contains(bps_text($osSaved['body']), 'This will not be used, because it is not of the form name:path') === true,
+    'the box itself carries a red "This will not be used, because ..." line under the stored remote',
+    substr(bps_text($osSaved['body']), max(0, (int) strpos(bps_text($osSaved['body']), 'rclone remote')), 420)
+);
+brs_check(
+    str_contains(bps_text($osSaved['body']), 'This will not be used, because it is not a plain e-mail address') === true,
+    'and under the stored alert address'
+);
+
+// A remote starting with a dash is refused for its own reason, not a generic
+// one: rclone would read it as an option rather than a destination.
+$osSaved = $osSave(array_merge($osGoodFields, ['rcloneRemote' => '-X b2:elsewhere']));
+brs_check(
+    str_starts_with($osSaved['said'], '[warning]') === true
+    && str_contains($osSaved['said'], 'starts with a dash') === true,
+    'a remote starting with a dash is warned about for that reason, not the general one',
+    $osSaved['said']
+);
+
+// And a good pair gets the plain success message, so the warning above is not
+// simply what this form always says.
+$osSaved = $osSave($osGoodFields);
+brs_check(
+    $osSaved['said'] === '[success] Off-site backup settings saved.',
+    'a remote and an address this portal can use get the plain success message',
+    $osSaved['said']
+);
+brs_check(
+    str_contains(bps_text($osSaved['body']), 'This will not be used, because') === false,
+    'and no red "will not be used" line is left anywhere on the page'
+);
+
+// -----------------------------------------------------------------------------
+// O10. A stored "copies to keep" figure outside what the boxes allow.
+// -----------------------------------------------------------------------------
+// Prefilling a value its own input forbids makes the browser refuse to submit
+// THE WHOLE FORM, so every other setting on the page becomes unsavable with no
+// message saying why (#668). Such a figure can only have come from a restored
+// database or from SQL by hand, which is why it is set here the same way.
+//
+// Both ends are tested in one go: 999 is above the weekly maximum and 0 is
+// below the monthly minimum, and a clamp written one-sided would pass on one.
+$osSet('backup.offsite.keepWeekly', '999');
+$osSet('backup.offsite.keepMonthly', '0');
+$page = $osPage('root');
+brs_check(
+    str_contains($page, 'name="keepWeekly" value="52"') === true,
+    'a stored keepWeekly of 999 is shown in the box as 52, the most the box itself allows'
+);
+brs_check(
+    str_contains($page, 'value="999"') === false,
+    'and 999 is nowhere in the page, because a browser would refuse to submit the whole form with it there'
+);
+brs_check(
+    str_contains($page, 'name="keepMonthly" value="1"') === true,
+    'a stored keepMonthly of 0 is shown as 1, so the clamp works at the bottom end as well as the top'
+);
+brs_check(
+    str_contains(bps_text($page), 'figure is outside what this page allows') === true,
+    'and the page says plainly that a stored figure is outside what it allows',
+    substr(bps_text($page), max(0, (int) strpos(bps_text($page), 'copies to keep')), 320)
+);
+// The total under the boxes is worked out from the clamped figures, which is
+// what a run would really keep. 999 + 0 would read as 999.
+brs_check(
+    str_contains(bps_text($page), 'Added together: 53 copies') === true,
+    'and the total under the boxes is 53, worked out from the clamped figures rather than the stored ones',
+    substr(bps_text($page), max(0, (int) strpos(bps_text($page), 'Added together')), 160)
+);
+brs_check(
+    bps_setting('backup.offsite.keepWeekly') === '999',
+    'while the stored row is UNCHANGED: this is a display clamp, and a save-time cap is not a cap (#668)'
+);
+$osSet('backup.offsite.keepWeekly', '8');
+$osSet('backup.offsite.keepMonthly', '12');
+$page = $osPage('root');
+brs_check(
+    str_contains(bps_text($page), 'figure is outside what this page allows') === false
+    && str_contains($page, 'name="keepWeekly" value="8"') === true,
+    'with both figures back in range the warning is gone and the boxes show what is stored'
+);
+
+// -----------------------------------------------------------------------------
+// O11. "Run now" no longer reports green success for a run that sent nothing.
+// -----------------------------------------------------------------------------
+// Exit code 0 stopped meaning "a copy went" the day the script learnt to read
+// these settings: a run that is switched off sends nothing, records itself
+// `skipped` and ends 0 on purpose, so that a hosting panel does not e-mail a
+// failure every week for a feature somebody turned off. The handler read only
+// the exit code, so it answered "Off-site sync completed in 1s." in GREEN for
+// a run that packed nothing, encrypted nothing and sent nothing — and that is
+// the state of EVERY FRESH INSTALLATION, because backup.offsite.enabled is
+// seeded '0'. The first thing an administrator does after setting this up is
+// press "Run now" to check it.
+//
+// WHAT THIS CAN AND CANNOT DRIVE, said plainly. The handler runs the real
+// script through exec(), so the script here is a stand-in that only RECORDS a
+// result — through the real log-offsite-result.php, so the row is written by
+// the file customers use and not by this test. What that proves is the
+// handler's reading of the row the run left behind, which is the part that was
+// wrong. It does NOT prove anything about the shipped script's own decision to
+// skip: that needs a command line and a program to send with, and nothing here
+// has either. The stand-in deliberately does not call the reader, so the page
+// around the flash says "ignored by the script" throughout O11; that is not
+// what is being measured here and O2 to O5 cover it.
+//
+// 🚨 THE FAULT THIS SECTION FOUND, AND THE CHECK THAT NOW PINS IT.
+//    The handler used to ask `SELECT status FROM tblOffsiteSyncLog ORDER BY
+//    logID DESC LIMIT 1` — the newest row on the whole installation, with
+//    nothing tying it to the run just made. So "recorded no run" really meant
+//    "the log table is empty", and these checks passed only because this
+//    section empties it first. Measured on 31 October 2026 by inserting ONE
+//    older `success` row and pressing again with the same record-nothing
+//    stand-in: the answer was "[success] Off-site sync completed in 0s." in
+//    GREEN — the exact wording #671 set out to stop, for a run that packed
+//    nothing and sent nothing. The same reading let a `skipped` or `failed` row
+//    from last week decide this week's message.
+//
+//    It is FIXED: the handler reads MAX(logID) before exec() and asks only
+//    about rows after it. O11b below is the check that would catch it coming
+//    back, and it is the one check here that an empty table cannot satisfy —
+//    which is exactly why the fault survived the first version of this
+//    section.
+$osStandIn = static function (string $body) use ($osScript): void {
+    // PHP's own binary by name, not `php` on the PATH: the server process
+    // inherits this run's environment, and a machine where `php` is not on the
+    // PATH would make this look like a portal fault rather than a missing
+    // program. Test only, and deleted with the scratch folder.
+    file_put_contents($osScript, "#!/usr/bin/env bash\n"
+        . "# Written by tools/backup-page-selftest.php for ONE run. Test only: it\n"
+        . "# sends nothing anywhere and only records a result.\n"
+        . "set -uo pipefail\n"
+        . 'BACKUPS_DIR="$(cd "$(dirname "$0")" && pwd)"' . "\n"
+        . 'PHP_BIN=' . escapeshellarg(PHP_BINARY) . "\n"
+        . $body . "\n"
+        . "exit 0\n");
+    chmod($osScript, 0750);
+};
+$osRecordCall = static function (string $status): string {
+    return '"${PHP_BIN}" "${BACKUPS_DIR}/log-offsite-result.php" --status=' . $status
+        . ' --destination=rclone --triggered-by=selftest --snapshot=upgrade-20261030-000000'
+        . ' --duration-sec=1 --output="a stand-in run that sent nothing" >/dev/null 2>&1 || true';
+};
+
+// 📝 Nothing recorded at all. The handler must not claim either way.
+$osStandIn('echo "this run records nothing"');
+brs_check($osRunCount() === 0, 'no run is recorded before the first press, so "nothing recorded" is really the state', 'rows: ' . $osRunCount());
+$osRan = $osRunNow();
+brs_check(
+    str_starts_with($osRan['said'], '[warning]') === true,
+    'a run that exits 0 but records nothing is answered with a WARNING, not green success',
+    $osRan['said']
+);
+brs_check(
+    str_contains($osRan['said'], 'recorded no run, so this page cannot confirm a copy was sent') === true,
+    'and says plainly that the page cannot confirm a copy was sent, rather than guessing either way',
+    $osRan['said']
+);
+brs_check(
+    str_contains($osRan['said'], 'log-offsite-result.php') === true,
+    'and names the file to check, because a missing recorder is the usual cause',
+    $osRan['said']
+);
+brs_check(
+    $osRunCount() === 0,
+    'and no row was invented to fill the gap: the handler only records a FAILED run it can attribute to a non-zero exit',
+    'rows: ' . $osRunCount()
+);
+
+// 🔘 A run that recorded itself `skipped`: switched off, so nothing was sent.
+$osStandIn($osRecordCall('skipped'));
+$osRan = $osRunNow();
+brs_check(
+    $osRunCount() === 1,
+    'the stand-in really wrote its row through the shipped log-offsite-result.php',
+    'rows: ' . $osRunCount() . ' (if 0, the recorder could not reach the portal from the command line)'
+);
+brs_check(
+    str_starts_with($osRan['said'], '[warning]') === true
+    && str_contains($osRan['said'], 'Nothing was sent: the off-site backup is switched off.') === true,
+    'a run recorded as skipped is answered "Nothing was sent: the off-site backup is switched off.", in amber',
+    $osRan['said']
+);
+brs_check(
+    str_contains($osRan['said'], 'Off-site sync completed') === false,
+    'and never says the sync completed, which is what it used to say for exactly this run',
+    $osRan['said']
+);
+brs_check(
+    str_contains($osRan['said'], 'Tick "Enabled"') === true,
+    'and says what to do about it',
+    $osRan['said']
+);
+
+// ✅ And a run that really recorded a success still gets the green message, so
+//    the two warnings above are not simply what this button always says now.
+Brs::$writer->query('DELETE FROM tblOffsiteSyncLog WHERE logID > ' . $osLogMark);
+$osStandIn($osRecordCall('success'));
+$osRan = $osRunNow();
+brs_check(
+    str_starts_with($osRan['said'], '[success] Off-site sync completed in') === true,
+    'a run recorded as a success still gets the plain green "Off-site sync completed in Ns."',
+    $osRan['said']
+);
+brs_check(
+    $osRunCount() === 1,
+    'and one row is on record for it',
+    'rows: ' . $osRunCount()
+);
+
+// -----------------------------------------------------------------------------
+// O11b. An OLDER run's row must never be read as this run's.
+// -----------------------------------------------------------------------------
+// The one case the checks above cannot reach, because they start from an empty
+// table. Here the table is deliberately NOT empty: one older `success` row is
+// already on file, exactly as it would be on any installation that has ever
+// backed anything up. The stand-in then records nothing at all.
+//
+// The handler must still answer "cannot confirm", because nothing was recorded
+// FOR THIS RUN. Before the fix it answered the older row's status — green,
+// "Off-site sync completed" — for a run that sent nothing.
+Brs::$writer->query('DELETE FROM tblOffsiteSyncLog WHERE logID > ' . $osLogMark);
+$osInsertRun('2026-02-01 01:00:00', 'success', 'an older run, from before the one being pressed now');
+brs_check(
+    $osRunCount() === 1,
+    'O11b one older success row is on file before the press, so "the table is empty" cannot be what makes this pass',
+    'rows: ' . $osRunCount()
+);
+$osStandIn('echo "this run records nothing"');
+$osRan = $osRunNow();
+brs_check(
+    str_contains($osRan['said'], 'Off-site sync completed') === false,
+    'O11b an older run\'s success is NOT read as this run\'s: the answer never says the sync completed',
+    $osRan['said']
+);
+brs_check(
+    str_starts_with($osRan['said'], '[warning]') === true
+    && str_contains($osRan['said'], 'recorded no run, so this page cannot confirm a copy was sent') === true,
+    'O11b and it still says plainly that it cannot confirm a copy was sent',
+    $osRan['said']
+);
+brs_check(
+    $osRunCount() === 1,
+    'O11b and the older row is left exactly as it was — nothing was added or changed',
+    'rows: ' . $osRunCount()
+);
+Brs::$writer->query('DELETE FROM tblOffsiteSyncLog WHERE logID > ' . $osLogMark);
+
+// -----------------------------------------------------------------------------
+// O12. The standing warning is for every administrator, not only a global one.
+// -----------------------------------------------------------------------------
+// An administrator of one organisation can open this page and see the backup
+// status; they cannot change the settings. Somebody reading "Last sync: never"
+// deserves the same explanation of why, whichever kind of administrator they
+// are.
+$osAdminAnswer = bps_request($jar['admin'], 'GET', '/admin/maintenance/offsite-backup');
+brs_check($osAdminAnswer['status'] === 200, 'an administrator of one organisation can open the off-site backup page', 'HTTP ' . $osAdminAnswer['status']);
+brs_check(
+    str_contains(bps_text($osAdminAnswer['body']), $osCommandLine) === true,
+    'and the standing "needs a command line on the server" warning is shown to them too'
+);
+
+// 🧹 This section's own files, rows and settings, put back.
+@unlink($osScript);
+@unlink($osReader);
+@unlink($osRecorder);
+@unlink($osKey);
+Brs::$writer->query('DELETE FROM tblOffsiteSyncLog WHERE logID > ' . $osLogMark);
+foreach ($osBefore as $osSettingKey => $osStoredBefore) {
+    $osSet($osSettingKey, $osStoredBefore);
+}
 
 // =============================================================================
 $failed = Brs::$proofOk === false;

@@ -76,6 +76,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -157,6 +158,36 @@ if (is_file($script) === false || is_executable($script) === false) {
 
 $adminId = (int) ($_SESSION['user_id'] ?? 0);
 $cmd = escapeshellcmd($script) . ' 2>&1';
+
+// 🔢 THE HIGHEST logID THAT EXISTED BEFORE THIS RUN, read before the script
+//    starts.
+//
+//    Everything below asks "what did THIS run record?", and the only way to
+//    ask that is to know what was already there. Without it the question
+//    becomes "what is the newest row on the installation", which is a
+//    different question with the same answer only on an installation that has
+//    never recorded a run.
+//
+//    WHAT WENT WRONG WITHOUT IT, measured (#671): with one older `success` row
+//    on file and a script that recorded nothing at all, this page answered
+//    "Off-site sync completed in 0s." in green — the exact wording the skip
+//    check was added to prevent. Equally, last week's `skipped` or `failed`
+//    row would have decided this week's message. The first version of that
+//    check therefore worked only on a fresh installation, which is the one
+//    case where the fault is invisible.
+//
+//    0 when the table cannot be read, which makes every row "after" it — the
+//    safe direction: the page may then quote a row from an earlier run, but it
+//    will never claim a copy went when no row exists at all.
+$db = App::db();
+$highestLogIdBefore = 0;
+$rsBefore = $db->query('SELECT MAX(logID) AS highest FROM tblOffsiteSyncLog');
+if ($rsBefore !== false) {
+    $rowBefore = $rsBefore->fetch_assoc();
+    $rsBefore->free();
+    $highestLogIdBefore = (int) ($rowBefore['highest'] ?? 0);
+}
+
 TimeLimit::atLeast(900);
 $start = time();
 $output = [];
@@ -164,21 +195,47 @@ exec($cmd, $output, $exit);
 $durationSec = time() - $start;
 $captured = implode("\n", $output);
 
-// Also overlay an admin-trigger marker into the log row inserted by the
-// script itself, when possible. If the script didn't reach the logger
-// (e.g. die before php call), insert a fallback row here.
-$db = App::db();
-$rs = $db->query('SELECT logID FROM tblOffsiteSyncLog ORDER BY logID DESC LIMIT 1');
-$mostRecent = $rs !== false ? ($rs->fetch_assoc() ?? null) : null;
-if ($mostRecent !== null && $rs !== false) {
-    $rs->free();
+// 📝 What THIS run recorded, if anything: the newest row that did not exist
+//    before the script started.
+//
+//    WHAT WAS HERE, AND WHY IT WAS WRONG (#671). It asked for the newest row
+//    on the installation and tested `$mostRecent === null`, which is only true
+//    when the table has NEVER held a row. So on any installation with history,
+//    a failed run that never reached its own logger recorded nothing at all —
+//    the fallback below could not fire — and the wording further down took its
+//    answer from somebody else's earlier run.
+$ranStatus   = '';
+$recordedRow = null;
+$stmtRan = $db->prepare(
+    'SELECT status FROM tblOffsiteSyncLog WHERE logID > ? ORDER BY logID DESC LIMIT 1'
+);
+if ($stmtRan !== false) {
+    $stmtRan->bind_param('i', $highestLogIdBefore);
+    $stmtRan->execute();
+    $resultRan = $stmtRan->get_result();
+    if ($resultRan !== false) {
+        $recordedRow = $resultRan->fetch_assoc();
+        $resultRan->free();
+    }
+    $stmtRan->close();
 }
-if ($exit !== 0 && $mostRecent === null) {
+if ($recordedRow !== null) {
+    $ranStatus = (string) ($recordedRow['status'] ?? '');
+}
+
+if ($exit !== 0 && $recordedRow === null) {
     // Script never reached its own logger — record the failure directly.
     $err = 'shell exit ' . $exit;
     $cap = mb_substr($captured, 0, 1000);
     $trig = 'admin-' . $adminId;
-    $dest = (string) (App::settings()['backup']['offsite']['destination'] ?? 'unknown');
+    // 🏢 The INSTALLATION's row, not the merged array (#671, #674). This row
+    //    records which destination the run used, and since #671 the script
+    //    takes its destination from the installation's settings through
+    //    read-offsite-settings.php. Reading the merged array here could name
+    //    the open organisation's own row instead — a log line saying the copy
+    //    went somewhere it did not go. This is a reader rather than a form, so
+    //    check_install_wide_prefill.py never looked at it.
+    $dest = (string) (InstallationSettings::layer()['backup']['offsite']['destination'] ?? 'unknown');
     $stmt = $db->prepare('INSERT INTO tblOffsiteSyncLog (triggeredBy, destination, status, errorMsg, output, durationSec) VALUES (?, ?, "failed", ?, ?, ?)');
     if ($stmt !== false) {
         $stmt->bind_param('ssssi', $trig, $dest, $err, $cap, $durationSec);
@@ -189,7 +246,40 @@ if ($exit !== 0 && $mostRecent === null) {
 
 Logger::activity('OffsiteBackupRun', 'Manual off-site sync (exit ' . (int) $exit . ')', $adminId);
 
-if ($exit === 0) {
+// 🔘 EXIT 0 NO LONGER MEANS A COPY WENT (#671).
+//
+//    Since the script reads the settings, a run that is switched off on this
+//    page sends nothing, records itself `skipped` and ends with exit code 0 —
+//    deliberately, so a hosting panel does not e-mail a failure every week for
+//    a feature somebody turned off. This handler read only the exit code, so
+//    it answered "Off-site sync completed in 1s." in GREEN for a run that
+//    packed nothing, encrypted nothing and sent nothing.
+//
+//    That is the state of EVERY FRESH INSTALLATION, because
+//    backup.offsite.enabled is seeded '0'. So the first thing an administrator
+//    did after setting the feature up — press "Run now" to check it — told
+//    them it had worked when it had not. Before this package the script always
+//    sent, so exit 0 really did mean a copy had gone; the skip path made the
+//    exit code ambiguous and this reader was not changed with it.
+//
+//    The row the run has just written is what decides the wording now. If it
+//    cannot be read, the exit code is used as before and the message says
+//    plainly that the result is unconfirmed, rather than claiming either way.
+//    $ranStatus was worked out above, from the row this run wrote — not from
+//    the newest row on the installation, which is a different thing and was
+//    the fault in the first version of this check.
+if ($exit === 0 && $ranStatus === 'skipped') {
+    $_SESSION['flash_msg']  = 'Nothing was sent: the off-site backup is switched off. '
+        . 'Tick "Enabled" in the settings below and save, then try again. '
+        . 'The run was recorded as skipped.';
+    $_SESSION['flash_type'] = 'warning';
+} elseif ($exit === 0 && $ranStatus === '') {
+    $_SESSION['flash_msg']  = 'The off-site sync finished in ' . $durationSec . 's without reporting a problem, '
+        . 'but it recorded no run, so this page cannot confirm a copy was sent. '
+        . 'Check the destination itself, and that read-offsite-settings.php and '
+        . 'log-offsite-result.php are both in the portal\'s _backups folder.';
+    $_SESSION['flash_type'] = 'warning';
+} elseif ($exit === 0) {
     $_SESSION['flash_msg']  = 'Off-site sync completed in ' . $durationSec . 's.';
     $_SESSION['flash_type'] = 'success';
 } else {

@@ -50,9 +50,18 @@
 #   - It copies the database snapshot ONLY. Uploaded files (_uploads/) and the
 #     keys (_auth_keys/) are not in it. Without a separate copy of
 #     _auth_keys/enc.key, the secrets inside a restored database cannot be read.
-#   - It reads none of the settings on /admin/maintenance/offsite-backup. The
-#     destination, how many copies to keep and the alert address are the
-#     variables in THIS file.
+#   - It reads SIX of the settings on /admin/maintenance/offsite-backup, and
+#     they WIN over the variables in this file: whether it is switched on, the
+#     destination, the rclone remote, the two "how many copies to keep"
+#     numbers and the alert address. The variables below are what it uses when
+#     a setting is not stored, cannot be read, or holds something it will not
+#     put on a command line. Until 30 October 2026 it read none of them, so a
+#     copy of this script from before then ignores that page completely
+#     (#671).
+#   - It does NOT read the address of an S3 bucket or an SFTP host from that
+#     page, because there is no box for either: those two stay in this file
+#     (#688). So choosing "s3" or "sftp" on the page still needs S3_BUCKET or
+#     SFTP_TARGET set below.
 #   - It does NOT check the snapshot's files against the checksums in its
 #     manifest. A snapshot that has a manifest but a damaged table file is sent
 #     and reported as a success. The portal's own check finds that: the
@@ -78,8 +87,9 @@
 # @package   WebMS-Intra (tooling — copied to the server by hand, never deployed)
 # @author    MWBM Partners Ltd (t/a MWservices)
 # @copyright MWBM Partners Ltd (t/a MWservices). All Rights Reserved.
-# @version   1.1.0 (12 October 2026, #488)
+# @version   1.2.0 (30 October 2026, #671)
 # @link      https://github.com/MWBMPartners/WebMS-Intra/issues/249
+# @link      https://github.com/MWBMPartners/WebMS-Intra/issues/671
 # -----------------------------------------------------------------------------
 
 set -euo pipefail
@@ -106,6 +116,29 @@ fi
 BACKUPS_DIR="${PORTAL_ROOT}/_backups"
 KEY_FILE="${PORTAL_ROOT}/_auth_keys/offsite.key"
 LOG_PHP="${BACKUPS_DIR}/log-offsite-result.php"
+READ_PHP="${BACKUPS_DIR}/read-offsite-settings.php"
+
+# --- What this file decides, and what the admin page decides ----------------
+#
+# EVERYTHING BELOW IS A FALLBACK. The portal's own settings, on
+# /admin/maintenance/offsite-backup, are read once at the start of each run
+# (see "Read the portal's settings" further down) and OVERRIDE these values.
+# A value here is what the run uses when that setting is not stored, when the
+# database cannot be read at all, or when what is stored is something this
+# script will not put on a command line.
+#
+# WHICH OF THOSE THREE SAYS SO, exactly — the first version of this comment
+# claimed all three print a WARNING, and that is not true of the first one:
+#   - stored value refused, or the whole read failed  → a WARNING names it
+#   - no row stored for that setting at all           → NOTHING is printed
+# So seeing no WARNING does NOT mean every value came from the page. The
+# "Settings from:" line counts how many came from there; if it says fewer than
+# six, the rest came from here. A missing row is not warned about on purpose:
+# it is the ordinary state of a setting nobody has ever set, and warning on it
+# every week would train people to ignore the warnings that matter.
+#
+# Two things the page does NOT decide, so set them here if you use them: the
+# address of an S3 bucket and of an SFTP host (#688).
 
 # --- Destination (pick ONE block; comment out the others) -------------------
 # A. rclone remote (Backblaze B2, R2, Google Drive, OneDrive, …)
@@ -122,9 +155,20 @@ RCLONE_REMOTE="myremote:portal-backups"
 
 KEEP_WEEKLY=8
 KEEP_MONTHLY=12
-# Where a failure is emailed. Empty = no email. This is the ONLY place the
-# address is read from; the "alert email" box on the admin page is not used.
+# Where a failure is emailed. Empty = no email. It needs the server's "mail"
+# program. The "alert email" box on the admin page overrides this.
 ALERT_EMAIL=""
+
+# Whether to send at all. This is the fallback for the "Enabled" box on the
+# admin page, and it is 1 — "send" — on purpose: it is what this script did
+# before it read any settings, so a run whose database cannot be reached
+# behaves as it always did rather than quietly stopping the backups. Set it to
+# 0 to refuse even when the database cannot be reached.
+#
+# Note which way round this is. A database that CAN be read and says the
+# feature is switched off stops the run: that is the box doing its job. This
+# value is only consulted when there is no answer from the database at all.
+ENABLED=1
 
 # The portal's own names: a snapshot folder is upgrade-YYYYMMDD-HHMMSS
 # (DbBackup::snapshot(), web/_core/DbBackup.php), and the copy this script
@@ -237,6 +281,199 @@ ENC="${WORK_DIR}/bundle.enc"
 # tee ends by itself when this script does.
 exec > >(trap '' TERM HUP QUIT; exec tee -i -a "${LOG_TMP}") 2>&1
 
+# --- Read the portal's settings --------------------------------------------
+#
+# The six settings on /admin/maintenance/offsite-backup, fetched through
+# read-offsite-settings.php, which is copied to _backups/ beside this script.
+# Until 30 October 2026 this step did not exist: the page's boxes were saved,
+# nothing read them, and an administrator could set a destination and an alert
+# address and be told it had saved while the run used the values in this file
+# (#671).
+#
+# WHERE IT SITS, AND WHY HERE
+#   - AFTER the run log is open, so its WARNING lines are kept with the run
+#     and appear in the recorded row rather than only in a cron email.
+#   - BEFORE step 0, because the destination, the remote and the two keep
+#     numbers are what step 0 checks. Reading them later would check the
+#     fallbacks and then use the stored values.
+#
+# WHY IT IS PARSED THIS WAY, AND NOT WITH "source" OR "eval"
+#   The stored values come from a web form. Reading them with "source" or
+#   "eval" would run whatever a settings box happened to hold, as this account,
+#   on the server holding the whole database. So: the output is read line by
+#   line, only lines of the exact shape KEY=value are looked at, only six keys
+#   are accepted, and EVERY value is matched against a pattern again here —
+#   even though read-offsite-settings.php has already refused anything that
+#   does not match. Two guards, because this one is the one that would have to
+#   hold if the other file were ever replaced or edited on the server.
+#
+# WHAT IT CANNOT DO
+#   - It cannot tell an older copy of read-offsite-settings.php from a current
+#     one beyond the format number on its first line.
+#   - It cannot check an rclone remote exists, or that a bucket is writable.
+#   - If php itself is missing, the settings are not read and the values in
+#     this file are used, with a WARNING. That is deliberate: a host without
+#     php on the command line can still send a copy.
+SETTINGS_SOURCE="this script file"
+if [[ ! -f "${READ_PHP}" ]]; then
+    echo "WARNING: ${READ_PHP} is not there, so the settings on /admin/maintenance/offsite-backup were NOT read and the values in this script file were used. Copy read-offsite-settings.php into ${BACKUPS_DIR}/ to use that page."
+elif ! SETTINGS_OUT="$(php "${READ_PHP}")"; then
+    echo "WARNING: the settings on /admin/maintenance/offsite-backup could not be read (read-offsite-settings.php refused or failed), so the values in this script file were used. Its reason is above."
+else
+    # The first line, taken with bash's own expansion rather than through a
+    # pipe to "head". The pipe version overflowed and broke when a stored value
+    # was very large (about 128 KB on this Mac, about 64 KB on Linux): bash
+    # printed "printf: write error: Broken pipe" and, under `set -o pipefail`,
+    # the whole run stopped before anything was packed, blaming "a step" and
+    # naming the wrong line. Measured (#671). This cannot fail that way: it is
+    # string handling inside bash, with no second process. The bridge also
+    # refuses an over-long value now, so this is the second of two guards.
+    SETTINGS_FORMAT="${SETTINGS_OUT%%$'\n'*}"
+    if [[ "${SETTINGS_FORMAT}" != "# OFFSITE-SETTINGS 1" ]]; then
+        # A format this script does not know is not half-read. A later version
+        # of the reader may print something arranged differently, and taking
+        # the lines that happen to look familiar is how a run ends up with
+        # three of six settings from the page and three from this file.
+        echo "WARNING: read-offsite-settings.php answered in a format this script does not know ('${SETTINGS_FORMAT}'), so the values in this script file were used. Copy a matching pair of files from the same release."
+    else
+        SETTINGS_READ=0
+        while IFS= read -r SETTING_LINE; do
+            case "${SETTING_LINE}" in
+                'WARN: '*)
+                    # Passed straight through so it is in the run's log and in
+                    # the failure email: a value held back must never be
+                    # silent, or an administrator goes on believing a box is
+                    # in force.
+                    echo "WARNING: ${SETTING_LINE#WARN: }"
+                    continue
+                    ;;
+                '#'*)
+                    continue
+                    ;;
+            esac
+            # A line that is not KEY=value at all is skipped in SILENCE, and
+            # that is worth knowing rather than assuming: the warning below
+            # fires for a value this script REFUSES, not for a line it cannot
+            # read. So a replaced reader printing junk is ignored without a
+            # word, while one printing a bad VALUE is named. Deliberate for the
+            # "#" and "WARN:" lines above, which are not settings; the cost is
+            # that a badly broken reader is quiet. What catches that case
+            # instead is the "Settings from:" count, which then says fewer
+            # settings than expected, or none.
+            if [[ ! "${SETTING_LINE}" =~ ^([A-Z_]+)=(.*)$ ]]; then
+                continue
+            fi
+            SETTING_KEY="${BASH_REMATCH[1]}"
+            SETTING_VALUE="${BASH_REMATCH[2]}"
+            # Every branch below either takes the value or leaves SETTING_TAKEN
+            # at 0, and a 0 is reported straight afterwards. The first version
+            # skipped a rejected value in SILENCE, which made the comment above
+            # untrue in exactly the case this second guard exists for — a bridge
+            # replaced or edited on the server, printing something this script
+            # will not use. The run then used the value in this file with
+            # nothing but the "Settings from:" line to hint at it, and never
+            # named the setting (#671).
+            SETTING_TAKEN=0
+            case "${SETTING_KEY}" in
+                ENABLED)
+                    if [[ "${SETTING_VALUE}" =~ ^[01]$ ]]; then
+                        ENABLED="${SETTING_VALUE}"
+                        SETTINGS_READ=$((SETTINGS_READ + 1)); SETTING_TAKEN=1
+                    fi
+                    ;;
+                DESTINATION)
+                    if [[ "${SETTING_VALUE}" == "rclone" || "${SETTING_VALUE}" == "s3" || "${SETTING_VALUE}" == "sftp" ]]; then
+                        DESTINATION="${SETTING_VALUE}"
+                        SETTINGS_READ=$((SETTINGS_READ + 1)); SETTING_TAKEN=1
+                    fi
+                    ;;
+                RCLONE_REMOTE)
+                    # The same pattern read-offsite-settings.php uses. A value
+                    # starting with a dash would be read by rclone as an
+                    # option, and the pattern cannot match one.
+                    if [[ "${SETTING_VALUE}" =~ ^[A-Za-z0-9_.-]+:[A-Za-z0-9_./-]*$ && "${SETTING_VALUE}" != -* ]]; then
+                        RCLONE_REMOTE="${SETTING_VALUE}"
+                        SETTINGS_READ=$((SETTINGS_READ + 1)); SETTING_TAKEN=1
+                    fi
+                    ;;
+                KEEP_WEEKLY)
+                    if [[ "${SETTING_VALUE}" =~ ^[0-9]+$ ]]; then
+                        KEEP_WEEKLY="${SETTING_VALUE}"
+                        SETTINGS_READ=$((SETTINGS_READ + 1)); SETTING_TAKEN=1
+                    fi
+                    ;;
+                KEEP_MONTHLY)
+                    if [[ "${SETTING_VALUE}" =~ ^[0-9]+$ ]]; then
+                        KEEP_MONTHLY="${SETTING_VALUE}"
+                        SETTINGS_READ=$((SETTINGS_READ + 1)); SETTING_TAKEN=1
+                    fi
+                    ;;
+                ALERT_EMAIL)
+                    # An EMPTY stored address is a real choice — "do not
+                    # email" — and has to be able to clear an address left in
+                    # this file, so empty is accepted here rather than skipped.
+                    if [[ -z "${SETTING_VALUE}" ]]; then
+                        ALERT_EMAIL=""
+                        SETTINGS_READ=$((SETTINGS_READ + 1)); SETTING_TAKEN=1
+                    elif [[ "${SETTING_VALUE}" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$ && "${SETTING_VALUE}" != -* ]]; then
+                        ALERT_EMAIL="${SETTING_VALUE}"
+                        SETTINGS_READ=$((SETTINGS_READ + 1)); SETTING_TAKEN=1
+                    fi
+                    ;;
+            esac
+            if [[ "${SETTING_TAKEN}" -eq 0 ]]; then
+                # The KEY is named and the VALUE is not. The value is the
+                # untrusted text this guard exists to hold back, and this line
+                # is printed, kept in the recorded row, and read by a person.
+                echo "WARNING: the settings reader sent a ${SETTING_KEY} this script will not use, so the value in this script file was kept. Check that setting on /admin/maintenance/offsite-backup."
+            fi
+        # "<<<" and not a pipe, and that is load-bearing: a pipe would run this
+        # loop in a subshell, every assignment above would be thrown away when
+        # it ended, and the run would use the values in this file while
+        # printing that it had read the page's. Tried deliberately to confirm
+        # it: with a pipe, nothing read from the page takes effect.
+        done <<< "${SETTINGS_OUT}"
+        if [[ "${SETTINGS_READ}" -gt 0 ]]; then
+            SETTINGS_SOURCE="/admin/maintenance/offsite-backup (${SETTINGS_READ} setting(s))"
+        fi
+    fi
+fi
+# The alert address is deliberately NOT printed: an address is somebody's
+# personal detail rather than part of the run's story, and everything printed
+# here is kept.
+#
+# "Kept" means kept in the recorded row's `output` column, which
+# /admin/maintenance/offsite-backup shows under each run. That was NOT true
+# when this line was first written — log-offsite-result.php threw away any
+# --output holding a newline, so the column was empty for every run ever made,
+# and the page did not read it either (#671). Both are fixed; if either breaks
+# again, these WARNING lines exist only in the hosting panel's e-mail.
+echo "Settings from: ${SETTINGS_SOURCE}"
+
+# 🔘 Switched off on the page means nothing is sent, and the run is recorded as
+#    skipped rather than failed — nothing went wrong, it was asked not to run.
+#    Exit 0 for the same reason: the hosting panel would email a failure
+#    otherwise, every week, for a feature deliberately turned off.
+#
+#    This is checked BEFORE the key file and before any copy of the database is
+#    made, so a switched-off installation never packs its database at all.
+#
+#    THE ONE THING TO KNOW WHEN UPGRADING THIS SCRIPT: backup.offsite.enabled
+#    is seeded '0', so an installation that has been running this script on a
+#    schedule and never opened the page WILL start skipping as soon as this
+#    version is copied in. That is the box doing what it says, but it is a
+#    change in behaviour, so switch it on on the page when upgrading the
+#    script. The skip says exactly this, in the run log and on the page.
+if [[ "${ENABLED}" != "1" ]]; then
+    SKIP_REASON="Off-site backup is switched off on /admin/maintenance/offsite-backup, so nothing was sent. Tick 'Enabled' there to send on a schedule."
+    echo "${SKIP_REASON}"
+    php "${LOG_PHP}" --status=skipped --destination="${DESTINATION}" \
+        --error="${SKIP_REASON}" --output="$(cat "${LOG_TMP}")" || true
+    remove_work_dir
+    OUTCOME_RECORDED=1
+    exit 0
+fi
+
 # --- 0. Refuse early, before any copy of the database is made ---------------
 
 if [[ ! -r "${KEY_FILE}" ]]; then
@@ -265,15 +502,18 @@ fi
 # its address still commented out then stopped on an "unbound variable".
 case "${DESTINATION}" in
     rclone)
-        [[ -n "${RCLONE_REMOTE:-}" ]] || die "DESTINATION is rclone but RCLONE_REMOTE is not set in this file."
+        # ":-" because the destination can now come from the admin page while
+        # this file still has the rclone block commented out. Without it the
+        # run stopped on an "unbound variable" instead of saying what to set.
+        [[ -n "${RCLONE_REMOTE:-}" ]] || die "The destination is rclone but no rclone remote is set, either in the 'rclone remote' box on /admin/maintenance/offsite-backup or as RCLONE_REMOTE in this file."
         command -v rclone >/dev/null 2>&1 || die "rclone not installed"
         ;;
     s3)
-        [[ -n "${S3_BUCKET:-}" ]] || die "DESTINATION is s3 but S3_BUCKET is not set in this file."
+        [[ -n "${S3_BUCKET:-}" ]] || die "The destination is s3 but S3_BUCKET is not set in this file. There is no box for it on the admin page (#688), so it has to be set here."
         command -v aws >/dev/null 2>&1 || die "aws CLI not installed"
         ;;
     sftp)
-        [[ -n "${SFTP_TARGET:-}" ]] || die "DESTINATION is sftp but SFTP_TARGET is not set in this file."
+        [[ -n "${SFTP_TARGET:-}" ]] || die "The destination is sftp but SFTP_TARGET is not set in this file. There is no box for it on the admin page (#688), so it has to be set here."
         command -v scp >/dev/null 2>&1 || die "scp not installed"
         ;;
     *)
@@ -439,9 +679,17 @@ esac
 
 # --- 5. Cleanup + log success ----------------------------------------------
 
-php "${LOG_PHP}" --status=success --destination="${DESTINATION}" \
+# The run is recorded LAST, and a failure to record is not a failure to back
+# up: the copy is already at the destination. But it must not be silent — a
+# recorder that cannot reach the database leaves the portal showing "No runs
+# logged yet" while copies really are going out, which is the one way the page
+# can still mislead (#671). So the failure is printed here, where the hosting
+# panel's e-mail will carry it even though the database cannot.
+if ! php "${LOG_PHP}" --status=success --destination="${DESTINATION}" \
     --snapshot="${SNAP_NAME}" --bundle-size="${BUNDLE_SIZE}" \
-    --duration-sec="${DURATION}" --output="$(cat "${LOG_TMP}")" || true
+    --duration-sec="${DURATION}" --output="$(cat "${LOG_TMP}")"; then
+    echo "WARNING: the copy WAS sent, but this run could not be recorded in the portal, so /admin/maintenance/offsite-backup will not show it. Check that read/log-offsite-result.php is in ${BACKUPS_DIR} and that the portal's database is reachable."
+fi
 remove_work_dir
 OUTCOME_RECORDED=1
 

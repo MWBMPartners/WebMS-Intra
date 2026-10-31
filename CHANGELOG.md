@@ -2,6 +2,125 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — the off-site backup's six settings now really decide what a run does, and a run is recorded at last (#671)**
+  - **The settings were decorative, on every installation.** `/admin/maintenance/offsite-backup`
+    saved six `backup.offsite.*` rows and **nothing in the repository read any of them** — the sync
+    script used the variables written into its own copy on the server, and said so in its own header
+    and in the setup guide. So an administrator could choose a destination, type an rclone remote,
+    set how many copies to keep and an alert address, press Save, be told "Off-site backup settings
+    saved." and have none of it affect anything, with or without a command line. The owner decided on
+    30 October 2026 to make them real rather than delete the feature.
+  - **A new bridge, `tools/offsite-backup/read-offsite-settings.php`**, copied to `_backups/` beside
+    the script. It reads the INSTALLATION's rows, validates each value and prints them for the script.
+    **It refuses rather than escapes:** a value that does not match its pattern is not printed at all,
+    the script keeps the value in its own file, and a `WARNING` says which setting and why. An escaped
+    destination is still a destination nobody chose, and a copy of the whole database is what is at
+    stake.
+  - **The script (now 1.2.0) reads that output without `source` or `eval`**, accepts only six keys and
+    re-checks every value in bash as well — two guards, because the bash one is what would have to
+    hold if the bridge were edited on the server. Switched off on the page now means a run sends
+    nothing, records itself `skipped` and exits 0.
+  - **A second, separate fault, and it was known: no run was ever recorded on a real installation.**
+    `log-offsite-result.php` required `'../../web/_core/bootstrap.php'`, which resolves only when the
+    portal's folder is literally named `web` — true in a checkout of this repository, where it was
+    tested on 12 October 2026, and false on a customer's server, where that folder is named by the
+    customer. So the recorder could not load the portal, `tblOffsiteSyncLog` stayed empty, and the
+    page showed "No runs logged yet" however many copies had really been sent — a FAILED run
+    included. **The setup guide had written this down as a limitation rather than treating it as a
+    bug.** Both files now find the portal instead of assuming its name.
+  - **The page stops implying things that are not true.** A standing notice says it needs a command
+    line on the server and a sending program, and does nothing on shared hosting without one. The
+    page also reads the script actually sitting on the server and says whether the settings are **in
+    force**, **ignored by the script** (a copy from before 30 October ignores them) or have no script
+    to obey them. The `Weekly` / `Monthly` boxes no longer imply a rotation the script does not do —
+    it adds the two numbers — and the total is shown. The destination list now says that the S3 and
+    SFTP addresses are set in the script file, not there (#688).
+  - **Also fixed, the #674 shape:** the page prefilled from the merged `App::settings()` while saving
+    installation-wide, so a global administrator inside an organisation with its own row could press
+    Save on an untouched form and make that organisation's value everyone's. It reads
+    `InstallationSettings::layer()` now — the same layer the bridge reads, so the page and the script
+    can no longer disagree about where a copy is going. Removed from
+    `check_install_wide_prefill.pending.txt` (13 → 12).
+  - **Tests.** New `tools/offsite-settings-selftest.php`: 112 checks against a real MySQL database,
+    real bash, real `openssl` and real rclone sending to a folder on the test machine — including
+    section D, which removes the override and proves the end-to-end check then fails. New section O of
+    `tools/backup-page-selftest.php`: 25 checks over real HTTP (181 → 206), including a script whose
+    call to the bridge is **commented out** while every mention of it remains, which is why the page's
+    check strips comments before looking. Existing tests re-run green: site-modes 136, access-pages
+    334, live-chat-moderation 64, page-head 19, static-calls 150.
+  - **The independent review found 14 real problems and they are fixed.** The worst was that
+    `log-offsite-result.php` **threw away every run's log**: its flag pattern
+    `/^--([a-z\-]+)(=(.*))?$/` has no `s` modifier, so `.` cannot cross a newline and the WHOLE
+    match failed for any multi-line value — and a run's log is never one line. So
+    `tblOffsiteSyncLog.output` was NULL for every run ever recorded. That mattered far more than it
+    sounds: the bridge **refuses** a value it will not put on a command line, and a `WARN` line was
+    the only record of which setting and why — so a mistyped destination left no trace anywhere an
+    administrator could reach, while the page badged the settings "in force". Two comments written
+    in this package claimed the opposite. Fixed by splitting at the first `=`; the page now reads
+    `output` and shows each run's warnings, prominently for the newest run.
+  - **`Portal\Core\OffsiteSettings` is now the ONE place that decides whether a stored off-site
+    value can be used.** The rules lived only inside the bridge, so the page could not ask them: it
+    accepted an rclone remote with a space or a capital (an ordinary typo), stored it, said
+    "saved", showed it back and badged the settings in force, while every run used the remote inside
+    the script file — and where the customer had set that fallback to a real remote, as the guide
+    tells them to, **the copy went somewhere the administrator had not chosen**. The page now warns
+    at the moment of saving, and under the box itself for an already-stored value. Writing the
+    pattern a second time on the page was rejected: two guards that can drift apart are worse than
+    one.
+  - **"Run now" no longer reports green success for a run that sent nothing.** Exit 0 stopped
+    meaning "a copy went" the moment the skip path was added, and the one reader of it was not
+    changed — so on **every fresh installation** (the setting is seeded off) the first thing an
+    administrator did after setting it up said "Off-site sync completed in 1s." It reads the status
+    of the row the run just wrote, and says plainly when it cannot confirm either way.
+  - **Three sentences this package had added were measured false and are reworded.** The banner's
+    "nothing here is sending a copy unless Recent runs shows one" — recording is allowed to fail
+    without failing the run, so an empty list means "nothing recorded", not "nothing sent". The
+    "switched off, so nothing is being sent" notice — the script's documented fallback is to SEND
+    when it cannot reach the database, so that notice was false in exactly the cases that matter.
+    And "each of those three cases prints a WARNING" in both the script header and the setup guide —
+    a setting with no row stored prints nothing, deliberately.
+  - **Three smaller faults, all real:** a very large stored value broke the pipe the script read the
+    bridge's first line through and, under `set -o pipefail`, **aborted every backup** while blaming
+    the wrong line (now bounded at 256 characters by the class, and the script no longer uses a pipe
+    there); a value the bash guard rejected was skipped in total silence, which its own comment
+    denied (it now names the setting); and an out-of-range stored keep figure was prefilled into an
+    input carrying `min`/`max`, which makes the browser refuse to submit **the whole form** — the
+    #668 trap, written down and then walked into.
+  - **Also fixed:** the script-reads-settings detection required `"${READ_PHP}"` and so reported a
+    script written `$READ_PHP` — the same call — as disobedient, in a red alert; it now accepts
+    both. The page's "what it cannot see" list now admits the two shapes it genuinely cannot: a call
+    disabled by its own condition (`false && php ...`), and the recorder, which is asked separately.
+  - **A second review round found four more, including a fault in the first fix.** "Run now" read
+    `ORDER BY logID DESC LIMIT 1` with nothing tying it to the run just made, so "recorded no run"
+    really meant "the log table has never held a row". **Measured: with one older `success` row on
+    file and a script that recorded nothing, the page answered "Off-site sync completed in 0s." in
+    green** — the exact wording the check was added to stop. So the fix worked only on a fresh
+    installation, the one case where the fault is invisible; and last week's `skipped` row would have
+    decided this week's message. The handler now reads `MAX(logID)` before the run and asks only
+    about rows after it. The same misreading disabled the fallback insert: `$mostRecent === null`
+    meant "no row has ever existed", so on any installation with history a failed run that never
+    reached its own logger **recorded nothing at all**. Pinned by O11b, the one check in that section
+    an empty table cannot satisfy — which is exactly why the fault survived the first version of it.
+  - **The keep range was decided in four places** (the save handler's literals, the display clamp,
+    the boxes' own `min`/`max`, and the bridge). All four now come from
+    `Portal\Core\OffsiteSettings`, so changing a constant cannot leave one behind.
+  - **A third overstated guarantee of mine, caught by measurement.** Both the bridge and the class
+    said the length ceiling was "the second of two guards" alongside the script's pipe fix. Measured
+    by raising the ceiling: the run then gets past the settings step and **rclone** refuses the
+    200,000-character remote instead, so the backup still does not happen. The two stop different
+    things and the ceiling is the only one that keeps a copy going out. Also noted beside the code:
+    an over-long alert address is held back twice over, because `filter_var` refuses a local part
+    beyond about 64 characters anyway — so that branch is belt and braces, not the only thing.
+  - **Final counts.** `tools/offsite-settings-selftest.php` 112 → **195** checks; section O of
+    `tools/backup-page-selftest.php` 24 → **77**, taking that file to **259**. Twenty-nine planted
+    faults across the two, each proved to have applied, each caught, each reversed and checked
+    byte-identical. Two checks in section O were found **already red** when the page moved under
+    them, and one check of its own passed on a planted fault until it was narrowed to read a single
+    block — both written up where they happened.
+  - **Not done, with issues raised:** #688 (no box for the S3 bucket or SFTP host, so two of the three
+    destinations are only half-controlled by the page) and #689 (`access-pages-selftest.php` counts
+    through `mysql.general_log`, which is server-wide, so it fails spuriously beside anything else on
+    the same MySQL server — it cost two false failures in this run).
 - **Decided and closed — a repeating series' feed falls back rather than publishing exceptions (#670)**
   - **The issue's premise was stale.** It said the feed "sends the pattern only", so cancelling, moving
     or editing one date was invisible to subscribers. Measured over real HTTP: all three were already
