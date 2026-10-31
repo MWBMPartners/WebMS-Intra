@@ -150,7 +150,10 @@ const BPS_ADMIN  = 918002;   // an administrator of one organisation only
 const BPS_MEMBER = 918003;
 const BPS_MIGRATION = '999_backup_page_selftest.sql';
 /** The activity-log lines the backup pages write themselves. */
-const BPS_OWN_LINES = ['BackupSnapshotChecked', 'BackupRestored', 'BackupRestoreFailed', 'BackupTableRestored', 'BackupActionRefused'];
+const BPS_OWN_LINES = ['BackupSnapshotChecked', 'BackupRestored', 'BackupRestoreFailed', 'BackupTableRestored', 'BackupActionRefused',
+    // The FOUR #694 actions. bps_settle() REFUSES a line that is not on this
+    // list, so a new action the page records has to be added here on purpose.
+    'BackupHeldRowsPutBack', 'BackupHeldRowsPutBackFailed', 'BackupHeldRowsDiscarded', 'BackupHeldRowsDiscardFailed'];
 
 $bps = ['proc' => null, 'child' => '', 'token' => bin2hex(random_bytes(16)), 'port' => 0, 'logMark' => 0, 'errMark' => null, 'put_back' => [], 'cleaned' => false];
 
@@ -2388,6 +2391,451 @@ Brs::$writer->query('DELETE FROM tblOffsiteSyncLog WHERE logID > ' . $osLogMark)
 foreach ($osBefore as $osSettingKey => $osStoredBefore) {
     $osSet($osSettingKey, $osStoredBefore);
 }
+
+// =============================================================================
+// P. Rows a restore could not put back: the card, and the two buttons (#694)
+// =============================================================================
+// The class keeps the rows (proof 27 of tools/backup-restore-selftest.php).
+// This is about the PAGE, over real HTTP: that the card appears only when
+// something is waiting, that it says what is being kept without naming anybody,
+// that both buttons really do what they say, and that the words an
+// administrator reads mid-recovery are true.
+//
+// WHY THE CARD MATTERS AS MUCH AS THE ROWS. The owner decided on 31 October
+// 2026 that the kept rows wait until somebody clears them, with no timer. So
+// this card is the ONLY thing that stops them being forgotten. A page that kept
+// the rows and did not mention them would be a holding table nobody looks in.
+echo "\nP. Rows a restore could not put back (#694)\n";
+
+$hrOrg     = 970950;
+$hrSetting = 970951;
+$hrUserA   = 970950;
+$hrUserB   = 970951;
+$hrWaiting = static fn (): int => (int) Brs::$writer->query('SELECT COUNT(*) FROM tblRestoreHeldRows WHERE putBackAtUtc IS NULL')->fetch_row()[0];
+$hrSettingRows = static fn (): int => (int) Brs::$writer->query('SELECT COUNT(*) FROM tblSettings WHERE settingID = ' . $hrSetting)->fetch_row()[0];
+$hrCodeRows    = static fn (): int => (int) Brs::$writer->query('SELECT COUNT(*) FROM tblTotpBackupCodes WHERE codeID >= 970950')->fetch_row()[0];
+$hrPage        = static fn (): string => bps_request($jar['root'], 'GET', '/admin/maintenance/backup')['body'];
+
+// P1. Nothing waiting: the page looks exactly as it did.
+brs_check($hrWaiting() === 0, 'nothing is being kept to start with', 'waiting: ' . $hrWaiting());
+$hrBlank = $hrPage();
+brs_check(
+    str_contains($hrBlank, 'Rows being kept for you') === false,
+    'with nothing waiting the card is not on the page at all — the ordinary case looks untouched'
+);
+
+// 🧱 The condition. One made-up organisation with a setting of its own, two
+//    made-up accounts with sign-in codes. No real person; the "codes" are not
+//    codes and are never hashed, printed or compared.
+Brs::$writer->query("INSERT INTO tblSites (siteID, siteName, siteKey, timezone) VALUES ($hrOrg, 'Held rows organisation', 'bps-p694', 'Europe/London')");
+Brs::$writer->query(
+    "INSERT INTO tblSettings (settingID, siteID, settingKey, settingValue, defaultValue, isSensitive, updatedAt) "
+    . "VALUES ($hrSetting, $hrOrg, 'org.address.line1', 'The organisation''s own address', '', 0, '2026-01-02 00:00:00')"
+);
+Brs::$writer->query("INSERT INTO tblUsers (userID, emailAddress) VALUES ($hrUserA, 'bps-p694-a@example.invalid'), ($hrUserB, 'bps-p694-b@example.invalid')");
+Brs::$writer->query(
+    "INSERT INTO tblTotpBackupCodes (codeID, userID, codeHash, isUsed) VALUES "
+    . "(970950, $hrUserA, 'not-a-real-hash-a1', 0), (970951, $hrUserA, 'not-a-real-hash-a2', 0), (970952, $hrUserB, 'not-a-real-hash-b1', 0)"
+);
+// 🔢 HOW MANY PER-ORGANISATION SETTINGS ROWS THERE ARE IS ASKED, NEVER TYPED. A
+//    fresh install already holds some — migration 231 (#677) copied each
+//    organisation's address down into a row of its own — and that is exactly the
+//    change #690 showed had quietly broken two tests that had hard-coded "none".
+//    The counts come from the database as it stands, which is independent of the
+//    code under test, so they cannot go stale when another migration adds one.
+$hrOrgSettings = (int) Brs::$writer->query('SELECT COUNT(*) FROM tblSettings WHERE siteID IS NOT NULL')->fetch_row()[0];
+$hrOrgCount    = (int) Brs::$writer->query('SELECT COUNT(DISTINCT siteID) FROM tblSettings WHERE siteID IS NOT NULL')->fetch_row()[0];
+// 🩹 A copy of those rows, kept so this section can mend the world it is about
+//    to break. P6 DISCARDS them on purpose, which is the point of that check,
+//    and brs_reset()-style comparison at the end of the section needs them
+//    back. Taken as whole rows and written back column by column, so no value
+//    is ever typed into this test: a row named here by hand would go stale the
+//    day a migration changed it, which is the #690 shape.
+$hrOrgRows = Brs::$writer->query('SELECT * FROM tblSettings WHERE siteID IS NOT NULL')->fetch_all(MYSQLI_ASSOC);
+$hrMendOrgRows = static function () use ($hrOrgRows): int {
+    $mended = 0;
+    foreach ($hrOrgRows as $row) {
+        // `siteScope` is worked out by the database and cannot be written.
+        unset($row['siteScope']);
+        $names  = array_keys($row);
+        $insert = Brs::$writer->prepare(
+            'INSERT IGNORE INTO tblSettings (`' . implode('`, `', $names) . '`) VALUES ('
+            . implode(', ', array_fill(0, count($names), '?')) . ')'
+        );
+        $values = array_values($row);
+        $insert->bind_param(str_repeat('s', count($values)), ...$values);
+        $insert->execute();
+        $mended += $insert->affected_rows > 0 ? 1 : 0;
+        $insert->close();
+    }
+    return $mended;
+};
+brs_check(
+    $hrOrgSettings >= 1 && $hrOrgCount >= 1,
+    'the world holds ' . $hrOrgSettings . ' per-organisation settings row(s) across ' . $hrOrgCount . ' organisation(s), this section having added one of each'
+);
+// The log is settled first, so the comparison at the end of this section is
+// about this section's rows and not about the lines the page writes for itself.
+bps_settle();
+$hrBefore = brs_fingerprint();
+
+// A snapshot THAT DOES NOT SAY IT COVERS THE WHOLE DATABASE, which is the one
+// thing that makes a restore hold the three tables back. Taken by pressing the
+// page's own button, so it holds this section's fixture rows, and then its
+// manifest's `whole_database` flag is removed — which is exactly the state
+// every snapshot taken before 27 October 2026 is in.
+//
+// WHY NOT brs_legacySnapshot(), WHICH WRITES A REAL OLD-FORM SNAPSHOT. It is a
+// frozen copy of the writer as it stood before #577, and that writer cannot
+// encode a column holding raw bytes that are not text — which is the fault
+// #577 fixed, and which is why the newer form exists. This database holds such
+// rows by the time this section runs, so it dies with "Malformed UTF-8". Proof
+// 27 of tools/backup-restore-selftest.php uses the real old writer, on a
+// database where that is safe. The flag is what the restore reads, so this
+// reaches the same code by the same door.
+bps_press($jar['root'], ['action' => 'snapshot_now']);
+$hrFolders = glob($backups . '/upgrade-*/_manifest.json') ?: [];
+usort($hrFolders, static fn (string $a, string $b): int => filemtime($a) <=> filemtime($b));
+$hrSnapshot = (string) basename(dirname((string) (array_slice($hrFolders, -1)[0] ?? '')));
+$hrManifestPath = $backups . '/' . $hrSnapshot . '/_manifest.json';
+$hrManifest = json_decode((string) @file_get_contents($hrManifestPath), true);
+brs_check(
+    $hrSnapshot !== '' && is_array($hrManifest) === true && ($hrManifest['whole_database'] ?? null) === true,
+    'a snapshot was taken from the page, and it says it covers the whole database',
+    $hrSnapshot . ' ' . json_encode($hrManifest['whole_database'] ?? null)
+);
+unset($hrManifest['whole_database']);
+file_put_contents($hrManifestPath, json_encode($hrManifest));
+brs_check(
+    ($hrManifest['whole_database'] ?? null) === null
+    && isset(json_decode((string) file_get_contents($hrManifestPath), true)['whole_database']) === false,
+    'and with that flag removed it is in the state every snapshot taken before 27 October 2026 is in'
+);
+
+// P2. The restore, pressed on the real page.
+bps_settle();
+$hrRestore = bps_message(bps_press($jar['root'], ['action' => 'restore_full', 'name' => $hrSnapshot])['body']);
+brs_check(
+    str_starts_with($hrRestore, '[warning] ') === true,
+    'pressing Restore all on an old-form snapshot answers as a WARNING, not a plain success: something was lost along the way',
+    $hrRestore
+);
+brs_check(
+    str_contains($hrRestore, $hrOrgSettings . ' ' . \Portal\Core\DbBackup::CASCADE_RESCUE['tblSettings']['describe']) === true
+    && str_contains($hrRestore, '3 ' . \Portal\Core\DbBackup::CASCADE_RESCUE['tblTotpBackupCodes']['describe']) === true,
+    'and the answer names WHAT went, with a count, in words rather than only naming the table',
+    $hrRestore
+);
+// 🧾 AND THE OLDER, WIDER SENTENCE IS STILL THERE. #694 ADDED the one above; it
+//    did not replace this one, which counts every table outside the snapshot
+//    that changed, including the ones that cannot be rescued. Pinning only one
+//    of the two would pass with the other deleted.
+brs_check(
+    str_contains($hrRestore, 'NOT in this snapshot were changed as well') === true,
+    'and the older sentence counting every changed table outside the snapshot is still there too',
+    $hrRestore
+);
+brs_check(
+    str_contains($hrRestore, 'being kept for you on the Backup page') === true
+    && str_contains($hrRestore, 'Nothing removes') === true
+    && str_contains($hrRestore, 'on a timer') === true,
+    'and says where they are and that nothing will quietly delete them',
+    $hrRestore
+);
+brs_check(
+    $hrSettingRows() === 0 && $hrCodeRows() === 0 && $hrWaiting() === $hrOrgSettings + 3,
+    'the cascade really took every one of those rows, and every one is being kept (' . ($hrOrgSettings + 3) . ')',
+    'setting: ' . $hrSettingRows() . ', codes: ' . $hrCodeRows() . ', waiting: ' . $hrWaiting()
+);
+brs_check(bps_portalIsOpen() === true, 'and the portal was reopened', 'portal.maintenance.active = ' . bps_setting('portal.maintenance.active'));
+
+// P3. The card itself.
+$hrWithCard = $hrPage();
+$hrWords    = bps_text($hrWithCard);
+brs_check(
+    str_contains($hrWithCard, 'Rows being kept for you') === true,
+    'the card is now on the page'
+);
+// 🚫 AND IT MUST NOT TELL SOMEBODY THEIR SETTINGS ARE NOT IN THEIR BACKUP. The
+//    card said "tables the backup does not cover", which for the snapshot this
+//    section restores is FALSE — an older backup DOES contain these tables, and
+//    the restore leaves them alone because each records what has already
+//    happened. Nothing held this wording until the independent check.
+// ONE test, not a disjunction. This was written as
+//   str_contains($words, 'does not') === false
+//   || str_contains($words, 'tables the backup does not cover') === false
+// which works — the long phrase CONTAINS "does not", so the only way both
+// clauses are false is the phrase being present — but the first clause can
+// never be true while the second is false, so it is pure noise that makes the
+// check LOOK like it tests two things. Say the one thing it tests.
+brs_check(
+    str_contains($hrWords, 'tables the backup does not cover') === false,
+    'and does not claim the backup lacks those tables — false for the snapshot this section restores, because a table has to be IN a backup to be held back from it'
+);
+brs_check(
+    str_contains($hrWords, 'could not') === true
+    && str_contains($hrWords, 'records what has already happened') === true,
+    'but says the RESTORE could not put them back, and why, which covers both reasons a table is not put back',
+    substr($hrWords, max(0, (int) strpos($hrWords, 'Rows being kept')), 700)
+);
+brs_check(
+    str_contains($hrWords, $hrOrgSettings . ' ' . \Portal\Core\DbBackup::CASCADE_RESCUE['tblSettings']['describe']) === true
+    && str_contains($hrWords, '3 ' . \Portal\Core\DbBackup::CASCADE_RESCUE['tblTotpBackupCodes']['describe']) === true,
+    'and it says what is being kept, in the same words as the restore\'s own answer, with a count',
+    substr($hrWords, max(0, (int) strpos($hrWords, 'Rows being kept')), 900)
+);
+brs_check(
+    str_contains($hrWithCard, '<code>tblSettings</code>') === true
+    && str_contains($hrWithCard, '<code>tblTotpBackupCodes</code>') === true,
+    'and names the table each group came out of, so somebody can match it against the restore\'s answer'
+);
+brs_check(
+    str_contains($hrWords, 'Nothing removes') === true
+    && str_contains($hrWords, 'on a timer') === true,
+    'and promises in so many words that nothing will delete them while they wait — the promise the owner chose on 31 October 2026',
+    substr($hrWords, max(0, (int) strpos($hrWords, 'Rows being kept')), 700)
+);
+brs_check(
+    str_contains($hrWithCard, 'name="action" value="put_held_back"') === true
+    && str_contains($hrWithCard, 'name="action" value="discard_held"') === true,
+    'and offers both buttons'
+);
+brs_check(
+    str_contains($hrWords, $hrOrgCount . ' organisation(s)') === true
+    && str_contains($hrWords, '2 people') === true,
+    'and says HOW MANY organisations and people the rows belonged to',
+    substr($hrWords, max(0, (int) strpos($hrWords, 'Rows being kept')), 900)
+);
+// 🔒 THE CHECK THAT MATTERS MOST HERE. A global administrator of the
+//    installation may be a different person from the administrators of the
+//    organisations on it (the owner, 29 October 2026), and a kept row's JSON
+//    holds the WHOLE row — for a settings row that includes `settingValue`,
+//    which can be anything the organisation has stored, `portal.support.email`
+//    among the keys migration 231 copied down. The card must say what a row IS
+//    and never what it says.
+//
+//    AN EARLIER VERSION OF THIS CHECK ALSO LOOKED FOR THE TWO ACCOUNTS'
+//    E-MAIL ADDRESSES, and its comment claimed a kept code row carried the
+//    owner's address. IT DOES NOT: `tblTotpBackupCodes` is
+//    (codeID, userID, codeHash, isUsed, usedAt, createdAt) and has no e-mail
+//    column, so those two clauses could never fail however broken the page was.
+//    The independent check caught it. A clause that cannot fail is worse than
+//    no clause, because the check LOOKS stronger than it is.
+brs_check(
+    str_contains($hrWithCard, 'not-a-real-hash') === false
+    && str_contains($hrWithCard, 'The organisation&#039;s own address') === false
+    && str_contains($hrWithCard, "The organisation's own address") === false,
+    'and the card shows NOT ONE value out of the kept rows: no code hash and no stored setting value'
+);
+// 🏷️ What it DOES show for a settings row: the key. A key names what a setting
+//    is without being a value, and an administrator judging what they have lost
+//    needs it, because `describe` cannot be exact — the rescue takes every
+//    per-organisation row whatever its key.
+brs_check(
+    str_contains($hrWithCard, 'org.address.line1') === true,
+    'but it DOES name the settings keys that went, which is the one thing in such a row that says what it is without saying what it holds',
+    substr($hrWords, max(0, (int) strpos($hrWords, 'Rows being kept')), 900)
+);
+// The second clause looks for the label the page would ACTUALLY use for another
+// table ('Which ones: '), not for 'Settings:' followed by a code column — which
+// could never match, because a names list for tblTotpBackupCodes would carry the
+// other label. A clause that cannot fail for the case its name describes is the
+// shape this package has already produced three times.
+brs_check(
+    str_contains($hrWithCard, 'Settings:') === true
+    && str_contains($hrWithCard, 'Which ones: ') === false
+    && str_contains($hrWithCard, 'codeHash') === false,
+    'and no such list is drawn for the sign-in codes, which have nothing showable in them at all'
+);
+
+// P4. Put them back, one table at a time, from the page.
+bps_settle();
+$hrPut = bps_message(bps_press($jar['root'], ['action' => 'put_held_back', 'table' => 'tblSettings'])['body']);
+brs_check(
+    str_starts_with($hrPut, '[success] ' . $hrOrgSettings . ' kept row(s) put back into tblSettings.') === true,
+    'pressing Put them back for the settings rows says how many went back',
+    $hrPut
+);
+brs_check($hrSettingRows() === 1, 'and this section\'s own row is really in tblSettings again', 'setting: ' . $hrSettingRows());
+// 📝 THE ACTIVITY LOG, read HERE rather than at the end of the section: these
+//    lines are the ones that press wrote, and bps_settle() clears them, so
+//    asking later would be asking about somebody else's press.
+$hrLines = implode(' | ', array_values(bps_newLines()));
+brs_check(
+    str_contains($hrLines, 'Kept rows put back into tblSettings') === true,
+    'and the press is recorded in the activity log, saying which table and how many',
+    $hrLines
+);
+brs_check(
+    str_contains($hrLines, 'not-a-real-hash') === false
+    && str_contains($hrLines, 'The organisation') === false
+    && str_contains($hrLines, 'org.address.line1') === false,
+    'and nothing it records quotes a value out of a kept row, nor even the key — a record of what happened needs the table and the count, nothing more',
+    $hrLines
+);
+bps_settle();
+$hrAfterOne = $hrPage();
+brs_check(
+    str_contains($hrAfterOne, '<code>tblSettings</code>') === false
+    && str_contains($hrAfterOne, '<code>tblTotpBackupCodes</code>') === true,
+    'the card no longer offers that table, and still offers the other'
+);
+$hrPutCodes = bps_message(bps_press($jar['root'], ['action' => 'put_held_back', 'table' => 'tblTotpBackupCodes'])['body']);
+bps_settle();
+brs_check(
+    str_starts_with($hrPutCodes, '[success] 3 kept row(s) put back into tblTotpBackupCodes.') === true,
+    'and the three sign-in codes go back too',
+    $hrPutCodes
+);
+brs_check(
+    str_contains($hrPage(), 'Rows being kept for you') === false,
+    'with nothing left waiting the card disappears again'
+);
+// 📌 The record of what happened survives the put-back: a row that went back is
+//    MARKED, not deleted, so the holding table still says it was kept and
+//    returned. Asserted before it is cleared for the comparison below, or
+//    clearing it would hide a put-back that had silently deleted the record.
+brs_check(
+    $hrWaiting() === 0
+    && (int) Brs::$writer->query('SELECT COUNT(*) FROM tblRestoreHeldRows WHERE putBackAtUtc IS NOT NULL')->fetch_row()[0] === $hrOrgSettings + 3,
+    'every kept row is marked as put back rather than deleted, so the record of what happened survives',
+    'waiting: ' . $hrWaiting()
+);
+brs_clearHeldRows();
+// 🎯 Not "a row with the right id is there" but every value of every table as
+//    it was before the restore. A row put back with a changed value, a lost
+//    column or a re-stamped date fails here and nowhere else — that is how the
+//    re-stamped `updatedAt` of #694 was found.
+brs_checkSame($hrBefore, 'and every value of every table is exactly as it was before the restore');
+
+// P5. The mixed answer: a row that cannot go back is SAID so, and stays.
+bps_settle();
+bps_press($jar['root'], ['action' => 'restore_full', 'name' => $hrSnapshot]);
+bps_settle();
+brs_check($hrWaiting() === $hrOrgSettings + 3, 'a second restore keeps the same rows again', 'waiting: ' . $hrWaiting());
+// 🧷 The whole row is kept and put back column by column, because tblUsers has
+//    `createdAt DEFAULT CURRENT_TIMESTAMP`: deleting the row and inserting it
+//    again by id alone would give it a NEW created date, and the comparison at
+//    the end of this section would read that as a change this section had made.
+$hrUserRow = Brs::$writer->query('SELECT * FROM tblUsers WHERE userID = ' . $hrUserB)->fetch_assoc();
+$hrPutUserBack = static function () use ($hrUserRow): void {
+    $names  = array_keys($hrUserRow);
+    $insert = Brs::$writer->prepare(
+        'INSERT INTO tblUsers (`' . implode('`, `', $names) . '`) VALUES ('
+        . implode(', ', array_fill(0, count($names), '?')) . ')'
+    );
+    $values = array_values($hrUserRow);
+    $insert->bind_param(str_repeat('s', count($values)), ...$values);
+    $insert->execute();
+    $insert->close();
+};
+Brs::$writer->query('DELETE FROM tblUsers WHERE userID = ' . $hrUserB);
+$hrMixed = bps_message(bps_press($jar['root'], ['action' => 'put_held_back', 'table' => 'tblTotpBackupCodes'])['body']);
+brs_check(
+    str_starts_with($hrMixed, '[warning] 2 kept row(s) put back into tblTotpBackupCodes.') === true
+    && str_contains($hrMixed, '1 could not be put back and are still being kept, so nothing has been lost') === true,
+    'with one account missing, the page says two went back and one is still being kept — never "done" and never "lost"',
+    $hrMixed
+);
+brs_check(
+    str_contains($hrMixed, 'likeliest reason') === true,
+    'and it says the likeliest reason rather than asserting one: a row already present fails the same way and the two cannot be told apart from here',
+    $hrMixed
+);
+brs_check(
+    str_contains($hrPage(), '<code>tblTotpBackupCodes</code>') === true,
+    'and the card still offers that table, because one row is still waiting'
+);
+$hrPutUserBack();
+
+// P6. Discard: it does NOT put anything back, and says so.
+bps_settle();
+$hrDiscard = bps_message(bps_press($jar['root'], ['action' => 'discard_held', 'table' => 'tblSettings'])['body']);
+brs_check(
+    str_contains($hrDiscard, 'kept row(s) for tblSettings discarded') === true
+    && str_contains($hrDiscard, 'They cannot be recovered') === true,
+    'Discard says what it did and that it cannot be undone',
+    $hrDiscard
+);
+brs_check(
+    $hrSettingRows() === 0,
+    'and it really did NOT put the row back: Discard is the deliberate "I accept this loss" button',
+    'setting: ' . $hrSettingRows()
+);
+
+// P7. A table this portal does not keep rows for.
+bps_settle();
+$hrNotKept = bps_message(bps_press($jar['root'], ['action' => 'put_held_back', 'table' => 'tblEvents'])['body']);
+brs_check(
+    str_starts_with($hrNotKept, '[danger] This portal does not keep rows for tblEvents.') === true,
+    'a posted request naming a table that is not on DbBackup::CASCADE_RESCUE is refused by name — that allow-list is what makes the name safe to put in a statement at all',
+    $hrNotKept
+);
+// 📝 AND THE POSTED NAME IS NOT WRITTEN INTO THE ACTIVITY LOG. It was, under an
+//    event type saying a put-back had been attempted and failed, so the log
+//    read "Putting kept rows back into <anything you posted> failed". The
+//    discard branch was fixed for exactly this and the put-back branch was not.
+$hrRefusedLines = implode(' | ', array_keys(bps_newLines())) . ' :: ' . implode(' | ', array_values(bps_newLines()));
+// ✅ THE POSITIVE CLAUSE FIRST, because the other two are absences and a check
+//    made only of absences passes when the thing stops happening at all:
+//    delete the $record() call and "recorded without the name" stayed green.
+brs_check(
+    str_contains($hrRefusedLines, 'BackupActionRefused') === true
+    && str_contains($hrRefusedLines, 'tblEvents') === false
+    && str_contains($hrRefusedLines, 'BackupHeldRowsPutBackFailed') === false,
+    'and the refusal IS recorded, without the posted name, and not as a failed put-back',
+    $hrRefusedLines
+);
+bps_settle();
+$hrDiscardUnknown = bps_message(bps_press($jar['root'], ['action' => 'discard_held', 'table' => 'tblEvents'])['body']);
+brs_check(
+    str_starts_with($hrDiscardUnknown, '[danger] This portal does not keep rows for tblEvents.') === true,
+    'and Discard answers the same way rather than "0 kept row(s) for tblEvents discarded. They cannot be recovered."',
+    $hrDiscardUnknown
+);
+$hrRefusedLines2 = implode(' | ', array_keys(bps_newLines())) . ' :: ' . implode(' | ', array_values(bps_newLines()));
+brs_check(
+    str_contains($hrRefusedLines2, 'BackupActionRefused') === true
+    && str_contains($hrRefusedLines2, 'tblEvents') === false,
+    'and that refusal is recorded too, naming no table',
+    $hrRefusedLines2
+);
+bps_settle();
+$hrInjection = bps_message(bps_press($jar['root'], ['action' => 'put_held_back', 'table' => 'tblSettings; DROP TABLE tblUsers'])['body']);
+brs_check(
+    str_contains($hrInjection, 'does not keep rows for') === true
+    && (int) Brs::$writer->query("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'tblUsers'")->fetch_row()[0] === 1,
+    'and a name with a statement glued on the end is simply not on the list, so it never reaches SQL',
+    $hrInjection
+);
+
+// P8. No form token, nothing happens.
+$hrWaitingNow = $hrWaiting();
+$hrNoToken    = bps_message(bps_press($jar['root'], ['action' => 'discard_held', 'table' => 'tblTotpBackupCodes'], 'not-the-token')['body']);
+brs_check(
+    str_contains($hrNoToken, 'Invalid CSRF token') === true && $hrWaiting() === $hrWaitingNow,
+    'a press without the right form token is refused and discards nothing',
+    $hrNoToken . ' waiting: ' . $hrWaiting()
+);
+
+// 🧹 This section's rows, snapshot and held rows, put back. The settings rows
+//    the Discard above threw away are written again from the fingerprint's own
+//    world: this section discarded them on purpose and must mend what it broke.
+bps_press($jar['root'], ['action' => 'put_held_back', 'table' => 'tblTotpBackupCodes']);
+brs_clearHeldRows();
+$hrMended = $hrMendOrgRows();
+brs_check(
+    $hrMended === $hrOrgSettings,
+    'the ' . $hrOrgSettings . ' settings row(s) this section DISCARDED on purpose all needed mending by hand (' . $hrMended . ') — if any had not, the Discard above had stopped discarding',
+    'mended: ' . $hrMended . ' of ' . $hrOrgSettings
+);
+bps_settle();
+brs_checkSame($hrBefore, 'the database is back to how this section found it, and the holding table is empty');
+Brs::$writer->query('DELETE FROM tblTotpBackupCodes WHERE codeID >= 970950');
+Brs::$writer->query('DELETE FROM tblUsers WHERE userID >= 970950');
+Brs::$writer->query('DELETE FROM tblSettings WHERE settingID = ' . $hrSetting);
+Brs::$writer->query('DELETE FROM tblSites WHERE siteID = ' . $hrOrg);
+brs_removeFolder($backups . '/' . $hrSnapshot);
 
 // =============================================================================
 $failed = Brs::$proofOk === false;

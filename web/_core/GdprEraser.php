@@ -245,6 +245,28 @@ class GdprEraser
             // NOTE: PHP's own session store is file-based, not a DB table
             // (there never was a `tblSessions` row to erase).
             ['table' => 'tblTotpBackupCodes',  'userCol' => 'userID', 'action' => 'delete'],
+            // 🛟 THE HOLDING TABLE FOR ROWS A RESTORE COULD NOT PUT BACK
+            //    (#694, migration 233). A whole-database restore from an
+            //    old-form snapshot keeps the rows a cascade was about to take,
+            //    so an administrator can put them back — and one of the two
+            //    tables it keeps rows from is tblTotpBackupCodes, whose rows
+            //    carry a hash of somebody's single-use sign-in code.
+            //
+            //    So the holding table is a SECOND COPY of that material,
+            //    outside the table the line above erases. Deleting by userID
+            //    here is what stops an erased person's codes surviving in it.
+            //    This was the condition of holding them at all (the owner was
+            //    told as much when they chose to keep both kinds on
+            //    31 October 2026), and it is why this table must NEVER be
+            //    added to $leftBehindOnPurpose in
+            //    tools/gdpr-coverage-selftest.php.
+            //
+            //    `delete`, not `anonymise`: a kept row with its person taken
+            //    out could not be put back anywhere and tells nobody anything.
+            //    A tblSettings row held here has a NULL userID and is left
+            //    alone, which is right — it belongs to an organisation, not a
+            //    person.
+            ['table' => 'tblRestoreHeldRows',  'userCol' => 'userID', 'action' => 'delete'],
             // Correct case: `tblWebAuthnCredentials` (capital A) — MySQL on
             // Linux is case-sensitive for table names, so the previous
             // `tblWebauthnCredentials` spelling never matched and passkeys

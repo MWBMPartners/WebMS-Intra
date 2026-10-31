@@ -22,6 +22,14 @@
  *   POST action=restore_table  name=NAME table=TABLE   — per-table restore
  *   POST action=restore_full   name=NAME               — restore all tables
  *   POST action=delete         name=NAME               — remove that one folder
+ *   POST action=put_held_back  table=TABLE              — put the rows a restore could
+ *                                                        not put back into TABLE (#694)
+ *   POST action=discard_held   table=TABLE              — throw those kept rows away
+ *
+ * TABLE on the two #694 actions is NOT tested by isTableName(): it has to be a
+ * key of DbBackup::CASCADE_RESCUE, which DbBackup::keepsRowsFor() answers and
+ * both writers ask. That allow-list is the stronger test, and it is what makes
+ * the name safe to put into a statement at all.
  *
  * NAME is tested once, by DbBackup::isSnapshotName(), for every action that
  * takes one, before anything is closed, changed or deleted. Each action that
@@ -593,11 +601,153 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $flash = sprintf('Could not delete %s.', $name);
                 $flashType = 'danger';
             }
+        } elseif ($action === 'put_held_back' || $action === 'discard_held') {
+            // 🧷 The rows a restore was about to lose to a cascade (#694).
+            //
+            //    The table name needs no test here. DbBackup::putHeldRowsBack()
+            //    and discardHeldRows() both refuse any name that is not a key
+            //    of DbBackup::CASCADE_RESCUE, a constant in that file, and that
+            //    allow-list IS the guard: it is what makes the name safe to put
+            //    into a statement at all. A test on this page would be a second
+            //    copy of a list that must not drift.
+            //
+            //    Not behind $whileClosed: this writes rows INTO two tables
+            //    inside one transaction and empties nothing, so there is no
+            //    half-way state for a visitor to see. It can still be slow if
+            //    a great many rows are waiting, hence the time limit.
+            $heldTable = (string) ($table ?? '');
+            TimeLimit::atLeast(900);
+            if ($action === 'put_held_back') {
+                $putBack = $backup->putHeldRowsBack($heldTable);
+                if ($putBack['success'] === true) {
+                    // ⚠️ A row that could not go back STAYS WAITING, and the
+                    //    message says so rather than quietly dropping it. The
+                    //    likeliest reason is that the organisation or the
+                    //    person it belonged to is not in the restored
+                    //    database, so there is nothing for it to point at —
+                    //    but that is said as the likeliest reason, not as the
+                    //    answer, because a row already present fails the same
+                    //    way and the two cannot be told apart from here.
+                    $flash = sprintf(
+                        '%d kept row(s) put back into %s.',
+                        $putBack['put_back'],
+                        $heldTable
+                    );
+                    if ($putBack['still_missing'] > 0) {
+                        $flash .= sprintf(
+                            ' %d could not be put back and are still being kept, so nothing has been lost.'
+                            . ' The likeliest reason is that the organisation or person they belonged to is'
+                            . ' not in the restored database.',
+                            $putBack['still_missing']
+                        );
+                    }
+                    $flashType = $putBack['still_missing'] > 0 ? 'warning' : 'success';
+                } else {
+                    $flash     = (string) ($putBack['error'] ?? 'Nothing was put back.');
+                    $flashType = 'danger';
+                }
+                // 📝 A posted name that is not a table this portal keeps rows for
+                //    is a REFUSAL, recorded without the name. Writing it in gave
+                //    the log a line reading "Putting kept rows back into
+                //    <anything you posted> failed", under an event type saying a
+                //    put-back had been attempted — the harm the discard branch
+                //    was just fixed for, one action along.
+                if (DbBackup::keepsRowsFor($heldTable) === false) {
+                    $record('BackupActionRefused', 'A request to put kept rows back named a table this portal does not keep rows for.');
+                } else {
+                    $record(
+                        $putBack['success'] === true ? 'BackupHeldRowsPutBack' : 'BackupHeldRowsPutBackFailed',
+                        $putBack['success'] === true
+                            ? sprintf('Kept rows put back into %s: %d written, %d still kept.', $heldTable, $putBack['put_back'], $putBack['still_missing'])
+                            : sprintf('Putting kept rows back into %s failed; nothing was changed.', $heldTable)
+                    );
+                }
+            } else {
+                // 🗑️ Deliberate, and the only way a WAITING row goes: nothing
+                //    removes one on a timer (the owner, 31 October 2026).
+                $discarded = $backup->discardHeldRows($heldTable);
+                if ($discarded === -2) {
+                    // ⏳ The database refused, which in practice means another
+                    //    administrator is putting rows back and holds the lock.
+                    //    Said honestly: nothing was discarded, and nothing is
+                    //    claimed about why beyond the likeliest cause.
+                    $flash     = 'Nothing was discarded, and the kept rows are exactly as they were. '
+                               . 'If somebody else is putting rows back at this moment, wait and try again.';
+                    $flashType = 'danger';
+                    // 📝 ITS OWN EVENT TYPE. Recorded as `BackupHeldRowsDiscarded` it
+                    //    counted, to anybody searching the log by type, as a run in
+                    //    which rows WERE discarded. The put-back branch a few lines
+                    //    above separates its success from its failure for exactly
+                    //    this reason, and its comment names the harm — so this was
+                    //    the same half-applied fix a fourth time.
+                    $record('BackupHeldRowsDiscardFailed', sprintf('Discarding kept rows for %s was refused by the database; nothing was discarded.', $heldTable));
+                } elseif ($discarded < 0) {
+                    // ⚠️ -1 means "this portal keeps no rows for that table",
+                    //    which is NOT the same as "none was waiting". It
+                    //    answered 0 for both at first, so a posted name — any
+                    //    name — was told `0 kept row(s) for X discarded. They
+                    //    cannot be recovered.` and written into the activity
+                    //    log as though X were a real table.
+                    $flash     = sprintf('This portal does not keep rows for %s.', $heldTable);
+                    $flashType = 'danger';
+                    $record('BackupActionRefused', 'A request to discard kept rows named a table this portal does not keep rows for.');
+                } else {
+                    $flash     = sprintf('%d kept row(s) for %s discarded. They cannot be recovered.', $discarded, $heldTable);
+                    $flashType = $discarded > 0 ? 'success' : 'warning';
+                    $record('BackupHeldRowsDiscarded', sprintf('Kept rows for %s discarded: %d.', $heldTable, $discarded));
+                }
+            }
         }
     }
 }
 
 $snapshots = $backup->listSnapshots();
+
+// 🛟 ------------------------------------------------------------------------
+//    The rows a restore was about to lose to a cascade, kept instead of lost
+//    (#694). Grouped by table, because that is what the two buttons act on:
+//    DbBackup::putHeldRowsBack() and discardHeldRows() each take one table.
+//
+//    An empty answer draws nothing at all, so the page looks exactly as it did
+//    for the ordinary case — and that is also what a database whose upgrade has
+//    not been run gives back (DbBackup asks whether the holding table is there
+//    before it reads it, so this cannot be what breaks the page).
+$heldByTable = [];
+foreach ($backup->rowsWaitingToBePutBack() as $heldRow) {
+    $forTable = $heldRow['tableName'];
+    if (isset($heldByTable[$forTable]) === false) {
+        $heldByTable[$forTable] = [
+            'describe'  => $heldRow['describe'],
+            'count'     => 0,
+            'snapshots' => [],
+            'people'    => [],
+            'orgs'      => [],
+            'names'     => [],
+            'oldest'    => $heldRow['heldAtUtc'],
+        ];
+    }
+    $heldByTable[$forTable]['count']++;
+    $heldByTable[$forTable]['snapshots'][$heldRow['snapshotName']] = true;
+    if ($heldRow['userID'] !== null) {
+        $heldByTable[$forTable]['people'][$heldRow['userID']] = true;
+    }
+    if ($heldRow['siteID'] !== null) {
+        $heldByTable[$forTable]['orgs'][$heldRow['siteID']] = true;
+    }
+    // 🏷️ What each row IS, where the class can say so without saying what it
+    //    HOLDS. For a settings row that is its key; for a sign-in code there is
+    //    nothing showable and `names` is empty, so only a count appears.
+    //
+    //    This matters because `describe` CANNOT be exact: the rescue takes every
+    //    per-organisation settings row whatever its key, so the sentence can only
+    //    say "its own choices, such as…". An administrator judging what they have
+    //    lost needs the actual keys, and the keys name nothing secret.
+    if (($heldRow['names'] ?? '') !== '') {
+        $heldByTable[$forTable]['names'][$heldRow['names']] = true;
+    }
+    // The list comes back newest first, so each row seen is older than the last.
+    $heldByTable[$forTable]['oldest'] = $heldRow['heldAtUtc'];
+}
 
 // 🔍 Inspect mode. The same name test as every action above, and the same
 //    door into the folder: DbBackup::manifestOf() refuses a link that leads
@@ -645,6 +795,117 @@ $csrf = Auth::csrfToken();
 
 <?php if ($flash !== ''): ?>
     <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($flash, ENT_QUOTES, 'UTF-8'); ?></div>
+<?php endif; ?>
+
+<?php
+// 🛟 ------------------------------------------------------------------------
+//    ROWS BEING KEPT FOR YOU (#694). FIRST on the page, above everything else,
+//    because somebody reading it is part way through a recovery and this is the
+//    only thing on the page that is waiting on a decision. Nothing is drawn
+//    when nothing is waiting.
+//
+//    There is no timer: these rows wait until an administrator puts them back
+//    or discards them (the owner, 31 October 2026). What stops them being
+//    forgotten is this card, not an expiry — so it has to be impossible to
+//    miss.
+?>
+<?php if ($heldByTable !== []): ?>
+    <div class="card border-warning mb-4">
+        <div class="card-body">
+            <h2 class="h5 card-title text-warning-emphasis">
+                <i class="fa-solid fa-life-ring me-2"></i>Rows being kept for you
+            </h2>
+            <p class="mb-3">
+                <?php // ⚠️ NOT "tables the backup does not cover", which this said first and
+                      //    which is FALSE in the commonest case: an older backup DOES contain
+                      //    these tables, and the restore deliberately leaves them alone because
+                      //    each records what has already happened. Telling somebody mid-recovery
+                      //    that their settings are not in their backup, when they are, is the
+                      //    worst moment to be wrong. ?>
+                Putting a backup back emptied and refilled the tables it put back. These rows were in tables
+                the restore <strong>could not</strong> put back &mdash; either because each one records what
+                has already happened and only makes sense restored beside the rest of the database, or because
+                the backup simply did not contain it. The database&rsquo;s own rules removed them along the
+                way, so nothing put them back. They are being kept here instead of being lost.
+                <strong>Nothing removes them on a timer</strong> &mdash; they wait until you put them back or
+                discard them.
+            </p>
+            <div class="portal-data-list">
+                <?php foreach ($heldByTable as $heldTable => $about): ?>
+                    <div class="row py-2 align-items-center border-bottom">
+                        <div class="col-md-6">
+                            <strong><?php echo htmlspecialchars((string) $about['count'] . ' ' . $about['describe'], ENT_QUOTES, 'UTF-8'); ?></strong>
+                            <div class="small text-muted">
+                                <code><?php echo htmlspecialchars((string) $heldTable, ENT_QUOTES, 'UTF-8'); ?></code>
+                                &middot; kept while putting back
+                                <?php echo htmlspecialchars(implode(', ', array_keys($about['snapshots'])), ENT_QUOTES, 'UTF-8'); ?>
+                                &middot; oldest <?php echo htmlspecialchars($about['oldest'], ENT_QUOTES, 'UTF-8'); ?> UTC
+                            </div>
+                            <?php if ($about['names'] !== []): ?>
+                                <div class="small">
+                                    <?php
+                                    // The keys themselves, sorted so the list reads the
+                                    // same way twice. Never a stored value: a key names
+                                    // what a setting is, a value can be anything at all.
+                                    // The label is tied to the ONE table that answers a name
+                                    // (DbBackup::nameInsideHeldRow()), so a table added to
+                                    // CASCADE_RESCUE later cannot be labelled "Settings:" by
+                                    // accident: it answers an empty string and draws nothing.
+                                    $heldNames = array_keys($about['names']);
+                                    sort($heldNames);
+                                    echo htmlspecialchars(
+                                        ($heldTable === 'tblSettings' ? 'Settings: ' : 'Which ones: ')
+                                        . implode(', ', $heldNames),
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    );
+                                    ?>
+                                </div>
+                            <?php endif; ?>
+                            <?php if ($about['orgs'] !== [] || $about['people'] !== []): ?>
+                                <div class="small text-muted">
+                                    <?php
+                                    // 👤 A COUNT, never a name or an e-mail address: this page is
+                                    //    read by a global administrator of the installation, who may be
+                                    //    a different person from the administrators of the organisations
+                                    //    on it (the owner, 29 October 2026). The count is what they need
+                                    //    to judge the size of the loss.
+                                    $whose = [];
+                                    if ($about['orgs'] !== []) {
+                                        $whose[] = count($about['orgs']) . ' organisation(s)';
+                                    }
+                                    if ($about['people'] !== []) {
+                                        $whose[] = count($about['people']) . ' ' . (count($about['people']) === 1 ? 'person' : 'people');
+                                    }
+                                    echo htmlspecialchars('Belonging to ' . implode(' and ', $whose) . '.', ENT_QUOTES, 'UTF-8');
+                                    ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                        <div class="col-md-6 text-md-end mt-2 mt-md-0">
+                            <form method="post" class="d-inline"
+                                  data-confirm="Put these rows back into <?php echo htmlspecialchars((string) $heldTable, ENT_QUOTES, 'UTF-8'); ?>? Each row is written back exactly as it was. A row whose organisation or person is not in the restored database cannot go back, and that row stays here rather than being lost."
+                                  data-confirm-confirm-label="Put them back">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="action" value="put_held_back">
+                                <input type="hidden" name="table" value="<?php echo htmlspecialchars((string) $heldTable, ENT_QUOTES, 'UTF-8'); ?>">
+                                <button type="submit" class="btn btn-primary btn-sm">Put them back</button>
+                            </form>
+                            <form method="post" class="d-inline"
+                                  data-confirm="Discard the <?php echo htmlspecialchars((string) $about['count'], ENT_QUOTES, 'UTF-8'); ?> kept row(s) for <?php echo htmlspecialchars((string) $heldTable, ENT_QUOTES, 'UTF-8'); ?>? This cannot be undone. These are the only copy the portal has: whether the backup you restored from holds an older one depends on that backup &mdash; only if it covers this table at all, and only for rows that existed when it was taken."
+                                  data-confirm-destructive="true"
+                                  data-confirm-confirm-label="Discard them">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="action" value="discard_held">
+                                <input type="hidden" name="table" value="<?php echo htmlspecialchars((string) $heldTable, ENT_QUOTES, 'UTF-8'); ?>">
+                                <button type="submit" class="btn btn-outline-danger btn-sm">Discard</button>
+                            </form>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    </div>
 <?php endif; ?>
 
 <div class="d-flex flex-wrap gap-2 align-items-center mb-4">
@@ -813,7 +1074,7 @@ $frequencyChoices  = [
                 </button>
                 <span class="text-muted small ms-2">Rehearses the whole restore and changes nothing.</span>
             </form>
-            <form method="post" class="mb-3" data-confirm="Restore ALL tables from this snapshot? Every table in it is emptied and filled again from the snapshot, so anything saved since the snapshot was taken is lost. A table that is not in the snapshot is not put back, but rows in it that are linked to rows being replaced can be deleted or lose their links: the result names every such table, and the Check button shows it beforehand. If anything goes wrong, nothing is changed. The portal is closed to everyone else while it runs." data-confirm-destructive="true" data-confirm-confirm-label="Restore all">
+            <form method="post" class="mb-3" data-confirm="Restore ALL tables from this snapshot? Every table in it is emptied and filled again from the snapshot, so anything saved since the snapshot was taken is lost. A table that is not in the snapshot is not put back, but rows in it that are linked to rows being replaced can be deleted or lose their links: the result names exactly what went, and the Check button shows it beforehand. Where the portal can keep such rows it does, and this page then offers them back. If anything goes wrong, nothing is changed. The portal is closed to everyone else while it runs." data-confirm-destructive="true" data-confirm-confirm-label="Restore all">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="restore_full">
                 <input type="hidden" name="name" value="<?php echo htmlspecialchars($inspect, ENT_QUOTES, 'UTF-8'); ?>">

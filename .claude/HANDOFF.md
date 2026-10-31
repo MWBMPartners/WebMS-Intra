@@ -1,211 +1,67 @@
-# Handoff — WebMS-Intra
+# Handoff — where the work is right now
 
-**Updated:** 2026-10-31. **Working branch:** `claude/alpha-wip`. **Target:** one pull request into
-`alpha` at the end; no stacked pull requests.
+> **OVERWRITTEN, never appended** (#678). Current state only, about one screen.
+> What shipped is in `CHANGELOG.md`, the lessons in `DEV_NOTES.md`, and anything
+> not-done has a GitHub issue. Never cite a document by line number — cite issue
+> numbers and commit hashes.
 
-> **This file is OVERWRITTEN, never appended** (owner, 30 October 2026, #678). It holds where the
-> work is **right now** and nothing else. It is not a work log and carries no history.
->
-> | Looking for | Go to |
-> |---|---|
-> | What is and is not done, and every deferral or open decision | **the GitHub issues** |
-> | What shipped | `CHANGELOG.md` |
-> | Technical lessons | `DEV_NOTES.md` |
-> | Finished and superseded plans | `.claude/history/plans/` |
-> | Earlier versions of this file | `.claude/history/HANDOFF-archive-to-2026-10-30.md` and two older archives |
->
-> **Anything not-done gets a GitHub issue in the same action that decides it.** If it is not worth
-> an issue it is not worth recording here — nothing checks prose. **Never cite a document by line
-> number;** cite issue numbers and commit SHAs.
+**Branch:** `claude/alpha-wip`. **Nothing is pushed**, and nothing may be: the
+owner reserves pushes, pull requests and merges, and no pull request is raised
+until the one comprehensive Codex review of the whole branch. "It is only the
+working branch" is not a reason to push.
 
----
+## #694 is committed
 
-## Where we are right now
+Restoring a backup taken before 27 October 2026 silently lost every
+organisation's own settings rows and everybody's two-factor backup codes to
+`ON DELETE CASCADE`. They are now kept in `tblRestoreHeldRows` (migration 233)
+and the Backup page offers them back or discards them. No timer — a waiting row
+waits until an administrator clears it (the owner, 31 October 2026); once it is
+back only the record remains, with the copy emptied.
 
-**The whole self-test set is green for the first time on this branch: 66 tests, plus the 45 audit
-checks.** The queue as it stood is empty. Pick up from "What to do next", which needs no decision,
-or from the owner's answers in "Waiting on the owner".
+**Six independent check rounds found 23 real problems.** Every one is fixed and
+recorded. The behaviour was stable from round 2; rounds 3-6 were almost entirely
+untrue sentences, numbers typed rather than established, and corrections recorded
+but applied in one place. The four lessons worth carrying to the next package are
+in `DEV_NOTES.md`:
 
-**Nothing is pushed.** `origin/claude/alpha-wip` was last updated on **27 October 2026** (`0e15afd`).
-Everything since exists only on this disk, plus the sign-in hotfix on `hotfix/sign-in-1.4.2`,
-including **migrations 224 to 232**. The owner decided on 30 October, asked directly, that **nothing
-is pushed until the comprehensive Codex review**; do not offer again, and "it is only the working
-branch" is not a reason.
+1. **Read the class before adding a helper to it** — `columnFacts()` already knew
+   that `EXTRA LIKE '%GENERATED%'` is wrong, a few hundred lines from where I
+   wrote a worse copy.
+2. **"Measured, not reasoned" is only worth writing if the measurement is of the
+   thing the sentence is about.** I measured a connect error and wrote it against
+   a claim about statement calls.
+3. **When a sentence is built from branches, spell out the whole sentence for each
+   branch** — `DbBackup::cascadeWarning()` holds eight; the ninety-line expression
+   it replaced produced four of six wording faults.
+4. **A hedge that covers one condition and asserts the other is not a hedge.**
 
-**Migrations:** the highest in `web/_sql/` is **232**. Allocate **233 upward**.
+## Verification, all against the committed tree
 
-**No throwaway database is left up.** Dangling volumes: **1 before this run, 1 after** — none added.
-Name the next one after its own work and remove it with `docker rm -vf` (the `-v` matters).
+- `php -l` on every changed PHP file; every `tools/audit-checks/check_*.py`, with
+  the parity check's output READ (231 migrations, 231 marks, 0 missing).
+- `tools/run-all-selftests.sh` — **66 tests, 0 not green**.
+- `tools/e2e-migrations/run.sh` — **all seven phases, all 42 checks**, MySQL
+  8.0.36. **Not** run on 8.4.11 or MariaDB 11.4.13; the pull-request check does
+  all three, so that is still owed from CI.
+- **Codex has not reviewed any of this.** Six fresh Claude agents stood in.
 
-### Closed, and what is open
+## Next
 
-| Issue | What | Commit |
-|---|---|---|
-| **#671** | The off-site backup's six settings really decide what a run does | `ec22773` |
-| **#672** | Unattended transcription — decided NOT wanted | (no code) |
-| **#669** | Change the pattern of a repeating series that already exists | `ffdbc08` |
-| **#690** | Two self-tests that were failing at HEAD | `aa9936f` |
-| **#695** | Three more red tests, and the two that ran in no workflow | see `CHANGELOG.md` |
-
-Raised and NOT built: **#688** (S3/SFTP address boxes), **#689** (access-pages must run alone),
-**#691** (no way to restore a date a pattern change hid), **#692** (publish or draft an added date),
-**#693** (the in-transaction attachment re-check has no test), **#694** (a pre-27-October restore
-silently loses every organisation's address and support e-mail), **#695** (nothing runs the whole
-self-test set locally — my recommendation on the issue is to build the one script).
-
-### What to do next, needing no decision
-
-1. **#695 is the cheapest thing on the list.** Running the set by hand found three red tests in one
-   morning; the commands are already worked out on that issue.
-2. Then the wider open list (#660–#667 and below), and the verification work in item 5 under
-   "Waiting on the owner".
-
-### Running the whole set by hand, until #695 exists
-
-Three MySQL servers (`--rm`, named after the work), `full_schema.sql` loaded into a database per
-test, then each test with the environment its own workflow step gives it. Three things that cost
-time on 31 October:
-
-- **`SELFTEST_WEB_DIR` must already exist** — every workflow step does `mkdir -p` first. Without it
-  23 tests refuse before doing anything, which reads exactly like 23 failures.
-- **No test is re-runnable on a database it has used.** Drop and reload the schema before each run,
-  or the first symptom is a duplicate key that is not the fault.
-- **`access-pages-selftest.php` runs ALONE** (#689): it counts through the server-wide
-  `mysql.general_log`.
-
-### The lessons from this run, worst first
-
-0. **A check can name the right file and still guard nothing.** The fix to the erasure-filing check
-   passed on broken code **three ways**, all found by the independent checker's plants and none by
-   reading: matching a gate's `if (...)` line left it green with the `exit` inside the braces
-   deleted; and naming callers by `basename()` made a new, completely ungated `zzplant/do.php`
-   indistinguishable from the gated `offboarding/do.php`. Pin the path, require the block to refuse,
-   check the order, and mask string literals. Full account in `DEV_NOTES.md`.
-1. **A test broken by one package is invisible to the next.** Three tests were red at HEAD and none
-   was broken by the work in hand: #569 added a third erasure-filing caller, and #625 put a
-   per-request CSP nonce on every page, which two page-comparison tests saw as a difference.
-2. **Measure the difference; do not reason about it.** Dumping the two landing pages and diffing them
-   took minutes and gave the exact answer — one attribute. Every guess beforehand was wrong.
-3. **A plant that prints nothing proves nothing.** One of mine read a session key that does not
-   exist, so the page was unchanged and the check stayed green. That is an invalid plant, not a gap.
-4. **Never write a count in a comment.** Three in one workflow header had gone stale in silence
-   ("twenty-three throwaway databases" while the loop built twenty-six).
-
----
+1. **#687** — the donor-retention cap. The owner's answers are on the issue:
+   opt-in, off by default; an installation global administrator OR an
+   organisation's own global admin may set one; an organisation cap LOCKS its own
+   figure; where an installation cap exists an organisation may only go LOWER; a
+   cap below an organisation's stored figure is REFUSED, naming who blocks it.
+   Organisations already over a new cap are the #685 shape and need their own
+   issue.
+2. Then the open list.
 
 ## Waiting on the owner
 
-1. **Apply the proposed `~/.claude/settings.json`** — prepared in a session scratchpad with a README.
-   It restores **three guards recorded as "DONE and PROVED" on 5 October 2026 that do not exist**:
-   the deny rules for force-push and hard reset, the deny rules for `docker volume prune` and
-   `docker system prune`, and `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=6`. That file has no
-   `permissions` block and no `env` block at all. **I cannot write it — refused as
-   self-modification, which is correct.** Needs a restart. Tracked as **#678**.
-2. **#564: a two-character fix, approved 25 September, never applied.** `tools/watchdog.sh` has no
-   `-L`, so a watchdog pointed at a symbolic link fires immediately. Also
-   **`~/.claude/bin/watchdog.sh` does not exist**, so "keep both copies identical" has one copy.
-3. **Decisions raised and still open**, each with its own issue and the options written out:
-   **#694** (how should a restore tell somebody what it could not put back?), **#688**, **#692**
-   (publish or draft a date the pattern adds — my recommendation is draft, with a line in the
-   preview saying so), **#687** (may a hosting provider bound how long an organisation keeps donor
-   names and addresses — the one case where capping is the DANGEROUS direction), **#685**
-   (organisations already over the attendance retention limit), **#681** (may a department approver
-   export their own departments' claims), **#695** (build the whole-suite runner — recommended).
-   **#679** is still open from before.
-4. **One thing #671 does NOT fix, and only you can decide it.** The off-site backup still needs a
-   command line and `rclone`, so **on plain shared hosting it can never send anything** — the page
-   now says so plainly. Making it work with no shell at all (uploading over HTTPS from PHP) is
-   option 3 of #671 and was not built: it needs a decision on which storage providers to support.
-5. **Close the rest of the finished issues.** **Not** closed, because I could not verify every part
-   had landed: the roll-out set (#510, #535, #545, #547, #568, #570, #563, #478, #534, #488) and
-   #499 / #500 / #502. They need a check, not a guess.
-6. **The public history rewrite** — settled in principle, not done. It happens ONCE, just before the
-   pull request. See the 13 October decision below.
-
----
-
-## Standing owner decisions
-
-Newest first. **Policy, never archived.** Full original wording for anything before 30 October is in
-`.claude/history/HANDOFF-archive-to-2026-10-30.md`.
-
-**31 October 2026 — three answers on #669, and one on #672.** A pattern change touches **future dates
-only, and a date with anything attached is never moved or removed** (chosen over a tick-box per
-attached date: the worst case under this rule is a date needing a manual fix, the worst case under
-the other is a lost attendance register). **A hand-edited date is identified by storing the moment
-the pattern produced it**, so it is worked out rather than remembered. **Nothing is written without a
-preview.** And **transcription will never send recordings unattended** — it stays two deliberate
-presses, because one API key pays for every organisation and shared hosting kills a long request
-part-way.
-
-**30 October 2026 (later) — seven answers, do not re-ask.** **#671:** the off-site backup's six
-settings are **made real** — not merely labelled with a notice, and not deleted. **#675:** leave
-`api.expenses.export.enabled` unseeded and document the working page route; fix the Export button's
-visibility so it is offered only to people the download serves. **#677:** the nine `org.*` keys and
-`portal.support.email` become per-organisation with a migration copying the installation's values
-down, the support address falling back to the installation's; an ordinary administrator may save the
-address card while `site.url` stays global-administrator-only. **#670:** the calendar feed's
-FALLBACK is the answer — a series whose dates no longer match its pattern is published one date at a
-time, and `EXDATE`/`RECURRENCE-ID` overrides are NOT wanted. Three more are written up as issues
-rather than decided: #681, #685, #687.
-
-**30 October 2026 — records, and four queue answers.** One job per document and nothing not-done in
-prose only (#678; written into `.claude/CLAUDE.md`). **Nothing is pushed until the Codex review.**
-Closing an issue is two actions — `gh issue close` **and** the `status: done` label.
-
-**13 October 2026 — the public history rewrite.** Happens **once**, just before the pull request,
-when all queued work is committed. Every commit's author and committer become `Salem874` with
-`Salem874@users.noreply.github.com`, and the name comes out of file contents. The assistant
-**prepares and rehearses in a mirror clone**, proves the name is gone from every commit, message,
-file and identity on every branch and tag, then hands over exact commands and a checklist. **The
-OWNER** unlocks `main`, `alpha` and `beta`, switches the deploy off, force-pushes and locks up
-again. **The assistant never force-pushes.** The checklist must also cover: the two Dependabot pull
-requests, every other copy being re-downloaded, asking GitHub Support to purge cached commits, and
-commit numbers in documents ceasing to match. Also: **questions go through the question tool**, not
-report prose — "they are getting missed just as messages in that chat". `gitleaks` is installed
-(8.30.1). The old installer on the first customer's address is **closed**: do not raise it again.
-
-**12 October 2026 — pace.** **Packages that share no files run side by side**, and work runs
-autonomously with questions asked when a decision is genuinely needed. **This supersedes the 24
-September "one package at a time, do not offer it again"**, which the archive still states as
-absolute. Each builder gets its exact file list; `CHANGELOG.md`, `DEV_NOTES.md` and `FEATURES.md`
-are never edited by two packages at once; **stage each package by its own file list, never from
-`git status`**; own named containers and ports — **and note #689: own named DATABASES is not enough,
-because one test counts through a server-wide table.** And **do not go over the same ground twice** —
-"this just causes elongated time to work and wasts usage credits/tokens!" Search this file before
-asking. **The sign-in lockout rule is settled: no more than 5 wrong tries in any 15 minutes, as
-built.**
-
-**11 October 2026 — the roll-out set and the Codex policy.** Must-fix before roll-out: #510, #535,
-#545, #547, #568, #570, #563, #478, the rest of #534, #488, plus #499, #500, #502 and #514 parts
-9-11; later additions were the twelve account-linked tables and #553/#555. Everything else waits
-unless pulled forward. **Codex: the riskiest parts only, NOT a gate, and only once the queue is
-done** — "minimise multiple rounds of code reviews, wasting potential codex usage/credits/tokens".
-So **one independent check per code package**, sized to the risk; small wording-and-test fixes after
-it are committed on the builder's proofs **without another round**; Codex gets **one lean,
-security-first pass at the end** (sign-in and permissions, erasure, expenses and payments, calendar
-import), split across its resets, blocking nothing. **Gift Aid declarations are KEPT on erasure.**
-
-**5 October 2026 — eleven answers (final; do not reopen).** Thinking effort `high`. **At most six
-helper agents at once** — the seventh is refused, not queued. **What gets reviewed is narrowed
-exactly as machine-wide:** only changes that could do real harm; **documentation of every kind —
-instruction files, memory, this handoff, notes — renames and comment-only changes do not get a
-review round.** A fresh agent checks each code package as **Codex's named stand-in**, and every
-commit message says plainly that Codex has not reviewed it. **Deleting a web-root folder that hides
-an address needs explicit approval first.** #569's pre-push check is one per repository with its own
-installer, not a global hooks folder. Old handoff entries move to an archive, marked as history.
-
-**25 September 2026 — #564 approved** (see "Waiting on the owner", item 2).
-
-**24 September 2026 — still governing.** API keys see an imported event exactly as a signed-out
-visitor would, plus a per-calendar "don't show via API" box, unticked by default. **Codex reviews
-the whole branch at the END OF THE QUEUE**, moving to the end again if tasks are added; run it with
-`-c model="gpt-6-astra"` and stdin closed — **a refusal naming `gpt-6-sol` is the model-name
-problem, not a lack of credit**; a credit refusal names a reset time. **Throwaway containers are
-removed WITH their data** (`docker run --rm` or `docker rm -v`, named after the work, and report
-`docker ps -a` and the dangling-volume count); checking once found **415 left-behind volumes taking
-101 GB** while every agent had reported clean-up as done. **Five calendar design questions are
-settled and must not be re-asked:** private events hidden until chosen; a changed event goes back
-for approval; later dates of a repeating event follow an approved one when nothing differs; an
-organisation with no site administrator of its own sends approval notices to every global
-administrator; at "title, date and time only" the category shows and the RSVP counts do not.
+- **#697 is the pointed one**: restoring a snapshot taken before some rows were
+  kept REPLACES them, and those waiting rows are the only copy outside the
+  snapshot being restored from. The restore WARNS, before and after. A warning is
+  not a fix; four options and a recommendation are on the issue.
+- Also #688, #685, #681, #679, #564, #689, and the `~/.claude/settings.json`
+  guards (#678). None blocks anything above.

@@ -391,6 +391,106 @@ class DbBackup
         'tblSettings'        => 'It holds every setting the portal runs on, including the database version it believes it is on and the marks upgrades leave behind. Putting an older copy back makes upgrades that have run look as though they have not, and replaces mail settings, secrets and the portal\'s open-or-closed state with whatever they were when the snapshot was taken.',
     ];
 
+    /**
+     * The tables whose rows are KEPT when a restore is about to lose them to a
+     * cascade (#694), and what each one is called in a sentence an
+     * administrator reads.
+     *
+     * HOW A ROW COMES TO BE LOST. A whole-database restore from an OLD-FORM
+     * snapshot holds back everything on WHOLE_DATABASE_ONLY, because each of
+     * those records what has already happened. But it still replaces
+     * `tblSites` and `tblUsers`, and two of the held-back tables are their
+     * children with ON DELETE CASCADE — so the cascade takes them and nothing
+     * puts them back. Measured on MySQL 8.0.36: one per-organisation settings
+     * row before, none after, and the restore reported success.
+     *
+     * WHY AN ALLOW-LIST AND NOT "every held-back table with a cascade". The
+     * holding table keeps whole rows, and the privacy of what lands in it was
+     * thought through for exactly these two shapes — one of them is a hash of
+     * somebody's sign-in code. A table joining WHOLE_DATABASE_ONLY later would
+     * otherwise start depositing rows of unreviewed content into it. Adding a
+     * name here is a decision; it should look like one.
+     *
+     * `tblMigrations` is deliberately absent: it has no foreign key at all, so
+     * no cascade can ever reach it.
+     *
+     * @var array<string, array{parent: string, column: string, describe: string}>
+     */
+    public const CASCADE_RESCUE = [
+        'tblSettings' => [
+            'parent'   => 'tblSites',
+            'column'   => 'siteID',
+            // ⚠️ NOT "its postal address, map position, what3words address and
+            //    support e-mail", which this said first and which is UNTRUE.
+            //    The rescue takes EVERY row with a `siteID`, whatever its key.
+            //    The four address keys migration 231 (#677) copied down are
+            //    only the commonest; `attend.detailRetentionDays`,
+            //    `giving.retention.years` and the four `mail.queue.*` numbers
+            //    are per-organisation too. Naming four address fields to
+            //    somebody whose retention periods had just gone would be worse
+            //    than saying nothing, and they read it at the worst possible
+            //    moment. The keys themselves are named by
+            //    rowsWaitingToBePutBack(), which lifts them out of the kept
+            //    rows, so the page can be exact where this cannot.
+            //
+            //    SEVEN files under `web/` can write such a row, and the first
+            //    version of this comment said 32 — which is the count of files
+            //    anywhere under `web/` holding the TEXT `INSERT INTO
+            //    tblSettings` at all (30 under `web/_apps` and `web/_core`,
+            //    the scope of the command the notes cite), nearly all of which
+            //    bind `siteID` as the literal NULL. TWO further FILES are
+            //    missed by a plain-text search altogether, because they write
+            //    `INSERT INTO \`tblSettings\`` with backticks
+            //    (`_core/Maintenance.php` and `_apps/admin/apps/index.php`,
+            //    four statements between them); every one binds NULL, so the
+            //    seven-writer list is not short. This read "four more" inside a
+            //    paragraph counting FILES, which made four statements look like
+            //    four files.
+            //    `.claude/CLAUDE.md` already said "seven per-organisation
+            //    writers" from #668 and I contradicted it. Establish it by
+            //    reading each INSERT's column list against its VALUES, never by
+            //    counting files that mention the table: `attendance/save.php`,
+            //    `organisation/save.php`, `repeats/save.php`,
+            //    `_apps/settings/save.php`, `venues/settings.php`,
+            //    `_core/GivingRetention.php`, `_core/Recordings.php`.
+            //    Kept SHORT, with the detail bracketed by dashes so the subject
+            //    still reaches its verb: the long version ran to 22 words
+            //    between "setting(s)" and "were removed", which no reader
+            //    follows. The exact keys are on the page, from `names`.
+            'describe' => 'setting(s) belonging to an organisation — its own choices, such as its '
+                        . 'address or a limit it has set for itself —',
+        ],
+        'tblTotpBackupCodes' => [
+            'parent'   => 'tblUsers',
+            'column'   => 'userID',
+            // "backup code(s)", not "UNUSED backup code(s)", which five places
+            // said. The cascade takes every row with a `userID`, and
+            // `auth/2fa/verify.php` marks a spent code `isUsed = 1` and KEEPS
+            // the row — so the record of which codes have been spent goes too,
+            // and is kept too. An understatement rather than a falsehood, but
+            // it is the record of a code having been used that matters most
+            // here: putting an older copy back is what WHOLE_DATABASE_ONLY
+            // exists to stop.
+            // Bracketed by em dashes, as the settings entry is and for the same
+            // reason: on commas the apposition never closed, and the assembled
+            // sentence read "... their authenticator, spent ones included were
+            // removed by ...". No test can see this; print the sentence.
+            'describe' => 'two-factor backup code(s) — the single-use codes people sign in with when they '
+                        . 'have lost their authenticator, spent ones included —',
+        ],
+    ];
+
+    /**
+     * The most rows this will hold in one restore.
+     *
+     * The rows are read into memory before the restore and written afterwards,
+     * so there has to be a ceiling. Past it, NOTHING is held and the answer
+     * says so with the count: half a rescue would be worse than none, because
+     * an administrator would believe the rest had been kept.
+     */
+    public const CASCADE_RESCUE_MAX_ROWS = 20000;
+
+
     private mysqli $db;
     private string $backupsRoot;
 
@@ -3202,6 +3302,41 @@ class DbBackup
 
             $outsideBefore = $this->countOutside($outside);
 
+            // 🛟 THE ROWS THIS RESTORE IS ABOUT TO LOSE (#694), read while they
+            //    are still there. A held-back table that is a child of a table
+            //    being replaced loses its rows to the cascade, and nothing puts
+            //    them back — the restore said so, but it named the table rather
+            //    than what went. They are written to the holding table after
+            //    every table is back; see readRowsACascadeWouldTake().
+            $rescue = $this->readRowsACascadeWouldTake($tables);
+
+            // ⚠️ ROWS ALREADY WAITING ARE ABOUT TO BE REPLACED BY THE SNAPSHOT'S
+            //    OWN COPY OF THIS TABLE, and nobody would otherwise be told.
+            //
+            //    `tblRestoreHeldRows` is an ordinary table from migration 233
+            //    on, so a restore puts back whatever the snapshot holds for it
+            //    — and a snapshot taken before some rows were kept holds none
+            //    of them. Those waiting rows are the only copy outside the
+            //    snapshot being restored FROM, which is the same silent loss
+            //    this whole feature exists to stop. Keeping them through the
+            //    restore is a decision the owner has to make (#697), so for now
+            //    this SAYS it, before and after, rather than quietly deciding.
+            // COUNT(*), not count(rowsWaitingToBePutBack()): that method reads
+            // every waiting row INCLUDING its MEDIUMTEXT copy, and this needs
+            // only a number — inside the restore's own transaction, where the
+            // class's docblock is already honest that memory is unbounded.
+            $alreadyWaiting = $this->holdingTableExists() === true
+                ? (int) ($this->db->query('SELECT COUNT(*) AS n FROM tblRestoreHeldRows WHERE putBackAtUtc IS NULL')->fetch_assoc()['n'] ?? 0)
+                : 0;
+            if ($alreadyWaiting > 0 && in_array('tblRestoreHeldRows', $tables, true) === true) {
+                $warnings[] = $alreadyWaiting . ' row(s) kept from an earlier restore '
+                            . ($dryRun === true ? 'would be' : 'were')
+                            . ' replaced by this snapshot\'s own copy of tblRestoreHeldRows, so '
+                            . ($dryRun === true ? 'they would no longer be' : 'they are no longer')
+                            . ' offered on the Backup page. Put kept rows back, or discard them, BEFORE '
+                            . 'restoring a snapshot (#697).';
+            }
+
             // Empty children first, so nothing is ever left pointing at a row
             // that has just gone.
             foreach (array_reverse($order) as $table) {
@@ -3224,6 +3359,59 @@ class DbBackup
                     $packet
                 );
                 $tablesDone++;
+            }
+
+            // 🛟 Now the rescued rows, after every table is back — including
+            //    the holding table itself if the snapshot held one, which is
+            //    why this cannot happen earlier.
+            if ($dryRun === false && $rescue['rows'] !== [] && $rescue['canKeep'] === true) {
+                $this->holdRescuedRows($rescue['rows'], basename($dir));
+            }
+
+            // 🧾 AND SAY WHAT WENT, not just which table it came out of.
+            //
+            //    THIS IS AN ADDITION, NOT A REPLACEMENT, and an earlier version
+            //    of this comment wrongly said otherwise. The older warning,
+            //    built in countOutside()/sayWhatChanged() around line 1485,
+            //    still runs and still says "N table(s) that are NOT in this
+            //    snapshot were changed as well", with its row counts per
+            //    table. It is kept because it covers EVERY table outside the
+            //    snapshot, including the ones this file cannot rescue; what it
+            //    does not do is say what the rows WERE, and an administrator
+            //    reads it at the worst possible moment. So both appear: the
+            //    general count, and then, for the two tables on CASCADE_RESCUE,
+            //    what went and where it is being kept.
+            //
+            //    A test that pins only one of the two sentences would pass if
+            //    the other were deleted, so pin both (proof 6 of
+            //    tools/backup-restore-selftest.php does).
+            if ($rescue['tooMany'] > 0) {
+                $warnings[] = $rescue['tooMany'] . ' row(s) in the tables this snapshot leaves alone '
+                            . ($dryRun === true ? 'would be' : 'were') . ' removed by the database\'s own '
+                            . 'rules, and that is more than this portal will hold on to at once (the limit is '
+                            . self::CASCADE_RESCUE_MAX_ROWS . '). NONE of them '
+                            . ($dryRun === true ? 'would be' : 'has been') . ' kept, deliberately: keeping some '
+                            // ⚠️ "when THE SNAPSHOT was taken", never "when it was taken":
+                            //    "it" was first defined LATER in the same sentence, so the
+                            //    only nouns before it were "the limit" and "them". And the
+                            //    hedge is about ROW CURRENCY, not table presence: a
+                            //    per-organisation row created since the snapshot was taken
+                            //    has no copy in it AT ALL, which the old "if that snapshot
+                            //    holds those tables" did not cover. This sentence is reached
+                            //    only where NOTHING was kept, so it is the administrator's
+                            //    one instruction and has to be exactly true.
+                            . 'would read as keeping all of them. Whether the snapshot you are restoring FROM '
+                            . 'holds older copies depends on the snapshot: only for the tables it covers, and only '
+                            . 'for rows that existed when it was taken.';
+            }
+            foreach ($rescue['rows'] as $table => $rows) {
+                $warnings[] = self::cascadeWarning(
+                    (string) $table,
+                    self::CASCADE_RESCUE[$table],
+                    count($rows),
+                    $dryRun,
+                    $rescue['canKeep']
+                );
             }
 
             // 🕳️ Say so if any pointer was emptied (see refuseUnlessMayEmpty()).
@@ -3492,6 +3680,737 @@ class DbBackup
         return $moved . ' text message' . ($moved === 1 ? '' : 's') . ' that ' . ($moved === 1 ? 'was' : 'were') . ' held for quiet hours when this snapshot was taken '
             . ($dryRun === true ? 'would be' : ($moved === 1 ? 'has been' : 'have been')) . ' recorded as NOT SENT, and will not be sent: the portal cannot tell whether '
             . ($moved === 1 ? 'it has' : 'they have') . ' been sent since, and sending again could mean a second text on somebody\'s phone.';
+    }
+
+    /**
+     * The rows a restore kept because it could not put them back, newest first
+     * (#694). For the Backup page.
+     *
+     * Only rows still waiting: one that has been put back is kept as a record
+     * of what happened, with `putBackAtUtc` filled in, and is not offered
+     * again.
+     *
+     * @return list<array{heldID: int, tableName: string, siteID: ?int, userID: ?int,
+     *                    snapshotName: string, heldAtUtc: string, describe: string, names: string}>
+     *         `names` is what the row IS and never what it says: a settings
+     *         row's key, and an empty string for anything else. The stored
+     *         JSON is deliberately NOT returned — see nameInsideHeldRow().
+     */
+    public function rowsWaitingToBePutBack(): array
+    {
+        if ($this->holdingTableExists() === false) {
+            return [];
+        }
+        $result = $this->db->query(
+            'SELECT heldID, tableName, siteID, userID, snapshotName, heldAtUtc, rowJson '
+            . 'FROM tblRestoreHeldRows WHERE putBackAtUtc IS NULL ORDER BY heldID DESC'
+        );
+        if ($result === false) {
+            return [];
+        }
+        $out = [];
+        while ($row = $result->fetch_assoc()) {
+            $table = (string) $row['tableName'];
+            $out[] = [
+                'heldID'       => (int) $row['heldID'],
+                'tableName'    => $table,
+                'siteID'       => $row['siteID'] === null ? null : (int) $row['siteID'],
+                'userID'       => $row['userID'] === null ? null : (int) $row['userID'],
+                'snapshotName' => (string) $row['snapshotName'],
+                'heldAtUtc'    => (string) $row['heldAtUtc'],
+                // Named from the constant, never from the stored row, so the
+                // words cannot drift from the rule that put it there.
+                'describe'     => self::CASCADE_RESCUE[$table]['describe'] ?? $table,
+                // 🏷️ ONE NAME OUT OF THE ROW, AND NEVER THE ROW. `describe`
+                //    cannot say WHICH settings went, because the rescue takes
+                //    every per-organisation row whatever its key, and naming
+                //    four address fields to somebody whose retention periods
+                //    had gone would be worse than saying nothing. The key is
+                //    the one thing in a settings row that names what it is
+                //    without being a value: `org.address.line1` identifies
+                //    nobody and nothing secret, while `settingValue` can be
+                //    anything at all. So the KEY is lifted here and the JSON is
+                //    NOT returned, which also means no caller can print a
+                //    stored value by accident.
+                'names'        => self::nameInsideHeldRow($table, (string) $row['rowJson']),
+            ];
+        }
+        $result->free();
+
+        return $out;
+    }
+
+    /**
+     * Put every waiting row of one table back (#694).
+     *
+     * ONE TRANSACTION for the lot, and a row whose parent is STILL missing is
+     * reported rather than forced: the parent row may simply not exist in the
+     * restored database, in which case putting the child back is impossible and
+     * saying so is the only honest answer. The row stays waiting, so nothing is
+     * lost by trying.
+     *
+     * The column list is taken from the DATABASE, not from the stored JSON, and
+     * only columns the table really has are written — a column the schema has
+     * since dropped would otherwise fail the whole insert, which is the
+     * REMOVED_COLUMNS problem this file already knows about.
+     *
+     * @return array{success: bool, put_back: int, still_missing: int, error?: string}
+     */
+    public function putHeldRowsBack(string $table): array
+    {
+        if (self::keepsRowsFor($table) === false) {
+            return ['success' => false, 'put_back' => 0, 'still_missing' => 0,
+                    'error' => 'This portal does not keep rows for ' . $table . '.'];
+        }
+        if ($this->holdingTableExists() === false) {
+            return ['success' => false, 'put_back' => 0, 'still_missing' => 0,
+                    'error' => 'There is nothing being kept: this database has not had its upgrade run yet.'];
+        }
+        // 📐 THE TABLE'S SHAPE, FROM THE SAME PLACE EVERY OTHER WRITER HERE
+        //    READS IT. columnFacts() asks information_schema and decides
+        //    "generated" from GENERATION_EXPRESSION; its comment says at length
+        //    why `EXTRA LIKE '%GENERATED%'` is wrong.
+        //
+        //    This method first had its own `SHOW COLUMNS` loop doing exactly
+        //    that wrong test, and it cost a real fault: MySQL puts
+        //    EXTRA = 'DEFAULT_GENERATED' on any column declared
+        //    `DEFAULT CURRENT_TIMESTAMP`, so `tblSettings.updatedAt` was read as
+        //    generated, left out of the INSERT, and RE-STAMPED with the time of
+        //    the put-back. The row went back with the wrong "last changed" date
+        //    and nothing said so. Caught by proof 27 of
+        //    tools/backup-restore-selftest.php, which compares every value
+        //    rather than checking the row exists.
+        $facts = $this->columnFacts()[$table] ?? [];
+        if ($facts === []) {
+            return ['success' => false, 'put_back' => 0, 'still_missing' => 0,
+                    'error' => 'The shape of ' . $table . ' could not be read.'];
+        }
+        $columns = [];
+        foreach ($facts as $column => $fact) {
+            // A derived column is worked out by the database and cannot be
+            // written: an INSERT that names one is refused outright.
+            if ($fact['generated'] === false) {
+                $columns[] = (string) $column;
+            }
+        }
+
+        $put  = 0;
+        $gone = 0;
+        // 🔐 THE TRANSACTION STARTS FIRST, AND THAT IS THE WHOLE POINT OF THE
+        //    `FOR UPDATE` BELOW.
+        //
+        //    The first version prepared and ran that SELECT here, BEFORE
+        //    begin_transaction(). No CODE in `web/_core/` touches autocommit —
+        //    searching for the word now finds only these comments, so take the
+        //    claim from the absence of a `->autocommit(` call, not from a
+        //    grep count — so autocommit is on, the implicit transaction around a bare SELECT
+        //    commits the moment the statement finishes, and every row lock it
+        //    took was released before the real transaction began. The lock was
+        //    decorative, and the comment above it CLAIMED it stopped two
+        //    administrators reading the same rows. Found by the independent
+        //    check, not by any test.
+        //
+        //    What the lock is for: without it the second press can read rows
+        //    the first is already putting back, its INSERT then fails on the
+        //    key, and the page tells it "1 could not be put back and is still
+        //    being kept" about a row that IS back and is NOT being kept. No row
+        //    could be duplicated either way — `tblSettings` has
+        //    `uq_setting_key_site` and a code carries its own `codeID` — so
+        //    this is about never saying something untrue, not about data. It is
+        //    the house rule the four money writers follow (#647): every writer
+        //    re-reads what it is about to change under a row lock.
+        if ($this->db->begin_transaction() === false) {
+            return ['success' => false, 'put_back' => 0, 'still_missing' => 0,
+                    'error' => 'The database would not start a transaction.'];
+        }
+        // ⏳ THE LOCKING READ IS INSIDE THE try, AND MAKING THE LOCK REAL IS
+        //    WHAT MADE THAT NECESSARY.
+        //
+        //    bootstrap.php sets mysqli_report(MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR), so every one
+        //    of these four calls THROWS rather than returning false. They sat
+        //    outside the try at first, so a throw escaped this method with the
+        //    transaction still open and the statement never closed.
+        //
+        //    And the reachable case is the one the lock exists for. Now that the
+        //    lock is genuinely held, a second administrator pressing the button
+        //    BLOCKS on the `FOR UPDATE`; the page has already called
+        //    TimeLimit::atLeast(900), so PHP will not cut it off first, and at
+        //    `innodb_lock_wait_timeout` (50 seconds by default) `execute()`
+        //    throws ERROR 1205. Outside the try that gave a bare 500 instead of
+        //    the honest message this method exists to give — and worse,
+        //    Logger::db() hands back the SAME connection, so the `tblErrors` row
+        //    was written inside the still-open transaction and rolled back when
+        //    the connection closed. The fault left no record anywhere.
+        $waiting = null;
+        $rows    = null;
+        try {
+            $waiting = $this->db->prepare(
+                'SELECT heldID, rowJson FROM tblRestoreHeldRows '
+                . 'WHERE tableName = ? AND putBackAtUtc IS NULL ORDER BY heldID FOR UPDATE'
+            );
+            if ($waiting === false) {
+                throw new RuntimeException('The kept rows could not be read.');
+            }
+            $waiting->bind_param('s', $table);
+            $waiting->execute();
+            $rows = $waiting->get_result();
+            while ($row = $rows->fetch_assoc()) {
+                $values = json_decode((string) $row['rowJson'], true);
+                if (is_array($values) === false) {
+                    $gone++;
+                    continue;
+                }
+                $writing = array_values(array_filter(
+                    $columns,
+                    static fn (string $c): bool => array_key_exists($c, $values) === true
+                ));
+                if ($writing === []) {
+                    $gone++;
+                    continue;
+                }
+                $sql = 'INSERT INTO `' . $table . '` (`' . implode('`, `', $writing) . '`) VALUES ('
+                     . implode(', ', array_fill(0, count($writing), '?')) . ')';
+                $insert = $this->db->prepare($sql);
+                if ($insert === false) {
+                    throw new RuntimeException('The row could not be written back.');
+                }
+                $bind = [];
+                foreach ($writing as $column) {
+                    $bind[] = $values[$column];
+                }
+                $insert->bind_param(str_repeat('s', count($bind)), ...$bind);
+                $thisOneWentBack = false;
+                try {
+                    $insert->execute();
+                    $put++;
+                    $thisOneWentBack = true;
+                } catch (\mysqli_sql_exception $e) {
+                    // The commonest reason, and the one worth telling somebody
+                    // about: the organisation or the person this row belonged
+                    // to is not in the restored database, so there is nothing
+                    // for it to point at. NEVER the database's own words —
+                    // they can quote the value, which here can be a setting or
+                    // a hashed code.
+                    $gone++;
+                }
+                $insert->close();
+                // 🧷 THIS row, not "any row so far". Written as `$put > 0`
+                //    first, which marked every row as put back the moment one
+                //    succeeded — so a row that could not go back would have
+                //    stopped being offered, which is the one thing this whole
+                //    feature exists to prevent.
+                if ($thisOneWentBack === true) {
+                    // 🔒 THE COPY IS EMPTIED AS THE ROW IS MARKED, in one
+                    //    statement, and this is not tidiness.
+                    //
+                    //    A marked row is never offered again and nothing
+                    //    anywhere deletes one: `discardHeldRows()` takes only
+                    //    WAITING rows, and the Backup page lists only waiting
+                    //    rows. So without this the whole original row — a hash
+                    //    of somebody's sign-in code, or a stored setting value —
+                    //    would sit here FOR EVER, grow with every restore, and
+                    //    travel into every later snapshot and every off-site
+                    //    copy. That is a second copy of authentication material
+                    //    outside the table erasure protects, unbounded in time,
+                    //    which is the exact thing the owner was warned about
+                    //    when they chose to keep the codes at all.
+                    //
+                    //    Once the row IS back in its own table the copy has no
+                    //    purpose: it exists only so the row CAN go back. What
+                    //    is worth keeping is the RECORD that it was kept and
+                    //    returned — which table, whose, from which snapshot,
+                    //    when — and that is every other column.
+                    $mark = $this->db->prepare(
+                        'UPDATE tblRestoreHeldRows SET putBackAtUtc = UTC_TIMESTAMP(), rowJson = NULL WHERE heldID = ?'
+                    );
+                    if ($mark !== false) {
+                        $heldId = (int) $row['heldID'];
+                        $mark->bind_param('i', $heldId);
+                        $mark->execute();
+                        $mark->close();
+                    }
+                }
+            }
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            // ⛔ Never the database's own words: they can quote the value being
+            //    put back, which here is a setting or a hashed code. The
+            //    commonest cause now is waiting too long for another
+            //    administrator's lock, and the message covers that honestly
+            //    without guessing which it was.
+            $this->db->rollback();
+
+            return ['success' => false, 'put_back' => 0, 'still_missing' => 0,
+                    'error' => 'Nothing was put back, and the kept rows are exactly as they were. '
+                             . 'If somebody else is putting rows back at this moment, wait and try again.'];
+        } finally {
+            // Closed on EVERY path, including a throw: `finally` is what makes
+            // that true, and the first version closed it only in the two
+            // branches it happened to think of.
+            if ($rows instanceof \mysqli_result) {
+                $rows->free();
+            }
+            if ($waiting instanceof \mysqli_stmt) {
+                $waiting->close();
+            }
+        }
+
+        return ['success' => true, 'put_back' => $put, 'still_missing' => $gone];
+    }
+
+    /**
+     * Throw away the rows kept for one table (#694).
+     *
+     * Deliberate, and the only way they go: nothing here removes them on a
+     * timer (the owner, 31 October 2026), because they exist while somebody is
+     * mid-recovery.
+     *
+     * @return int How many were discarded; -1 when this portal keeps no rows
+     *             for that table at all; -2 when the database refused, which in
+     *             practice means another administrator is putting rows back at
+     *             this moment and holds the lock. Nothing was discarded in
+     *             either negative case.
+     */
+    public function discardHeldRows(string $table): int
+    {
+        // -1, not 0: the page has to be able to tell "this portal does not keep
+        // rows for that table" from "there was nothing waiting". Returning 0
+        // for both made it answer `0 kept row(s) for <anything posted>
+        // discarded. They cannot be recovered.` and write the posted name
+        // into the activity log as though it were a real table.
+        if (self::keepsRowsFor($table) === false) {
+            return -1;
+        }
+        if ($this->holdingTableExists() === false) {
+            return 0;
+        }
+        // ⏳ CAUGHT, BECAUSE MAKING THE PUT-BACK'S LOCK REAL MADE THIS BLOCK.
+        //
+        //    `putHeldRowsBack()` now holds row locks on exactly these rows for
+        //    the length of its transaction, so this DELETE can wait on them and,
+        //    at `innodb_lock_wait_timeout` (50 seconds by default), throw
+        //    ERROR 1205. bootstrap.php sets
+        //    mysqli_report(MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR), and the
+        //    Backup page's action handler has no try/catch of its own, so that
+        //    throw gave the administrator a BARE 500 with no message at all —
+        //    and TimeLimit::atLeast(900) guarantees PHP will not cut it short
+        //    first. The put-back path was given this handling a round earlier
+        //    and the discard path was not, which is the same half-applied fix
+        //    this package has already made twice.
+        //
+        //    -2 rather than an exception: this method's callers word the answer,
+        //    and a number keeps that true. Nothing is half done either way — one
+        //    DELETE is atomic and opens no transaction of its own.
+        try {
+            $stmt = $this->db->prepare('DELETE FROM tblRestoreHeldRows WHERE tableName = ? AND putBackAtUtc IS NULL');
+            if ($stmt === false) {
+                return 0;
+            }
+            $stmt->bind_param('s', $table);
+            $stmt->execute();
+            $gone = $stmt->affected_rows;
+        } catch (\Throwable $e) {
+            // NEVER the database's own words: they can quote the value being
+            // discarded, which here is a setting or a hashed code.
+            return -2;
+        } finally {
+            // Outside the try on purpose. With `close()` INSIDE it, a throw from
+            // close() AFTER a successful execute() would have committed the
+            // deletion (one DELETE, autocommit) and still answered -2 — making
+            // "Nothing was discarded, and the kept rows are exactly as they
+            // were" false. Narrow, but it is the one direction that matters.
+            if (isset($stmt) === true && $stmt instanceof \mysqli_stmt) {
+                $stmt->close();
+            }
+        }
+
+        return max(0, $gone);
+    }
+
+    /**
+     * The whole sentence an administrator reads about rows a restore could not
+     * put back (#694).
+     *
+     * WHY THIS IS A METHOD WITH EIGHT WHOLE SENTENCES IN IT, and not the
+     * expression it replaced. That expression grew to ninety lines and nine
+     * nested ternaries over five review rounds, and FOUR of the six wording
+     * faults those rounds found were in it:
+     *
+     *   - it told an administrator their settings were not in their backup,
+     *     in the same answer that said those tables had been left alone;
+     *   - a REHEARSAL, which changes nothing, said "nothing replaced them";
+     *   - "1 setting(s) ... were removed", and "1 of them is being kept";
+     *   - "Any of it that existed ... if it was created since is not."
+     *
+     * Every one was a ternary in the middle of a clause, and none was findable
+     * by any check, because nothing judges how an assembled sentence reads. So
+     * the combinations are spelt out instead: eight complete sentences you can
+     * read in one go, named by the three facts that choose between them. A
+     * missing combination is now obvious, and a wording fault is visible
+     * without evaluating anything in your head.
+     *
+     * READ THEM ALL before changing one, and PRINT them by calling this method
+     * rather than reading the source: transcribing is how you check the sentence
+     * you meant to write instead of the one that is there. Two separate facts,
+     * which an earlier draft of this line wrongly joined with a "so": `php -l`
+     * cannot tell you a sentence has stopped making sense, and the tests pin
+     * only SUBSTRINGS of these, so they will happily pin a substring of nonsense.
+     *
+     * NEVER put a literal `%` in one of these tails. They go into the sprintf
+     * FORMAT, and PHP 8.5 does not throw on a stray one — `sprintf('%1$d of
+     * 100% of them', 3)` prints `3 of 1003f them`. A `%` inside an ARGUMENT is
+     * harmless; measured both.
+     *
+     * @param array{parent: string, column: string, describe: string} $about
+     */
+    private static function cascadeWarning(
+        string $table,
+        array $about,
+        int $howMany,
+        bool $dryRun,
+        bool $canKeep
+    ): string {
+        // 🔤 The three facts that choose the sentence. `describe` ends in "(s)",
+        //    so it cannot agree with a number and the verb has to.
+        $when  = $dryRun === true ? 'ahead' : 'done';
+        $keep  = $canKeep === true ? 'kept' : 'lost';
+        $count = $howMany === 1 ? 'one' : 'many';
+
+        $removed = [
+            'ahead.one'  => 'would be removed',
+            'ahead.many' => 'would be removed',
+            'done.one'   => 'was removed',
+            'done.many'  => 'were removed',
+        ][$when . '.' . $count];
+
+        $replaced = [
+            'ahead.one'  => 'This restore would not put %3$s back, so nothing would replace it.',
+            'ahead.many' => 'This restore would not put %3$s back, so nothing would replace them.',
+            'done.one'   => 'This restore did not put %3$s back, so nothing replaced it.',
+            'done.many'  => 'This restore did not put %3$s back, so nothing replaced them.',
+        ][$when . '.' . $count];
+
+        // The eight tails, in full. Nothing here is stitched from words.
+        $tails = [
+            'ahead.kept.one'  => 'In a real restore it would be kept on the Backup page, where you could put it '
+                               . 'back or discard it.',
+            'ahead.kept.many' => 'In a real restore they would be kept on the Backup page, where you could put them '
+                               . 'back or discard them.',
+            'ahead.lost.one'  => 'It could NOT be kept, because the holding table is not there — most likely this '
+                               . 'database has not had its upgrade run. Run the database upgrade and it would be '
+                               . 'kept next time.',
+            'ahead.lost.many' => 'They could NOT be kept, because the holding table is not there — most likely this '
+                               . 'database has not had its upgrade run. Run the database upgrade and they would be '
+                               . 'kept next time.',
+            'done.kept.one'   => 'It is being kept for you on the Backup page: put it back there, or discard it '
+                               . 'deliberately. Nothing removes it on a timer.',
+            // "All %1$d are being kept", never "N of them are": a partial rescue
+            // cannot happen (holdRescuedRows() throws rather than returning a
+            // short count, which rolls the whole restore back), and a branch for
+            // one printed "0 of them are being kept ... put them back there" — a
+            // false offer in the one direction this feature exists to prevent.
+            'done.kept.many'  => 'All %1$d are being kept for you on the Backup page: put them back there, or '
+                               . 'discard them deliberately. Nothing removes them on a timer.',
+            // ⚠️ "Any of them that existed when the snapshot was taken", never
+            //    "What they were is in the snapshot". The rows a cascade removes
+            //    are the LIVE rows at the moment of the restore; the snapshot
+            //    holds that table as it stood when it was TAKEN, so a row created
+            //    since has no copy in it at all. Reached only where NOTHING was
+            //    kept, which makes it the administrator's one instruction.
+            // ⚠️ WHAT THE SNAPSHOT HOLDS IS TWO CONDITIONS, NOT ONE, and these
+            //    sentences have now been wrong BOTH ways round. The first version
+            //    hedged on table PRESENCE ("if that snapshot holds those tables")
+            //    and said nothing about currency; the second hedged on CURRENCY
+            //    ("any created since are not in it") and asserted presence — which
+            //    is false for the case THIS PACKAGE ADDED, a snapshot that does not
+            //    contain the table at all (proof 27 section F). Both reach this
+            //    tail, and getting it wrong here is wrong in the REASSURING
+            //    direction: it tells somebody mid-recovery that rows they have
+            //    just lost for good can be read out of their backup.
+            //
+            //    And the CAUSE is not asserted either. All the code knows is that
+            //    the holding table is absent; a hand-dropped table or a failed
+            //    query look the same, so it says "most likely".
+            'done.lost.one'   => 'It has NOT been kept, because the holding table is not there — most likely this '
+                               . 'database has not had its upgrade run. Whether the snapshot you are restoring FROM '
+                               . 'holds an older copy depends on the snapshot: only if it covers %3$s at all, and '
+                               . 'only if the row existed when it was taken.',
+            'done.lost.many'  => 'They have NOT been kept, because the holding table is not there — most likely '
+                               . 'this database has not had its upgrade run. Whether the snapshot you are restoring '
+                               . 'FROM holds older copies depends on the snapshot: only if it covers %3$s at all, '
+                               . 'and only for rows that existed when it was taken.',
+        ];
+        $tail = $tails[$when . '.' . $keep . '.' . $count];
+
+        // ⚠️ "This restore did not put X back", NEVER "this snapshot does not
+        //    cover X". An OLD-FORM snapshot DOES contain the table — the
+        //    held-back list is built from the manifest's own list, so a table
+        //    has to be in the snapshot to be held back at all — and the same
+        //    answer already says those tables were left exactly as they are.
+        //    Saying both told an administrator mid-recovery that their settings
+        //    were not in their backup. This wording covers BOTH reasons a table
+        //    is not put back: held back, or simply absent.
+        return sprintf(
+            '%1$d %2$s ' . $removed . ' by the database\'s own rule for the link between %3$s and %4$s. '
+            . $replaced . ' ' . $tail,
+            $howMany,
+            $about['describe'],
+            $table,
+            $about['parent']
+        );
+    }
+
+    /**
+     * Does this portal keep rows for that table at all (#694)?
+     *
+     * The ONE test, asked by both writers and by the Backup page, so no caller
+     * keeps a copy of the list. Membership of `CASCADE_RESCUE` is also what
+     * makes the name safe to put into a statement: every identifier used by
+     * this feature comes from that constant and never from a request.
+     */
+    public static function keepsRowsFor(string $table): bool
+    {
+        return isset(self::CASCADE_RESCUE[$table]) === true;
+    }
+
+    /**
+     * The one thing in a kept row that may be shown: what the row IS, never
+     * what it says (#694).
+     *
+     * For `tblSettings` that is `settingKey` — `org.address.line1` names
+     * nothing secret and nobody, while `settingValue` can be anything at all,
+     * a decrypted integration credential among them. For
+     * `tblTotpBackupCodes` there is NOTHING showable: every column of it is
+     * either the hash itself or the person it belongs to, and the Backup page
+     * is read by an administrator of the INSTALLATION, who may be a different
+     * person from the administrators of the organisations on it (the owner,
+     * 29 October 2026). So that table answers an empty string, deliberately,
+     * and a count is all the page ever shows for it.
+     *
+     * A table added to CASCADE_RESCUE later answers an empty string too, which
+     * is the safe direction: it shows less rather than something unreviewed.
+     */
+    private static function nameInsideHeldRow(string $table, string $json): string
+    {
+        if ($table !== 'tblSettings') {
+            return '';
+        }
+        $row = json_decode($json, true);
+
+        return is_array($row) === true && is_string($row['settingKey'] ?? null) === true
+            ? (string) $row['settingKey']
+            : '';
+    }
+
+    /**
+     * Is the holding table there (#694)?
+     *
+     * It is NOT there on a database whose upgrade has not been run: the files
+     * reach a server before anybody presses "Run migrations". Every reader of
+     * `tblRestoreHeldRows` asks this first, so that case degrades to what the
+     * portal did before #694 — the rows are named and lost — instead of a bare
+     * 500 on the Backup page or a refused restore.
+     *
+     * WHY `SHOW TABLES LIKE` AND NOT A try/catch: it answers "does a table by
+     * this name exist" without ever failing because the table is missing — it
+     * simply returns no rows. bootstrap.php sets
+     * mysqli_report(MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR), so an ordinary query on a missing
+     * table THROWS; a blanket try/catch would hide a genuinely broken
+     * connection behind the same "nothing is being kept" answer as the
+     * harmless, expected case. The house pattern is
+     * Newsletter::demoRegisterExists().
+     */
+    private function holdingTableExists(): bool
+    {
+        $result = $this->db->query("SHOW TABLES LIKE 'tblRestoreHeldRows'");
+        if ($result === false) {
+            return false;
+        }
+        $there = $result->num_rows > 0;
+        $result->free();
+
+        return $there;
+    }
+
+    /**
+     * The rows a restore is about to lose to a cascade, read BEFORE anything is
+     * emptied (#694).
+     *
+     * Only for a table that is BOTH held back from this restore AND a child,
+     * with ON DELETE CASCADE, of a table this restore is going to replace. A
+     * row whose pointer is already empty is not at risk and is left out.
+     *
+     * READ NOW, WRITTEN AFTERWARDS, and that order is the point: the holding
+     * table itself may be in the snapshot, so writing the rows before the
+     * restore would see them deleted again by the restore of that very table.
+     * Keeping them in memory for the length of one restore sidesteps the
+     * ordering question altogether, and CASCADE_RESCUE_MAX_ROWS is the price of
+     * doing it that way.
+     *
+     * WHAT THAT PRICE REALLY IS, said plainly. The ceiling counts ROWS, not
+     * bytes, and a `tblSettings` value is MEDIUMTEXT — so 20,000 rows is not a
+     * bounded amount of memory. And `holdRescuedRows()` runs inside the
+     * restore's transaction, so if it throws (out of memory, a value
+     * json_encode() will not take) the WHOLE RESTORE rolls back: a restore that
+     * used to succeed while losing the rows would now fail outright and change
+     * nothing. That is the safer of the two directions — nothing is half done,
+     * and the message says nothing was changed — but it IS a change in
+     * behaviour, and no test reaches it.
+     *
+     * @param list<string> $replacing The tables this restore is going to empty —
+     *                                 which, at the one call site, is the
+     *                                 manifest's list with the held-back
+     *                                 tables already taken out. A table that is
+     *                                 NOT in it is not being put back, whatever
+     *                                 the reason.
+     *
+     * @return array{rows: array<string, list<array<string, mixed>>>, tooMany: int, canKeep: bool}
+     *         `tooMany` is the total row count when it is over the ceiling, in
+     *         which case `rows` is empty: holding some of them would tell an
+     *         administrator the rest had been kept too.
+     *
+     *         `canKeep` is false when the holding table is not there, which
+     *         happens on a database whose upgrade has not been run yet — the
+     *         files reach a server before anybody presses "Run migrations".
+     *         The restore then goes ahead and the rows are NAMED but not kept,
+     *         which is what the portal did before #694 plus an honest warning.
+     *         Refusing the restore instead would block a recovery at the one
+     *         moment somebody is recovering, which is worse than the loss this
+     *         issue is about.
+     */
+    private function readRowsACascadeWouldTake(array $replacing): array
+    {
+        $found = [];
+        $total = 0;
+        $canKeep = $this->holdingTableExists();
+        foreach (self::CASCADE_RESCUE as $table => $about) {
+            // 🎯 THE QUESTION IS "IS THIS TABLE BEING PUT BACK", NOT "IS IT ON
+            //    THE HELD-BACK LIST", and that distinction was wrong at first.
+            //
+            //    The first version asked whether the table was in `$heldBack`,
+            //    which is built ONLY from names the manifest itself lists. So a
+            //    snapshot whose manifest named `tblSites` but NOT `tblSettings`
+            //    — a hand-edited one, or simply an imported snapshot that does
+            //    not contain the table — restored the sites, let the cascade
+            //    wipe every per-organisation settings row, rescued nothing and
+            //    printed no #694 warning at all. Only the older generic count
+            //    said anything. That is the same silent loss this whole feature
+            //    exists to stop, one door along.
+            //
+            //    "Not in `$replacing`" covers both: a held-back table was taken
+            //    out of that list by the block that held it back, and a table
+            //    the snapshot never had was never in it.
+            if (in_array($table, $replacing, true) === true) {
+                continue;
+            }
+            if (in_array($about['parent'], $replacing, true) === false) {
+                continue;
+            }
+            // The identifiers come from CASCADE_RESCUE, a constant in this
+            // file, so they are not user input — but they are still checked
+            // against the same pattern every other identifier here is, because
+            // a typo in a constant would otherwise build SQL.
+            if (preg_match(self::IDENTIFIER, $table) !== 1 || preg_match(self::IDENTIFIER, $about['column']) !== 1) {
+                continue;
+            }
+            $result = $this->db->query(
+                'SELECT * FROM `' . $table . '` WHERE `' . $about['column'] . '` IS NOT NULL'
+            );
+            if ($result === false) {
+                continue;
+            }
+            $rows = [];
+            while ($row = $result->fetch_assoc()) {
+                $rows[] = $row;
+                $total++;
+                if ($total > self::CASCADE_RESCUE_MAX_ROWS) {
+                    $result->free();
+                    // Keep counting, so the answer can say how many there were,
+                    // but hold nothing.
+                    while ($this->db->more_results() === true && $this->db->next_result() === true) {
+                        // drain, so the connection is usable
+                    }
+                    $count = 0;
+                    foreach (self::CASCADE_RESCUE as $t => $a) {
+                        if (in_array($t, $replacing, true) === true
+                            || in_array($a['parent'], $replacing, true) === false) {
+                            continue;
+                        }
+                        // The same identifier check as the loop above, for the
+                        // same reason: a typo in the constant would otherwise
+                        // build SQL. It was missing here, which made the one
+                        // guard that exists for that case half a guard.
+                        if (preg_match(self::IDENTIFIER, $t) !== 1 || preg_match(self::IDENTIFIER, $a['column']) !== 1) {
+                            continue;
+                        }
+                        $one = $this->db->query('SELECT COUNT(*) AS n FROM `' . $t . '` WHERE `' . $a['column'] . '` IS NOT NULL');
+                        if ($one !== false) {
+                            $count += (int) ($one->fetch_assoc()['n'] ?? 0);
+                            $one->free();
+                        }
+                    }
+
+                    return ['rows' => [], 'tooMany' => $count, 'canKeep' => $canKeep];
+                }
+            }
+            $result->free();
+            if ($rows !== []) {
+                $found[$table] = $rows;
+            }
+        }
+
+        return ['rows' => $found, 'tooMany' => 0, 'canKeep' => $canKeep];
+    }
+
+    /**
+     * Write the rescued rows into the holding table (#694).
+     *
+     * Called INSIDE the restore's own transaction and AFTER every table has
+     * been put back, so a restore that rolls back takes these with it — the
+     * rows were never lost in that case, and a holding table full of rows that
+     * are still in their own table would be worse than useless.
+     *
+     * `siteID` and `userID` are copied out of the row where the row has them,
+     * so the Backup page can say whose a row was and `GdprEraser` can reach it.
+     * Everything else is kept as JSON exactly as it was read.
+     *
+     * @param array<string, list<array<string, mixed>>> $byTable
+     *
+     * @return array<string, int> How many were held, per table.
+     */
+    private function holdRescuedRows(array $byTable, string $snapshotName): array
+    {
+        if ($byTable === []) {
+            return [];
+        }
+        $stmt = $this->db->prepare(
+            'INSERT INTO `tblRestoreHeldRows` (`tableName`, `siteID`, `userID`, `rowJson`, `snapshotName`, `heldAtUtc`) '
+            . 'VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP())'
+        );
+        if ($stmt === false) {
+            throw new RuntimeException('The rows this restore would have lost could not be kept: '
+                                     . 'the holding table would not accept them.');
+        }
+        $held = [];
+        foreach ($byTable as $table => $rows) {
+            foreach ($rows as $row) {
+                $siteId = isset($row['siteID']) === true && $row['siteID'] !== null ? (int) $row['siteID'] : null;
+                $userId = isset($row['userID']) === true && $row['userID'] !== null ? (int) $row['userID'] : null;
+                $json   = json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                if ($json === false) {
+                    throw new RuntimeException('A row this restore would have lost could not be written down.');
+                }
+                $stmt->bind_param('siiss', $table, $siteId, $userId, $json, $snapshotName);
+                if ($stmt->execute() === false) {
+                    $stmt->close();
+                    throw new RuntimeException('The rows this restore would have lost could not be kept.');
+                }
+                $held[$table] = ($held[$table] ?? 0) + 1;
+            }
+        }
+        $stmt->close();
+
+        return $held;
     }
 
     /**

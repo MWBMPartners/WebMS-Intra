@@ -12120,3 +12120,310 @@ and raised an issue (#696) for the bulk control I assumed was missing. The handl
 series' **bulk edit** page, which already lists every date including drafts with a tick-box each and a
 bulk `Status` control. So the facility existed, on the very page the administrator lands on. **Before
 writing "you cannot do X yet", open the page they are sent to.** #696 is closed as not planned.
+
+---
+
+## The rows a restore cannot put back (#694)
+
+Added 31 October 2026. The behaviour is in `CHANGELOG.md`; this is what somebody
+changing the code needs to know, and what the tests cost to get right.
+
+### The fault, exactly
+
+A snapshot written before 27 October 2026 has no `whole_database` flag in its
+manifest, so `DbBackup::restoreAll()` holds the three
+`WHOLE_DATABASE_ONLY` tables back. It still replaces `tblSites` and `tblUsers`.
+Two of the three are their children with `ON DELETE CASCADE`:
+
+    tblSettings.siteID        -> tblSites.siteID    ON DELETE CASCADE
+    tblTotpBackupCodes.userID -> tblUsers.userID    ON DELETE CASCADE
+
+`tblMigrations` has no foreign key at all, so it can never go this way.
+
+**A one-table restore cannot cause it either**, and I first said on the issue
+that it could. `restoreTable()` builds `$pointedAtBy` and refuses any table
+another table points at, telling you to restore the whole snapshot instead. The
+mechanism was corrected on the issue before any code was written. This is a
+whole-database restore from an old-form snapshot, and nothing else.
+
+### Why the rows are read early and written late
+
+`readRowsACascadeWouldTake()` runs **before** any table is emptied;
+`holdRescuedRows()` runs **after** every table is back. That order is the whole
+design, and it is not an accident of style:
+
+* The holding table may itself be in the snapshot. Writing the rescued rows
+  before the restore would see them deleted again by the restore of that very
+  table.
+* Both happen inside the restore's own transaction, so a restore that rolls back
+  takes the kept rows with it — the rows were never lost in that case, and a
+  holding table full of rows that are still in their own table would be worse
+  than useless.
+
+The price of keeping them in memory for the length of one restore is
+`CASCADE_RESCUE_MAX_ROWS` (20,000). Past it, **nothing** is kept and the warning
+says how many there were: keeping some would read as keeping all of them. **That
+path is not exercised by any test**, and proof 27's header says so.
+
+### Four traps, each of which cost something
+
+1. **`EXTRA LIKE '%GENERATED%'` is not how you find a generated column.** MySQL
+   puts `DEFAULT_GENERATED` in `EXTRA` for any column declared
+   `DEFAULT CURRENT_TIMESTAMP`. My first version of `putHeldRowsBack()` used
+   that test, so `tblSettings.updatedAt` was read as generated, left out of the
+   INSERT, and re-stamped by the database with the moment of the put-back. The
+   row was back, with the right key and the right value, carrying the wrong
+   "last changed" date. `columnFacts()` already reads `GENERATION_EXPRESSION`
+   and its comment already warned against exactly this; I wrote a worse copy
+   beside it. **Read the class before adding a helper to it.**
+2. **"Did any row go back" is not "did THIS row go back".** The mark was written
+   `if ($mark !== false && $put > 0)`, which marks every row as put back the
+   moment one succeeds. A row that could not go back would have stopped being
+   offered — the single thing this feature exists to prevent.
+3. **A row that cannot go back has more than one possible reason, so do not
+   assert one.** The likeliest is that its organisation or person is not in the
+   restored database. But a row that is *already there* fails the same way, and
+   the two cannot be told apart from the insert's failure. The page says
+   "the likeliest reason is…", never the reason.
+4. **The holding table is not there before migration 233 has run**, and files
+   reach a server before anybody presses "Run migrations". Every reader asks
+   `holdingTableExists()` first (`SHOW TABLES LIKE`, as
+   `Newsletter::demoRegisterExists()` does and for the same reason: a blanket
+   try/catch would hide a broken connection behind "nothing is being kept").
+   The restore then proceeds and the warning says the rows could not be kept —
+   because refusing a restore would block a recovery at the one moment somebody
+   is recovering, which is worse than the loss this issue is about.
+
+### What the tests taught
+
+**`brs_checkSame()` is why trap 1 was found.** Every weaker check passed: the
+row existed, its key was right, its value was right. Only comparing every value
+of every table saw the date. Proof 27's comment says so, so nobody reduces it to
+a row-exists test.
+
+**Proof 27 derives its row counts from the database, never types them.** A fresh
+install already holds per-organisation settings rows — migration 231 (#677)
+copied each organisation's address down — and that is exactly the change #690
+showed had quietly broken two tests that had hard-coded "none". The baseline
+count is read from the pristine database, which is independent of the code under
+test.
+
+**Two existing proofs had to be mended, not excused.** Proofs 6 and 17 cause
+this cascade, so they now leave rows in the holding table, and `brs_reset()`
+compares the whole database. `brs_clearHeldRows()` returns the count and each
+caller **checks it was not nothing** — a silent sweep would go on passing the
+day the rescue stopped working, which is the shape of dead check this project
+has been caught by before.
+
+**One claim of mine in the code comments was false and a test caught it.** The
+comment said the new warning replaced the older "N table(s) that are NOT in this
+snapshot were changed as well". It does not: both are printed, the older one
+covers every table outside the snapshot including the ones that cannot be
+rescued, and proof 6 now pins both sentences, because pinning one would pass
+with the other deleted.
+
+### What the independent check found, and the shapes behind it
+
+Five real problems, all in work that had already passed every test it had. Each
+is a shape worth recognising again.
+
+**A describing sentence that is narrower than the thing it describes.** The words
+naming the lost settings rows listed four address fields. The rescue takes every
+row with a `siteID`, whatever its key: `attend.detailRetentionDays`,
+`giving.retention.years` and the four `mail.queue.*` numbers are all
+per-organisation. **Seven** files under `web/` can write such a row — see the
+next section for how I got that number wrong twice. So the sentence could name four address fields to somebody
+whose retention periods had gone, at the worst possible moment. The cure was two
+parts: make the sentence general, and give the page the **keys** out of each kept
+row. A settings key says what a row IS without being a value, which is the line
+to draw — `nameInsideHeldRow()` returns the key and the JSON is never returned
+at all, so no caller can print a stored value by accident.
+
+**A comment that invents a column, and takes a check down with it.** Two comments
+said a kept `tblTotpBackupCodes` row carried its owner's e-mail address. That
+table is `(codeID, userID, codeHash, isUsed, usedAt, createdAt)`. So two clauses
+of the privacy check searched a page for an address that could never be on it,
+however broken the page was. The check still had working clauses, so it was not
+wholly vacuous — but **a clause that cannot fail makes a check look stronger than
+it is**, which is worse than leaving it out.
+
+**"Nothing deletes it" plus "it is kept for ever" is a privacy decision nobody
+made.** `discardHeldRows()` takes only waiting rows and the card lists only
+waiting rows, so a row marked as put back was unreachable and permanent — a
+second copy of a code hash or a setting value, growing with every restore and
+travelling into every later snapshot and off-site copy. Four documents said the
+rows "wait until an administrator clears them", which was true of waiting rows
+only. `rowJson` is now emptied in the same statement that sets `putBackAtUtc`.
+The test for it counts `COUNT(rowJson)` against `COUNT(*)` **and** checks the
+other columns are still there, because emptying the whole row would destroy the
+audit trail instead of the copy.
+
+**Asking "is it on the list" when the question is "is it being put back".** The
+rescue skipped any table not in `$heldBack`, and `$heldBack` is built only from
+names the manifest itself holds. So a snapshot that simply did not contain
+`tblSettings` — an imported one, or a hand-edited manifest — restored `tblSites`,
+let the cascade wipe every per-organisation row, rescued nothing and printed no
+#694 warning. **No existing check could have caught it**, because every fixture
+was a genuine old-form snapshot, which contains all three tables. Section F of
+proof 27 is the check, and what makes it decisive is that its snapshot still
+*says* it covers the whole database: nothing is held back, so the old reading
+would rescue nothing. This is the same lesson as I7d (#645): when a check exists
+to prove something ordinary works, make sure some fixture is actually ordinary —
+and its mirror, when a fix is positioned to close a shape, check it closes the
+whole shape.
+
+**Returning the same answer for two different facts.** `discardHeldRows()`
+answered 0 both for "this portal keeps no rows for that table" and for "none was
+waiting", so the page said `0 kept row(s) for <anything you posted> discarded.
+They cannot be recovered.` and wrote the posted name into the activity log as
+though it were a real table. It answers -1 for the first now, and
+`DbBackup::keepsRowsFor()` is the one public test both writers and the page ask.
+
+### Round 3, and the two shapes that only showed up because the earlier fix worked
+
+**A real lock makes new paths reachable, so the fix needs the handling the
+broken version never did.** Round 2 moved the `FOR UPDATE` read inside the
+transaction, which is what finally made it a lock. Round 3 then found that
+`prepare`, `bind_param`, `execute` and `get_result` sat *outside* the `try`.
+Under `mysqli_report(MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR)` every one of
+them throws — and **it takes BOTH flags**, which I got wrong twice. Measured on
+the STATEMENT path (`prepare()` on a missing table), PHP 8.5.11:
+
+| flags | result |
+|---|---|
+| `MYSQLI_REPORT_ERROR` | returns false, raises a warning, no exception |
+| `MYSQLI_REPORT_STRICT` | returns false, **no warning at all**, no exception |
+| `STRICT \| ERROR` | throws `mysqli_sql_exception` |
+
+`ERROR` is what makes a statement error get reported; `STRICT` turns a reported
+error into an exception. **A CONNECT error is reported whatever `ERROR` says**,
+which is why `STRICT` alone throws there — and that is exactly the measurement I
+first made and then generalised to statements. **Measuring the wrong code path
+and writing "measured, not reasoned" against the conclusion is worse than
+reasoning**, because the next reader has no reason to doubt it. So a throw
+escaped the method with the transaction open and the statement unclosed — and
+the newly reachable case was exactly the one the lock exists for. With the lock
+genuinely held, a second administrator pressing the button now **blocks**; the
+page has already called `TimeLimit::atLeast(900)`, so PHP will not cut it off
+first, and at `innodb_lock_wait_timeout` (50 seconds by default) `execute()`
+throws ERROR 1205. Outside the `try` that gave a bare 500 instead of the honest
+message, and — worse — `Logger::db()` hands back the *same* connection, so the
+`tblErrors` row was written inside the still-open transaction and rolled back
+when the connection closed. **The fault left no record anywhere.** The read is
+inside the `try` now, with a `finally` that frees and closes on every path.
+
+**A correction recorded in six documents was applied in one.** Round 2 wrote
+that `"unused" two-factor codes was wrong in five places` and that
+`"address rows"` understated what the cascade takes. Round 3 found both
+uncorrected wordings still in: the in-app help page, migration 233's own header,
+section 18 of the eraser test, `CHANGELOG.md`, `.claude/HANDOFF.md`, and — on the
+very line that recorded the correction — `.claude/CLAUDE.md` and its `.OpenAI`
+mirror. **A document that asserts a fix while stating the thing it fixed is
+worse than one that says nothing**, because the next reader stops looking. The
+help page mattered most: its own comment says it is said there "because this is
+the page somebody opens when they are about to put a backup back", so it was the
+one sentence a customer reads *before* deciding whether to accept the loss, and
+it understated it.
+
+**And a check made only of absences passes when the thing stops happening.**
+Section P's new log check asserted that the posted table name was *not* in the
+activity log and that the event type was *not* `BackupHeldRowsPutBackFailed`.
+Delete the `$record()` call entirely and it stayed green, under a name claiming
+"the refusal is recorded WITHOUT the posted name". The positive clause comes
+first now. Same family as #668's section D and the `&& false` lesson: pin what
+must be true, not only what must not.
+
+**What I did about it, and why it is not a committed check.** After round 3 I
+swept the whole package myself for every wording the three rounds had declared
+untrue — a short script over `git status --porcelain`, matching each banned
+phrase and treating a hit as a *live claim* only when the surrounding 200
+characters did not also read as a recorded lesson. It found a **seventh**
+instance, in `FEATURES.md`, which round 3 had not named. Zero after fixing it.
+
+That sweep is a technique, not a tripwire, and it is deliberately not in
+`tools/audit-checks/`. The banned-phrase list is specific to one package's
+history, it would need curating for ever, and the "is this a live claim or a
+recorded lesson" test is a heuristic on surrounding prose — exactly the shape
+#668 warns about, because a check that cries wolf gets switched off and then
+catches nothing. **The rule worth keeping is the habit: when a round tells you a
+sentence is untrue, grep the whole working tree for that sentence before
+reporting it fixed, and count the places.** Round 2 said "wrong in five places"
+and fixed one.
+
+### Round 5, and the refactor that should have come three rounds earlier
+
+Three more: the wrong account of which `mysqli_report` flag makes mysqli throw
+(it takes BOTH — see the table above; and the "correction" I made in this round
+was wrong too), in four
+documents, after the two code comments had been corrected a round earlier; a
+pronoun defined later in its own sentence; and a refused discard logged under the
+same event type as a successful one.
+
+**The lesson is the refactor, not the three faults.** The sentence an
+administrator reads had grown to ninety lines and nine nested ternaries, and four
+of the six wording faults rounds 2-5 found were inside it. Every one was a
+ternary in the middle of a clause: a rehearsal saying "nothing replaced them", "1
+setting(s) ... were removed", "1 of them is being kept" about one row, "Any of it
+that existed ... if it was created since is not". **None was findable by any
+check, because nothing judges how an assembled sentence reads** — and a test that
+pins a substring of it will happily pin a substring of nonsense.
+
+`DbBackup::cascadeWarning()` now holds eight complete sentences, keyed by the
+three facts that choose between them. The rule it encodes: **when a sentence is
+built from branches, spell out the whole sentence for each branch.** A reader can
+check eight sentences; nobody can evaluate nine nested ternaries over eight paths
+in their head, which is why five rounds of review kept finding faults in it.
+
+Print the output of anything like this before changing it. The sixteen outputs
+here were printed by calling the real method through a small harness that pulls
+the method and the constant out of the file and evals them, so no wording was
+transcribed by hand — transcribing is how you check the sentence you meant to
+write rather than the one that is there.
+
+### Round 6: measuring the wrong code path
+
+The most useful thing in this whole package. I wrote that `MYSQLI_REPORT_STRICT`
+is the flag that makes mysqli throw, and put "measured, not reasoned" beside it.
+The measurement was real. It was of a **connect** error, and the sentence was
+about four **statement** calls. Measured properly, `prepare()` on a missing
+table, PHP 8.5.11:
+
+| flags | result |
+|---|---|
+| `MYSQLI_REPORT_ERROR` | returns false, raises a warning, no exception |
+| `MYSQLI_REPORT_STRICT` | returns false, **silently** — no warning, no exception |
+| `STRICT \| ERROR` | throws `mysqli_sql_exception` |
+
+`ERROR` is what makes a statement error get reported at all; `STRICT` turns a
+reported error into an exception. A connect error is reported whatever `ERROR`
+says, which is why `STRICT` alone throws there — and why the easy measurement
+looked conclusive.
+
+**The lesson is not about mysqli.** "Measured, not reasoned" is only worth
+writing if the measurement is of the thing the sentence is about. Written against
+a conclusion drawn from a neighbouring code path, it is worse than reasoning,
+because it removes the next reader's reason to doubt. Before attaching it, ask
+which code path the claim describes and whether that is the path you ran.
+
+`web/_core/bootstrap.php`'s own comment had carried the same untruth since long
+before this package. Correcting it meant touching one file outside the package's
+list; that is declared rather than buried, because the alternative was leaving
+the wrong explanation in the one place everybody looks it up.
+
+### Round 6: a sentence wrong in both directions, and a branch nothing reached
+
+The sentence telling an administrator what their backup might still hold has now
+been wrong twice, in opposite ways: first hedging on whether the snapshot
+*contains* the table while saying nothing about row currency, then hedging on
+currency while *asserting* presence. The second was false for exactly the case
+the package had just added coverage for — a snapshot that does not contain the
+table — and false in the reassuring direction. **When a hedge has two conditions,
+write both; a hedge that covers one and asserts the other is not a hedge.**
+
+And half the eight sentences — the whole `canKeep === false` branch — were
+reached by no check, which proof 27's own "what this cannot show" list had failed
+to mention. Section G reaches them by renaming the holding table to a name
+outside `tbl%` and taking the snapshot afterwards, because an un-upgraded
+database has no holding table *and no snapshot containing one*. It caught two
+faults of mine in its first two runs, both in the test rather than the portal —
+which is what a test exercising a genuinely new branch should do.

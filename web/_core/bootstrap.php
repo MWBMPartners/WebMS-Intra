@@ -372,7 +372,15 @@ $creds = require $authFile; // Returns array with db_host, db_user, db_pass, db_
 // 🛢️ ---------------------------------------------------------------------------
 // 5. Open MySQLi connection
 // -----------------------------------------------------------------------------
-// Using MYSQLI_REPORT_STRICT enables exceptions instead of silent failures.
+// BOTH flags are needed, and this comment used to credit STRICT alone.
+// Measured on PHP 8.5.11 with a `prepare()` on a missing table:
+//   MYSQLI_REPORT_ERROR  - returns false and raises a warning, no exception
+//   MYSQLI_REPORT_STRICT - returns false SILENTLY, no warning, no exception
+//   STRICT | ERROR       - throws mysqli_sql_exception
+// ERROR is what makes a statement error get reported at all; STRICT turns a
+// reported error into an exception. A CONNECT error is reported whatever
+// ERROR says, so STRICT alone DOES throw there - which is how the old
+// wording came to look right when measured the easy way (#694).
 // See: https://www.php.net/manual/en/mysqli-driver.report-mode.php
 
 mysqli_report(MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR);

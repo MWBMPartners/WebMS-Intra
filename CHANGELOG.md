@@ -2,6 +2,222 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — putting back a backup taken before 27 October 2026 no longer loses every organisation's
+  address and everybody's sign-in codes in silence (#694, migration 233)**
+  - **What went wrong.** A snapshot in the older form does not say that it covers the whole database,
+    so a full restore deliberately leaves `tblMigrations`, `tblSettings` and `tblTotpBackupCodes`
+    alone — each records what has already happened, and putting one back without the rest loses data.
+    That part is right. But the restore *does* replace `tblSites` and `tblUsers`, and two of those
+    three tables are their children with `ON DELETE CASCADE`. So the database's own rules deleted
+    every per-organisation settings row and every two-factor backup code, spent ones included, and
+    nothing put them back. Measured on MySQL 8.0.36: one per-organisation settings row before, none after, and the
+    restore reported success.
+  - **What it cost a customer.** Since migration 231 (#677) each organisation keeps its own postal
+    address, map position, what3words address and support e-mail in rows of its own. All of them went,
+    and the support address then silently fell back to the installation's. For the codes: every
+    person's remaining single-use sign-in codes.
+  - **What happens now.** The restore reads those rows *before* anything is emptied and writes them to
+    a new holding table, `tblRestoreHeldRows`, *after* every table is back. The Backup page lists what
+    is being kept, with one button to put it back and one to discard it. **Nothing removes them on a
+    timer** (the owner's decision, 31 October 2026): they exist while somebody is mid-recovery, and a
+    clock that deleted them part way through would be this same silent loss one step further on. What
+    stops them being forgotten is the page naming them.
+  - **The warning now says what went, not which table.** It used to say "1 table(s) that are NOT in
+    this snapshot were changed as well", which tells an administrator nothing about what they have
+    lost — and they are reading it at the worst possible moment. It now names the rows, the link that
+    took them, and where they are being kept. **That sentence is an ADDITION, not a replacement:** the
+    older, wider one still runs and still covers every table outside the snapshot, the ones that
+    cannot be rescued included. A draft of the code comment claimed it had replaced it; both appear,
+    and proof 6 now pins both, because pinning one would pass with the other deleted.
+  - **The codes are kept too, so the erasure half was the condition, not a nicety.** A kept row from
+    `tblTotpBackupCodes` is a second copy of authentication material outside the table erasure
+    protects. `GdprEraser::catalogue()` deletes this table by `userID` — whole rows, not blanked
+    ones, because a kept row with its person taken out could not be put back anywhere — and it may
+    never be added to the pinned "left behind on purpose" list in `tools/gdpr-coverage-selftest.php`.
+  - **Only two tables are ever kept**, by an allow-list (`DbBackup::CASCADE_RESCUE`) rather than by
+    working it out from the schema. Without that, a table joining `WHOLE_DATABASE_ONLY` later would
+    start depositing rows of unreviewed content into a table whose privacy handling was thought
+    through for two known shapes. It is also what makes the table name safe to put into a statement.
+  - **Over twenty thousand rows and NONE is kept**, deliberately, with the count said out loud:
+    keeping some would read as keeping all of them. That ceiling's code path is **not** exercised by
+    any test, and proof 27 says so in its header rather than leaving it to be assumed.
+  - **Two faults of my own here, both caught by a test and neither by reading.** The mark saying a row
+    had gone back was written `if ($put > 0)`, which marked *every* row as put back the moment *one*
+    succeeded — so a row that could not go back would have stopped being offered, which is the single
+    thing this feature exists to prevent. And the INSERT skipped any column whose `EXTRA` contains the
+    word `GENERATED`, which is how MySQL describes **any** column declared `DEFAULT CURRENT_TIMESTAMP`
+    — so `updatedAt` was dropped and re-stamped with the moment of the put-back. The row was back,
+    with the right key and the right value, and the wrong "last changed" date. The class already had
+    `columnFacts()`, which reads `GENERATION_EXPRESSION` and whose comment warns against exactly that
+    test; I wrote a worse copy beside it. Only the check that compares *every value of every table*
+    caught it — every row-exists check passed.
+  - **A database whose upgrade has not been run degrades honestly.** The holding table is not there
+    until migration 233 has run, and files reach a server before anybody presses "Run migrations". So
+    every reader asks first (`SHOW TABLES LIKE`, the house pattern); the restore then goes ahead, the
+    rows are named and lost as before, and the warning says why they could not be kept. Refusing the
+    restore instead would block a recovery at the one moment somebody is recovering.
+  - **Five things the independent check found, and two of them were untrue sentences an administrator
+    would read.** First, the words naming the lost settings rows said "its postal address, map
+    position, what3words address and support e-mail" — but the rescue takes EVERY row with a
+    `siteID`, whatever its key — `attend.detailRetentionDays`, `giving.retention.years` and the four
+    `mail.queue.*` numbers are per-organisation too, and **seven** files under `web/` can write such
+    a row. Naming four address fields to somebody whose retention periods had just gone would be worse
+    than saying nothing. The sentence is now general, and the page names the actual **keys**, lifted
+    out of each kept row — a key says what a setting is without being a value. Second, two comments
+    claimed a kept sign-in-code row carried its owner's e-mail address; `tblTotpBackupCodes` has no
+    such column, so two clauses of the privacy check **could never fail**. They are replaced with
+    clauses that can.
+  - **A row put back kept its whole copy for ever, and four documents said otherwise.** Nothing
+    anywhere deletes a marked row — Discard takes only waiting rows and the page lists only waiting
+    rows — so a hash of somebody's sign-in code, or a stored setting value, would have sat in the
+    holding table indefinitely and travelled into every later snapshot and off-site copy. That is the
+    unbounded second copy of authentication material the owner was warned about when they chose to
+    keep the codes. `rowJson` is now **emptied in the same statement that marks the row**: once the
+    row is back, the copy has no purpose, and what is worth keeping is the record that it was held and
+    returned. The column is nullable for that reason.
+  - **The rescue asked the wrong question, and no existing check could catch it.** It asked whether a
+    table was on the held-back list — which is built only from names the manifest itself holds. So a
+    snapshot that simply did not CONTAIN `tblSettings` (an imported one, or a hand-edited manifest)
+    restored `tblSites`, let the cascade wipe every per-organisation row, rescued nothing and printed
+    no #694 warning at all. It now asks whether the table is being **put back**, which covers both.
+    Section F of proof 27 is the check, and it is decisive because its snapshot still says it covers
+    the whole database, so nothing is held back and the old reading would rescue nothing.
+  - **Smaller things from the same round:** the waiting-rows read takes `FOR UPDATE`, because without
+    it two administrators pressing at once could be told "1 could not be put back and is still being
+    kept" about a row that is back (the house rule the four money writers follow, #647);
+    `discardHeldRows()` answers **-1** rather than 0 for a table it keeps no rows for, because
+    answering 0 for both made the page say "0 kept row(s) for <anything posted> discarded" and write
+    that name into the activity log; the row-count ceiling's recount loop was missing the identifier
+    check its sibling applies; and the long docblock explaining `WHOLE_DATABASE_ONLY` had been
+    orphaned onto the new constant, taking its `@var` with it.
+  - **A second round found five more, and two of my own numbers were wrong.** I wrote "32 files under
+    `web/` write such rows". **Seven** can. 32 was not even the count of the thing I cited: the grep I
+    put in the notes (`grep -rln "INSERT INTO tblSettings" web/_apps web/_core | wc -l`) gives **30**,
+    and it counts files that write *any* settings row — nearly all of which bind `siteID` as the
+    literal `NULL`. `.claude/CLAUDE.md` **already said "seven per-organisation writers"** from #668
+    and I contradicted my own instruction file. Establish this by reading each INSERT's column list
+    against its VALUES, never by counting files that mention the table. This is the same shape as the
+    fault the first round existed to repair, two rounds running.
+  - **The `FOR UPDATE` took no lock at all.** It was added to a SELECT that ran *before*
+    `begin_transaction()`. Nothing in `web/_core/` touches autocommit, so the implicit transaction
+    around that SELECT committed the moment it finished and every row lock went with it — while an
+    eleven-line comment, the changelog and both instruction files all claimed it stopped two
+    administrators reading the same rows. The transaction now starts first. **A lock outside a
+    transaction is decoration, and the comment was the only thing asserting otherwise.**
+  - **"Because this snapshot does not cover tblSettings" is false in the commonest case**, and the
+    restore contradicted itself in one answer. An old-form snapshot *does* contain `tblSettings` —
+    the held-back list is built from the manifest's own list, so a table has to be in the snapshot to
+    be held back at all. The same answer already said "tblSettings … were left exactly as they are".
+    So an administrator mid-recovery was told their settings were not in their backup when they were.
+    Both the warning and the card now say the **restore** could not put the table back, which covers
+    held-back and simply-absent alike. Nothing held that wording until the independent check; two new
+    checks do now, including one that the contradicting sentence is still there.
+  - **`put_held_back` still wrote a posted table name into the activity log**, under an event type
+    saying a put-back had been attempted and failed. The discard branch had just been fixed for
+    exactly that; the put-back branch had not. Both route an unknown name to `BackupActionRefused`
+    with no name now.
+  - **Section 18 of the eraser test gave an untrue reason, 25 lines below its own correction.** It
+    said a marked row "still holds their sign-in codes"; after the fix above a marked row has
+    `rowJson` emptied, and it never held an e-mail address. The real reason it must go is that it
+    still **names the person** in the column the instruction matches on. Its fixture now nulls
+    `rowJson` as the portal does, because a fixture in a state production can never reach is testing
+    nothing.
+  - **Also corrected: "unused" two-factor backup codes**, in five places. The cascade takes every row
+    with a `userID`; `auth/2fa/verify.php` marks a spent code `isUsed = 1` and keeps the row, so the
+    record of which codes have been spent goes too — and that record is exactly what
+    `WHOLE_DATABASE_ONLY` exists to protect.
+  - **A third round found three more, and two were failures to APPLY a correction already written
+    down.** Round 2 recorded that "unused" two-factor codes was wrong in five places, and that
+    "address rows" understated what the cascade takes. Round 3 found both wordings still live in the
+    in-app help page, migration 233's own header, section 18 of the eraser test, this changelog,
+    `.claude/HANDOFF.md`, and — on the very line recording the correction — `.claude/CLAUDE.md` and
+    its `.OpenAI` mirror. **A document that asserts a fix while stating the thing it fixed is worse
+    than one that says nothing**, because the next reader stops looking. The help page mattered most:
+    its own comment says it is said there because it is the page somebody opens when they are about
+    to put a backup back — so it was the one sentence a customer reads *before* deciding whether to
+    accept the loss, and it understated it.
+  - **Making the lock real made a new path reachable that the broken version never could.**
+    `prepare`, `bind_param`, `execute` and `get_result` sat outside the `try`, and under
+    `mysqli_report(MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR)` all of them throw — it takes BOTH
+    flags on the statement path, which I had wrong in four documents after correcting it in the two
+    code comments — and then got wrong a second way, see below. With the lock genuinely held a second
+    administrator now BLOCKS; the page has already called `TimeLimit::atLeast(900)`, so PHP will not
+    cut it off first, and at `innodb_lock_wait_timeout` (50 seconds by default) `execute()` throws
+    ERROR 1205 — escaping with the transaction **open**. That gave a bare 500 instead of the honest
+    message the method exists to give, and because `Logger::db()` hands back the *same* connection
+    the `tblErrors` row was written inside the open transaction and rolled back on disconnect: **the
+    fault left no record anywhere.** The read is inside the `try` now, with a `finally` that frees and
+    closes on every path, and the message tells the second administrator to wait and try again.
+  - **A check made only of absences passes when the thing stops happening at all.** Section P
+    asserted that the posted table name was *not* in the activity log and the event type was *not* a
+    failed put-back — so deleting the `$record()` call entirely left it green, under a name claiming
+    "the refusal is recorded WITHOUT the posted name". The positive clause comes first now. Same
+    family as #668's section D.
+  - **A fifth round found three more, and one of them I had corrected in the code and left wrong in
+    four documents.** I wrote that `MYSQLI_REPORT_ERROR` is what makes mysqli throw. It is not:
+    **it takes BOTH flags**, and my first
+    "correction" was wrong too. Measured on the statement path (`prepare()` on a missing table):
+    `ERROR` alone returns false and warns; `STRICT` alone returns false **silently**; only
+    `STRICT | ERROR` throws. My original measurement was of a *connect* error, which is reported
+    whatever `ERROR` says — so `STRICT` alone does throw there, and I generalised that to statements.
+    **Measuring the wrong code path and then writing "measured, not reasoned" against the conclusion
+    is worse than reasoning**, because the next reader has no cause to doubt it. The two code comments had been corrected a round
+    earlier; `.claude/CLAUDE.md`, `.OpenAI/CONTEXT.md`, `CHANGELOG.md` and `DEV_NOTES.md` were left
+    telling the next reader that the wrong flag is load-bearing — the fifth time in this package that
+    a correction was recorded and applied in one place.
+  - **Also: a pronoun with no antecedent, and a log line that said the opposite of what happened.**
+    The over-the-ceiling sentence read "as they stood when **it** was taken", where "it" was first
+    defined later in the same sentence. And a discard REFUSED by the database was recorded as
+    `BackupHeldRowsDiscarded` — the same event type as a successful one — so a log search by type
+    counted a run in which nothing was discarded. The put-back branch separates its success from its
+    failure and its comment names that exact harm, so this was the same half-applied fix a fourth
+    time. It has its own type now, `BackupHeldRowsDiscardFailed`, added to the page test's allow-list.
+  - **Then the design changed, because the same thing kept failing.** The warning sentence had grown
+    to ninety lines and nine nested ternaries over five rounds, and **four of the six wording faults
+    those rounds found were inside it** — every one a ternary in the middle of a clause, and not one
+    findable by any check, because nothing judges how an assembled sentence reads. It is now
+    `DbBackup::cascadeWarning()`, holding **eight complete sentences** named by the three facts that
+    choose between them (ahead/done, kept/lost, one/many). A missing combination is obvious and a
+    wording fault is visible without evaluating anything in your head. All sixteen outputs were
+    printed by calling the real method, so nothing was transcribed. This is the project's own rule
+    being followed: when the same item fails two rounds running, simplify before refining again.
+  - **A sixth round found four more, and the worst was that my own correction was wrong the same way.**
+    I had written that `MYSQLI_REPORT_STRICT` is what makes mysqli throw, with "measured, not reasoned"
+    beside it. I had measured a **connect** error. On the STATEMENT path — the four calls the sentence
+    is about — `ERROR` alone returns false and warns, `STRICT` alone returns false **silently**, and
+    only both together throw. A connect error is reported whatever `ERROR` says, which is why `STRICT`
+    alone throws there and why the measurement looked conclusive. **Measuring the wrong code path and
+    then writing "measured" against the conclusion is worse than reasoning**, because the next reader
+    has no cause to doubt it. `web/_core/bootstrap.php`'s own comment carried the same untruth, in the
+    authoritative place, and is corrected too — one comment line outside this package's file list.
+  - **A sentence that was wrong both ways round.** It first hedged on whether the snapshot CONTAINS the
+    table and said nothing about row currency; the round-4 fix hedged on currency and ASSERTED
+    presence — false for the case round 2 had just added coverage for, a snapshot that does not contain
+    the table at all. Wrong in the reassuring direction: it told somebody mid-recovery that rows they
+    had just lost for good were readable from their backup. All three places now state both
+    conditions, the Discard button's confirmation included. The CAUSE is no longer asserted either
+    ("most likely this database has not had its upgrade run"): all the code knows is that the table is
+    absent, and a hand-dropped table looks the same.
+  - **A fourth clause that cannot fail**, and the same shape deleted forty lines below it in the same
+    edit with the reason attached: `discardHeldRows('tblSettings') >= 0`, when the method ends
+    `return max(0, $gone)`. Gone, with what it failed to test said plainly instead.
+  - **Half the eight sentences were exercised by nothing.** The `canKeep === false` branch — what an
+    un-upgraded database sees — was reached by no check in either test, and proof 27's own "what this
+    cannot show" list had not mentioned it. **Section G reaches all four now**, and it caught two
+    faults of its own in two runs, both mine: it first restored a snapshot taken while the holding
+    table still existed (so the restore failed outright, correctly, on a table the database no longer
+    had — an un-upgraded database's snapshots have no such table either), and then ran the rehearsal
+    AFTER the real restore, by which point there was nothing left to lose and nothing to warn about.
+    `brs_tidy()` also puts the table back if that section is killed between its two renames, so a
+    killed run cannot poison the next.
+  - **What this still does not do, now tracked as #697.** `tblRestoreHeldRows` is an ordinary table,
+    so restoring a snapshot taken before some rows were kept replaces them — and those waiting rows
+    are the only copy outside the snapshot being restored from. The restore now **warns**, before and
+    after, naming the count and saying to clear them first. A warning is not a fix, and which fix to
+    make is the owner's choice.
+  - Tests: proof 27 of `tools/backup-restore-selftest.php` (the class, against a real database),
+    section P of `tools/backup-page-selftest.php` (the page, over real HTTP), section 18 of
+    `tools/gdpr-eraser-selftest.php` (the erasure really runs and touches nobody else's row).
 - **Changed — a date a series pattern change ADDS now arrives as a draft (#692, the owner's decision of 31 October 2026)**
   - It used to inherit the template date's status, so on a published series the new dates appeared on
     the public calendar the moment somebody pressed the button. They now arrive unpublished and

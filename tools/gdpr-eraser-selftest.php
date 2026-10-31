@@ -226,10 +226,10 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 230;
+const EXPECTED_CHECKS = 235; // 230 before section 18 (#694) added five
 
 // The headings that must all be reached for a pass.
-const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17'];
+const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18'];
 
 // 🗺️ The made-up people and requests. Every number is 920000 or higher, far
 //    above anything the fresh-install script seeds.
@@ -281,6 +281,9 @@ const REQ_O       = 940087;
 // section 14 already had, and the run stopped on a duplicate account.
 const P_LOG   = 920201; // erased in section 17
 const REQ_LOG = 940201;
+
+const P_HELD   = 920202; // erased in section 18: his kept rows must go from the holding table too (#694)
+const REQ_HELD = 940202;
 const SITE_G1     = 3;      // "tax gifts only" (the default rule), in Europe/London
 const SITE_G2     = 4;      // "every gift", in Pacific/Auckland
 const SITE_K      = 12;     // section 16: "tax gifts only", in Pacific/Kiritimati, fourteen hours AHEAD of UTC
@@ -4781,5 +4784,132 @@ ge_ok('A RECORD WRITTEN BEFORE #626, naming nobody in its own column, is left ex
     && $factsOnlyAfter['visitorIP'] === '203.0.113.9',
     json_encode(['before' => $factsOnlyBefore, 'after' => $factsOnlyAfter,
         'what this means' => 'if this check FAILED, the erasure has begun reaching records that do not name the person — read the comment above it before changing anything']));
+
+// =============================================================================
+ge_section('18', 'Rows a restore kept: an erased person\'s sign-in codes go from the holding table too (#694, 31 October 2026)');
+// =============================================================================
+// WHAT THIS IS FOR, AND WHY IT IS NOT OPTIONAL. Since #694 a restore that
+// cannot put a table back KEEPS the rows the database's own rules removed, in
+// `tblRestoreHeldRows`, so an administrator can put them back or discard them
+// deliberately instead of losing them in silence.
+//
+// Two kinds of row are kept, and one of them is authentication material: the
+// two-factor backup codes of `tblTotpBackupCodes`, spent ones included. That makes the
+// holding table a SECOND COPY of something the erasure already deletes — and a
+// second copy outside the erasure's reach would mean a person asked to be
+// erased, was told they had been, and the hash of their sign-in codes sat in
+// another table until somebody happened to press Discard.
+//
+// BE EXACT ABOUT WHAT A KEPT CODE ROW HOLDS. An earlier version of this comment
+// said it carried their e-mail address as well. It does not:
+// `tblTotpBackupCodes` is (codeID, userID, codeHash, isUsed, usedAt, createdAt)
+// and has no e-mail column — so a check looking for an address here could never
+// fail, and one of them did not. The independent check caught it. What a kept
+// row really gives away about a person is the `userID` column beside it, which
+// is what the instruction matches on, and the code hash itself.
+//
+// The owner chose to keep both kinds on 31 October 2026, having been told that
+// about the codes. So the erasure half was not a nicety; it was the condition.
+//
+// The coverage test (tools/gdpr-coverage-selftest.php) proves the INSTRUCTION
+// is in the written list and cannot be hidden. This proves the statement it
+// builds really runs, really deletes, and touches nobody else's row.
+//
+// WHY `delete` AND NOT `anonymise`. A kept row has no value of its own: it is a
+// copy of a row that either goes back whole or does not go back. Blanking the
+// person out of it would leave a row that cannot be put back and cannot be
+// read, which is worse than no row at all.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+ge_user(P_HELD, 'Hugh Held', 'hugh.held@selftest.invalid');
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+
+$heldInsert = static function (string $table, ?int $site, ?int $user, string $json): int {
+    ge_q(
+        'INSERT INTO tblRestoreHeldRows (tableName, siteID, userID, rowJson, snapshotName, heldAtUtc) '
+        . 'VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP())',
+        'siiss',
+        [$table, $site, $user, $json, 'upgrade-20260901-120000']
+    );
+    return (int) (ge_one('SELECT LAST_INSERT_ID() AS n')['n'] ?? 0);
+};
+// The person's own: one still waiting, one already put back. BOTH must go, and
+// BE EXACT ABOUT WHY, because an earlier version of this comment was wrong
+// twice: it said a marked row "still holds their e-mail address and their
+// codes". There is no e-mail column (said correctly 25 lines above), and since
+// #694's fix round a marked row has `rowJson` EMPTIED, so it holds no codes
+// either. What it still does is NAME THE PERSON, in the `userID` column the
+// instruction matches on, beside which snapshot it came from and when. That is
+// what has to go. The marked fixture therefore has `rowJson` null, exactly as
+// the portal now writes one — a fixture in a state production cannot produce
+// would be testing something that cannot happen.
+$heldWaiting = $heldInsert('tblTotpBackupCodes', null, P_HELD, '{"codeID":970960,"userID":' . P_HELD . ',"codeHash":"not-a-real-hash-1","isUsed":0}');
+$heldDone    = $heldInsert('tblTotpBackupCodes', null, P_HELD, '{"codeID":970961,"userID":' . P_HELD . ',"codeHash":"not-a-real-hash-2","isUsed":0}');
+ge_q('UPDATE tblRestoreHeldRows SET putBackAtUtc = UTC_TIMESTAMP(), rowJson = NULL WHERE heldID = ?', 'i', [$heldDone]);
+// Somebody else's, and one belonging to no person at all (a settings row).
+// Neither may be touched: an erasure that cleared the whole table would
+// destroy another person's only copy of their own codes.
+$heldOther   = $heldInsert('tblTotpBackupCodes', null, D, '{"codeID":970962,"userID":' . D . ',"codeHash":"not-a-real-hash-3","isUsed":0}');
+$heldNobody  = $heldInsert('tblSettings', 1, null, '{"settingID":970963,"siteID":1,"settingKey":"org.address.line1","settingValue":"an address"}');
+
+$readHeld = static fn (int $id): ?array => ge_one(
+    'SELECT heldID, tableName, siteID, userID, rowJson, snapshotName, putBackAtUtc FROM tblRestoreHeldRows WHERE heldID = ?',
+    'i',
+    [$id]
+);
+$otherHeldBefore  = $readHeld($heldOther);
+$nobodyHeldBefore = $readHeld($heldNobody);
+
+ge_ok('four kept rows are on file before the erasure: two of the person\'s (one waiting, one already put back), one of somebody else\'s and one belonging to no person',
+    $readHeld($heldWaiting) !== null && $readHeld($heldDone) !== null
+    && $otherHeldBefore !== null && $nobodyHeldBefore !== null,
+    json_encode(['waiting' => $readHeld($heldWaiting), 'put back' => $readHeld($heldDone),
+        'someone else' => $otherHeldBefore, 'nobody' => $nobodyHeldBefore]));
+
+ge_request(REQ_HELD, P_HELD, 'hugh.held@selftest.invalid', 'Hugh Held', 'processing');
+$resultHeld = ge_execute(REQ_HELD, P_HELD);
+
+ge_ok('THE ERASED PERSON\'S KEPT ROWS ARE GONE FROM THE HOLDING TABLE — the one still waiting AND the one already put back, because a marked row still NAMES THE PERSON in the column the instruction matches on, even with its copy of the data emptied',
+    is_array($resultHeld) === true && $resultHeld['failed'] === 0
+    && $readHeld($heldWaiting) === null && $readHeld($heldDone) === null,
+    json_encode(['the run' => is_array($resultHeld) === true ? ['failed' => $resultHeld['failed']] : (string) $resultHeld,
+        'waiting' => $readHeld($heldWaiting), 'put back' => $readHeld($heldDone)]));
+
+ge_ok('SOMEBODY ELSE\'S KEPT ROW IS NOT TOUCHED: every column of it is as it was, so one person\'s erasure cannot destroy another\'s only copy of their own sign-in codes',
+    ge_same($otherHeldBefore, $readHeld($heldOther)) === true,
+    json_encode(['before' => $otherHeldBefore, 'after' => $readHeld($heldOther)]));
+
+ge_ok('AND A KEPT ROW THAT BELONGS TO NO PERSON IS NOT TOUCHED EITHER: a per-organisation settings row names nobody, so there is nothing on it to erase',
+    ge_same($nobodyHeldBefore, $readHeld($heldNobody)) === true,
+    json_encode(['before' => $nobodyHeldBefore, 'after' => $readHeld($heldNobody)]));
+
+// Asked of the WHOLE table, not of the two rows this section made, so a third
+// row written by something else would be caught — and asked two ways, because
+// the instruction matches on `userID` and a WAITING row also names the person
+// inside its JSON. (A marked row's JSON is NULL and matches nothing either way,
+// which is why the first clause is the one that proves a marked row went.)
+//
+// 🔍 THE SECOND CLAUSE USES JSON_EXTRACT, NOT `LIKE`, AND THAT IS THE THIRD
+//    TIME THIS SHAPE HAS BEEN CAUGHT HERE. It was written
+//    `rowJson LIKE '%"userID":920202%'`, which counts 0 for EVERY database
+//    state, so it passed on an eraser that deleted nothing — in the very fix
+//    for two earlier clauses that could never fail.
+//
+//    Why: `rowJson` is a real `JSON` column, and MySQL NORMALISES JSON on
+//    storage. Measured on mysql:8.0.36, the row above comes back as
+//      {"codeID": 970960, "isUsed": 0, "userID": 920202, "codeHash": "..."}
+//    — keys reordered AND a space after every colon. So the un-spaced pattern
+//    matches nothing, and the spaced one matches.
+//
+//    DO NOT "FIX" IT BY ADDING THE SPACE. On MariaDB `JSON` is an alias for
+//    `LONGTEXT` and nothing is normalised, so the un-spaced pattern WOULD
+//    match there: a `LIKE` either way is vacuous on one engine and live on the
+//    other, which is the worst of both. JSON_EXTRACT asks the question itself
+//    and works on both.
+ge_ok('nothing of the erased person is left anywhere in the holding table, asked of the whole table and both by the column and inside the kept row',
+    (int) (ge_one('SELECT COUNT(*) AS n FROM tblRestoreHeldRows WHERE userID = ?', 'i', [P_HELD])['n'] ?? -1) === 0
+    && (int) (ge_one('SELECT COUNT(*) AS n FROM tblRestoreHeldRows WHERE JSON_EXTRACT(rowJson, \'$.userID\') = ?', 'i', [P_HELD])['n'] ?? -1) === 0,
+    json_encode(ge_q('SELECT heldID, userID, rowJson FROM tblRestoreHeldRows')));
+
+ge_q('DELETE FROM tblRestoreHeldRows WHERE heldID IN (?, ?)', 'ii', [$heldOther, $heldNobody]);
 
 ge_finish();

@@ -769,6 +769,22 @@ return [
         'reason'   => 'A task on the organisation\'s to-do list. It stays. Whoever it was given to is detached, so it is unassigned, and so is whoever created it.',
         'columns'  => ['assignedToID', 'createdByID'],
     ],
+    // 🛟 #694, migration 233. A whole-database restore from an old-form
+    //    snapshot keeps the rows a cascade was about to take, so an
+    //    administrator can put them back instead of losing them in silence.
+    //    One of the two tables it keeps rows from is tblTotpBackupCodes, so a
+    //    held row can carry a hash of somebody's single-use sign-in code: a
+    //    SECOND COPY of authentication material, outside the table that
+    //    normally holds it. Erasing by userID is what stops it surviving an
+    //    erasure, and was the condition of keeping those rows at all.
+    //
+    //    A held tblSettings row has a NULL userID and is untouched: it belongs
+    //    to an organisation, not a person.
+    'tblRestoreHeldRows' => [
+        'decision' => 'erase',
+        'reason'   => "Rows a restore could not put back, kept so somebody can. A kept row from tblTotpBackupCodes carries a hash of this person's sign-in code, so it is a second copy of what the main table holds and goes with them. The whole row is deleted rather than anonymised: a kept row with its person taken out could not be put back anywhere.",
+        'columns'  => ['userID'],
+    ],
     'tblTotpBackupCodes' => [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',

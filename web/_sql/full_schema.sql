@@ -1686,6 +1686,53 @@ COMMENT='TOTP backup/recovery codes';
 
 
 -- -----------------------------------------------------------------------------
+-- 🛟 tblRestoreHeldRows — rows a restore was about to lose (migration 233, #694)
+-- -----------------------------------------------------------------------------
+-- A whole-database restore from an OLD-FORM snapshot (one .json per table, no
+-- `format` in the manifest) holds back the three tables on
+-- `DbBackup::WHOLE_DATABASE_ONLY`, because each records what has already
+-- happened. But it still replaces `tblSites` and `tblUsers` — and two of those
+-- held-back tables are their children with ON DELETE CASCADE:
+--
+--     tblSettings.siteID        -> tblSites.siteID        ON DELETE CASCADE
+--     tblTotpBackupCodes.userID -> tblUsers.userID        ON DELETE CASCADE
+--
+-- so the cascade deleted them and nothing put them back. Since migration 231
+-- (#677) that silently cost every organisation its postal address, map
+-- position, what3words address and support e-mail on any restore of a backup
+-- taken before 27 October 2026. The rows now land here instead.
+--
+-- NO FOREIGN KEY on `siteID` or `userID`, deliberately: a row is here precisely
+-- BECAUSE the parent it pointed at has just been deleted. A key would refuse
+-- the insert, or a later cascade would delete the very rows this table exists
+-- to keep.
+--
+-- Rows wait until an administrator puts them back or discards them, from the
+-- Backup page. Nothing expires on a clock (the owner, 31 October 2026): these
+-- rows exist while somebody is mid-recovery, so a timer that deleted them
+-- part-way through would be the same silent loss, one step on.
+--
+-- `GdprEraser` clears this table by `userID` — not optional, because the backup
+-- codes make it a second copy of authentication material outside the table
+-- erasure protects.
+CREATE TABLE IF NOT EXISTS `tblRestoreHeldRows` (
+    `heldID`       INT          NOT NULL AUTO_INCREMENT,
+    `tableName`    VARCHAR(64)  NOT NULL COMMENT 'The table the row came out of. Only the names on DbBackup''s own allow-list are ever written here',
+    `siteID`       INT          DEFAULT NULL COMMENT 'The organisation the row belonged to, copied out of the row so the Backup page can say whose it was. NO foreign key on purpose: the row is here because that organisation''s row has just been deleted',
+    `userID`       INT          DEFAULT NULL COMMENT 'The person the row belonged to, copied out of the row so GdprEraser can reach it (#694). NO foreign key, for the same reason as siteID',
+    `rowJson`      JSON         DEFAULT NULL COMMENT 'The whole row as it was read, so putting it back writes exactly what was there. EMPTIED the moment the row is put back (#694): a marked row is never offered again and nothing deletes one, so keeping the copy would leave a hash of somebody''s sign-in code, or a stored setting value, here for ever and in every later snapshot. What is kept is the RECORD that it was held and returned - every other column',
+    `snapshotName` VARCHAR(255) NOT NULL COMMENT 'Which snapshot was being restored when this row was taken',
+    `heldAtUtc`    DATETIME     NOT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when the restore took this row',
+    `putBackAtUtc` DATETIME     DEFAULT NULL COMMENT 'A MOMENT IN UTC: when an administrator put this row back. NULL means it is still waiting. A row is never deleted by a clock - the owner decided on 31 October 2026 that it waits until somebody clears it',
+    PRIMARY KEY (`heldID`),
+    KEY `idx_heldrows_user` (`userID`),
+    KEY `idx_heldrows_site` (`siteID`),
+    KEY `idx_heldrows_waiting` (`tableName`, `putBackAtUtc`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Rows a whole-database restore was about to lose to a cascade, kept so somebody can put them back or discard them (#694)';
+
+
+-- -----------------------------------------------------------------------------
 -- 🔄 tblWorkflows — configurable workflow definitions (migration 034)
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `tblWorkflows` (
@@ -10596,4 +10643,13 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('231_organisation_address_per_s
 -- migration 220's — and it is only here so the installer's replay of every
 -- numbered migration finds nothing left to do.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('232_series_repattern.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 233_restore_held_rows.sql (#694) ────────────────────────────────────
+-- Nothing to do here: `tblRestoreHeldRows` is created in the table block above,
+-- so a fresh install already has it. The mark is written UNCONDITIONALLY — the
+-- migration only creates a table, so there is no "do this once" work to test
+-- for — and it is here so the installer's replay of every numbered migration
+-- finds nothing left to do.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('233_restore_held_rows.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
