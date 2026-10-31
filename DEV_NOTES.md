@@ -12047,3 +12047,76 @@ never found; `null['usedAt']` is null; the clause passed on a row that did not e
 warning nobody read. It now calls the portal's own function and requires the row to **exist** —
 writing the prefix out in the test would be a second copy of the portal's rule, which is the same
 fault one step further on.
+
+---
+
+## Two fixes of mine that looked right and were not (31 October 2026)
+
+Both from the #692 package (a date a pattern change adds now arrives as a draft). Neither was found
+by reading; the first was found by planting and the second by `git show`.
+
+### 1. A fix that cannot work, because the page had already consumed what it needed
+
+A new check asked for the message the pattern-change handler writes — "N date(s) added as drafts" —
+on the page it redirects to, `calendar/manage/series-edit.php`. It came back "(no message shown)".
+
+I concluded the page had never printed the message it was given, wrote that into a long comment, and
+added a read of the session plus a block to print it. **The claim was false.** `git show HEAD` on
+that file shows one read of `flash_msg` and one block printing it, and it had always worked. What my
+"fix" did was add a **second** read before the page's own — and because the first read `unset`s the
+message, the page's own block then had nothing to print. So I broke a working page while believing I
+was repairing it, and the check went on failing, which looked like confirmation.
+
+**The actual cause was my own test, twice over.** It first read the message from the wrong page: the
+repattern page itself reads and unsets `flash_msg`, so opening that page consumed the message before
+the check could see it. Corrected, it then built the address by passing the handler's own `Location`
+straight to a helper that prefixes the organisation's part — joining two already-built addresses, the
+exact #536 trap — so the request landed somewhere with no message at all. Both failures print the
+identical "(no message shown)".
+
+Three things worth keeping:
+
+- **Before claiming a page has never done something, look at the committed version.** Two seconds of
+  `git show HEAD:<path>` would have stopped the whole detour. A backup taken *after* your own first
+  edit is not evidence about the original; mine showed two reads and I read that as "the page is
+  odd" rather than "I did that".
+- **"No message shown" has at least three causes** — the message was never set, something consumed
+  it first, or you are looking at the wrong page — and they are indistinguishable from the symptom.
+  Probing both ends (where it is set, where it is read, with `session_id()` on each) separated them
+  in one run after an hour of reasoning had not.
+- **A duplicate read of a one-shot value is a silent breakage.** `unset($_SESSION['flash_msg'])` is
+  destructive by design; a second reader anywhere earlier in the page wins and the later one shows
+  nothing, with no error.
+
+### 2. Why the draft decision needed three checks, not one
+
+`tblEvents.status` already defaults to `draft`, so the code change is one line. What is easy to get
+wrong is everything around it: the preview must say the dates will arrive as drafts *before* anything
+is written, and the message afterwards must say they did. Without the second, somebody presses the
+button, reads "2 date(s) added", and goes looking for them on the public calendar where they are not
+— a message that is not untrue and still misleads.
+
+Those two sentences live in two different places in the page and either could be deleted on its own,
+so each has its own check (S15b, S15c). The status check is written `=== 'draft'` rather than
+`!== 'cancelled'`: the weaker form passes on either answer, and the status is the whole of what #692
+changed.
+
+### And two more untrue sentences in the same package, both caught by the independent check
+
+Worth adding to the two above, because they are the same shape — a confident sentence nobody had
+measured — and because one of them I had already written into three documents.
+
+**"Anybody subscribing to this calendar now sees one repeating entry."** The message said this
+whenever the repeat rule row was written. The rule row is decided on the series' dates alone, which is
+right. But `calendar/export.php` reads a series' run with `AND e.status = 'published'` and collapses
+it into one `VEVENT` only when those published rows match the rule's expansion. Once the added dates
+are drafts they never can, so a subscriber sees one entry per date — the literal opposite of the
+sentence, for exactly the change just made. Before #692 the added dates inherited `published` and the
+two agreed. **A sentence can be true for years and be falsified by a change three files away.** The
+message now has three answers and names how many drafts are holding it up.
+
+**"Publish them one at a time."** I wrote that in the preview, in a code comment and in `FEATURES.md`,
+and raised an issue (#696) for the bulk control I assumed was missing. The handler redirects to the
+series' **bulk edit** page, which already lists every date including drafts with a tick-box each and a
+bulk `Status` control. So the facility existed, on the very page the administrator lands on. **Before
+writing "you cannot do X yet", open the page they are sent to.** #696 is closed as not planned.

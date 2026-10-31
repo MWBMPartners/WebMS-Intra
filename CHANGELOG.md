@@ -2,6 +2,51 @@
 
 
 ## [Unreleased] (alpha)
+- **Changed — a date a series pattern change ADDS now arrives as a draft (#692, the owner's decision of 31 October 2026)**
+  - It used to inherit the template date's status, so on a published series the new dates appeared on
+    the public calendar the moment somebody pressed the button. They now arrive unpublished and
+    somebody has to publish them from Manage Events.
+  - **Why:** an added date is a copy of the series and nothing more. It has no registration window of
+    its own — the template's `registrationClosesAt` is a moment just before the TEMPLATE's own date,
+    so a date added weeks later would arrive with registration already closed — and nothing beyond
+    the series' description. A draft is one click from being right; a wrongly published service is
+    not, and **there is no way in this repository to bring back a date that has been hidden** (#691).
+  - **Saying so is half of it.** The preview says it before anything is written, and the message
+    afterwards says "N date(s) added as drafts" rather than "added" — without that, the first thing
+    anybody does is go looking for the dates on the public calendar, where they are not. Both
+    wordings are pinned by checks of their own (S15b, S15c), because they live in two places and
+    either could be dropped alone.
+  - **Publishing them all at once already works**, and the independent check found that out after I
+    had written the opposite in three places. The handler redirects to the series' **bulk edit** page,
+    which lists every date including drafts with a tick-box each and a bulk Status control. The
+    preview, a code comment and `FEATURES.md` all said "one at a time" and pointed at the wrong page;
+    all three are corrected, and **#696 is closed as not planned** — I raised it from an assumption
+    without reading the page the handler redirects to.
+  - **And the message told subscribers the opposite of the truth, which the independent check also
+    caught.** It said "Anybody subscribing to this calendar now sees one repeating entry" whenever the
+    repeat rule was written — but `calendar/export.php` reads a series' run with
+    `AND e.status = 'published'` and collapses it only when the *published* dates match the rule. With
+    the added dates in draft they never can, so a subscriber sees each date on its own: the sentence
+    claimed the opposite of what the feed does, for exactly the change just made. Before #692 the
+    added dates were published, the two agreed, and it was true. The message now has **three**
+    answers, not two, and says how many drafts are holding it up. The rule row is still decided on
+    the dates alone, which is right — the pattern either describes the series or it does not.
+  - Eight planted faults, all caught, including the one that matters most (the added date quietly
+    going back to inheriting the template's status) and both directions of the subscriber sentence.
+    Covering the second direction needed a new check on a change that only RE-TIMES dates: that
+    branch of the message had never been exercised, which planting proved by making the page claim
+    drafts remained when none did — and nothing failed.
+  - **A correction worth recording, because I reported it wrongly on the way.** I claimed
+    `calendar/manage/series-edit.php` had never printed the flash message it was given, and changed
+    it. That was **false**: `git show HEAD` shows one read and one print block, and it had always
+    worked. The real cause of the failing check was my own test — it first read the message from the
+    wrong page, then built its address by joining two already-built addresses (#536, "never join two
+    built addresses"), which doubled the organisation's part. My "fix" then added a second read of
+    the session, which consumed the message before the page's own block could print it — so for a
+    while I had broken a working page while believing I was fixing it. That page is untouched;
+    **#692 changes two files.** The lesson is the one already in memory: check the thing that would
+    disprove it, which here was two seconds of `git show`.
+
 - **Fixed — three more self-tests that were red at HEAD, found by running the WHOLE set for the first time (#695)**
   - The lesson from #690 was to run every self-test at the end of each package, not only the ones
     that touch what changed. Doing that found **three red tests, none of them broken by the work in
@@ -35,6 +80,36 @@
     `hash('sha256', 'reset-link-utc:' . $token)`. The row was never found, `null['usedAt']` is null,
     so it passed on a row that did not exist while raising a PHP warning nobody read. It now calls
     the portal's own `Auth::resetLinkFingerprint()` and requires the row to exist.
+- **Added — one command that runs every self-test (#695, `tools/run-all-selftests.sh`)**
+  - Starts the three throwaway MySQL servers, loads `full_schema.sql` into a database per test, runs
+    every self-test with exactly the environment its own workflow step gives it, prints one line per
+    test, removes the containers and exits non-zero if anything failed. `--list`, `--only <substring>`
+    and `--keep`. Deliberately **not** in the pre-push hook: that hook is nine seconds and this is
+    about fifteen minutes, and a push gate that slow gets bypassed with `--no-verify`.
+  - **It found a bug in itself on the first run, which is the argument for having built it:**
+    `docker exec -i` reads standard input, and the loop was being fed the test list on standard
+    input, so the first schema load swallowed the rest of the list. One database was built and 37
+    tests reported "Unknown database". Both loops now read the table on file descriptor 3.
+  - **Five more faults found by the independent check**, each of which would have made it report
+    green or near-green while something was wrong:
+    - `php -S` with `PHP_CLI_SERVER_WORKERS=6` forks six workers, and killing the master **orphaned
+      them, still bound to the port**. A later run then failed to bind (into a log nothing reads),
+      its readiness probe got an answer from the *old* server and said "ready", and the importer test
+      ran against a previous run's calendar fixtures and reported green. Measured: six such workers
+      were still serving two hours later. The children are now killed by this run's own scratch path,
+      and the port pre-flight covers **every** port the table names, not just the three database ones.
+    - `tools/maillib/tests/run.php` was missing from the table, so "every self-test" was untrue and a
+      full local run missed the one thing #592 exists to protect.
+    - The header promised it "refuses rather than running a reduced set that looks complete". Untrue
+      for five programs, which warn and carry on; it now says so, and says what each costs.
+    - A mistyped `--only` printed "0 tests ran; 0 not green" and exited **0** — a typo read exactly
+      like a clean run. It now refuses.
+    - `--help` printed a fixed line range that stopped just before the two sections a reader most
+      needs.
+  - Also: `--only` no longer builds all 38 databases for one test; an interrupt now stops rather than
+    tearing the servers down and running the rest against nothing; the QR test gets
+    `--with-qrencode` when qrencode is present, as the workflow does; and the API description's check
+    runs with `-I`, as `pr-security.yml` does.
 - **Fixed — two self-tests that ran in no workflow at all (#646's shape again, #671, #668)**
   - `tools/setting-limit-selftest.php` and `tools/offsite-settings-selftest.php` were invoked by
     nothing. Both now run in `portal-selftests.yml`, on every pull request with no path filter —
