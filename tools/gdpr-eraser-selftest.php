@@ -1477,9 +1477,36 @@ function ge_checkRows(array $world, array $before, array $expectStillNamed = [])
         }
 
         $onUpdate = [];
+        // 🧮 AND THE COLUMNS THE DATABASE WORKS OUT FOR ITSELF. A generated
+        //    column is a FUNCTION of the stored ones, so it necessarily changes
+        //    whenever an erasure empties one of its inputs — comparing it is
+        //    comparing the same fact twice and calling the second one a fault.
+        //
+        //    `ge_insert()` already steps over these when it builds a row (the
+        //    database refuses a value for them); this loop did not, which is
+        //    the asymmetry that broke it.
+        //
+        //    WHAT MADE IT SHOW UP, because it is worth knowing this was not a
+        //    real erasure gap: migration 224 (#487) added
+        //    `tblEventAttendance.attendeeRef`, VIRTUAL, as
+        //    `COALESCE(CONCAT('u:', userID), CONCAT('w:', walkinName))`. This
+        //    test's made-up row fills BOTH `userID` and `walkinName`, so when
+        //    erasure emptied `userID` the worked-out value flipped from
+        //    "u:920001" to "w:<made-up name>" and four checks reported a column
+        //    changing that nothing had written.
+        //
+        //    A REAL ROW NEVER HOLDS BOTH: `calendar/event-attendance-mark.php`
+        //    inserts either `userID` or `walkinName` (checked, both statements),
+        //    so after an erasure a real row's `attendeeRef` becomes EMPTY, which
+        //    is exactly what #487 says it must be — two erased people cannot be
+        //    told apart. So the erasure is right and the comparison was wrong.
+        $worked   = [];
         foreach (ge_columns($table) as $c) {
             if (stripos((string) $c['extra'], 'on update') !== false) {
                 $onUpdate[] = $c['name'];
+            }
+            if (stripos((string) $c['extra'], 'GENERATED') !== false) {
+                $worked[] = (string) $c['name'];
             }
         }
 
@@ -1537,7 +1564,9 @@ function ge_checkRows(array $world, array $before, array $expectStillNamed = [])
             }
         }
         foreach ($now as $name => $value) {
-            if (in_array($name, $onUpdate, true) === true || in_array($name, $changedOnPurpose, true) === true) {
+            if (in_array($name, $onUpdate, true) === true || in_array($name, $changedOnPurpose, true) === true
+                || in_array($name, $worked, true) === true
+            ) {
                 continue;
             }
             // An R2 row names the person in several columns, each emptied
@@ -4460,7 +4489,19 @@ $other->query('SELECT keptDonorID FROM tblGivingKeptDonors WHERE keptDonorID = '
 $jobCode = 'declare(strict_types=1); define("PORTAL_ROOT", getenv("SELFTEST_RACE_ROOT")); $core = getenv("SELFTEST_RACE_CORE");'
     . ' foreach (["App", "GivingRetention", "GdprEraser", "Giving", "Site", "Logger"] as $class) { require_once $core . $class . ".php"; }'
     . ' mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);'
-    . ' $mysqli = new mysqli(getenv("SELFTEST_RACE_HOST"), getenv("SELFTEST_RACE_USER"), getenv("SELFTEST_RACE_PASS"), getenv("SELFTEST_RACE_NAME"), (int) getenv("SELFTEST_RACE_PORT"));'
+    // ⚠️ `(string)` ON EVERY ONE, AND THE PASSWORD IS WHY. An EMPTY value in the
+    //    env array handed to `proc_open()` does not reach the child as an empty
+    //    string — the variable is simply absent, so `getenv()` answers FALSE.
+    //    PHP then refuses `false` for `new mysqli()`'s `?string $password` and
+    //    the child dies with a TypeError before it connects, which this test
+    //    reports as the retention job having answered nothing.
+    //
+    //    An empty password is the ORDINARY local setup (this file's own header
+    //    starts a container with `MYSQL_ALLOW_EMPTY_PASSWORD=1`), and CI sets a
+    //    password, so the fault appeared only off CI — where nobody had run it
+    //    since the tests this file shares a schema with began changing.
+    . ' $mysqli = new mysqli((string) getenv("SELFTEST_RACE_HOST"), (string) getenv("SELFTEST_RACE_USER"),'
+    . ' (string) getenv("SELFTEST_RACE_PASS"), (string) getenv("SELFTEST_RACE_NAME"), (int) getenv("SELFTEST_RACE_PORT"));'
     . ' $mysqli->set_charset("utf8mb4");'
     . ' echo "JOB ANSWER: " . Portal\\Core\\GdprEraser::clearKeptGivingIdentity((int) $argv[1]) . "\n";';
 $job = proc_open([PHP_BINARY, '-r', $jobCode, (string) $keptWd1['keptDonorID']], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $jobPipes, null, getenv() + [

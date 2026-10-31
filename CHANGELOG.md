@@ -2,6 +2,49 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — two self-tests that had been failing at HEAD, and nothing had run them since 27 October (#690)**
+  - `tools/gdpr-eraser-selftest.php` (now 230/230) and `tools/backup-restore-selftest.php` (now 364/364,
+    25 proofs) both failed on the committed tree. Every later package inherited a red baseline, and
+    because they run on any pull request touching `web/_sql/**`, the next pull request would have been
+    red whatever it contained.
+  - **One root cause behind most of it, and it was my own work.** Migration 231 (#677) copied each
+    organisation's address into its own `tblSettings` row — **the first row that table had ever held
+    with a non-empty `siteID`**. Several long-standing expectations had been true only because no such
+    row existed, and the behaviour they tripped over is older than they are.
+  - **The erasure test** compared `tblEventAttendance.attendeeRef`, the VIRTUAL generated column added
+    by migration 224. A generated column is a function of the stored ones, so it necessarily moves when
+    an erasure empties one of its inputs — from `u:920001` to `w:…` here. The comparison now steps over
+    columns the database works out, as the test's own row-builder already did. **Checked rather than
+    assumed that this is not an erasure gap:** both real writers in
+    `calendar/event-attendance-mark.php` set either `userID` or `walkinName` and never both, so on a
+    real row `attendeeRef` becomes EMPTY after erasure — exactly what #487 requires, since two erased
+    people must not be tellable apart.
+  - **A second, separate fault in the same test:** the retention-race proof spawns a child process, and
+    an EMPTY value in the environment array handed to `proc_open()` does not reach the child as an
+    empty string — the variable is simply absent, so `getenv()` answers `false`, which PHP 8.5 refuses
+    for `new mysqli()`'s `?string $password`. The child died before connecting. An empty password is the
+    ordinary local setup (the file's own header starts a container with `MYSQL_ALLOW_EMPTY_PASSWORD=1`)
+    and CI sets one, so this could only ever fail off CI.
+  - **The backup test** was failing because an OLD-FORM snapshot deliberately holds `tblMigrations`,
+    `tblSettings` and `tblTotpBackupCodes` back, while still restoring `tblSites` — and
+    `tblSettings.siteID` carries `ON DELETE CASCADE`, so replacing the sites takes the per-organisation
+    row with it and nothing puts it back. The restore warns about both halves, and **those two warnings
+    are now pinned by checks of their own**, so the comparisons that had to be narrowed are more than
+    paid for. The proofs that break the world now mend it where they break it, bounded to rows a
+    cascade could really have taken — a row with every link empty is left missing for the comparison to
+    catch, which was proved by planting.
+  - **A timing flake in the same test, which would have failed on a fast CI runner too:** proof 19
+    pre-creates the folder names for "this second" and the next to prove a snapshot will not reuse a
+    taken name — but a snapshot taken a few lines earlier can land in that very second, in which case
+    the check demanded that a folder holding 229 files be empty. It now checks only the folders it
+    really created.
+  - **And one guard removed for being unexercised.** A catch-all mend in the between-proof reset turned
+    out to catch nothing once the two per-proof mends existed: deleting it failed not one of the 364
+    checks. An unexercised guard is worse than none, because it is believed.
+  - Raised and not fixed: **#694** — restoring a pre-27-October backup silently loses every
+    organisation's address and support e-mail, by the mechanism above. The restore says a linked table
+    was changed, but names the table rather than what was lost, and nothing offers to put it back.
+
 - **Added — the pattern of a repeating series can be changed after it exists (#669, migration 232)**
   - Repeating events have shipped since #569 but **on creation only**, deliberately rather than
     half-offered. The new page `/calendar/manage/series-repattern`, reached from the series list, does
