@@ -1199,13 +1199,31 @@ $saidDelete   = $settingsPress($jar['adm'], '/settings', ['action' => 'delete', 
 $saidRootEdit = $settingsPress($jar['root'], '/settings/save', ['settingID' => $idOf(null, 'giving.retention.confirmed'), 'settingKey' => 'giving.retention.confirmed', 'settingValue' => 'true']);
 $saidRootOwn  = $settingsPress($jar['root'], '/settings/save', ['settingID' => $idOf(ORG_A, 'giving.retention.hold'), 'settingKey' => 'giving.retention.hold', 'settingValue' => 'false']);
 $saidRootDel  = $settingsPress($jar['root'], '/settings', ['action' => 'delete', 'settingID' => $idOf(null, 'giving.retention.hold')]);
+// 🛑 And the CEILING (#687), which is the newest of these keys and is locked
+//    here for a reason worth proving: a ceiling written in this editor would
+//    skip GivingRetention::organisationsAboveCap(), the refusal that stops a
+//    ceiling being set below a figure an organisation has already chosen. That
+//    refusal is what makes it a ceiling rather than a wish (#668).
+$saidCeiling  = $settingsPress($jar['root'], '/settings/save', ['settingID' => $idOf(null, 'giving.retention.maxYears'), 'settingKey' => 'giving.retention.maxYears', 'settingValue' => '3']);
 $lockedWords  = 'It can only be changed at Admin, Giving records';
 $wideNow      = array_column(q("SELECT settingKey, settingValue FROM tblSettings WHERE siteID IS NULL AND settingKey LIKE 'giving.retention.%' ORDER BY settingKey"), 'settingValue', 'settingKey');
 ok('THE GENERAL SETTINGS EDITOR REFUSES every change to a giving-records setting: an organisation\'s administrator editing the hold and the years, adding a new one, and deleting the year end; and a GLOBAL administrator editing the installation-wide "confirmed", editing an organisation\'s own hold, and deleting the installation-wide hold. Each time the page says where to change it, and not one of those rows moved',
-    count(array_filter([$saidEdit, $saidYears, $saidAdd, $saidDelete, $saidRootEdit, $saidRootOwn, $saidRootDel], static fn (string $said): bool => str_contains($said, '[danger]') && str_contains($said, $lockedWords))) === 7
-    && [$givingRows(ORG_A), $givingRows(ORG_B)] === $rowsBefore && $wideNow === $wideBefore && count($wideBefore) === 7
+    count(array_filter([$saidEdit, $saidYears, $saidAdd, $saidDelete, $saidRootEdit, $saidRootOwn, $saidRootDel, $saidCeiling], static fn (string $said): bool => str_contains($said, '[danger]') && str_contains($said, $lockedWords))) === 8
+    && [$givingRows(ORG_A), $givingRows(ORG_B)] === $rowsBefore && $wideNow === $wideBefore
+    // ⚠️ THE KEYS BY NAME, not `count($wideBefore) === 7`. The count was right
+    //    until #687 seeded an eighth (`maxYears`) and then it was simply wrong,
+    //    which is the staleness the owner's own note warns about ("Counts are
+    //    not kept in this file ... they went stale within days"). A named list
+    //    is also STRICTER: a count passes on the wrong seven keys, and it is
+    //    exactly what a deliberate change to the set should invalidate - the
+    //    same move made for the notification preferences in #612.
+    && array_keys($wideBefore) === [
+        'giving.retention.confirmed', 'giving.retention.confirmedOn', 'giving.retention.countryCode',
+        'giving.retention.hold', 'giving.retention.maxYears', 'giving.retention.scope',
+        'giving.retention.yearEnd', 'giving.retention.years',
+    ]
     && (int) one("SELECT COUNT(*) AS n FROM tblSettings WHERE settingKey LIKE 'giving.retention.something%'")['n'] === 0,
-    implode(' | ', [$saidEdit, $saidYears, $saidAdd, $saidDelete, $saidRootEdit, $saidRootOwn, $saidRootDel]));
+    implode(' | ', [$saidEdit, $saidYears, $saidAdd, $saidDelete, $saidRootEdit, $saidRootOwn, $saidRootDel, $saidCeiling]));
 ok('...and the list offers no Edit or Delete button for those rows, only a link to the page where they are changed',
     $listPage['status'] === 200 && str_contains($listPage['body'], 'data-setting-key="giving.retention.hold"') === true
     && str_contains($listPage['body'], 'data-key="giving.retention.') === false && str_contains($listPage['body'], 'Delete setting: giving.retention.') === false

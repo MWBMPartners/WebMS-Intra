@@ -104,7 +104,7 @@ Four rules protect a person whose erasure stopped part way (added 12 October
 A statement the donor downloaded for themselves is kept, like the ones the
 organisation issued, when every gift on it is a kept gift.
 
-The seven settings can be changed only on the Giving records page. The general
+These settings can be changed only on the Giving records page (seven from migration 209, and the optional ceiling added by 234 — #687). The general
 settings editor (`/settings`) refuses them, because it has neither the un-tick
 nor the second tick. The one exception is the installation-wide hold, which a
 global administrator sets there; the page shows it apart from the

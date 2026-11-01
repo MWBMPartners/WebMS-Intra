@@ -24,7 +24,7 @@
  * treasurer role: this decides what happens to personal records, not how the
  * accounts are kept. There is no installation-wide form here on purpose:
  * each organisation has its own country and its own adviser, and one
- * organisation's rule must never become another's by default. (The seven
+ * organisation's rule must never become another's by default. (These
  * settings do have installation-wide rows, seeded by migration 209 with the
  * cautious starting values. An organisation does NOT inherit them: its rule
  * is read from its own rows only, so that nobody can "confirm" a figure for
@@ -80,6 +80,23 @@ if (App::isAdmin() === false) {
 
 $siteId     = Site::id();
 $rule       = GivingRetention::ruleForSite($siteId);
+
+// 🛑 The ceiling (#687). THREE different questions, and the page needs all three:
+//      $ceiling             what is in force for this organisation (0 = none)
+//      $installationCeiling what the INSTALLATION allows, on its own
+//      $ownCeiling          what THIS organisation has chosen for itself
+//
+// ⚠️ $installationCeiling comes from GivingRetention::installationCap(), which
+//    reads InstallationSettings::layer() - NOT the merged $SETTINGS. That is
+//    #674: $SETTINGS is already merged by the time a page runs, so a box filled
+//    from it shows the OPEN ORGANISATION's value while a Save writing
+//    `siteID IS NULL` writes the INSTALLATION's. A global administrator would
+//    then open the page, see a number that is not the installation's, press
+//    Save without touching anything, and make it everyone's.
+$ceiling             = GivingRetention::capInForce();
+$installationCeiling = GivingRetention::installationCap();
+$ownCeiling          = GivingRetention::ownCap($siteId);
+$isGlobalAdmin       = App::isRootAdmin();
 $suggestion = $rule['suggestion'];
 $countries  = GivingRetention::countryChoices();
 $kept       = GivingRetention::keptDonorsForSite($mysqli, $siteId, $rule);
@@ -237,14 +254,103 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <label class="form-label fw-semibold" for="years">How long</label>
                 <div class="d-flex align-items-center flex-wrap gap-2">
                     <span>Keep for</span>
+                    <?php // ⚠️ `max` IS THE HARD MAXIMUM, NOT THE CEILING, AND THE FIRST
+                          //    VERSION OF THIS BOX GOT IT WRONG - in the same edit that got it
+                          //    right for the ceiling box five lines below, and directly under a
+                          //    comment citing the rule.
+                          //
+                          //    #668's words: "must never prefill a value its own `max` forbids -
+                          //    the browser then refuses to submit the whole form". A stored
+                          //    figure CAN be above the ceiling (hand-written SQL, or a restored
+                          //    backup) - that is the very state the warning below exists for -
+                          //    and the box then drew `max=7 value=50`. Measured in headless Edge:
+                          //    the form would not submit at all, `rangeOverflow`, no submit
+                          //    event. So the only way to use the page again was to SHORTEN a
+                          //    statutory retention period, which is the one thing this whole
+                          //    feature exists to avoid forcing on anybody.
+                          //
+                          //    The handler is the boundary (whyYearsNotAllowed(), asked twice,
+                          //    the second time live and locked), and the help text below says
+                          //    what the ceiling is. ?>
                     <input type="number" class="form-control" style="max-width: 6rem;" id="years" name="years"
-                           min="<?php echo GivingRetention::MIN_YEARS; ?>" max="<?php echo GivingRetention::MAX_YEARS; ?>"
+                           min="<?php echo GivingRetention::MIN_YEARS; ?>"
+                           max="<?php echo GivingRetention::MAX_YEARS; ?>"
                            value="<?php echo $rule['yearsOwn'] === null ? '' : (int) $rule['yearsOwn']; ?>"
                            placeholder="<?php echo (int) $suggestion['years']; ?>" aria-describedby="yearsHelp">
                     <span>years after the end of the financial year of the donor's last gift.</span>
                 </div>
                 <div class="form-text" id="yearsHelp">
                     Leave it empty to follow the portal's suggestion, which is <?php echo (int) $suggestion['years']; ?> today.
+                    <?php if ($ceiling !== GivingRetention::NO_CAP): ?>
+                        A ceiling of <?php echo (int) $ceiling; ?> <?php echo $ceiling === 1 ? 'year' : 'years'; ?> is in force,
+                        so you can choose that or fewer.
+                    <?php endif; ?>
+                </div>
+                <?php // ⚠️ A figure ALREADY above the ceiling. Both save gates read the
+                      //    ceiling live and lock the installation's row, so the portal's own
+                      //    pages cannot produce this any more - the first version could, and
+                      //    an independent check measured it. What still can: a figure written
+                      //    by hand in SQL, or arriving in a restored backup. Said here because
+                      //    the clear-out job deliberately obeys the STORED figure and keeps
+                      //    the records longer - destroying a statutory record early cannot be
+                      //    undone - so somebody has to know the ceiling is not being applied. ?>
+                <?php if ($ceiling !== GivingRetention::NO_CAP && $rule['yearsOwn'] !== null && (int) $rule['yearsOwn'] > $ceiling): ?>
+                    <div class="alert alert-warning mt-3 mb-0">
+                        This organisation keeps giving records for <strong><?php echo (int) $rule['yearsOwn']; ?></strong>
+                        years, which is above the ceiling of <strong><?php echo (int) $ceiling; ?></strong> now in force.
+                        <strong>The portal is still keeping them for <?php echo (int) $rule['yearsOwn']; ?> years</strong> and
+                        will not shorten that on its own: these are statutory retention periods, and clearing a record
+                        early cannot be undone. Lower the number of years here if that is what you intend.
+                    </div>
+                <?php endif; ?>
+
+                <!-- 🛑 This organisation's OWN ceiling (#687). -->
+                <div class="mt-4">
+                    <label class="form-label fw-semibold" for="maxYears">A ceiling of your own (optional)</label>
+                    <div class="d-flex align-items-center flex-wrap gap-2">
+                        <span>Never more than</span>
+                        <?php // ⚠️ `max` IS THE HARD MAXIMUM HERE, NOT THE INSTALLATION'S CEILING,
+                              //    and the difference is a fault this project has already named:
+                              //    "must never prefill a value its own `max` forbids - the browser
+                              //    then refuses to submit the whole form" (#668). An organisation
+                              //    can legitimately hold a ceiling ABOVE the installation's: it is
+                              //    simply superseded, the smaller wins, and the portal will not
+                              //    lower it behind their back. Measured by the independent check:
+                              //    with its own ceiling at 20 and the installation lowered to 10,
+                              //    this box was drawn `max=10 value=20` and a real browser would
+                              //    not submit the form at all - with nothing on the page saying
+                              //    why. The handler does the refusing (whyCapNotAllowed()), as it
+                              //    must, because anything can be posted. ?>
+                        <input type="number" class="form-control" style="max-width: 6rem;" id="maxYears" name="maxYears"
+                               min="<?php echo GivingRetention::MIN_YEARS; ?>"
+                               max="<?php echo GivingRetention::MAX_YEARS; ?>"
+                               value="<?php echo $ownCeiling === GivingRetention::NO_CAP ? '' : (int) $ownCeiling; ?>"
+                               aria-describedby="maxYearsHelp">
+                        <span>years.</span>
+                    </div>
+                    <div class="form-text" id="maxYearsHelp">
+                        Leave it empty for no ceiling of your own, which is how it starts. This is a decision about how
+                        this organisation governs itself: it stops the number of years above being raised past it by
+                        accident, and you can change or remove it here at any time.
+                        <?php if ($installationCeiling !== GivingRetention::NO_CAP): ?>
+                            Whoever runs this installation allows at most <?php echo (int) $installationCeiling; ?>,
+                            so a new ceiling of your own can be that or lower.
+                        <?php endif; ?>
+                    </div>
+                    <?php // 🔔 Your own ceiling is above the installation's, so it has no effect.
+                          //    Reachable without anybody doing anything wrong: the installation can
+                          //    be lowered afterwards, and setting one is refused only when an
+                          //    organisation's FIGURE is above it, never its ceiling. Said rather
+                          //    than silently overridden. ?>
+                    <?php if ($installationCeiling !== GivingRetention::NO_CAP && $ownCeiling !== GivingRetention::NO_CAP && $ownCeiling > $installationCeiling): ?>
+                        <div class="alert alert-info mt-3 mb-0">
+                            Your own ceiling of <strong><?php echo (int) $ownCeiling; ?></strong> years is above the
+                            <strong><?php echo (int) $installationCeiling; ?></strong> this installation allows, so the
+                            lower number is the one in force. Nothing of yours has been changed, and you do not have to
+                            do anything: saving this page works as usual while your own ceiling is left as it is. You can
+                            lower it here if you would rather the two matched.
+                        </div>
+                    <?php endif; ?>
                 </div>
 
                 <!-- 💡 The suggestion, how strong it is, and where it comes from.
@@ -421,6 +527,62 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </form>
     </div>
 </div>
+
+<?php // 🏢 THE INSTALLATION'S CEILING (#687). Its own form, for a global
+      //    administrator only, because it writes one row that binds every
+      //    organisation - and because setting it is refused when an
+      //    organisation has already chosen more, which is the rule that makes
+      //    it a ceiling rather than a wish.
+      //
+      //    The page header says there is "no installation-wide form here on
+      //    purpose", and that stays true of the RULE: nobody can confirm a
+      //    figure, or choose a country, for every organisation at once. A
+      //    ceiling is a bound on what an organisation may choose, not a figure
+      //    for any of them, which is why it is the one thing allowed here. ?>
+<?php if ($isGlobalAdmin === true): ?>
+<div class="card mb-4 border-primary">
+    <div class="card-body">
+        <h2 class="h5 card-title">A ceiling for every organisation</h2>
+        <p>
+            You are seeing this because you are a global administrator of this installation. This sets the most
+            years <strong>any</strong> organisation here may choose to keep giving records for. It is a ceiling,
+            not a figure: an organisation that has chosen fewer keeps its own number, and no organisation's
+            records are shortened by setting one.
+        </p>
+        <p class="mb-3">
+            <strong>It starts switched off, and it is yours to leave off.</strong> These numbers are statutory
+            retention periods, so the portal will never lower one behind an organisation's back: if any
+            organisation has already chosen more than the ceiling you ask for, the change is refused and the
+            organisations are named, so you can talk to them first.
+        </p>
+        <form method="post" action="<?php echo $saveUrl; ?>">
+            <?php // $csrf is ALREADY escaped where it is set ($e(Auth::csrfToken())),
+                  //    so escaping it again here would send a mangled token and every
+                  //    save would be refused as an expired form. The form above does
+                  //    the same thing; match it rather than "improving" it. ?>
+            <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+            <input type="hidden" name="action" value="installation_ceiling">
+            <div class="d-flex align-items-center flex-wrap gap-2">
+                <span>No organisation may choose more than</span>
+                <input type="number" class="form-control" style="max-width: 6rem;" id="installationMaxYears"
+                       name="installationMaxYears" min="<?php echo GivingRetention::MIN_YEARS; ?>"
+                       max="<?php echo GivingRetention::MAX_YEARS; ?>"
+                       value="<?php echo $installationCeiling === GivingRetention::NO_CAP ? '' : (int) $installationCeiling; ?>"
+                       aria-describedby="installationMaxYearsHelp">
+                <span>years.</span>
+                <button type="submit" class="btn btn-outline-primary btn-sm">Save the ceiling</button>
+            </div>
+            <div class="form-text" id="installationMaxYearsHelp">
+                Leave it empty for no ceiling, which is how it starts.
+                <?php if ($installationCeiling === GivingRetention::NO_CAP): ?>
+                    There is no ceiling at present: every organisation may choose any number of years from
+                    <?php echo GivingRetention::MIN_YEARS; ?> to <?php echo GivingRetention::MAX_YEARS; ?>.
+                <?php endif; ?>
+            </div>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
 
 <!-- 📋 The donors whose names are still kept. -->
 <div class="card mb-4">

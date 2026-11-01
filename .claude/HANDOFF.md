@@ -4,61 +4,63 @@
 what is and is not done.*
 
 **Branch:** `claude/alpha-wip`. **Nothing is pushed** — the owner reserves pushes,
-and no pull request may be raised until the one comprehensive Codex review of the
-whole branch.
+and no pull request until the one comprehensive Codex review of the whole branch.
 
 ## Just committed
 
-**#697 — a restore no longer throws away the rows an earlier restore kept.**
-`DbBackup` reads the waiting rows before it empties anything and writes them again
-after every table is back; `tblRestoreHeldRows` joined `WHOLE_DATABASE_ONLY` so a
-one-table restore of it is refused. No migration, no schema change.
+**#687 — an optional ceiling on how long giving records keep a donor's name**
+(migration 234). Settable installation-wide by a global administrator, or by an
+organisation for itself, and **off by default**: the figure is a statutory
+retention period, so forcing it down could make a customer destroy records their
+own law requires. The owner's decision, 31 October 2026.
 
-It also fixed a class of fault older than itself: **a table name compared, or used
-as an array key, with capitals mattering**, which on a server with
-`lower_case_table_names = 1` had silently disabled #694's cascade rescue, the
-holding of restored mail and the recording of restored held texts. New hard gate
-`tools/audit-checks/check_table_name_comparisons.py`, wired into
-`pr-security.yml`.
+Before it: **#697** (`e1fe6e4`), carrying the rows a restore could not put back
+through a restore.
 
-## What to know before touching this area
+## What to know before touching the ceiling
 
-- **The rule, which took four rounds to state right:** a table-keyed lookup is
-  safe when **both sides come from the same place**, unsafe when one side is
-  folded by the server and the other is not. Earlier wordings were wrong in both
-  directions. `namedIn()` compares names; `forTable()` fetches from an array keyed
-  by table name; neither is "the ONE way".
-- **The audit script pins both helper bodies WHOLE.** Any edit to them fails it on
-  purpose — update `EXPECTED_BODIES` in the same commit.
-- **No self-test here can see this class of fault.** They all run one server set
-  to 0. Verification was by driving the class directly against a server with the
-  setting on.
+- **`capFromDatabase()` is the authority for every refusal**, read LIVE and under
+  `FOR UPDATE` on the installation's own settings row, inside the transaction
+  that writes (#647's rule). `capInForce()` reads the request's snapshot through
+  `SettingLimit` and is for DRAWING THE PAGE ONLY. Using the snapshot to judge a
+  save let two ordinary requests store 50 years under a ceiling of 7.
+- **The gate is on `$yearsOwn` after rules 1 and 2**, which is exactly what will
+  be stored. Gating `$years` (the typed figure OR the suggestion) refused saves
+  that store nothing — including switching the hold on.
+- **The organisation's own ceiling is judged only when it CHANGES.** It may
+  legitimately sit above the installation's and is simply superseded.
+- **`max` on both number boxes is the hard maximum**, never the ceiling: a
+  prefill above `max` stops a real browser submitting the form at all (#668).
+- `check_limit_settings_capped.py` now REQUIRES the cap — its exemption for
+  `GivingRetention.php` is gone.
 
 ## Open, with issues
 
-- **#687** — the donor-retention cap (`giving.retention.years`). **Next up.** The
-  owner's decision is on the issue: opt-in at either level, off by default; an
-  installation global admin or an organisation's own may set one; where an
-  installation cap exists an organisation may only go lower. Still open on the
-  issue: what happens to an organisation already storing more than a newly-set
-  cap. My intended reading, stated there rather than assumed: **refuse a cap that
-  conflicts with a stored figure, naming the organisations that block it**, so the
-  save-time check really is a cap rather than #668's "a save-time cap is not a
-  cap".
+- **#699** — the ceiling's two save gates are covered by no automatic test. They
+  are the whole design, so this is the honest weak point. Needs an HTTP section
+  (`access-pages-selftest.php`, which must run alone, #689).
+- **#700** — two organisations saving the giving-records page for the FIRST time
+  in the same instant deadlock on their inserts' gap locks. **Pre-existing**,
+  proved against `git show HEAD:` of the class; nothing is lost and a retry works.
 - **#698** — a snapshot moved between servers with different
-  `lower_case_table_names` settings. Deliberately out of #697; not measured.
-- **#685** — organisations already over a newly-capped retention figure.
-- **#697's** own residue: nothing automatic reaches the over-20,000-row ceiling or
-  the two "could not read/count" branches.
+  `lower_case_table_names`. Deliberately out of #697; not measured.
+- **#685** — organisations already over a newly-set attendance retention cap.
 
-## Verification of the commit, as run
+## Verification of this commit, as run
 
 `php -l` clean; all **46** `tools/audit-checks/check_*.py` pass with the parity
-check's output read (231 migrations on disk, 231 marked, 0 missing); every
-workflow YAML parses; `tools/run-all-selftests.sh` **66 tests, 0 not green**;
-`tools/e2e-migrations/run.sh` seven phases and 42 checks (on the tree whose two
-`web/_sql/` files are byte-identical to this one); **31 planted faults over five
-rounds**, each caught by the check that should catch it.
+check's output read (232 migrations on disk, 232 marked, 0 missing);
+`tools/e2e-migrations/run.sh` all seven phases; `tools/giving-retention-selftest.php`
+63 of 63.
 
-**Codex has not reviewed any of it.** Five independent Claude checkers stood in,
-finding 8, 6, 5, 4 and 4 real problems; all 27 are fixed.
+**`tools/run-all-selftests.sh`: 65 of 66 green.** The one that is not is
+`mail-queue`, which **REFUSED rather than failed**: its part F3 computes a moment
+that falls in the hour New York's clock repeats, and today (1 November 2026) is
+the day those clocks go back. Nothing in this package touches mail, every check
+before F3 passed, and the same suite was **66/66 with this package's setting
+already seeded** earlier the same day. A re-run is scheduled for after the
+overlap.
+
+**Codex has not reviewed any of it.** Independent Claude checkers stood in: five
+rounds on #697 (8, 6, 5, 4, 4 real problems) and two on #687 (6 and 3). All are
+fixed.

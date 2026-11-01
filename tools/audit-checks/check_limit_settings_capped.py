@@ -134,16 +134,6 @@ SEARCHED = (APPS, CORE)
 #    fault, and a name here that has started asking — or stopped writing such a
 #    key — means the line is describing nothing and is believed anyway.
 NOT_A_LIMIT = {
-    "web/_core/GivingRetention.php":
-        "#687 — `giving.retention.years` (1 to 50) is how long a donor's name and home address "
-        "are kept, set per organisation by its own administrator, and it IS the shape #668 is "
-        "about. It is NOT capped here because capping it is the DANGEROUS direction for this one "
-        "setting: the figure is a statutory retention period, the owner chose a country per "
-        "organisation deliberately (see the class header), and an installation forcing it DOWN "
-        "could make a customer destroy records their own law requires them to keep. Whether a "
-        "hosting provider may bound it at all is the owner's decision, which is why there is an "
-        "issue rather than a cap. Listed so the judgement is on record instead of looking like an "
-        "oversight.",
     "web/_apps/venues/settings.php":
         "#668 — `venues.invoice_due_lead_days`, `venues.renewal_lead_days` and "
         "`venues.unagreed_lead_days` are how many days BEFORE something an organisation wants its "

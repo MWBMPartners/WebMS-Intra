@@ -2,6 +2,110 @@
 
 
 ## [Unreleased] (alpha)
+- **Added — an optional ceiling on how long giving records keep a donor's name (#687, migration 234)**
+  - **The decision, in the owner's words (31 October 2026):** "An installation Global Admin, or
+    Organisation global admin can have the option to enforce such a limit - but can also choose not
+    to. so customisable." So it ships with **no ceiling** and nothing changes for anybody until an
+    administrator deliberately sets one.
+  - **Why this one limit is opt-in where #668 makes every other one compulsory.** Everywhere else the
+    installation allowing less means less personal data is held and nothing breaks. Here the figure is
+    a **statutory retention period** — the portal's suggestions come from per-country research and an
+    administrator confirms the figure with their own adviser — so forcing it DOWN could make a
+    customer destroy records their own law requires them to keep. That is why #687 was raised as a
+    question rather than fixed as a cap.
+  - **How the two levels combine.** `GivingRetention::capInForce()` is the ONE place that answers it
+    and it asks `Portal\Core\SettingLimit`, the ONE general place that decides a three-tier limit
+    (#668). An organisation may hold itself to a lower ceiling and may never raise its own above the
+    installation's. **A stored 0 means "no ceiling", which makes 0 the LARGEST value rather than the
+    smallest** — #668's zero trap — so `$zeroIsLargest` is passed rather than the conversion done by
+    hand at either end, which is what broke both ends before.
+  - **What keeps it a real ceiling rather than a save-time courtesy.** #668's rule is that a cap
+    applied only at Save is not a cap, because the clear-out job reads the stored figure. There are
+    **two** save-time gates here, and between them `years <= ceiling` holds by construction: a figure
+    above the ceiling is refused with the reason, and **a ceiling below a figure an organisation has
+    already chosen is also refused, naming the organisations that block it.** So the job never meets a
+    figure it would have to shorten, and deliberately does not apply the ceiling itself.
+  - **The two gates are SERIALISED, and the first version was not.** They both re-read the ceiling
+    LIVE and both lock the installation's own row, inside the transaction that writes — the rule the
+    four money writers follow (#647). The first version compared against the request's settings
+    snapshot, taken at start-up, and the independent check measured two ordinary web requests storing
+    **50 years under a ceiling of 7** with both saves reported successful, reproduced in **60 of 60**
+    simultaneous pairs. Five places in this package had said the only way into that state was
+    hand-written SQL or a restored backup, which was the stated reason the clear-out job need not
+    apply the ceiling at all. It could happen, and that sentence is what would have stopped the next
+    reader looking.
+  - **The gate is on the figure the save really STORES, not on `$years`.** `$years` is the typed
+    number OR the country suggestion where none was typed, and gating it refused saves that store no
+    figure at all: on a fresh installation with a ceiling of 7, **switching the HOLD on was refused**
+    — the one control that stops records being cleared — as was setting the financial year end, and
+    pressing Save on the form exactly as drawn, with a message about "that number" when the box was
+    empty and the page's own help said to leave it so. An organisation only stores a figure by typing
+    one or by ticking "confirmed", which adopts the suggestion; both are gated, and an unadopted
+    suggestion above the ceiling is genuinely harmless because nothing is cleared while it is
+    unconfirmed.
+  - **The one hole left, stated rather than left to be found:** a figure written by hand in SQL, or
+    arriving in a restored backup. The job then obeys the **stored** figure and keeps the records
+    longer, and the page says so. That is the safe direction here — keeping too long is a privacy
+    fault to be fixed, while destroying too early can be unlawful and cannot be undone.
+  - **Three more the independent check found, each measured:** the activity log said "Nothing was
+    different." for a save that really changed the ceiling, because the old value was read AFTER the
+    transaction committed and `settingsAt()` has no cache — `save.php`'s own header promises a record
+    of who changed it "and from what", so that promise was dead. The organisation's own ceiling box was
+    prefilled above its own `max`, which is the fault #668 names in so many words ("the browser then
+    refuses to submit the whole form"), reproduced five lines below the comment citing it; `max` is
+    now the hard maximum, the handler does the refusing, and the page explains an own ceiling that the
+    installation's supersedes. And a comment justified the "did the field arrive" design with a
+    protection that does not exist — the box is drawn for every administrator — which is worse than no
+    comment, because the next person removes the design when they find the protection missing.
+  - **The race fix was then PROVED by a second check**, which is worth recording because the first
+    version of it was not: 116 genuinely simultaneous pairs (20 at the same instant, 70 with head
+    starts from 0.05s to 0.5s, 26 on a database where migration 234 has not run and there is no row
+    to lock) ended **0 of 116** with a figure above the ceiling; both orders were then forced with an
+    external session holding the lock, and each path blocked for about five seconds, woke, saw the
+    committed value and refused. Removing just ` FOR UPDATE` brought the original fault straight back,
+    so the LOCK is what closes it and not merely the live read. At `innodb_lock_wait_timeout` both
+    paths roll back, log and refuse — no bare 500, no transaction left open.
+  - **Three FALSE REFUSALS the same check found, and the gate was never too weak — only too eager.**
+    The figure was gated before the un-tick branch had been decided, so an administrator clearing the
+    years box with the tick left on (how the page draws it) was refused while the identical end state
+    saved if they also unticked by hand; the gate now runs after rules 1 and 2, on `$yearsOwn`, which
+    by then is exactly what will be stored. An organisation's own ceiling was judged even when the
+    save did not change it, so an own ceiling the installation had later been lowered past blocked the
+    hold, the year end, confirming and a plain Save — a number the organisation never raised and the
+    page itself had prefilled; it is now judged only when it CHANGES, which is the #667/#677 rule
+    ("ask whether the field changed"). And **the years box was itself prefilled above its own `max`**
+    when a stored figure exceeded the ceiling — #668's named fault, in the same edit that fixed it for
+    the ceiling box five lines below, under a comment citing the rule; measured in headless Edge, the
+    form would not submit at all, so the only way to use the page was to shorten a statutory
+    retention period.
+  - **A pre-existing deadlock, raised as #700 rather than fixed here:** two organisations saving this
+    page for the FIRST time in the same instant can deadlock on the gap locks of their seven inserts.
+    Established as pre-existing by running it against `git show HEAD:` of the class (6 of 6 without
+    #687's lock), and it cannot recur once each organisation's rows exist.
+  - **"The seven settings" was left in ten places**, five of them in the file being edited, one line
+    from a comment this package wrote about counts going stale. All now say what they mean without a
+    number; the historical changelog entries are left as the record of what shipped then.
+  - **An organisation that has chosen nothing is untouched.** It follows the country suggestion, which
+    can be above the ceiling, and that is harmless: nothing is ever cleared until somebody ticks
+    "confirmed", and confirming WRITES the figure through the same refusal.
+  - **It is set on the giving-records page, not the general settings editor.**
+    `GivingRetention::lockedInGeneralEditor()` still refuses every `giving.retention.*` key there
+    except the hold. The issue suggested that method "has to change"; it does not, and the reason is
+    worth keeping — that editor asks this class about the LOCK and nothing else (checked, at
+    `_apps/settings/save.php`), so a ceiling written there would skip the refusal that makes a ceiling
+    mean anything.
+  - **The refusal an organisation reads never says WHO set the ceiling**, matching
+    `SettingLimit::refusalWords()` and for its reason: the two levels may be different parties.
+    Naming organisations to the **installation's** administrator is the other direction and is their
+    own business, so that refusal does name them — while the activity log carries only a count.
+  - **The tripwire now requires it.** `GivingRetention.php`'s exemption in
+    `tools/audit-checks/check_limit_settings_capped.py` is deleted, so that hard gate — which fails
+    both ways — now demands the cap. It reported the stale entry itself.
+  - Tests: section 6 of `tools/giving-retention-selftest.php` (9 new checks, 63 in all), covering every
+    sentence the feature can print, including that none of them reads as if the portal knows the law.
+    **The two save paths are covered by no automatic test and that is #699**, raised in the same
+    action: this file has no database, and the gates that keep the invariant are exactly what is
+    untested.
 - **Fixed — putting a backup back no longer throws away the rows an earlier restore kept for you (#697)**
   - **What went wrong.** #694 gave the portal a holding table, `tblRestoreHeldRows`, for rows a
     restore could not put back, so an administrator can put them back or discard them deliberately.

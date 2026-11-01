@@ -1,0 +1,99 @@
+-- =============================================================================
+-- Path: _sql/234_giving_retention_ceiling.sql
+-- Migration 234 — an OPTIONAL ceiling on how long giving records keep a donor's
+-- name, settable by an installation's global administrator or by an
+-- organisation's own (#687)
+--
+-- @package   Portal\Sql
+-- @author    MWBM Partners Ltd (t/a MWservices)
+-- @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
+-- @license   All Rights Reserved
+-- @version   1.0.0
+-- @link      https://github.com/MWBMPartners/WebMS-Intra/issues/687
+-- =============================================================================
+--
+-- WHAT THIS IS FOR
+--   `/admin/settings/giving-records` lets an organisation's own administrator
+--   choose how many years its giving records keep an erased donor's name and
+--   home address: 1 to 50. Until now there was no way for whoever RUNS the
+--   installation to bound that, and no way for an organisation to bind itself.
+--   Found by the independent check of #668 part 2 as a seventh route past the
+--   limits rule.
+--
+-- WHY IT IS OPT-IN, WHERE #668 MAKES EVERY OTHER LIMIT COMPULSORY
+--   This is the one limit where capping is the DANGEROUS direction. Everywhere
+--   else, the installation allowing less means less personal data is held and
+--   nothing breaks. Here the figure is a STATUTORY retention period — the
+--   portal's suggestions come from per-country research and an administrator
+--   confirms the figure with their own adviser — so forcing it DOWN could make
+--   a customer destroy records their own law requires them to keep.
+--
+--   So the owner's decision of 31 October 2026, in their own words: "An
+--   installation Global Admin, or Organisation global admin can have the option
+--   to enforce such a limit - but can also choose not to. so customisable."
+--
+--   It therefore ships with NO ceiling (`'0'`), and nothing changes for any
+--   existing installation until somebody deliberately sets one.
+--
+-- HOW THE TWO LEVELS COMBINE
+--   `Portal\Core\GivingRetention::capInForce()` is the ONE place that answers
+--   it, and it asks `Portal\Core\SettingLimit` — the ONE general place that
+--   decides a three-tier limit (#668). An organisation may hold itself to a
+--   LOWER ceiling than the installation's and may never raise its own above it.
+--   A stored 0 means "no ceiling", which makes 0 the LARGEST value rather than
+--   the smallest; that is #668's zero trap, and it is handled by passing
+--   `$zeroIsLargest` rather than converting by hand at either end.
+--
+-- WHAT KEEPS IT A REAL CEILING RATHER THAN A SAVE-TIME COURTESY
+--   #668's rule is that a cap applied only when somebody presses Save is not a
+--   cap, because the job that clears records reads the stored figure. There are
+--   TWO save-time gates here, and between them `years <= ceiling` stays true by
+--   construction:
+--
+--     1. a figure above the ceiling is REFUSED, with the reason, never clamped;
+--     2. a CEILING below a figure an organisation has already chosen is also
+--        REFUSED, naming the organisations that block it.
+--
+--   So the clear-out job never meets a figure it would have to shorten, and it
+--   deliberately does not apply the ceiling itself.
+--
+--   BOTH GATES RE-READ THE CEILING LIVE AND LOCK THE INSTALLATION'S OWN ROW,
+--   so two overlapping requests cannot agree a figure and a ceiling that
+--   contradict each other. The first version read each request's settings
+--   snapshot, and the independent check measured two ordinary requests storing
+--   50 years under a ceiling of 7 with both saves reported successful, in 60 of
+--   60 simultaneous pairs. The first version of this header claimed that could
+--   not happen; it could.
+--
+--   WHAT CAN STILL BREAK IT, and it is genuinely only this now: a figure
+--   written by hand in SQL, or arriving in a restored backup. The job then
+--   obeys the STORED figure and keeps the records LONGER, which is the safe
+--   direction for a statutory period, and the page says so.
+--
+--
+-- WHERE IT IS SET
+--   The giving-records page, for both levels. NOT the general settings editor:
+--   `GivingRetention::lockedInGeneralEditor()` still refuses every
+--   `giving.retention.*` key there except the hold, because that editor asks
+--   this class about the lock and nothing else, so a ceiling written there
+--   would skip gate 2 above.
+--
+-- SAFE TO RUN TWICE: `INSERT ... ON DUPLICATE KEY UPDATE settingKey =
+-- settingKey` changes nothing the second time, and it never overwrites a
+-- ceiling an administrator has already chosen.
+-- =============================================================================
+
+-- #############################################################################
+-- 🛑 A. The setting, installation-wide, with no ceiling
+-- #############################################################################
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`)
+VALUES (NULL, 'giving.retention.maxYears', '0', '0', 0)
+    ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+-- #############################################################################
+-- 📋 B. Self-record (safe to run a second time)
+-- #############################################################################
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('234_giving_retention_ceiling.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;

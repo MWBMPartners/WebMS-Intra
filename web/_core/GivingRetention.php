@@ -85,7 +85,12 @@ namespace Portal\Core;
 
 class GivingRetention
 {
-    /** The seven per-organisation settings (seeded by migration 209). */
+    /**
+     * The per-organisation settings. SEVEN were seeded by migration 209; the
+     * EIGHTH, KEY_MAX_YEARS, by migration 234 (#687). Counted nowhere on
+     * purpose - every reader here matches the `giving.retention.` prefix, and a
+     * number written in prose went stale the day the eighth arrived.
+     */
     public const KEY_COUNTRY      = 'giving.retention.countryCode';
     public const KEY_SCOPE        = 'giving.retention.scope';
     public const KEY_YEARS        = 'giving.retention.years';
@@ -93,6 +98,29 @@ class GivingRetention
     public const KEY_CONFIRMED_ON = 'giving.retention.confirmedOn';
     public const KEY_YEAR_END     = 'giving.retention.yearEnd';
     public const KEY_HOLD         = 'giving.retention.hold';
+
+    /**
+     * 🛑 The OPTIONAL ceiling on the number of years (#687, migration 234).
+     *
+     * A ceiling, not a figure: it says how many years an organisation may
+     * CHOOSE, never how many it keeps. Stored at either level, and **0 means no
+     * ceiling at all**, which is how it ships — the owner's decision of
+     * 31 October 2026 was that an installation's global administrator, or an
+     * organisation's own, "can have the option to enforce such a limit, but can
+     * also choose not to. so customisable".
+     *
+     * WHY IT IS OPT-IN WHERE #668 MAKES LIMITS COMPULSORY. Everywhere else in
+     * this portal the installation's limit simply wins, because a shorter
+     * retention period means less personal data and nothing breaks. Here it is
+     * the other way round: this figure is a STATUTORY retention period, taken
+     * from per-country research, and forcing it DOWN could make a customer
+     * destroy records their own law requires them to keep. So nobody is bound
+     * unless an administrator deliberately decides to bind them.
+     */
+    public const KEY_MAX_YEARS = 'giving.retention.maxYears';
+
+    /** What a stored 0 in KEY_MAX_YEARS means: no ceiling. */
+    public const NO_CAP = 0;
 
     public const SCOPE_RECEIPTED = 'receipted';
     public const SCOPE_ALL       = 'all';
@@ -484,7 +512,7 @@ class GivingRetention
     }
 
     /**
-     * The seven settings stored at ONE exact level: one organisation's own
+     * The giving-retention settings stored at ONE exact level: one organisation's own
      * rows, or (with null) the installation-wide rows. Never a mixture: see
      * ruleForSite() for why that matters here.
      *
@@ -526,7 +554,7 @@ class GivingRetention
     /**
      * 🔒 May the GENERAL settings editor (/settings) change this setting?
      *
-     * No, for the seven settings of this feature, with one exception. They
+     * No, for every `giving.retention.` setting, with one exception. They
      * are changed on the giving-records page, whose save routine un-ticks
      * "confirmed" when the figure changes and refuses a change that would
      * clear kept records until a second box is ticked. The general editor
@@ -549,6 +577,25 @@ class GivingRetention
             return false;
         }
 
+        // 🔒 THE CEILING STAYS LOCKED HERE, and the issue's suggestion that
+        //    this method "has to change" turned out to be wrong for the design
+        //    that was built.
+        //
+        //    #687 could have been built by unlocking KEY_MAX_YEARS for a global
+        //    administrator in the general editor. It was not, because setting a
+        //    ceiling is REFUSED when it is below a figure an organisation has
+        //    already chosen (organisationsAboveCap()), and the general editor
+        //    asks this method about the LOCK and nothing else — checked, at
+        //    `_apps/settings/save.php`, which calls lockedInGeneralEditor() and
+        //    no other method of this class. Unlocking it there would leave a
+        //    second way to write a ceiling that skips the one rule that makes a
+        //    ceiling mean anything, which is #668's "a save-time cap is not a
+        //    cap" with the save in the wrong place.
+        //
+        //    So the installation's ceiling is set on the giving-records page, by
+        //    a global administrator, where the refusal lives. The HOLD remains
+        //    the one exception: it holds everybody, it has no page of its own,
+        //    and nothing has to be checked before it can be switched on.
         return ($portalWideRow === true && $globalAdmin === true && strcasecmp($key, self::KEY_HOLD) === 0) === false;
     }
 
@@ -556,6 +603,471 @@ class GivingRetention
     public const LOCKED_MESSAGE = 'That setting is part of the giving-records rule, which decides when an erased donor\'s name is '
         . 'cleared. It can only be changed at Admin, Giving records, where a change that would clear kept records is '
         . 'checked first. Nothing was changed.';
+
+    // #########################################################################
+    // 🛑 The OPTIONAL ceiling on the years (#687)
+    // #########################################################################
+
+    /**
+     * 🛑 The ceiling in force for the organisation being served — 0 for none.
+     *
+     * `Portal\Core\SettingLimit` is the ONE general place that decides a limit
+     * of three tiers (#668), and this is exactly its shape: a number stored at
+     * two levels where the SMALLER wins, with 0 meaning "no limit" and
+     * therefore being the LARGEST value rather than the smallest. That trap is
+     * #668's own, and it was wrong in both directions before the flag existed,
+     * so the flag is passed rather than the conversion done here.
+     *
+     * ⚠️ IT READS THE SERVED ORGANISATION, so it must NOT be used by anything
+     *    that walks several organisations. `SettingLimit::effective()` compares
+     *    the MERGED `$SETTINGS` against the installation's layer, and a
+     *    scheduled job merges `$SETTINGS` once — that is #683, where one
+     *    organisation's support address reached another's members. The retention
+     *    job therefore never asks this, and `ruleForSite()` deliberately does
+     *    not carry it: see whyYearsNotAllowed() for why the ceiling does not
+     *    need to be applied when records are cleared.
+     *
+     * @return int The most years this organisation may choose, or 0 for no
+     *             ceiling (which is how it ships).
+     */
+    public static function capInForce(): int
+    {
+        self::needSettingLimit();
+
+        return SettingLimit::effective(self::KEY_MAX_YEARS, self::NO_CAP, self::MAX_YEARS, true);
+    }
+
+    /**
+     * 📦 Load SettingLimit if nothing else has.
+     *
+     * The house pattern, as DbBackup does for MailQueue. This class is loaded
+     * directly by several self-tests with no autoloader at all — that is how it
+     * can be tested with no database — and adding a dependency without this
+     * made `tools/gdpr-eraser-selftest.php` stop with
+     * `Class "Portal\Core\SettingLimit" not found`, found by running the whole
+     * set rather than only the tests about giving. A class that advertises
+     * "no database needed" has to keep its own requires honest.
+     */
+    private static function needSettingLimit(): void
+    {
+        // The CHAIN, not just the sibling: SettingLimit reads
+        // InstallationSettings::layer() and App::settings(), and loads neither
+        // itself. Under the portal's own start-up all three are already there;
+        // the chain matters only for a self-test that loads this class on its
+        // own, and that is exactly where the fault showed. Each is guarded, so
+        // loading twice is free.
+        if (class_exists(InstallationSettings::class) === false) {
+            require_once __DIR__ . DIRECTORY_SEPARATOR . 'InstallationSettings.php';
+        }
+        if (class_exists(App::class) === false) {
+            require_once __DIR__ . DIRECTORY_SEPARATOR . 'App.php';
+        }
+        if (class_exists(SettingLimit::class) === false) {
+            require_once __DIR__ . DIRECTORY_SEPARATOR . 'SettingLimit.php';
+        }
+    }
+
+    /**
+     * 🔒 The ceiling as the DATABASE has it right now — 0 for none.
+     *
+     * THIS IS THE AUTHORITY FOR EVERY REFUSAL. capInForce() reads the REQUEST'S
+     * SNAPSHOT (`App::settings()` and `InstallationSettings::layer()`, both
+     * taken at start-up), which is right for drawing a page and wrong for
+     * judging a save: a request that started before a ceiling was committed
+     * does not see it.
+     *
+     * ⚠️ THAT WAS NOT THEORETICAL, and five places in this package claimed it
+     *    could not happen. The independent check measured it with two
+     *    connections, as two ordinary web requests: request A started, request B
+     *    set the installation ceiling to 7 and was accepted, then request A
+     *    saved 50 years and was accepted. A fresh request then saw a ceiling of
+     *    7 and a stored, CONFIRMED figure of 50 — the figure the clear-out job
+     *    uses. Reproduced in 60 of 60 genuinely simultaneous pairs. **No
+     *    hand-written SQL and no restored backup were involved**, which is what
+     *    those five sentences said was the only way in — and that claim was the
+     *    stated reason the job need not apply the ceiling itself.
+     *
+     * So the gates re-read, live, inside the transaction that writes. That is
+     * the rule the four money writers follow (#647): re-fetch what you are
+     * about to change, under the lock, and refuse when it has moved.
+     *
+     * THE ARITHMETIC IS THE SAME RULE AS SettingLimit'S, and it is written out
+     * here rather than shared because the two paths read different things:
+     * SettingLimit is the ONE place that decides the limit from the request's
+     * SNAPSHOT, which is what a page shows, and this is the same rule applied to
+     * rows read LIVE. If they ever disagree, this one is obeyed, because this is
+     * the one a save is judged by. The rule, once: the smaller of the two levels
+     * wins, and 0 means "no ceiling" and is therefore the LARGEST value.
+     *
+     * A READ THAT FAILS THROWS. It must never answer "no ceiling", which is the
+     * permissive direction: a boundary between two parties fails the safe way,
+     * and saveForSite() turns the throw into a refusal that changes nothing.
+     */
+    /**
+     * 🔒 Take the lock, and nothing else.
+     *
+     * The same row capFromDatabase() locks when a figure is being saved, so the
+     * two writers serialise on it. Its own name, rather than
+     * `capFromDatabase($db, 0, true)` with the answer thrown away: that worked
+     * (there is no organisation 0, so the "own" half found nothing) but it read
+     * as a trick, and the next person would have deleted the line as a pointless
+     * read.
+     *
+     * The caller must already be in a transaction — a lock outside one is
+     * decoration, which #694 cost a review round to learn.
+     */
+    private static function lockInstallationCeiling(\mysqli $db): void
+    {
+        $key  = self::KEY_MAX_YEARS;
+        $stmt = $db->prepare(
+            'SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL FOR UPDATE'
+        );
+        if ($stmt === false) {
+            throw new \RuntimeException('The ceiling could not be locked.');
+        }
+        $stmt->bind_param('s', $key);
+        $stmt->execute();
+        $stmt->get_result();
+        $stmt->close();
+    }
+
+    private static function capFromDatabase(\mysqli $db, int $siteId, bool $lock = false): int
+    {
+        // 🔒 `FOR UPDATE` ON THE INSTALLATION'S ROW IS WHAT SERIALISES THE TWO
+        //    WRITERS. Reading live is not enough on its own: two requests can
+        //    both read "no ceiling", and then one commits a ceiling while the
+        //    other commits a figure above it. Both saveForSite() and
+        //    saveInstallationCap() take this lock on the SAME row (the
+        //    installation's `maxYears`), inside their own transaction, so one
+        //    waits for the other and sees what it did.
+        //
+        //    A LOCK OUTSIDE A TRANSACTION IS DECORATION (#694 cost a round
+        //    learning that), so the caller must already have begun one. The
+        //    installation row is seeded by migration 234, so it is there to be
+        //    locked; on a database that has not run it there is no ceiling to
+        //    protect anyway.
+        $read = static function (?int $forSite) use ($db, $lock): ?int {
+            $stmt = $db->prepare(
+                'SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID '
+                . ($forSite === null ? 'IS NULL' : '= ?')
+                . ($lock === true ? ' FOR UPDATE' : '')
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException('The ceiling could not be read.');
+            }
+            $key = self::KEY_MAX_YEARS;
+            if ($forSite === null) {
+                $stmt->bind_param('s', $key);
+            } else {
+                $stmt->bind_param('si', $key, $forSite);
+            }
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+
+            return $row === null ? null : self::yearsFromText(trim((string) ($row['settingValue'] ?? '')));
+        };
+
+        $installation = $read(null) ?? self::NO_CAP;
+        $own          = $read($siteId) ?? self::NO_CAP;
+
+        if ($installation === self::NO_CAP && $own === self::NO_CAP) {
+            return self::NO_CAP;
+        }
+
+        return min(
+            $installation === self::NO_CAP ? self::MAX_YEARS : $installation,
+            $own === self::NO_CAP ? self::MAX_YEARS : $own
+        );
+    }
+
+    /**
+     * 🏢 The ceiling ONE organisation has chosen for itself — 0 for none.
+     *
+     * Read at that organisation's own level, never from the merged `$SETTINGS`,
+     * for the same reason settingsAt() exists: the merge would hand back the
+     * installation's ceiling where the organisation has chosen none, and a box
+     * prefilled from that would show a number this organisation never set. A
+     * Save would then make it its own (#674, and #677 where exactly that
+     * happened).
+     */
+    public static function ownCap(int $siteId): int
+    {
+        $stored = self::yearsFromText(trim((string) (self::settingsAt($siteId)[self::KEY_MAX_YEARS] ?? '')));
+
+        return $stored ?? self::NO_CAP;
+    }
+
+    /** 🏢 The ceiling the INSTALLATION sets, on its own — 0 for none. For a page to SAY it. */
+    public static function installationCap(): int
+    {
+        self::needSettingLimit();
+
+        return SettingLimit::installationAllowsForEver(self::KEY_MAX_YEARS, self::NO_CAP, self::MAX_YEARS) === true
+            ? self::NO_CAP
+            : SettingLimit::installationAllows(self::KEY_MAX_YEARS, self::NO_CAP, self::MAX_YEARS, true);
+    }
+
+    /**
+     * 🚫 Why this number of years may not be saved — '' when it may be.
+     *
+     * One reason only: 'above-cap'. The hard range (MIN_YEARS to MAX_YEARS) is
+     * checked by saveForSite() with its own words, because a number outside it
+     * is a typing mistake rather than somebody being bound by another party.
+     *
+     * WHY THE CLEAR-OUT JOB DOES NOT ALSO APPLY THE CEILING, which looks like
+     * #668's "A SAVE-TIME CAP IS NOT A CAP" and is not. There are TWO save-time
+     * gates, and between them they keep `years <= ceiling` true by
+     * construction: this one refuses a figure above the ceiling, and
+     * whyCapNotAllowed() refuses a CEILING that is below a figure somebody
+     * already has. So the job never meets a figure it would have to shorten.
+     *
+     * THE TWO GATES ARE SERIALISED, which the first version was not. They both
+     * re-read the ceiling LIVE and both lock the installation's own row, so two
+     * overlapping requests cannot agree a figure and a ceiling that contradict
+     * each other — see capFromDatabase() for the measurement that forced this.
+     * The first version read the request's settings snapshot and claimed the
+     * only way in was outside the portal, which was untrue.
+     *
+     * WHAT CAN STILL BREAK IT, and it is genuinely only this now: a figure
+     * written by hand in SQL, or arriving in a restored backup. The job then
+     * obeys the STORED figure and keeps the records longer. That is deliberate
+     * and it is the safe direction here — this is a statutory retention period,
+     * so keeping too long is a privacy fault to be fixed, while destroying too
+     * early can be unlawful and cannot be undone. The giving-records page says
+     * so when it sees one.
+     */
+    public static function whyYearsNotAllowed(?int $years, int $cap): string
+    {
+        // 🎯 IT TAKES THE CEILING AS A FACT rather than fetching one, and both
+        //    gates call it: the cheap one with the request's snapshot, and the
+        //    one inside the transaction with the live, locked value. That is the
+        //    shape ExpenseRules::whyNotEditable() uses for the same reason
+        //    (#647) - the handler asks TWICE, and a method that fetched its own
+        //    answer could not be asked the second time.
+        //
+        //    An earlier version fetched capInForce() itself and was then left
+        //    DEAD when the gate was inlined: a public method nothing calls, with
+        //    an authoritative docblock, is worse than none, because the next
+        //    reader believes it is the rule.
+        //
+        //    `$years` is NULLABLE on purpose: null means this save stores no
+        //    figure for the organisation at all, which the ceiling has no
+        //    business refusing. See the gate in saveForSite() for what that
+        //    cost before.
+        if ($years === null || $cap === self::NO_CAP) {
+            return '';
+        }
+
+        return $years > $cap ? 'above-cap' : '';
+    }
+
+    /** 💬 The refusal in words, for an organisation's administrator. */
+    public static function yearsRefusalWords(int $cap): string
+    {
+        // ⚠️ IT DOES NOT SAY WHO SET THE CEILING, and that is deliberate rather
+        //    than vague. SettingLimit::refusalWords() made the same choice for
+        //    the same reason: the two levels may be DIFFERENT PARTIES, and an
+        //    organisation's administrator has no business being told who to
+        //    argue with. (Telling the INSTALLATION's administrator which
+        //    organisations block a ceiling is the other direction, their own
+        //    business, and whyCapNotAllowed() does name those.)
+        return 'A ceiling of ' . $cap . ' ' . ($cap === 1 ? 'year' : 'years')
+             . ' is in force for giving records, so that number was not saved. You can choose '
+             . $cap . ' or fewer. Nothing was saved.';
+    }
+
+    /**
+     * 🚫 Why a posted CEILING may not be saved for this organisation — '' when
+     *    it may be.
+     *
+     * Delegates the two-party question to SettingLimit, which is the one place
+     * that decides it: an organisation may hold itself to a lower ceiling than
+     * the installation's and may never raise its own above it. A posted 0
+     * ("no ceiling of our own") is allowed only where the installation itself
+     * has no ceiling — there is no arithmetic for that, which is exactly why
+     * `$zeroIsLargest` exists.
+     *
+     * @return string '' , 'above-installation' or 'above-hard-max'.
+     */
+    public static function whyCapNotAllowed(int $posted): string
+    {
+        self::needSettingLimit();
+
+        return SettingLimit::whyNotAllowed($posted, self::KEY_MAX_YEARS, self::NO_CAP, self::MAX_YEARS, true);
+    }
+
+    /**
+     * 🏢 The organisations whose CHOSEN figure is above a proposed ceiling.
+     *
+     * For the one person who needs to know: whoever is about to set a ceiling.
+     * A ceiling below a figure an organisation has already chosen is REFUSED
+     * rather than applied, because applying it would either shorten a statutory
+     * retention period behind that organisation's back or leave a "ceiling"
+     * that the clear-out job ignores — and #668's lesson is that the second is
+     * not a ceiling at all.
+     *
+     * ⚠️ ONLY organisations with a figure OF THEIR OWN. An organisation that
+     *    has chosen nothing follows the portal's country suggestion, which can
+     *    be above the ceiling — and that is harmless, because nothing is ever
+     *    cleared until somebody ticks "confirmed", and confirming WRITES the
+     *    figure through saveForSite(), where whyYearsNotAllowed() refuses it.
+     *    So the invariant is kept without ever having to touch an organisation
+     *    that has not decided yet.
+     *
+     * Organisation NAMES are returned, not just a count, because the reader is
+     * the installation's own administrator and the names are their own
+     * business. Contrast rowsWaitingToBePutBack() in DbBackup, which counts
+     * PEOPLE rather than naming them (#694).
+     *
+     * @return array<int, array{name: string, years: int}> Keyed by siteID.
+     */
+    public static function organisationsAboveCap(\mysqli $db, int $cap): array
+    {
+        if ($cap === self::NO_CAP) {
+            return [];
+        }
+        $above = [];
+        $stmt  = $db->prepare(
+            'SELECT s.siteID, s.siteName, t.settingValue FROM tblSettings t '
+            . 'INNER JOIN tblSites s ON s.siteID = t.siteID '
+            . 'WHERE t.settingKey = ? AND t.siteID IS NOT NULL ORDER BY s.siteName'
+        );
+        if ($stmt === false) {
+            // The caller must not read "none" as "checked and found none", so
+            // this is the one place that cannot answer honestly; it throws
+            // rather than returning an empty list that looks like a clean bill.
+            throw new \RuntimeException('The organisations\' own figures could not be read.');
+        }
+        // The organisations' own CHOSEN figures, not their ceilings.
+        $key = self::KEY_YEARS;
+        $stmt->bind_param('s', $key);
+        $stmt->execute();
+        $rows = $stmt->get_result();
+        while ($row = $rows->fetch_assoc()) {
+            $years = self::yearsFromText(trim((string) ($row['settingValue'] ?? '')));
+            if ($years !== null && $years > $cap) {
+                $above[(int) $row['siteID']] = ['name' => (string) $row['siteName'], 'years' => $years];
+            }
+        }
+        $rows->free();
+        $stmt->close();
+
+        return $above;
+    }
+
+    /** 💬 The refusal when a ceiling would be below figures organisations already have. */
+    public static function capRefusalWords(array $above): string
+    {
+        $named = [];
+        foreach ($above as $one) {
+            $named[] = $one['name'] . ' (' . $one['years'] . ')';
+        }
+
+        return 'That ceiling is below the number of years '
+             . (count($above) === 1 ? 'an organisation has' : 'some organisations have')
+             . ' already chosen, so it was not saved: ' . implode(', ', $named) . '. '
+             . 'These are statutory retention periods, so the portal will not shorten one behind an '
+             . 'organisation\'s back. Ask them to lower their own figure first, or choose a higher '
+             . 'ceiling. Nothing was saved.';
+    }
+
+    /**
+     * 🏢 Set the INSTALLATION's ceiling (#687). A global administrator only.
+     *
+     * This is the one place an installation-wide `giving.retention.*` row other
+     * than the hold is written, and it is here rather than in the general
+     * settings editor for one reason: a ceiling below a figure an organisation
+     * has already chosen must be REFUSED, and the general editor asks this
+     * class about the lock and nothing else. See lockedInGeneralEditor().
+     *
+     * THE FLAG IS PASSED AND CHECKED HERE as well as at the page's own gate.
+     * The two levels are two different parties (the owner, 29 October 2026), so
+     * the boundary is worth stating twice; and a method that writes for every
+     * organisation at once should not depend on its caller having remembered.
+     *
+     * @param int  $cap         Years, or 0 for no ceiling.
+     * @param bool $globalAdmin Whether the person is a global administrator.
+     *
+     * @return array{saved: bool, type: string, message: string, blocked: array<int, array{name: string, years: int}>}
+     */
+    public static function saveInstallationCap(\mysqli $db, int $cap, bool $globalAdmin): array
+    {
+        $refuse = static fn (string $why, array $blocked = []): array => [
+            'saved' => false, 'type' => 'danger', 'message' => $why, 'blocked' => $blocked,
+        ];
+        if ($globalAdmin === false) {
+            return $refuse('Only a global administrator can set a ceiling for every organisation. Nothing was saved.');
+        }
+        if ($cap !== self::NO_CAP && ($cap < self::MIN_YEARS || $cap > self::MAX_YEARS)) {
+            return $refuse('The ceiling has to be a whole number from ' . self::MIN_YEARS . ' to '
+                         . self::MAX_YEARS . ', or 0 for no ceiling. Nothing was saved.');
+        }
+
+        // 🛑 The rule that makes this a ceiling rather than a wish: never below
+        //    a figure somebody has already chosen. organisationsAboveCap()
+        //    THROWS rather than answering an empty list if it cannot read, so a
+        //    database fault can never be mistaken for a clean bill of health.
+        // 🔒 One transaction, and the FIRST thing it does is lock the row it is
+        //    about to write - the same row saveForSite() locks - so the two
+        //    cannot interleave. Without it both can read "nobody is above this"
+        //    and then commit a ceiling and a figure that contradict each other.
+        if ($db->begin_transaction() === false) {
+            return $refuse('The database would not start a transaction. Nothing was saved.');
+        }
+        try {
+            self::lockInstallationCeiling($db);
+            $above = self::organisationsAboveCap($db, $cap);
+        } catch (\Throwable $e) {
+            $db->rollback();
+            error_log('[WebMS-Intra] GivingRetention: the organisations\' own figures could not be read '
+                    . 'while setting the installation ceiling: ' . $e->getMessage());
+
+            return $refuse('The organisations\' own figures could not be read, so the portal cannot tell '
+                         . 'whether this ceiling would shorten one of them. Nothing was saved.');
+        }
+        if ($above !== []) {
+            $db->rollback();
+
+            return $refuse(self::capRefusalWords($above), $above);
+        }
+
+        try {
+            $value = (string) $cap;
+            $key   = self::KEY_MAX_YEARS;
+            $stmt  = $db->prepare(
+                'INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive, updatedAt) '
+                . 'VALUES (NULL, ?, ?, ?, 0, NOW()) '
+                . 'ON DUPLICATE KEY UPDATE settingValue = VALUES(settingValue), updatedAt = NOW()'
+            );
+            if ($stmt === false) {
+                $db->rollback();
+
+                return $refuse('The ceiling could not be saved because the database refused the change.');
+            }
+            $stmt->bind_param('sss', $key, $value, $value);
+            $stmt->execute();
+            $stmt->close();
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollback();
+            error_log('[WebMS-Intra] GivingRetention: the installation ceiling could not be saved: ' . $e->getMessage());
+
+            return $refuse('The ceiling could not be saved because the database refused the change.');
+        }
+
+        return [
+            'saved'   => true,
+            'type'    => 'success',
+            'message' => $cap === self::NO_CAP
+                ? 'Saved. There is now no ceiling: every organisation may choose any number of years from '
+                  . self::MIN_YEARS . ' to ' . self::MAX_YEARS . '.'
+                : 'Saved. No organisation may now choose more than ' . $cap . ' '
+                  . ($cap === 1 ? 'year' : 'years') . ' for its giving records. An organisation that has '
+                  . 'chosen fewer keeps its own figure.',
+            'blocked' => [],
+        ];
+    }
 
     /** A number of years typed by somebody: 1 to 50, or null for anything else. */
     public static function yearsFromText(string $text): ?int
@@ -644,7 +1156,7 @@ class GivingRetention
      *      refused unless the box "I understand" was ticked, and the message
      *      says how many.
      *
-     * The seven values are written in one transaction, so a rule can never be
+     * The values are written in one transaction, so a rule can never be
      * half saved (a new number of years with the old "confirmed" tick, say).
      *
      * What this cannot do: stop somebody changing these settings by other
@@ -696,6 +1208,14 @@ class GivingRetention
             return $refuse('The number of years has to be a whole number from ' . self::MIN_YEARS . ' to ' . self::MAX_YEARS
                 . ', or left empty to follow the portal\'s suggestion.');
         }
+        // 🛑 THE CEILING (#687), checked on the figure that will really be
+        //    stored. `$years` below is `$yearsOwn` where one was typed and the
+        //    country suggestion where none was, and TICKING "confirmed" writes
+        //    the suggestion as the organisation's own figure - so checking
+        //    `$years` covers both, and an organisation cannot adopt a
+        //    suggestion that is above the ceiling either. It has to come after
+        //    `$years` is worked out, which is why it is not up here with the
+        //    other range checks; see the block below the suggestion.
         $month = $text('yearEndMonth');
         $day   = $text('yearEndDay');
         if (($month === '') !== ($day === '')) {
@@ -718,6 +1238,15 @@ class GivingRetention
         $understood = $text('understood') === '1';
 
         $old        = self::ruleForSite($siteId, $path);
+        // ⚠️ BEFORE the write, because the log line is built AFTER it. The first
+        //    version read this with settingsAt() once the transaction had
+        //    committed, and settingsAt() runs a fresh query every time - so
+        //    "what it was" was always "what it now is", the label could never
+        //    differ, and a save that really changed the ceiling from 5 to 11
+        //    logged "Nothing was different." Measured by the independent check.
+        //    save.php's own header promises a record of who changed it "and from
+        //    what", so that was a dead promise.
+        $oldOwnCap  = self::ownCap($siteId);
         // 📅 The date people read, then the date that decides. See "TWO DATES" above.
         $ownToday   = $today ?? self::today(Site::timezone($siteId), $now);
         $today      = $today ?? self::today((string) $old['timezone'], $now);
@@ -735,6 +1264,78 @@ class GivingRetention
                 $confirmed   = true;
                 $yearsOwn    = $years;
                 $confirmedOn = $old['confirmed'] === true && (string) $old['confirmedOn'] !== '' ? (string) $old['confirmedOn'] : $ownToday;
+            }
+        }
+
+        // 🛑 THE CEILING, AFTER RULES 1 AND 2, BECAUSE ONLY NOW IS THE FIGURE KNOWN.
+        //
+        //    `$yearsOwn` is, at this point, exactly what will be stored for the
+        //    organisation: the typed number, or the suggestion where "confirmed"
+        //    was ticked and accepted (the branch above sets it), or null where
+        //    nothing is being stored - including the UN-TICK branch, where the
+        //    tick is refused and the suggestion is deliberately NOT adopted.
+        //
+        //    ⚠️ TWO EARLIER VERSIONS GATED THE WRONG NUMBER, and both were FALSE
+        //       REFUSALS rather than holes - the gate has never been too weak.
+        //       The first gated `$years`, which is the typed figure OR the
+        //       country suggestion, so with a ceiling in force and an empty
+        //       years box **switching the HOLD on was refused** - the one
+        //       control that stops records being cleared. The second computed
+        //       the figure BEFORE the un-tick branch had been decided, so an
+        //       administrator clearing the years box with the tick left on (how
+        //       the page draws it) was refused, while the identical end state
+        //       saved if they also unticked by hand. Both measured by
+        //       independent checks, neither findable by reading.
+        $storing = $yearsOwn;
+        $capNow  = self::capInForce();
+        if (self::whyYearsNotAllowed($storing, $capNow) !== '') {
+            return $refuse(self::yearsRefusalWords($capNow));
+        }
+
+        // 🏢 The organisation's OWN ceiling, which it may lower but never raise
+        //    above the installation's. A field that did not ARRIVE leaves it
+        //    alone: #677's lesson is to ask whether a field arrived rather than
+        //    what it contains, because `?? ''` would read as "no ceiling".
+        $capOwn = null;
+        if (array_key_exists('maxYears', $posted) === true) {
+            $capTyped = trim((string) $posted['maxYears']);
+            if ($capTyped === '') {
+                $capOwn = self::NO_CAP;
+            } elseif (preg_match('/^\d{1,3}$/', $capTyped) !== 1) {
+                return $refuse('The ceiling has to be a whole number of years, or left empty for no ceiling.');
+            } else {
+                $capOwn = (int) $capTyped;
+                if ($capOwn !== self::NO_CAP && $capOwn < self::MIN_YEARS) {
+                    return $refuse('A ceiling of fewer than ' . self::MIN_YEARS . ' year is not a ceiling anybody '
+                                 . 'could keep to. Leave it empty for no ceiling.');
+                }
+            }
+
+            // ⚠️ ONLY WHAT THIS SAVE CHANGES, which is the #667/#677 shape: ask
+            //    whether the field CHANGED, not only whether it arrived.
+            //
+            //    An organisation's own ceiling can sit ABOVE the installation's
+            //    quite legitimately - the installation can be lowered
+            //    afterwards, and setting an installation ceiling is refused only
+            //    when an organisation's FIGURE is above it, never its ceiling.
+            //    Judging an unchanged value refused a number the organisation
+            //    never raised and the page itself had prefilled, and it took the
+            //    WHOLE save with it: measured, with an own ceiling of 20 and the
+            //    installation lowered to 10, the hold, the year end, confirming
+            //    and a plain Save were all refused until the box was lowered by
+            //    hand. The page explains the superseded ceiling instead.
+            if ($capOwn !== $oldOwnCap) {
+                $whyNot = self::whyCapNotAllowed($capOwn);
+                if ($whyNot !== '') {
+                    return $refuse(SettingLimit::refusalWords($whyNot, self::installationCap() === self::NO_CAP
+                        ? self::MAX_YEARS : self::installationCap(), 'years'));
+                }
+                if ($capOwn !== self::NO_CAP && $storing !== null && $storing > $capOwn) {
+                    return $refuse('That ceiling is below the ' . $storing . ' '
+                        . ($storing === 1 ? 'year' : 'years')
+                        . ' this organisation keeps giving records for, so it was not saved. Lower the number of '
+                        . 'years first, or choose a higher ceiling. Nothing was saved.');
+                }
             }
         }
 
@@ -771,7 +1372,7 @@ class GivingRetention
             ];
         }
 
-        // 💾 All seven, or none.
+        // 💾 All of them, or none. (Seven, or eight where the ceiling's field arrived.)
         $values = [
             self::KEY_COUNTRY      => $country,
             self::KEY_SCOPE        => $scope,
@@ -781,8 +1382,24 @@ class GivingRetention
             self::KEY_YEAR_END     => $yearEnd,
             self::KEY_HOLD         => $hold === true ? 'true' : 'false',
         ];
+        // The ceiling joins the all-or-none write only when its field arrived,
+        // so a page that does not offer it cannot clear one.
+        if ($capOwn !== null) {
+            $values[self::KEY_MAX_YEARS] = (string) $capOwn;
+        }
         $db->begin_transaction();
         try {
+            // 🔒 THE CEILING AGAIN, LIVE AND LOCKED, before anything is written.
+            //    The check above used this request's settings snapshot, which was
+            //    taken at start-up and can be out of date by now: measured, two
+            //    overlapping requests stored 50 years under a ceiling of 7 with
+            //    both saves reported as successful. See capFromDatabase().
+            $capLive = self::capFromDatabase($db, $siteId, true);
+            if (self::whyYearsNotAllowed($storing, $capLive) !== '') {
+                $db->rollback();
+
+                return $refuse(self::yearsRefusalWords($capLive));
+            }
             // A real organisation number, so the settings table's unique key
             // on (settingKey, siteID) matches an existing row normally.
             $stmt = $db->prepare(
@@ -811,12 +1428,18 @@ class GivingRetention
             'confirmed' => $old['confirmed'] === true ? 'yes' : 'no', 'financial year end' => (string) $old['yearEnd'],
             'hold' => $old['holdOwn'] === true ? 'on' : 'off',
         ];
+        if ($capOwn !== null) {
+            $was['own ceiling'] = $oldOwnCap === self::NO_CAP ? 'none' : (string) $oldOwnCap;
+        }
         $now = [
             'country' => $country, 'which gifts' => $scope,
             'years' => $yearsOwn === null ? 'following the suggestion (' . $years . ')' : (string) $yearsOwn,
             'confirmed' => $confirmed === true ? 'yes' : 'no', 'financial year end' => $yearEnd,
             'hold' => $hold === true ? 'on' : 'off',
         ];
+        if ($capOwn !== null) {
+            $now['own ceiling'] = $capOwn === self::NO_CAP ? 'none' : (string) $capOwn;
+        }
         foreach ($now as $label => $value) {
             if ($value !== $was[$label]) {
                 $changes[] = $label . ': "' . ($was[$label] === '' ? 'not set' : $was[$label]) . '" to "' . ($value === '' ? 'not set' : $value) . '"';

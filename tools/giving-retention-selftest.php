@@ -76,7 +76,7 @@ set_exception_handler(static function (Throwable $e): void {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result.
-const EXPECTED_CHECKS = 54;
+const EXPECTED_CHECKS = 63;
 
 require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'GivingRetention.php';
 
@@ -587,6 +587,89 @@ ok('dates and year ends are written in words',
     && count(G::monthNames()) === 12);
 ok('the country list for the settings page is every country in the file, by name',
     count(G::countryChoices()) === count($real['countries']) && array_values(G::countryChoices($good)) === array_fill(0, 5, 'Madeupland'));
+
+
+// =============================================================================
+// 🛑 6. The OPTIONAL ceiling on the years (#687)
+// =============================================================================
+//
+// WHAT THIS SECTION CAN AND CANNOT REACH, said plainly. This file loads
+// GivingRetention.php on its own, with no database and no settings loader, so
+// the two-level ARITHMETIC (`capInForce()`, `ownCap()`) and the save-time
+// REFUSALS cannot run here. The arithmetic lives in Portal\Core\SettingLimit,
+// which capInForce() delegates to, and is covered by its own 47-check test
+// (tools/setting-limit-selftest.php) including the zero-is-largest trap. What
+// is NOT covered anywhere automatically is the glue: saveForSite()'s refusal of
+// a figure above the ceiling, and saveInstallationCap(). That is #699, raised
+// rather than left to be assumed.
+//
+// What this section does cover is the WORDS, which is where this package's
+// predecessors kept going wrong, and the one branch that answers before it
+// touches a database.
+
+ok('a ceiling of 0 means no ceiling, and the constant says so',
+    G::NO_CAP === 0 && G::KEY_MAX_YEARS === 'giving.retention.maxYears');
+
+// 🛑 organisationsAboveCap() answers [] for "no ceiling" BEFORE it asks the
+//    database, which is the one path reachable here. A null connection proves
+//    it never gets that far.
+$noCapNeedsNoDatabase = true;
+try {
+    /** @phpstan-ignore-next-line a deliberate null: the point is that it is never used. */
+    $noCapNeedsNoDatabase = G::organisationsAboveCap(new mysqli(), G::NO_CAP) === [];
+} catch (\Throwable $e) {
+    $noCapNeedsNoDatabase = false;
+}
+ok('with no ceiling, the list of organisations above it is empty without asking the database at all',
+    $noCapNeedsNoDatabase === true);
+
+// 💬 The refusal an ORGANISATION's administrator reads.
+$yearsRefusal = G::yearsRefusalWords(7);
+ok('the refusal for a figure above the ceiling says what the ceiling is, what to choose, and that nothing was saved',
+    str_contains($yearsRefusal, 'ceiling of 7 years') === true
+    && str_contains($yearsRefusal, 'You can choose 7 or fewer') === true
+    && str_contains($yearsRefusal, 'Nothing was saved') === true,
+    $yearsRefusal);
+ok('and it is written for ONE year as well, never "1 years"',
+    str_contains(G::yearsRefusalWords(1), 'ceiling of 1 year ') === true
+    && str_contains(G::yearsRefusalWords(1), '1 years') === false,
+    G::yearsRefusalWords(1));
+// ⚠️ It must NOT say who set the ceiling. SettingLimit::refusalWords() made the
+//    same choice for the same reason: the two levels may be different parties,
+//    and an organisation's administrator has no business being told who to
+//    argue with. Naming ORGANISATIONS to the installation's administrator is
+//    the other direction and is their own business — capRefusalWords() does it.
+ok('and it never says WHICH administrator set the ceiling, because the two levels may be different parties',
+    preg_match('/\b(installation|global administrator|whoever runs|hosting)\b/i', $yearsRefusal) !== 1,
+    $yearsRefusal);
+
+// 💬 The refusal a GLOBAL administrator reads, which does name organisations.
+$blocked = [4 => ['name' => 'Second Chapel', 'years' => 10], 2 => ['name' => 'First Chapel', 'years' => 12]];
+$capRefusal = G::capRefusalWords($blocked);
+ok('the refusal for a ceiling below a figure already chosen NAMES the organisations and their figures',
+    str_contains($capRefusal, 'Second Chapel (10)') === true
+    && str_contains($capRefusal, 'First Chapel (12)') === true
+    && str_contains($capRefusal, 'Nothing was saved') === true,
+    $capRefusal);
+ok('and says WHY the portal will not shorten one, rather than just refusing',
+    str_contains($capRefusal, 'statutory retention periods') === true
+    && str_contains($capRefusal, 'behind an organisation\'s back') === true,
+    $capRefusal);
+ok('and is written for ONE organisation as well as several',
+    str_contains(G::capRefusalWords([2 => ['name' => 'Only Chapel', 'years' => 9]]), 'an organisation has') === true
+    && str_contains($capRefusal, 'some organisations have') === true,
+    G::capRefusalWords([2 => ['name' => 'Only Chapel', 'years' => 9]]));
+
+// 🚫 And no sentence this feature adds may read as if the portal knows the law,
+//    which is this class's standing rule (section 5 above checks the others).
+$ceilingSentences = [$yearsRefusal, $capRefusal, G::yearsRefusalWords(1)];
+$lawClaims = [];
+foreach ($ceilingSentences as $sentence) {
+    if (preg_match('/\b(the law requires|required by law|legally required|you must keep|must be kept for|is the legal|the legal period|by law you)\b/i', $sentence) === 1) {
+        $lawClaims[] = $sentence;
+    }
+}
+ok('and no ceiling sentence says that a figure is what the law requires', $lawClaims === [], implode('; ', $lawClaims));
 
 // -----------------------------------------------------------------------------
 $ran = $pass + $fail;

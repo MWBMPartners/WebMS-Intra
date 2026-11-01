@@ -6202,7 +6202,7 @@ retention job then clears them.
   count that is not yet closed keeps its giver when the gift it will become
   is a kept gift, so that closing the count makes a gift the tax claim can
   match. Its giver goes with the rest when the keep-until date has passed.
-- **The seven settings are locked in the general settings editor**
+- **Every `giving.retention.` setting is locked in the general settings editor**
   (`GivingRetention::lockedInGeneralEditor()`), which knows nothing of the
   un-tick or the second tick. A global administrator may still change the
   installation-wide `hold` row there.
@@ -12875,3 +12875,100 @@ place — and the proof's own fixture is one of the worlds where the sentence is
 false, which is why it never noticed. The sentence now says only what is known
 (the snapshot records the row as put back, so it is no longer offered) and where
 to look, and the check requires the reassurance to be **absent**.
+
+## The giving-records ceiling (#687), and what two check rounds cost
+
+The feature is small: an optional ceiling on `giving.retention.years`, settable
+installation-wide or by an organisation for itself, off by default. Two
+independent check rounds found **nine** real problems in it. Seven were mine;
+one was pre-existing (#700) and one was a test counting rather than naming.
+
+### The claim that justified the design was false
+
+#668's standing rule is that **a save-time cap is not a cap**, because the job
+that clears records reads the stored figure. #687 does not cap in the reader —
+deliberately, because this figure is a statutory retention period and shortening
+one behind a customer's back can be unlawful and cannot be undone. The
+justification was that two save-time gates keep `years <= ceiling` true by
+construction, and that **the only way past them was hand-written SQL or a
+restored backup.**
+
+That sentence was in five places, and it was wrong. The gate compared against the
+request's **settings snapshot**, taken at start-up by `bootstrap.php`, while the
+other gate read the database live. Two ordinary web requests were enough:
+
+    request A starts (snapshot: no ceiling)
+    request B sets the installation ceiling to 7      -> accepted
+    request A saves 50 years, confirmed               -> accepted
+    a fresh request: ceiling 7, stored figure 50, confirmed
+
+Measured by the first check round, reproduced in **60 of 60** simultaneous pairs.
+
+**The lesson is about the sentence, not the race.** "The portal cannot reach this
+state" is precisely the claim that stops the next reader looking, and it was the
+stated reason for not capping in the reader. Where a design rests on a claim
+about what cannot happen, that claim has to be measured.
+
+### Closing it, and proving it closed
+
+Both gates now re-read the ceiling **live** and take `FOR UPDATE` on the
+installation's own settings row, inside the transaction that writes — the rule
+the four money writers follow (#647). `capFromDatabase()` is the authority for
+every refusal; `capInForce()`, which reads the snapshot through `SettingLimit`,
+is for drawing the page only.
+
+The second round proved it rather than accepting it: **116 genuinely simultaneous
+pairs, 0 of 116** above the ceiling; both orders forced with an external session
+holding the lock, each path blocking about five seconds and then refusing; and —
+the part that matters — **removing just ` FOR UPDATE` brought the original end
+state straight back.** That plant is what distinguishes "the lock closes it" from
+"the live read closes it", and without it the conclusion would have been a guess.
+
+### The gate was never too weak — only too eager
+
+Three separate false refusals, each of which looked like safety:
+
+- It gated `$years`, which is the typed figure **or** the country suggestion. So
+  with a ceiling in force and an empty years box, **switching the hold on was
+  refused** — the one control that stops records being cleared — and the message
+  said "that number was not saved" about a number nobody had typed.
+- Moved after the suggestion, it still ran before the **un-tick** branch was
+  decided, so clearing the years box with the tick left on (how the page draws
+  it) was refused, while the identical end state saved if the administrator also
+  unticked by hand.
+- It judged the organisation's **own** ceiling even when the save did not change
+  it, so an own ceiling the installation had later been lowered past blocked the
+  hold, the year end, confirming and a plain Save — over a number the
+  organisation never raised and the page itself had prefilled.
+
+The gate now runs after rules 1 and 2, on `$yearsOwn`, which by then is exactly
+what will be stored; and the own ceiling is judged only when it **changes**,
+which is #667/#677's rule: ask whether the field changed, not only whether it
+arrived.
+
+### #668's prefill fault, reproduced under the comment citing it
+
+Both number boxes were prefilled above their own `max` — the ceiling box because
+`max` was the installation's ceiling, the years box because `max` was the ceiling
+in force while a stored figure can legitimately exceed it. #668 names this in so
+many words: *"must never prefill a value its own `max` forbids — the browser then
+refuses to submit the whole form."* Measured in headless Edge: `rangeOverflow`,
+no submit event at all. For the years box that meant **the only way to use the
+page again was to shorten a statutory retention period**, which is the one thing
+the feature exists to avoid forcing on anybody.
+
+`max` is the hard maximum on both boxes now, and the handler is the boundary —
+which it has to be, because anything can be posted.
+
+### And one of my own edits deleted working code
+
+Moving the gate "to after rules 1 and 2" was done by cutting the text between my
+own block and an anchor below it. **Rules 1 and 2 was what lay in between**, so
+the confirm logic went with it: seventeen checks failed across three self-tests,
+none of them about the ceiling. The whole-suite rule (#695) is the only reason it
+was caught.
+
+**A slice between two markers deletes whatever is between them.** The same method
+had already silently duplicated a block in an audit script earlier the same day.
+Replace exact text, or insert before an anchor; if a slice is unavoidable, print
+what it removes and read it before writing the file.

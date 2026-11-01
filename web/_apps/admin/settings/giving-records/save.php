@@ -77,6 +77,66 @@ foreach (['countryCode', 'scope', 'years', 'confirmed', 'yearEndMonth', 'yearEnd
     $posted[$field] = is_string($_POST[$field] ?? null) === true ? $_POST[$field] : '';
 }
 
+// 🛑 THE CEILING ONLY WHERE IT REALLY ARRIVED (#687, and #677's lesson).
+//    The loop above deliberately fills every one of its eight fields with '',
+//    because for a tick box that is what "not ticked" looks like. The ceiling
+//    is different: '' means "no ceiling", so filling it in for a request that
+//    never carried the field would CLEAR a ceiling somebody had set. So ask
+//    whether it ARRIVED, never what it contains.
+//
+//    ⚠️ AND NOT FOR THE REASON THIS COMMENT FIRST GAVE. It said the field is
+//       "absent for an ordinary administrator, because the page only draws it
+//       where it may be changed, and a disabled control is not submitted at
+//       all". That is UNTRUE of this page: the ceiling box is drawn for EVERY
+//       administrator, inside the one form, with no condition around it and no
+//       `disabled` anywhere in the file - the independent check mapped the
+//       markup rather than reading the comment. So from a real browser the
+//       field always arrives.
+//
+//       The design is still right, and that is the point worth keeping: asking
+//       whether a field arrived is correct whether or not anything currently
+//       omits it, because it is what makes the question answerable at all. A
+//       comment that justifies a correct design with a protection that does not
+//       exist is worse than no comment, because the next person removes the
+//       design when they find the protection missing.
+if (array_key_exists('maxYears', $_POST) === true) {
+    $posted['maxYears'] = is_string($_POST['maxYears']) === true ? $_POST['maxYears'] : '';
+}
+
+// 🏢 The INSTALLATION's ceiling is its own action, because it writes one row
+//    for every organisation at once and only a global administrator may do it.
+//    GivingRetention::saveInstallationCap() checks that flag again itself: the
+//    two levels are two different parties (the owner, 29 October 2026), so the
+//    boundary is stated at the gate AND at the writer.
+if (($_POST['action'] ?? '') === 'installation_ceiling') {
+    $typed   = is_string($_POST['installationMaxYears'] ?? null) === true ? trim($_POST['installationMaxYears']) : '';
+    $isGlobal = App::isRootAdmin();
+    $asked    = $typed === '' ? GivingRetention::NO_CAP : (preg_match('/^\d{1,3}$/', $typed) === 1 ? (int) $typed : -1);
+    if ($asked < 0) {
+        $outcome = ['saved' => false, 'type' => 'danger', 'blocked' => [],
+                    'message' => 'The ceiling has to be a whole number of years, or left empty for no ceiling. Nothing was saved.'];
+    } else {
+        $outcome = GivingRetention::saveInstallationCap($mysqli, $asked, $isGlobal);
+    }
+    Logger::activity(
+        $outcome['saved'] === true ? 'GivingRecordsCeilingSaved' : 'GivingRecordsCeilingRefused',
+        $outcome['saved'] === true
+            ? 'The installation-wide ceiling on giving-record retention was set to '
+              . ($asked === GivingRetention::NO_CAP ? 'no ceiling' : $asked . ' year(s)') . '.'
+            // ⚠️ The REFUSAL names no organisation. The refusal MESSAGE does, on
+            //    purpose, because the person reading it has to act on it - but the
+            //    activity log is read later and by others, so it carries a count.
+            : 'A change to the installation-wide ceiling on giving-record retention was refused and '
+              . 'nothing was saved' . ($outcome['blocked'] === [] ? '' : ' (' . count($outcome['blocked'])
+              . ' organisation(s) have already chosen more)') . '.',
+        $userId > 0 ? $userId : null
+    );
+    $_SESSION['flash_msg']  = $outcome['message'];
+    $_SESSION['flash_type'] = $outcome['type'];
+    header('Location: ' . $back);
+    exit();
+}
+
 $result = GivingRetention::saveForSite($mysqli, $siteId, $posted);
 
 if ($result['saved'] === true) {

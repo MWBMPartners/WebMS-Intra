@@ -3839,11 +3839,21 @@ ge_ok('THE DATABASE ITSELF GUARDS THE KEPT NAME: deleting an account row that a 
     && in_array($keptLinks['fk_gkd_site'] ?? '', ['RESTRICT', 'NO ACTION'], true) === true && count($keptLinks) === 3
     && $deleteAccount === 'refused' && ge_one('SELECT fullName FROM tblGivingKeptDonors WHERE keptDonorID = ?', 'i', [$keptM])['fullName'] === 'Mo Tomorrow',
     json_encode([$keptLinks, $deleteAccount]));
-ge_ok('the installation-wide defaults are the cautious ones: no country, nothing confirmed, no hold, the narrower rule',
+// ⚖️ THE WHOLE MAP, so a new key cannot be added without somebody deciding
+//    what its default should be. #687 added the eighth (`maxYears`) and this
+//    check failed until the default was stated here - which is the check doing
+//    its job, not getting in the way.
+//
+//    `maxYears` => '0' is the one that matters most: 0 means NO CEILING, and
+//    the owner's decision of 31 October 2026 was that the ceiling is opt-in and
+//    off by default, because this figure is a statutory retention period and
+//    forcing it down could make a customer destroy records their own law
+//    requires them to keep. A fresh installation must therefore cap nobody.
+ge_ok('the installation-wide defaults are the cautious ones: no country, nothing confirmed, no hold, the narrower rule, and NO ceiling on the years',
     $givingSettings(null) === [
         GivingRetention::KEY_CONFIRMED => 'false', GivingRetention::KEY_CONFIRMED_ON => '', GivingRetention::KEY_COUNTRY => '',
-        GivingRetention::KEY_HOLD => 'false', GivingRetention::KEY_SCOPE => 'receipted', GivingRetention::KEY_YEAR_END => '',
-        GivingRetention::KEY_YEARS => '',
+        GivingRetention::KEY_HOLD => 'false', GivingRetention::KEY_MAX_YEARS => '0', GivingRetention::KEY_SCOPE => 'receipted',
+        GivingRetention::KEY_YEAR_END => '', GivingRetention::KEY_YEARS => '',
     ], json_encode($givingSettings(null)));
 
 // =============================================================================
@@ -4261,7 +4271,7 @@ foreach ($lockedKeys as $key) {
         }
     }
 }
-ge_ok('ALL SEVEN GIVING-RECORDS SETTINGS ARE LOCKED IN THE GENERAL SETTINGS EDITOR, an organisation\'s own row and the installation-wide one alike, whatever the capitals; the one row left open is the installation-wide hold, for a global administrator; and no other setting is locked',
+ge_ok('THE SEVEN GIVING-RECORDS SETTINGS THIS CHECK LISTS ARE LOCKED IN THE GENERAL SETTINGS EDITOR (the eighth, the #687 ceiling, is covered over real HTTP by erasure-pages-selftest.php), an organisation\'s own row and the installation-wide one alike, whatever the capitals; the one row left open is the installation-wide hold, for a global administrator; and no other setting is locked',
     $open === [] && count($lockedKeys) === 7 && GivingRetention::lockedInGeneralEditor('GIVING.Retention.Confirmed', false, true) === true
     && GivingRetention::lockedInGeneralEditor('giving.retention.somethingNew', true, true) === true
     && GivingRetention::lockedInGeneralEditor('giving.statement.footer', false, false) === false

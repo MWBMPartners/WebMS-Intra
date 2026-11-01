@@ -10128,7 +10128,7 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('208_erasure_keeps_others_recor
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── from 209_giving_kept_donors.sql (roll-out package A2b) ───────────────────
--- The table itself is above, straight after tblErasureAudit. Here: the seven
+-- The table itself is above, straight after tblErasureAudit. Here: the
 -- per-organisation settings, as installation-wide defaults, and the two
 -- addresses of the settings page. `giving.retention.countryCode` is EMPTY by
 -- default on purpose: see the migration's header.
@@ -10140,7 +10140,15 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'giving.retention.confirmed',   'false',     'false',     0),
     (NULL, 'giving.retention.confirmedOn', '',          '',          0),
     (NULL, 'giving.retention.yearEnd',     '',          '',          0),
-    (NULL, 'giving.retention.hold',        'false',     'false',     0)
+    (NULL, 'giving.retention.hold',        'false',     'false',     0),
+    -- 🛑 #687, migration 234. The OPTIONAL ceiling on the number of years, 0 =
+    --    no ceiling, which is how it ships. A ceiling, not a figure: it says
+    --    how many years an organisation may CHOOSE. Opt-in at either level
+    --    because this is a STATUTORY retention period and forcing it down could
+    --    make a customer destroy records their own law requires them to keep
+    --    (the owner, 31 October 2026). Read only through
+    --    GivingRetention::capInForce(), which asks SettingLimit.
+    (NULL, 'giving.retention.maxYears',    '0',         '0',         0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
@@ -10653,4 +10661,13 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('232_series_repattern.sql')
 -- for — and it is here so the installer's replay of every numbered migration
 -- finds nothing left to do.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('233_restore_held_rows.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 234_giving_retention_ceiling.sql (#687) ──────────────────────────
+-- Nothing to do here: `giving.retention.maxYears` is seeded with the other
+-- giving-retention settings in the block above, with '0' meaning NO ceiling.
+-- The mark is written UNCONDITIONALLY — the migration only seeds a setting and
+-- never overwrites a ceiling somebody has chosen — and it is here so the
+-- installer's replay of every numbered migration finds nothing left to do.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('234_giving_retention_ceiling.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
