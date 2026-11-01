@@ -1138,6 +1138,102 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     retention deliberately does NOT follow the organisation's zone. Test:
     `tools/time-zones-selftest.php`.
 
+    **A reminder e-mail now obeys the member's switch, and the morning
+    summary belongs to ONE organisation (#666, #616, #683).**
+    `WebPush::notifyPrefAllows()` is the ONE test of a notification
+    preference and is public for that reason: the idiom is implemented FOUR
+    times already (`WebPush::notifyPrefAllows()` public, `Workflow`'s
+    private copy, `cron/user-reminders.php`'s function,
+    `Giving::isOptedOutOfStatements()` inverted) and `sendReminderBatch()`
+    in `_apps/cron/event-reminders.php` asks it rather than making a fifth.
+    **`ImportNotifier` is NOT a copy — it already ASKS `WebPush`, which is
+    the precedent this follows** — and `auth/account/save.php` only writes
+    the column; counting those two gave "six copies", which reached four
+    documents and two comments before the independent check killed it. Count
+    function bodies, not file names. **A missing key, empty text or
+    unreadable JSON all mean YES**, so nobody who has never opened the
+    Notification preferences page loses a reminder. **The switch covers the
+    DAY-BEFORE and ONE-HOUR reminders only** (both go through
+    `sendReminderBatch()`): the DAY-OF SUMMARY is not filtered by it at all
+    and never was — it goes to the event's coordinators and the
+    organisation's administrators, not to members who answered "going", and
+    the switch's own words are "Get notified ahead of events you have RSVP'd
+    to". Never write "it stops the e-mails" unqualified; silencing the
+    summary too would be a decision, not a tidy-up. Until 1 November 2026
+    the reminder query asked only who had answered "going". **Be exact about
+    how little the switch did: it was saved and read by NOTHING** — `git
+    grep -n eventReminders 8810a06 -- web/` finds only the two account pages
+    that write the key and draw its tick-box (each a view and a handler, so
+    four files), plus two schema column comments — no reader. Quote the
+    command WITH its `-- web/` filter: without it the citation returns more
+    than the sentence claims. The push is gated on a DIFFERENT key,
+    `pushServiceReminders` ("Service reminders"), so switching this one off
+    changed nothing anywhere, e-mail or push. Saying it was "honoured for
+    the companion push" is false, flatters the old code, and replaced a
+    comment on the page that had been RIGHT; it reached five places before
+    the independent check caught it. A consent failure on a live mail path,
+    under a standing notice on the page admitting the e-mails were not
+    filtered. **ONE ADDRESS, TWO ACCOUNTS:** the recipient map is keyed by
+    e-mail and two accounts can share a mailbox, so a refused row is dropped
+    BEFORE the merge — an address is written off only when every account
+    reading it has said no, and a refusing account can never upgrade
+    somebody else's e-mail to the one naming the location. The morning
+    summary joins `tblUserSites` on the EVENT's organisation (#616): the
+    portal-wide `isAdmin` flag still counts, because that is how a
+    single-organisation install marks its administrator, but it now reaches
+    only the organisations that person actually belongs to.
+    `Mailer::renderBase()` takes a site id and
+    `Mailer::send()`/`sendTemplated()` read it from `$options['siteId']`
+    (#683) — a scheduled job sends across every organisation with
+    `$SETTINGS` merged once, and `Site::forceContext()` does NOT re-merge
+    it, so without that the footer's name and support mailbox stayed with
+    whichever organisation the job resolved to while the LINK followed the
+    context, which is the hardest kind of half-right output to notice. **The
+    issue blamed the reminder job and could not have been right:** all three
+    reminder bodies are HTML and `renderBase()` only wraps a body that does
+    not look like HTML, so no reminder e-mail has ever carried a footer; the
+    live instance was the giving statement. **Three traps in testing this,
+    all measured.** `tblEventReminderLog.recipientCount` counts only a
+    message a mail service really TOOK, and part T of the time-zones test
+    deliberately points the portal at an empty SMTP mailbox, so it is 0 for
+    every message that went out perfectly well — read
+    `tblEmailLog.toRecipients` through `mailTo()` instead, which says WHO.
+    **Part T switches every account but one member OFF**, and the summary's
+    query asks `u.isActive = 1` where the reminder's does not, so the first
+    #616 check PASSED ON THE PRE-FIX QUERY planted back from `git show
+    HEAD:` — the administrator was unreachable, not excluded. And the plant
+    tried before that one, loosening the join to `LEFT JOIN`, ALSO passed:
+    **a plant that will not go red means the fixture is dead just as readily
+    as it means the code does not matter, and the passing run cannot tell
+    you which.** The check now asserts the positive half too — the same
+    administrator IS told about their own organisation's event — because
+    "not told" that could mean "unreachable" is the fault it just had. **AND
+    IT STILL PROVED NOTHING ABOUT THE QUERY, which the independent check
+    found and is the better lesson:** that administrator holds all THREE
+    ADMINISTRATOR grounds at once (the fixture loop passes one `$isAdmin`
+    into `isAdmin`, `isRootAdmin`, `isSiteAdmin` and `isSiteRootAdmin`
+    alike, though the query never reads `isRootAdmin`), so **each of those
+    three `OR` clauses could be deleted on its own with every check green**
+    — measured, one at a time. **THREE, NOT FOUR, and I wrote four in five
+    places:** the COORDINATOR clause was never deletable-green, because that
+    administrator coordinates nothing. **Claiming a measurement that was
+    never made is worse than claiming none**, since the next reader has no
+    cause to re-run it. **The REFUSING conditions were worse and all three
+    were INERT:** `AND us.isActive = 1`, `WHERE u.isActive = 1` and `AND
+    revokedAt IS NULL` could EACH be deleted with all 134 checks green,
+    because nothing in that world could trip any of them — three separate
+    production leaks (a person removed from an organisation, a closed
+    account, a coordinator stood down, each still sent the morning diary).
+    **A condition no fixture can trip is not a condition**, and two of those
+    three were only found in the THIRD round, because rounds 1 and 2 looked
+    at the clauses that ADMIT. **One account holding several flags cannot
+    tell them apart; give each ground a person who holds it and nothing
+    else, and each refusing condition a person who trips it.** Seven people
+    now stand in that world. `tools/mail-queue-selftest.php` also calls this
+    job over HTTP, but its day-of check is satisfied by the portal-wide flag
+    alone, so do not count it as cover. Test: the three #666/#616 checks in
+    `tools/time-zones-selftest.php` (134).
+
     **The "We're live" push (#612).** In `web/_apps/admin/livestream/index.php`
     the action `notify_live` is the ONE action open to an event's coordinator:
     the posted event decides, and must belong to the organisation

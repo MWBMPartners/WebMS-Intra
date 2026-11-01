@@ -66,9 +66,14 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 //    The same replacing behaviour is why this page and the smaller card on
 //    `/account` have always fought over this column — see #667.
 //
-//    `eventReminders` STAYS on the list. Its switch is still on the page,
-//    deliberately, with a notice saying the e-mails are not yet filtered by
-//    it; see the comment beside that notice.
+//    `eventReminders` STAYS on the list, and since #666 (1 November 2026) it
+//    is one of the keys that really does something: `cron/event-reminders.php`
+//    reads it before sending the day-before and one-hour reminders, so a
+//    member who switches it off is not sent those. The day-of summary further
+//    down that job goes to coordinators and administrators and is NOT filtered
+//    by this key.
+//    It used to be listed here with a standing notice on the page admitting
+//    the e-mails ignored it. Both the notice and the fault are gone.
 $allowedKeys = [
     'eventReminders',
     'givingStatements',

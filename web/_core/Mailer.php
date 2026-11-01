@@ -343,6 +343,15 @@ class Mailer
      *                                           alert).
      *                              `sendNow`    false: do not try in this
      *                                           request; keep it for the job.
+     *                              `siteId`     which organisation the message
+     *                                           belongs to, for the footer's
+     *                                           name and support address. A
+     *                                           SCHEDULED JOB that walks
+     *                                           several organisations must set
+     *                                           it; a web request need not,
+     *                                           because its merged settings
+     *                                           are already the right
+     *                                           organisation's (#683).
      *
      * @return bool True when the message was SENT, or KEPT to be sent
      *              (queued, or held). False when it was neither. lastOutcome()
@@ -360,9 +369,20 @@ class Mailer
         //    automatically by sendTemplated()'s flow when used; callers
         //    using send() directly get the auto-wrap behaviour.
         $looksLikeHtml = (bool) preg_match('/<[a-zA-Z][^>]*>/', $body);
+        // 🏷️ Which organisation's footer (#683). A scheduled job that walks
+        //    several organisations must say which one each message belongs to,
+        //    because the request's merged settings were fixed before the walk
+        //    began. Left out, nothing changes: the merged settings answer, which
+        //    is right for a web request.
+        //    NOTE that a body which already looks like HTML never reaches
+        //    renderBase() at all, so it carries no branded footer either way —
+        //    that is why every reminder e-mail was unaffected by this fault.
+        $siteIdForFooter = isset($options['siteId']) === true && is_numeric($options['siteId']) === true
+            ? (int) $options['siteId']
+            : null;
         $htmlBody = $looksLikeHtml === true
             ? $body
-            : self::renderBase($body);
+            : self::renderBase($body, $siteIdForFooter);
 
         // 🪞 Plain-text alternative (#254). Auto-derive from the HTML if the
         //    caller didn't supply one. This goes into the providers'
@@ -948,7 +968,15 @@ class Mailer
                 $template
             );
         }
-        return self::send($to, $subject, self::renderBase($rendered), $files, $options);
+        // 🏷️ A templated message ALWAYS goes through the branded base, so this
+        //    is the path on which #683 really bit: the giving statement. The
+        //    organisation comes from the caller's options, the same name
+        //    send() reads, so one caller sets it once and both halves agree.
+        $siteIdForFooter = isset($options['siteId']) === true && is_numeric($options['siteId']) === true
+            ? (int) $options['siteId']
+            : null;
+
+        return self::send($to, $subject, self::renderBase($rendered, $siteIdForFooter), $files, $options);
     }
 
     /**
@@ -984,9 +1012,91 @@ class Mailer
     }
 
     /**
-     * Wrap the given content HTML in the branded base layout.
+     * The organisation's name and support address for the footer (#683).
+     *
+     * WHY THIS EXISTS. `renderBase()` read `global $SETTINGS`, which the
+     * settings loader merges ONCE per request. For a web request that is
+     * exactly right: the merge is the open organisation's. For a SCHEDULED JOB
+     * that walks several organisations it is wrong, because the merge happened
+     * before the walk began and never changes.
+     *
+     * `Site::forceContext()` does NOT help, and that was the trap: it updates
+     * the current site id and reloads the site row, so `PortalAddress` follows
+     * it and the footer's LINK was always right — but `$SETTINGS` is untouched,
+     * so the NAME and the SUPPORT ADDRESS stayed with whichever organisation
+     * the job's own request resolved to. A giving statement, which is a
+     * document of somebody's giving history, went out to every donor in every
+     * organisation carrying ONE organisation's support mailbox and name.
+     *
+     * The organisation's own row wins; where it has none, the installation-wide
+     * row answers. That is deliberate and matches #677: the nine `org.*` keys
+     * and `portal.support.email` belong to an organisation, and the support
+     * address FALLS BACK to the installation's, which is why migration 231 did
+     * not copy that row down.
+     *
+     * NEITHER KEY IS A SECRET, so the stored text is used as it stands. WHERE
+     * AN ORGANISATION IS NAMED, the address is checked with
+     * `FILTER_VALIDATE_EMAIL` before it is shown: a footer must not print
+     * something that is not an address, and that check also means a value
+     * somebody had marked sensitive (and so sealed) is left out rather than
+     * printed as a blob.
+     *
+     * BE PRECISE ABOUT WHERE THAT CHECK IS, because it is easy to read as a
+     * promise about every message and it is not one. The early return above —
+     * no organisation named, which is EVERY ordinary web request and
+     * `testSmtp()` — hands back the merged value untouched and checks nothing,
+     * exactly as this code did before #683. So a malformed or sealed support
+     * address stored installation-wide is still printed on that path. That is
+     * unchanged behaviour rather than a new hole, and fixing it belongs with
+     * whatever validates the setting when it is SAVED, not here.
+     *
+     * IT NEVER THROWS. Mail matters more than a footer: if the read fails for
+     * any reason the merged array answers, which is the behaviour this method
+     * replaced.
+     *
+     * @return array{name: string, support: string}
      */
-    private static function renderBase(string $content): string
+    private static function footerFactsFor(?int $siteId): array
+    {
+        global $SETTINGS;
+        $merged = [
+            'name'    => (string) ($SETTINGS['site']['name'] ?? 'WebMS Intra'),
+            'support' => (string) ($SETTINGS['portal']['support']['email'] ?? ''),
+        ];
+        if ($siteId === null || $siteId <= 0) {
+            return $merged;
+        }
+
+        try {
+            // 🔁 App::settingForSite() is the reader that already answers "this
+            //    organisation's value, else the installation's" — the exact
+            //    fallback #677 describes. A first draft of this method wrote
+            //    its own two-layer query instead, which was a second copy of
+            //    one rule for no gain. Giving.php next door already asks this
+            //    way for the charity name and the subject line.
+            $name = trim((string) (App::settingForSite('site.name', $siteId) ?? ''));
+            $sup  = trim((string) (App::settingForSite('portal.support.email', $siteId) ?? ''));
+
+            return [
+                'name'    => $name === '' ? $merged['name'] : $name,
+                'support' => ($sup !== '' && filter_var($sup, FILTER_VALIDATE_EMAIL) !== false)
+                    ? $sup
+                    : '',
+            ];
+        } catch (\Throwable $e) {
+            return $merged;
+        }
+    }
+
+    /**
+     * Wrap the given content HTML in the branded base layout.
+     *
+     * $siteId names the organisation the message belongs to. Left out, the
+     * request's own merged settings answer — right for a web request, and
+     * wrong for a scheduled job that walks several organisations. See
+     * footerFactsFor() (#683).
+     */
+    private static function renderBase(string $content, ?int $siteId = null): string
     {
         global $SETTINGS;
         $base = PORTAL_CORE
@@ -1002,15 +1112,23 @@ class Mailer
                     : '<pre style="white-space:pre-wrap">' . htmlspecialchars($content, ENT_QUOTES, 'UTF-8') . '</pre>')
                  . '</body></html>';
         }
-        $portalName    = (string) ($SETTINGS['site']['name'] ?? 'WebMS Intra');
+        // 🏷️ The name and the support address belong to ONE organisation
+        //    (#683). With no organisation named this is the request's own
+        //    merged value, exactly as before.
+        $footer        = self::footerFactsFor($siteId);
+        $portalName    = $footer['name'];
         // 🔗 The footer's "Visit the portal" link. PortalAddress is the one
         //    place that decides the address in a link the portal sends out
         //    (#500). This used to read the `site.url` setting itself; nothing
         //    seeded that setting, so the link was never shown. When there is
         //    no address to give this is '', and the template leaves the link
         //    out.
-        $portalUrl     = PortalAddress::absolute('');
-        $supportEmail  = (string) ($SETTINGS['portal']['support']['email'] ?? '');
+        //    This half was always right in a job that walks organisations,
+        //    because PortalAddress follows Site::id() and Site::forceContext()
+        //    updates it — which is precisely what made the other two values
+        //    looking wrong so hard to spot.
+        $portalUrl     = PortalAddress::absolute('', $siteId);
+        $supportEmail  = $footer['support'];
         // 🪞 Auto-wrap plain text in <p> tags so paragraphs render.
         $contentHtml = preg_match('/<[a-zA-Z][^>]*>/', $content) === 1
             ? $content

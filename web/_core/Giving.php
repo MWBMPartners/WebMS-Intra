@@ -886,7 +886,14 @@ class Giving
             //    safe to repeat: a second copy of a statement would not do.
             //    `origin` names this row, so that the queue can tell it what
             //    became of a kept e-mail (statementMailSettled()).
-            $ok = Mailer::sendTemplated($email, $subject, 'giving-statement', $vars, [$pdfPath], ['priority' => 'bulk', 'origin' => 'statement:' . $logId]);
+            //    `siteId` names the organisation whose name and support address
+            //    the footer states (#683). A statement run walks every
+            //    organisation from one job, and the settings the job merged at
+            //    start-up never change as it walks — so without this, every
+            //    donor in every organisation received a statement footed with
+            //    ONE organisation's name and support mailbox. The portal link
+            //    was already right, because it is built from $siteId above.
+            $ok = Mailer::sendTemplated($email, $subject, 'giving-statement', $vars, [$pdfPath], ['priority' => 'bulk', 'origin' => 'statement:' . $logId, 'siteId' => $siteId]);
         } catch (\Throwable $e) {
             Logger::errorPlatform('GivingStatements', 'Error', 'EMAIL_SEND_FAIL', 'Failed to email giving statement', $e->getMessage());
             self::rollbackStatementClaim($logId, 'send-exception');

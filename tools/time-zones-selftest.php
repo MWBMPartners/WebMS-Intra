@@ -114,7 +114,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 131;
+const EXPECTED_CHECKS = 134;
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -1651,11 +1651,18 @@ ok(
 // T. THE REMINDER JOB DECIDES FROM MOMENTS
 // =============================================================================
 head('T. The reminder job on both change nights, north and south of the equator, with the database\'s clock in a third zone (' . DB_ZONE . ')');
-// Nobody to send to: every account but ONE is switched off while this part runs, so the job records WHEN each
-// reminder is made and no message is attempted. The one member left is going only to the events about the
-// day-before reminder's WORDS (further down). The mail route for the run is the SMTP mailbox with nothing
-// filled in: an attempt then answers "not set up" and is written to the e-mail log with its subject, which is
-// how those checks read what would have been sent. No connection is made, to anything.
+// Nobody to send to: the block below switches every account but ONE off, so for MOST of this part the job
+// records WHEN each reminder is made and no message is attempted. The one member left is going only to the
+// events about the day-before reminder's WORDS (further down). The mail route for the run is the SMTP mailbox
+// with nothing filled in: an attempt then answers "not set up" and is written to the e-mail log with its
+// subject, which is how those checks read what would have been sent. No connection is made, to anything.
+//
+// 🚪 TWO BLOCKS NEAR THE END DELIBERATELY BREAK THAT, and each says so where it happens: the #666 checks give
+//    the one member RSVPs of their own and change their stored preference between runs, and the #616 check adds
+//    a second organisation's coordinator and three more accounts (left active to the end) and switches the
+//    administrator back on for two runs before putting them back. Read those before assuming a new fixture
+//    added here has nobody to send to — or that it has, which is the mistake that made the first version of
+//    the #616 check pass on the code it was written to catch.
 $switchedOff = array_map(static fn (array $r): int => (int) $r['userID'], q('SELECT userID FROM tblUsers WHERE isActive = 1'));
 q('UPDATE tblUsers SET isActive = 0');
 q('UPDATE tblUsers SET isActive = 1 WHERE userID = ?', 'i', [MEMBER]);
@@ -1666,6 +1673,23 @@ setting('mail.smtp.host', '');
 function reminderSubjects(string $eventName): array
 {
     return array_column(q("SELECT subject FROM tblEmailLog WHERE subject LIKE CONCAT('Reminder: ', ?, '%') ORDER BY emailLogID", 's', [$eventName]), 'subject');
+}
+
+/**
+ * Every address the mail log holds a message for whose subject begins with `$prefix`, in the order the
+ * messages were written. One row per address: both reminder paths send one message per person.
+ *
+ * WHY THE ADDRESSES AND NOT A COUNT. `tblEventReminderLog.recipientCount` counts only messages a mail
+ * service really TOOK (`Mailer::lastOutcome() === OUTCOME_SENT`), and in this made-up world no mail
+ * service takes anything, so that column is 0 for every message that went out perfectly well. Asserting
+ * on it reads as a strict check and is in fact a check of the harness's own lack of a mail server. The
+ * addresses say what the assertions here are really about: WHO was written to, and who was not.
+ *
+ * @return list<string>
+ */
+function mailTo(string $prefix): array
+{
+    return array_column(q("SELECT toRecipients FROM tblEmailLog WHERE subject LIKE CONCAT(?, '%') ORDER BY emailLogID", 's', [$prefix]), 'toRecipients');
 }
 
 /**
@@ -1972,6 +1996,233 @@ ok(
     $weekWrong === [] && $weekNotOk === [] && $weekRuns === 337 && $weekKinds['held'] === 0 && $weekKinds['named'] >= 6 && $weekKinds['tomorrow'] >= 1,
     count($weekWrong) . ' wrong: ' . json_encode(array_slice($weekWrong, 0, 4)) . '; kinds ' . json_encode($weekKinds) . '; runs that did not end OK: ' . json_encode(array_slice($weekNotOk, 0, 3))
 );
+// ─────────────────────────────────────────────────────────────────────
+// The member's own choice, and whose morning summary it is (#666, #616)
+// ─────────────────────────────────────────────────────────────────────
+// These two are not about time zones, but they are about the SAME JOB, and this
+// is the harness that runs it at MANY clock moments against a real database,
+// which is what these checks need. Writing a third made-up world would be one
+// more to keep in step. Note it is NOT the only harness that runs this job:
+// `tools/mail-queue-selftest.php` calls `/cron/event-reminders` over real HTTP
+// and asserts on the day-of summary's recipients, so a change to EITHER
+// recipient query must re-run that one too. Its own day-of check is satisfied
+// by the portal-wide `isAdmin` clause alone, so it would not notice a
+// per-organisation flag being dropped. A fixed July date is used for both, in a zone with no clock change that
+// month, so nothing here depends on when the suite is run.
+$prefClock = '2027-07-14 19:00:00';
+$prefZone  = 'Europe/London';
+$prefStart = momentOf($prefClock, $prefZone);
+
+// ---- switched OFF: the member who said "going" is not e-mailed ----
+$offId   = $nextId++;
+$offName = 'Selftest zones reminders off ' . $offId;
+reminderEvent($offId, $offName, $prefClock, $prefZone);
+q("INSERT INTO tblEventRSVPs (eventID, userID, siteID, response, status) VALUES (?, ?, 1, 'going', 'confirmed')", 'ii', [$offId, MEMBER]);
+q("UPDATE tblUsers SET notifyPrefs = ? WHERE userID = ?", 'si', ['{"eventReminders":false}', MEMBER]);
+$offRan   = runJobAt($prefStart - 86400);
+$offLine  = (string) (one("SELECT activityDescription AS d FROM tblActivityLogs WHERE activityType = 'EventReminderSent' AND activityDescription LIKE ? ORDER BY logID DESC LIMIT 1", 's', ['Event #' . $offId . ' type=24h%'])['d'] ?? '');
+// `tblEventReminderLog.recipientCount` is deliberately NOT asked here. It
+// counts only a message a mail service really TOOK, and this part points the
+// portal at an SMTP mailbox with nothing in it, so it is 0 for a message that
+// went out perfectly well AND 0 for one that was never attempted: a clause
+// requiring it to be 0 cannot fail, which makes the check look stricter than
+// it is. `reminders()` below proves the reminder was recorded as made.
+ok(
+    'T #666 the member had switched "Event reminders" off: they answered "going" and NOTHING is written to them. The reminder is still recorded as made, so the job does not try again, and the log line says how many had switched it off',
+    mailTo('Reminder: ' . $offName) === []
+        && str_contains($offLine, 'off=1') === true && reminders($offId, '24h') === 1 && str_starts_with($offRan, 'OK ') === true,
+    'written to: ' . json_encode(mailTo('Reminder: ' . $offName)) . '; recorded as made ' . reminders($offId, '24h') . ' time(s); log line: "' . $offLine . '"; the job said: ' . $offRan
+);
+
+// ---- switched ON (and never touched): unchanged from before #666 ----
+// Two cases in one check, because "the gate works" and "the gate does not
+// over-reach" fail in opposite directions and a test of only the first would
+// pass on a job that e-mails nobody at all.
+$onId   = $nextId++;
+$onName = 'Selftest zones reminders on ' . $onId;
+reminderEvent($onId, $onName, $prefClock, $prefZone);
+q("INSERT INTO tblEventRSVPs (eventID, userID, siteID, response, status) VALUES (?, ?, 1, 'going', 'confirmed')", 'ii', [$onId, MEMBER]);
+q("UPDATE tblUsers SET notifyPrefs = ? WHERE userID = ?", 'si', ['{"eventReminders":true}', MEMBER]);
+$onRan  = runJobAt($prefStart - 86400);
+$onRow  = one("SELECT recipientCount FROM tblEventReminderLog WHERE eventID = ? AND reminderType = '24h'", 'i', [$onId]);
+// And once more with NO preference stored at all, which is what somebody who
+// has never opened the page has: a missing key MUST still mean yes.
+$noneId   = $nextId++;
+$noneName = 'Selftest zones reminders unset ' . $noneId;
+reminderEvent($noneId, $noneName, $prefClock, $prefZone);
+q("INSERT INTO tblEventRSVPs (eventID, userID, siteID, response, status) VALUES (?, ?, 1, 'going', 'confirmed')", 'ii', [$noneId, MEMBER]);
+q("UPDATE tblUsers SET notifyPrefs = NULL WHERE userID = ?", 'i', [MEMBER]);
+$noneRan = runJobAt($prefStart - 86400);
+$noneRow = one("SELECT recipientCount FROM tblEventReminderLog WHERE eventID = ? AND reminderType = '24h'", 'i', [$noneId]);
+ok(
+    'T #666 the switch left ON, and never touched at all: both are e-mailed exactly as before, at the member\'s own address. A missing preference means yes, so nobody who has not opened the page loses a reminder',
+    mailTo('Reminder: ' . $onName) === ['member.zones@selftest.invalid']
+        && mailTo('Reminder: ' . $noneName) === ['member.zones@selftest.invalid']
+        && reminders($onId, '24h') === 1 && reminders($noneId, '24h') === 1
+        && str_starts_with($onRan, 'OK ') === true && str_starts_with($noneRan, 'OK ') === true,
+    'switched on: written to ' . json_encode(mailTo('Reminder: ' . $onName)) . ', recorded as made ' . reminders($onId, '24h') . ' time(s)'
+        . '; never set: written to ' . json_encode(mailTo('Reminder: ' . $noneName)) . ', recorded as made ' . reminders($noneId, '24h') . ' time(s)'
+        . '; the job said: ' . $onRan . ' | ' . $noneRan
+);
+
+// ---- the morning summary belongs to ONE organisation (#616) ----
+// The event is the SECOND organisation's. Its own coordinator must be told; the
+// installation's global administrator — who holds the older portal-wide
+// `isAdmin` flag and is a member of organisation 1 ONLY — must not, because the
+// two levels may be different parties.
+// The ADDRESSES are the evidence, and the check names the one that must be
+// there as well as refusing the one that must not: a check that only asserted
+// "the administrator was not told" would also pass on a job that had stopped
+// telling anybody. A count cannot do that job here either way — see mailTo()
+// for why tblEventReminderLog.recipientCount is 0 in this made-up world even
+// for a message that went out exactly as it should.
+const ORG_TWO_COORD = 960004;
+q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [ORG_TWO_COORD, 'Selftest Zones Two Coordinator', 'coord.two.zones@selftest.invalid']);
+q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [ORG_TWO_COORD, ORG_TWO]);
+// 🧍 SEVEN PEOPLE: ONE PER GROUND THAT ADMITS, ONE PER CONDITION THAT REFUSES.
+//    The summary's query admits somebody on any of FOUR grounds: they
+//    coordinate this event, or they hold `tblUserSites.isSiteAdmin`, or
+//    `isSiteRootAdmin`, or the portal-wide `tblUsers.isAdmin`. The
+//    administrator this part already has holds all THREE ADMINISTRATOR
+//    grounds at once (the loop near the top of the file passes its `$isAdmin`
+//    into `isAdmin`, `isRootAdmin`, `isSiteAdmin` and `isSiteRootAdmin` alike,
+//    though the query never reads `isRootAdmin`), so with that account alone
+//    **each of those three clauses could be deleted on its own and this check
+//    stayed green** — measured, each in turn.
+//
+//    BE EXACT ABOUT WHICH THREE, because the first version of this comment
+//    said all FOUR and that was an overstatement of its own measurement,
+//    caught by the independent check. The COORDINATOR clause was never
+//    deletable-green: that administrator coordinates nothing, so deleting it
+//    drops the coordinator from the list and the exact-list assertion fails.
+//    Claiming a measurement that was never made is worse than claiming none,
+//    because the next reader has no reason to re-run it.
+//
+//    One account holding several flags cannot tell them apart, which is the
+//    same trap as a fixture whose two rows differ in more than one way. So
+//    each ground gets a person holding it and nothing else.
+//
+//    Then three more who must be told NOTHING, one per refusing condition,
+//    because a condition no fixture can trip is not a condition. Their own
+//    comments below say which each one pins. Without them `AND us.isActive = 1`,
+//    `WHERE u.isActive = 1` and `AND revokedAt IS NULL` could each change
+//    an answer with every check green — measured for all three.
+//
+//    All of them are inserted AFTER part T's blanket `UPDATE tblUsers SET
+//    isActive = 0` for the same reason the coordinator is: before it they
+//    would be switched straight off again and could receive nothing.
+
+const ORG_TWO_SITE_ADMIN = 960005;
+const ORG_TWO_ROOT_ADMIN = 960006;
+const ORG_TWO_EX_MEMBER  = 960007;
+const ORG_TWO_GLOBAL     = 960008;
+const ORG_TWO_LEFT       = 960009;
+const ORG_TWO_EX_COORD   = 960010;
+foreach (
+    [
+        // [userID, name, address, the ACCOUNT's isActive, portal-wide isAdmin, the MEMBERSHIP's isActive, isSiteAdmin, isSiteRootAdmin]
+        [ORG_TWO_SITE_ADMIN, 'Selftest Zones Two Site Admin',   'siteadmin.two.zones@selftest.invalid',   1, 0, 1, 1, 0],
+        [ORG_TWO_ROOT_ADMIN, 'Selftest Zones Two Root Admin',   'rootadmin.two.zones@selftest.invalid',   1, 0, 1, 0, 1],
+        // The portal-wide flag's own person: a global administrator who IS an
+        // active member of this organisation, with neither per-organisation
+        // flag. They SHOULD be told, and they are the only one who proves that
+        // clause still admits anybody — the administrator at the top of this
+        // file holds all three ADMINISTRATOR grounds, so dropping
+        // `u.isAdmin = 1` left every check green until this row existed
+        // (measured).
+        [ORG_TWO_GLOBAL,     'Selftest Zones Two Global Admin', 'globaladmin.two.zones@selftest.invalid', 1, 1, 1, 0, 0],
+        // 🚫 THE THREE WHO MUST BE TOLD NOTHING, one per refusing condition.
+        //    Each would be admitted by a qualifying ground if that condition
+        //    stopped being applied, so each makes one condition load-bearing.
+        // Membership of this organisation switched off, account live: this is
+        // what being removed from an organisation looks like. Pins
+        // `AND us.isActive = 1` on the JOIN.
+        [ORG_TWO_EX_MEMBER,  'Selftest Zones Two Ex Member',    'exmember.two.zones@selftest.invalid',    1, 0, 0, 1, 1],
+        // The other way round: the ACCOUNT is switched off and the membership
+        // is live. They hold EVERY qualifying flag on purpose, so the only thing
+        // keeping them out is the account test — which both sharpens the pin and
+        // closes a hole the independent check found by moving two brackets:
+        // `… isSiteRootAdmin = 1) OR (u.isAdmin = 1` keeps the parentheses
+        // balanced, passes `php -l`, and lifts the whole WHERE off anybody
+        // holding the portal-wide flag, account test included. Pins
+        // `WHERE u.isActive = 1`, which was deletable with all
+        // 134 checks green until this row existed — found by the independent
+        // check, which planted it and measured it. A person whose account has
+        // been closed went on being sent the organisation's morning diary.
+        [ORG_TWO_LEFT,       'Selftest Zones Two Closed Account', 'closed.two.zones@selftest.invalid',    0, 1, 1, 1, 1],
+        // An active member with no administrator flag at all, who is a
+        // coordinator of the event whose appointment has been REVOKED. Pins
+        // `AND revokedAt IS NULL` inside the coordinator sub-select: with only
+        // an unrevoked coordinator in this world that condition could be
+        // deleted and nothing moved, so a coordinator who had been stood down
+        // kept receiving the diary.
+        [ORG_TWO_EX_COORD,   'Selftest Zones Two Ex Coordinator', 'excoord.two.zones@selftest.invalid',   1, 0, 1, 0, 0],
+    ] as [$uid, $uname, $umail, $accountActive, $isPortalAdmin, $memberActive, $isSiteAdmin, $isSiteRootAdmin]
+) {
+    // isAdmin is 0 for the two per-organisation people on purpose: the
+    // portal-wide flag is the one clause THEY must not be let in by, or they
+    // prove nothing about the flags this package added.
+    q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, ?, ?, 0)', 'issii', [$uid, $uname, $umail, $accountActive, $isPortalAdmin]);
+    q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, ?, ?, ?)', 'iiiii', [$uid, ORG_TWO, $memberActive, $isSiteAdmin, $isSiteRootAdmin]);
+}
+// 🔌 THE ADMINISTRATOR HAS TO BE SWITCHED BACK ON, AND THIS IS THE WHOLE
+//    POINT OF THE CHECK BELOW. Part T switches every account but the one
+//    member off (see the note at its head), and the morning summary's query
+//    — unlike the day-before reminder's — asks for `u.isActive = 1`. So a
+//    first version of this check PASSED ON THE CODE AS IT STOOD BEFORE THIS
+//    PACKAGE, measured by planting `git show HEAD:web/_apps/cron/event-reminders.php`'s
+//    own query: the global administrator was never written to, not because
+//    the organisation was judged, but because the administrator was switched
+//    off and could not have been written to about ANYTHING. A fixture that
+//    cannot reach the branch tests nothing.
+$adminWasActive = (int) (one('SELECT isActive FROM tblUsers WHERE userID = ?', 'i', [ADMIN])['isActive'] ?? 0);
+q('UPDATE tblUsers SET isActive = 1 WHERE userID = ?', 'i', [ADMIN]);
+$dayId    = $nextId++;
+$dayName  = 'Selftest zones morning summary ' . $dayId;
+$dayClock = '2027-07-15 10:00:00';
+q(
+    "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES (?, ?, ?, ?, ?, NULL, ?, 'published', 1, 0)",
+    'iissss', [$dayId, ORG_TWO, 'selftest-zones-day-' . $dayId, $dayName, $dayClock, $prefZone]
+);
+q('INSERT INTO tblEventCoordinators (eventID, userID, grantedByID) VALUES (?, ?, NULL)', 'ii', [$dayId, ORG_TWO_COORD]);
+// The coordinator who was stood down. `revokedAt` is the only thing that
+// separates them from the one above, so they are what makes the sub-select's
+// `AND revokedAt IS NULL` mean something.
+q('INSERT INTO tblEventCoordinators (eventID, userID, grantedByID, revokedAt) VALUES (?, ?, NULL, NOW())', 'ii', [$dayId, ORG_TWO_EX_COORD]);
+$dayRan = runJobAt(momentOf('2027-07-15 07:00:00', $prefZone));
+// And the OTHER half, the day after: an event of organisation 1, which the
+// administrator IS a member of. They must be told about that one. Without
+// this half, "the administrator was not told" could still mean "the
+// administrator can never be told", which is exactly the fault above.
+$ownId    = $nextId++;
+$ownName  = 'Selftest zones own summary ' . $ownId;
+reminderEvent($ownId, $ownName, '2027-07-16 10:00:00', $prefZone);
+$ownRan   = runJobAt(momentOf('2027-07-16 07:00:00', $prefZone));
+q('UPDATE tblUsers SET isActive = ? WHERE userID = ?', 'ii', [$adminWasActive, ADMIN]);
+// Sorted, because the query has no ORDER BY and one message is written per
+// address: the ORDER the three come out in is not something to pin.
+$twoGot = mailTo('📋 Today: ' . $dayName);
+$ownGot = mailTo('📋 Today: ' . $ownName);
+sort($twoGot);
+ok(
+    'T #616 the morning summary for the SECOND organisation\'s event goes to each of the FOUR kinds of person the query admits, one person per clause: its coordinator, the holder of `isSiteAdmin`, the holder of `isSiteRootAdmin`, and a portal-wide administrator who IS one of its members. It goes to NONE of the four people who must be refused: the installation\'s global administrator, who belongs to organisation 1 only; somebody whose membership of this organisation has been switched off; somebody whose ACCOUNT has been switched off; and a coordinator whose appointment was revoked. The SAME global administrator IS told about organisation 1\'s own event the next morning, so none of those absences can be "unreachable"',
+    $twoGot === ['coord.two.zones@selftest.invalid', 'globaladmin.two.zones@selftest.invalid', 'rootadmin.two.zones@selftest.invalid', 'siteadmin.two.zones@selftest.invalid']
+        && $ownGot === ['admin.zones@selftest.invalid']
+        && reminders($dayId, 'day') === 1 && reminders($ownId, 'day') === 1
+        && str_starts_with($dayRan, 'OK ') === true && str_starts_with($ownRan, 'OK ') === true,
+    'the other organisation\'s event, written to ' . json_encode($twoGot)
+        . ' (expected exactly its coordinator, its isSiteAdmin, its isSiteRootAdmin and the global administrator who IS one of its members, sorted.'
+        . ' admin.zones@selftest.invalid among them is #616 itself — the installation\'s global administrator, a member of organisation 1 only.'
+        . ' exmember.two.zones@selftest.invalid among them means `AND us.isActive = 1` stopped mattering, so somebody removed from an organisation still gets its diary.'
+        . ' closed.two.zones@selftest.invalid among them means `WHERE u.isActive = 1` stopped mattering, so a closed account still gets it.'
+        . ' excoord.two.zones@selftest.invalid among them means `AND revokedAt IS NULL` stopped mattering, so a coordinator who was stood down still gets it.'
+        . ' A SHORTER list means one of the FOUR admitting grounds — the coordinator sub-select,'
+        . ' `us.isSiteAdmin`, `us.isSiteRootAdmin` or `u.isAdmin` — has stopped admitting the person it is for);'
+        . ' organisation 1\'s own event, written to ' . json_encode($ownGot)
+        . ' (an empty list here means the administrator was unreachable all along, so every absence above proved nothing);'
+        . ' recorded as made ' . reminders($dayId, 'day') . ' and ' . reminders($ownId, 'day') . ' time(s); the job said: ' . $dayRan . ' | ' . $ownRan
+);
+
 // An event stored with text that is not a zone: worked out on the ORGANISATION's clock, not London's and not the server's.
 $id    = $nextId++;
 $clock = clockIn(45, '10:00:00');

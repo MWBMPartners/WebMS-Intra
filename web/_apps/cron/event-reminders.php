@@ -24,6 +24,30 @@
  * early is noise). `WebPush::isConfigured()` short-circuits first, so an
  * unconfigured install pays one settings read and nothing else.
  *
+ * THE MEMBER'S OWN CHOICE (#666, 1 November 2026): the DAY-BEFORE and
+ * ONE-HOUR reminders go only to somebody whose `eventReminders` notifyPrefs
+ * key is not switched off. Both go through sendReminderBatch(), which is where
+ * the test lives.
+ *
+ * WHICH E-MAILS THIS DOES NOT COVER, said plainly because "it stops the
+ * e-mails" is too broad: the DAY-OF SUMMARY further down is not filtered by
+ * this key at all. It is a different notification — it goes to the event's
+ * coordinators and the organisation's administrators, not to members who
+ * answered "going" — and the switch's own words on the page are "Get notified
+ * ahead of events you have RSVP'd to". If a member's switch should ever silence
+ * that summary too, that is a decision and a change, not a tidy-up.
+ *
+ * Until that date this job read NO preference for the e-mails at all, and the
+ * switch was read by NOTHING anywhere in the portal:
+ * `git grep -n eventReminders 8810a06 -- web/` finds only the two account
+ * pages that write the key and draw its tick-box (each a view and a handler),
+ * plus two schema column comments. No reader. The companion push below is
+ * gated on a DIFFERENT key, `pushServiceReminders` ("Service reminders" on the
+ * page), so switching this one off changed nothing at all. The page carried a
+ * standing notice admitting the e-mails were not filtered; it is gone with the
+ * fault. A missing or unreadable preference still means yes, so somebody who
+ * has never opened the page is reminded as before.
+ *
  * WHO GETS A REMINDER, AND HOW MUCH IT SAYS (#514 part P2): every recipient
  * is checked against the one shared visibility rule, Portal\Core\
  * EventVisibility, in "token" mode with the recipient as the viewer — inside
@@ -202,6 +226,13 @@ function eventClockText(string $stored, string $format): string
  * WHAT THIS CANNOT DO: two accounts sharing one email address, one of them
  * allowed full details and one not, get ONE email — the full one, because
  * the account allowed it reads that mailbox too. Nothing else is merged.
+ * The same shape applies to the member's own choice (#666): an address shared
+ * by somebody who wants reminders and somebody who does not still gets one,
+ * because the person who asked for it reads that mailbox. Only when EVERY
+ * account on the address has switched them off is nothing sent. The two rules
+ * are applied in that order on purpose — a refused row is dropped before the
+ * full-detail merge, so an account that said no can never widen what an
+ * account that said yes is told.
  *
  * @param \mysqli              $db
  * @param array<string, mixed> $event       The event row (needs eventID).
@@ -229,7 +260,7 @@ function sendReminderBatch(\mysqli $db, array $event, string $type, string $subj
     // (measured while building #514 part P2). The text sprintf() puts in is
     // SQL built by EventVisibility itself.
     $stmt = $db->prepare(sprintf(
-        'SELECT DISTINCT u.emailAddress AS email, u.fullName, %s FROM tblEventRSVPs r '
+        'SELECT DISTINCT u.emailAddress AS email, u.fullName, u.notifyPrefs, %s FROM tblEventRSVPs r '
         . 'JOIN tblUsers u ON u.userID = r.userID '
         . 'JOIN tblEvents e ON e.eventID = r.eventID '
         . 'WHERE r.eventID = ? AND u.emailAddress IS NOT NULL '
@@ -244,9 +275,51 @@ function sendReminderBatch(\mysqli $db, array $event, string $type, string $subj
     // email => true for the full body, false for the limited one. A full
     // answer for the same address wins (see the doc block above).
     $recipients = [];
+    // 🔇 HOW MANY PEOPLE HAD SWITCHED THESE E-MAILS OFF (#666). Counted so the
+    //    record of the run says it, because "nobody was reminded" and "nobody
+    //    wanted to be reminded" are different facts and the old line could not
+    //    tell them apart.
+    $switchedOff = 0;
     $result = $stmt->get_result();
     while ($r = $result->fetch_assoc()) {
         $email = (string) $r['email'];
+        // 🙅 THE MEMBER'S OWN CHOICE DECIDES (#666). Until 1 November 2026 this
+        //    query asked only who had answered "going", so switching "Event
+        //    reminders" off on the Notification preferences page changed
+        //    NOTHING about the e-mails. Be exact about how little it did:
+        //    the switch was saved and read by NOTHING, anywhere. The push sent
+        //    further down is gated on a DIFFERENT key, `pushServiceReminders`
+        //    ("Service reminders" on the page), so this one changed nothing at
+        //    all. The page carried a standing notice admitting the e-mails
+        //    were not filtered by it. That is a consent failure on a live mail
+        //    path, and the notice is gone with the fault.
+        //
+        //    The test is WebPush::notifyPrefAllows(), which is public for
+        //    exactly this reason: the idiom is implemented FOUR times already
+        //    — WebPush::notifyPrefAllows() (public), Workflow's own private
+        //    copy, cron/user-reminders.php's plain function, and
+        //    Giving::isOptedOutOfStatements() (the same rule inverted) — and a
+        //    fifth here would have made the drift worse rather than better.
+        //    ImportNotifier does NOT hold a copy: it ASKS WebPush, which is
+        //    the precedent this follows. A missing key, empty text or
+        //    unreadable JSON all mean YES, so somebody who has never opened
+        //    the page is still reminded.
+        //
+        //    ONE ADDRESS, TWO ACCOUNTS. The map is keyed by e-mail, and two
+        //    accounts can share a mailbox (a married couple, a shared family
+        //    address). A refused row is dropped BEFORE the merge below, so the
+        //    address is written off only when EVERY account reading it has
+        //    said no — one person's choice cannot silence the other's
+        //    reminder — and the full-detail answer is decided among the
+        //    accounts that said yes, so a refusing account can never upgrade
+        //    somebody else's e-mail to one naming the location.
+        if (WebPush::notifyPrefAllows(
+            isset($r['notifyPrefs']) === true ? (string) $r['notifyPrefs'] : null,
+            'eventReminders'
+        ) === false) {
+            $switchedOff++;
+            continue;
+        }
         $recipients[$email] = ($recipients[$email] ?? false) || (int) $r['canSeeFull'] === 1;
     }
     $stmt->close();
@@ -275,7 +348,10 @@ function sendReminderBatch(\mysqli $db, array $event, string $type, string $subj
     $stmt->execute();
     $stmt->close();
 
-    Logger::activity('EventReminderSent', 'Event #' . $eventId . ' type=' . $type . ' n=' . $sent);
+    // 📋 Counts only, and never an address or a name: this line is read by
+    //    somebody checking a run, not by somebody auditing a person. `off` is
+    //    how many people had switched these e-mails off (#666).
+    Logger::activity('EventReminderSent', 'Event #' . $eventId . ' type=' . $type . ' n=' . $sent . ' off=' . $switchedOff);
     return $sent;
 }
 
@@ -488,11 +564,14 @@ $stmt->close();
 //    that. Always entered (the old test on PHP's hour is gone): which events
 //    are in their own morning is not known until each one is looked at.
 {
-    // #514 part P2: the portal's own events only (`externalFeedID IS NULL`).
-    // Imported events have no coordinators, and the recipients below include
-    // every holder of the older portal-wide `isAdmin` flag in EVERY
-    // organisation (`u.isAdmin = 1`) — a separate, older fault to be reported
-    // under #514 part P11, which must not also start carrying imported events.
+    // #514 part P2: the portal's own events only (`externalFeedID IS NULL`),
+    // because imported events have no coordinators.
+    // The recipients below used to include every holder of the older
+    // portal-wide `isAdmin` flag in EVERY organisation, which is why this
+    // query's own restriction mattered so much: without it the leak would
+    // have carried imported events as well. That fault is fixed (#616) — see
+    // the long note on the recipient query — and this restriction stays, on
+    // its own original grounds.
     $stmt = $mysqli->prepare(
         'SELECT e.eventID, e.siteID, e.eventName, e.startDateTime, e.timezone FROM tblEvents e '
         . 'WHERE e.isDeleted = 0 AND e.externalFeedID IS NULL AND e.status = "published" '
@@ -514,15 +593,43 @@ $stmt->close();
         }
         $eid = (int) $e['eventID'];
 
-        // 📧 Recipients: admins + coordinators.
+        // 📧 Recipients: THIS ORGANISATION'S administrators and the event's
+        //    coordinators (#616, 1 November 2026).
+        //
+        //    WHAT WAS WRONG: the only tests were "coordinates this event" OR
+        //    `u.isAdmin = 1`, and that second one is the older PORTAL-WIDE
+        //    flag with no organisation anywhere in the query. So every holder
+        //    of it received a morning summary for every event in EVERY
+        //    organisation on the installation — a hosting provider's own
+        //    administrator reading each customer's diary, which is the
+        //    boundary between two separate parties (see "One install, many
+        //    organisations" in .claude/CLAUDE.md).
+        //
+        //    THE JOIN IS THE FIX: everybody named must be an ACTIVE member of
+        //    the event's own organisation. It scopes the coordinators too,
+        //    which is right — somebody who has left the organisation should
+        //    not be sent its morning summary, whatever a stale coordinator row
+        //    says.
+        //
+        //    AND THE PER-ORGANISATION ADMIN FLAGS ARE ADDED DELIBERATELY, as
+        //    part of the same fix rather than as an extra. Scoping alone would
+        //    have made this WORSE for the ordinary case: an organisation's own
+        //    administrator holds `tblUserSites.isSiteAdmin`, not the legacy
+        //    portal-wide flag, so they were already being missed and the join
+        //    would not have given them anything. The legacy flag is kept as a
+        //    third test because it is still how a single-organisation install
+        //    marks its administrator; it now only reaches the organisations
+        //    that person actually belongs to.
+        $eventSiteId = (int) $e['siteID'];
         $r2 = $mysqli->prepare(
             'SELECT DISTINCT u.emailAddress AS email, u.fullName FROM tblUsers u '
+            . 'JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
             . 'WHERE u.isActive = 1 AND u.emailAddress IS NOT NULL AND u.emailAddress != "" AND ('
             . '   u.userID IN (SELECT userID FROM tblEventCoordinators WHERE eventID = ? AND revokedAt IS NULL) '
-            . '   OR u.isAdmin = 1'
+            . '   OR us.isSiteAdmin = 1 OR us.isSiteRootAdmin = 1 OR u.isAdmin = 1'
             . ')'
         );
-        $r2->bind_param('i', $eid);
+        $r2->bind_param('ii', $eventSiteId, $eid);
         $r2->execute();
         $recipients = [];
         $rs = $r2->get_result();

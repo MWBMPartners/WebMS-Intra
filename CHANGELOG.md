@@ -2,6 +2,88 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — switching "Event reminders" off now stops the reminder e-mails, and the morning summary no
+  longer crosses organisations (#666, #616, #683)**
+  - **The consent failure.** A member could switch "Event reminders" off, the portal saved the
+    choice, and the reminder e-mails kept arriving. `cron/event-reminders.php` read **no**
+    preference for the e-mails at all: its recipient query asked only who had answered "going". The
+    only mention of `notifyPrefs` in the whole job was a comment about the companion **push**, which
+    did honour its own switch. The preferences page carried a standing warning admitting it. It was honest about the e-mails,
+    which is what it existed to admit, but its other half was **wrong**: it implied the push obeyed
+    this key, and the push has always had its own. Both the notice and the fault are now gone.
+  - **The test is `WebPush::notifyPrefAllows()`, deliberately not a new copy.** That idiom already
+    had **four** implementations — `WebPush::notifyPrefAllows()` (public), `Workflow`'s own private
+    copy, `cron/user-reminders.php`'s plain function, and `Giving::isOptedOutOfStatements()` (the same
+    rule inverted). All four agree — checked — and a fifth here would have made the drift worse.
+    `ImportNotifier` holds no copy: it already **asks** `WebPush`, which is the precedent this change
+    follows. (`auth/account/save.php` only writes the column and holds no test; an earlier draft of
+    this entry counted both of those as copies and said six, which was wrong.) A missing key, empty text or unreadable JSON all still mean **yes**, so somebody
+    who has never opened the page is reminded exactly as before.
+  - **One mailbox, two accounts.** The recipient list is keyed by e-mail address, and a couple may
+    share one. A refused row is dropped **before** the full-detail merge, so an address is written
+    off only when every account reading it has said no, and an account that said no can never widen
+    what an account that said yes is told. The run's log line now carries `off=N` as well as `n=N`,
+    because "nobody was reminded" and "nobody wanted to be reminded" are different facts.
+  - **The morning summary went to every organisation (#616).** Its recipient query tested
+    "coordinates this event" OR `u.isAdmin = 1` — the older portal-wide flag — with no organisation
+    anywhere in it, so every holder received a summary for every event on the installation. A
+    hosting provider's administrator was reading each customer's diary, across the boundary between
+    two separate parties. Everybody named must now be an **active member of the event's own
+    organisation**.
+  - **The per-organisation admin flags were added as part of that fix, not as an extra.** Scoping
+    alone would have made the ordinary case worse: an organisation's own administrator holds
+    `tblUserSites.isSiteAdmin`, not the legacy flag, so they were already being missed and the join
+    would not have given them anything. The legacy flag is kept as a third test, because it is still
+    how a single-organisation install marks its administrator — it now only reaches the
+    organisations that person actually belongs to.
+  - **#683 was real, and not where the issue said.** The issue blamed the reminder job. It could
+    not have been: all three reminder bodies are built as HTML, and `Mailer::send()` only wraps a
+    body in the branded base when it does **not** look like HTML — so no reminder e-mail has ever
+    carried a footer at all. The live instance is the **giving statement**. `Mailer::sendTemplated()`
+    always goes through `renderBase()`, which read `global $SETTINGS` — merged once, before the job
+    began walking organisations. **`Site::forceContext()` does not help and that is the trap:** it
+    updates the site id and reloads the site row, so the footer's *link* was always right, while the
+    name and the support mailbox stayed with whichever organisation the job's own request resolved
+    to. Every donor in every organisation received a statement of their giving history footed with
+    one organisation's name and support address.
+  - **The fix is an optional organisation on the footer.** `renderBase()` takes a `?int $siteId`,
+    and `send()` and `sendTemplated()` read it from `options['siteId']`. **Left out, nothing
+    changes** — the merged settings answer, which is correct for a web request. `Giving` now names
+    the statement's own organisation. The two values are read with `App::settingForSite()`, which
+    already answers "this organisation's value, else the installation's" — the fallback #677
+    describes, and the reason migration 231 deliberately did not copy the support address down. A
+    first draft of this wrote its own two-layer query, which was a second copy of one rule for no
+    gain. Where a message names its organisation the support address is checked with
+    `FILTER_VALIDATE_EMAIL`, and a value that is not an address is left out. With no organisation named
+    — every ordinary web request — the merged value is printed as it stands, exactly as before, so
+    this is not a promise about every message.
+  - **Proved by three new checks in `tools/time-zones-selftest.php`** (134 in all), which is the
+    harness that runs this job at many clock moments against a real database. They read `tblEmailLog.toRecipients`,
+    so each one says **who** was written to. The switch covers the day-before and one-hour reminders —
+    not the day-of summary, which goes to coordinators and administrators and is a different
+    notification. The member who switched it off is not written to, the member who left it on and the
+    member who never touched it are, and the second organisation's summary reaches that
+    organisation's coordinator, its own `isSiteAdmin` holder, its own `isSiteRootAdmin` holder, and a
+    portal-wide administrator who IS one of its members — but not the installation's global
+    administrator, who is a member of organisation 1 only and who, in the same check, **is** told about their own organisation's event the next
+    morning, so the absence means something. `tblEventReminderLog.recipientCount` is deliberately not
+    used: it counts only messages a mail service really took, and this test points the portal at an
+    empty SMTP mailbox on purpose, so a clause requiring it to be 0 could never fail.
+  - **The independent check found that the first version of the #616 check proved nothing**, and this
+    is the part worth keeping. The administrator in that made-up world holds all three ADMINISTRATOR
+    grounds at once, so **each of those three `OR` clauses could be deleted on its own with every check
+    still green** — measured, one at a time. (Three, not four: the coordinator clause was never
+    deletable-green, because that administrator coordinates nothing. An earlier draft of this entry said
+    four, which overstated its own measurement.) The three refusing conditions were worse: `AND
+    us.isActive = 1`, `WHERE u.isActive = 1` and `AND revokedAt IS NULL` could EACH be deleted with all
+    134 checks green, because nothing in the made-up world could trip any of them — so a person removed
+    from an organisation, a closed account and a coordinator who had been stood down all went on
+    receiving the organisation's morning diary. Seven people now stand in that world: one per ground
+    that admits, one per condition that refuses. All six plants go red, each caught by the #616 check.
+    The three refusal plants name the person who leaked in; the three admitting plants show a person
+    dropping out of the expected list. `tools/mail-queue-selftest.php` also calls this job over real HTTP and
+    asserts on the day-of summary's recipients, but its own check is satisfied by the portal-wide flag
+    alone — so it would not have noticed a per-organisation flag being dropped either.
 - **Added — an optional ceiling on how long giving records keep a donor's name (#687, migration 234)**
   - **The decision, in the owner's words (31 October 2026):** "An installation Global Admin, or
     Organisation global admin can have the option to enforce such a limit - but can also choose not
@@ -1815,6 +1897,11 @@
     the reminder job honours only the push notification — so that switch now says so in plain words
     rather than quietly lying. Making it work is tracked separately, at a higher priority than the
     switches that merely did nothing.
+    **SUPERSEDED on 1 November 2026: #666 is fixed and the switch now stops the reminder e-mails —
+    the day-before and one-hour ones; the day-of summary to coordinators and administrators is not
+    filtered by it. The
+    notice described here is gone. Left in place as the record of what that release did, with this
+    line so that nobody reads it as current — see the Unreleased entry for #666.**
 - **Fixed — GoCardless could be chosen and then failed every payment (#569)**
   - It sat in the payment provider list labelled "follow-up". Choosing it let an administrator save
     an access token and then failed every single payment. Stripe and PayPal work properly. It can no

@@ -12972,3 +12972,214 @@ was caught.
 had already silently duplicated a block in an audit script earlier the same day.
 Replace exact text, or insert before an anchor; if a slice is unavoidable, print
 what it removes and read it before writing the file.
+
+## A preference that was saved and read by nothing, while the push obeyed its own (#666, #616, #683)
+
+*1 November 2026.*
+
+**The fault, and why it survived so long.** `cron/event-reminders.php` sent an
+event reminder to everybody who had answered "going". It read no notification
+preference for the e-mails at all. The word `notifyPrefs` appeared exactly once
+in the whole file — in a comment, about the companion **web push**.
+
+**Be exact about how little the switch did, because the first draft of this
+section was not, and the independent check caught it.** That draft said the
+switch "was saved, honoured for the companion push, and ignored by the mail",
+and the same clause reached four other documents and two code comments. It is
+false. `git grep -n eventReminders 8810a06 -- web/` finds only the two account
+pages that WRITE the key and draw its tick-box — each a view and a handler, so
+four files — plus two schema column comments: **no reader anywhere in the
+portal.** Quote the command with its `-- web/` filter; without it the output is
+wider than the sentence claims. The push is gated on a different key entirely —
+`pushServiceReminders`, shown on the page as "Service reminders" — so a member
+who switched "Event reminders" off went on getting both the e-mails and the
+push. The sentence was wrong in the direction that flatters the old code, and it
+replaced a comment that had been right: the block deleted from
+`notifications.php` said the job "honours only the PUSH switch … it does not
+read this one".
+
+**The thing worth copying, with the same qualification: the page said so out
+loud.** Rather than hide a switch that did nothing, `auth/account/notifications.php`
+carried a standing warning telling the member that switching it off did not stop
+the e-mails. That is the right thing to do with a known fault, and it is why this
+one was easy to find and easy to trust. The notice was itself imprecise — it
+implied the push obeyed this key — so when the fault went, the warning was
+**deleted rather than reworded**, because a notice that no longer describes
+anything is worse than none.
+
+**Do not write a fifth copy of `notifyPrefAllows()`.** The "a missing key means
+yes" idiom is implemented **four** times: `WebPush::notifyPrefAllows()` (public),
+`Workflow`'s own private copy, `cron/user-reminders.php`'s plain function, and
+`Giving::isOptedOutOfStatements()` (the same rule inverted). All four were
+compared and they agree, so there is no latent bug — but there is no one place
+either. `ImportNotifier` is **not** a fifth: it already asks `WebPush`, which is
+the precedent the reminder job now follows, and `auth/account/save.php` only
+writes the column. An earlier draft of this paragraph counted those two as
+copies and said six; count the function bodies, not the file names. If a fifth
+reader appears, the right move is one `Portal\Core` class that all five ask.
+
+**One mailbox, two accounts, and the order the two rules are applied in.** The
+recipient map is keyed by e-mail address, and a couple may share one. A refused
+row is dropped **before** the full-detail merge. That gives two properties that
+are easy to lose: an address is written off only when *every* account reading it
+has said no, so one person's choice cannot silence the other's reminder; and an
+account that said no can never raise the other's e-mail to the version naming
+the location.
+
+**#616: an `OR u.isAdmin = 1` with no organisation in the query.** The day-of
+summary tested "coordinates this event" OR the older portal-wide admin flag, so
+every holder of that flag received a morning summary for every event on the
+installation — a hosting provider reading each customer's diary, across the
+boundary between two parties. The cure is a join to `tblUserSites` for the
+event's own organisation, which scopes the coordinators too.
+
+**And the per-organisation flags had to go in with it.** Scoping alone would
+have made the ordinary case *worse*: an organisation's own administrator holds
+`tblUserSites.isSiteAdmin`, not the legacy flag, so they were already missed and
+the join alone would still not have reached them. When you narrow a recipient
+set, check who was only ever qualifying through the thing you are narrowing.
+
+**#683 was real and the issue pointed at the wrong code.** It blamed the
+reminder job. It could not have been that job: all three reminder bodies are
+built as HTML, and `Mailer::send()` wraps a body in the branded base only when
+it does **not** look like HTML — so **no reminder e-mail has ever carried a
+footer at all**. The live instance is the giving statement, through
+`Mailer::sendTemplated()`, which always goes through `renderBase()`.
+
+**`Site::forceContext()` is the trap in it.** It sets the current site id and
+reloads the site row, so `PortalAddress` follows it and the footer's *link* was
+always right for each organisation. It does **not** re-merge `$SETTINGS`, so the
+portal name and the support mailbox stayed with whichever organisation the job's
+own request resolved to. Half-right output is the hardest kind to notice: the
+link changing per organisation is exactly what makes the footer look correct.
+
+**Read `App::settingForSite()` before writing a two-layer query.** It already
+answers "this organisation's value, else the installation's" — the fallback #677
+describes. The first draft of `Mailer::footerFactsFor()` wrote its own; that was
+a second copy of one rule for no gain, and `Giving.php` next door was already
+asking the house way.
+
+**A CHECK THAT PASSED ON THE PRE-FIX CODE, AND THE PLANT THAT WAS NOT A FAULT
+AT ALL.** The #616 check was written to prove that the morning summary for one
+organisation's event does not reach the installation's global administrator, who
+belongs to a different organisation. It passed. It also passed when
+`git show HEAD:web/_apps/cron/event-reminders.php`'s own query — the code as it
+stood before this package, with no organisation join whatever — was planted back
+in. **The check proved nothing.** Part T of `tools/time-zones-selftest.php`
+switches every account but one member off, deliberately, so that the clock-change
+checks can read what the job *would* have sent without anything being attempted;
+and the morning summary's query asks for `u.isActive = 1` where the day-before
+reminder's does not. So the administrator was never a recipient of anything, in
+either version, and "the administrator was not told" was true for a reason that
+had nothing to do with organisations. The check now switches that one account
+back on for its own two runs and puts it back as it found it.
+
+**Two things about this are worth more than the fix.** First, the plant I tried
+BEFORE the real one — loosening the join to a `LEFT JOIN`, which by reading
+should let a global administrator straight through — also passed, and that
+looked exactly like "the guard is unnecessary". It was not: the fixture was
+dead, so no mutation of the query could have moved the result. **A plant that
+fails to go red is as likely to mean the fixture cannot reach the code as it is
+to mean the code does not matter, and the two are indistinguishable from the
+passing run alone.** The way out was to stop inventing mutations and plant the
+actual previous version from git, which is the one plant whose meaning is not in
+doubt. Second, the fix is only decisive because the check now asserts the
+POSITIVE half as well: the same administrator IS written to about their own
+organisation's event the following morning. Without that half, "not told" could
+still mean "unreachable", which is the fault this check just had.
+
+**AND THE REPAIRED CHECK STILL PROVED NOTHING ABOUT THE QUERY. This is the
+sharpest lesson in the package.** Switching the administrator back on made the
+check mean something about organisations, and the independent check then showed
+it meant nothing about the query. The summary admits somebody on any of FOUR
+grounds — they coordinate the event, or they hold `tblUserSites.isSiteAdmin`, or
+`isSiteRootAdmin`, or the portal-wide `tblUsers.isAdmin` — and the administrator
+in that made-up world holds **all three ADMINISTRATOR grounds at once**, because
+the fixture loop near the top of the file passes one `$isAdmin` value into
+`isAdmin`, `isRootAdmin`, `isSiteAdmin` and `isSiteRootAdmin` alike — though the
+query never reads `isRootAdmin`.
+Measured, one at a time: **each of those three ADMINISTRATOR clauses could be
+deleted on its own with all 134 checks green.** Three, not four — and getting
+that number right matters, because the first version of this paragraph said four
+and the independent check caught it. The COORDINATOR clause was never
+deletable-green: that administrator coordinates nothing, so deleting it drops the
+coordinator from the expected list. **Claiming a measurement that was never made
+is worse than claiming none**, because the next reader has no reason to re-run it.
+
+The REFUSING conditions were worse than the admitting ones, and all three were
+inert. `AND us.isActive = 1` on the join, `WHERE u.isActive = 1`, and
+`AND revokedAt IS NULL` inside the coordinator sub-select could EACH be deleted
+with all 134 checks green, because nothing in the made-up world could trip any of
+them — every membership was active, every account that mattered was active, and
+the single coordinator had never been stood down. In production that is three
+separate leaks: a person removed from an organisation, a person whose account has
+been closed, and a coordinator who was stood down, each going on receiving that
+organisation's morning diary. **A condition no fixture can trip is not a
+condition**, and two of the three took a second and third round of checking to
+find because the first round's attention was all on the clauses that ADMIT.
+
+The cure is one person per ground that admits and one per condition that refuses,
+seven in all: a coordinator, an `isSiteAdmin` holder, an `isSiteRootAdmin` holder,
+and a portal-wide administrator who IS an active member of that organisation, none
+of them holding any other qualifying flag; then an ex-member (live account,
+membership switched off), a closed account (membership live), and a coordinator
+whose appointment is revoked — all three of whom must be told nothing. All six
+plants now go red, each caught by the #616 check alone, and each failure names the
+person who leaked in or dropped out.
+**Note the order the repair went in, because it is the same mistake twice:** the
+first attempt added three people and covered three clauses, and the portal-wide
+clause stayed deletable, because the person who proved the OTHER half of the same
+check still held `isSiteAdmin` as well. **One account holding several flags
+cannot tell them apart** — the same shape as a fixture whose two rows differ in
+more than one way, and the reason to plant every clause separately rather than
+assume a fixture that looks richer is richer.
+
+**A TWO-CHARACTER BRACKET MOVE LIFTS THE WHOLE `WHERE` CLAUSE, AND `php -l`
+CANNOT SEE IT.** Round 3 of the independent check found one edit that still left
+all 134 checks green: closing the admitting group one disjunct early and opening
+a new one, `… isSiteRootAdmin = 1) OR (u.isAdmin = 1`. The parentheses stay
+balanced, so the file lints clean, but the condition becomes
+`(account live AND address tests AND (coordinator OR isSiteAdmin OR isSiteRootAdmin)) OR (u.isAdmin = 1)`
+— and anybody holding the portal-wide flag with a live membership then bypasses
+the account test and both address tests. An offboarded administrator would go
+back to receiving the organisation's morning diary. It stayed green only because
+no fixture held `isAdmin = 1` together with a closed account: the closed-account
+person had `isAdmin = 0` and the portal-wide-flag person was fully live.
+
+The cure was one character — give the closed account every qualifying flag, so
+the account test is the only thing keeping it out. That **sharpens** its pin
+rather than blurring it, which is the question to ask before adding a flag to an
+existing fixture person. It is now caught, by the one check that should catch it.
+The general lesson: when a condition is a group of `OR`s inside an `AND`, the
+grouping is itself a thing that can break, and no amount of pinning the
+individual clauses covers it — pin a person who is refused by the OUTER test
+while qualifying on an inner one.
+
+**And the rounds themselves are the last lesson.** Three rounds, and each one
+found the previous fix incomplete in the same way: round 1 found the fixture
+dead, round 2 found three clauses indistinguishable, round 3 found the number
+"four" wrong in one place and "stops the e-mails" unqualified in four more.
+Every round was wording-or-coverage of the SAME correction, not a new fault.
+**When a correction has to be made in more than two places, list the places
+first and edit them in one pass** — the cost here was two extra rounds, entirely
+self-inflicted, on a package whose code was right from round 1 onwards.
+
+And do not count a neighbouring harness as cover. `tools/mail-queue-selftest.php`
+does call `/cron/event-reminders` over real HTTP and does assert on the day-of
+summary's recipients, but its check is `count($dayRows) >= 1 && in_array(mailOf('root'), …)`
+and `root` holds the portal-wide flag, so it is satisfied by the legacy clause
+alone and would not have noticed a per-organisation flag being dropped either.
+A claim that this is "the only harness that runs the job" was also simply false,
+and is corrected where it was written.
+
+**And `tblEventReminderLog.recipientCount` is not evidence that anything was
+sent.** It counts only messages a mail service really took
+(`Mailer::lastOutcome() === OUTCOME_SENT`), and part T deliberately points the
+portal at an SMTP mailbox with nothing filled in, so every message that goes out
+perfectly well is recorded as 0. The first version of all three new checks
+asserted on that column; two of them failed on correct code, and the one that
+"passed" expected 0 and would have passed on a job that sent nothing at all.
+`mailTo()` reads `tblEmailLog.toRecipients` instead, so each check says WHO was
+written to — which is both stricter than a count and, unlike a count, actually
+about the behaviour. **Asserting on a column the harness cannot populate reads as
+a strict check and is really a check of the harness's own missing mail server.**

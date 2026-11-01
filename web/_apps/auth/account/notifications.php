@@ -220,22 +220,30 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
         <div class="card-body">
             <?php echo $switchRow('eventReminders',        'Event reminders',                'Get notified ahead of events you have RSVP\'d to.'); ?>
             <?php
-            // ⚠️ KEPT, unlike the other dead switches, and said plainly rather
-            //    than hidden. The event reminder job honours only the PUSH
-            //    switch ("Service reminders", further down); it does not read
-            //    this one, so reminder e-mails go out even to somebody who has
-            //    switched this off. That is not a switch that does nothing —
-            //    it is a switch that says "off" while mail still arrives, and
-            //    hiding it would remove the only sign that anything is wrong.
-            //    Tracked as its own defect, #666, at a higher priority than
-            //    the switches that merely do nothing.
+            // ✅ THIS SWITCH NOW STOPS THE REMINDER E-MAILS (#666, 1 November
+            //    2026) — the day-before and one-hour ones. The day-of summary
+            //    sent to coordinators and administrators is a different
+            //    notification and is not filtered by this key.
+            //
+            //    A standing warning used to sit here saying that switching this
+            //    off affected only the push notification. Its e-mail half was
+            //    true and is what the notice existed to admit:
+            //    `cron/event-reminders.php` read no preference for the e-mails
+            //    at all. Its PUSH half was WRONG, and that is worth recording
+            //    rather than repeating — the push is gated on a separate key,
+            //    `pushServiceReminders` ("Service reminders" further down), so
+            //    this switch never affected the push either. It was read by
+            //    nothing. The job reads it now, so the warning is gone —
+            //    deleted rather than reworded, because a notice that no longer
+            //    describes anything is worse than none.
+            //
+            //    If you are tempted to remove this key from the page, read the
+            //    long note at the top of notifications-save.php first: that
+            //    handler REBUILDS the whole column from its allowed-key list,
+            //    so taking a key off the page without taking it off the list
+            //    rewrites that preference to off for everybody, one at a time,
+            //    as they each press Save (#667).
             ?>
-            <div class="alert alert-warning small mb-0 mt-2" role="alert">
-                <i class="fa-solid fa-triangle-exclamation me-1"></i>
-                Switching event reminders off does not stop the e-mails yet &mdash; only
-                the push notification below is affected. We are fixing this; until then,
-                reminders are sent to everybody who said they are going.
-            </div>
         </div>
     </div>
 
