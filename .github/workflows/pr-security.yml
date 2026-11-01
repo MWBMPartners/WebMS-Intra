@@ -1141,6 +1141,19 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_time_limit_calls.py
 
+      # A table name is never compared with capitals mattering (#697). Whether
+      # two names differing only in capitals are the same table is a SERVER
+      # setting, and on a server set to 1 every name SHOW TABLES reports is
+      # lower case - which made both of the restore's safety nets inert, with
+      # no warning. Every self-test here runs ONE server, set to 0, so no test
+      # in this repository can see that fault return. Note the step name is
+      # quoted: a '#' with a space before it starts a YAML comment, which
+      # silently truncated twelve step names when #646 wired its checks in.
+      - name: 'No table name is compared with capitals mattering (hard gate, #697)'
+        id: table_name_comparisons
+        if: always()
+        run: python3 tools/audit-checks/check_table_name_comparisons.py
+
       # Nothing under web/ may ask another website to draw a QR picture (#623).
       # The rule existed for PHP and had no guard for JavaScript, which is how
       # the noticeboard bundle's api.qrserver.com fallback went unnoticed. It is
@@ -1354,6 +1367,10 @@ jobs:
             # "the ten guards" over eleven results. This file has been bitten by
             # a stale count before.
             echo "- No known outside QR service is reachable: ${{ steps.no_outside_qr_service.outcome }} (hard gate, #623)"
+            # Its own line rather than joining the "#646 ten" list above, which
+            # says "ten" and would then be wrong - the exact shape of staleness
+            # this file keeps being caught by.
+            echo "- No table name is compared with capitals mattering: ${{ steps.table_name_comparisons.outcome }} (hard gate, #697)"
             echo "- Pages write the shared head tags: ${{ steps.page_head_tags.outcome }} (hard gate, #569)"
             # The ten guards wired by #646, as ONE line unless something failed.
             # Ten separate lines would bury the rest of the summary; what a

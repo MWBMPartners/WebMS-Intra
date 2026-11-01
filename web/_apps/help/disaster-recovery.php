@@ -98,23 +98,39 @@ must-know shortcuts.</p>
         <li><strong>Bad migration</strong> — Full-restore the latest snapshot via <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/backup'), ENT_QUOTES, 'UTF-8'); ?>">Backups</a>.</li>
         <li><strong>Stolen credentials</strong> — clear every session, force password reset, rotate <code>enc.key</code>, rotate every encrypted integration credential. Exact SQL in <a href="https://github.com/MWBMPartners/WebMS-Intra/blob/main/docs/disaster-recovery-runbook.md#7-after-a-break-in" target="_blank" rel="noopener">runbook section 4.4</a>.</li>
         <li><strong>Compromised account</strong> &mdash; Disable user + revoke sessions, then run the offboarding flow.</li>
-        <?php // 🛟 #694. Said HERE because this is the page somebody opens when they are
-              //    about to put a backup back, and the Backup page's own card only
-              //    appears AFTER the restore has already happened. ?>
+        <?php // 🛟 #694, and the last three sentences #697. Said HERE because this is
+              //    the page somebody opens when they are about to put a backup back, and
+              //    the Backup page's own card only appears AFTER the restore has already
+              //    happened. Those sentences used to say the OPPOSITE - that another
+              //    restore would replace the waiting list and the portal would merely say
+              //    so - which was true until 31 October 2026 and is what #697 fixed.
+              //
+              //    ⚠️ THREE TABLES, NOT FOUR, and the #697 package briefly said four
+              //    here. `tblRestoreHeldRows` IS on the list a one-table restore refuses,
+              //    but a backup with no "covers the whole database" flag was taken before
+              //    that flag existed (27 October 2026) and the holding table did not exist
+              //    until 31 October 2026 - so such a backup cannot contain it, and there is
+              //    nothing to leave alone. Measured by restoring one. This is the sentence
+              //    a customer reads before deciding whether to accept a loss, so a true
+              //    sentence was replaced with a false one in the worst possible place. ?>
         <li><strong>An older backup leaves rows behind</strong> &mdash; a backup taken before
             27&nbsp;October&nbsp;2026 does not say it covers the whole database, so putting it back
-            leaves three tables alone and the database&rsquo;s own rules then remove some rows from
-            two of them: <strong>every setting an organisation has chosen for itself</strong> &mdash;
-            its address and support e-mail, and any limit it has set &mdash; and
+            leaves three tables alone and the database&rsquo;s own rules then remove rows from two of
+            them: <strong>every setting an organisation has chosen for itself</strong> &mdash; its
+            address and support e-mail, and any limit it has set &mdash; and
             <strong>people&rsquo;s two-factor backup codes</strong>, including the record of which
             ones have already been used. The portal <strong>keeps those rows</strong> and the
             <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/backup'), ENT_QUOTES, 'UTF-8'); ?>">Backup page</a>
             offers one button to put them back and one to discard them. They wait until you choose
-            &mdash; nothing deletes them on a timer. <strong>Deal with them before you put another
-            backup back</strong>, though: a backup that holds its own copy of this waiting list will
-            replace it, and the portal says so before and after it happens. (A backup from before
-            this feature existed has no such list in it and leaves the waiting rows alone.) A backup
-            taken since 27&nbsp;October&nbsp;2026 does not cause this loss in the first place.</li>
+            &mdash; nothing deletes them on a timer. <strong>Putting another backup back does not
+            throw them away.</strong> The portal reads the waiting rows before it empties anything
+            and writes them again at the end, and the result says what it did. One thing it will not
+            do silently: if a backup already records one of those rows as put back, it honours that
+            backup instead of offering the row again &mdash; and says so. (If more than 20,000 rows
+            are waiting it leaves the whole list alone rather than rewriting it, and every one of
+            them is still waiting afterwards.) Putting back the one table they are kept in WOULD
+            lose them, so the portal refuses to and says why. A backup taken since 27&nbsp;October&nbsp;2026 does not cause
+            this loss in the first place.</li>
     </ul>
 </div></div>
 

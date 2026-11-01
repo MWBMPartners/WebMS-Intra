@@ -1689,9 +1689,10 @@ COMMENT='TOTP backup/recovery codes';
 -- 🛟 tblRestoreHeldRows — rows a restore was about to lose (migration 233, #694)
 -- -----------------------------------------------------------------------------
 -- A whole-database restore from an OLD-FORM snapshot (one .json per table, no
--- `format` in the manifest) holds back the three tables on
--- `DbBackup::WHOLE_DATABASE_ONLY`, because each records what has already
--- happened. But it still replaces `tblSites` and `tblUsers` — and two of those
+-- `format` in the manifest) holds back the tables on
+-- `DbBackup::WHOLE_DATABASE_ONLY` that it contains, because each records what
+-- has already happened. In practice that is three of the four on the list: such
+-- a snapshot predates `tblRestoreHeldRows` (migration 233) and cannot hold it. But it still replaces `tblSites` and `tblUsers` — and two of those
 -- held-back tables are their children with ON DELETE CASCADE:
 --
 --     tblSettings.siteID        -> tblSites.siteID        ON DELETE CASCADE

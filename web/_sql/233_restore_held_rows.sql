@@ -15,9 +15,11 @@
 --   A snapshot written before 27 October 2026 (the OLD form: one .json per
 --   table, no `format` in the manifest) does not say that it covers the whole
 --   database. `DbBackup::restoreAll()` therefore deliberately HOLDS BACK the
---   three tables on `DbBackup::WHOLE_DATABASE_ONLY` — `tblMigrations`,
---   `tblSettings` and `tblTotpBackupCodes` — because each records what has
---   already happened, and putting one back without the rest loses data. That is
+--   tables on `DbBackup::WHOLE_DATABASE_ONLY` that the snapshot contains — for
+--   such a snapshot that is `tblMigrations`, `tblSettings` and
+--   `tblTotpBackupCodes` (this table joined the list for #697, but a snapshot
+--   in the old form predates it and cannot hold it) — because each records what
+--   has already happened, and putting one back without the rest loses data. That is
 --   right, and the restore says so.
 --
 --   But the restore DOES put `tblSites` and `tblUsers` back, and it does that by

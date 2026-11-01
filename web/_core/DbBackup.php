@@ -389,6 +389,11 @@ class DbBackup
         'tblMigrations'      => 'It is the record of which database upgrades have already run. Putting an older copy back makes the portal believe an upgrade it has already done is still waiting, so it closes itself to everyone and runs that upgrade again over data the upgrade has already changed.',
         'tblTotpBackupCodes' => 'It is the single-use codes for signing in without a phone, and a code is spent by being marked used. Putting an older copy back would make codes that have already been used work again, so a code from an old printout or screenshot would let someone in.',
         'tblSettings'        => 'It holds every setting the portal runs on, including the database version it believes it is on and the marks upgrades leave behind. Putting an older copy back makes upgrades that have run look as though they have not, and replaces mail settings, secrets and the portal\'s open-or-closed state with whatever they were when the snapshot was taken.',
+        // 🛟 Added for #697. A whole-database restore is a different matter and
+        //    is handled rather than refused: it CARRIES the waiting rows
+        //    through (see readWaitingHeldRows()). This entry is about the
+        //    one-table button, where there is nothing to carry them past.
+        'tblRestoreHeldRows' => 'It is the record of the rows a restore could not put back, kept so somebody can put them back or discard them deliberately. Putting an older copy back on its own throws away every row still waiting — and those rows are the only copy of themselves outside the snapshot you would be restoring from. It also offers rows that have already been returned, and brings back the copy of each one that was deliberately emptied when it went home, which for a sign-in code is a second copy of something somebody signs in with.',
     ];
 
     /**
@@ -412,7 +417,11 @@ class DbBackup
      * name here is a decision; it should look like one.
      *
      * `tblMigrations` is deliberately absent: it has no foreign key at all, so
-     * no cascade can ever reach it.
+     * no cascade can ever reach it. So is `tblRestoreHeldRows`, which joined
+     * WHOLE_DATABASE_ONLY for #697 and has no foreign key either — on purpose,
+     * because a row lands in it precisely BECAUSE its parent has just gone. The
+     * rows IT can lose are lost to the restore writing over them rather than to
+     * a cascade, and readWaitingHeldRows() is what keeps those.
      *
      * @var array<string, array{parent: string, column: string, describe: string}>
      */
@@ -600,6 +609,82 @@ class DbBackup
     }
 
     /**
+     * Is $table one of the names in $names, ignoring capitals?
+     *
+     * 🔎 WHY IGNORING CAPITALS, AND WHY THIS IS NOT FUSSINESS. Whether MySQL
+     *    treats two table names differing only in capitals as the same table is
+     *    a SERVER setting, `lower_case_table_names`, and on a server set to 1
+     *    every name `SHOW TABLES` reports comes back in lower case.
+     *    isWholeDatabaseOnly() has compared with strcasecmp() for that reason
+     *    since it was written.
+     *
+     *    The lists these comparisons are made against — a snapshot's table
+     *    list, and the tables a restore is replacing — hold names exactly as
+     *    the server reported them. Comparing them to a name typed in this file
+     *    with `in_array(..., true)` therefore answered FALSE on such a server,
+     *    which made BOTH safety nets inert: #694's cascade rescue kept nothing
+     *    and printed no warning, and #697's carry never ran, so a waiting row
+     *    was lost with the restore reporting success. Measured by the
+     *    independent check on `mysql:8.0.36 --lower-case-table-names=1`: one
+     *    per-organisation settings row before, none after, no warning. The
+     *    tables WERE still held back, because that path went through
+     *    strcasecmp() — so the two halves disagreed about what a table is.
+     *
+     *    Being stricter than the server is safe here: a server set to 0 has
+     *    exact names anyway, so this changes nothing there.
+     *
+     * @param list<string> $names
+     */
+    private static function namedIn(string $table, array $names): bool
+    {
+        foreach ($names as $name) {
+            if (strcasecmp($table, (string) $name) === 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * One table's entry out of an array KEYED by table name, ignoring capitals.
+     *
+     * 🔑 AN ARRAY SUBSCRIPT IS A COMPARISON WRITTEN ANOTHER WAY, and that is
+     *    how the first fix for this went wrong. namedIn() was added to make the
+     *    `in_array()` comparisons ignore capitals, and four documents then said
+     *    "all five sites use it" — while `$facts['tblRestoreHeldRows']` and
+     *    `self::REMOVED_COLUMNS[$table]` went on matching exactly.
+     *
+     *    What that cost, measured on `mysql:8.0.36 --lower-case-table-names=1`:
+     *    `columnFacts()` keys its answer by information_schema's own TABLE_NAME,
+     *    which is LOWER CASE there, so the subscript found nothing, the carry
+     *    threw its "the shape could not be read" exception, and EVERY
+     *    whole-database restore — the rehearsal included — was refused outright
+     *    while any row was waiting. Making the carry run had turned a silent
+     *    loss into a blocked recovery, which this file elsewhere refuses to
+     *    create ("refusing it would block a recovery at the one moment somebody
+     *    is recovering"). And the message named the wrong cause: the shape HAD
+     *    been read, just under another key.
+     *
+     *    So: never subscript a table-keyed array with a name from anywhere but
+     *    that same array. Use this.
+     *
+     * @param array<string, mixed> $byTableName
+     *
+     * @return array<mixed> The entry, or an empty array when there is none.
+     */
+    private static function forTable(array $byTableName, string $table): array
+    {
+        foreach ($byTableName as $name => $entry) {
+            if (strcasecmp($table, (string) $name) === 0) {
+                return is_array($entry) === true ? $entry : [];
+            }
+        }
+
+        return [];
+    }
+
+    /**
      * The words shown when one of those tables is asked for on its own. Kept
      * beside the list so the page and the class say exactly the same thing,
      * and so there is one place to improve the wording.
@@ -751,7 +836,11 @@ class DbBackup
      */
     private static function withoutRemovedColumns(string $table, array $row, array $tableFacts): array
     {
-        foreach (self::REMOVED_COLUMNS[$table] ?? [] as $gone) {
+        // forTable(), not a subscript: `$table` comes from the snapshot's
+        // manifest, which comes from SHOW TABLES, which is lower case on a
+        // server with lower_case_table_names = 1 - where this would then strip
+        // nothing and put a removed column back. See forTable().
+        foreach (self::forTable(self::REMOVED_COLUMNS, $table) as $gone) {
             if (isset($tableFacts[$gone]) === false) {
                 unset($row[$gone]);
             }
@@ -3133,8 +3222,9 @@ class DbBackup
         // ---------------------------------------------------------------
         // 🛡️ IS THIS REALLY A WHOLE SNAPSHOT?
         //
-        // Three tables may be put back only as part of a whole restore
-        // (WHOLE_DATABASE_ONLY): each holds a "this has already happened" mark,
+        // The tables on WHOLE_DATABASE_ONLY may be put back only as part of a
+        // whole restore (there are four; read the constant, do not count from a
+        // comment): each holds a "this has already happened" mark,
         // and moving one alone loses data. Refusing them HERE as well was
         // considered and rejected long ago, for a good reason that has not
         // changed — it would make the pre-upgrade snapshot impossible to undo,
@@ -3176,6 +3266,74 @@ class DbBackup
                     );
                 }
             }
+        }
+
+        // ---------------------------------------------------------------
+        // 🛶 TOO MANY KEPT ROWS TO WRITE AGAIN? THEN DO NOT PUT THAT TABLE
+        //    BACK AT ALL, rather than losing every row in it (#697).
+        //
+        //    The carry holds the waiting rows in memory for the length of the
+        //    restore, so it has a ceiling (CASCADE_RESCUE_MAX_ROWS). The first
+        //    version reached that ceiling, carried NOTHING, and let the
+        //    snapshot's own copy of the list replace them — measured by the
+        //    independent check: 20,001 waiting rows before, ZERO after, restore
+        //    successful. Meanwhile the Backup page and the help page both
+        //    promised that putting a backup back cannot lose them. That is the
+        //    #694 rule "check every page claim against the FALLBACK, not the
+        //    happy path", broken in the package that cites it.
+        //
+        //    Holding the table back instead loses nothing: the rows stay
+        //    exactly where they are, the snapshot's older copy of the list
+        //    simply is not put back, and the answer says so. It is the same
+        //    mechanism WHOLE_DATABASE_ONLY already uses a few lines above, for
+        //    the same reason — a table whose own contents matter more than
+        //    matching the snapshot.
+        //
+        //    DECIDED HERE, OUTSIDE THE TRANSACTION, AND NOWHERE ELSE. That is
+        //    what lets readWaitingHeldRows() read every waiting row without a
+        //    count of its own: two places deciding one ceiling is how a pair of
+        //    readers come to disagree (#668's lesson), and the portal is closed
+        //    to everyone while a restore runs, so the number cannot grow in
+        //    between.
+        $tooManyKept  = 0;
+        $couldNotTell = false;
+        // 🛡️ INSIDE A try, AND A FAILURE HOLDS THE TABLE BACK RATHER THAN
+        //    FALLING THROUGH. Two faults the independent check named, both in the
+        //    unsafe direction. These two queries ran outside any try, and
+        //    restoreAll() has no catch of its own, so a throw here gave the
+        //    Backup page a bare 500 instead of the honest refusal this method
+        //    exists to give (the same shape as #694's put-back path). And a
+        //    count that merely returned false fell through with $tooManyKept = 0,
+        //    which lets the carry read every waiting row with no bound at all -
+        //    the opposite of how the rest of this file is written.
+        //
+        //    "Could not tell" is treated as "do not put that table back":
+        //    nothing is lost either way, and the answer says what happened.
+        try {
+            if (self::namedIn('tblRestoreHeldRows', $tables) === true && $this->holdingTableExists() === true) {
+                $counted = $this->db->query(
+                    'SELECT COUNT(*) AS n FROM `tblRestoreHeldRows` WHERE `putBackAtUtc` IS NULL'
+                );
+                if ($counted === false) {
+                    $couldNotTell = true;
+                } else {
+                    $howManyKept = (int) ($counted->fetch_assoc()['n'] ?? 0);
+                    $counted->free();
+                    if ($howManyKept > self::CASCADE_RESCUE_MAX_ROWS) {
+                        $tooManyKept = $howManyKept;
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            // NEVER the database's own words: they can quote a stored setting
+            // value or a hashed sign-in code.
+            $couldNotTell = true;
+        }
+        if ($tooManyKept > 0 || $couldNotTell === true) {
+            $tables = array_values(array_filter(
+                $tables,
+                static fn (string $t): bool => strcasecmp($t, 'tblRestoreHeldRows') !== 0
+            ));
         }
 
         // ---------------------------------------------------------------
@@ -3269,12 +3427,34 @@ class DbBackup
             $warnings[] = 'This snapshot does not say that it covers the whole database, so '
                         . implode(' and ', $heldBack) . ' ' . (count($heldBack) === 1 ? 'was' : 'were')
                         . ' left exactly as ' . (count($heldBack) === 1 ? 'it is' : 'they are')
+                        // ⚠️ THREE EXAMPLES, NOT FOUR, AND NOT ONE PER TABLE ON THE LIST.
+                        //    A fourth was added for #697 ("which rows an earlier restore kept
+                        //    for you") on the assumption that `tblRestoreHeldRows` would be
+                        //    among the names in this sentence. It almost never is: a snapshot
+                        //    with no `whole_database` flag was taken before that flag existed
+                        //    (27 October 2026), and the holding table did not exist until
+                        //    migration 233 (31 October 2026), so a genuine old-form snapshot
+                        //    CANNOT contain it and there is nothing to hold back. The clause
+                        //    therefore attributed to tblMigrations, tblSettings and
+                        //    tblTotpBackupCodes a thing none of them records. Found by the
+                        //    independent check, by printing the real output.
+                        //
+                        //    These are EXAMPLES of "what has already happened", so the
+                        //    sentence stays true however many names `$heldBack` holds; a
+                        //    gloss per table would need a branch per table, which is how
+                        //    #694 collected four wording faults nothing could see.
                         . '. Each of those records what has already happened — which migrations have run, '
                         . 'which backup codes have been used, what the settings now say — and putting one '
                         . 'back without the rest of the database loses data. Everything else in the snapshot '
                         . ($dryRun === true ? 'would be' : 'was') . ' put back. Snapshots taken by this '
                         . 'portal from 27 October 2026 onwards say that they cover the whole database, and '
                         . 'for those nothing is held back.';
+        }
+        if ($tooManyKept > 0) {
+            $warnings[] = self::keptRowsHeldBackWarning($tooManyKept, $dryRun);
+        }
+        if ($couldNotTell === true) {
+            $warnings[] = self::couldNotCountKeptRowsWarning($dryRun);
         }
         $zoneWas        = null;
         $modeWas        = null;
@@ -3310,32 +3490,24 @@ class DbBackup
             //    every table is back; see readRowsACascadeWouldTake().
             $rescue = $this->readRowsACascadeWouldTake($tables);
 
-            // ⚠️ ROWS ALREADY WAITING ARE ABOUT TO BE REPLACED BY THE SNAPSHOT'S
-            //    OWN COPY OF THIS TABLE, and nobody would otherwise be told.
+            // 🛶 THE ROWS STILL WAITING TO BE PUT BACK, read while they are
+            //    still there, so this restore cannot lose them (#697).
             //
             //    `tblRestoreHeldRows` is an ordinary table from migration 233
-            //    on, so a restore puts back whatever the snapshot holds for it
-            //    — and a snapshot taken before some rows were kept holds none
-            //    of them. Those waiting rows are the only copy outside the
-            //    snapshot being restored FROM, which is the same silent loss
-            //    this whole feature exists to stop. Keeping them through the
-            //    restore is a decision the owner has to make (#697), so for now
-            //    this SAYS it, before and after, rather than quietly deciding.
-            // COUNT(*), not count(rowsWaitingToBePutBack()): that method reads
-            // every waiting row INCLUDING its MEDIUMTEXT copy, and this needs
-            // only a number — inside the restore's own transaction, where the
-            // class's docblock is already honest that memory is unbounded.
-            $alreadyWaiting = $this->holdingTableExists() === true
-                ? (int) ($this->db->query('SELECT COUNT(*) AS n FROM tblRestoreHeldRows WHERE putBackAtUtc IS NULL')->fetch_assoc()['n'] ?? 0)
-                : 0;
-            if ($alreadyWaiting > 0 && in_array('tblRestoreHeldRows', $tables, true) === true) {
-                $warnings[] = $alreadyWaiting . ' row(s) kept from an earlier restore '
-                            . ($dryRun === true ? 'would be' : 'were')
-                            . ' replaced by this snapshot\'s own copy of tblRestoreHeldRows, so '
-                            . ($dryRun === true ? 'they would no longer be' : 'they are no longer')
-                            . ' offered on the Backup page. Put kept rows back, or discard them, BEFORE '
-                            . 'restoring a snapshot (#697).';
-            }
+            //    on, so a whole restore puts back whatever the snapshot holds
+            //    for it — and a snapshot taken BEFORE some rows were kept holds
+            //    none of them. Those waiting rows are the only copy of
+            //    themselves outside the snapshot being restored FROM, so
+            //    replacing them is the same silent loss #694 exists to stop,
+            //    one door along. Until 31 October 2026 this only SAID so in a
+            //    warning, which asks somebody mid-recovery to read a warning
+            //    — exactly what #694 says not to rely on.
+            //
+            //    Same read-early, write-late order as the cascade rescue above,
+            //    and for the same reason: the holding table is itself in the
+            //    snapshot, so anything written before the restore would be
+            //    emptied again when that table's turn came.
+            $waitingRows = $this->readWaitingHeldRows($tables);
 
             // Empty children first, so nothing is ever left pointing at a row
             // that has just gone.
@@ -3359,6 +3531,34 @@ class DbBackup
                     $packet
                 );
                 $tablesDone++;
+            }
+
+            // 🛶 THE WAITING ROWS GO BACK IN, now that this snapshot's own
+            //    copy of the holding table has been written over them (#697).
+            //
+            //    Done in a REHEARSAL too, unlike the cascade rescue just below.
+            //    That is deliberate: everything in this transaction is undone at
+            //    the end of a rehearsal anyway (holdRestoredMail() and
+            //    holdRestoredTexts() already write inside one), and a rehearsal
+            //    that skipped this step could not tell an administrator that
+            //    the carry would fail — which is the one thing a rehearsal is
+            //    for. The rescue below is skipped on a rehearsal because it
+            //    writes rows that only a real restore has any business keeping.
+            // The table's shape comes from the `columnFacts()` this method
+            // already read, rather than a second call asking information_schema
+            // about all 231 tables again inside the restore's own transaction.
+            $carried = $this->carryWaitingHeldRowsThrough(
+                $waitingRows['rows'],
+                self::forTable($facts, 'tblRestoreHeldRows')
+            );
+            if ($carried['carried'] > 0) {
+                $warnings[] = self::carriedWarning($carried['carried'], $dryRun);
+            }
+            if ($carried['stoppedWaiting'] > 0) {
+                $warnings[] = self::stoppedWaitingWarning($carried['stoppedWaiting'], $dryRun);
+            }
+            if ($waitingRows['couldNotRead'] === true) {
+                $warnings[] = self::couldNotReadKeptRowsWarning($dryRun);
             }
 
             // 🛟 Now the rescued rows, after every table is back — including
@@ -3604,7 +3804,14 @@ class DbBackup
      */
     private function holdRestoredMail(array $restored, bool $dryRun): string
     {
-        if (in_array('tblMailQueue', $restored, true) === false) {
+        // ⚠️ namedIn(), not in_array(..., true): `$restored` is the restore's
+        //    table order, which comes from the manifest and so from SHOW TABLES.
+        //    On a server with lower_case_table_names = 1 this answered false,
+        //    so restored mail was NOT held - and this method's own docblock
+        //    says what that costs: "three waiting messages came out as six
+        //    copies when this was run". Measured on such a server: success,
+        //    no warning, the message left `queued`.
+        if (self::namedIn('tblMailQueue', $restored) === false) {
             return '';
         }
         // This class is also loaded BY ITSELF, with nothing that finds other
@@ -3664,7 +3871,11 @@ class DbBackup
      */
     private function holdRestoredTexts(array $restored, bool $dryRun): string
     {
-        if (in_array('tblSmsMessage', $restored, true) === false) {
+        // The same fault as holdRestoredMail() above, and the same cost in its
+        // own words: a held text sent "a SECOND time, to somebody's phone and
+        // at the customer's cost". Measured on a lower-case server: the row
+        // stayed `queued` with `quiet-hours`, and nothing was said.
+        if (self::namedIn('tblSmsMessage', $restored) === false) {
             return '';
         }
         // This class is also loaded BY ITSELF (see holdRestoredMail()).
@@ -3780,7 +3991,48 @@ class DbBackup
         //    and nothing said so. Caught by proof 27 of
         //    tools/backup-restore-selftest.php, which compares every value
         //    rather than checking the row exists.
-        $facts = $this->columnFacts()[$table] ?? [];
+        // ⚠️ forTable(), NOT a subscript, and this was the THIRD site of this one
+        //    class — found after two rounds of fixing the ones I could see.
+        //
+        //    `$table` here is a name the caller posted, and keepsRowsFor() has
+        //    just demanded it match `CASCADE_RESCUE` exactly, so it carries the
+        //    SOURCE's spelling (`tblSettings`). `columnFacts()` keys its answer
+        //    by information_schema's own TABLE_NAME, which is lower case on a
+        //    server with lower_case_table_names = 1. So the subscript found
+        //    nothing and this method returned before touching a row — while
+        //    `discardHeldRows()`, which needs no shape, worked perfectly.
+        //
+        //    Measured on `mysql:8.0.36 --lower-case-table-names=1`: the Backup
+        //    page offered a kept row and drew both buttons; "put it back"
+        //    always failed with "The shape of tblSettings could not be read"
+        //    (naming the wrong cause — the shape WAS read, under another key)
+        //    and "discard" removed it. **The only button that worked was the
+        //    one that throws the data away.** That is the condition #694 exists
+        //    to prevent, one door along.
+        //
+        //    THE LESSON, because this is the third round it has cost: when a
+        //    case-sensitivity fault is found, fix the CLASS, not the instance.
+        //
+        //    ⚠️ AND GETTING THE RULE RIGHT TOOK A FOURTH ROUND. The first
+        //       attempt read "every table-keyed array subscripted with a name
+        //       that came from the SOURCE is the fault; the ones indexed by a
+        //       name from the SERVER are safe", and it is wrong BOTH WAYS:
+        //
+        //       - it CLEARS a real fault. `REMOVED_COLUMNS[$table]` was the
+        //         second of these three faults, and its index comes from the
+        //         MANIFEST - the server - while its keys are typed here. The
+        //         rule calls that safe.
+        //       - it CONDEMNS three correct sites. `CASCADE_RESCUE[$table]` is
+        //         indexed by a source name and capitals DO matter there, and
+        //         that is right, because the array's own keys are source-typed
+        //         too. forTable() would be the wrong fix for them.
+        //
+        //    The rule that is actually true: a table-keyed lookup is safe when BOTH SIDES COME FROM THE SAME PLACE, and unsafe when one side is folded by the server and the other is not.
+        //    Keys typed here, indexed by a name typed here: safe.
+        //    Keys from information_schema, indexed by a name from SHOW TABLES:
+        //    safe on one server, and the cross-server case is #698. One of each:
+        //    the fault.
+        $facts = self::forTable($this->columnFacts(), $table);
         if ($facts === []) {
             return ['success' => false, 'put_back' => 0, 'still_missing' => 0,
                     'error' => 'The shape of ' . $table . ' could not be read.'];
@@ -4300,10 +4552,13 @@ class DbBackup
             //    "Not in `$replacing`" covers both: a held-back table was taken
             //    out of that list by the block that held it back, and a table
             //    the snapshot never had was never in it.
-            if (in_array($table, $replacing, true) === true) {
+            // Capitals ignored: see namedIn(). `in_array(..., true)` here made
+            // this whole rescue inert on a server with
+            // lower_case_table_names = 1 (#694, found checking #697).
+            if (self::namedIn((string) $table, $replacing) === true) {
                 continue;
             }
-            if (in_array($about['parent'], $replacing, true) === false) {
+            if (self::namedIn((string) $about['parent'], $replacing) === false) {
                 continue;
             }
             // The identifiers come from CASCADE_RESCUE, a constant in this
@@ -4332,8 +4587,8 @@ class DbBackup
                     }
                     $count = 0;
                     foreach (self::CASCADE_RESCUE as $t => $a) {
-                        if (in_array($t, $replacing, true) === true
-                            || in_array($a['parent'], $replacing, true) === false) {
+                        if (self::namedIn((string) $t, $replacing) === true
+                            || self::namedIn((string) $a['parent'], $replacing) === false) {
                             continue;
                         }
                         // The same identifier check as the loop above, for the
@@ -4360,6 +4615,533 @@ class DbBackup
         }
 
         return ['rows' => $found, 'tooMany' => 0, 'canKeep' => $canKeep];
+    }
+
+    /**
+     * The rows still waiting to be put back, read BEFORE anything is emptied,
+     * so a restore cannot write over them (#697).
+     *
+     * WHAT GOES WRONG WITHOUT THIS. `tblRestoreHeldRows` is an ordinary table
+     * from migration 233 on, so a whole-database restore empties it and fills
+     * it again from the snapshot. A snapshot taken BEFORE some rows were kept
+     * holds none of them, so those rows simply vanish - and they are the only
+     * copy of themselves anywhere outside the snapshot being restored FROM.
+     * That is the silent loss #694 exists to stop, one door along. Measured on
+     * MySQL 8.0.36: one waiting row before the restore, none after, and the
+     * restore reported success with a warning nobody mid-recovery is in a
+     * state to act on.
+     *
+     * WHY ONLY THE WAITING ONES. A row that has already been put back is
+     * HISTORY: it says that a row was kept and returned, and its copy of the
+     * row was emptied the moment it went home (see putHeldRowsBack()). Putting
+     * a database back to an earlier moment is supposed to put its history back
+     * with it. **That is a judgement, not a promise that nothing goes** - an
+     * earlier version of this paragraph said "nothing is lost that the restored
+     * database does not itself account for", and the `@return` note on
+     * carryWaitingHeldRowsThrough() records a measured sequence in which the
+     * waiting row held the LAST copy of a setting value and afterwards it was in
+     * no table and in no kept row. A WAITING row is the opposite: it is work in
+     * progress, and
+     * the only copy of data that is no longer in its own table. The owner's
+     * decision of 31 October 2026 - that a waiting row waits until somebody
+     * deals with it - is what this protects.
+     *
+     * NO CEILING OF ITS OWN, AND THAT IS DELIBERATE. These rows are held in
+     * memory for the length of the restore and a `tblSettings` value is
+     * MEDIUMTEXT, so there IS a bound — but it is decided once, in
+     * restoreAllWork(), before the transaction starts: past
+     * CASCADE_RESCUE_MAX_ROWS waiting rows that method does not put the holding
+     * table back at all, so this one is never reached with more than the
+     * ceiling in front of it. The first version decided the ceiling HERE and
+     * answered "carry nothing", which let the snapshot's older copy of the list
+     * replace every waiting row — measured at 20,001 rows in, zero out. Two
+     * places deciding one ceiling is also how a pair of readers come to
+     * disagree (#668).
+     *
+     * THE CASCADE RESCUE'S CEILING IS THE SAME NUMBER FOR THE SAME REASON — BUT
+     * NOT THE SAME BUDGET, and an earlier version of this paragraph said "it is
+     * the same memory", which implies one. They are independent, so the worst
+     * case the two can reach between them is TWICE the constant. Both can be
+     * non-empty in one restore: a modern snapshot that contains
+     * `tblRestoreHeldRows` but not `tblSettings` gives the cascade rescue work
+     * to do AND needs the carry. Found by the independent check.
+     *
+     * @param list<string> $replacing The tables this restore is going to empty.
+     *                                `tblRestoreHeldRows` not being in it means
+     *                                nothing is going to write over these rows
+     *                                - which is the ordinary case for an
+     *                                OLD-FORM snapshot, where it is held back
+     *                                by name, and for a snapshot that does not
+     *                                contain it at all.
+     *
+     * @return array{rows: list<array<string, mixed>>, couldNotRead: bool}
+     *         `couldNotRead` is true when the database would not answer at all,
+     *         which must not be reported as "nothing was waiting" — see the
+     *         comment on that return.
+     */
+    private function readWaitingHeldRows(array $replacing): array
+    {
+        $nothing = ['rows' => [], 'couldNotRead' => false];
+        // ⚡ AN OPTIMISATION, NOT THE GUARD, and the first version of this comment
+        //    read as though it were the guard. Measured by the independent check:
+        //    replace this test with `false` and proofs 6, 26, 27 and 28 all stay
+        //    green over 126 checks. That is not a coverage gap — with the table
+        //    not being emptied, every waiting row is still at its own `heldID`
+        //    and identical to itself, so each takes the "already" branch of
+        //    carryWaitingHeldRowsThrough() and nothing is written. What this
+        //    saves is a pointless read of every waiting row, including its
+        //    MEDIUMTEXT copy, inside the restore's own transaction. Worth
+        //    keeping; just not what makes anything safe.
+        if (self::namedIn('tblRestoreHeldRows', $replacing) === false) {
+            return $nothing;
+        }
+        // Not there on a database whose upgrade has not been run yet: the files
+        // reach a server before anybody presses "Run migrations". SHOW TABLES,
+        // never a blanket try/catch - see holdingTableExists().
+        if ($this->holdingTableExists() === false) {
+            return $nothing;
+        }
+        // 🔇 A READ THAT FAILS IS SAID OUT LOUD, NOT TREATED AS "NOTHING WAITING".
+        //
+        //    Both of the `=== false` returns below used to answer $nothing,
+        //    which is indistinguishable from an empty holding table: the restore
+        //    would go on and write over the waiting rows with no warning at all,
+        //    which is the exact failure this method exists to remove. Found by
+        //    the independent check.
+        //
+        //    They are unreachable as things stand — bootstrap.php sets
+        //    mysqli_report(MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR), and it
+        //    takes BOTH for a statement error to throw rather than return false
+        //    — so this is about never being able to fail silently if that ever
+        //    changes, which is the house pattern elsewhere in this file.
+        //
+        //    `couldNotRead`, not a throw: refusing the restore would block a
+        //    recovery at the one moment somebody is recovering, which is the
+        //    same reasoning #694 used for a missing holding table. The restore
+        //    goes ahead and SAYS the rows could not be carried.
+        $result = $this->db->query(
+            'SELECT * FROM `tblRestoreHeldRows` WHERE `putBackAtUtc` IS NULL ORDER BY `heldID`'
+        );
+        if ($result === false) {
+            return ['rows' => [], 'couldNotRead' => true];
+        }
+        $rows = [];
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+        $result->free();
+
+        return ['rows' => $rows, 'couldNotRead' => false];
+    }
+
+    /**
+     * Put the waiting rows back into the holding table, after the restore has
+     * written this snapshot's own copy of it over them (#697).
+     *
+     * Called INSIDE the restore's transaction, so a restore that rolls back
+     * takes this with it - the rows were never lost in that case.
+     *
+     * HOW A ROW IS RECOGNISED, because this cannot simply insert everything. If
+     * the snapshot was taken AFTER a row was kept, the snapshot holds that same
+     * row, with the same `heldID`, and inserting it again would offer one row
+     * twice. So each carried row is looked up by its own `heldID` first:
+     *
+     *   - nothing there        -> written back WITH its original `heldID`, so
+     *                             the numbering an administrator may already
+     *                             have seen on the page does not change.
+     *   - the same row there   -> left alone. The snapshot's copy IS this row.
+     *   - a DIFFERENT row there -> written back under a NEW `heldID`. This is
+     *                             reachable: `loadTable()` writes the
+     *                             snapshot's own ids, which pushes
+     *                             AUTO_INCREMENT back to just above the
+     *                             snapshot's highest, and the rescue below may
+     *                             then be handed an id a waiting row already
+     *                             had. Nothing is lost; only the number
+     *                             changes.
+     *
+     * "The same row" compares `tableName`, `siteID`, `userID` and `heldAtUtc`,
+     * and deliberately NOT `rowJson`. Two reasons. A row already put back has
+     * had its copy emptied, so comparing the copy would call it a different row
+     * and re-offer something the restored database says is finished. And
+     * `rowJson` is a JSON column: MySQL rewrites what it stores (keys reordered,
+     * a space after each colon) while MariaDB's JSON is an alias for LONGTEXT
+     * and rewrites nothing, so a text comparison means two different things on
+     * the two engines. The four columns above are an identity; the copy is
+     * content.
+     *
+     * A FAILURE HERE STOPS THE WHOLE RESTORE, by throwing. Same direction as
+     * holdRescuedRows(): nothing is half done, the message says nothing was
+     * changed, and the alternative is a restore that reports success while the
+     * waiting rows have gone. This table has no foreign keys and nothing but
+     * its primary key to clash on, so the only reachable causes are the
+     * infrastructural ones - out of memory, or a database that has stopped
+     * answering.
+     *
+     * @param list<array<string, mixed>>                                                    $rows
+     * @param array<string, array{type: string, nullable: bool, generated: bool, restamped: bool}> $facts
+     *        `tblRestoreHeldRows`' columns, from the restore's own
+     *        `columnFacts()` read. Empty means the shape could not be read,
+     *        which stops this method rather than guessing.
+     *
+     * @return array{carried: int, already: int, moved: int, stoppedWaiting: int}
+     *         `stoppedWaiting` counts the rows the snapshot records as ALREADY
+     *         PUT BACK, which are therefore no longer offered. **Do not call
+     *         them "not a loss".** This docblock did, in the words the warning
+     *         itself was reworded to stop using, and it was measured false: in
+     *         an ordinary sequence (keep a row, put it back, delete the setting,
+     *         snapshot, restore an older snapshot which brings the row back
+     *         waiting, restore the newer one) the waiting row held the LAST copy
+     *         of a setting value, and afterwards it was in no table and in no
+     *         kept row. Nothing here looks at whether the snapshot holds the
+     *         row's own table, so nothing here can say. What IS true is that the
+     *         restore honours what the snapshot records, and that the rows
+     *         disappear from the Backup page, so somebody has to be told.
+     */
+    private function carryWaitingHeldRowsThrough(array $rows, array $facts): array
+    {
+        $answer = ['carried' => 0, 'already' => 0, 'moved' => 0, 'stoppedWaiting' => 0];
+        if ($rows === []) {
+            return $answer;
+        }
+        // The shape is HANDED IN, from the columnFacts() the restore already
+        // read. columnFacts() decides "generated" from GENERATION_EXPRESSION,
+        // and its comment says at length why `EXTRA LIKE '%GENERATED%'` is
+        // wrong - that exact mistake cost this package a re-stamped
+        // `updatedAt`. This method asked for its own copy at first, which meant
+        // a second information_schema read of every table in the database
+        // inside the restore's own transaction.
+        if ($facts === []) {
+            throw new RuntimeException('The shape of the table that keeps rows a restore could not put '
+                                     . 'back would not be read, so the rows waiting in it could not be '
+                                     . 'carried through this restore.');
+        }
+        $columns = [];
+        foreach ($facts as $column => $fact) {
+            if ($fact['generated'] === false) {
+                $columns[] = (string) $column;
+            }
+        }
+        $withoutId = array_values(array_filter(
+            $columns,
+            static fn (string $c): bool => $c !== 'heldID'
+        ));
+        if ($withoutId === [] || count($withoutId) === count($columns)) {
+            // No `heldID` among the writable columns at all: the table is not
+            // the shape this method was written for, and guessing would be
+            // worse than stopping.
+            throw new RuntimeException('The table that keeps rows a restore could not put back is not the '
+                                     . 'shape this portal expects, so the rows waiting in it could not be '
+                                     . 'carried through this restore.');
+        }
+
+        $look  = null;
+        $keep  = null;
+        $fresh = null;
+        try {
+            // 📌 `putBackAtUtc` IS SELECTED TO COUNT, NEVER TO COMPARE. sameHeldRow()
+            //    deliberately ignores it (see its docblock), and that must not change:
+            //    a row the snapshot records as already put back IS the same row, and
+            //    the restore honours that snapshot's own history. But until it was
+            //    selected, nothing could COUNT those rows — so the one case where a
+            //    waiting row deliberately stops waiting happened in SILENCE, while the
+            //    Backup page said "the result always tells you what happened" and the
+            //    help page listed it as something the portal "will not do silently".
+            //    Measured by the independent check: waiting 1 before, 0 after, zero
+            //    warnings. Counting it is what makes those two sentences true.
+            $look = $this->db->prepare(
+                'SELECT `tableName`, `siteID`, `userID`, `heldAtUtc`, `putBackAtUtc` '
+                . 'FROM `tblRestoreHeldRows` WHERE `heldID` = ?'
+            );
+            $keep = $this->db->prepare(
+                'INSERT INTO `tblRestoreHeldRows` (`' . implode('`, `', $columns) . '`) VALUES ('
+                . implode(', ', array_fill(0, count($columns), '?')) . ')'
+            );
+            $fresh = $this->db->prepare(
+                'INSERT INTO `tblRestoreHeldRows` (`' . implode('`, `', $withoutId) . '`) VALUES ('
+                . implode(', ', array_fill(0, count($withoutId), '?')) . ')'
+            );
+            if ($look === false || $keep === false || $fresh === false) {
+                throw new RuntimeException('The rows waiting to be put back could not be carried through '
+                                         . 'this restore.');
+            }
+            foreach ($rows as $row) {
+                $heldId = (int) ($row['heldID'] ?? 0);
+                $look->bind_param('i', $heldId);
+                $look->execute();
+                $found   = $look->get_result();
+                $takenBy = $found instanceof \mysqli_result ? $found->fetch_assoc() : null;
+                if ($found instanceof \mysqli_result) {
+                    $found->free();
+                }
+                if (is_array($takenBy) === true && self::sameHeldRow($row, $takenBy) === true) {
+                    $answer['already']++;
+                    // The snapshot says this row has already gone home, so it is no
+                    // longer offered. Counted separately from the ordinary "the
+                    // snapshot holds this row as waiting too" case, where nothing
+                    // changes for anybody and there is nothing to say.
+                    if (($takenBy['putBackAtUtc'] ?? null) !== null) {
+                        $answer['stoppedWaiting']++;
+                    }
+                    continue;
+                }
+                $names = is_array($takenBy) === true ? $withoutId : $columns;
+                $use   = is_array($takenBy) === true ? $fresh : $keep;
+                $bind  = [];
+                foreach ($names as $column) {
+                    $bind[] = $row[$column] ?? null;
+                }
+                // Bound as text, as every other writer here does: the database
+                // converts, and the session is strict (pinStrictness()), so a
+                // value that would not fit is an error rather than a silent
+                // change.
+                $use->bind_param(str_repeat('s', count($bind)), ...$bind);
+                $use->execute();
+                $answer['carried']++;
+                if (is_array($takenBy) === true) {
+                    $answer['moved']++;
+                }
+            }
+        } finally {
+            // Closed on every path, a throw included. The statements are the
+            // only thing this method owns; the transaction belongs to the
+            // restore and is rolled back by it.
+            foreach ([$look, $keep, $fresh] as $stmt) {
+                if ($stmt instanceof \mysqli_stmt) {
+                    $stmt->close();
+                }
+            }
+        }
+
+        return $answer;
+    }
+
+    /**
+     * Is the row now sitting at this `heldID` the same kept row we are carrying
+     * through (#697)? See carryWaitingHeldRowsThrough() for why these four
+     * columns and not `rowJson`.
+     *
+     * @param array<string, mixed> $waiting The row read before the restore.
+     * @param array<string, mixed> $found   The row at that id afterwards.
+     */
+    private static function sameHeldRow(array $waiting, array $found): bool
+    {
+        foreach (['tableName', 'siteID', 'userID', 'heldAtUtc'] as $column) {
+            $before = $waiting[$column] ?? null;
+            $after  = $found[$column] ?? null;
+            // Empty is only equal to empty. Compared as text otherwise, because
+            // one side comes back from a numeric column as a string and the
+            // other may not.
+            if ($before === null || $after === null) {
+                if ($before !== $after) {
+                    return false;
+                }
+                continue;
+            }
+            if ((string) $before !== (string) $after) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * The whole sentence about rows carried through a restore (#697).
+     *
+     * FOUR COMPLETE SENTENCES, not one sentence with ternaries in the middle of
+     * it. That is the lesson of cascadeWarning(): four of the six wording
+     * faults six review rounds found in #694 were inside an assembled sentence,
+     * not one of them findable by any check, because nothing judges how a
+     * sentence reads and a test pinning a substring will pin a substring of
+     * nonsense. Read them all, and PRINT them by calling this method rather
+     * than transcribing.
+     *
+     * Never a literal `%` in one of these: they are sprintf formats.
+     */
+    private static function carriedWarning(int $howMany, bool $dryRun): string
+    {
+        // ⚠️ WHAT THESE MUST NOT SAY, because the first version said both and
+        //    both were FALSE in the same reachable branch. The number here is
+        //    the number of rows WRITTEN AGAIN, not the number waiting: a row the
+        //    snapshot already holds takes the "already" branch and is not
+        //    counted. So with four waiting and two in the snapshot the first
+        //    version said "All 2 rows kept for you ... were carried through",
+        //    giving an administrator with four waiting rows a number that is not
+        //    the count of anything they can see — and "All" of a part. It also
+        //    ASSERTED that the snapshot's copy "does not include the row", which
+        //    in that same branch is untrue of half of them.
+        //
+        //    So neither "All" nor any claim about what the snapshot contains.
+        //
+        //    ⚠️ AND NO CLAIM ABOUT *EVERY* WAITING ROW EITHER. The fix for the
+        //       "All" fault ended each sentence "Every row that was waiting is
+        //       still waiting on the Backup page", which replaced an undercount
+        //       with an ABSOLUTE promise — and sameHeldRow() ignores
+        //       `putBackAtUtc` on purpose, so a row that is waiting here while
+        //       the snapshot records it as already PUT BACK takes the "already"
+        //       branch and stops waiting. Measured by the independent check,
+        //       reached with two real snapshots and two real restores. That
+        //       behaviour is right (the snapshot's own history says the row went
+        //       home, and its data is in that snapshot's `tblSettings`), so what
+        //       had to change was the sentence.
+        //
+        //    These speak ONLY about the rows this restore wrote again, which is
+        //    the one thing the number counts and the one thing it can promise.
+        $sentences = [
+            'ahead.one'  => 'One row kept for you by an earlier restore would have to be written again after '
+                          . 'this restore, because this snapshot holds its own copy of the list of kept rows. '
+                          . 'It would still be waiting on the Backup page afterwards.',
+            'ahead.many' => '%1$d rows kept for you by earlier restores would have to be written again after '
+                          . 'this restore, because this snapshot holds its own copy of the list of kept rows. '
+                          . 'They would still be waiting on the Backup page afterwards.',
+            'done.one'   => 'One row kept for you by an earlier restore had to be written again after this '
+                          . 'restore, because this snapshot holds its own copy of the list of kept rows. It is '
+                          . 'still waiting on the Backup page.',
+            'done.many'  => '%1$d rows kept for you by earlier restores had to be written again after this '
+                          . 'restore, because this snapshot holds its own copy of the list of kept rows. They '
+                          . 'are still waiting on the Backup page.',
+        ];
+        $which = ($dryRun === true ? 'ahead' : 'done') . '.' . ($howMany === 1 ? 'one' : 'many');
+
+        return sprintf($sentences[$which], $howMany);
+    }
+
+    /**
+     * The whole sentence when the snapshot records a kept row as already put
+     * back, so it is no longer offered (#697). Four complete sentences, for the
+     * same reason as carriedWarning().
+     *
+     * WHY THIS EXISTS AT ALL. It is the one case where a row an administrator
+     * could see on the Backup page stops being offered, and it used to happen in
+     * complete silence — measured by the independent check — while the Backup
+     * page claimed "the result always tells you what happened" and the help page
+     * listed it among the things the portal "will not do silently". The choice
+     * was to weaken both sentences or to make them true. This makes them true.
+     *
+     * ⚠️ IT MUST NOT CLAIM NOTHING WAS LOST, and the first version did — "this
+     *    snapshot holds the row in its own copy of the table it came from".
+     *    Nothing here looks at whether the snapshot holds that table, and the
+     *    independent check measured both ways it can be false: a snapshot that
+     *    contains the holding table but NOT `tblSettings`, and an ordinary
+     *    sequence where the waiting row held the last copy of a setting value
+     *    and afterwards it was in no table and no kept row. Asserted in the
+     *    REASSURING direction, which is the worst one — and the check over it
+     *    pinned the untrue clause, so it held the fault in place.
+     *
+     *    So these say only what is known: the snapshot records the row as
+     *    already put back, so it is no longer offered, and where to look.
+     */
+    private static function stoppedWaitingWarning(int $howMany, bool $dryRun): string
+    {
+        $sentences = [
+            'ahead.one'  => 'One row kept for you by an earlier restore is recorded in this snapshot as having '
+                          . 'already been put back, so it would no longer be offered on the Backup page '
+                          . 'afterwards: this restore would honour what the snapshot says happened to it. If you '
+                          . 'need what was in that row, look in the table it came from once the restore has '
+                          . 'finished, and in an earlier backup if it is not there.',
+            'ahead.many' => '%1$d rows kept for you by earlier restores are recorded in this snapshot as having '
+                          . 'already been put back, so they would no longer be offered on the Backup page '
+                          . 'afterwards: this restore would honour what the snapshot says happened to them. If '
+                          . 'you need what was in those rows, look in the tables they came from once the restore '
+                          . 'has finished, and in an earlier backup if they are not there.',
+            'done.one'   => 'One row kept for you by an earlier restore is recorded in this snapshot as having '
+                          . 'already been put back, so it is no longer offered on the Backup page: this restore '
+                          . 'honoured what the snapshot says happened to it. If you need what was in that row, '
+                          . 'look in the table it came from, and in an earlier backup if it is not there.',
+            'done.many'  => '%1$d rows kept for you by earlier restores are recorded in this snapshot as having '
+                          . 'already been put back, so they are no longer offered on the Backup page: this '
+                          . 'restore honoured what the snapshot says happened to them. If you need what was in '
+                          . 'those rows, look in the tables they came from, and in an earlier backup if they '
+                          . 'are not there.',
+        ];
+        $which = ($dryRun === true ? 'ahead' : 'done') . '.' . ($howMany === 1 ? 'one' : 'many');
+
+        return sprintf($sentences[$which], $howMany);
+    }
+
+    /**
+     * The whole sentence when the number of kept rows could not be COUNTED, so
+     * the holding table was left alone (#697).
+     *
+     * ⚠️ A SEPARATE SENTENCE FROM couldNotReadKeptRowsWarning(), AND THE TWO
+     *    MUST NOT BE MERGED. They describe opposite outcomes, and sharing one
+     *    sentence made it false: that one says "only the rows this snapshot
+     *    holds a copy of are back", which is true when the table WAS restored
+     *    and the rows could not be written again — and flatly untrue here,
+     *    where the table was not restored at all and every waiting row is
+     *    exactly where it was. One sentence for two outcomes is how this
+     *    package collected six wording faults.
+     *
+     * Neither branch is reached while `MYSQLI_REPORT_STRICT |
+     * MYSQLI_REPORT_ERROR` makes a failing query throw rather than return
+     * false; both exist so that neither can fail silently if that changes.
+     */
+    private static function couldNotCountKeptRowsWarning(bool $dryRun): string
+    {
+        return $dryRun === true
+            ? 'How many rows are being kept for you by earlier restores could not be read, so this '
+              . 'rehearsal left that list alone: a real restore would not put this snapshot\'s own copy '
+              . 'of it back, and every row waiting now would still be waiting afterwards. Everything '
+              . 'else in the snapshot would be put back as usual.'
+            : 'How many rows are being kept for you by earlier restores could not be read, so this '
+              . 'restore left that list alone: this snapshot\'s own copy of it was NOT put back, and '
+              . 'every row that was waiting is still waiting on the Backup page. Everything else in '
+              . 'the snapshot was put back as usual.';
+    }
+
+    /**
+     * The whole sentence when the kept rows themselves could not be read, after
+     * the holding table has already been replaced (#697). See
+     * couldNotCountKeptRowsWarning() for why these are two sentences and not
+     * one.
+     *
+     * It says what is NOT known rather than guessing a number: the read that
+     * failed is the one that would have counted them. NO TEST REACHES THIS —
+     * `mysqli_report(MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR)` makes a
+     * statement error throw rather than return false, so the two returns that
+     * set this flag are unreachable while that stays true. It exists so that
+     * they can never fail SILENTLY if it stops being true.
+     */
+    private static function couldNotReadKeptRowsWarning(bool $dryRun): string
+    {
+        return $dryRun === true
+            ? 'The list of rows kept for you by earlier restores could not be read, so this rehearsal '
+              . 'cannot say whether a real restore would write them again. Look at the Backup page before '
+              . 'you restore, and put any kept rows back or discard them deliberately.'
+            : 'The list of rows kept for you by earlier restores could not be read, so none of them was '
+              . 'written again after this restore. Whether a row is still offered on the Backup page now '
+              . 'depends on this snapshot: only the rows it holds a copy of are back, and a row kept since '
+              . 'it was taken has no copy in it at all. Look at the Backup page.';
+    }
+
+    /**
+     * The whole sentence when there are so many kept rows that the holding
+     * table is left alone instead (#697). Two complete sentences, for the same
+     * reason as carriedWarning().
+     *
+     * NO TEST REACHES THIS by building the rows: it needs more than
+     * CASCADE_RESCUE_MAX_ROWS rows waiting at once, which is 20,000 rows of a
+     * MEDIUMTEXT column. The independent check reached it once, by hand, and
+     * that is how the old behaviour — carry nothing, let the snapshot's copy
+     * replace them all — was found to lose every waiting row while two pages
+     * promised it could not.
+     */
+    private static function keptRowsHeldBackWarning(int $howMany, bool $dryRun): string
+    {
+        $sentences = [
+            'ahead' => 'There are %1$d rows kept for you by earlier restores, which is more than this portal '
+                     . 'will write again after one restore (the limit is %2$d). So this snapshot\'s own, older '
+                     . 'copy of that list would NOT be put back, and every one of those rows would still be '
+                     . 'waiting on the Backup page afterwards. Everything else in the snapshot would be put back '
+                     . 'as usual. Putting kept rows back, or discarding them deliberately, is what clears this.',
+            'done'  => 'There are %1$d rows kept for you by earlier restores, which is more than this portal '
+                     . 'will write again after one restore (the limit is %2$d). So this snapshot\'s own, older '
+                     . 'copy of that list was NOT put back, and every one of those rows is still waiting on the '
+                     . 'Backup page. Everything else in the snapshot was put back as usual. Putting kept rows '
+                     . 'back, or discarding them deliberately, is what clears this.',
+        ];
+
+        return sprintf($sentences[$dryRun === true ? 'ahead' : 'done'], $howMany, self::CASCADE_RESCUE_MAX_ROWS);
     }
 
     /**
@@ -4479,9 +5261,9 @@ class DbBackup
             return $fail('Invalid table identifier: ' . $table);
         }
 
-        // 🚫 Refuse the three tables that only make sense put back beside the
+        // 🚫 Refuse every table that only makes sense put back beside the
         //    rest of the database (WHOLE_DATABASE_ONLY says why each is on the
-        //    list, and what to ask before adding a fourth).
+        //    list, and what to ask before adding another).
         //
         //    THE POSITION OF THIS CHECK IS THE POINT. It is above every read of
         //    the snapshot and far above emptyTable(), so a refused table costs

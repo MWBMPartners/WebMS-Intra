@@ -65,7 +65,7 @@
  *      and the health page say the same. Pressing the second button runs the
  *      migration, says it ran without a way back and records that. With the
  *      rows mended, nothing is said any more.
- *   J. The three tables a ONE-table restore refuses by name (they only make
+ *   J. The tables a ONE-table restore refuses by name (they only make
  *      sense put back beside the rest of the database): the snapshot's page
  *      still lists them but offers no Restore button for them, says above the
  *      list which button does put them back, and a request posted past the
@@ -978,11 +978,11 @@ $health = bps_text(bps_request($jar['root'], 'GET', '/admin/maintenance/health')
 brs_check(str_contains($health, 'cannot be put back whole') === false, 'and neither does the health page: the newest snapshot is one that can be put back', substr($health, (int) strpos($health, 'Backups'), 300));
 
 // =============================================================================
-// J. The three tables the one-table restore refuses, on the real page
+// J. The tables the one-table restore refuses, on the real page
 // =============================================================================
 // The class refuses them (proof 26 of tools/backup-restore-selftest.php). This
 // is about the PAGE: that it does not offer a button that is going to be
-// refused, that it still shows the three tables as part of the snapshot, and
+// refused, that it still shows every one of them as part of the snapshot, and
 // that a request posted past the missing button is turned away WITHOUT closing
 // the portal to everybody for an action that was never going to run.
 echo "\nJ. Tables that only a whole-snapshot restore may put back\n";
@@ -1009,7 +1009,7 @@ if (brs_check($newest !== '', 'there is a finished snapshot to inspect') === tru
     );
     brs_check(
         str_contains($words, implode(', ', $only)) === true && str_contains($words, 'Restore ALL tables') === true,
-        'and one line above the list names the three and says which button does put them back',
+        'and one line above the list names them all and says which button does put them back',
         substr($words, max(0, (int) strpos($words, 'Per-table') - 40), 420)
     );
 
@@ -2594,6 +2594,33 @@ brs_check(
     && str_contains($hrWords, 'on a timer') === true,
     'and promises in so many words that nothing will delete them while they wait — the promise the owner chose on 31 October 2026',
     substr($hrWords, max(0, (int) strpos($hrWords, 'Rows being kept')), 700)
+);
+// 🛟 #697. TWO POSITIVE CLAUSES AND NO ABSENCE, and the absence it used to
+//    carry is worth recording rather than deleting silently.
+//
+//    It was `str_contains($hrWords, 'replaced by this') === false`, labelled
+//    "and does not still say the opposite". It COULD NOT FAIL. `$hrWords` is a
+//    tag-stripped GET of the backup page; the phrase it forbade came from
+//    restoreAllWork()'s warning list, which is shown in the restore RESULT
+//    ($hrRestore, a different variable, from a POST). And the card at HEAD said
+//    nothing on the subject at all - this package ADDED the paragraph - so there
+//    was never an opposite sentence on this page to guard against:
+//      git show HEAD:web/_apps/admin/maintenance/backup.php | grep "replaced by this"
+//    finds nothing. The fourth-clause-that-cannot-fail shape #694 shipped four
+//    times, repeated in the package that wrote the lesson down. Found by the
+//    independent check, not by me.
+brs_check(
+    str_contains($hrWords, 'does not throw these away') === true
+    && str_contains($hrWords, 'read before anything is emptied') === true
+    // 🏷️ And the ONE case where a row really does stop waiting is named on the
+    //    card, because an unqualified promise here was the "check every page
+    //    claim against the FALLBACK, not the happy path" rule broken in the
+    //    package that cites it. This comment said "the two cases ... are on the
+    //    card"; there is one, and the figure 20,000 appears nowhere in the
+    //    page's text.
+    && str_contains($hrWords, 'honours that backup') === true,
+    'and says that putting another backup back will NOT lose them, which is the promise #697 made true',
+    substr($hrWords, max(0, (int) strpos($hrWords, 'Rows being kept')), 900)
 );
 brs_check(
     str_contains($hrWithCard, 'name="action" value="put_held_back"') === true

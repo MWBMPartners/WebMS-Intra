@@ -109,11 +109,11 @@
  *   23  An undo the database does not confirm: the connection is closed, the
  *       result says so, and nothing has changed. The same when the
  *       connection's own settings cannot be put back after a restore
- *   26  The three tables a ONE-table restore refuses by name, because putting
+ *   26  The tables a ONE-table restore refuses by name, because putting
  *       one of them back by itself leaves the rest of the database out of step
  *       with it: the refusal, that it happens before anything is read or
  *       emptied, that a table NOT on the list still goes back, and that a
- *       whole-database restore still puts all three back
+ *       whole-database restore still puts every one of them back
  *   24  A value that is not on its column's list of choices: the snapshot is
  *       taken and SAYS it cannot be put back whole, naming the table, the
  *       column and how many; mended, a new snapshot goes back exactly
@@ -677,6 +677,14 @@ function brs_heldBack(): array
  * has already happened, and putting one back without the rest loses data. The
  * restore says so in a warning, in those words.
  *
+ * `brs_heldBack()` reads the WHOLE list, which has four names on it since #697.
+ * Only three can ever be held back from a snapshot in this form, because the
+ * fourth (`tblRestoreHeldRows`) did not exist when a snapshot in this form could
+ * still be written — so one name is excluded from the comparison for nothing.
+ * That is harmless and deliberate: the list is read from the class rather than
+ * typed, and the proofs that care about the holding table clear it and CHECK the
+ * count separately rather than relying on this comparison.
+ *
  * On top of that, restoring a table those three are LINKED to can change them
  * anyway: `tblSettings.siteID` carries `ON DELETE CASCADE` from `tblSites`, so
  * replacing the sites takes any per-organisation setting row with it, and
@@ -1117,6 +1125,28 @@ function brs_runChild(string $job, array $arguments): never
  * FROZEN ON PURPOSE. This is a copy of the old writer's logic and must not be
  * "tidied" to match the class: its whole job is to keep producing the files
  * that real customers have on disk, so proof 6 can show they still restore.
+ *
+ * ⚠️ IT LEAVES OUT `tblRestoreHeldRows`, AND THAT IS NOT A CONVENIENCE — IT IS
+ *    WHAT MAKES THE FIXTURE REAL. A snapshot in this form has no
+ *    `whole_database` flag, so it was written before that flag existed
+ *    (27 October 2026, commit b7496b7). The holding table did not exist until
+ *    migration 233 (31 October 2026, commit ac1b19e). So NO snapshot a customer
+ *    can have in this form contains that table.
+ *
+ *    This function reads every live `tbl%` table, so it HAPPILY produced one
+ *    that did — a state production cannot reach. The #697 package then built a
+ *    check on it ("the holding table was among the tables left exactly as they
+ *    are"), wrote four documents describing a "second effect" that is a no-op
+ *    for every real old-form snapshot, and changed a true sentence in the
+ *    customer-facing help page ("leaves three tables alone") into a false one.
+ *    Found by the independent check, which restored a genuine one and read the
+ *    answer. The exact shape the #645 and #694 notes warn about: when a check
+ *    exists to prove something ORDINARY still works, check the fixture is
+ *    actually ordinary.
+ *
+ *    The hand-edited case — a MODERN snapshot with the flag taken out, which
+ *    does contain the table — is the only one the `WHOLE_DATABASE_ONLY`
+ *    addition changes, and section G of proof 28 is where that is exercised.
  */
 function brs_legacySnapshot(mysqli $db, string $dir): void
 {
@@ -1134,6 +1164,10 @@ function brs_legacySnapshot(mysqli $db, string $dir): void
     $tables = $db->query("SHOW TABLES LIKE 'tbl%'");
     while (($listed = $tables->fetch_array(MYSQLI_NUM)) !== null) {
         $table   = (string) $listed[0];
+        // See the note above: a real snapshot in this form predates this table.
+        if ($table === 'tblRestoreHeldRows') {
+            continue;
+        }
         $rs      = $db->query('SELECT * FROM `' . $table . '`');
         $columns = [];
         foreach ($rs->fetch_fields() as $field) {
@@ -1426,7 +1460,7 @@ function brs_proof6(): void
     //    Proof 27 is the test of the kept rows; here it is only a mend.
     $kept = brs_clearHeldRows();
     brs_check($kept > 0, 'the restore KEPT the rows the cascade took out of a held-back table instead of losing them (#694): ' . $kept, 'nothing was kept, so #694 has stopped working');
-    // 🧱 The three tables the old form HOLDS BACK are left out of this
+    // 🧱 The tables the old form HOLDS BACK are left out of this
     //    comparison, and `brs_checkSameExcept()` says at length why. They are
     //    not ignored: the two checks below prove the restore SAID it held them
     //    back, which is the part that matters to somebody putting a real
@@ -3241,7 +3275,7 @@ function brs_proof25(): void
 }
 
 /**
- * 26 — the three tables a ONE-table restore refuses by name (#X9, the owner's
+ * 26 — the tables a ONE-table restore refuses by name (#X9, the owner's
  * decision of 26 October 2026).
  *
  * WHY THIS PROOF EXISTS. restoreTable() used to check two things about a table
@@ -3257,7 +3291,7 @@ function brs_proof25(): void
  *     code made after the upgrade.
  *
  * WHAT IS CHECKED HERE, and why each check is not enough on its own:
- *   1. Each of the three is refused, and the words name the table and the
+ *   1. Each of them is refused, and the words name the table and the
  *      button to press instead.
  *   2. The refusal comes BEFORE anything is read or emptied. "Nothing
  *      changed" would NOT prove that by itself — the database undoes a
@@ -3270,7 +3304,7 @@ function brs_proof25(): void
  *      between a shared host and a developer's machine.
  *   4. A table NOT on the list goes back exactly as before: the guard must
  *      not have narrowed the button it was built to keep.
- *   5. A WHOLE-database restore still puts all three back, exactly. That is
+ *   5. A WHOLE-database restore still puts every one of them back, exactly. That is
  *      the supported way, and the refusal above is worthless if the way out
  *      it recommends does not work.
  *   6. Every name on the list is a real table in this database. A typo in the
@@ -3298,13 +3332,20 @@ function brs_proof26(): void
     }
     $dir = (string) $taken['directory'];
 
-    // 📋 The list itself: exactly the three tables, each with its own words,
+    // 📋 The list itself: exactly these four tables, each with its own words,
     //    and each name a table this database really has. A name misspelt in
     //    the constant would guard nothing, and nothing else here would notice.
+    //
+    //    WRITTEN OUT RATHER THAN COUNTED, on purpose. `count($list) === 4`
+    //    would pass on a list with the wrong four names in it, and a check that
+    //    reads the names from the constant it is testing proves only that the
+    //    constant agrees with itself. `tblRestoreHeldRows` joined for #697: the
+    //    holding table records what has already happened, so a one-table
+    //    restore of it throws away every row still waiting.
     $list = DbBackup::WHOLE_DATABASE_ONLY;
     brs_check(
-        array_keys($list) === ['tblMigrations', 'tblTotpBackupCodes', 'tblSettings'],
-        'the list of tables that may only go back with the whole database is exactly the three it should be',
+        array_keys($list) === ['tblMigrations', 'tblTotpBackupCodes', 'tblSettings', 'tblRestoreHeldRows'],
+        'the list of tables that may only go back with the whole database is exactly the four it should be',
         brs_say(array_keys($list))
     );
     // The tables this database really has, asked for ONCE and compared in PHP:
@@ -3388,11 +3429,11 @@ function brs_proof26(): void
     brs_check(($now['tblTasks'] ?? '') === ($before['tblTasks'] ?? ''), 'and tblTasks is exactly as it was', 'tblTasks differs');
 
     // 5. The whole-database restore, the way out the refusal recommends, still
-    //    puts all three back exactly. Without this the refusal would be a dead
-    //    end rather than a redirection.
+    //    puts every one of them back exactly. Without this the refusal would be
+    //    a dead end rather than a redirection.
     $whole = $backup->restoreAll($dir, false);
     brs_check($whole['success'] === true, 'the WHOLE-database restore still runs', brs_say($whole));
-    brs_checkSame($before, 'and every value of every table is as it was when the snapshot was taken, the three refused tables included');
+    brs_checkSame($before, 'and every value of every table is as it was when the snapshot was taken, every refused table included');
     brs_check(
         $spentNow() === 0
         && (string) Brs::$writer->query('SELECT settingValue FROM tblSettings WHERE settingID = 970030')->fetch_row()[0] === 'as it was when the snapshot was taken'
@@ -3916,6 +3957,709 @@ function brs_proof27(): void
     brs_checkSame($before, 'the whole database is back to how this proof found it, and the holding table is empty');
 }
 
+/**
+ * 28 - rows waiting to be put back survive a restore (#697).
+ *
+ * WHAT GOES WRONG WITHOUT IT. `tblRestoreHeldRows` is an ordinary table from
+ * migration 233 on, so a whole-database restore empties it and fills it again
+ * from the snapshot. A snapshot taken BEFORE some rows were kept holds none of
+ * them, so restoring it threw those rows away - and a waiting row is the only
+ * copy of itself anywhere outside the snapshot being restored FROM. That is the
+ * silent loss #694 exists to stop, one door along, and until 31 October 2026
+ * the restore only WARNED about it, which asks somebody mid-recovery to read a
+ * warning.
+ *
+ * The one-table half of #697 is proved in proof 26, which asks every name on
+ * `WHOLE_DATABASE_ONLY` to be refused on its own and now asks it of this table
+ * too. This proof is about the WHOLE restore, which is the case that matters:
+ * refusing it would block a recovery at the one moment somebody is recovering.
+ *
+ * WHICH SNAPSHOT IS DANGEROUS, because the first version of this proof had it
+ * backwards. The carry is needed by a snapshot that CONTAINS the holding table,
+ * which in practice means a modern one. A snapshot in the old form predates the
+ * table and cannot hold it (section A), and a modern snapshot that happens not
+ * to hold it is safe for the same reason. Putting the table on
+ * `WHOLE_DATABASE_ONLY` changes a WHOLE restore only for a manifest somebody has
+ * edited the flag out of, which is section G.
+ *
+ * WHAT THIS PROOF CANNOT SHOW, said plainly:
+ *
+ *   - The ceiling. Reaching it needs more than `CASCADE_RESCUE_MAX_ROWS`
+ *     (20,000) rows waiting at once, which this harness does not build. The
+ *     independent check reached it by hand and found the old behaviour — carry
+ *     nothing, let the snapshot's copy replace them — lost every waiting row;
+ *     restoreAllWork() now leaves that table alone instead, and nothing
+ *     automatic exercises it.
+ *   - `couldNotReadKeptRowsWarning()`. It needs a read of the holding table to
+ *     return false rather than throw, which `MYSQLI_REPORT_STRICT |
+ *     MYSQLI_REPORT_ERROR` prevents; it exists so that path cannot fail
+ *     silently if that ever changes.
+ *   - A server with `lower_case_table_names = 1`, where every one of these
+ *     comparisons used to answer false and BOTH safety nets were inert. This
+ *     harness runs one server, set to 0. namedIn() and forTable() are where it
+ *     is handled; only a second server proves it, and an independent check
+ *     running one found that fixing namedIn() alone left the restore REFUSING
+ *     outright while a row was waiting. The guard against a regression is
+ *     tools/audit-checks/check_table_name_comparisons.py, not anything here.
+ *   - Two administrators restoring at the same moment. A restore closes the
+ *     portal, so this is not a race the portal allows, but nothing here proves
+ *     that either.
+ *   - WHETHER the decision not to carry a row the snapshot records as already
+ *     put back is the RIGHT one. Section E2 now pins the decision in both
+ *     directions — reverse it and E2 fails — but whether it should be reversed
+ *     is a judgement, written down beside readWaitingHeldRows(). What goes with
+ *     such a row is the record that somebody returned it.
+ *   - That a carried row came back under a DIFFERENT number is not reported to
+ *     anybody. Section E proves no row is lost; nothing claims the number is
+ *     kept, and the page lists rows rather than numbers.
+ *   - The help page's own words. Nothing in this repository reads
+ *     `_apps/help/disaster-recovery.php`, and its sentence about this feature
+ *     has already been turned false once and corrected.
+ */
+function brs_proof28(): void
+{
+    $backup = brs_backup('p28');
+
+    // 🧱 One made-up organisation with a setting of its own, and one made-up
+    //    account with two sign-in codes - one spent, one not, because the
+    //    record of which have been spent is exactly what WHOLE_DATABASE_ONLY
+    //    exists to protect. No real person; the "codes" are not codes and are
+    //    never hashed, printed or compared.
+    brs_sql(
+        "INSERT INTO tblSites (siteID, siteName, siteKey, timezone) VALUES (970960, 'Proof 28 organisation', 'brs-p28', 'Europe/London')",
+        "INSERT INTO tblSettings (settingID, siteID, settingKey, settingValue, defaultValue, isSensitive, updatedAt) "
+        . "VALUES (970961, 970960, 'org.address.line1', 'Proof 28 address', '', 0, '2026-01-02 00:00:00')",
+        "INSERT INTO tblUsers (userID, emailAddress) VALUES (970960, 'brs-p28@example.invalid')",
+        "INSERT INTO tblTotpBackupCodes (codeID, userID, codeHash, isUsed, usedAt) VALUES "
+        . "(970960, 970960, 'not-a-real-hash-p28-1', 0, NULL), "
+        . "(970961, 970960, 'not-a-real-hash-p28-2', 1, '2026-10-20 08:00:00')"
+    );
+    $before      = brs_fingerprint();
+    $heldBackWas = brs_savedHeldBack();
+
+    // Counters asked of the database every time, never remembered.
+    $waiting = static fn (): int => (int) Brs::$writer->query('SELECT COUNT(*) FROM tblRestoreHeldRows WHERE putBackAtUtc IS NULL')->fetch_row()[0];
+    $marked  = static fn (): int => (int) Brs::$writer->query('SELECT COUNT(*) FROM tblRestoreHeldRows WHERE putBackAtUtc IS NOT NULL')->fetch_row()[0];
+    $codes   = static fn (): int => (int) Brs::$writer->query('SELECT COUNT(*) FROM tblTotpBackupCodes WHERE codeID >= 970960')->fetch_row()[0];
+
+    // 📋 EVERY VALUE OF EVERY WAITING ROW, not just how many there are. "They
+    //    are still there" has to mean the VALUES are still there: a carry that
+    //    kept the right number of rows and lost the copy inside them would pass
+    //    a count. `heldID` is deliberately left out - a carried row may
+    //    legitimately come back under a new number (section E), and pinning the
+    //    number would make that correct behaviour look like a fault.
+    $rowText = static function (): string {
+        $out = [];
+        $rows = Brs::$writer->query(
+            'SELECT tableName, siteID, userID, rowJson, snapshotName, heldAtUtc FROM tblRestoreHeldRows '
+            . 'WHERE putBackAtUtc IS NULL'
+        );
+        while (($row = $rows->fetch_assoc()) !== null) {
+            $out[] = implode('|', array_map(static fn ($value): string => (string) $value, $row));
+        }
+        $rows->free();
+        // Sorted in PHP rather than by the database: this is a comparison of a
+        // SET of rows, and ORDER BY on a JSON column is not something to rely
+        // on across engines.
+        sort($out);
+
+        return implode("\n", $out);
+    };
+
+    brs_check($waiting() === 0 && $marked() === 0, 'the world starts with nothing being kept at all', 'waiting: ' . $waiting() . ', marked: ' . $marked());
+
+    // 📸 A WHOLE snapshot taken BEFORE anything is kept. This is the dangerous
+    //    one: it SAYS it covers the whole database, so nothing is held back and
+    //    its own empty copy of the holding table is written over whatever is
+    //    there by the time it is restored.
+    $takenEmpty = $backup->snapshot('proof 28, before anything was kept');
+    if (brs_check($takenEmpty['success'] === true, 'a whole snapshot is taken while the holding table is empty', brs_say($takenEmpty)) === false) {
+        return;
+    }
+    $emptyCopy = (string) $takenEmpty['directory'];
+    $manifest  = json_decode((string) file_get_contents($emptyCopy . '/_manifest.json'), true);
+    brs_check(
+        ($manifest['whole_database'] ?? null) === true && isset($manifest['tables']['tblRestoreHeldRows']) === true,
+        'and that snapshot both says it covers the whole database AND contains the holding table - so nothing about it is held back'
+    );
+
+    // ---------------------------------------------------------------------
+    // A. Rows come to be waiting the way they really do: an old-form restore
+    //    lets the cascade take them, and they are kept instead of lost (#694).
+    // ---------------------------------------------------------------------
+    $old = Brs::$root . '/p28/upgrade-20260902-120000';
+    brs_legacySnapshot(brs_connect(), $old);
+    $madeThem = $backup->restoreAll($old, false);
+    brs_check($madeThem['success'] === true, 'an old-form snapshot is put back', brs_say($madeThem));
+    $madeSaid = implode(' ', (array) ($madeThem['warnings'] ?? []));
+    // 🛡️ WHY THE OLD FORM IS ALREADY SAFE, AND WHY MY FIRST REASON FOR IT WAS
+    //    WRONG. `tblRestoreHeldRows` joined WHOLE_DATABASE_ONLY for #697, and I
+    //    wrote a check here saying an old-form snapshot therefore "leaves it
+    //    alone entirely" - and four documents describing that as the change's
+    //    second effect. It passed, because brs_legacySnapshot() read every live
+    //    `tbl%` table and so put the holding table INTO a snapshot no customer
+    //    can have one of. A snapshot in this form has no `whole_database` flag,
+    //    so it predates that flag (27 October 2026); the holding table arrived
+    //    with migration 233 (31 October 2026). It CANNOT be in there.
+    //
+    //    The old form is safe for the simpler reason: the table is not in the
+    //    snapshot, so it is never emptied and never refilled. That is the same
+    //    reason a modern snapshot that happens not to contain it is safe, and it
+    //    has nothing to do with WHOLE_DATABASE_ONLY. The addition matters for a
+    //    ONE-table restore (proof 26) and for a hand-edited manifest (section G
+    //    below), and for nothing else. Found by the independent check.
+    //
+    //    So this now checks the fixture is REALISTIC, which is what the first
+    //    version failed to do, and the three names the restore really holds back.
+    brs_check(
+        is_file($old . '/tblRestoreHeldRows.json') === false
+        && isset(json_decode((string) file_get_contents($old . '/_manifest.json'), true)['tables']['tblRestoreHeldRows']) === false,
+        'the old-form snapshot does NOT contain the holding table, as no real snapshot in that form can',
+        'brs_legacySnapshot() is putting a table into a snapshot that predates it'
+    );
+    brs_check(
+        stripos($madeSaid, 'tblRestoreHeldRows') === false
+        && stripos($madeSaid, 'tblSettings') !== false
+        && stripos($madeSaid, 'left exactly as they are') !== false,
+        'and the restore holds back the tables it DOES contain, which does not include the holding table - so nothing can write over the kept rows',
+        $madeSaid
+    );
+    // 🧪 THE GLOSS ON "each of those", positive clause first. The #697 package
+    //    added a fourth example to it ("which rows an earlier restore kept for
+    //    you") on the assumption the holding table would be among the names in
+    //    this sentence. It is not, as the check above has just established, so
+    //    the clause attributed to tblMigrations, tblSettings and
+    //    tblTotpBackupCodes a thing none of them records. Nothing pinned the
+    //    clause either way; this is that pin. The positive half comes first,
+    //    because a check made only of an absence passes when the whole sentence
+    //    stops being printed.
+    brs_check(
+        stripos($madeSaid, 'which migrations have run') !== false
+        && stripos($madeSaid, 'which backup codes have been used') !== false
+        && stripos($madeSaid, 'what the settings now say') !== false
+        && stripos($madeSaid, 'rows an earlier restore kept for you') === false,
+        'and the sentence saying what those tables record gives examples that are TRUE of them, and does not claim they record the rows an earlier restore kept',
+        $madeSaid
+    );
+    $held = $waiting();
+    brs_check($held >= 3, 'that restore leaves rows waiting to be put back - at least the two sign-in codes and one settings row (' . $held . ')', 'waiting: ' . $held);
+    brs_check($codes() === 0, 'and the cascade really did take the sign-in codes, so those waiting rows are the only copy of them', 'codes: ' . $codes());
+
+    // ---------------------------------------------------------------------
+    // B. The rehearsal: it says what WOULD happen, in the future tense, and
+    //    changes nothing.
+    // ---------------------------------------------------------------------
+    $stateBefore = brs_fingerprint();
+    $rehearsal   = $backup->restoreAll($emptyCopy, true);
+    brs_check($rehearsal['success'] === true, 'a rehearsal of the modern snapshot runs', brs_say($rehearsal));
+    $rehearsalSaid = implode(' ', (array) ($rehearsal['warnings'] ?? []));
+    brs_check(
+        stripos($rehearsalSaid, 'would have to be written again after this restore') !== false
+        && stripos($rehearsalSaid, 'had to be written again') === false
+        && stripos($rehearsalSaid, 'was written again') === false,
+        'and says in the future tense what a real restore WOULD write again - no clause of it is in the past tense',
+        $rehearsalSaid
+    );
+    brs_check(
+        stripos($rehearsalSaid, 'They would still be waiting on the Backup page afterwards') !== false,
+        'and says where they would still be afterwards, which is the thing an administrator needs to know',
+        $rehearsalSaid
+    );
+    // ⚖️ "NO VALUE CHANGED", NOT "NOTHING CHANGED AT ALL", and the difference
+    //    was measured by the independent check. A rehearsal runs inside the
+    //    transaction and rolls back, so no ROW survives it - but an INSERT that
+    //    is rolled back still consumes an AUTO_INCREMENT number, so a rehearsal
+    //    that reaches the clashing-number branch leaves the next `heldID` one
+    //    higher. brs_checkSame() compares values and cannot see that, which is
+    //    exactly why the claim had to be narrowed rather than left to it.
+    brs_checkSame($stateBefore, 'and the rehearsal left every value of every table as it was, the holding table included');
+
+    // ---------------------------------------------------------------------
+    // C. The real restore of a snapshot taken BEFORE the rows were kept. This
+    //    is the whole point of #697.
+    // ---------------------------------------------------------------------
+    // One row is put back first, so this also covers what happens to a row that
+    // is no longer waiting. The settings rows can go back because the cascade
+    // took them and this snapshot has not been restored yet.
+    $putBack = $backup->putHeldRowsBack('tblSettings');
+    brs_check(
+        ($putBack['success'] ?? false) === true && (int) ($putBack['put_back'] ?? 0) > 0 && $marked() > 0,
+        'first, the settings rows are put back, so there is a FINISHED record in the table as well as waiting ones',
+        brs_say($putBack)
+    );
+    $wasWaiting = $waiting();
+    $wasText    = $rowText();
+    brs_check($wasWaiting > 0, 'and sign-in code rows are still waiting (' . $wasWaiting . ')', 'waiting: ' . $wasWaiting);
+
+    $carried = $backup->restoreAll($emptyCopy, false);
+    brs_check($carried['success'] === true, 'the modern snapshot - whose own copy of the holding table is EMPTY - is put back', brs_say($carried));
+    brs_check(
+        $waiting() === $wasWaiting,
+        'AND EVERY WAITING ROW IS STILL WAITING (' . $wasWaiting . ' expected, ' . $waiting() . ' there): the restore carried them through instead of writing over them',
+        'this is the #697 fault: the snapshot\'s own empty copy of the holding table replaced them'
+    );
+    brs_check(
+        $rowText() === $wasText,
+        'and every VALUE of every one of them is unchanged - the table it came from, whose it was, the copy of the row itself, and when it was kept',
+        'before:' . "\n" . $wasText . "\n" . 'after:' . "\n" . $rowText()
+    );
+    $carriedSaid = implode(' ', (array) ($carried['warnings'] ?? []));
+    brs_check(
+        stripos($carriedSaid, 'had to be written again after this restore') !== false
+        && stripos($carriedSaid, 'They are still waiting on the Backup page') !== false
+        && stripos($carriedSaid, 'would') === false,
+        'and the answer says so in the past tense, with no clause left in the future',
+        $carriedSaid
+    );
+    // 🔢 NEITHER "All" NOR ANY CLAIM ABOUT WHAT THE SNAPSHOT HOLDS. The first
+    //    version said "All %d rows ... were carried through" and "this snapshot
+    //    ... does not include them", and BOTH are false in section D's branch,
+    //    where the snapshot holds some of the waiting rows and the number is
+    //    only the count of those written again. Found by the independent check,
+    //    which ran it with four waiting and two in the snapshot and read "All 2
+    //    rows kept for you" to an administrator who could see four.
+    brs_check(
+        stripos($carriedSaid, 'All ') === false
+        && stripos($carriedSaid, 'does not include') === false
+        && stripos($carriedSaid, 'Every row') === false,
+        'and never says "All" of a number counting only the rows it wrote again, never claims what the snapshot does not hold, and never promises anything about EVERY waiting row (ONE branch breaks that: a row the snapshot records as already put back)',
+        $carriedSaid
+    );
+    // 🧾 And the FINISHED record went, which is deliberate rather than an
+    //    oversight: a put-back row is history, and the snapshot holds the
+    //    history as it stood when it was taken. Checked so that a later change
+    //    to carry those too cannot happen silently.
+    brs_check(
+        $marked() === 0,
+        'while the FINISHED record of the row already put back is gone, replaced by the snapshot\'s own history - deliberate, and this check is what stops it changing by accident',
+        'marked: ' . $marked()
+    );
+
+    // ---------------------------------------------------------------------
+    // D. A snapshot taken WHILE the rows were waiting: nothing is duplicated.
+    // ---------------------------------------------------------------------
+    $takenFull = $backup->snapshot('proof 28, while rows were waiting');
+    if (brs_check($takenFull['success'] === true, 'a snapshot is taken while rows are waiting', brs_say($takenFull)) === true) {
+        $fullCopy = (string) $takenFull['directory'];
+        $again    = $backup->restoreAll($fullCopy, false);
+        brs_check($again['success'] === true, 'and put straight back again', brs_say($again));
+        brs_check(
+            $waiting() === $wasWaiting && $rowText() === $wasText,
+            'nothing is doubled: the snapshot\'s own copy of each row IS that row, so the carry leaves it alone (' . $waiting() . ')',
+            'the carry is inserting rows the snapshot already put back'
+        );
+        $againSaid = implode(' ', (array) ($again['warnings'] ?? []));
+        brs_check(
+            stripos($againSaid, 'carried through this restore') === false,
+            'and nothing is said about carrying rows through, because nothing needed carrying',
+            $againSaid
+        );
+
+        // -----------------------------------------------------------------
+        // E. A DIFFERENT row already sitting at that number.
+        //
+        //    HOW THIS HAPPENS IN PRODUCTION, corrected after the independent
+        //    check measured the route this comment first gave. It is NOT "a
+        //    snapshot taken after rows were discarded and others kept":
+        //    `emptyTable()` uses DELETE rather than TRUNCATE (that was the whole
+        //    bug in #472) and `discardHeldRows()` deletes too, so the `heldID`
+        //    counter never rewinds and a discarded number is never handed out
+        //    again. Measured: two rows, a discard, a new keep - the new row is
+        //    number 3, not 1.
+        //
+        //    Two routes that are real. An IMPORTED snapshot, from an
+        //    installation whose numbering ran differently. And, on one
+        //    installation: restore a snapshot holding FEWER kept rows, which
+        //    leaves the counter at that snapshot's highest number plus one, let
+        //    a later restore keep new rows at those reused numbers, then restore
+        //    a snapshot taken between the two.
+        //
+        //    Built here by hand, because from the carry's point of view the
+        //    situation is just "the number I want is taken by somebody else",
+        //    and two more whole restores would prove nothing extra.
+        // -----------------------------------------------------------------
+        // 🎯 ONE SUB-CASE PER IDENTITY COLUMN, AND THAT IS THE WHOLE POINT OF
+        //    DOING IT THREE TIMES.
+        //
+        //    `DbBackup::sameHeldRow()` compares FOUR columns - tableName,
+        //    siteID, userID and heldAtUtc. The first version of this section
+        //    made its hand-made row differ in `tableName`, which is the one
+        //    column a narrowing would keep: the independent check narrowed the
+        //    comparison to `foreach (['tableName'] as $column)` and all THIRTY
+        //    checks of this proof stayed green, while a real waiting row was
+        //    silently LOST - the restore reported success with no carry warning
+        //    at all. Three quarters of the identity was guarded by nothing.
+        //
+        //    So there is a sub-case PER COLUMN below, each differing from the
+        //    snapshot's row at that number in exactly ONE of the four. Narrow
+        //    the comparison to any proper subset and at least one of them takes
+        //    the "already" branch, drops its row, and fails.
+        //
+        //    THERE USED TO BE THREE SUB-CASES FOR FOUR COLUMNS, and the claim
+        //    above was written anyway. All three shared the snapshot row's
+        //    `tableName`, so dropping `tableName` from the comparison was
+        //    invisible: the independent check planted
+        //    `['siteID', 'userID', 'heldAtUtc']` - a proper subset - and all 47
+        //    checks passed. An overstated guarantee is worse than none.
+        //
+        //    WHICH SOURCE ROW EACH SUB-CASE USES, because it decides whether the
+        //    fixture is one production can produce. A kept `tblSettings` row
+        //    always has a `siteID` and never a `userID`; a kept
+        //    `tblTotpBackupCodes` row is the reverse (holdRescuedRows() copies
+        //    whichever the row has). So the `siteID` case is built on a settings
+        //    row and the `userID` case on a code row, which makes each one a row
+        //    a real restore could have kept. The `tableName` case cannot be: it
+        //    needs two rows alike in `siteID`, `userID` and `heldAtUtc` and
+        //    differing only in the table, which those two shapes cannot both be.
+        //    It is DECLARED synthetic, and what it proves is narrow and still
+        //    worth proving - that `tableName` is part of the comparison at all.
+        // 🧱 THIS SECTION BUILDS ITS OWN TWO ROWS AND ITS OWN SNAPSHOT, one of
+        //    each shape, because by this point in the proof only the sign-in
+        //    code rows are still waiting - section C put the settings rows back.
+        //    Each row is in a shape a real restore produces: holdRescuedRows()
+        //    copies whichever of `siteID` and `userID` the kept row has, so a
+        //    settings row has a `siteID` and no `userID` and a code row the
+        //    reverse.
+        brs_sql('DELETE FROM tblRestoreHeldRows');
+        brs_sql(
+            'INSERT INTO tblRestoreHeldRows (tableName, siteID, userID, rowJson, snapshotName, heldAtUtc) VALUES '
+            . "('tblSettings', 970960, NULL, "
+            . "'{\"settingID\": 970961, \"siteID\": 970960, \"settingKey\": \"org.address.line1\"}', "
+            . "'proof 28, section E world', '2026-10-29 07:00:00'), "
+            . "('tblTotpBackupCodes', NULL, 970960, "
+            . "'{\"codeID\": 970960, \"userID\": 970960, \"codeHash\": \"not-a-real-hash-p28-1\"}', "
+            . "'proof 28, section E world', '2026-10-29 07:00:00')"
+        );
+        $wasWaiting = $waiting();
+        $twoShapes  = $backup->snapshot('proof 28, one kept row of each shape');
+        $fullCopy   = (string) ($twoShapes['directory'] ?? '');
+        $sourceRows = [];
+        if (brs_check($twoShapes['success'] === true && $wasWaiting === 2,
+            'section E builds its own world: one kept row of each shape, and a snapshot holding both',
+            brs_say($twoShapes) . ' waiting: ' . $wasWaiting) === true) {
+            $rs = Brs::$writer->query(
+                'SELECT heldID, tableName, siteID, userID, heldAtUtc FROM tblRestoreHeldRows ORDER BY heldID'
+            );
+            while (($row = $rs->fetch_assoc()) !== null) {
+                $sourceRows[(string) $row['tableName']] = $row;
+            }
+            $rs->free();
+        }
+        if (brs_check(
+            isset($sourceRows['tblSettings']) === true && isset($sourceRows['tblTotpBackupCodes']) === true,
+            'and the snapshot holds a kept row of BOTH shapes, so each sub-case below can be built on one a real restore could have kept',
+            brs_say(array_keys($sourceRows))
+        ) === true) {
+            $settingsRow = $sourceRows['tblSettings'];
+            $codeRow     = $sourceRows['tblTotpBackupCodes'];
+            $asText      = static fn (?string $value): string => $value === null ? 'NULL' : (string) (int) $value;
+            $cases = [
+                // Another organisation's settings row, kept in the same restore.
+                'siteID' => [
+                    'id'    => (int) $settingsRow['heldID'],
+                    'table' => 'tblSettings',
+                    'site'  => (string) (((int) $settingsRow['siteID']) + 500),
+                    'user'  => $asText($settingsRow['userID']),
+                    'when'  => (string) $settingsRow['heldAtUtc'],
+                    'real'  => true,
+                ],
+                // Another person's sign-in code, kept in the same restore.
+                'userID' => [
+                    'id'    => (int) $codeRow['heldID'],
+                    'table' => 'tblTotpBackupCodes',
+                    'site'  => $asText($codeRow['siteID']),
+                    'user'  => (string) (((int) $codeRow['userID']) + 500),
+                    'when'  => (string) $codeRow['heldAtUtc'],
+                    'real'  => true,
+                ],
+                // The same row kept by an EARLIER restore, which is how two kept
+                // rows come to differ only in when they were kept.
+                'heldAtUtc' => [
+                    'id'    => (int) $settingsRow['heldID'],
+                    'table' => 'tblSettings',
+                    'site'  => $asText($settingsRow['siteID']),
+                    'user'  => $asText($settingsRow['userID']),
+                    'when'  => '2001-02-03 04:05:06',
+                    'real'  => true,
+                ],
+                // SYNTHETIC, and declared: see the note above. It proves only
+                // that `tableName` is compared at all.
+                'tableName' => [
+                    'id'    => (int) $settingsRow['heldID'],
+                    'table' => 'tblTotpBackupCodes',
+                    'site'  => $asText($settingsRow['siteID']),
+                    'user'  => $asText($settingsRow['userID']),
+                    'when'  => (string) $settingsRow['heldAtUtc'],
+                    'real'  => false,
+                ],
+            ];
+            foreach ($cases as $differsIn => $case) {
+                brs_sql('DELETE FROM tblRestoreHeldRows');
+                $marker = 'proof 28, differs only in ' . $differsIn;
+                brs_sql(
+                    'INSERT INTO tblRestoreHeldRows (heldID, tableName, siteID, userID, rowJson, snapshotName, heldAtUtc) VALUES ('
+                    . $case['id'] . ", '" . $case['table'] . "', " . $case['site'] . ', ' . $case['user'] . ", "
+                    . "'{\"settingID\": 970962, \"siteID\": 970960, \"settingKey\": \"org.address.line2\", \"settingValue\": \"numbered to collide\"}', "
+                    . "'" . $marker . "', '" . $case['when'] . "')"
+                );
+                $mine  = $rowText();
+                $moved = $backup->restoreAll($fullCopy, false);
+                brs_check(
+                    $moved['success'] === true,
+                    'the snapshot is put back over a waiting row with the SAME number, differing only in ' . $differsIn
+                    . ($case['real'] === true ? '' : ' (a synthetic row: see the note above)'),
+                    brs_say($moved)
+                );
+                brs_check(
+                    $waiting() === $wasWaiting + 1,
+                    'nothing is lost: the snapshot\'s rows are all back AND that row is there too, under a number of its own ('
+                    . ($wasWaiting + 1) . ' expected, ' . $waiting() . ') - so ' . $differsIn . ' really is part of the identity',
+                    'sameHeldRow() called two different rows the same, and the waiting row was dropped'
+                );
+                brs_check(
+                    str_contains($rowText(), $marker) === true,
+                    'and it is that row, with its own copy of the data intact, not the snapshot\'s row wearing its number',
+                    $mine
+                );
+            }
+
+            // -------------------------------------------------------------
+            // E2. THE ONE CASE WHERE A WAITING ROW DELIBERATELY STOPS WAITING,
+            //     and until now nothing could tell it from its opposite.
+            //
+            //     `sameHeldRow()` ignores `putBackAtUtc` on purpose. So a row
+            //     waiting HERE, whose counterpart at the same number comes back
+            //     from the snapshot marked PUT BACK, takes the "already" branch:
+            //     the snapshot's history wins and the row stops being offered.
+            //     That is right - the snapshot records that the row went home,
+            //     and its data is in that snapshot's own `tblSettings` - but the
+            //     independent check found that putting `putBackAtUtc` INTO the
+            //     identity, which reverses the decision and re-offers the row,
+            //     left all 47 checks green. A deliberate decision no check can
+            //     tell from its opposite is not covered.
+            //
+            //     The state is reached in production by restoring an older
+            //     snapshot (which resurrects a put-back row as waiting) and then
+            //     a newer one. It is built here with the same two UPDATEs the
+            //     portal itself makes, because the state is what matters and two
+            //     more whole restores would prove nothing extra.
+            // -------------------------------------------------------------
+            brs_sql('DELETE FROM tblRestoreHeldRows');
+            $doneId = (int) $settingsRow['heldID'];
+            brs_sql(
+                'INSERT INTO tblRestoreHeldRows (heldID, tableName, siteID, userID, rowJson, snapshotName, heldAtUtc) VALUES ('
+                . $doneId . ", 'tblSettings', " . $asText($settingsRow['siteID']) . ', '
+                . $asText($settingsRow['userID']) . ", "
+                . "'{\"settingID\": 970964, \"settingKey\": \"org.address.line4\"}', "
+                . "'proof 28, the snapshot says this one went home', '" . (string) $settingsRow['heldAtUtc'] . "')"
+            );
+            // Exactly what putHeldRowsBack() writes when a row goes home.
+            brs_sql('UPDATE tblRestoreHeldRows SET putBackAtUtc = UTC_TIMESTAMP(), rowJson = NULL WHERE heldID = ' . $doneId);
+            $doneSnap = $backup->snapshot('proof 28, this row has gone home');
+            if (brs_check($doneSnap['success'] === true, 'a snapshot is taken in which that row is recorded as PUT BACK', brs_say($doneSnap)) === true) {
+                // And now it is waiting again, which is the state restoring an
+                // older snapshot leaves behind.
+                brs_sql(
+                    'UPDATE tblRestoreHeldRows SET putBackAtUtc = NULL, '
+                    . "rowJson = '{\"settingID\": 970964, \"settingKey\": \"org.address.line4\"}' WHERE heldID = " . $doneId
+                );
+                brs_check($waiting() === 1, 'and the row is waiting again, as restoring an older snapshot would leave it', 'waiting: ' . $waiting());
+                // 🎭 THE REHEARSAL FIRST, because HALF of stoppedWaitingWarning()
+                //    was reached by nothing. The method holds four sentences keyed by
+                //    (ahead/done, one/many), and this proof's only other rehearsal runs
+                //    against a snapshot that CARRIES rows rather than stopping them
+                //    waiting - so the two `ahead.*` sentences, the ones somebody reads
+                //    BEFORE deciding whether to restore, were exercised by nothing. The
+                //    independent check put the old untruth back into those two alone and
+                //    all 483 checks passed. This is the #694 round-6 lesson over again.
+                $ahead     = $backup->restoreAll((string) $doneSnap['directory'], true);
+                $aheadSaid = implode(' ', (array) ($ahead['warnings'] ?? []));
+                brs_check($ahead['success'] === true, 'a rehearsal of that snapshot runs', brs_say($ahead));
+                brs_check(
+                    stripos($aheadSaid, 'would no longer be offered on the Backup page') !== false
+                    && stripos($aheadSaid, 'this restore would honour what the snapshot says') !== false
+                    && stripos($aheadSaid, 'nothing would be lost') === false
+                    && stripos($aheadSaid, 'is no longer offered') === false,
+                    'and says in the future tense that the row WOULD stop being offered, with no clause in the past tense and no claim that nothing would be lost',
+                    $aheadSaid === '' ? '(no warnings at all)' : $aheadSaid
+                );
+                brs_check($waiting() === 1, 'and the rehearsal left the row waiting, as a rehearsal must', 'waiting: ' . $waiting());
+                $honoured     = $backup->restoreAll((string) $doneSnap['directory'], false);
+                $honouredSaid = implode(' ', (array) ($honoured['warnings'] ?? []));
+                brs_check($honoured['success'] === true, 'that snapshot is put back', brs_say($honoured));
+                brs_check(
+                    $waiting() === 0,
+                    'and the row STOPS waiting, because the snapshot records it as already put back and the restore honours that - reverse this decision and nothing else here would notice',
+                    'waiting: ' . $waiting() . ' (if this says 1, putBackAtUtc has been added to sameHeldRow() and the row is being offered again)'
+                );
+                brs_check(
+                    stripos($honouredSaid, 'written again after this restore') === false,
+                    'and nothing claims a row was written again, because none was',
+                    $honouredSaid
+                );
+                // 📣 AND IT IS SAID OUT LOUD. This used to happen in complete
+                //    SILENCE - measured by the independent check: waiting 1 before,
+                //    0 after, zero warnings - while the Backup page claimed "the
+                //    result always tells you what happened" and the help page listed
+                //    this very case among the things the portal "will not do
+                //    silently". Both sentences were true of nothing. The choice was
+                //    to weaken them or to make them true; this is the second.
+                // ⚠️ AND IT MUST NOT CLAIM NOTHING WAS LOST. This check used to
+                //    REQUIRE the words "Nothing has been lost", which pinned an
+                //    untrue clause in place: the code never looks at whether the
+                //    snapshot holds the row's own table, and the independent check
+                //    measured two ways it is false - a snapshot holding the
+                //    holding table but not `tblSettings`, and an ordinary sequence
+                //    where the waiting row held the LAST copy of a setting value
+                //    and afterwards it was in no table and no kept row. A check
+                //    that pins a reassurance is worse than no check: it makes the
+                //    untruth load-bearing. This proof's own fixture is one of
+                //    those worlds, which is why it never noticed.
+                brs_check(
+                    stripos($honouredSaid, 'recorded in this snapshot as having already been put back') !== false
+                    && stripos($honouredSaid, 'no longer offered on the Backup page') !== false
+                    && stripos($honouredSaid, 'honoured what the snapshot says') !== false
+                    // Only the `done.*` wording, because $honouredSaid comes from a
+                    // REAL restore. The rehearsal's wording is forbidden above, where
+                    // it can actually appear - this clause used to forbid it here too,
+                    // where it never can, which made the check look stronger than it
+                    // was (the clause-that-cannot-fail shape, in the package that
+                    // wrote the lesson).
+                    && stripos($honouredSaid, 'Nothing has been lost') === false,
+                    'and the answer SAYS the row is no longer offered and why, rather than letting it disappear in silence - and does NOT claim nothing was lost, which it cannot know',
+                    $honouredSaid === '' ? '(no warnings at all)' : $honouredSaid
+                );
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // F. ONE waiting row, so the singular sentence is read as well as the
+    //    plural one. Both are complete sentences in carriedWarning(), and the
+    //    lesson of #694 is that nothing but reading them catches a wording
+    //    fault.
+    // ---------------------------------------------------------------------
+    // Its own single row, rather than whatever the section before happened to
+    // leave: section E2 deliberately ends with NO row waiting, and depending on
+    // a previous section's leftovers is how this check came to ask for "exactly
+    // one" of nothing.
+    brs_sql('DELETE FROM tblRestoreHeldRows');
+    brs_sql(
+        'INSERT INTO tblRestoreHeldRows (tableName, siteID, userID, rowJson, snapshotName, heldAtUtc) VALUES '
+        . "('tblSettings', 970960, NULL, "
+        . "'{\"settingID\": 970961, \"siteID\": 970960, \"settingKey\": \"org.address.line1\"}', "
+        . "'proof 28, section F world', '2026-10-29 08:00:00')"
+    );
+    brs_check($waiting() === 1, 'exactly one row is waiting', 'waiting: ' . $waiting());
+    $one     = $backup->restoreAll($emptyCopy, false);
+    $oneSaid = implode(' ', (array) ($one['warnings'] ?? []));
+    brs_check($one['success'] === true, 'the snapshot with the empty holding table is put back again', brs_say($one));
+    brs_check(
+        $waiting() === 1,
+        'the single waiting row is carried through as well',
+        'waiting: ' . $waiting()
+    );
+    brs_check(
+        stripos($oneSaid, 'One row kept for you by an earlier restore had to be written again') !== false
+        && stripos($oneSaid, ' rows ') === false
+        && stripos($oneSaid, 'All 1 ') === false,
+        'and the sentence is written for ONE row throughout - never "All 1 rows", and no plural left anywhere in it',
+        $oneSaid
+    );
+
+    // ---------------------------------------------------------------------
+    // G. A HAND-EDITED MANIFEST: the one whole-restore case the
+    //    WHOLE_DATABASE_ONLY addition really changes.
+    //
+    //    This is the honest version of the claim section A used to make. A
+    //    snapshot only reaches the held-back path by NOT saying it covers the
+    //    whole database, and a genuine snapshot of that kind predates the
+    //    holding table and cannot contain it (section A). So the only snapshot
+    //    that both CONTAINS the table and gets it held back is a modern one
+    //    somebody has taken the flag out of - which is exactly what
+    //    `whole_database` was added for in the first place (a manifest is an
+    //    ordinary file in the folder). Without this section the addition's
+    //    effect on a whole restore is exercised by nothing at all.
+    // ---------------------------------------------------------------------
+    $edited = Brs::$root . '/p28/flag-taken-out-by-hand';
+    $modern = $backup->snapshot('proof 28, modern, to be edited');
+    if (brs_check($modern['success'] === true, 'a modern snapshot is taken while a row is waiting', brs_say($modern)) === true) {
+        brs_copyFolder((string) $modern['directory'], $edited);
+        $cut = json_decode((string) file_get_contents($edited . '/_manifest.json'), true);
+        unset($cut['whole_database']);
+        file_put_contents($edited . '/_manifest.json', json_encode($cut));
+        brs_check(
+            isset($cut['whole_database']) === false && isset($cut['tables']['tblRestoreHeldRows']) === true,
+            'and edited so it no longer says it covers the whole database while STILL containing the holding table - which only a hand-edited manifest can be'
+        );
+        // One more waiting row, so the live table and the snapshot's copy of it
+        // differ. Without this the check below would pass whether the table was
+        // held back or restored, because the two would be identical.
+        brs_sql(
+            "INSERT INTO tblRestoreHeldRows (tableName, siteID, userID, rowJson, snapshotName, heldAtUtc) VALUES "
+            . "('tblSettings', 970960, NULL, '{\"settingID\": 970963, \"settingKey\": \"org.address.line3\"}', "
+            . "'proof 28, kept after the snapshot was taken', '2026-10-31 09:00:00')"
+        );
+        $liveNow = $waiting();
+        // 📌 THE TWO ROWS BY NAME, not the count, and the first version of this
+        //    section got that wrong. A hand-edited manifest does not say it
+        //    covers the whole database, so it holds back ALL FOUR names - which
+        //    means `tblSettings` and `tblTotpBackupCodes` are held back too,
+        //    their parents ARE replaced, and the #694 cascade rescue correctly
+        //    KEEPS more rows. So the waiting count goes UP, which is right, and
+        //    a check that the count was unchanged failed on correct behaviour.
+        //    What matters here is that the two rows that were already waiting
+        //    are still there, untouched, with their own copies of the data.
+        // The two rows by their own snapshotName: the one section F left waiting
+        //    and the one inserted just above. Named rather than counted, because
+        //    the count legitimately GOES UP here (see the note below).
+        $mineAlready = ['proof 28, section F world', 'proof 28, kept after the snapshot was taken'];
+        $liveText    = $rowText();
+        brs_check(
+            $liveNow === 2
+            && str_contains($liveText, $mineAlready[0]) === true
+            && str_contains($liveText, $mineAlready[1]) === true,
+            'and a second row is kept AFTER that snapshot was taken, so the live table and the snapshot differ',
+            'waiting: ' . $liveNow . "\n" . $liveText
+        );
+        $heldBackRun = $backup->restoreAll($edited, false);
+        brs_check($heldBackRun['success'] === true, 'the hand-edited snapshot is put back', brs_say($heldBackRun));
+        $heldBackSaid = implode(' ', (array) ($heldBackRun['warnings'] ?? []));
+        brs_check(
+            stripos($heldBackSaid, 'tblRestoreHeldRows') !== false
+            && stripos($heldBackSaid, 'does not say that it covers the whole database') !== false,
+            'and the holding table is named among the tables left alone, which is what putting it on WHOLE_DATABASE_ONLY does to a whole restore',
+            $heldBackSaid
+        );
+        $afterText = $rowText();
+        brs_check(
+            str_contains($afterText, $mineAlready[0]) === true
+            && str_contains($afterText, $mineAlready[1]) === true
+            && $waiting() >= $liveNow,
+            'so both rows that were waiting are still there, untouched - the snapshot\'s own older copy of that table was not written over them',
+            'before:' . "\n" . $liveText . "\n" . 'after:' . "\n" . $afterText
+        );
+        brs_check(
+            $waiting() > $liveNow,
+            'and MORE rows are waiting now, not fewer: the same hand-edited manifest holds the other three names back too, so the #694 cascade rescue kept their rows as well ('
+            . $liveNow . ' before, ' . $waiting() . ' after)',
+            'waiting: ' . $waiting()
+        );
+        brs_check(
+            stripos($heldBackSaid, 'written again after this restore') === false,
+            'and nothing was written again, because nothing was going to be written over',
+            $heldBackSaid
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // H. Mend the world. This proof broke it several times.
+    // ---------------------------------------------------------------------
+    brs_sql('DELETE FROM tblRestoreHeldRows');
+    brs_putHeldBackRows($heldBackWas);
+    brs_checkSame($before, 'the whole database is back to how this proof found it, and the holding table is empty');
+}
+
 mkdir(Brs::$root, 0750, true);
 Brs::$root    = (string) realpath(Brs::$root);
 // The scratch folder holds whole copies of the database, so it is removed
@@ -3947,8 +4691,9 @@ $proofs = [
     23 => ['An undo the database does not confirm closes the connection, and the result says so', 'brs_proof23', false],
     24 => ['A value not on its column\'s list of choices: the snapshot says at once that it cannot be put back whole', 'brs_proof24', false],
     25 => ['A snapshot taken before migration 217 goes back onto a database that has run it (#604)', 'brs_proof25', false],
-    26 => ['Three tables a one-table restore refuses by name, and a whole restore still puts back', 'brs_proof26', false],
+    26 => ['The tables a one-table restore refuses by name, and a whole restore still puts back', 'brs_proof26', false],
     27 => ['Rows a restore cannot put back are kept, not lost (#694)', 'brs_proof27', false],
+    28 => ['Rows waiting to be put back survive a restore (#697)', 'brs_proof28', false],
     // These four need the large table, so they run together at the end.
     5  => ['A large table under a fixed memory limit (#579)', 'brs_proof5', true],
     7  => ['A snapshot that fails or is killed is never counted as a backup', 'brs_proof7', true],

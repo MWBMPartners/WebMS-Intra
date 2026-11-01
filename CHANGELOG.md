@@ -2,6 +2,172 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — putting a backup back no longer throws away the rows an earlier restore kept for you (#697)**
+  - **What went wrong.** #694 gave the portal a holding table, `tblRestoreHeldRows`, for rows a
+    restore could not put back, so an administrator can put them back or discard them deliberately.
+    But that table was an ordinary one, so the next whole-database restore emptied it and filled it
+    again from the snapshot — and a snapshot taken BEFORE some rows were kept holds none of them. The
+    waiting rows simply went, and a waiting row is the only copy of itself anywhere outside the
+    snapshot being restored from. That is the silent loss #694 exists to stop, one door along.
+  - **What was there before.** A warning, before and after, saying the rows had been replaced and to
+    deal with them first. It asks somebody mid-recovery to read a warning and act on it, which is
+    exactly what #694 says not to rely on.
+  - **What happens now.** The restore reads the waiting rows before it empties anything and writes
+    them again after every table is back — the same read-early, write-late order #694 already uses,
+    and for the same reason: the holding table is itself in the snapshot, so anything written earlier
+    would be emptied again when that table's turn came. The result says how many were carried
+    through. The Backup page's card and the disaster-recovery help page both say so. The HELP PAGE
+    used to say the opposite; the card said nothing on the subject at all, and this adds the
+    paragraph — a first draft of this entry claimed both had said the opposite, which
+    `git show HEAD:web/_apps/admin/maintenance/backup.php` disproves.
+  - **A row already put back is deliberately NOT carried.** It is history — a record that a row was
+    kept and returned, with its copy of the data emptied when it went home — and putting a database
+    back to an earlier moment is supposed to put its history back with it. Written down beside the
+    code and pinned by a check, so it cannot change by accident.
+  - **A one-table restore of the holding table is now refused by name.** `tblRestoreHeldRows` joined
+    `DbBackup::WHOLE_DATABASE_ONLY`: the button for it is gone and a posted request is turned away
+    with the reason, because putting that one table back on its own would throw away every waiting
+    row and there is no carry to save them.
+  - **What that addition does NOT do, because a first draft of this entry said it did.** It was
+    written up as also making an OLD-FORM snapshot leave the table alone, "so it cannot write over
+    kept rows at all". That is a no-op for every snapshot a customer can have: a snapshot with no
+    "covers the whole database" flag was written before that flag existed (27 October 2026,
+    `b7496b7`) and the holding table arrived with migration 233 (31 October 2026, `ac1b19e`), so such
+    a snapshot cannot contain the table and there was never anything to hold back. The only
+    whole-restore case the addition changes is a MODERN snapshot somebody has edited the flag out of,
+    which is what the flag exists to catch. **An old-form snapshot is safe for the simpler reason
+    that the table is not in it** — and so is any snapshot that does not contain it. Found by the
+    independent check, which restored a genuine old-form snapshot and read the answer: three tables
+    held back, not four. The in-app help page had been changed from a true sentence ("leaves three
+    tables alone") to a false one in the process, in the one place a customer reads before deciding
+    whether to accept a loss.
+  - **How a carried row is recognised, since it cannot simply be inserted again.** A snapshot taken
+    AFTER a row was kept holds that same row, under the same number, so each carried row is looked up
+    by its own number first: nothing there and it goes back under its own number; the same row there
+    and it is left alone; a DIFFERENT row there and it goes back under a new number. "The same row"
+    compares which table it came from, whose it was and when it was kept, and deliberately not the
+    copy of the data — a row already put back has had that copy emptied, and a JSON column is
+    rewritten on storage by MySQL and not by MariaDB, so comparing it would mean two different things
+    on the two engines.
+  - **A failure stops the whole restore** rather than reporting success with the rows gone, the same
+    direction `holdRescuedRows()` already takes. The table has no foreign keys and nothing but its
+    own number to clash on, so the only reachable causes are infrastructural.
+  - **More than 20,000 rows waiting no longer loses them.** The carry holds the rows in memory, so
+    it has a ceiling; past it the first version carried NOTHING and let the snapshot's older copy of
+    the list replace them — measured at 20,001 rows in and ZERO out, with the Backup page and the
+    help page both promising that could not happen. The decision now happens BEFORE the restore
+    starts, and past the ceiling that one table is simply not put back: the rows stay exactly where
+    they are, everything else in the snapshot goes back as usual, and the answer says so. It is the
+    same mechanism `WHOLE_DATABASE_ONLY` already uses, and the ceiling is decided in one place so two
+    readers cannot disagree about it.
+  - **An ARRAY SUBSCRIPT is the same comparison, and fixing only the `in_array()` calls turned a
+    silent loss into a BLOCKED RECOVERY.** `$facts['tblRestoreHeldRows']` kept matching exactly, and
+    `columnFacts()` keys its answer by `information_schema`'s own `TABLE_NAME` — lower case on such a
+    server — so the carry threw "the shape could not be read" and **every whole-database restore,
+    the rehearsal included, was refused while any row was waiting**, naming the wrong cause. The only
+    route to it was #694's rescue succeeding. `DbBackup::forTable()` is the helper for fetching an
+    entry out of an array keyed by table name, and `self::REMOVED_COLUMNS[$table]` used it too.
+    Four documents had said "all five sites use it"; they were wrong, and that sentence is what
+    invited the next reader to stop looking.
+  - **And a draft of the line above called `forTable()` "the ONE way", which it is not — the same
+    mistake one round later.** `DbBackup.php` holds about eighteen other table-keyed subscripts, and
+    the next review round found a THIRD live fault among them: `columnFacts()[$table]` in
+    `putHeldRowsBack()`, where `$table` carries the SOURCE's spelling because `keepsRowsFor()` has
+    just demanded it match `CASCADE_RESCUE` exactly. On a lower-case server the Backup page then
+    offered a kept row and drew both buttons, and **only the one that throws the data away worked** —
+    "put it back" always failed, naming the wrong cause. **The rule for it took a further round to state correctly:**
+    a table-keyed lookup is safe when BOTH SIDES COME FROM THE SAME PLACE, and unsafe when one side is
+    folded by the server and the other is not. The first attempt — "safe only where both sides came
+    from the server" — was wrong both ways: it cleared `REMOVED_COLUMNS[$table]`, which was one of
+    the very faults being generalised (its index comes from the manifest, its keys from the source),
+    and it condemned the three correct `CASCADE_RESCUE[$table]` sites, where capitals matter by
+    design. **Three rounds were spent fixing instances of this one class rather than the class**, which is why the audit script now
+    flags `columnFacts()` subscripts by shape and pins `forTable()`'s body as well as
+    `namedIn()`'s — a one-token change inside `forTable()` had passed every check in the repository.
+  - **Two PRE-EXISTING faults of the same shape, found on the way:** `$restored` is a fourth
+    server-reported list, so on such a server restored mail was NOT held and a restored held text was
+    NOT recorded as not sent. Their own docblocks say the cost — "three waiting messages came out as
+    six copies when this was run", and a text sent "a SECOND time, to somebody's phone and at the
+    customer's cost".
+  - **The one case where a waiting row deliberately stops waiting is now SAID OUT LOUD.** A row the
+    snapshot records as already put back is not carried, because the restore honours that snapshot's
+    history — and that happened in complete silence, measured at zero warnings, while the Backup page
+    claimed "the result always tells you what happened" and the help page listed it among the things
+    the portal will not do silently. `DbBackup::stoppedWaitingWarning()` reports it, which makes both
+    sentences true rather than merely softened.
+  - **Verified on a real server with the setting on**, by driving the class directly: the restore
+    succeeds, the waiting row survives, restored mail is held, and the held text is recorded. Each of
+    the three fixes was then planted away in turn and reproduced its exact fault — the refusal, the
+    silently lost row, and the unheld mail. **The repository's own harness cannot do this**: it
+    compares table names exactly in its OWN checks, so running it against such a server fails on the
+    test rather than the portal. That is why the guard is an audit script and not a self-test.
+  - **Two safety nets were inert on a server with `lower_case_table_names = 1`, and one of them was
+    #694's.** Table names from `SHOW TABLES` come back in lower case on such a server, and both this
+    carry and #694's cascade rescue compared them with `in_array(..., true)` against a name typed in
+    the source — so neither ran, and a waiting row was lost with the restore reporting success and
+    printing no warning at all. Measured on `mysql:8.0.36 --lower-case-table-names=1`. All five such
+    comparisons now ignore capitals, which is what `isWholeDatabaseOnly()` has always done, and for
+    the reason its comment gives. The two halves had disagreed about what a table is: the tables
+    were held back while neither protection fired.
+  - **Still not covered, said plainly:** the over-20,000 path is reached by no automatic test (the
+    independent check reached it by hand), and neither is the branch where the holding table cannot
+    be read at all.
+  - **The wording faults the independent check found, because they are the kind no check can see.**
+    `carriedWarning()` said "All %d rows kept for you ... were carried through", where the number
+    counts only the rows actually written again — so an administrator with four waiting rows and two
+    of them in the snapshot was told "All 2 rows kept for you", a number that is not the count of
+    anything they can see. The same sentence ASSERTED that the snapshot "does not include them",
+    which is untrue of exactly those rows. And `tooManyToCarryWarning()` asserted that the rows
+    "are no longer offered on the Backup page" when, in that branch, no rows are read at all and
+    nothing knows whether the snapshot holds copies of them. All three are now stated as what is
+    known: how many were written again, and nothing more. A first attempt at that fix ended each
+    sentence "Every row that was waiting is still waiting", which swapped an undercount for an
+    ABSOLUTE promise that ONE branch breaks — a row the snapshot already records as put back stops
+    waiting, deliberately, because the restore honours that snapshot's own history. (A draft of this
+    entry said "two branches" and named the ceiling as the second; the ceiling leaves every row
+    waiting, so it is not one.) That case used to happen in SILENCE, which made "the result always
+    tells you what happened" false on the Backup page; it is reported now.
+  - **A read of the kept rows that fails now says so.** Two `=== false` returns answered "nothing
+    was waiting", which is indistinguishable from an empty table, so the restore would have written
+    over the waiting rows with no warning — the exact failure this fixes. Unreachable while
+    `MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR` makes a statement error throw; it is there so it
+    cannot fail silently if that stops being true.
+  - **A new hard gate, because no test here can catch the case-sensitivity fault returning.** Every
+    self-test in this repository runs one database server with `lower_case_table_names = 0`, where the
+    names match exactly, so the fault is invisible to all of them — the #646 situation exactly.
+    `tools/audit-checks/check_table_name_comparisons.py` fails on a case-sensitive `in_array()`
+    against a list of server-reported table names, and also fails if `DbBackup::namedIn()` stops
+    existing or stops CALLING `strcasecmp()`, because without that second half the first is satisfied
+    by deleting the comparison. Wired into `pr-security.yml` as a hard gate (`if: always()`, no
+    `|| true`), with the step name quoted so a `#` cannot truncate it, and the YAML parsed before
+    pushing.
+  - **That gate's first version passed on two planted faults, and the fixes are the general lesson.**
+    It required the `in_array()` call to be followed by a comparison, so assigning the result to a
+    variable escaped it entirely — and it listed the three haystack variables it knew about, where
+    `$restored` was a fourth holding two live faults. It now anchors on the NEEDLE (a `'tbl...'`
+    literal) and matches the call's own parentheses, so neither the haystack's name nor what follows
+    the call matters. Its second half asked whether the WORD `strcasecmp` appeared in the helper's
+    body, which `$how = 'strcasecmp';` satisfied while the comparison used `===` — the
+    `check_no_outside_qr_service.py` lesson word for word. It now requires a CALL, with comments and
+    string literals masked first. It also matched haystack names by substring, so an ordinary
+    `in_array($column, $orderedColumns, true)` turned it red; anchoring on the needle fixed that too,
+    and #668's rule is that a check which cries wolf gets switched off. Five plants now: the assigned
+    call, the literal `strcasecmp`, the array subscript, the mail comparison, and a correct unrelated
+    helper that must NOT trip it.
+  - Tests: proof 28 of `tools/backup-restore-selftest.php` (61 checks against a real database — the
+    rehearsal, the singular and plural sentences, the no-duplication case, ONE SUB-CASE PER IDENTITY
+    COLUMN, the one branch where a waiting row deliberately stops waiting, and a hand-edited
+    manifest), proof 26 for the one-table refusal, and section P of `tools/backup-page-selftest.php`
+    for the card. Thirty-one planted faults across five rounds, each caught by the check that should
+    catch it — and the count matters less than the fact that five of them were bypasses of the new
+    audit script itself, each measured reaching the code and reproducing a fault the script exists
+    to stop. Two are worth naming. **Narrowing the row identity to `tableName` alone left all thirty
+    of the original checks green while a real waiting row was silently lost** — and the later fix for
+    that was itself incomplete: three sub-cases for four columns, so dropping `tableName` stayed
+    invisible until a fourth was added. And **a plant that cannot change behaviour proves nothing**:
+    adding `putBackAtUtc` to the identity looked inert because the lookup does not select that
+    column, so reversing the decision properly takes two edits, and only then does the new section
+    E2 fail.
 - **Fixed — putting back a backup taken before 27 October 2026 no longer loses every organisation's
   address and everybody's sign-in codes in silence (#694, migration 233)**
   - **What went wrong.** A snapshot in the older form does not say that it covers the whole database,
@@ -210,11 +376,10 @@
     AFTER the real restore, by which point there was nothing left to lose and nothing to warn about.
     `brs_tidy()` also puts the table back if that section is killed between its two renames, so a
     killed run cannot poison the next.
-  - **What this still does not do, now tracked as #697.** `tblRestoreHeldRows` is an ordinary table,
-    so restoring a snapshot taken before some rows were kept replaces them — and those waiting rows
-    are the only copy outside the snapshot being restored from. The restore now **warns**, before and
-    after, naming the count and saying to clear them first. A warning is not a fix, and which fix to
-    make is the owner's choice.
+  - **What this did not do at first was #697, and that is now fixed** (see the entry above this one):
+    `tblRestoreHeldRows` was an ordinary table, so restoring a snapshot taken before some rows were
+    kept replaced them, and those waiting rows are the only copy outside the snapshot being restored
+    from. The restore warned, before and after, which is not a fix. It now carries them through.
   - Tests: proof 27 of `tools/backup-restore-selftest.php` (the class, against a real database),
     section P of `tools/backup-page-selftest.php` (the page, over real HTTP), section 18 of
     `tools/gdpr-eraser-selftest.php` (the erasure really runs and touches nobody else's row).

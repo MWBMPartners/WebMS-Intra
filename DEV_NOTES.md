@@ -12427,3 +12427,451 @@ outside `tbl%` and taking the snapshot afterwards, because an un-upgraded
 database has no holding table *and no snapshot containing one*. It caught two
 faults of mine in its first two runs, both in the test rather than the portal —
 which is what a test exercising a genuinely new branch should do.
+
+## Carrying the kept rows through a restore (#697)
+
+#694 gave the portal a holding table for rows a restore could not put back.
+`tblRestoreHeldRows` was then an **ordinary** table, so the next whole-database
+restore emptied it and filled it again from the snapshot — and a snapshot taken
+*before* some rows were kept holds none of them. The waiting rows went, and a
+waiting row is the only copy of itself anywhere outside the snapshot being
+restored from. The same silent loss #694 exists to stop, one door along, and it
+shipped inside the fix for it.
+
+**A warning is not a fix, and this is the clearest example of why.** The first
+version said so, before and after, naming the count and telling the
+administrator to deal with the rows first. But the only person who ever reads
+that sentence is somebody mid-recovery, which is the condition #694's own
+reasoning says not to rely on — the owner's "no timer" decision rests on exactly
+that point. A sentence that has to be acted on at the worst moment of somebody's
+week is a design that has chosen to fail quietly.
+
+### The fix is the mechanism that was already there
+
+Read the waiting rows before anything is emptied; write them again after every
+table is back. The same read-early, write-late order as the cascade rescue, and
+for the same reason: the holding table is **itself in the snapshot**, so
+anything written earlier is emptied again when that table's turn comes.
+
+### `WHOLE_DATABASE_ONLY` guards the one-table button, and almost nothing else
+
+Adding `tblRestoreHeldRows` to that list was option 4 on the issue: refuse a
+one-table restore of it, which would otherwise throw away every waiting row with
+no carry to save them. That is what it does.
+
+**It was also written up as having a second effect, and that was wrong.** The
+claim was that an old-form snapshot — one that does not say it covers the whole
+database — now leaves the table alone, "so it cannot write over kept rows at
+all", which inverts the danger compared with #694. It is a **no-op for every
+snapshot a customer can have**:
+
+    git log -S"whole_database" --format='%h %ci' -- web/_core/DbBackup.php | tail -1
+      b7496b7 2026-10-27 18:19:23 +0000
+    git log --format='%h %ci' --diff-filter=A -- web/_sql/233_restore_held_rows.sql
+      ac1b19e 2026-10-31 17:26:43 +0000
+
+A snapshot with no flag predates the flag; the holding table arrived four days
+later. Such a snapshot **cannot contain it**, so there was never anything to hold
+back. The only whole-restore case the addition changes is a modern snapshot
+somebody has edited the flag out of — which is precisely what the flag was added
+for, and is now section G of proof 28.
+
+**An old-form snapshot was already safe for a simpler reason: the table is not in
+it.** So is any snapshot that does not contain it, old or modern. The carry is
+needed by a snapshot that *does* contain it.
+
+**How the wrong claim survived: the fixture could not exist.**
+`brs_legacySnapshot()` writes a snapshot in the old form by reading every live
+`tbl%` table — so it cheerfully produced one containing `tblRestoreHeldRows`. A
+check was built on it, four documents described the second effect, and the
+customer-facing help page was changed from a true sentence ("leaves three tables
+alone") to a false one. Caught by the independent check, which restored a genuine
+one and read the answer. **This is the #645 lesson exactly: when a check exists to
+prove something ordinary still works, check that the fixture is actually
+ordinary.** `brs_legacySnapshot()` now omits the table, with the dates in a
+comment above it.
+
+That is also why proof 26 earns its keep. Its one-table refusal loop iterates
+`WHOLE_DATABASE_ONLY`, so removing a name from the list does not make that loop
+fail — it simply stops testing it. The explicit
+`array_keys($list) === ['tblMigrations', …]` pin is what catches a deleted name,
+and planting proved it: the list check failed and the eleven refusal checks went
+on passing.
+
+### Recognising a row you are about to insert again
+
+A snapshot taken *after* a row was kept holds that same row, under the same
+number, so the carry cannot simply insert everything. Each carried row is looked
+up by its own `heldID` first:
+
+| what is at that number | what happens |
+|---|---|
+| nothing | written back **with** its original number |
+| the same row | left alone — the snapshot's copy *is* this row |
+| a different row | written back under a **new** number |
+
+"The same row" compares `tableName`, `siteID`, `userID` and `heldAtUtc`, and
+deliberately **not** `rowJson`. Two separate reasons, both load-bearing:
+
+- A row already put back has had its copy **emptied** (#694 does that in the
+  same statement that marks it). Comparing the copy would call it a different
+  row and re-offer something the restored database says is finished.
+- `rowJson` is a **JSON column**. MySQL rewrites what it stores — keys reordered,
+  a space after each colon — while MariaDB's `JSON` is an alias for `LONGTEXT`
+  and rewrites nothing. A text comparison therefore means two different things
+  on the two engines. This is the same trap as the `rowJson LIKE '%"userID":…'`
+  clause that could never fail in #694's eraser test.
+
+The third row of that table is reachable in production whenever the snapshot came
+from a database whose numbering ran differently — an imported snapshot, or one
+taken after rows were discarded and others kept. Proof 28 reaches it by making
+one waiting row carry a number the snapshot already uses, and planting the
+fallback away turns the whole restore red (the duplicate-key insert throws and
+the restore rolls back, which is the honest direction and exactly what the
+`RuntimeException` promises).
+
+### What is deliberately NOT carried
+
+A row that has **already been put back** is history: it records that a row was
+kept and returned, and its copy of the data was emptied when it went home.
+Putting a database back to an earlier moment is supposed to put its history back
+with it. Proof 28 checks that those records go, so the decision cannot be
+reversed by accident — and the judgement itself is written beside
+`readWaitingHeldRows()`, because no check can tell you whether it is right.
+
+**What that costs, stated rather than glossed.** No data goes: a put-back row's
+`rowJson` is already empty and the row itself really is back in its own table.
+What goes is the **audit trail** — the record that somebody returned those rows,
+from which snapshot and when. An earlier draft of this section said "nothing is
+lost that the restored database does not itself account for", which is too strong:
+the restored database does not account for that.
+
+### The rehearsal writes, and that is not new
+
+A rehearsal (`restoreAll($path, true)`) runs inside the transaction and rolls it
+back, so "a rehearsal changes nothing" has always meant "no value survives it".
+`holdRestoredMail()` and `holdRestoredTexts()` already wrote inside one.
+
+**One thing a rehearsal does leave behind, measured by the independent check:** an
+INSERT that is rolled back still consumes an AUTO_INCREMENT number, so a
+rehearsal that reaches the clashing-number branch leaves the next `heldID` one
+higher. Harmless, and invisible to `brs_checkSame()`, which compares values —
+which is why proof 28's claim is now "left every value of every table as it was"
+rather than "changed nothing at all". The carry runs in a rehearsal too, deliberately, because a rehearsal that
+skipped it could not tell an administrator the carry would fail — which is the
+one thing a rehearsal is for. `holdRescuedRows()` is still skipped on a
+rehearsal; it writes rows only a real restore has business keeping.
+
+### The independent check's round on #697, and the one finding worth memorising
+
+Eight real problems, and **seven of the eight were about what the package said
+about itself** rather than what it did. The mechanism survived every attack: the
+waiting rows came through a modern snapshot, an old-form one, a snapshot that did
+not contain the table, a rehearsal, a failed restore and an un-upgraded database.
+
+The one that was not about wording is the one to remember. **Narrowing
+`sameHeldRow()`'s identity from four columns to `tableName` alone left all thirty
+of proof 28's checks green while a real waiting row was silently lost** — the
+restore reported success, printed no carry warning at all, and the row was gone.
+Three quarters of the identity was guarded by nothing, because the only fixture
+that reached the clash branch made its two rows differ in `tableName`, which is
+the one column a narrowing keeps. Section E now has **one sub-case per column**,
+each differing from the snapshot's row in exactly one of `siteID`, `userID` and
+`heldAtUtc` with the same `tableName`, so any proper subset of the four fails.
+
+**The general shape: a fixture that differs in several ways at once tests only the
+first thing the code looks at.** It is the same family as "a check that exists to
+prove something ordinary still works needs an ordinary fixture" — in both cases
+the fixture quietly decides how much of the code is reachable, and nothing says so.
+
+Four smaller lessons, each a repeat of one already written down:
+
+- **"All N" of a number that counts a subset.** `carriedWarning()` was handed the
+  count of rows *written again*, not the count waiting, and said "All". With four
+  waiting and two in the snapshot it told an administrator "All 2 rows kept for
+  you". Say what the number counts.
+- **A hedge that covers one condition and asserts the other.** For the third time
+  in two packages. `tooManyToCarryWarning()` asserted the rows were "no longer
+  offered on the Backup page" from a branch that reads no rows and cannot know.
+- **A clause that cannot fail, in the package that wrote the lesson down.** The
+  new check in section P forbade a phrase that was never on that page, under a
+  label claiming it proved the page "does not still say the opposite".
+- **A claim about history with nothing behind it.** The changelog said the Backup
+  page's card "used to say the opposite". The card said nothing; the package added
+  the paragraph. One `git show HEAD:` would have caught it.
+
+### Round two of the check on #697: two behavioural faults, and a one-server blind spot
+
+Six more real problems. Four were wording again; two were behaviour, and both
+were measured rather than argued.
+
+**The carry did not run at all on a server with `lower_case_table_names = 1`.**
+That setting decides whether MySQL treats two names differing only in capitals
+as one table, and on a server set to 1 every name `SHOW TABLES` reports comes
+back lower case. `readWaitingHeldRows()` asked
+`in_array('tblRestoreHeldRows', $replacing, true)` — case-sensitive — so the
+answer was false and the restore behaved exactly as it had before #697. Measured
+on `mysql:8.0.36 --lower-case-table-names=1`: one waiting row before, none
+after, `success=true`, **no warning of any kind**.
+
+The same run showed **#694's cascade rescue inert beside it**, for the same
+reason and in the same loop. So the root is older than this package.
+`isWholeDatabaseOnly()` has compared with `strcasecmp()` since it was written,
+*because* `lower_case_table_names` is a server setting — which means the two
+halves of one class disagreed about what a table is, and the tables were still
+held back while neither protection fired. `DbBackup::namedIn()` compares a name
+against a list of names, and `DbBackup::forTable()` fetches an entry out of an
+array KEYED by table name.
+
+**Fixing the five `in_array` sites was not enough, and I wrote "all five sites
+use it" in four documents before anyone checked.** The next round measured what
+that cost, and it is the sharpest lesson in the package:
+
+- **An array subscript is the same comparison written another way.**
+  `$facts['tblRestoreHeldRows']` and `self::REMOVED_COLUMNS[$table]` went on
+  matching exactly.
+- **Making the carry RUN without fixing the subscript turned a silent loss into
+  a BLOCKED RECOVERY.** `columnFacts()` keys its answer by
+  `information_schema`'s own `TABLE_NAME`, lower case on such a server, so the
+  subscript found nothing, `carryWaitingHeldRowsThrough()` threw "the shape
+  could not be read", and **every whole-database restore and every rehearsal was
+  refused while any row was waiting** — naming the wrong cause, because the
+  shape had been read, just under another key. The only route to it was #694's
+  rescue *succeeding*. This file elsewhere refuses to create exactly that
+  condition: "refusing it would block a recovery at the one moment somebody is
+  recovering".
+- **`$restored` was a fourth server-reported list**, holding two PRE-EXISTING
+  faults of the same shape: restored mail was not held and restored held texts
+  were not recorded as not sent. Their own docblocks say what that costs —
+  "three waiting messages came out as six copies when this was run", and a text
+  sent "a SECOND time, to somebody's phone and at the customer's cost".
+
+**A fix is not finished when the shape you first noticed is gone.** Ask what
+other shapes do the same job: a subscript, `===`, `array_search`, `isset`, a
+`switch`. The check's header now lists the ones it still cannot see.
+
+**The blind spot is the part worth keeping.** Every self-test in this repository
+runs one database server, set to 0, where names match exactly. So **no test here
+can see this fault return** — a correct guard over a fault that has already
+happened, with nothing able to run it. That is the #646 situation, and the answer
+is the same: a tripwire. `tools/audit-checks/check_table_name_comparisons.py`
+fails on a case-sensitive `in_array()` against a server-reported list, *and* on
+`namedIn()` ceasing to exist or ceasing to use `strcasecmp()` — because without
+that second half the first is satisfied by deleting the comparison altogether.
+Four plants, including the function commented out whole, which is the shape that
+fooled the QR check twice.
+
+**The ceiling lost everything it existed to protect.** Past
+`CASCADE_RESCUE_MAX_ROWS` the carry held nothing and let the snapshot's older
+copy of the list replace the lot: 20,001 waiting rows in, **zero** out, measured
+with the real class — while the Backup page and the help page both promised that
+putting a backup back could not lose them. That is "check every page claim
+against the FALLBACK, not the happy path", broken in the package that cites it.
+
+The fix is not a bigger ceiling. The decision moved **before** the transaction,
+and past the ceiling the holding table is **not put back at all** — the rows stay
+exactly where they are, everything else in the snapshot goes back, and the answer
+says so. It reuses the mechanism `WHOLE_DATABASE_ONLY` already provides, and the
+ceiling is now decided in exactly one place, because two readers of one limit is
+how #668's save-time cap came to disagree with its job.
+
+### Three smaller lessons from the same round
+
+- **An absolute promise is as wrong as an undercount.** Fixing "All N rows" (a
+  count of a subset) produced "Every row that was waiting is still waiting",
+  which one branch breaks by design: a row the snapshot records as already put
+  back stops waiting, because the restore honours that snapshot's history. The
+  sentence now speaks only of the rows it wrote again.
+- **A plant that cannot change behaviour proves nothing.** Adding `putBackAtUtc`
+  to `sameHeldRow()`'s identity looked inert — all checks green — but the lookup
+  does not *select* that column, so both sides were null and the comparison was
+  unchanged. Reversing the decision properly takes two edits, and only then does
+  the new section E2 fail. A green run after a plant is evidence only once you
+  have shown the plant reaches the code.
+- **A fix for "the fixture differs in several ways" can itself be incomplete.**
+  Three sub-cases were added for four identity columns, all sharing the
+  snapshot row's `tableName`, and the claim "any proper subset fails" was written
+  anyway. `['siteID', 'userID', 'heldAtUtc']` is a proper subset and passed.
+  There is a sub-case per column now; the `tableName` one is declared synthetic,
+  because the two kept-row shapes cannot differ in the table alone.
+
+### Round three on #697: a fix that made things worse, and why one server is not enough
+
+Five more. Two were behaviour, and the worst was **mine, introduced by round two's
+fix**.
+
+**Fixing half of a case-sensitivity fault is worse than fixing none of it.**
+Round two made the five `in_array()` comparisons ignore capitals, so on a server
+with `lower_case_table_names = 1` the carry started running. It then threw,
+because the line that hands it the table's shape was still an exact lookup:
+
+    $facts['tblRestoreHeldRows'] ?? []
+
+`columnFacts()` keys that array by `information_schema`'s own `TABLE_NAME`, which
+is lower case there. So the carry took its "the shape could not be read" branch,
+which stops the whole restore — and **every whole-database restore, rehearsal
+included, was refused while any row was waiting.** The only way to reach it was
+#694's rescue *succeeding*. A silent loss had become a blocked recovery, which is
+the one condition this file elsewhere refuses to create: *"refusing it would block
+a recovery at the one moment somebody is recovering."* The message named the wrong
+cause too — the shape had been read, just under another key.
+
+**An array subscript is a comparison written another way.** That is the sentence
+to keep. `DbBackup::namedIn()` compares a name against a list; `forTable()`
+fetches an entry out of an array keyed by table name. `REMOVED_COLUMNS[$table]`
+was the same shape, and `$restored` was a **fourth** server-reported list holding
+two **pre-existing** faults: restored mail was not held, and a restored held text
+was not recorded as not sent. Their docblocks price them — "three waiting messages
+came out as six copies", and a text sent "a SECOND time, to somebody's phone and
+at the customer's cost".
+
+**"All five sites use it" is what let it survive.** That sentence went into four
+documents after round two, and it is exactly the kind of claim that tells the next
+reader to stop looking. A fix is not finished when the shape you first noticed is
+gone: ask what else does the same job — a subscript, `===`, `array_search`,
+`isset`, a `switch`.
+
+### What this cost in verification, and the standing conclusion
+
+**The repository's own harness cannot test this.** Run
+`tools/backup-restore-selftest.php` against a server with the setting on and it
+fails in its *own* checks, which compare table names exactly (`in_array((string)
+$table, $real, true)` against `SHOW TABLES`, and `unset($cut['tables']['tblSettings'])`
+on a manifest whose keys are lower case). Those failures are MOSTLY the test's — and the word "mostly" cost another round.
+One of them came out of the real class (`putHeldRowsBack()`'s own "the shape of
+... could not be read"), so a blanket "the failures are the test's" buries
+exactly the finding that matters. Sort them one at a time.
+
+So the behaviour was verified by driving the class directly against a server with
+`--lower-case-table-names=1`: the restore succeeds, the waiting row survives,
+restored mail is held, the held text is recorded. Then each of the three fixes was
+planted away in turn and reproduced its exact fault — the refusal, the silently
+lost row, the unheld mail. **The guard against regression is therefore an audit
+script, not a self-test**, and proof 28's header says so rather than implying
+cover it does not have.
+
+### The gate that passed on broken code, twice
+
+`check_table_name_comparisons.py`'s first version was bypassed two ways, both
+measured as reaching the code:
+
+- it required the `in_array()` call to be **followed by** a comparison, so
+  `$isThere = in_array('tblX', $list, true);` escaped it;
+- it listed the **haystack** variables it knew about, and `$restored` was a fourth.
+
+It now anchors on the **needle** — a `'tbl…'` literal — and matches the call's own
+parentheses, so neither the haystack's name nor what follows the call matters.
+That also cured a cry-wolf: matching haystack names by substring turned it red on
+an ordinary `in_array($column, $orderedColumns, true)`, and #668's rule is that a
+check which cries wolf gets switched off.
+
+Its second half asked whether the **word** `strcasecmp` appeared in the helper's
+body. `$how = 'strcasecmp';` satisfied that while the comparison used `===` — the
+`check_no_outside_qr_service.py` lesson word for word, in a check written by
+somebody who had just read it. It now requires a **call**, with comments and
+string literals masked first.
+
+### Round four on #697: fix the CLASS, not the instance
+
+Four more. Three rounds in a row now, the same single class of fault has been
+fixed one instance at a time, and each round found another instance:
+
+| round | the instance fixed | what the next round found |
+|---|---|---|
+| 2 | five `in_array($name, $list, true)` calls | `$facts['tblRestoreHeldRows']` — a subscript |
+| 3 | that subscript, and `REMOVED_COLUMNS[$table]` | `columnFacts()[$table]` in `putHeldRowsBack()` |
+| 4 | that one, and the check now flags the shape | — |
+
+**The round-4 instance was the worst of the three.** `putHeldRowsBack($table)`
+receives a name that `keepsRowsFor()` has just required to match `CASCADE_RESCUE`
+exactly, so it carries the **source's** spelling; `columnFacts()` keys its answer
+by the **server's**. On a server with `lower_case_table_names = 1` the lookup
+found nothing and the method returned before touching a row — while
+`discardHeldRows()`, which needs no shape, worked perfectly. So the Backup page
+offered a kept row, drew both buttons, and **only the one that throws the data
+away worked.** "Put it back" always failed, naming the wrong cause.
+
+**The rule took a fourth round to state correctly, and the wrong version is the
+more interesting half.** Round 4 wrote: *a table-keyed array is safe only where
+both sides came from the server; the fault is an index that came from the
+source.* That is wrong in **both** directions, and the counter-examples are both
+inside this package:
+
+- **It clears a real fault.** `REMOVED_COLUMNS[$table]` was the second of the
+  three faults. Its index comes from the restore's loop over the **manifest** —
+  the server's own names — while its keys are typed in the source. The rule
+  calls that combination safe. Measured: every key in a manifest written on a
+  lower-case server is lower case.
+- **It condemns three correct sites.** `CASCADE_RESCUE[$table]` is indexed by a
+  source name and capitals really do matter there (`keepsRowsFor('tblsettings')`
+  is false, by design) — and that is correct, because the array's own keys are
+  source-typed too. `forTable()` would be the wrong fix.
+
+**The true rule: a table-keyed lookup is safe when BOTH SIDES COME FROM THE SAME PLACE, and unsafe when one side is folded by the server and the other is not.** Keys typed
+here indexed by a name typed here is safe. Keys from `information_schema` indexed
+by a name from `SHOW TABLES` is safe on one server, with the cross-server residue
+as #698. One of each is the fault. That version classifies all four known
+instances, all three `CASCADE_RESCUE` sites and #698 correctly.
+
+**The shape of the mistake is worth more than the rule.** A rule written to
+generalise a fault, from the fault's own symptoms, will describe the instance you
+happened to see. Both halves of this one had to be tested against the OTHER
+known sites before it was worth anything — which is what the fifth round did and
+the fourth did not.
+
+**And a sentence of mine made it worse twice.** Round 2 produced "all five sites
+use it"; round 3's correction produced "`forTable()` is now the ONE way". Both are
+the kind of claim that tells the next reader to stop looking, and in this codebase
+"the ONE place" is a standing promise with real weight. The second was written
+*while correcting the first*.
+
+### The gate asked a narrower question than the one it exists to answer — twice more
+
+`check_table_name_comparisons.py` was bypassed by two one-token regressions, each
+shown to reach the code:
+
+- **`strcmp` inside `forTable()`.** The check pinned `namedIn()` alone, although
+  its own header named both helpers as the remedy. It pins both now.
+- **`in_array('tblX', $list)` with no `true`.** The check required the third
+  argument to be `true`. A loose `in_array` over strings is **just as
+  case-sensitive** — PHP's `==` between two non-numeric strings compares them
+  exactly — and dropping `, true` is the likeliest way the regression returns.
+  Any `in_array()` of a table name now fails it.
+
+A new check D flags a `columnFacts()` subscript by shape. **The first version of
+that sentence said the round-4 instance "could not recur silently", and two lines
+disproved it** — assigning `columnFacts()` to a local first walked past check D
+entirely, and the independent check measured it reproducing the fault with every
+check green. Check E now follows exactly one assignment, and only inside the four
+held-row methods, because applied to the whole file it reported FIFTEEN safe
+sites. The helper bodies are pinned WHOLE rather than by the presence of a
+`strcasecmp` call, because `strcasecmp(...) === 0 && $table === (string) $name`
+is a real call and is case-sensitive again.
+
+**Five versions of one check now, and the arc is identical to
+`check_no_outside_qr_service.py`: each version asked something narrower than the
+question it exists to answer, and only planting found the gap.** What finally
+stopped it was giving up on detecting arbitrary shapes and pinning the two
+helpers' entire bodies — the literal form of this repository's own "pin the WHOLE
+condition" rule. The cost is that any edit to either helper fails the check,
+which is the point: it forces the change to be deliberate.
+
+**What it still cannot see is listed in its header rather than implied away** — a
+needle in a variable, a needle built by concatenation, more than one assignment,
+a `columnFacts()` array passed to another method, and anything outside
+`DbBackup.php`.
+
+### A check that pins a reassurance makes the untruth load-bearing
+
+The warning added in round 3 to stop a silent disappearance ended "Nothing has
+been lost: this snapshot holds the row in its own copy of the table it came
+from." The code never looks at whether the snapshot holds that table. Two
+measured counter-examples: a snapshot containing the holding table but not
+`tblSettings`, and an ordinary sequence where the waiting row held the **last**
+copy of a setting value and afterwards it was in no table and no kept row.
+
+Worse, section E2 **required** those words, so the check held the untruth in
+place — and the proof's own fixture is one of the worlds where the sentence is
+false, which is why it never noticed. The sentence now says only what is known
+(the snapshot records the row as put back, so it is no longer offered) and where
+to look, and the check requires the reassurance to be **absent**.

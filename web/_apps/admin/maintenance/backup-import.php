@@ -13,8 +13,8 @@
  * Importing and restoring are deliberately two steps. The import produces a
  * snapshot folder; putting it back is the existing Restore button, unchanged,
  * with every guard it already has — the rehearsal, the one-transaction restore,
- * the closing of the portal, and `DbBackup::WHOLE_DATABASE_ONLY` for the three
- * tables a one-table restore refuses.
+ * the closing of the portal, and `DbBackup::WHOLE_DATABASE_ONLY` for the tables
+ * a one-table restore refuses (four as this is written; read the constant).
  *
  * Doing it in one press would mean a second path that writes over a live
  * database, and that path would have to agree with the first about every one of

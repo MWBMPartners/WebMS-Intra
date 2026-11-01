@@ -830,6 +830,32 @@ $csrf = Auth::csrfToken();
                 <strong>Nothing removes them on a timer</strong> &mdash; they wait until you put them back or
                 discard them.
             </p>
+            <?php // 🛟 #697. Said here because this is where somebody sees the waiting rows,
+                  //    and because until 31 October 2026 the opposite was true: a later restore
+                  //    replaced this list with the backup's own older copy and the rows simply
+                  //    went. The restore now reads them before it empties anything and writes
+                  //    them again at the end, and says how many it wrote again.
+                  //
+                  //    ⚠️ ONE case really does end with a row no longer waiting, and this
+                  //       comment said TWO: a backup that already records the row as put back,
+                  //       where the restore honours that backup's own history. The other one it
+                  //       named - more than 20,000 kept rows - leaves the whole list ALONE, so
+                  //       every row is still waiting; the same sentence said so and contradicted
+                  //       itself. Measured by the independent check at 20,001 rows in and
+                  //       20,001 out.
+                  //
+                  //       And "the result always tells you" was false until the same round: that
+                  //       one case happened in SILENCE, measured at zero warnings. It is
+                  //       reported now (DbBackup::stoppedWaitingWarning()), which is what makes
+                  //       this sentence true rather than merely softened. ?>
+            <p class="mb-3 small">
+                Putting another backup back does <strong>not</strong> throw these away. They are read
+                before anything is emptied and written again at the end, and the result says how many
+                were written again. Putting back the one table they are kept in would lose them, so the
+                portal refuses to do that. The result always tells you what happened &mdash; if a backup
+                already records one of these rows as put back, the portal honours that backup rather
+                than offering the row again.
+            </p>
             <div class="portal-data-list">
                 <?php foreach ($heldByTable as $heldTable => $about): ?>
                     <div class="row py-2 align-items-center border-bottom">
@@ -1083,15 +1109,21 @@ $frequencyChoices  = [
                 </button>
             </form>
             <h3 class="h6">Per-table</h3>
-            <?php // 📣 Said once, above the list, rather than on each of the three rows: an administrator needs to know WHY the button is missing and what to press instead, and three copies of that sentence in a long list would be read by nobody. ?>
+            <?php // 📣 Said once, above the list, rather than on each of the rows it applies to: an administrator needs to know WHY the button is missing and what to press instead, and a copy of that sentence against every such row in a long list would be read by nobody. ?>
             <p class="text-muted small mb-2">
                 A few tables can only be put back by &ldquo;Restore ALL tables&rdquo; above:
                 <?php echo htmlspecialchars(implode(', ', array_keys(DbBackup::WHOLE_DATABASE_ONLY)), ENT_QUOTES, 'UTF-8'); ?>.
-                They keep track of things the rest of the database has moved on from &mdash; which
-                database upgrades have run, which sign-in codes have been used &mdash; so putting
-                one of them back on its own would leave the rest of the database out of step with
-                it. They are still saved in the snapshot, and a whole-snapshot restore puts them
-                back.
+                <?php // 🗒️ THE EXAMPLES ARE EXAMPLES, and they used to name two of the
+                      //    tables on a list of three. A fourth joined for #697, so an
+                      //    administrator was given no reason at all why that one has no
+                      //    button. The general sentence covers whatever the list holds; the
+                      //    exact reason for each name is in WHOLE_DATABASE_ONLY and is what
+                      //    the refusal says if somebody posts past the missing button. ?>
+                Each of them keeps track of something the rest of the database has moved on from
+                &mdash; which database upgrades have run, which sign-in codes have been used, which
+                rows an earlier restore kept for you &mdash; so putting one back on its own would
+                leave the rest of the database out of step with it. They are still saved in the
+                snapshot, and a whole-snapshot restore puts them back.
             </p>
             <div class="portal-data-list">
                 <?php foreach ((array) ($inspectManifest['tables'] ?? []) as $tableName => $meta): ?>
