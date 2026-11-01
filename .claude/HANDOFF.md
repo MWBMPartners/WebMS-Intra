@@ -3,64 +3,78 @@
 *Overwritten, never appended. Current state only (#678). Issues are the record of
 what is and is not done.*
 
-**Branch:** `claude/alpha-wip`. **Nothing is pushed** — the owner reserves pushes,
-and no pull request until the one comprehensive Codex review of the whole branch.
+**Branch:** `claude/alpha-wip`, clean. **11 commits unpushed**, and the branch is
+**573 commits ahead of `origin/alpha`, 615 ahead of `origin/main`** — so every
+fault those 573 commits fix is still live on the released branches. The owner
+reserves pushes and merges; no pull request until the one comprehensive Codex
+review of the whole branch.
 
-## Just committed
+## The queue is finished and the owner's release scope is built
 
-**#687 — an optional ceiling on how long giving records keep a donor's name**
-(migration 234). Settable installation-wide by a global administrator, or by an
-organisation for itself, and **off by default**: the figure is a statutory
-retention period, so forcing it down could make a customer destroy records their
-own law requires. The owner's decision, 31 October 2026.
+All five items the owner chose on 29 October for the first usable release are in
+the tree: repeating events (`6c6b854`), backups taken by themselves, downloaded
+and brought back (`eefa603`, migration 228), transcription's trigger (#276,
+#672), #641 in full, and the browser/visual half of #569 (`0186531`).
 
-Before it: **#697** (`e1fe6e4`), carrying the rows a restore could not put back
-through a restore.
+`tools/run-all-selftests.sh` is **66 of 66 green**. The one that refused on
+31 October — `mail-queue`, whose part F3 lands in the hour New York's clock
+repeats — re-ran clean after the overlap: 159 checks, all passed.
 
-## What to know before touching the ceiling
+## What the 1 November audit of the whole open list established
 
-- **`capFromDatabase()` is the authority for every refusal**, read LIVE and under
-  `FOR UPDATE` on the installation's own settings row, inside the transaction
-  that writes (#647's rule). `capInForce()` reads the request's snapshot through
-  `SettingLimit` and is for DRAWING THE PAGE ONLY. Using the snapshot to judge a
-  save let two ordinary requests store 50 years under a ceiling of 7.
-- **The gate is on `$yearsOwn` after rules 1 and 2**, which is exactly what will
-  be stored. Gating `$years` (the typed figure OR the suggestion) refused saves
-  that store nothing — including switching the hold on.
-- **The organisation's own ceiling is judged only when it CHANGES.** It may
-  legitimately sit above the installation's and is simply superseded.
-- **`max` on both number boxes is the hard maximum**, never the ceiling: a
-  prefill above `max` stops a real browser submitting the form at all (#668).
-- `check_limit_settings_capped.py` now REQUIRES the cap — its exemption for
-  `GivingRetention.php` is gone.
+198 issues were open; 97 were named in a commit subject. Four read-only
+verifiers checked all 97 against the tree: **68 are finished, 16 are partly
+done, 13 are genuinely open.** Nothing among them stops a fresh install or kills
+an upgrade — the three that once did (#552, #555, #561) are fixed and verified.
 
-## Open, with issues
+**They are deliberately NOT closed.** Several carry a comment saying they close
+when the branch merges, and the branch is unmerged, so closing them now would
+claim something that has not happened.
 
-- **#699** — the ceiling's two save gates are covered by no automatic test. They
-  are the whole design, so this is the honest weak point. Needs an HTTP section
-  (`access-pages-selftest.php`, which must run alone, #689).
-- **#700** — two organisations saving the giving-records page for the FIRST time
-  in the same instant deadlock on their inserts' gap locks. **Pre-existing**,
-  proved against `git show HEAD:` of the class; nothing is lost and a retry works.
-- **#698** — a snapshot moved between servers with different
-  `lower_case_table_names`. Deliberately out of #697; not measured.
-- **#685** — organisations already over a newly-set attendance retention cap.
+## Waiting on the owner
 
-## Verification of this commit, as run
+1. **The merge, and the Codex review gate in front of it.** 573 commits of fixes
+   are unmerged. The #514 part-8 precedent is to split a Codex review across
+   several resets rather than wait for one allowance.
+2. **#474 — branch protection.** Measured, not read: `main`, `beta` and `alpha`
+   each have a protection object with **no required status checks, no required
+   reviews, and admins not enforced**. A pull request into `main` can merge with
+   every check red. The earlier claim that a deleted `Psalm` check blocks every
+   pull request is FALSE; nothing is required at all.
+3. **#678's three settings.** `~/.claude/settings.json` has no `permissions`
+   block and no `env` block — checked, not assumed. So the force-push/hard-reset
+   denials, the `docker prune` denials and
+   `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=6` are all absent, **and
+   `.claude/CLAUDE.md` still asserts in two places that they are in force.**
+   Neither branch of #678's acceptance is met.
+4. **#581 items 2, 3 and 4** — a snapshot with no single moment in time; no way
+   to rebuild a destroyed database without a command line; losing `enc.key`
+   locks out everyone with two-step sign-in (#582 is the nearest home).
+5. **#475** — shipping onto MySQL 8.0, whose extended support ended April 2026.
 
-`php -l` clean; all **46** `tools/audit-checks/check_*.py` pass with the parity
-check's output read (232 migrations on disk, 232 marked, 0 missing);
-`tools/e2e-migrations/run.sh` all seven phases; `tools/giving-retention-selftest.php`
-63 of 63.
+## The real exposures left, none of them an install failure
 
-**`tools/run-all-selftests.sh`: 65 of 66 green.** The one that is not is
-`mail-queue`, which **REFUSED rather than failed**: its part F3 computes a moment
-that falls in the hour New York's clock repeats, and today (1 November 2026) is
-the day those clocks go back. Nothing in this package touches mail, every check
-before F3 passed, and the same suite was **66/66 with this package's setting
-already seeded** earlier the same day. A re-run is scheduled for after the
-overlap.
+- **#598 item 1** — a password reset does not end the person's other open
+  sessions. Needs a prior compromise, so it is residue, not an open door.
+- **#598 item 4** — after five failed sign-ins from one address,
+  `forms/public-submit.php` and `prayer-requests/anonymous-save.php` answer
+  "success" and **discard the submission**. Behind a shared address a visitor's
+  prayer request is lost silently.
+- **#511** — coordinator grants are still installation-wide
+  (`admin/calendar/coordinators-save.php` has no `tblUserSites` join), and the
+  legacy portal-wide `tblUsers.isAdmin` flag still counts in every organisation.
+- **#549** — the time-zone sweep's own deliverable is missing, and `CURDATE()`
+  appears 37 times in 21 files under `web/`, each answering in the database
+  connection's zone rather than the organisation's.
+- **#564** — the `-L` fix to `tools/watchdog.sh` approved on 25 September 2026 is
+  still not applied, so a watchdog on a symlink fires immediately.
 
-**Codex has not reviewed any of it.** Independent Claude checkers stood in: five
-rounds on #697 (8, 6, 5, 4, 4 real problems) and two on #687 (6 and 3). All are
-fixed.
+## Raised on 1 November, because nothing covered them
+
+**#701** path mode's four remaining blockers (they lived only in prose),
+**#702** mail parts M5/M6 split out of #592, **#703** the undecided question from
+#574 about keeping the name of who made a pastoral visit. The visual audit's ten
+undersized tap targets were recorded on **#225**, which is partly done.
+
+**Codex has reviewed none of this branch.** Independent Claude checkers stood in
+package by package.
