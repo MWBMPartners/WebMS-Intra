@@ -1,87 +1,78 @@
 # Handoff — where the work is right now
 
-*Overwritten, never appended. Current state only (#678). Issues are the record of
-what is and is not done.*
+*Overwritten, never appended. Current state only. 1 November 2026.*
 
-**Branch:** `claude/alpha-wip`, clean. **13 commits unpushed**, and **573 ahead of
-`origin/alpha`, 615 ahead of `origin/main`** — so every fault those commits fix is
-still live on the released branches. Pushes and merges are the owner's.
+## Branch
 
-## The owner's seven decisions, 1 November 2026
+`claude/alpha-wip` at **`95f6232`**. **15 commits unpushed**, 577 ahead of
+`alpha`. Working tree clean. The owner reserves pushes, pull requests and
+merges: nothing is pushed.
 
-1. **Codex review: split across resets, but DO NOT START until every identified
-   release task is done** — the owner's reason: avoid re-reviewing the same code.
-   So the order is **finish the release work → queue the Codex pieces → merge**.
-2. **#474 branch protection goes on AFTER the merge** (hard gates + one review).
-3. **#678: do both halves.** Wording corrected in `d43a4f6`; the settings JSON is
-   drafted for approval and NOT written — it is the owner's own file.
-4. **#475: ship on the MySQL 8.0 convention and say so plainly.** A floor, not a
-   ceiling: the harness already passes on 8.4.11 and MariaDB 11.4.13.
-5. **#581 item 4: build the key-loss escape** (#582's change-the-key tool). Item 3
-   (rebuild with no command line) is documented as a known limit.
-6. **#703: the name on a pastoral or safeguarding record is configurable, default
-   keep.**
-7. **#541 item 2: add treasurer alongside approver** in `mayExportClaims()`.
+## Just landed
 
-## The release scope is built, and all five items are verified
+**`95f6232` — #666, #616, #683.** Switching "Event reminders" off now stops the
+day-before and one-hour reminder e-mails; the day-of summary no longer crosses
+organisations; a scheduled job's e-mail footer takes its organisation's name and
+support address. All three issues closed and labelled `status: done`.
 
-Repeating events (`6c6b854`), backups taken by themselves, downloaded and brought
-back (`eefa603`, migration 228), transcription's trigger, #641 in full, and the
-browser/visual half of #569 (`0186531`). `tools/run-all-selftests.sh` is **66 of
-66** — the mail-queue test re-ran clean after the New York clock overlap.
+Three independent check rounds by fresh agents, standing in for Codex. **Codex
+has not reviewed any of this branch.** 18 findings, 16 stood, 2 refuted. The
+code was right from round 1; rounds 2 and 3 found test-coverage and wording
+faults of mine. The lessons are in DEV_NOTES.md under "A preference that was
+saved and read by nothing" — the useful ones being that a plant which will not
+go red may mean the *fixture* is dead, that one account holding several flags
+cannot tell those flags apart, and that a two-character bracket move lifts a
+whole `WHERE` clause with `php -l` clean.
 
-## The issue tracker is now honest
+## Next, in order
 
-198 were open. **Six read-only audits judged every one against the CODE**, not
-commit messages — the earlier pass had selected candidates by commit subject,
-which is the signal that cannot be trusted (#556 was finished with no commit
-naming it anywhere). Result: **75 closed** with `status: done`, **22 given a
-status correction**, **128 open**, 1 critical and 19 high.
+1. **#635** — needs roughly 35 owner decisions before it can start.
+2. **#582**, then **#586**, then **#583g**.
+3. **#685 / #491 / #492.2 / #481**, then **#620 / #596.3 / #588.1**.
+4. **#649 / #596.7**, then **#541.2 / #703 / #539 / #619**, then
+   **#476 / #146 / #637**.
+5. **#474 / #678** — owner's own items.
+6. **#705 — PHP 8.6**, new today. See below.
+7. **The one comprehensive Codex review of the whole branch**, split across its
+   resets. Only after 1–6. No pull request before it is done.
+8. Merge.
 
-A seventh audit re-read 18 of the 71 closures against the code: **all correctly
-closed, none to reopen.** It also caught a **false statement in my own comment on
-#529** — I said no help page names who may read attendance figures;
-`web/_apps/help/calendar.php:377` does. Corrected on the issue, because a wrong
-reason on an open issue is what stops the next reader looking.
+## Waiting on the owner
 
-Raised because nothing covered them: **#701** (path mode's four blockers),
-**#702** (mail M5/M6), **#703** (the erasure decision), **#704** (#514's waived
-criterion 3). **#540 closed as a duplicate of #587.**
+- **#705, PHP 8.6** (due 19 November 2026, RC5 on the 5th). Two decisions: does
+  8.6 become a supported runtime for the first release and does
+  `PhpRuntime::PREFERRED_SERIES` move to 8.6 or stay 8.5; and when does 8.4
+  support end. The second is what unlocks 8.6's new *syntax* — partial function
+  application and readonly property defaults are parse errors on 8.4 and 8.5, so
+  they cannot be used behind a runtime guard. DreamHost offers up to 8.5 today.
+  Measured and recorded on the issue: **none of 8.6's deprecations is used
+  anywhere in this repository**, there is no `return` inside any `finally` block,
+  and the session-default change is already a no-op because the portal sets
+  `httponly` and `samesite` itself. **Dated action with a security consequence:**
+  when 8.6.0 final ships, `PhpRuntime`'s 8.6 pin must move off the pre-release,
+  because a finished release of a newer line counts as carrying the PHP2Shell fix
+  and a pre-release does not (#640).
+- **#635** — about 35 decisions, listed on the issue.
 
-## What must be fixed before the release, in order
+## Known weak points on this branch
 
-1. **#666** — event reminders ignore the preference. Measured: the recipient query
-   has no `notifyPrefs` condition, the only mention in the file is a comment about
-   the push path, and the page tells the member it does not work. A consent
-   failure on a live mail path.
-2. **#635** — 35 tables still leave named personal data after an erasure; the
-   pinned list in `tools/gdpr-coverage-selftest.php` is unchanged. 35 owner
-   decisions.
-3. **#582** — the key-loss escape (decision 5).
-4. **#586** — a password is reported saved and nothing is stored when the account
-   has none. The likeliest day-one support call.
-5. **#583g** — `/help/disaster-recovery` describes three tools that do not exist
-   and links to GitHub addresses a customer cannot open.
-6. **#683 / #685 / #491 / #492 item 2 / #481** — cross-organisation and retention
-   faults: one organisation's support address in another's mail; the attendance cap
-   enforced at the form and ignored by the job; a log clear-out with no `siteID`;
-   a borrower's phone number surviving erasure; migrations switching apps back on.
-7. **#620 / #649 / #596 items 3 and 7 / #588 item 1** — redirect judging (including
-   a tab bypass), receipts silently dropped, the `Secure` cookie flag behind a
-   proxy, mail silently not sent with no from-address, and
-   `StrictHostKeyChecking=no` on the deploy.
-8. **#541 item 2, #703, #539, #619** — small, decided or near-decided.
-9. **#476, #146, #637** — alpha's wrong version; the visual audit runs in no
-   workflow; one audit check runs in no workflow and two documents overstate the
-   gap.
+- Codex has reviewed none of it.
+- `tools/access-pages-selftest.php` must run **alone**: it counts through
+  `mysql.general_log`, which is server-wide (#689).
+- `~/.claude/settings.json` has no `permissions` and no `env` block, so the
+  written rules on force-push, `docker prune` and the six-agent ceiling are what
+  bind — not a deny rule (#678).
+- Nothing exercises the over-20,000-rows path or the could-not-read path in the
+  backup rescue (#694 / #697).
+- The two giving-retention save paths are covered by no automatic test (#699).
 
-## Known weak points, stated rather than buried
+## How to verify this branch
 
-- **#699** — the giving ceiling's two save gates have no automatic test.
-- **#585 item 1** — the "error log is empty" check cannot fail: a caught exception
-  goes to `tblErrors`, which that check never reads generally.
-- **#479's check is wired `|| true`**, so a table of personal data with no decision
-  recorded leaves the run green.
-- **#689** — `access-pages-selftest.php` must run alone.
+```bash
+bash tools/run-all-selftests.sh          # ~15 min, three MySQL servers, 66 tests
+for c in tools/audit-checks/check_*.py; do python3 "$c"; done
+python3 tools/audit-checks/check_schema_seed_parity.py   # READ it: exits 0 with a missing mark
+```
 
-**Codex has reviewed nothing on this branch.** Independent Claude checkers stood in.
+Last full run: **66 of 66 green**, four consecutive times. 46 audit scripts
+green. Parity: 0 missing marks, 0 missing seeds.
