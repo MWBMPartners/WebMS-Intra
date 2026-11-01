@@ -3,78 +3,85 @@
 *Overwritten, never appended. Current state only (#678). Issues are the record of
 what is and is not done.*
 
-**Branch:** `claude/alpha-wip`, clean. **11 commits unpushed**, and the branch is
-**573 commits ahead of `origin/alpha`, 615 ahead of `origin/main`** — so every
-fault those 573 commits fix is still live on the released branches. The owner
-reserves pushes and merges; no pull request until the one comprehensive Codex
-review of the whole branch.
+**Branch:** `claude/alpha-wip`, clean. **13 commits unpushed**, and **573 ahead of
+`origin/alpha`, 615 ahead of `origin/main`** — so every fault those commits fix is
+still live on the released branches. Pushes and merges are the owner's.
 
-## The queue is finished and the owner's release scope is built
+## The owner's seven decisions, 1 November 2026
 
-All five items the owner chose on 29 October for the first usable release are in
-the tree: repeating events (`6c6b854`), backups taken by themselves, downloaded
-and brought back (`eefa603`, migration 228), transcription's trigger (#276,
-#672), #641 in full, and the browser/visual half of #569 (`0186531`).
+1. **Codex review: split across resets, but DO NOT START until every identified
+   release task is done** — the owner's reason: avoid re-reviewing the same code.
+   So the order is **finish the release work → queue the Codex pieces → merge**.
+2. **#474 branch protection goes on AFTER the merge** (hard gates + one review).
+3. **#678: do both halves.** Wording corrected in `d43a4f6`; the settings JSON is
+   drafted for approval and NOT written — it is the owner's own file.
+4. **#475: ship on the MySQL 8.0 convention and say so plainly.** A floor, not a
+   ceiling: the harness already passes on 8.4.11 and MariaDB 11.4.13.
+5. **#581 item 4: build the key-loss escape** (#582's change-the-key tool). Item 3
+   (rebuild with no command line) is documented as a known limit.
+6. **#703: the name on a pastoral or safeguarding record is configurable, default
+   keep.**
+7. **#541 item 2: add treasurer alongside approver** in `mayExportClaims()`.
 
-`tools/run-all-selftests.sh` is **66 of 66 green**. The one that refused on
-31 October — `mail-queue`, whose part F3 lands in the hour New York's clock
-repeats — re-ran clean after the overlap: 159 checks, all passed.
+## The release scope is built, and all five items are verified
 
-## What the 1 November audit of the whole open list established
+Repeating events (`6c6b854`), backups taken by themselves, downloaded and brought
+back (`eefa603`, migration 228), transcription's trigger, #641 in full, and the
+browser/visual half of #569 (`0186531`). `tools/run-all-selftests.sh` is **66 of
+66** — the mail-queue test re-ran clean after the New York clock overlap.
 
-198 issues were open; 97 were named in a commit subject. Four read-only
-verifiers checked all 97 against the tree: **68 are finished, 16 are partly
-done, 13 are genuinely open.** Nothing among them stops a fresh install or kills
-an upgrade — the three that once did (#552, #555, #561) are fixed and verified.
+## The issue tracker is now honest
 
-**They are deliberately NOT closed.** Several carry a comment saying they close
-when the branch merges, and the branch is unmerged, so closing them now would
-claim something that has not happened.
+198 were open. **Six read-only audits judged every one against the CODE**, not
+commit messages — the earlier pass had selected candidates by commit subject,
+which is the signal that cannot be trusted (#556 was finished with no commit
+naming it anywhere). Result: **75 closed** with `status: done`, **22 given a
+status correction**, **128 open**, 1 critical and 19 high.
 
-## Waiting on the owner
+A seventh audit re-read 18 of the 71 closures against the code: **all correctly
+closed, none to reopen.** It also caught a **false statement in my own comment on
+#529** — I said no help page names who may read attendance figures;
+`web/_apps/help/calendar.php:377` does. Corrected on the issue, because a wrong
+reason on an open issue is what stops the next reader looking.
 
-1. **The merge, and the Codex review gate in front of it.** 573 commits of fixes
-   are unmerged. The #514 part-8 precedent is to split a Codex review across
-   several resets rather than wait for one allowance.
-2. **#474 — branch protection.** Measured, not read: `main`, `beta` and `alpha`
-   each have a protection object with **no required status checks, no required
-   reviews, and admins not enforced**. A pull request into `main` can merge with
-   every check red. The earlier claim that a deleted `Psalm` check blocks every
-   pull request is FALSE; nothing is required at all.
-3. **#678's three settings.** `~/.claude/settings.json` has no `permissions`
-   block and no `env` block — checked, not assumed. So the force-push/hard-reset
-   denials, the `docker prune` denials and
-   `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=6` are all absent, **and
-   `.claude/CLAUDE.md` still asserts in two places that they are in force.**
-   Neither branch of #678's acceptance is met.
-4. **#581 items 2, 3 and 4** — a snapshot with no single moment in time; no way
-   to rebuild a destroyed database without a command line; losing `enc.key`
-   locks out everyone with two-step sign-in (#582 is the nearest home).
-5. **#475** — shipping onto MySQL 8.0, whose extended support ended April 2026.
+Raised because nothing covered them: **#701** (path mode's four blockers),
+**#702** (mail M5/M6), **#703** (the erasure decision), **#704** (#514's waived
+criterion 3). **#540 closed as a duplicate of #587.**
 
-## The real exposures left, none of them an install failure
+## What must be fixed before the release, in order
 
-- **#598 item 1** — a password reset does not end the person's other open
-  sessions. Needs a prior compromise, so it is residue, not an open door.
-- **#598 item 4** — after five failed sign-ins from one address,
-  `forms/public-submit.php` and `prayer-requests/anonymous-save.php` answer
-  "success" and **discard the submission**. Behind a shared address a visitor's
-  prayer request is lost silently.
-- **#511** — coordinator grants are still installation-wide
-  (`admin/calendar/coordinators-save.php` has no `tblUserSites` join), and the
-  legacy portal-wide `tblUsers.isAdmin` flag still counts in every organisation.
-- **#549** — the time-zone sweep's own deliverable is missing, and `CURDATE()`
-  appears 37 times in 21 files under `web/`, each answering in the database
-  connection's zone rather than the organisation's.
-- **#564** — the `-L` fix to `tools/watchdog.sh` approved on 25 September 2026 is
-  still not applied, so a watchdog on a symlink fires immediately.
+1. **#666** — event reminders ignore the preference. Measured: the recipient query
+   has no `notifyPrefs` condition, the only mention in the file is a comment about
+   the push path, and the page tells the member it does not work. A consent
+   failure on a live mail path.
+2. **#635** — 35 tables still leave named personal data after an erasure; the
+   pinned list in `tools/gdpr-coverage-selftest.php` is unchanged. 35 owner
+   decisions.
+3. **#582** — the key-loss escape (decision 5).
+4. **#586** — a password is reported saved and nothing is stored when the account
+   has none. The likeliest day-one support call.
+5. **#583g** — `/help/disaster-recovery` describes three tools that do not exist
+   and links to GitHub addresses a customer cannot open.
+6. **#683 / #685 / #491 / #492 item 2 / #481** — cross-organisation and retention
+   faults: one organisation's support address in another's mail; the attendance cap
+   enforced at the form and ignored by the job; a log clear-out with no `siteID`;
+   a borrower's phone number surviving erasure; migrations switching apps back on.
+7. **#620 / #649 / #596 items 3 and 7 / #588 item 1** — redirect judging (including
+   a tab bypass), receipts silently dropped, the `Secure` cookie flag behind a
+   proxy, mail silently not sent with no from-address, and
+   `StrictHostKeyChecking=no` on the deploy.
+8. **#541 item 2, #703, #539, #619** — small, decided or near-decided.
+9. **#476, #146, #637** — alpha's wrong version; the visual audit runs in no
+   workflow; one audit check runs in no workflow and two documents overstate the
+   gap.
 
-## Raised on 1 November, because nothing covered them
+## Known weak points, stated rather than buried
 
-**#701** path mode's four remaining blockers (they lived only in prose),
-**#702** mail parts M5/M6 split out of #592, **#703** the undecided question from
-#574 about keeping the name of who made a pastoral visit. The visual audit's ten
-undersized tap targets were recorded on **#225**, which is partly done.
+- **#699** — the giving ceiling's two save gates have no automatic test.
+- **#585 item 1** — the "error log is empty" check cannot fail: a caught exception
+  goes to `tblErrors`, which that check never reads generally.
+- **#479's check is wired `|| true`**, so a table of personal data with no decision
+  recorded leaves the run green.
+- **#689** — `access-pages-selftest.php` must run alone.
 
-**Codex has reviewed none of this branch.** Independent Claude checkers stood in
-package by package.
+**Codex has reviewed nothing on this branch.** Independent Claude checkers stood in.
