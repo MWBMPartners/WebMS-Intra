@@ -408,10 +408,12 @@ genuinely separate — a wide search across many files, a build, or the independ
 check this project requires. Do not start one for work you can finish yourself in a
 handful of steps, and do not start one to re-check your own work: the independent
 checker is the one exception, and it must be a fresh agent that did not build the
-thing. If one helper can do it, use one. No more than 6 at once. On the owner's Mac
-that ceiling is also enforced by `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=6` in
-`~/.claude/settings.json` (owner, 5 October 2026): a seventh agent is REFUSED, not
-queued, so a workflow must be shaped to run at most six at a time.
+thing. If one helper can do it, use one. No more than 6 at once, so shape a workflow
+to run at most six at a time. **The ceiling is a rule you keep, not a setting that
+stops you.** `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=6` was recorded on 5 October 2026
+as enforcing it in `~/.claude/settings.json`; on 1 November 2026 that file had no
+`env` block at all, so nothing refuses a seventh agent. Open the file before saying
+otherwise (#678).
 
 **Deep analysis and deep planning run on Opus**, one agent at a time, in
 sequence. Implementation stays on Sonnet or Haiku, whichever fits — or Opus when
@@ -716,7 +718,7 @@ Set by the owner on 24 September 2026. Every agent here starts MySQL containers 
 - Start test containers with `docker run --rm`, or remove them with `docker rm -v`.
 - Name each after its work (`p514p6chk-mysql`), so it can be identified later.
 - **Report the count of left-behind volumes before and after** (`docker volume ls -q -f dangling=true | wc -l`), and `docker ps -a`. Your own work must add none. Remove only your own containers and volumes, by name.
-- Never remove another project's container, a running one, or a NAMED volume without asking — `g2ml-mysql` and `wrapper-v2` belong to other projects. Never run `docker volume prune` or `docker system prune`: they remove every unused unnamed volume, other projects' included. Claude Code's settings on the owner's Mac refuse both (5 October 2026); Codex is not bound by those settings.
+- Never remove another project's container, a running one, or a NAMED volume without asking — `g2ml-mysql` and `wrapper-v2` belong to other projects. Never run `docker volume prune` or `docker system prune`: they remove every unused unnamed volume, other projects' included. A deny rule for both was recorded on 5 October 2026 as being in force; on 1 November 2026 `~/.claude/settings.json` had no `permissions` block, so **the written rule above is what binds** — check the file before claiming a deny rule stops you, and note it would not bind Codex even if it were there (#678).
 
 ## Code style (house rules that differ from the usual defaults)
 
@@ -880,6 +882,6 @@ until the security comment is clean. This applies regardless of session.
 - Shared dirs (`_core/`, `_vendor/`, `_sql/`, `_includes/`, `_functions/`, `_libraries/`) mirror with `--delete` — manual server-side edits to these dirs vanish on the next deploy (see DEV_NOTES.md → Troubleshooting)
 - Branch-based deploy (one customer's set-up — see `DEV_NOTES.md` for the full table): `alpha` → `public_html_dev/`, `beta` → `public_html_beta/`, `main` → `public_html/`.
 - `web/public_html/` is the only web root, and the web server answers directly for just three PHP addresses: `/index.php`, `/error.php` and `/api-docs/index.php`. Every app page lives under `web/_apps/`, outside the web root (#159), and is reached only through the router.
-- Never force-push, hard-reset or change a remote without an explicit instruction, and never push straight to a release or protected branch. Claude Code's settings on the owner's Mac refuse force-push and hard reset outright (5 October 2026), but the written rule still stands: those settings cannot catch every form of the command, and they do not bind Codex.
+- Never force-push, hard-reset or change a remote without an explicit instruction, and never push straight to a release or protected branch. A deny rule for force-push and hard reset was recorded on 5 October 2026 as being in force; on 1 November 2026 `~/.claude/settings.json` had no `permissions` block. **The written rule is what binds**, for three separate reasons: a deny rule cannot catch every form of the command, it does not bind Codex, and it may not be there at all. Open the file before relying on one (#678).
 
 Keep replies and reports reasonably short.
