@@ -14198,3 +14198,93 @@ whatever its runner image carries, which is probably patched and is not
 knowable from the repository. Left as a recorded finding on #716 rather than
 changed here, because pinning CI runtimes is a decision about the build rather
 than part of reviewing one CVE.
+
+---
+
+## Take a reserved-word list from MySQL, not from a summary of MySQL (#718)
+
+DreamHost is moving the reference host from MySQL 8.0 to 8.4 on **9 November
+2026**. Its notice — **and its help page "Using reserved words in MySQL 8"** —
+say 8.4 adds four reserved words: `MANUAL`, `PARALLEL`, `QUALIFY`,
+`TABLESAMPLE`, and that "queries using those names will fail".
+
+**Only two of the four are reserved**, settled three ways rather than one. The
+decisive source is the server itself, which keeps the answer in a table:
+
+```sql
+SELECT WORD, RESERVED FROM INFORMATION_SCHEMA.KEYWORDS
+ WHERE WORD IN ('MANUAL','PARALLEL','QUALIFY','TABLESAMPLE','FULLTEXT','RANK','STATUS');
+```
+
+On a real 8.4.13: `FULLTEXT` 1, `QUALIFY` 1, `RANK` 1, `TABLESAMPLE` 1,
+**`MANUAL` 0, `PARALLEL` 0**, `STATUS` 0. MySQL's published keyword list agrees,
+and so does a parse test — each word given a column and then referenced bare,
+with a control to prove the test could tell the difference:
+
+| word | bare reference on 8.4.13 |
+|---|---|
+| `manual` | works — not reserved |
+| `parallel` | works — not reserved |
+| `qualify` | **fails** |
+| `tablesample` | **fails** |
+| `fulltext` | fails — the word behind #276 |
+| `rank`, `system` | fail |
+| `status` | works — the control |
+
+`manual` and `parallel` are keywords in 8.4 but **non-reserved**, so they are
+legal identifiers unquoted. Had the guard been built from the host's wording it
+would have failed on a column named `manual` — a thoroughly plausible name —
+for no reason, which is #483's rule: a check that cries wolf gets switched off,
+and then it catches nothing.
+
+**The durable lesson: when a hosting company and the database disagree about
+the database, ask the database.** The documentation was wrong in two separate
+places, including the page a developer would go to on purpose. The server's own
+`INFORMATION_SCHEMA.KEYWORDS` cannot be stale, and the check records the query
+so the list can be regenerated rather than copied.
+
+**None of the four appears in this schema, the migrations or the PHP**, so the
+upgrade itself needs nothing from us. The value of the work was the guard.
+
+### What the guard actually asks
+
+Exactly **one** identifier in 229 tables is a reserved word:
+`tblTranscript.fullText`, which is `FULLTEXT`. That is #276's column, and every
+reference to it today is already backticked or qualified (`t.fullText`) — both
+work, because after a dot a reserved word is allowed as an identifier.
+
+So the check has two halves: every reserved identifier in `full_schema.sql`
+must be a recorded decision in `RESERVED_ON_PURPOSE` (failing both ways, so a
+stale entry is also an error), and every reference to a listed one must be
+quoted or qualified. Planted, it catches the original `fullText = ?`.
+
+### Two rules that had to be narrowed, both for the same reason
+
+**An alias rule was written and deleted.** `... AS rank` is the same parse
+error by another route, so it looked worth catching. But `AS <word>` cannot be
+told from English: "as long as", "as not", "as if", "as is", "as with" all
+matched, in help pages and comments — and `CAST(x AS BINARY)` is perfectly
+valid SQL that it also flagged. Fifteen reports, not one real. Deleting the
+rule is the right answer, not a gap: an alias colliding with a reserved word is
+far rarer than a column doing so, which is the fault this exists for.
+
+**"Does this string look like SQL" had to be much stricter.** The first version
+asked whether the text contained any of select/insert/update/set/where/from —
+which is ordinary English, and matched prose throughout the help pages. The
+reliable discriminator in this codebase is the table naming: every table is
+`tbl` followed by a capital. A string either names one or begins with a SQL
+verb; prose does neither.
+
+**What that costs, stated rather than hidden:** a continuation fragment like
+`. 'fullText = ? '` on its own would be missed. In the real fault the bare
+reference sat in the same string as `UPDATE tblTranscript SET`, which the check
+does see.
+
+### What needed no change
+
+The MySQL 8.0 end-of-life warning the owner asked for already existed, from
+#489/#640: `DbServer` classifies 8.0 as "works, but no longer getting security
+fixes" and 8.4 as supported, and four callers display it — the installer, the
+admin dashboard, Server Information and the health probes. The end-to-end
+migration harness already runs against 8.4.11. **Checking before building was
+the whole of the work there.**

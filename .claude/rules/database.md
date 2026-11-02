@@ -54,3 +54,58 @@ and the safety of every multi-step database change in the portal.
 - **Migrations must replay as no-ops** on an up-to-date schema — the installer replays every numbered migration after `full_schema.sql`, ignoring `tblMigrations`.
 - **CI**: `tools/audit-checks/check_mariadb_only_ddl.py` + the `e2e-migrations` harness enforce this.
 - Since 12 October 2026 the migration test (`tools/e2e-migrations/run.sh`) also upgrades two older databases, one built from the last release and one from the install script of 6 March 2026, and requires each to end up equal to a fresh install. Run it whenever a change touches `web/_sql/`.
+## Backtick every identifier in SQL you write or change
+
+Set by the owner on 2 November 2026, and also in `~/.claude/CLAUDE.md` so it
+binds every project on the machine.
+
+A database reserves words, **ignores capitals when matching them**, and the
+reserved set grows between versions and differs between engines. MySQL 8.4 adds
+`QUALIFY` and `TABLESAMPLE` to 8.0's set; MariaDB's set is different again. A
+bare identifier that happens to be reserved does not parse, so the query never
+runs — and nothing catches it, because the SQL is a string and `php -l` sees
+only a string.
+
+**It has already cost this project a live fault.** `fullText` is the reserved
+word `FULLTEXT`, so the statement that saves a finished transcript could never
+run — and it threw *after* the outside provider had been called and charged
+(#276).
+
+```sql
+UPDATE tblTranscript SET fullText = ?     -- never parses
+UPDATE tblTranscript SET `fullText` = ?   -- correct
+SELECT t.fullText FROM tblTranscript t    -- also correct: after a dot, a
+                                          -- reserved word is allowed
+```
+
+**Why quoting rather than looking the words up.** It needs no version check, no
+engine check and no query. Do **not** rewrite SQL at run time to add quoting:
+that means parsing SQL in PHP, and a parser bug corrupts queries silently.
+
+**And never take a reserved-word list from a hosting company.** DreamHost's
+upgrade notice and its help page both say MySQL 8.4 newly reserves `MANUAL` and
+`PARALLEL`. Both are wrong — the server's own
+`INFORMATION_SCHEMA.KEYWORDS` reports `RESERVED = 0` for each, and both work
+unquoted. Ask the database:
+
+```sql
+SELECT WORD FROM INFORMATION_SCHEMA.KEYWORDS WHERE RESERVED = 1 ORDER BY WORD;
+```
+
+MariaDB is the sharper case, and it was checked rather than assumed. It HAS
+`INFORMATION_SCHEMA.KEYWORDS` — 699 rows on 11.4.13 — but with a `WORD` column
+ONLY and no `RESERVED` flag, and **membership does not mean reserved**:
+`FULLTEXT`, `STATUS` and `WINDOW` are all listed, yet a bare `FULLTEXT` fails
+while `STATUS` and `WINDOW` work. Its only other candidate,
+`INFORMATION_SCHEMA.SQL_FUNCTIONS`, is functions. So MariaDB cannot answer "is
+this reserved?" at all, and code that treated membership as the answer would be
+wrong in the cry-wolf direction.
+
+One more reason to quote rather than look up.
+
+**Scope.** This binds SQL you write or change. The existing code is not being
+converted wholesale: that would be 3,259 table references across 498 files,
+which cannot be automated safely for exactly the reason run-time rewriting
+cannot. It is protected instead by
+`tools/audit-checks/check_reserved_words_quoted.py`, which fails when an
+identifier IS a reserved word or is referenced bare (#718).

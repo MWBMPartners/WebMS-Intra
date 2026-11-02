@@ -2,6 +2,41 @@
 
 
 ## [Unreleased] (alpha)
+- **Added — a reserved word used as a database identifier must be backticked or qualified (#718,
+  #276), before the reference host moves to MySQL 8.4 on 9 November 2026**
+  - **The fault this guards already happened.** MySQL ignores case in keywords, so `fullText` **is**
+    the reserved word `FULLTEXT`. A bare `fullText = ?` cannot parse — and it was in the statement
+    that saves a finished transcript, so it threw *after* the outside transcription company had been
+    called and charged. `php -l` cannot see it, and until now no check here could either; the
+    developer notes said so in as many words.
+  - **Why now.** DreamHost upgrades the reference host's MySQL from 8.0 to 8.4 on 9 November 2026,
+    and 8.4 adds reserved words. The question "is this column name a keyword?" is live again.
+  - **Exactly one identifier in 229 tables needs the exemption** — `tblTranscript.fullText` — and
+    every reference to it today is already backticked or qualified. The check passes as it stands
+    and would have failed on the original fault.
+  - **The host's documentation is wrong about half its list — in two places — and the check does
+    not inherit that.** DreamHost's upgrade notice *and* its help page "Using reserved words in
+    MySQL 8" both name four new reserved words: `MANUAL`, `PARALLEL`, `QUALIFY`, `TABLESAMPLE`.
+    **Only two are reserved.** Settled three ways: the server's own
+    `INFORMATION_SCHEMA.KEYWORDS` on a real 8.4.13 (`MANUAL` 0, `PARALLEL` 0, `QUALIFY` 1,
+    `TABLESAMPLE` 1), a parse test, and MySQL's published keyword list. A guard built from the
+    host's wording would have refused a perfectly legal column named `manual`. **When a hosting
+    company and the database disagree about the database, ask the database** — the check now
+    records the query that regenerates its list. None of the four appears in the schema, the
+    migrations or the PHP, so the upgrade needs nothing from us.
+  - **An alias rule was written and deleted**, which is the right answer rather than an oversight.
+    `... AS rank` is the same parse error by another route, but `AS <word>` cannot be told from
+    English — "as long as", "as not", "as if", "as is" — and `CAST(x AS BINARY)` is valid SQL. It
+    produced fifteen reports and not one was real. A check that cries wolf gets switched off.
+  - **"Does this string look like SQL" had to be strict for the same reason.** Asking whether the
+    text contained select/set/where/from matched ordinary prose throughout the help pages; it now
+    requires a `tbl…` table name or a leading SQL verb.
+  - **Nothing else was needed for the upgrade.** The MySQL 8.0 end-of-life warning already exists
+    and is shown in four places — `DbServer` classifies 8.0 as *"works, but no longer getting
+    security fixes"* and 8.4 as supported. The migration harness already runs against 8.4.11.
+  - Checks: `tools/audit-checks/check_reserved_words_quoted.py`, a new hard gate. Five planted
+    cases, each behaving correctly — the original `fullText` fault, a new reserved column, `qualify`
+    itself, a stale exemption, and a control proving a column named `manual` is **not** reported.
 - **Security — correction: the Brotli fix of `8dc848a` did not work, and the real one is to ask for
   no compression at all (#716, CVE-2026-111497 "HTTP2Shell")**
   - **What was wrong.** `8dc848a` changed `SafeFetch` from `CURLOPT_ENCODING => ''` to

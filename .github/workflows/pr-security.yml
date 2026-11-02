@@ -1168,6 +1168,17 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_no_brotli_decode.py
 
+      # MySQL ignores case in keywords, so `fullText` IS the reserved word
+      # `FULLTEXT`. A bare reference does not parse, `php -l` cannot see it, and
+      # that is exactly how the statement that saves a transcript shipped unable
+      # to run — throwing after the outside provider had been called and charged
+      # (#276). The reference host moves to MySQL 8.4 on 9 November 2026, which
+      # adds reserved words, so the question is live again (#718).
+      - name: 'A reserved word used as an identifier is backticked or qualified (hard gate, #718)'
+        id: reserved_words_quoted
+        if: always()
+        run: python3 tools/audit-checks/check_reserved_words_quoted.py
+
       # Nothing under web/ may ask another website to draw a QR picture (#623).
       # The rule existed for PHP and had no guard for JavaScript, which is how
       # the noticeboard bundle's api.qrserver.com fallback went unnoticed. It is

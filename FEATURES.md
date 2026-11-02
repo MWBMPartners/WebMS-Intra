@@ -270,6 +270,20 @@ screens and didn't say what it meant.
     warn everybody on 8.6.0RC4, which is the first build that carries the
     October 2026 fix. Section C4 of the self-test pins that, and says why at
     the point of failure.
+- **A database word that MySQL reserves cannot be used by accident (#718).**
+  MySQL treats some words as its own — `FULLTEXT`, `RANK`, `SYSTEM` and about
+  260 others — and it ignores capitals, so a column called `fullText` really is
+  the reserved word `FULLTEXT`. Using one without quoting it makes the query
+  fail to run at all. **That happened here**: the statement that saves a
+  finished transcript could never run, and it failed only after the outside
+  transcription company had been called and charged. A check now refuses a new
+  column named after a reserved word, and refuses an unquoted reference to the
+  one column that is (`tblTranscript.fullText`).
+  - Written because the hosting company is moving the database to MySQL 8.4 on
+    9 November 2026, which reserves more words.
+  - **Their notice named four new words and only two are real** — measured
+    against a real MySQL 8.4. A check built from the notice would have refused
+    a perfectly legal column called `manual`.
 - **An outside address is never fetched with Brotli compression (#716,
   CVE-2026-111497).** The flaw called HTTP2Shell is an out-of-bounds write in
   Google's Brotli decoder — remote, unauthenticated, and on CISA's

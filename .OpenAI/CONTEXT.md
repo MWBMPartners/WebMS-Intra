@@ -2379,6 +2379,26 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     technical record is DEV_NOTES.md, "\"No compression preference\" means \"offer everything\" (#716)".
     *(`.claude/CLAUDE.md` → the #716 bullet.)*
 
+38. **A RESERVED WORD USED AS AN IDENTIFIER MUST BE BACKTICKED OR QUALIFIED (#718, #276).**
+    MySQL ignores case in keywords, so **`fullText` IS `FULLTEXT`** — a bare `fullText = ?` does not parse, `php -l`
+    cannot see it, and that is how the statement that SAVES a transcript shipped unable to run, throwing AFTER the
+    outside provider had been called and charged. Until #718 no audit script could see it either, exactly as the #276
+    note said. `tools/audit-checks/check_reserved_words_quoted.py` is now a hard gate: every reserved identifier in
+    `full_schema.sql` must be in `RESERVED_ON_PURPOSE` with a reason (fails BOTH ways), and every reference to a listed
+    one must be backticked or qualified by an alias — **both work, because after a dot a reserved word is allowed**.
+    **EXACTLY ONE of 229 tables needs it: `tblTranscript.fullText`.** Written because the reference host moves to MySQL
+    8.4 on **9 November 2026**. **THE HOST'S NOTICE IS WRONG ABOUT HALF ITS LIST:** it names `MANUAL`, `PARALLEL`,
+    `QUALIFY`, `TABLESAMPLE` as new reserved words; measured on a real MySQL 8.4.13, `manual` and `parallel` are NOT
+    reserved and work unquoted. **Take the list from MySQL, never from a summary of MySQL** — a guard built from the
+    notice would have failed on a column named `manual` (#483). **THE ALIAS RULE WAS WRITTEN AND DELETED ON PURPOSE:**
+    `AS <word>` cannot be told from English ("as long as", "as not", "as if") and `CAST(x AS BINARY)` is valid SQL; it
+    gave fifteen reports and not one was real. **And "does this string look like SQL" had to be strict:** asking for
+    select/set/where/from matched ordinary prose in the help pages, so it now requires a `tbl[A-Z]` table name or a
+    leading SQL verb. What it cannot see: a continuation fragment like `. 'fullText = ? '` alone. Nothing else was
+    needed for the upgrade — the 8.0 end-of-life warning already existed (#489/#640) and the harness already runs
+    8.4.11. The technical record is DEV_NOTES.md, "Take a reserved-word list from MySQL, not from a summary of MySQL".
+    *(`.claude/CLAUDE.md` → the #718 bullet.)*
+
 ## A few more things worth knowing
 
 - **Branches are meant to be promoted through four steps on the way to
