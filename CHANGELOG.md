@@ -2,6 +2,51 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — the change history about an erased person is emptied, and the easy way of doing it would
+  have destroyed other people's records (#707, #708)**
+  - **What could not be reached.** The change history records *who* made a change in one column and
+    *what was changed* as a pair — a table's name and a row's number. There is no column saying who
+    a row is **about**. So an entry reading "somebody edited this person's account" matched nothing
+    any erasure instruction could look at, and was reachable by nothing. That mattered because the
+    history keeps the values: a creation records the whole new row and a deletion the whole old one,
+    so a change to somebody's own account wrote their name and e-mail address into it, where it
+    stayed after an erasure. (Measured. An earlier draft of this entry said "telephone number and
+    home address" as well; the two places that audit that table pass a name, an e-mail address and
+    three yes/no flags, and nothing audits a deletion of it, so neither has ever been written
+    there.)
+  - **Anonymised, not deleted** (the owner, 2 November 2026). The before-and-after values are
+    emptied; who acted, when, which table and which record all remain. A change history is worth
+    having because it shows who changed what and when, and that survives in full. Deleting the
+    entry would destroy the evidence that the account was changed at all, which is often exactly
+    what somebody asks a change history.
+  - **The obvious shortcut would have emptied other people's records.** Adding those columns to the
+    table's ordinary instruction looks right and is wrong: that instruction matches on *who made the
+    change*, so it would have emptied the before-and-after of every change this person had made to
+    **somebody else's** record — third-party data — while still missing every entry about the person
+    themselves. One check exists purely to fail if anybody ever takes that shortcut, and it does
+    fail: planted, it reports exactly that.
+  - **The order is load-bearing, and it is the same trap as #709.** Entries about the person's
+    *memberships* are found by looking their membership rows up — and the main walk deletes those
+    rows. So the step runs before the walk. Run it after and that half silently matches nothing
+    while the audit line still says the step ran.
+  - **What it still cannot reach, said plainly.** An entry about some other record whose values
+    happen to quote the person — an announcement whose text names them. Nothing on such a row says
+    they are in it, so only searching the values themselves would find it, and that would also match
+    a namesake. **And it covers their account and their organisation membership, not every kind of
+    membership:** department, group and role membership entries are audited too and are not reached.
+    They record account numbers only, with no names, and the account itself is emptied by the walk,
+    so nothing identifying is left — but "every entry about this person" would not have been true,
+    and an independent check measured that rather than taking the word for it. Raised as its own
+    issue so that the day one of those payloads gains a name, it is not forgotten.
+  - **Also recorded (#708).** A pastoral visit's follow-up owner has a correct erasure instruction
+    that can never match a row, because nothing writes the column. The limit is now written beside
+    it rather than the instruction being deleted or the page changed: whether a visit should have an
+    assignable follow-up owner is a question about how pastoral care is run. The third item of that
+    issue — matching the name of whoever collected a child — was already decided and recorded on
+    1 November 2026 and needed nothing.
+  - Checks: `tools/gdpr-eraser-selftest.php` 251 → 258, including the third-party check above.
+    Three planted faults — the step never called, the shortcut taken, and the step moved after the
+    walk — each caught and each reverted byte-identically. Whole suite 66 of 66 green.
 - **Fixed — every table now has a decision about the personal information in it, and the check that
   was meant to notice a gap no longer depends on somebody's memory (#706)**
   - **What was wrong, and it was worse than the issue said.** `personal-data-catalogue.php` records,

@@ -1354,16 +1354,38 @@ return [
         'decision' => 'unlink',
         'reason'   => 'Kept for running and repairing the portal. The record stays;'
                     . ' the link to the person is cut, so it can no longer be traced'
-                    . ' back to them',
+                    . ' back to them. Since #707 the recorded VALUES are emptied too, for a row'
+                    . ' about this person: the convention is that a creation records the whole'
+                    . ' new row, so a change to somebody\'s own account wrote their NAME AND'
+                    . ' E-MAIL ADDRESS in here — measured, and not the telephone or postal address'
+                    . ' an earlier draft of this claimed. Who acted, when, which'
+                    . ' table and which record all remain, so the trail still shows the account'
+                    . ' was changed. The owner chose anonymising over deleting on 2 November 2026',
         'columns'  => ['userID', 'ipAddress', 'oldValue', 'newValue', 'changeSet'],
             'notEmptiedHere' => [
-            'oldValue' => 'The value before a change. A change to somebody\'s own account writes their details '
-                . 'here, because a creation records the whole new row and a deletion the whole old one. '
-                . 'The network address IS emptied; this is not. The class\'s own notes already said these '
-                . 'columns can hold personal data',
-            'newValue' => 'The value after a change, for the same reason as the one before it',
-            'changeSet' => 'The whole set of changes as one piece of machine-readable text, so it carries the same '
-                . 'contents as the two columns above',
+            // 🧾 All three are EMPTIED ELSEWHERE, following the same pattern as
+            //    tblUsers.avatarPath above: a column a dedicated step deals with
+            //    is recorded here with the reason, because the ordinary
+            //    instruction cannot do it.
+            'oldValue' => 'Emptied elsewhere, on purpose: GdprEraser::eraseAuditTrailAboutPerson() (#707) '
+                . 'empties it for a row about this person\'s ACCOUNT or their ORGANISATION membership. '
+                . 'NOT "every row about this person", which an earlier draft claimed and an independent check '
+                . 'measured false: a row about their department, group or role membership is audited too and '
+                . 'is not reached (those payloads carry account numbers and no names, and the account itself '
+                . 'is emptied by the walk, so nothing identifying is left - but the sentence was wrong; #717). '
+                . 'It CANNOT be done by this table\'s ordinary '
+                . 'instruction, and that is the whole point — the ordinary instruction matches `userID`, '
+                . 'which is whoever MADE a change, so emptying the values there would wipe the '
+                . 'before-and-after of changes this person made to OTHER people\'s records. A row is about '
+                . 'somebody only through its `(tableName, recordID)` pair, so the dedicated step matches '
+                . 'on that instead. It holds the whole new row for a creation and the whole old row for a '
+                . 'deletion, which is why a change to somebody\'s own account wrote their name and '
+                . 'e-mail address in here. Measured: the two places that audit this table pass a name, an '
+                . 'e-mail address and three yes/no flags, and nothing audits a deletion of it, so neither a '
+                . 'telephone number nor a postal address has ever been written here',
+            'newValue' => 'Emptied elsewhere with oldValue, by the same step and for the same reason',
+            'changeSet' => 'Emptied elsewhere with the two above. It is the whole set of changes as one piece '
+                . 'of machine-readable text, so it carries the same contents',
         ],
     ],
     'tblErrors' => [
@@ -1830,7 +1852,20 @@ return [
         // made the visit was left in place, pointing at an emptied account.
         // Migration 208 made the column emptiable and GdprEraser::catalogue()
         // now empties it, and `followUpAssignedToID`, with an instruction
-        // each. The CASE HISTORY stays for as long as safeguarding policy keeps
+        // each.
+        //
+        // 🧾 #708, and the owner's decision of 2 November 2026: RECORD THE
+        //    LIMIT, change nothing. `followUpAssignedToID`'s instruction is
+        //    correct and can NEVER MATCH A ROW on the code as it stands,
+        //    because nothing writes the column — `_apps/care/visit-save.php`
+        //    inserts only `caseID`, `visitedByID`, `kind`, `notes` and
+        //    `followUpAt`. So the coverage here looks wider than it is, and
+        //    that is the whole reason this note exists. It was NOT deleted,
+        //    and the page was NOT changed to fill it: whether a pastoral visit
+        //    should have an assignable follow-up owner is a question about how
+        //    pastoral care is run, which is the owner's and not a tidy-up.
+        //    If the page ever sets it, this note comes out and nothing else
+        //    needs to change. The CASE HISTORY stays for as long as safeguarding policy keeps
         // the case - but the note on a visit is the subject's own record and is
         // to be emptied, which needs matching through the parent table (#709).
         // An earlier version of this comment and of `reason` said the notes

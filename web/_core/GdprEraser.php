@@ -1636,6 +1636,13 @@ class GdprEraser
             //    tools/gdpr-coverage-selftest.php looks for it.)
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseMailQueueMessages($requestId, $erasedEmail));
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseEmailLogRecipients($requestId, $erasedEmail));
+            // 📜 #707 — the values an audit-trail row kept ABOUT this person.
+            //    BEFORE the walk, and that is load-bearing: it finds rows about
+            //    their MEMBERSHIPS by looking their tblUserSites rows up, and
+            //    the walk deletes those. Run after it and that half matches
+            //    nothing while the audit line still says the step ran — #709's
+            //    ordering trap in a new place.
+            $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseAuditTrailAboutPerson($requestId, $userId));
             foreach (self::catalogue() as $entry) {
                 $outcomes[] = self::asOneStep(
                     $db,
@@ -5442,6 +5449,164 @@ class GdprEraser
         }
 
         return ['where' => $elsewhere === true ? 'elsewhere' : 'missing', 'path' => ''];
+    }
+
+
+    /**
+     * 📜 Empty the values an audit-trail row kept ABOUT this person (#707).
+     *
+     * WHY THIS EXISTS AT ALL. `tblAuditTrail.userID` is the ACTOR — whoever
+     * made a change. The record that was CHANGED is named by a pair,
+     * `(tableName, recordID)`, with no account column at all. So a row saying
+     * "somebody edited tblUsers id 4211" — an edit to the erased person's own
+     * account, by anybody — matched no column any instruction could look at,
+     * and was reachable by NOTHING. Combined with the values it keeps, that
+     * mattered: `Logger::audit()` records whatever the caller hands it, and
+     * the convention is the whole new row for a creation and the whole old row
+     * for a deletion — so a person's details sat in the trail after an
+     * erasure, in a row nothing could find.
+     *
+     * BE EXACT ABOUT WHICH DETAILS, because the first version of this said
+     * "telephone number and home address" and an independent check measured it
+     * false. Exactly two call sites audit `tblUsers`
+     * (`_apps/users/api/create.php` and `update.php`), and between them they
+     * pass `userID`, `fullName`, `emailAddress` and three yes/no flags — no
+     * telephone, no address. Nothing audits a DELETE of `tblUsers` anywhere, so
+     * "the whole old row" is theoretical for this table too. **A name and an
+     * e-mail address is what is really in there**, which is quite enough to
+     * matter and did not need overstating.
+     *
+     * WHAT IT DOES, AND WHAT IT DELIBERATELY DOES NOT. The owner decided on
+     * 2 November 2026: ANONYMISE, not delete. The three value columns are
+     * emptied; everything that makes the row an audit record — who acted, when,
+     * which table, which record, what kind of change — is kept. An audit
+     * trail's worth is "who changed what, when", and that survives in full;
+     * what goes is the part that is the person's own data. Deleting the row
+     * would destroy the evidence that their account was changed at all, which
+     * is often exactly what somebody asks an audit trail.
+     *
+     * It is NOT a tidy-up of a decision somebody already made: before this,
+     * nothing emptied these columns for anybody.
+     *
+     * WHY IT IS NOT IN DEDICATED_STEP_TABLES, which is where a reader would
+     * look for it first.
+     *
+     * ⚠️ THE FIRST VERSION OF THIS PARAGRAPH GAVE A FALSE REASON, and an
+     *    independent check disproved it by measurement. It claimed that
+     *    registering a table there makes fromPersonalDataCatalogue() SKIP it,
+     *    so `tblAuditTrail` would lose the instruction that unlinks the actor
+     *    and empties `ipAddress`. That cannot happen: this table's instruction
+     *    is HAND-WRITTEN (see `$handWritten` above), and
+     *    fromPersonalDataCatalogue() already skips every hand-written table
+     *    through its own `$alreadyHandled` list. Registering it was tried:
+     *    222 instructions before and after, the same entry, the same
+     *    `nullCols`. Nothing was lost.
+     *
+     * The REAL reason is better, because it is both true and enforced: with
+     * the table registered, `tools/gdpr-coverage-selftest.php` fails its check
+     * that every table erased by a dedicated step is erased, in time, and
+     * EXPORTED. This step empties three columns of a kept row; it does not
+     * erase the table, and the download does not report it. So the constant
+     * would be claiming something about this table that is not true.
+     *
+     * Either way the step is additional to the ordinary instruction rather
+     * than a replacement for it, so it is called directly from the run,
+     * exactly as eraseProfileImages() is while `tblUsers` keeps its own.
+     *
+     * 🛑 THE ORDER MATTERS, and it is #709's trap in a new place. The second
+     *    half of the WHERE finds rows about the person's MEMBERSHIPS by looking
+     *    their `tblUserSites` rows up — and the catalogue walk DELETES those
+     *    rows. Run this after the walk and that half silently matches nothing,
+     *    while the audit line still says the step ran. So it is called BEFORE
+     *    the walk. The first half (`tblUsers`) does not care about order.
+     *
+     * WHAT IT STILL CANNOT REACH, said plainly because an overstated
+     * guarantee is worse than none. Two things:
+     *
+     *   - A row about some OTHER record whose values happen to quote this
+     *     person — an announcement whose text names them, say. Nothing on such
+     *     a row says the person is in it, so only a search of the values
+     *     themselves would find it, and that would also match a namesake.
+     *   - A row about their DEPARTMENT, GROUP or ROLE membership.
+     *     `tblUserDepts`, `tblUserGroups` and `tblUserRoles` are all audited
+     *     (see Departments.php, UserGroups.php, Roles.php) and none is in the
+     *     WHERE below. An independent check measured this rather than taking
+     *     the word for it. It costs nothing identifying today — those payloads
+     *     carry account NUMBERS and no names (#518), and the account itself is
+     *     emptied by the walk — but the day a writer puts a name in one of
+     *     them, #707 is back in a table this step does not cover. Tracked as
+     *     #717, because nothing here would notice.
+     *
+     * Re-running is safe: the WHERE asks for a row that still has a value, so
+     * a second run matches nothing and reports that nothing changed.
+     *
+     * @return string One of STEP_CHANGED, STEP_UNCHANGED or STEP_FAILED.
+     */
+    private static function eraseAuditTrailAboutPerson(int $requestId, int $userId): string
+    {
+        $db      = App::db();
+        $emptied = 0;
+        $problem = null;
+
+        try {
+            $stmt = $db->prepare(
+                'UPDATE tblAuditTrail SET oldValue = NULL, newValue = NULL, changeSet = NULL '
+                . "WHERE ((tableName = 'tblUsers' AND recordID = ?) "
+                . "OR (tableName = 'tblUserSites' "
+                . 'AND recordID IN (SELECT userSiteID FROM tblUserSites WHERE userID = ?))) '
+                // Only a row that still holds something. BE HONEST ABOUT WHAT
+                // THIS EARNS: it is belt-and-braces, not the thing that makes
+                // the count truthful. MySQL's affected_rows already counts only
+                // rows whose values really changed (the connection sets no
+                // CLIENT_FOUND_ROWS), so NULL -> NULL counts 0 with or without
+                // this clause — measured by an independent check, which removed
+                // it and saw all 258 checks still pass. It is kept because it
+                // says the intent plainly and narrows the UPDATE, not because
+                // anything depends on it.
+                . 'AND (oldValue IS NOT NULL OR newValue IS NOT NULL OR changeSet IS NOT NULL)'
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException((string) $db->error);
+            }
+            $stmt->bind_param('ii', $userId, $userId);
+            if ($stmt->execute() === false) {
+                $failure = new \RuntimeException((string) $stmt->error);
+                $stmt->close();
+                throw $failure;
+            }
+            $emptied = (int) $stmt->affected_rows;
+            $stmt->close();
+        } catch (\Throwable $e) {
+            // Never the fault's own words: a message about a failed UPDATE can
+            // quote the value it was writing over, which is the thing being
+            // erased.
+            $problem = 'the change history about this person could not be emptied';
+        }
+
+        if ($problem !== null) {
+            self::logAudit($db, $requestId, 'failed', 'tblAuditTrail', null, $problem . '. The rows are '
+                . 'unchanged, so running the request again will find them.');
+
+            return self::STEP_FAILED;
+        }
+        if ($emptied === 0) {
+            self::logAudit($db, $requestId, 'none', 'tblAuditTrail', null, 'the change history holds no '
+                . 'recorded value about this person\'s account or their memberships');
+
+            return self::STEP_UNCHANGED;
+        }
+        self::logAudit(
+            $db,
+            $requestId,
+            'anonymise',
+            'tblAuditTrail',
+            (string) $emptied . ' row(s)',
+            'the change history: ' . $emptied . ' row(s) about this person\'s account or memberships had their '
+            . 'before-and-after values emptied. Who made each change, when, and which record it was remain, '
+            . 'so the trail still shows that the account was changed'
+        );
+
+        return self::STEP_CHANGED;
     }
 
     /**

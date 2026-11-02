@@ -13256,7 +13256,9 @@ real guard to accommodate a sentence is how a guard stops guarding.
 was a list of what the catalogue **admits to**, not of what these tables hold.
 `tblAuditTrail`'s `oldValue`, `newValue` and `changeSet` hold `json_encode()` of a
 whole row, so a change to somebody's own account leaves their name, e-mail,
-telephone and home address in the trail; `tblErrors.errorDetail` holds a full
+and e-mail address in the trail (measured under #707 — NOT a telephone number
+or a postal address, which this line claimed until 2 November 2026);
+`tblErrors.errorDetail` holds a full
 backtrace and `requestURL` the whole query string; and ten more personal columns
 appear in **no catalogue entry at all**. None of them is visible to #635, to its
 checks, or to an erasure. It is the #645 shape: a guard that reads as complete
@@ -13914,3 +13916,155 @@ and `NAMED_ELSEWHERE_ON_PURPOSE` is empty so its stale-exemption clause cannot
 fail today. Nothing in the repository tests the check itself — every mutation
 the reviewer tried was invisible to everything but their own eye, which is the
 `api-spec-check-selftest.py` shape and the obvious next thing to build.
+
+---
+
+## Reaching a row that nothing says is about anybody (#707)
+
+`tblAuditTrail.userID` is the ACTOR. What was CHANGED is a pair,
+`(tableName, recordID)`. There is no column saying who a row is ABOUT — so an
+entry reading "somebody edited `tblUsers` id 4211" matched nothing any
+instruction could look at. `Logger::audit()` records a creation as the whole
+new row and a deletion as the whole old one, so a change to somebody's own
+account put their name and e-mail address in there. **Measured, after an
+independent check disproved a bolder first draft:** exactly two call sites audit
+`tblUsers` and between them they pass `userID`, `fullName`, `emailAddress` and
+three yes/no flags — no telephone, no postal address — and nothing audits a
+deletion of that table at all. `Logger::audit()` records whatever the caller
+hands it; it does not read the row, so "the whole row" is the caller's
+convention rather than the function's promise. A name and an e-mail address is
+quite enough to matter and did not need overstating.
+
+`GdprEraser::eraseAuditTrailAboutPerson()` empties the three value columns for
+such a row. Anonymise, not delete (the owner, 2 November 2026): a change
+history is worth having because it shows who changed what and when, and that
+survives in full.
+
+### The shortcut reaches third parties and misses the subject
+
+Adding `oldValue`, `newValue` and `changeSet` to the table's ordinary
+instruction's `nullCols` looks like the obvious fix. **It is wrong in both
+directions at once.** That instruction matches `userID` — the actor — so it
+would empty the before-and-after of every change this person made to
+**somebody else's** record, and still reach no row about the person
+themselves. It is #709's lesson in a new table: the easy route destroys a
+third party's data and does not do the job.
+
+One check exists purely to fail if anybody takes it. Planted — swapping the
+match to `userID` — it reports exactly that, by name.
+
+### Why it is NOT in DEDICATED_STEP_TABLES, where a reader looks first
+
+Registering a table there makes `fromPersonalDataCatalogue()` **skip** it. So
+`tblAuditTrail` would have lost the instruction it already has, the one that
+unlinks the actor and empties `ipAddress`. This step is additional, not a
+replacement, so it is called directly from the run — exactly as
+`eraseProfileImages()` is while `tblUsers` keeps its own instruction. Worth
+knowing before somebody "tidies" it into the list.
+
+### A column a dedicated step empties is recorded as emptied elsewhere
+
+The coverage test requires a named column on an `unlink` table to be either in
+the instruction's `nullCols` or explained in `notEmptiedHere`. Neither fitted
+at first — the step empties it, but not through the instruction. The precedent
+is `tblUsers.avatarPath`, which `eraseProfileImages()` handles: it sits in
+`notEmptiedHere` with a reason beginning "Emptied elsewhere, on purpose". The
+three value columns now do the same, and the reason says why the ordinary
+instruction must not do it.
+
+### The ordering trap, for the second time in two packages
+
+Entries about the person's memberships are found by looking their
+`tblUserSites` rows up, and the catalogue walk DELETES those rows. So the step
+runs before the walk. Run it after and that half matches nothing while the
+audit line still says the step ran — silent, and exactly #709's shape. Section
+20 of the eraser test has a membership row for this, and moving the call after
+the walk turns four checks red.
+
+### Two fixture lessons, both from this section failing first
+
+`ge_user()` does **not** create a membership row — the first version looked one
+up, got nothing, wrote the audit row against record 0, and failed loudly. And
+`ge_insert()` answers `{table, key}`, where the key is the row's primary key
+**by name**: asking for `['id']` gave 0. Both failed noisily rather than
+quietly, which is the right way round, but neither was guessable.
+
+### Adding a step shifts every hard-coded count in the test
+
+Six separate expectations had to move: the number of steps a run reports (twice),
+the number of audit lines (twice), the list of expected lines in order, and the
+position of the first instruction's line. The file keeps a running note at each
+one ("CHANGED by mail package M3: + 6 became + 7"), which is what made them
+findable — worth continuing.
+
+### Three untrue statements, and the one that teaches most
+
+The independent check of #707 found no behavioural fault — the SQL reaches
+exactly the rows claimed, a probe of three collision shapes came back
+untouched, and every plant was caught by the check named for it. What it found
+was three **untrue statements**, which this project counts as real problems.
+
+**1. The reason I gave for not registering the table was false, and I had
+propagated it to four places.** I wrote that putting `tblAuditTrail` in
+`DEDICATED_STEP_TABLES` would make `fromPersonalDataCatalogue()` skip it and
+lose the instruction that unlinks the actor. It cannot: that instruction is
+**hand-written**, and the deriver already skips every hand-written table
+through its own `$alreadyHandled` list. The checker registered it and counted:
+222 instructions before and after, same entry, same `nullCols`.
+
+**The real reason is better because it is enforced** — with the table
+registered, `gdpr-coverage-selftest.php` fails its check that a dedicated-step
+table is erased, in time, *and exported*. This step empties three columns of a
+**kept** row, so the constant would be claiming something untrue about it.
+
+The lesson: **a plausible mechanism is not a measured one.** I reasoned from
+reading `fromPersonalDataCatalogue()`'s skip condition without checking which
+list this table was already in — and then wrote the conclusion into a docblock
+and three documents, where it reads as established fact.
+
+**2. "Telephone number and home address" was never true, and it was
+pre-existing.** Exactly two call sites audit `tblUsers`, and between them they
+pass `userID`, `fullName`, `emailAddress` and three yes/no flags. Nothing
+audits a *deletion* of that table at all, so "the whole old row" is theoretical
+for it too. `Logger::audit()` records whatever the caller hands it — it does not
+read the row — so "records the whole row" is the caller's convention, not the
+function's promise.
+
+**The wording came from #706's own DEV_NOTES line, so this package propagated
+it rather than inventing it** — which means the honest fix reached one line
+outside the package's file list. That is declared here rather than buried.
+A name and an e-mail address is quite enough to matter and did not need
+overstating; the overstatement was in the one sentence a customer reads before
+accepting what an erasure leaves behind, which is the #694 round-3 lesson in a
+new place.
+
+**3. "Every row about this person" was not true either.** `tblUserDepts`,
+`tblUserGroups` and `tblUserRoles` are all audited and none is reached.
+Measured, not argued: an audit row for a department membership was added to the
+fixture and came back untouched. It costs nothing identifying today — those
+payloads carry account numbers and no names (#518) and the account is emptied
+by the walk — but the sentence was wrong, and the day a writer puts a name in
+one of those payloads #707 returns in a table nothing covers. Tracked as #717.
+
+### Adding a section to a self-test takes TWO registrations, and one is silent
+
+`REQUIRED_SECTIONS` is this test's "a skipped section never reads as a pass"
+guard. I added section 20 and did not add `'20'` to it — the checker spotted
+that. Adding it immediately exposed a **second** omission: my section printed
+its heading with a bare `echo` instead of calling `ge_section('20', …)`, so it
+never registered itself as reached either.
+
+So before the fix the section was invisible to that guard **twice over**, and
+`EXPECTED_CHECKS` was the only thing standing between a deleted section and a
+green run — which it would not survive, because an edit that removed the
+section and put the count back would pass. Two one-line fixes; worth knowing
+that the `echo` form looks exactly like the real thing.
+
+### A clause can be harmless and still be oversold
+
+`AND (oldValue IS NOT NULL OR …)` carried a comment saying it was what made the
+count honest and a second run a no-op. The checker removed it: all 258 checks
+still passed. `affected_rows` already counts only rows whose values really
+changed, because the connection sets no `CLIENT_FOUND_ROWS`, so `NULL → NULL`
+counts zero either way. The clause is kept — it states the intent and narrows
+the UPDATE — but the comment now says what it actually earns.

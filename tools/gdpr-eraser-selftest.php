@@ -226,11 +226,15 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 251; // 235 before section 19 (#709) added nine; the fix round
-                             // replaced its single guard check with eight
+const EXPECTED_CHECKS = 258; // 235 before section 19 (#709) added nine; the fix round
+                             // replaced its single guard check with eight, giving 251.
+                             // Section 20 (#707) then added seven: five on which rows the
+                             // change-history step reaches, one on the actor link still
+                             // being cut by the ordinary instruction, and one on a second
+                             // run. 251 + 7 = 258.
 
 // The headings that must all be reached for a pass.
-const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19'];
+const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20'];
 
 // 🗺️ The made-up people and requests. Every number is 920000 or higher, far
 //    above anything the fresh-install script seeds.
@@ -287,6 +291,9 @@ const P_HELD   = 920202; // erased in section 18: his kept rows must go from the
 const REQ_HELD = 940202;
 const P_CARE   = 920301; // erased in section 19: a pastoral visit's notes are reached through the case (#709)
 const REQ_CARE = 940301;
+const P_AUDIT   = 920401; // erased in section 20: the change history ABOUT them is emptied (#707)
+const P_AUDIT_2 = 920402; // section 20: somebody else, whose history must survive untouched
+const REQ_AUDIT = 940401;
 const SITE_G1     = 3;      // "tax gifts only" (the default rule), in Europe/London
 const SITE_G2     = 4;      // "every gift", in Pacific/Auckland
 const SITE_K      = 12;     // section 16: "tax gifts only", in Pacific/Kiritimati, fourteen hours AHEAD of UTC
@@ -1756,6 +1763,13 @@ function ge_checkAudit(array $world, array $lines, bool $demoLine, array $failTa
     // log, whose line used to come after the giving-statement lines below.
     $expected[] = ['tblMailQueue', ['none']];
     $expected[] = ['tblEmailLog', ['anonymise']];
+    // #707: the change history ABOUT the person, straight after the send log
+    // and still before the first instruction — it has to run before the walk
+    // deletes the membership rows it finds some of its rows through. In the
+    // made-up worlds nothing has written a change history about this person,
+    // so it says that nothing was held; section 20 builds a world where it
+    // really has something to empty.
+    $expected[] = ['tblAuditTrail', ['none']];
     $rowsFor = [];
     foreach ($world['rows'] as $tracked) {
         if ($tracked['kind'] === 'R1') {
@@ -1989,8 +2003,9 @@ if ($resultA instanceof Throwable || is_array($resultA) === false) {
 ge_ok('it reports no failed step, and the number of steps it ran',
     // CHANGED by roll-out package A2b: + 5 became + 6 (the giving-records step).
     // CHANGED by mail package M3: + 6 became + 7 (the mail queue's step).
-    $resultA['failed'] === 0 && $resultA['changed'] === true && $resultA['steps'] === $instructionCount + 7,
-    json_encode($resultA) . ' (expected steps: ' . ($instructionCount + 7) . ')');
+    // CHANGED by #707: + 7 became + 8 (the change-history step).
+    $resultA['failed'] === 0 && $resultA['changed'] === true && $resultA['steps'] === $instructionCount + 8,
+    json_encode($resultA) . ' (expected steps: ' . ($instructionCount + 8) . ')');
 
 $reqA = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_A]);
 ge_ok('the request row still exists and is "completed"', $reqA !== null && $reqA['status'] === 'completed', json_encode($reqA));
@@ -2123,8 +2138,9 @@ ge_ok('exactly one line per instruction, each for the right table, with the righ
 // per organisation that holds giving records of the person's.
 ge_ok('the number of lines is the instructions, the Demo Data step, the giving-records lines (' . $givingCountA
     // CHANGED by mail package M3: four dedicated lines became five (the mail queue's).
-    . ', one per organisation), the five dedicated lines and the closing line',
-    count($auditA) === $instructionCount + 7 + $givingCountA && $givingCountA >= 3,
+    // CHANGED by #707: five became six (the change history about the person).
+    . ', one per organisation), the six dedicated lines and the closing line',
+    count($auditA) === $instructionCount + 8 + $givingCountA && $givingCountA >= 3,
     count($auditA) . ' lines for ' . $instructionCount . ' instructions and ' . $givingCountA . ' organisations');
 ge_ok('the chain of the audit trail verifies', GdprEraser::verifyAuditChain(REQ_A) === true);
 // CHANGED by roll-out package A2b, in two ways. The giving-records step
@@ -2695,7 +2711,8 @@ ge_trigger('selftest_gdpr_fail_step', "CREATE TRIGGER `selftest_gdpr_fail_step` 
 $resultB1 = ge_execute(REQ_B, P_B);
 ge_ok('the run still ends without an exception, and reports exactly one failed step',
     // CHANGED by mail package M3: + 6 became + 7 (the mail queue's step), here and four lines down.
-    is_array($resultB1) === true && $resultB1['failed'] === 1 && $resultB1['steps'] === $instructionCount + 7,
+    // CHANGED by #707: + 7 became + 8 (the change-history step).
+    is_array($resultB1) === true && $resultB1['failed'] === 1 && $resultB1['steps'] === $instructionCount + 8,
     $resultB1 instanceof Throwable ? get_class($resultB1) . ': ' . $resultB1->getMessage() : json_encode($resultB1));
 $reqB = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_B]);
 ge_ok('the request is back at "pending review" with its account number, name, address and notes all still on it',
@@ -2708,7 +2725,7 @@ ge_ok('the audit trail has a line for EVERY instruction: one "failed", and nothi
     $auditB1Problems === [], implode('; ', array_slice($auditB1Problems, 0, 8)));
 $summary = $auditB1[count($auditB1) - 1] ?? ['details' => ''];
 ge_ok('its last line says how many steps failed and that the request can be run again',
-    str_contains((string) $summary['details'], '1 of ' . ($instructionCount + 7) . ' steps failed')
+    str_contains((string) $summary['details'], '1 of ' . ($instructionCount + 8) . ' steps failed')
     && str_contains((string) $summary['details'], 'back at pending review'), (string) $summary['details']);
 $rowsB1 = ge_checkRows($worldB, $beforeRowsB, ['tblExternalFeedRuns.triggeredByID']);
 ge_ok('the failed table\'s row is untouched, and every other instruction still did its work',
@@ -2755,7 +2772,8 @@ ge_ok('the second run also wrote one line per instruction, most of them "nothing
     // for each organisation that kept something on the first run.
     // (And one line for the counted envelopes, which is why "- 1" below.)
     // CHANGED by mail package M3: + 5 became + 6 (the mail queue's line).
-    count($auditB2) === $instructionCount + 6 + $givingCountB2 && $givingCountB2 >= 3 && $noneLines > 100
+    // CHANGED by #707: + 6 became + 7 (the change-history step's line).
+    count($auditB2) === $instructionCount + 7 + $givingCountB2 && $givingCountB2 >= 3 && $noneLines > 100
     && ($auditB2[count($auditB2) - 1]['action'] ?? '') === 'completed'
     && count(array_filter($auditB2, static fn (array $l): bool => $l['tableName'] === 'GivingRecords'
         && str_contains((string) $l['details'], 'already dealt with by an earlier run')
@@ -2810,10 +2828,13 @@ ge_ok('run again with the audit trail working: completed, and the first step is 
     // CHANGED by mail package M3: then the two steps that find the person by
     // their e-mail address (the mail queue, then the send log), so the first
     // instruction's line is the fifth.
+    // CHANGED by #707: then the change history ABOUT the person, which must
+    // also run before the walk, so the first instruction's line is the sixth.
     && (ge_audit(REQ_PC)[2]['tableName'] ?? '') === 'tblMailQueue' && (ge_audit(REQ_PC)[2]['action'] ?? '') === 'none'
     && (ge_audit(REQ_PC)[3]['tableName'] ?? '') === 'tblEmailLog'
-    && (ge_audit(REQ_PC)[4]['tableName'] ?? '') === (string) $first['table']
-    && in_array(ge_audit(REQ_PC)[4]['action'] ?? '', ['anonymise', 'delete'], true),
+    && (ge_audit(REQ_PC)[4]['tableName'] ?? '') === 'tblAuditTrail'
+    && (ge_audit(REQ_PC)[5]['tableName'] ?? '') === (string) $first['table']
+    && in_array(ge_audit(REQ_PC)[5]['action'] ?? '', ['anonymise', 'delete'], true),
     $resultC2 instanceof Throwable ? $resultC2->getMessage() : json_encode([$resultC2, $reqPc2, ge_audit(REQ_PC)[0] ?? null, ge_audit(REQ_PC)[4] ?? null]));
 
 // =============================================================================
@@ -5426,5 +5447,135 @@ ge_ok('each refusal the guard returns ends in a whole word rather than mid-ident
     && str_ends_with($withinRun, 'table') === true
     && str_ends_with($earlierRunNeverDone, 'hand') === true,
     json_encode(['ordering' => $withinRun, 'earlier run' => $earlierRunNeverDone]));
+
+// =============================================================================
+ge_section('20', 'The change history ABOUT the person is emptied, and nobody else\'s is (#707)');
+// =============================================================================
+// 🧠 WHY THIS SECTION EXISTS. `tblAuditTrail.userID` is the ACTOR. The record
+//    that was CHANGED is named by a pair, `(tableName, recordID)`, with no
+//    account column at all — so a row saying "somebody edited tblUsers id N"
+//    matched nothing any instruction could look at, and was reachable by
+//    NOTHING. It holds the whole new row for a creation and the whole old row
+//    for a deletion, so a change to somebody's own account wrote their name,
+//    e-mail, telephone and home address into it.
+//
+// 🛑 THE CHECK THAT MATTERS MOST IS THE THIRD-PARTY ONE. The obvious shortcut
+//    — adding these columns to the ordinary instruction's `nullCols` — matches
+//    `userID`, so it would empty the before-and-after of every change this
+//    person made to OTHER PEOPLE'S records. That is the #709 shape exactly:
+//    the easy route reaches third parties and misses the subject. The fourth
+//    row below exists to fail if anybody ever takes it.
+ge_user(P_AUDIT, 'Ada Audit', 'ada.audit@selftest.invalid');
+ge_user(P_AUDIT_2, 'Bob Bystander', 'bob.bystander@selftest.invalid');
+
+/** Put one row in the change history and return its number. */
+$auditInsert = static function (?int $actor, string $table, int $record, string $action, ?string $old, ?string $new, ?string $set) use ($mysqli): int {
+    $stmt = $mysqli->prepare(
+        'INSERT INTO tblAuditTrail (siteID, userID, tableName, recordID, action, oldValue, newValue, changeSet, ipAddress) '
+        . 'VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    $ip = '203.0.113.77';
+    $stmt->bind_param('isisssss', $actor, $table, $record, $action, $old, $new, $set, $ip);
+    $stmt->execute();
+    $id = (int) $mysqli->insert_id;
+    $stmt->close();
+
+    return $id;
+};
+$readAudit = static function (int $id) use ($mysqli): ?array {
+    return ge_one('SELECT userID, tableName, recordID, action, oldValue, newValue, changeSet, ipAddress FROM tblAuditTrail WHERE auditID = ?', 'i', [$id]);
+};
+
+$adaDetails = '{"fullName":"Ada Audit","emailAddress":"ada.audit@selftest.invalid","phoneNumber":"07700 900123","displayAddress":"4 Audit Lane, Cambridge"}';
+// 1. A change to Ada's OWN account, made by an administrator. Nothing on this
+//    row names Ada except the (tableName, recordID) pair.
+$aboutAda   = $auditInsert(ADMIN, 'tblUsers', P_AUDIT, 'update', $adaDetails, '{"fullName":"Ada Audit"}', '{"phoneNumber":{"old":"07700 900123","new":null}}');
+// 2. A change to one of Ada's MEMBERSHIPS, found only by looking her
+//    tblUserSites rows up — which the catalogue walk DELETES, so this row is
+//    what proves the step runs before the walk.
+// ge_user() does NOT create a membership, so one is made here on purpose. The
+// first version of this section looked one up and got nothing, so `recordID`
+// was 0 and the check failed loudly — which is the right way round, but it is
+// worth knowing that this row has to be built rather than assumed.
+$adaMembership = ge_insert('tblUserSites', ['userID' => P_AUDIT], ['siteID' => 1, 'isActive' => 1]);
+// ge_insert() answers {table, key}; the key is the row's primary key by name,
+// NOT an `id` field. Asking for ['id'] gave 0, the audit row was written
+// against record 0, and the check failed loudly — which is the right way
+// round, but worth the line so nobody repeats it.
+$adaSite    = (int) ($adaMembership['key']['userSiteID'] ?? 0);
+$aboutAdaSite = $auditInsert(ADMIN, 'tblUserSites', $adaSite, 'create', null, '{"userID":' . P_AUDIT . ',"siteID":1}', null);
+// 3. A change to SOMEBODY ELSE's account. Must survive whole.
+$aboutBob   = $auditInsert(ADMIN, 'tblUsers', P_AUDIT_2, 'update', '{"fullName":"Bob Bystander","phoneNumber":"07700 900999"}', '{"fullName":"Bob Bystander"}', null);
+// 4. A change ADA MADE to somebody else's record. The values here are Bob's,
+//    not Ada's, so they must survive — see the note at the top of the section.
+$adaChangedBob = $auditInsert(P_AUDIT, 'tblUsers', P_AUDIT_2, 'update', '{"displayBio":"Bob helps with the minibus."}', '{"displayBio":""}', null);
+
+ge_request(REQ_AUDIT, P_AUDIT, 'ada.audit@selftest.invalid', 'Ada Audit', 'processing');
+$resultAudit = ge_execute(REQ_AUDIT, P_AUDIT);
+
+$rowAda      = $readAudit($aboutAda);
+$rowAdaSite  = $readAudit($aboutAdaSite);
+$rowBob      = $readAudit($aboutBob);
+$rowAdaDidIt = $readAudit($adaChangedBob);
+
+$valuesGone = static fn (?array $r): bool => is_array($r) === true
+    && $r['oldValue'] === null && $r['newValue'] === null && $r['changeSet'] === null;
+
+ge_ok('A ROW ABOUT THE PERSON\'S OWN ACCOUNT LOSES ITS RECORDED VALUES: the before, the after and the set of changes are all empty, so the name, e-mail, telephone and home address that a change to an account writes into the history are gone',
+    is_array($resultAudit) === true && $resultAudit['failed'] === 0 && $valuesGone($rowAda) === true,
+    json_encode(['the run' => is_array($resultAudit) === true ? ['failed' => $resultAudit['failed']] : (string) $resultAudit, 'row' => $rowAda]));
+
+ge_ok('AND THE ROW IS STILL AN AUDIT RECORD: which table, which record and what kind of change are exactly as they were, so the history still shows the account WAS changed',
+    is_array($rowAda) === true && $rowAda['tableName'] === 'tblUsers'
+    && (int) $rowAda['recordID'] === P_AUDIT && $rowAda['action'] === 'update',
+    json_encode($rowAda));
+
+ge_ok('A ROW ABOUT ONE OF THEIR MEMBERSHIPS IS REACHED TOO, which only works because the step runs BEFORE the walk that deletes those membership rows (#709\'s ordering trap in a new place)',
+    $valuesGone($rowAdaSite) === true,
+    json_encode(['membership row' => $rowAdaSite, 'the userSiteID it was found by' => $adaSite]));
+
+ge_ok('SOMEBODY ELSE\'S HISTORY IS UNTOUCHED: a change to another person\'s account keeps every recorded value',
+    is_array($rowBob) === true && $rowBob['oldValue'] !== null && $rowBob['newValue'] !== null
+    && str_contains((string) $rowBob['oldValue'], '07700 900999') === true,
+    json_encode($rowBob));
+
+ge_ok('THE ONE THAT CATCHES THE EASY MISTAKE: a change the erased person MADE to somebody else\'s record keeps its values. Emptying by `userID` would wipe these — third-party audit data — and still miss every row above',
+    is_array($rowAdaDidIt) === true && $rowAdaDidIt['oldValue'] !== null
+    && str_contains((string) $rowAdaDidIt['oldValue'], 'minibus') === true,
+    json_encode($rowAdaDidIt));
+
+ge_ok('and the actor link on that row IS cut, which is the ordinary instruction still doing its own job alongside the new step',
+    is_array($rowAdaDidIt) === true && $rowAdaDidIt['userID'] === null && $rowAdaDidIt['ipAddress'] === null,
+    json_encode($rowAdaDidIt));
+
+// Running again must change nothing AND SAY SO. The first version of this
+// check asserted only that no exception was thrown, which is not what its
+// label claims — an independent check pointed that out. It now reads the
+// second run's own audit line and the rows, which is the honesty being
+// claimed.
+$linesBeforeSecondRun = count(ge_audit(REQ_AUDIT));
+$again      = ge_execute(REQ_AUDIT, P_AUDIT);
+$secondRun  = array_slice(ge_audit(REQ_AUDIT), $linesBeforeSecondRun);
+$secondLine = null;
+foreach ($secondRun as $line) {
+    if ((string) $line['tableName'] === 'tblAuditTrail') {
+        $secondLine = $line;
+        break;
+    }
+}
+ge_ok('running the request again empties nothing a second time, and the line it writes SAYS nothing was held rather than claiming a count it did not earn',
+    ($again instanceof Throwable) === false
+    && is_array($secondLine) === true
+    && (string) $secondLine['action'] === 'none'
+    && $secondLine['recordKey'] === null
+    // and the rows really are still as the first run left them
+    && $valuesGone($readAudit($aboutAda)) === true
+    && $valuesGone($readAudit($aboutAdaSite)) === true
+    && is_array($readAudit($adaChangedBob)) === true
+    && $readAudit($adaChangedBob)['oldValue'] !== null,
+    json_encode(['the run' => is_array($again) === true ? ['failed' => $again['failed']] : (string) $again,
+        'its change-history line' => $secondLine,
+        'the third party is still whole' => $readAudit($adaChangedBob)['oldValue'] !== null]));
+
 
 ge_finish();

@@ -270,6 +270,23 @@ screens and didn't say what it meant.
     warn everybody on 8.6.0RC4, which is the first build that carries the
     October 2026 fix. Section C4 of the self-test pins that, and says why at
     the point of failure.
+- **The change history about an erased person is emptied (#707).** The history
+  records *who* made a change and *what* was changed as a table name and a row
+  number — there is no column saying who a row is **about**, so an entry
+  reading "somebody edited this person's account" was reachable by nothing. It
+  keeps the values, and a change to an account records the row as it was, so a
+  name and an e-mail address sat there after an erasure. (Measured — not a
+  telephone number or a postal address, which an earlier draft of this claimed.)
+  The values are now emptied; who acted, when and which record are kept, so the
+  history still shows the account was changed. **Anonymised rather than
+  deleted**, your decision of 2 November 2026.
+  - **The obvious shortcut would have emptied other people's records**, and a
+    check exists purely to fail if anybody takes it: the table's ordinary
+    instruction matches on who *made* a change, so using it would have emptied
+    the before-and-after of every change this person made to somebody else's
+    record, while still missing every entry about them.
+  - **Not reached:** an entry about some other record whose text happens to
+    mention them. Nothing on such a row says they are in it.
 - **Every table now has a written decision about the personal information in
   it, and the check guarding that no longer relies on memory (#706).** The
   personal-data catalogue is the one list behind both of somebody's rights over

@@ -687,9 +687,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <strong>Kept because it is the organisation's own record, not the person's.</strong> A
             note about a piece of equipment, the condition it was in, who serviced it. A group's
             description and its meeting notes. A venue's address. What was changed in a settings
-            page. These stay and the account link is cut &mdash; though note that an entry in the
-            change history also keeps the <em>values</em> before and after a change, so a former
-            name or e-mail address can remain there.
+            page. These stay and the account link is cut. <strong>The change history is a special
+            case and was improved on 2 November 2026:</strong> an entry about the person's own
+            account or their memberships now has its before-and-after values emptied too, because a
+            change to an account recorded the row as it was &mdash; in practice their name and
+            e-mail address. Who made each change, when, and which record it was are kept, so the
+            history still shows the account was changed.
+            <br>
+            Two limits, so that nothing here is read as more than it is. An entry about some
+            <em>other</em> record whose text happens to mention them is <strong>not</strong>
+            reached, because nothing on such a row says they are in it. And it covers an entry about
+            their account or about which <em>organisations</em> they belong to &mdash; not entries
+            about their department, group or role membership, which record account numbers only and
+            no names.
         </li>
         <li>
             <strong>Kept because emptying it would take something from somebody else.</strong>

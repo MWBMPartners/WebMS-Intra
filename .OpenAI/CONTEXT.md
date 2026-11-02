@@ -2326,6 +2326,34 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     number and the delete never reaches it.
     *(`.claude/CLAUDE.md` → the #706 bullet.)*
 
+36. **The change history ABOUT the erased person is emptied now, and the EASY WAY WOULD DESTROY THIRD-PARTY RECORDS (#707).**
+    `tblAuditTrail.userID` is the ACTOR; what was CHANGED is the pair `(tableName, recordID)`, and NO column says who a row
+    is ABOUT — so an entry reading "somebody edited tblUsers id N" was reachable by NOTHING, while `Logger::audit()` records
+    a creation as the WHOLE new row and a deletion as the WHOLE old one, so a change to somebody's own account wrote their
+    NAME AND E-MAIL ADDRESS in there — measured, and NOT the telephone or postal address my first version claimed.
+    `GdprEraser::eraseAuditTrailAboutPerson()` empties the three value
+    columns; ANONYMISE, not delete (the owner, 2 November 2026) — who acted, when, which table and which record all stay.
+    **DO NOT "SIMPLIFY" IT BY ADDING THOSE COLUMNS TO THE ORDINARY INSTRUCTION'S `nullCols`:** that instruction matches
+    `userID`, so it would empty the before-and-after of every change this person made to SOMEBODY ELSE'S record AND still
+    reach no row about the person — wrong in both directions, #709's lesson in a new table. One check in section 20 of
+    `tools/gdpr-eraser-selftest.php` exists purely to fail on that, and does. **And it is NOT in `DEDICATED_STEP_TABLES` on
+    purpose, but MY FIRST REASON WAS FALSE and an independent check disproved it:** I wrote that registering it would make
+    `fromPersonalDataCatalogue()` SKIP the table and lose its `ipAddress` instruction. It cannot — that instruction is
+    HAND-WRITTEN and the deriver already skips every hand-written table. Measured: 222 instructions before and after,
+    unchanged. The REAL reason is enforced — with it registered, `gdpr-coverage-selftest.php` fails its check that a
+    dedicated-step table is erased, in time, AND EXPORTED, and this step empties three columns of a KEPT row. Called
+    directly from the run, as `eraseProfileImages()` is. **THE ORDER IS LOAD-BEARING, #709's trap again:** rows about the person's ORGANISATION memberships are
+    found by looking their `tblUserSites` rows up and the walk DELETES those, so the step runs BEFORE the walk; moving it
+    after turns four checks red. A column a dedicated step empties is recorded in `notEmptiedHere` beginning "Emptied
+    elsewhere, on purpose", the `tblUsers.avatarPath` precedent. Not reached: a row about some OTHER record whose values
+    quote the person. Two fixture traps, both of which failed loudly: `ge_user()` does NOT make a membership row, and
+    `ge_insert()` answers `{table, key}` with the key BY NAME, so `['id']` is 0. Adding a step shifts SIX hard-coded counts
+    in that test. **#708:** `tblCareVisit.followUpAssignedToID`'s instruction is correct and can NEVER MATCH — nothing
+    writes the column — so the limit is recorded beside it rather than the instruction being deleted or the page changed
+    (the owner, 2 November 2026). `tblKidCheckins.pickupName` was already recorded on 1 November 2026. The technical record
+    is DEV_NOTES.md, "Reaching a row that nothing says is about anybody (#707)".
+    *(`.claude/CLAUDE.md` → the #707 bullet.)*
+
 ## A few more things worth knowing
 
 - **Branches are meant to be promoted through four steps on the way to
