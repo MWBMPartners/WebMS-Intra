@@ -659,10 +659,94 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h2 class="h4 mb-3"><i class="fa-solid fa-receipt me-2 text-primary"></i>Giving Records and Erasure</h2>
 
     <p>
-        When somebody asks to be erased, the portal erases their details. One thing is different:
-        tax and accounting rules make most organisations keep some giving records, with the donor's
+        When somebody asks to be erased, the portal erases their details. <strong>Some things are
+        deliberately kept, and a few are not reached at all</strong> &mdash; the list below says
+        which, so that nobody is promised more than the portal does. The best known is giving: tax
+        and accounting rules make most organisations keep some giving records, with the donor's
         name, for a number of years. Each organisation sets what it keeps, and for how long, at
         <strong>Admin &rarr; Giving records</strong>.
+    </p>
+
+    <h3 class="h6 mt-3">What an erasure keeps, and what it does not reach</h3>
+    <p>
+        This was written out in full on 2 November 2026, by going through every table in the
+        database rather than relying on memory. Three kinds of thing survive an erasure, and they
+        are not the same kind of thing at all.
+    </p>
+    <ul>
+        <li>
+            <strong>Kept because the law or the organisation's duty requires it.</strong> Giving
+            records as above. Expense claims, which HMRC requires for six years &mdash; the
+            claimant's name comes off the claim, but the receipts attached to it keep the filename
+            they were uploaded with, which is often a person's name. The adults authorised to
+            collect a child, because the organisation's duty of care to that child does not end
+            because an adult asked to be erased. A Gift Aid declaration, with the network address
+            it was made from, because that is part of the evidence it was made.
+        </li>
+        <li>
+            <strong>Kept because it is the organisation's own record, not the person's.</strong> A
+            note about a piece of equipment, the condition it was in, who serviced it. A group's
+            description and its meeting notes. A venue's address. What was changed in a settings
+            page. These stay and the account link is cut &mdash; though note that an entry in the
+            change history also keeps the <em>values</em> before and after a change, so a former
+            name or e-mail address can remain there.
+        </li>
+        <li>
+            <strong>Kept because emptying it would take something from somebody else.</strong>
+            Two of these were decided deliberately on 1 November 2026, and they are not oversights.
+            The address a small group meets at is very often a member's <strong>home</strong>
+            &mdash; but nothing records whose, so emptying it would blank the meeting place of
+            groups that have nothing to do with the person asking. A name typed in for a visitor
+            with no account stays on the attendance register, because there is no account to match
+            it to, which is the only reason it was typed in the first place.
+        </li>
+        <li>
+            <strong>Not reached, which is a fault rather than a decision.</strong> These are
+            recorded as open problems and each has a number against it, so none is forgotten:
+            <ul>
+                <li>
+                    <strong>Messages from a payment provider</strong> are kept whole and
+                    indefinitely, and a payment message normally carries the payer's name, e-mail
+                    address and billing address. This is the most sensitive item on the page.
+                </li>
+                <li>
+                    <strong>Messages the portal sent to another system</strong> keep what was in
+                    them &mdash; a registration carries somebody's full name, an event sent in by
+                    a visitor carries their e-mail address.
+                </li>
+                <li>
+                    <strong>Visitors' network addresses</strong> in two places that nothing ever
+                    clears.
+                </li>
+                <li>
+                    <strong>A recording's written-out transcript</strong>, and a second searchable
+                    copy of it &mdash; whatever was said aloud.
+                </li>
+                <li>
+                    <strong>Free text in the person's own words</strong>: a prayer request, a
+                    salvation card, why somebody wanted a room. Also a pastoral case's summary, and
+                    a presenter's name typed by hand.
+                </li>
+                <li>
+                    <strong>An expense receipt's original filename</strong>, which is the name the
+                    file had on the claimant's own computer.
+                </li>
+                <li>
+                    <strong>The fault log's detail and the address asked for</strong>, which can
+                    quote a name or an e-mail address. These do expire on the fault log's own
+                    timer, unlike the rest of this list.
+                </li>
+            </ul>
+            <strong>If somebody asks to be erased and any of these matters to them, deal with it
+            directly and record that you have.</strong>
+        </li>
+    </ul>
+    <p>
+        Everything above is written down, table by table and column by column, with the reason for
+        each, in the portal's own list of where personal information lives. An automatic check
+        refuses to let a new place holding somebody's contact details be added without a decision
+        being written for it &mdash; but <strong>that check cannot judge free text</strong>, so a
+        note somebody types a name into will not be caught by it.
     </p>
 
     <h3 class="h6 mt-3">What you set</h3>

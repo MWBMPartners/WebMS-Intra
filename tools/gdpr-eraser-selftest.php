@@ -441,6 +441,27 @@ const CASCADES_INTO_KEPT_TABLES = [
     'tblZoomAccount -> tblZoomMeeting' => 'A meeting made through the erased person\'s own Zoom connection is a room in '
         . 'THEIR Zoom account, which the portal cannot open once the connection is gone. Salem874 decided on 11 October '
         . '2026 that it goes with the connection. A meeting they made through somebody else\'s connection is kept.',
+    // 🧾 Added by #706 (2 November 2026), and the reason it reads oddly is worth
+    //    knowing. Which day of a reading plan somebody finished is a record of
+    //    what a NAMED PERSON did, so it should go — and it does. But the row
+    //    carries no account number of its own, so no instruction can find the
+    //    person in it, and the coverage test refuses an entry that claims an
+    //    action with no column to act on (#535). So the catalogue records it as
+    //    kept, and the database is what removes it: the enrolment above it does
+    //    carry the account number, is erased outright, and these rows go with
+    //    it. The entry's reason says exactly that.
+    //
+    //    IT DIFFERS FROM THE TWO ABOVE IN ONE WAY. They are `unlink`, because
+    //    each has an actor column to detach (`contactedByID`, `createdByID`).
+    //    This one has NO column at all, which is why it could not be `unlink`
+    //    and had to be recorded as kept instead. The outcome is the same: the
+    //    rows are gone.
+    'tblReadingPlanEnrollment -> tblReadingPlanProgress' => 'Which days of a reading plan the erased person '
+        . 'finished. The enrolment is theirs and is deleted outright, and the progress rows under it are about '
+        . 'nobody else, so they go with it. The row itself is two numbers and a date - no name, no free text - '
+        . 'and it carries no account number, which is why its own catalogue entry records it as kept and leaves '
+        . 'the removal to the database. Nothing of anybody else\'s is reached: a row belongs to exactly one '
+        . 'enrolment, and an enrolment to exactly one person.',
 ];
 
 // A delete after which the database EMPTIES a link on a kept table's rows.

@@ -2,6 +2,64 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — every table now has a decision about the personal information in it, and the check that
+  was meant to notice a gap no longer depends on somebody's memory (#706)**
+  - **What was wrong, and it was worse than the issue said.** `personal-data-catalogue.php` records,
+    table by table, what personal information the portal holds and what happens to it when somebody
+    asks for a copy or asks to be forgotten. **Sixty-six tables were in it nowhere at all**, and
+    **thirty-seven columns holding a person's details were named in no entry.** The issue listed
+    eleven columns found by reading; the real figures came from reading the database structure.
+    **Be exact about what that cost, because a first draft of this entry was not.** For about a
+    dozen of the thirty-seven the erasure was already clearing them and only the written record was
+    missing — `tblUsers.phoneNumber` and `displayPhone` were already emptied, and
+    `tblPrayerRequests`' submitter name, address and network address too. For the rest — a walk-in's
+    name on a register, a small group's street address, the adults authorised to collect a child —
+    nothing reached them and still does not. Both are faults, but they are different faults: the
+    first misdescribed the portal to anybody answering a request, the second left personal data in
+    place. And naming a column does **not** add it to the copy somebody can ask for: that copy
+    reports each table's name, row count, action and reason, never a column's value.
+  - **The root cause was one level up from the issue's description.** There is already an automatic
+    check that reads the database structure and refuses a table holding personal data with no
+    decision recorded — and it was passing over all thirty-seven. Its list of what counts as a
+    personal column is **written out by hand, name by name**, so it only ever found a column
+    somebody had already thought of: it knows `phone` but not `phoneNumber`, `address` but not
+    `addressLine1`, `visitorIP` but not `createdIP`. Its own notes record eleven separate occasions
+    on which somebody had to remember to extend it. A guard that looks as though it reads the
+    database was in fact reading somebody's memory.
+  - **It now asks about the SHAPE of a column's name as well.** The words of the name are examined
+    one by one: a contact word (e-mail, telephone, address, postcode, network address) or a `name`
+    whose qualifier says *whose* — a reporter, a submitter, a walk-in, a counterparty. The
+    hand-written list stays beside it, because a shape cannot recognise an account-number column.
+    **The judgement about each column stays in the catalogue, where a person reads it**; the check
+    only insists that somebody has written one.
+  - **It is deliberately a narrow rule.** A first attempt flagged 283 columns across 150 tables,
+    nearly all of them harmless classifications — `categoryName`, `deptName`, `tuneName`. A check
+    that cries wolf gets switched off, and then it catches nothing. As written it finds 37 and
+    every one is real.
+  - **Four of the new entries record a fault rather than a position, and each has its own issue.**
+    Writing an honest reason for every table is what exposed them: **#712** two tables holding a
+    visitor's network address in full that nothing ever clears (one of them carries an index named
+    for a tidy-up that does not exist); **#713** payment messages from Stripe or PayPal kept whole
+    and for ever — including messages stored *before* the check on who sent them is acted on, and
+    carrying the payer's name, e-mail address and billing address; **#714** three places an erasure
+    cannot reach, namely a recording's transcript and its second searchable copy, an expense
+    receipt's original filename (the claim above it is kept for six years for HMRC, so the usual
+    cascade never happens), and a workflow's subject label.
+  - **Among the thirty-seven, the ones worth naming**: a member's own telephone number and second
+    telephone number; the network address kept against a password reset, a trusted device and a
+    Gift Aid declaration; a prayer request's submitter name, address and network address; the
+    adults authorised to collect a child; a walk-in's name on an attendance register; and — the one
+    nobody would guess — a small group's street address, because a small group usually meets in
+    somebody's **home**.
+  - **A free-text column is listed, not refused.** 216 `text` and long `varchar` columns (as at 2 November
+    2026) are printed as an inventory with a count. Most hold nothing personal and a few certainly do; a
+    written reason for each would be mostly boilerplate, and filler nobody reads is a cost rather
+    than cover. They are worked down later, with an issue each. **So a green run means every
+    contact-shaped column is named — not that every personal column is**, and the check says so
+    itself.
+  - Checks: `tools/gdpr-coverage-selftest.php` 90/90, `check_personal_data_coverage.py` extended
+    and still a hard gate, whole suite 66 of 66 green. Four planted faults, each caught by the
+    check that should catch it and each reverted byte-identically.
 - **Added — PHP 8.6 is supported, and two fixes that are right on every version (#705, #627)**
   - **Measured against a real PHP 8.6.0RC4, not read about.** All 1,069 PHP files in the
     repository parse on it, and the self-tests that need no database pass on it unchanged. 8.4

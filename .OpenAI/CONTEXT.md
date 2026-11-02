@@ -2256,6 +2256,76 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     parent table (#709)".
     *(`.claude/CLAUDE.md` → the erasure bullet.)*
 
+35. **Every table has a catalogue decision now, and the check that guards it asks about a column's SHAPE (#706).**
+    `web/_core/personal-data-catalogue.php` had SIXTY-SIX tables missing entirely and THIRTY-SEVEN columns holding a
+    person's details named in no entry at all. **The hard gate that exists to catch exactly this was GREEN over all
+    thirty-seven**, because `tools/audit-checks/check_personal_data_coverage.py` decided what a personal column is
+    from a hand-written list of LITERAL names — it knew `phone` but not `phoneNumber`, `address` but not
+    `addressLine1`, `visitorIP` but not `createdIP`, nine particular `*Name` columns but not `walkinName`. Its own
+    comments record ELEVEN separate occasions on which somebody had to remember to extend it. **It was somebody's
+    memory wearing a schema-driven check's clothes — the #645 shape one level up: the guard meant to break the circle
+    was inside it.** It now ALSO tests the SHAPE of the name: whole words split out of the column name, a contact word
+    (email/phone/address/postcode/ip/dob/nhs), or `name`/`names` where the qualifier says WHOSE (reporter, submitter,
+    walkin, counterparty, external, pickup, guardian). Only on a column that can really HOLD text, which keeps
+    `emailOutcome` (an enum), `emailAt` (a datetime) and `emailLogID` (an integer) out. **The literal list STAYS
+    beside it**, because no shape catches an account-link column (`actorUserID`, `giverID`, `decidedByID`), and those
+    are most of its present value. **The judgement stays in the catalogue**, where a person reads it; the check only
+    insists somebody has written one. **KEEP IT NARROW:** a first draft flagged 283 columns across 150 tables, because
+    "contains the word name" matches `categoryName`, `deptName`, `typeName`, `themeName`, `tuneName`, `eventName`,
+    `locationName`, `groupName` and `seriesName` — not one a person. A check that cries wolf gets switched off, and
+    then it catches nothing (#483, and `check_limit_settings_capped.py`'s own lesson). As written it finds 37 and
+    every one is real. **Free-text columns are an INVENTORY, not a gate** (the owner, 2 November 2026): they are
+    printed with a count (do not write the number down here - it moves every time a column is named), because most hold nothing personal while a few certainly do, and a written reason for each
+    would be mostly boilerplate. **So a green run means every CONTACT-SHAPED column is named, NOT that every personal
+    column is**, and the check says so itself. Three rules the catalogue enforces, each learnt the hard way here: a
+    `notEmptiedHere` key must ALSO appear in `columns` (#635 — `columns` says what makes the table personal,
+    `notEmptiedHere` why a named one survives); an entry may not promise an action the code cannot perform (#535), so
+    `tblExpenseClaimItems` and `tblReadingPlanProgress` — which carry no account column anywhere — are `retain` with
+    the truth in the reason rather than `unlink` and `erase`; and **`tblErasureAudit` must NOT be in the catalogue at
+    all** (#510, rule 7d of the coverage test, which refuses ANY instruction naming it — **including a `retain` entry,
+    because "keep this" is still an instruction**), so the file carries a comment at that spot, because a deliberate
+    absence looks exactly like the #706 fault. **NOT ONE of the sixty-six carried a `userID`** — they are lists of
+    kinds, settings, and child tables keyed by a parent (`tblExpenseClaimFiles.claimID`, `tblEventJobs.eventID`) — so
+    they were unreachable BY CONSTRUCTION rather than by oversight, which is why nobody had written them down. #709's
+    parent matching reaches some of them, **but NOT `tblExpenseClaimFiles`**: its parent is deliberately KEPT for
+    HMRC, so there is no deletion to cascade and no parent-matched clause to write — a mechanism that reaches rows
+    through a parent is no help when the parent is the thing being kept. **WRITING AN HONEST REASON IS WHAT FOUND THE
+    FAULTS:** four of the sixty-six reasons could not be written truthfully without recording something broken, and
+    each became an issue — #712 (two tables keep a visitor's network address in full and nothing ever clears them; one
+    carries an index named `idx_ratelimit_prune` for a tidy-up that does not exist), #713 (`tblWebhookEvent` keeps the
+    WHOLE Stripe/PayPal message, stored BEFORE the check on who sent it is acted on, on a table with no foreign keys
+    at all, carrying the payer's name, e-mail and billing address), #714 (three places an erasure cannot reach). An
+    entry saying "nothing clears this" is a description of today, not a defence of it. The technical record is
+    DEV_NOTES.md, "A guard that looks schema-driven and is not (#706)".
+    **ROUND 1 OF THE CHECK FOUND THE GUARD ITSELF BROKEN, and it is the
+    best lesson here: a BRACKET-COUNTING parser is broken by a COMMENT,
+    and the comment that broke mine was a note about this very parser.**
+    One unbalanced `[` inside tblAnonymousCheckins' comment made that
+    entry's "block" run 144,494 of the file's 153,340 characters,
+    absorbing every other entry's `notEmptiedHere` keys -- so a
+    contact-shaped column on that table was INVISIBLE if its name
+    appeared anywhere else in the file. Live on the day it was written.
+    **Stripping comments is the WRONG fix** (a reason may contain `//`,
+    as any URL does): delimit each entry from its own header to the NEXT
+    header and parse no structure at all. Same cause, second fault: the
+    decision regex wanted `'decision'` immediately after `[`, so it
+    MISSED the two entries carrying a comment there -- 226 seen where
+    PHP sees 228, and the success line printed the wrong number as
+    coverage. Four more: **"nothing erased them" conflated two faults**
+    (about a dozen of the 37 were ALREADY erased and merely
+    undocumented, which `git show HEAD:` proves, while the rest are
+    genuinely unreached); **naming a column does NOT add it to the data
+    copy** (`inventory()` reports table, count, action and reason, never
+    a value); **a `period` must be checked against the purging code**
+    (`tblAssetFoundReports` IS cleared at 180 days by the nightly asset
+    job, and that method's own docblock records the same untruth being
+    deleted once before); and **a reason may not cite the issue being
+    closed** (four said "Tracked as #706" and now say #715). Also:
+    listing a column under an `erase` table READS as erased --
+    `externalName` means "not a portal user", so that row has no account
+    number and the delete never reaches it.
+    *(`.claude/CLAUDE.md` → the #706 bullet.)*
+
 ## A few more things worth knowing
 
 - **Branches are meant to be promoted through four steps on the way to

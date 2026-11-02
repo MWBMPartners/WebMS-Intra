@@ -13724,3 +13724,193 @@ close cannot be provoked without a custom stream wrapper, and nothing in
 Third, the `version_compare` check in section C4 pins PHP's own ranking rather
 than anything in this repository, so no edit here can make it fail; the
 pre-release test beside it is the one that guards the constant.
+
+---
+
+## A guard that looks schema-driven and is not (#706)
+
+The personal-data catalogue is the one list behind both of somebody's rights
+over their own information: a copy of it, and its deletion. On 2 November 2026
+**sixty-six tables were in it nowhere, and thirty-seven columns holding a
+person's details were named in no entry at all.**
+
+The interesting part is not the gap. It is that **a hard gate existed to catch
+exactly this, it reads the database structure, and it was green over all
+thirty-seven.**
+
+### Why it was green
+
+`tools/audit-checks/check_personal_data_coverage.py` decides what counts as a
+personal column from a hand-written list of **literal names**, anchored whole:
+
+```python
+r"^(firstName|lastName|fullName|…|email|phone|address|postcode|notes|userID|…)$"
+```
+
+So it knows `phone` but not `phoneNumber`; `address` but not `addressLine1`;
+`visitorIP` but not `createdIP`; nine particular `*Name` columns but not
+`walkinName`, `reporterName` or `counterpartyName`. Its own comments record
+**eleven separate occasions** on which somebody extended it — "Added by #514
+part P7", "Added by #535", "Added by roll-out package A2a", "Added by mail
+package M3" — each saying, in effect, "without the name here that entry could
+be deleted and this check would still pass."
+
+**It was never a schema-driven check. It was somebody's memory wearing a
+schema-driven check's clothes.** That is the #645 shape one level up: the guard
+that was supposed to break the circle was itself inside it.
+
+### The rule that replaced it, and why it is narrow
+
+Ask about the **shape** of the name, not the name itself. Split the column name
+into words and test whole words:
+
+- a contact word — `email`, `phone`, `address`, `postcode`, `ip`, `dob`, `nhs`;
+- or `name`/`names` where the qualifier says **whose** — `reporter`,
+  `submitter`, `walkin`, `counterparty`, `external`, `pickup`, `guardian`.
+
+And it only applies to a column that can actually hold text, which is what
+keeps `emailOutcome` (an enum), `emailAt` (a datetime) and `emailLogID` (an
+integer) out of it.
+
+**The first draft flagged 283 columns across 150 tables** and was useless,
+because "contains the word name" matches `categoryName`, `deptName`,
+`typeName`, `themeName`, `tuneName`, `eventName`, `locationName`, `groupName`
+and `seriesName` — not one of them a person. The same lesson
+`check_limit_settings_capped.py` already carries, and #483's: **a check that
+cries wolf gets switched off, and then it catches nothing.** As written the rule
+finds 37 and every one is real.
+
+**The hand-written list stays beside it.** A shape cannot recognise
+`actorUserID`, `giverID` or `decidedByID`, and those account-link columns are
+most of that list's present value. The two run together.
+
+**The judgement stays in the catalogue.** The check never decides whether a
+column *is* personal or what should happen to it; it insists only that somebody
+has written a decision down, in the file a person reads.
+
+### Writing an honest reason is what finds the faults
+
+The work was supposed to be documentation. Four of the sixty-six reasons could
+not be written truthfully without recording something broken, and each became
+its own issue:
+
+| Issue | What the reason had to admit |
+|---|---|
+| **#712** | Two tables keep a visitor's network address in full and **nothing ever clears them**. `tblLiveRateLimits` has no clear-out, no foreign key and no cascade — and carries an index named `idx_ratelimit_prune`, for a tidy-up that does not exist. |
+| **#713** | `tblWebhookEvent` keeps the **whole** Stripe or PayPal message, and keeps it **before the check on who sent it is acted on** — so anybody's POST is stored for ever, on a table with no foreign keys at all, carrying the payer's name, e-mail and billing address. |
+| **#714** | Three places an erasure cannot reach: a recording's transcript and its byte-for-byte search copy; an expense receipt's **original filename** (the uploader's own, so "Jane Smith receipt.pdf"), where the claim above it is deliberately KEPT for HMRC so the cascade never fires; and a workflow's subject label. |
+| **#707** | Already open — an audit line *about* the erased person is reachable by nothing. |
+
+**An entry that says "nothing clears this" is a description of today, not a
+defence of it.** That is why each carries an issue number in the reason itself.
+
+### Three things the catalogue's own rules taught, the hard way
+
+1. **A column in `notEmptiedHere` must also be named in `columns`** (#635's
+   rule). `columns` says what makes the table personal; `notEmptiedHere`
+   explains why a named one survives. Adding the second without the first reads
+   as a stale explanation left behind by a rename, and the coverage test says
+   so.
+2. **An entry may not promise an action the code cannot perform** (#535). Two
+   drafts said `unlink` and `erase` for tables with no account column anywhere
+   on them — `tblExpenseClaimItems` and `tblReadingPlanProgress`. There is
+   nothing to find the person by, so both are recorded as kept, with the truth
+   in the reason: the first is detached when the claim above it is, the second
+   is removed by the database along with the enrolment it hangs off.
+3. **`tblErasureAudit` must NOT be in the catalogue** (#510). It is the sealed
+   proof that an erasure happened, and rule 7d of the coverage test refuses any
+   instruction naming it — **including a `retain` entry, because "keep this" is
+   still an instruction.** A deliberate absence looks exactly like the #706
+   fault, so the file now carries a comment at that spot explaining why the gap
+   is intentional.
+
+### None of the sixty-six could be reached before #709
+
+Not one of them carries a `userID`. They are lists of kinds, settings, and
+child tables keyed by a parent (`tblExpenseClaimFiles.claimID`,
+`tblEventJobs.eventID`). An erasure instruction needs a person's number to
+match on, so they were unreachable **by construction** rather than by
+oversight — which is why nobody had written them down.
+
+#709's parent matching changes that for some of them. **But not for
+`tblExpenseClaimFiles`**, and the reason is worth keeping: its parent is
+deliberately retained for HMRC, so there is no deletion to cascade and no
+parent-matched clause to write. A mechanism that reaches rows through a parent
+is no help when the parent is the thing being kept.
+
+### Seven things the independent check found, and the first is the best
+
+The package above was NOT CLEAN. Each of these is worth recognising again.
+
+**1. A bracket-counting parser is broken by a comment — and the comment that
+broke mine was about this very parser.** `catalogue_named_columns()` walked
+brackets from `'tblX' => [`. `personal-data-catalogue.php` line 182 holds,
+inside a comment, the text `('tblXxx' => [ \s* 'decision' => '...')` — one
+unbalanced `[`. So `tblAnonymousCheckins`' "entry" ran from line 162 to line
+2352: **144,494 of the file's 153,340 characters.** Its set of named columns
+absorbed every other entry's `notEmptiedHere` keys, sixty of them, so a
+contact-shaped column added to that table was invisible whenever its name
+appeared anywhere else in the file. Proved by planting: `postcode` on
+`tblAnonymousCheckins` passed while `postcode` on `tblVenueRooms` was caught,
+in the same run. **This was live on the day it was written, in the guard whose
+whole purpose is to close this class of gap.**
+
+**Stripping comments first is the obvious repair and is wrong** — a reason may
+legitimately contain `//`, as any URL does. The fix is to stop parsing
+structure at all: entries are top-level and uniformly indented, so each runs
+from its own header to the next header. Nothing inside an entry can move that
+boundary.
+
+**And my stated limit was wrong in the reassuring direction, twice.** The
+docstring warned about a `]` inside a *reason string* and said "none does
+today" — true, and irrelevant: the break was a `[` in a *comment*, and it was
+already happening.
+
+**2. A regex that requires the next thing after `[` misses anything with a
+comment there.** `catalogue_decisions()` wanted `'decision'` after the opening
+bracket with only whitespace between, so it skipped the two entries that carry
+a comment explaining why their decision reads oddly. Measured: the regex saw
+226 entries where PHP sees 228 — and the success line printed that wrong
+number as though it were the coverage. Both readers now share one splitter.
+
+**3. "Nothing erased them" conflated two different faults.** Of the 37 unnamed
+columns, about a dozen were *already* being erased and only the written record
+was missing (`git show HEAD:web/_core/GdprEraser.php` — `tblUsers`' nullCols
+already held `phoneNumber` and `displayPhone`; `tblPrayerRequests`' already
+held its three submitter columns). The rest are genuinely unreached. Both are
+faults; one misdescribes the portal to whoever answers a request, the other
+leaves personal data in place. **Overstating a fault is the direction this
+project keeps calling out.**
+
+**4. Naming a column does not put it in the copy somebody can ask for.**
+`GdprEraser::inventory()` reports each table's name, row count, action and
+reason — never a column's value — and it iterates instructions, so the
+`not-personal` and account-less `retain` entries never appear in it at all.
+Three documents claimed otherwise.
+
+**5. A `period` field must be checked against the code that does the purging.**
+`tblAssetFoundReports`' new `period` said "nothing clears it on a timer".
+`AssetRegister::purgeExpiredFoundReports()` deletes past
+`assets.found_report_retention_days` (default 180) and the nightly asset job
+calls it. **That method's own docblock records that a note claiming the
+opposite was deleted in the #569 sweep** — so this package wrote the same
+untruth back, in the one field whose purpose is to let an organisation state
+how long it keeps something.
+
+**6. An issue reference must not point at the issue being closed.** Four column
+reasons said "Tracked as #706". On closing #706 they would have been recorded
+nowhere — the #678 rule. They now point at #715.
+
+**7. Listing a column under an `erase` table reads as "erased", and may not
+be.** `externalName` on three event tables is, by its own schema comment, the
+"name if person is not a portal user" — so such a row has no account number,
+the delete-where-userID-matches never touches it, and the name survives
+exactly as a walk-in's does. Naming it in `columns` with no `notEmptiedHere`
+said the opposite.
+
+**What the check still cannot do, now stated in its own header:** it cannot
+judge free text, it misses a `VARCHAR(10)` postcode (the text-length floor),
+and `NAMED_ELSEWHERE_ON_PURPOSE` is empty so its stale-exemption clause cannot
+fail today. Nothing in the repository tests the check itself — every mutation
+the reviewer tried was invisible to everything but their own eye, which is the
+`api-spec-check-selftest.py` shape and the obvious next thing to build.

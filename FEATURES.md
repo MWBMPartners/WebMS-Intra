@@ -270,6 +270,37 @@ screens and didn't say what it meant.
     warn everybody on 8.6.0RC4, which is the first build that carries the
     October 2026 fix. Section C4 of the self-test pins that, and says why at
     the point of failure.
+- **Every table now has a written decision about the personal information in
+  it, and the check guarding that no longer relies on memory (#706).** The
+  personal-data catalogue is the one list behind both of somebody's rights over
+  their own information — a copy of it, and its deletion. Sixty-six tables were
+  in it nowhere, and thirty-seven columns holding a person's details were named
+  in no entry. All now carry a decision and a reason.
+  - **Two different faults, and the difference matters.** For about a dozen of
+    the thirty-seven the erasure was already clearing the column and only the
+    written record was missing, so the portal was misdescribed to whoever
+    answered a request. For the rest — a walk-in's name, a small group's street
+    address, the adults authorised to collect a child — nothing reached them,
+    and for several of those nothing does yet. Naming a column does not add it
+    to the copy somebody can ask for: that copy reports each table's name, row
+    count, action and reason, never a column's value.
+  - **The check that should have caught it was green over all thirty-seven**,
+    because its idea of a personal column was a list of names written out by
+    hand: it knew `phone` but not `phoneNumber`, `address` but not
+    `addressLine1`. It now also asks about the shape of a name — a contact word,
+    or a `name` whose qualifier says whose — while the hand-written list stays
+    beside it for account-number columns, which no shape can recognise.
+  - **Deliberately narrow.** A first attempt flagged 283 columns, nearly all
+    harmless classifications (`categoryName`, `deptName`, `tuneName`). A check
+    that cries wolf gets switched off. As written it finds 37, all real.
+  - **The judgement stays in the catalogue**, where a person reads it; the
+    check only insists somebody has written one. Free-text columns are listed
+    as an inventory rather than refused, and the check says plainly that a
+    green run means every contact-shaped column is named, not every personal
+    one.
+  - Writing an honest reason for each is what exposed four real faults, now
+    tracked as #712, #713 and #714 — personal data that nothing ever clears,
+    and three places an erasure cannot reach.
 - **A session id the portal never issued is refused (#705).** Up to and
   including PHP 8.5, PHP accepts any well-formed session id a request sends —
   even one naming no session — and starts a session under it. The portal now
