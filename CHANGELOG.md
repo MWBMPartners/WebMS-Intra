@@ -84,6 +84,63 @@
     dropping out of the expected list. `tools/mail-queue-selftest.php` also calls this job over real HTTP and
     asserts on the day-of summary's recipients, but its own check is satisfied by the portal-wide flag
     alone — so it would not have noticed a per-organisation flag being dropped either.
+- **Fixed — thirty-five tables named a personal column that nothing emptied; every one now has a decision
+  and a written reason (#635)**
+  - **What was wrong.** `web/_core/personal-data-catalogue.php` is the written list of where personal
+    information lives, and it names the columns that make each table personal. The erasure routine built its
+    instructions from that list but only ever acted on the names holding an **account number** — so a column
+    holding an address, a hand-typed name or a note was named as personal and emptied by nothing. That was
+    #626 on the activity log. It was true of thirty-five other tables.
+  - **Five columns are now emptied, across three tables.** `tblErrors` loses the visitor's address, the
+    browser name and the copied request headers; `tblAuditTrail` loses the address a change came from;
+    `tblEventAttendance` loses a note on the row that says this person was present. A sixth named column,
+    `tblCareVisit`'s pastoral note, is **not** emptied yet: reaching it needs matching through a parent
+    table, which is **#709**.
+  - **`tblErrors` and `tblAuditTrail` are hand-written instructions on purpose, and this is the trap worth
+    knowing.** For a column that is not an account number the routine emits a plain `= NULL` on **every row
+    the instruction matched** — only account columns get the per-person `IF()` scoping. So such a column is
+    safe only where the matched column says who the row is **about**. `tblErrors` has two account columns, and
+    the three diagnostic columns belong to the subject one alone: on the "who resolved it" instruction they
+    would have blanked an unrelated visitor's address from every fault the erased administrator ever ticked
+    off. A hand-written entry also **wins over the derived one for the whole table**, so both of that table's
+    instructions are written out; dropping the second would silently stop the other link being detached.
+  - **Several tables keep a personal column because the only available match is the WRONG PERSON.** In
+    `tblLiveChatMessages`, `tblEventRSVPInvites`, `tblVenues` (the caretaker's name and telephone),
+    `tblKidCheckins` (who collected a child) and `tblSmallGroups` (a meeting place that may be a member's
+    home), the only account column is the moderator who approved or hid the message — a chat sender has no
+    account at all, being identified by an anonymous token — or the coordinator who sent the invitation,
+    whoever added the venue, or the helper who did the checking. Nothing records whose home a group meets in. Emptying would have deleted a
+    **third party's** details from rows that have nothing to do with the person who asked, while reaching none
+    of their own — and would have lost the only record of who to ring for a building's keys, and the only
+    record of who collected a child. An earlier draft of this work called these "the same fault as #626" and
+    would have emptied all four; the owner's decision of 1 November 2026 keeps them with the limit written down.
+  - **Twenty-two were only a free-text note; twenty-one of them keep it, and the owner's rule decides by
+    what the ROW is** (the twenty-second is the attendance note, now emptied): empty it
+    where the row is the person's own record, keep it where the row is the organisation's record of a thing or
+    a transaction. So a note on a pastoral visit goes and a note on a venue invoice stays. Whoever typed the
+    note is still detached, by cutting the account link; the text is not theirs to erase.
+  - **Six columns were never personal at all** and have come off the list: an `AUTO_INCREMENT` primary key,
+    a venue's postcode and map position (a building in a directory), and a stored filename that is
+    `bin2hex(random_bytes(16))` and never derived from anything a visitor sends.
+  - **`notEmptiedHere` replaces a list of 35 table names that lived in a test file.** Each named column that
+    an instruction does not empty now carries its reason **beside the column, in the file a request for
+    somebody's information is answered from** — so a person asking why a column is still there can read the
+    answer. Three new checks stop it becoming an excuse list: a reason must be long enough to be a reason, an
+    explanation for a column the entry no longer names fails as stale, and an explanation for a column that
+    **is** now emptied fails — so the list shrinks as the work is done. `$leftBehindOnPurpose` is empty and
+    must stay empty.
+  - **Also corrected:** a comment in the erasure routine claimed thirteen columns could never be emptied and
+    named `createdByID` on the venue register as an example. Migration 192 made exactly those nullable and the
+    schema now says `createdByID INT DEFAULT NULL`. The guard is still right — a customer's database is what
+    refuses, and it can be out of step with the schema file — but the example was false.
+  - **Found and raised, not fixed here:** #706, the catalogue is **incomplete** — `tblAuditTrail`'s
+    `oldValue`/`newValue`/`changeSet` hold a JSON copy of a whole row, `tblErrors.errorDetail` holds a full
+    backtrace, and ten more personal columns appear in **no entry at all**, so they are invisible to this
+    issue and to its checks. #707, an audit row *about* the erased person is reachable by nothing. #708, two
+    dead columns and two loose ends.
+  - Proved by `tools/gdpr-coverage-selftest.php` (73 checks), with planted faults at build time and more
+    against the three checks the independent rounds added — each caught by the check that should catch it,
+    and each reverted byte-identically.
 - **Added — an optional ceiling on how long giving records keep a donor's name (#687, migration 234)**
   - **The decision, in the owner's words (31 October 2026):** "An installation Global Admin, or
     Organisation global admin can have the option to enforce such a limit - but can also choose not

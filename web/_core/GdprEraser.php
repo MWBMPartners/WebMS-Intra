@@ -177,7 +177,19 @@ class GdprEraser
             // `tblAttendanceCheckIns` table. `tblAttendanceSessions` /
             // `tblAttendanceCounts` are aggregate headcounts by service
             // type with no per-user column, so nothing to catalogue there.
-            ['table' => 'tblEventAttendance',  'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'aggregate attendance stats retained — userID nulled'],
+            // 📝 `notes` ADDED 2 November 2026 (#635). `userID` here is a SUBJECT
+            //    column, so this instruction matches only rows that say the erased
+            //    person was present: the note on such a row is a note about them,
+            //    which the owner's rule of 1 November 2026 puts on the empty side.
+            //    It must NOT go on the `markedByID` instruction further down - that
+            //    one matches the coordinator who ticked the cell, and emptying there
+            //    would wipe OTHER members' notes. Nothing in the portal writes the
+            //    column today (both writers are INSERT IGNOREs in
+            //    calendar/event-attendance-mark.php and neither names it), so this is
+            //    a correct instruction for an import or a future page rather than a
+            //    live leak. `walkinName` on this table is a hand-typed name that no
+            //    catalogue entry names at all - #706.
+            ['table' => 'tblEventAttendance',  'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => ['notes'], 'reason' => 'aggregate attendance stats retained — userID nulled, and a note about this person goes with it'],
             // Expense claims live in `tblExpenseClaims`.`userID` — there is
             // no `tblExpenseClaim` (singular) table or `submittedByID` column.
             ['table' => 'tblExpenseClaims',    'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'UK HMRC requires 6-year retention of expense records'],
@@ -632,6 +644,47 @@ class GdprEraser
             // does.
             ['table' => 'tblEvents',                  'userCol' => 'submittedByID',    'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the event is kept; who sent it in for the calendar is detached'],
             ['table' => 'tblEvents',                  'userCol' => 'statusChangedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the event is the organisation\'s and stays; who last changed its status is detached'],
+            // 🧹 THE FAULT RECORD AND THE AUDIT TRAIL (#635, 2 November 2026).
+            //    Both are "unlink" in the written list, and both name a column
+            //    holding something other than an account number - an address, a
+            //    browser name, a copy of the request's headers. The derived route
+            //    only ever emits `nullCols => []`, so those columns were named as
+            //    personal and emptied by nothing: #626 on the activity log, twice
+            //    over.
+            //
+            //    WHY THESE ARE HAND-WRITTEN RATHER THAN DERIVED, which is the whole
+            //    reason this block exists. A `nullCols` entry belongs to ONE
+            //    instruction, and the derived route has no way to say which. For
+            //    tblErrors that matters: the table has TWO link columns, and
+            //    processEntry() empties a non-link column on EVERY row its
+            //    instruction matched. Put these three on the `resolvedByID`
+            //    instruction and an erasure would blank an unrelated visitor's
+            //    address, browser and headers from every fault the erased
+            //    administrator had ever ticked off. They belong to `userID` alone.
+            //
+            //    A hand-written entry WINS OVER THE DERIVED ONE FOR THE WHOLE TABLE,
+            //    so both of tblErrors' link columns are written out here. Dropping
+            //    the second line would silently stop `resolvedByID` being detached.
+            //
+            //    LIMIT, recorded rather than left to be discovered: Logger's
+            //    `errorPlatform()` takes its `userID` from the caller and defaults
+            //    to null, and about five of some 250 call sites pass one. So this
+            //    reaches almost none of a person's own fault records. It is right,
+            //    and it is not much. `errorDetail` (a full backtrace) and
+            //    `requestURL` (the whole request including its query string) are
+            //    named in no catalogue entry at all - #706.
+            ['table' => 'tblErrors',                  'userCol' => 'userID',           'action' => 'anonymise', 'nullCols' => ['visitorIP', 'userAgent', 'requestHeaders'], 'reason' => 'the fault record is kept for running and repairing the portal; the account, the address it came from, the browser name and the copied headers all go'],
+            ['table' => 'tblErrors',                  'userCol' => 'resolvedByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s fault record stays; who marked it resolved is detached'],
+            // tblAuditTrail has ONE link column, so there is no wrong-instruction
+            // risk here: `userID` is the actor, the account that made the change,
+            // and an address on such a row can only be theirs.
+            //    What this does NOT reach, written down because the table looks
+            //    covered: `oldValue`, `newValue` and `changeSet` hold json_encode()
+            //    of the whole row, so a change to the person's own account leaves
+            //    their name, e-mail and address in the trail (#706); and a row
+            //    ABOUT them is named by (tableName, recordID), which matches no
+            //    column at all (#707).
+            ['table' => 'tblAuditTrail',              'userCol' => 'userID',           'action' => 'anonymise', 'nullCols' => ['ipAddress'], 'reason' => 'the audit trail is kept for running and repairing the portal; the account and the address the change came from both go'],
             ['table' => 'tblEventAttendance',         'userCol' => 'markedByID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s attendance record stays; who marked it is detached'],
             ['table' => 'tblGivingEntry',             'userCol' => 'recordedByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s gift is a financial record and stays, with its donor, amount and date; who entered it is detached'],
             ['table' => 'tblPrayerRequests',          'userCol' => 'moderatorID',      'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s prayer request stays; who moderated it is detached'],
@@ -2675,13 +2728,27 @@ class GdprEraser
 
             // 🚫 Only empty a column the database allows to be empty.
             //
-            //    Thirteen of these columns are marked in the schema as never
-            //    allowed to be empty - `createdByID` on the venue register, the
-            //    asset register, invoices and several more. Emptying one throws,
-            //    and because that happens part way through a request, the person
-            //    is left with some of their information removed, some of it
-            //    still there, and no record of which was which. A half-finished
-            //    erasure is worse than one that never started.
+            //    Emptying a column the database refuses throws, and because that
+            //    happens part way through a request, the person is left with some
+            //    of their information removed, some of it still there, and no
+            //    record of which was which. A half-finished erasure is worse than
+            //    one that never started.
+            //
+            //    This note used to say "thirteen of these columns are marked in
+            //    the schema as never allowed to be empty - `createdByID` on the
+            //    venue register, the asset register, invoices and several more".
+            //    That is no longer true and the example was the clearest case
+            //    against it: migration 192 made every one of them nullable (the
+            //    count is deliberately not repeated - the old wording said
+            //    thirteen and the migration has fourteen `MODIFY COLUMN` lines,
+            //    which is how a number in a comment goes wrong),
+            //    and `full_schema.sql` now declares
+            //    `createdByID INT DEFAULT NULL COMMENT 'Empty once this person has
+            //    asked to be forgotten'`. The GUARD is still right, for a reason
+            //    the old wording hid: a customer's database is what refuses, and
+            //    it can be out of step with the schema file - an upgrade that half
+            //    ran, a column somebody changed by hand. Keep the guard; do not
+            //    trust a list of names in a comment.
             //
             //    Asked of the database itself rather than assumed from the
             //    schema file, because the database is what will actually refuse.
@@ -2713,8 +2780,30 @@ class GdprEraser
                 }
 
                 // Not a link to an account - free text describing whoever the
-                // row is about, such as a name typed in by hand. The row was
-                // matched on this person, so it does belong to them.
+                // row is about, such as a name typed in by hand. This is a PLAIN
+                // unconditional `= NULL`, on EVERY row the instruction matched.
+                //
+                // ⚠️ SO A NON-LINK `nullCols` ENTRY IS ONLY SAFE WHERE THE
+                //    MATCHED COLUMN IS THE ROW'S SUBJECT. The line above reads
+                //    "the row was matched on this person, so it does belong to
+                //    them" - true when `userCol` says who the row is ABOUT, and
+                //    false when it says who ACTED on it. Match on an actor and
+                //    this empties a THIRD PARTY's name, address or telephone from
+                //    every row that actor ever touched, on a request that was
+                //    never theirs.
+                //
+                //    That is why #635 (2 November 2026) hand-wrote tblErrors'
+                //    two instructions instead of leaving them derived: the three
+                //    diagnostic columns belong to the `userID` instruction alone,
+                //    and on `resolvedByID` they would have blanked an unrelated
+                //    visitor's address from every fault the erased administrator
+                //    had ticked off. It is also why SEVERAL tables keep a personal
+                //    column on purpose - tblLiveChatMessages, tblEventRSVPInvites,
+                //    tblVenues' caretaker, tblKidCheckins' pickup name and
+                //    tblSmallGroups' meeting location - each recorded with its
+                //    reason in `notEmptiedHere`. No count is given: an earlier
+                //    version of this comment said four and there were five. When you add a
+                //    non-link column here, check what `userCol` MEANS first.
                 $sets[] = '`' . $c . '` = NULL';
             }
             foreach ($overrides as $c => $v) {

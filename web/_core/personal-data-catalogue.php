@@ -49,6 +49,59 @@
  *   not-personal  It only looks personal. The map position of a room. A cache of
  *                 place names. Nothing about a person at all.
  *
+ * A FIFTH THING, WHICH IS NOT A FIFTH DECISION: `notEmptiedHere`
+ * -------------------------------------------------------------
+ * Added 2 November 2026 (#635). An entry's `columns` list names what makes the
+ * table personal. A table WITHOUT a hand-written instruction, though, got one
+ * instruction per ACCOUNT NUMBER column and nothing else - so a column holding
+ * an address, a hand-typed name or a note was named as personal and emptied by
+ * nothing. (A hand-written entry could always name extra columns; most tables
+ * do not have one.) That was #626 on the activity log, and it was true of
+ * thirty-five other tables.
+ *
+ * `notEmptiedHere` is where an entry answers, column by column, "this one is
+ * not emptied by this table's instruction, and here is why that is right". The
+ * reason is in ORDINARY WORDS on purpose: this is the file a request for
+ * somebody's information is answered from, so a person asking why a column they
+ * care about is still there should be able to read the answer.
+ *
+ * There are three honest reasons, and each appears below. A FOURTH state is
+ * allowed only while work is in flight and must name its issue: a column that is
+ * TO BE emptied, where the routine cannot yet reach it. `tblCareVisit.notes` is
+ * the one such line today (#709). Recording it here beats leaving it silent, and
+ * the check that refuses an explanation for a column that IS emptied is what
+ * forces the line out again when the work lands.
+ *
+ *   it is deliberately KEPT    The row is the organisation's record of a thing
+ *                              or a transaction, not the person's own record -
+ *                              an asset loan, an invoice, an order of service.
+ *                              Whoever typed the note is detached by cutting
+ *                              the account link; the text is not theirs to
+ *                              erase. (The owner's rule, 1 November 2026:
+ *                              decide by what the ROW is.)
+ *
+ *   it is emptied ELSEWHERE    Something other than this table's instruction
+ *                              deals with it, and the order matters. The two
+ *                              profile-image columns are the example.
+ *
+ *   it is UNREACHABLE          The column really is personal, and the only
+ *                              column an instruction could match on belongs to
+ *                              a DIFFERENT person. Emptying it would delete a
+ *                              third party's details from rows that have
+ *                              nothing to do with the person who asked, and
+ *                              still not touch anything of theirs. Several
+ *                              tables are in this state and each says so. No
+ *                              number is given here on purpose: a count in
+ *                              prose goes stale, and the entries below are the
+ *                              authority.
+ *
+ * WHAT STOPS THIS BECOMING AN EXCUSE LIST. Three checks in
+ * `tools/gdpr-coverage-selftest.php`: a reason must be long enough to be a
+ * reason, an explanation for a column the entry does not name is stale and
+ * fails, and an explanation for a column that IS now emptied fails - so the
+ * list shrinks as the work is done. It replaced a list of 35 table names kept
+ * in that test file with no reason attached to any of them.
+ *
  * ONE STANDARD FOR EVERYBODY
  * --------------------------
  * Deliberately no variation by where somebody lives. Working out a person's
@@ -174,11 +227,17 @@ return [
         'decision' => 'unlink',
         'reason'   => 'Who assigned equipment to an event. The assignment is the organisation\'s record, not the person\'s. Deleting it because a volunteer left would lose the event\'s kit list.',
         'columns'  => ['notes', 'assignedByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. An event kit list: where a piece of the organisation\'s property went and in what condition.',
+        ],
     ],
     'tblAssetIdentifiers' => [
         'decision' => 'unlink',
         'reason'   => 'Barcodes and tags identifying the organisation\'s property.',
         'columns'  => ['notes', 'createdByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. A barcode, serial number or asset tag is a fact about a thing the organisation owns; the note describes the identifier.',
+        ],
     ],
     'tblAssetKioskPins' => [
         'decision' => 'erase',
@@ -189,11 +248,17 @@ return [
         'decision' => 'unlink',
         'reason'   => 'Who a software licence seat was allotted to. The organisation still needs to know how many seats are in use.',
         'columns'  => ['userID', 'notes', 'releasedByID', 'linkedByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. A software licence seat and what it is used for.',
+        ],
     ],
     'tblAssetLoans' => [
         'decision' => 'unlink',
         'reason'   => 'Who borrowed an item. Deleting the loan would erase the item\'s history, and the organisation still needs to know where its property went. The name goes, the loan stays.',
         'columns'  => ['notes', 'counterpartyUserID', 'approvedByID', 'requestedByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. The organisation\'s record of lending its property out, kept as the loan\'s own history. (counterpartyName and counterpartyContact on this table are an outside person\'s details and are named in no entry at all - #706.)',
+        ],
     ],
     'tblAssetOrgs' => [
         'decision' => 'retain',
@@ -223,11 +288,17 @@ return [
         'decision' => 'unlink',
         'reason'   => 'An item counted during a stocktake. An audit record; deleting it would leave a gap in the count.',
         'columns'  => ['notes'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. A line in a stocktake of the organisation\'s property. Written by nothing in the portal today (#708).',
+        ],
     ],
     'tblAssetStocktakes' => [
         'decision' => 'unlink',
         'reason'   => 'A stocktake of the organisation\'s property - an audit record.',
         'columns'  => ['startedByID', 'notes'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. A stocktake of the organisation\'s property. Written by nothing in the portal today (#708).',
+        ],
     ],
     'tblAttendanceCounts' => [
         'decision' => 'not-personal',
@@ -244,7 +315,10 @@ return [
     'tblAttendanceSessions' => [
         'decision' => 'unlink',
         'reason'   => 'An attendance session. Deleting it would destroy the record of who came, for everybody who came.',
-        'columns'  => ['sessionID', 'notes', 'createdByID', 'updatedByID'],
+        'columns'  => ['notes', 'createdByID', 'updatedByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. A note about the gathering itself, not about anybody who came to it.',
+        ],
     ],
     'tblConsentLog' => [
         'decision' => 'erase',
@@ -276,11 +350,17 @@ return [
         'decision' => 'unlink',
         'reason'   => 'A two-person offering count - a FINANCIAL control record, deliberately requiring two people. Deleting it on one person\'s request defeats the whole point of it.',
         'columns'  => ['notes', 'createdByID', 'counter1ID', 'counter2ID', 'closedByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. A note about a counting session: the organisation\'s own figure for how many were present.',
+        ],
     ],
     'tblDecisionMoments' => [
         'decision' => 'unlink',
         'reason'   => 'Who wrote the entry down, not who it is about. Deleting it would destroy somebody else\'s record because the person holding the pen asked to be forgotten.',
         'columns'  => ['notes', 'recordedByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. This row has no human subject at all: it is a running tally keyed on the event and the kind of response.',
+        ],
     ],
     // 🧪 The Demo Data page's list of the rows it created (#498).
     //
@@ -379,6 +459,9 @@ return [
         'decision' => 'unlink',
         'reason'   => 'A change to one date of a repeating event. Deleting it would silently move the event back to its original time for everybody.',
         'columns'  => ['notes', 'createdByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. A note about one date of a repeating event.',
+        ],
     ],
     'tblEventPeople' => [
         'decision' => 'erase',
@@ -389,6 +472,10 @@ return [
         'decision' => 'unlink',
         'reason'   => 'Invitations sent for an event. They concern the people invited, not the person who sent them.',
         'columns'  => ['email', 'displayName', 'createdByID'],
+        'notEmptiedHere' => [
+            'email' => 'PERSONAL, AND UNREACHABLE. The only account column is the COORDINATOR who sent the invitation, so emptying here would delete a non-member invitee\'s e-mail address from every invitation that coordinator ever sent, and would not touch the erased person\'s own invitation. Kept with the limit recorded (the owner, 1 November 2026).',
+            'displayName' => 'PERSONAL, AND UNREACHABLE, for the same reason as email.',
+        ],
     ],
     'tblEventRSVPs' => [
         'decision' => 'erase',
@@ -530,6 +617,12 @@ return [
         'decision' => 'unlink',
         'reason'   => 'A CHILD\'S record, reached through the parent. The parent\'s right to erasure is their own and not their child\'s, and a child in current safeguarding arrangements must not disappear because an adult closed their account. The parent link is emptied; the child\'s record stays, and is covered by the time limit instead.',
         'columns'  => ['fullName', 'dateOfBirth', 'allergies', 'medicalNotes', 'parentUserID'],
+        'notEmptiedHere' => [
+            'fullName' => 'A child\'s own record, kept deliberately (the owner, 1 November 2026): the guardian link is cut and the child\'s details stay. The child is not the person asking, and this table holds exactly ONE guardian column, so "another guardian still has access" is not a state this schema can represent.',
+            'dateOfBirth' => 'Kept with the child\'s record. See fullName.',
+            'allergies' => 'Kept deliberately, and this is the reason the whole row is kept: allergies are safety-critical for a child who still attends, and destroying them because an adult closed their account could put that child at risk.',
+            'medicalNotes' => 'Kept for the same reason as allergies. (pickupAuthorisedNames on this table names other adults and is in no entry at all - #706.)',
+        ],
     ],
     'tblLeadershipAssignments' => [
         'decision' => 'erase',
@@ -560,6 +653,10 @@ return [
                     . 'account: they are posted without signing in, under a typed name, and nothing links them to '
                     . 'anybody.',
         'columns'  => ['displayName', 'senderIP', 'moderatedByID'],
+        'notEmptiedHere' => [
+            'displayName' => 'PERSONAL, AND UNREACHABLE - more so than it first looks. A chat sender has NO account at all: they are identified by `sessionToken`, which the schema calls an anonymous identity, and they type this name themselves. The table\'s only link to an account is `moderatedByID`, the MODERATOR, so an instruction that emptied this would blank the name a visitor typed from every message the erased moderator ever handled, while reaching nothing of the erased person\'s own. The owner chose on 1 November 2026 to keep it and record the limit rather than delete somebody else\'s data.',
+            'senderIP' => 'PERSONAL, AND UNREACHABLE, for the same reason as displayName: the address belongs to whoever sent the message, who has no account, and the only account column on the row is the moderator\'s. Its own schema comment says it is kept for moderation audit.',
+        ],
     ],
     'tblLocalAccounts' => [
         'decision' => 'erase',
@@ -596,7 +693,7 @@ return [
     'tblNoticeboardUploads' => [
         'decision' => 'unlink',
         'reason'   => 'Posters and media on the notice board. The organisation\'s material.',
-        'columns'  => ['storedName', 'createdByID'],
+        'columns'  => ['createdByID'],
     ],
     'tblOffboarding' => [
         'decision' => 'erase',
@@ -667,6 +764,9 @@ return [
         'decision' => 'unlink',
         'reason'   => 'Who approved a room or equipment booking. The booking belongs to whoever made it. Deleting it because the approver left would cancel other people\'s bookings.',
         'columns'  => ['notes', 'approvedByID', 'bookedByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. The organisation\'s record of a room booking. (purpose and declineReason are free text and are named in no entry - #706.)',
+        ],
     ],
     // 🤝 The next three, and tblTasks and tblVisitor further down, said 'erase'
     //    with the stock reason "Holds information about the person themselves"
@@ -682,6 +782,9 @@ return [
         'decision' => 'unlink',
         'reason'   => 'A slot on the organisation\'s rota. It stays. Whoever was filling it is detached, so the slot is unfilled, and so is whoever created it.',
         'columns'  => ['assignedToID', 'notes', 'createdByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. A duty on the rota exists before anybody is assigned and goes on existing unfilled. The note tells whoever is on duty something about the DUTY, and the reminder e-mail prints it.',
+        ],
     ],
     'tblRotaSwapRequest' => [
         'decision' => 'unlink',
@@ -698,6 +801,13 @@ return [
         // and no column ties the card's subject to an account.
         'reason'   => 'A response card filled in by, or about, somebody who came to an event. It is about THAT person, not the follow-up worker it was given to, so it stays and only the worker is detached. A card about the erased person themselves cannot be found: nothing ties a card\'s subject to an account.',
         'columns'  => ['fullName', 'email', 'phone', 'address', 'assignedToID', 'notes'],
+        'notEmptiedHere' => [
+            'fullName' => 'This describes the card\'s SUBJECT - the person who came to an event - not the erased follow-up worker the card was given to. Only the worker is detached. A card about the erased person themselves cannot be found: nothing ties a card\'s subject to an account. The owner decided on 1 November 2026 to record that limit rather than guess by matching on a typed e-mail address, which would miss a mistyped one and could erase a different person who shares a mailbox.',
+            'email' => 'The card subject\'s, not the erased worker\'s. See fullName.',
+            'phone' => 'The card subject\'s, not the erased worker\'s. See fullName.',
+            'address' => 'The card subject\'s, not the erased worker\'s. See fullName.',
+            'notes' => 'Follow-up notes about the card\'s subject, a third party. Emptying them because the worker asked to be forgotten would destroy somebody else\'s record. (prayerRequest on this table is the subject\'s own words and is named in no entry at all - #706.)',
+        ],
     ],
     'tblServicePlanItem' => [
         'decision' => 'unlink',
@@ -713,6 +823,9 @@ return [
         'reason'   => 'One item in a service running order. The running order is the organisation\'s own working '
                     . 'document, so the item stays and the number of whoever was down to present it goes.',
         'columns'  => ['presenterID', 'notes'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. A line in the order of service. (presenterText, a hand-typed presenter name, is the personal one here and is named in no entry - #706.)',
+        ],
     ],
     'tblServicePlanItems' => [
         'decision' => 'retain',
@@ -736,6 +849,9 @@ return [
         'decision' => 'unlink',
         'reason'   => 'A service running order. The organisation\'s own working document.',
         'columns'  => ['notes', 'createdByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. The organisation\'s order of service for a gathering.',
+        ],
     ],
     'tblSmallGroupMeetingAttendance' => [
         'decision' => 'unlink',
@@ -746,6 +862,9 @@ return [
         'decision' => 'unlink',
         'reason'   => 'Who took the register at a meeting. Deleting it would destroy the attendance record for everybody who was there, because one person asked to be forgotten.',
         'columns'  => ['notes', 'recordedByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. A note about one meeting of a group.',
+        ],
     ],
     'tblSmallGroupMembers' => [
         'decision' => 'erase',
@@ -756,6 +875,12 @@ return [
         'decision' => 'unlink',
         'reason'   => 'The group itself - its name, its purpose, its members. Deleting it because its founder left would dissolve the group and remove everybody else from it.',
         'columns'  => ['postcode', 'latitude', 'longitude', 'what3words', 'createdByID'],
+        'notEmptiedHere' => [
+            'postcode' => 'PERSONAL IN SOME ROWS, AND UNREACHABLE. This column\'s own schema comment says groups often meet in a member\'s home, so a postcode here can be somebody\'s home address - but NO column records whose, and nothing links the location to an account. Emptying it would blank the meeting place of groups that have nothing to do with the erased person. Kept with the limit recorded (the owner, 1 November 2026). (description and meetingNotes are free text and are named in no entry at all - #706.)',
+            'latitude' => 'The same home address as postcode, to seven decimal places. Personal in some rows, unreachable for the same reason.',
+            'longitude' => 'The same home address as postcode. Personal in some rows, unreachable for the same reason.',
+            'what3words' => 'Pinpoints the same place as postcode in three words. Personal in some rows, unreachable for the same reason.',
+        ],
     ],
     'tblSmsMessage' => [
         'decision' => 'erase',
@@ -893,16 +1018,26 @@ return [
         // photo and the biography its owner had written.
         'reason'   => 'The account itself. It is emptied rather than deleted: hundreds of records point at it, and deleting the row would drag them all down with it. Name, email, telephone, address, coordinates, biography and photo are all cleared, a photo file held in the portal\'s uploads folder is deleted, and the account is left as a tombstone that names nobody.',
         'columns'  => ['userID', 'fullName', 'emailAddress', 'displayAddress', 'displayBio', 'avatarPath', 'displayPhoto', 'latitude', 'longitude', 'what3words'],
+        'notEmptiedHere' => [
+            'avatarPath' => 'Emptied elsewhere, on purpose: GdprEraser::eraseProfileImages() reads this column to find the file, deals with the file, and only then empties both columns in one statement of its own. Emptying it from this instruction instead would throw away the only record of where the file is and leave the image on disk.',
+            'displayPhoto' => 'Emptied elsewhere, with avatarPath, by GdprEraser::eraseProfileImages() - after the file itself is dealt with, for the same reason.',
+        ],
     ],
     'tblVenueAgreements' => [
         'decision' => 'unlink',
         'reason'   => 'A hire agreement with a venue owner - a contract. It does not stop existing because the person who recorded it left.',
         'columns'  => ['notes', 'createdByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. A hire agreement\'s own terms, which the organisation must be able to show.',
+        ],
     ],
     'tblVenueBookings' => [
         'decision' => 'unlink',
         'reason'   => 'Agreed bookings of a hired building. They belong to the organisation and the venue owner, not to whoever entered them.',
         'columns'  => ['notes', 'createdByID', 'updatedByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. The organisation\'s record of a booking it made.',
+        ],
     ],
     'tblVenueImportRows' => [
         'decision' => 'retain',
@@ -927,21 +1062,35 @@ return [
         'decision' => 'unlink',
         'reason'   => 'Who recorded a payment. This is a FINANCIAL record. Deleting it because the person who typed it in left would put the organisation\'s accounts out of balance.',
         'columns'  => ['notes', 'recordedByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. A payment against an invoice: a financial record.',
+        ],
     ],
     'tblVenueInvoices' => [
         'decision' => 'unlink',
         'reason'   => 'A FINANCIAL record of money owed for venue hire. Deleting it because of who entered it would put the accounts out of balance.',
         'columns'  => ['notes', 'createdByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. An invoice: a financial record the organisation must be able to show.',
+        ],
     ],
     'tblVenueUsageTypeWindows' => [
         'decision' => 'unlink',
         'reason'   => 'Default hours a venue may be used. Organisation-wide settings, not personal information.',
         'columns'  => ['note', 'createdByID'],
+        'notEmptiedHere' => [
+            'note' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. When a venue may be used for a kind of activity: a rule about a building, set per venue.',
+        ],
     ],
     'tblVenues' => [
         'decision' => 'unlink',
         'reason'   => 'The venue register itself. Deleting it because of who typed it in would remove every hired building the organisation uses, and take its bookings, invoices and hire agreements with it.',
-        'columns'  => ['postcode', 'latitude', 'longitude', 'what3words', 'caretakerName', 'caretakerPhone', 'notes', 'createdByID'],
+        'columns'  => ['caretakerName', 'caretakerPhone', 'notes', 'createdByID'],
+        'notEmptiedHere' => [
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. Operational detail about a building - how to get in, where to park. Its own schema comment says so.',
+            'caretakerName' => 'PERSONAL, AND UNREACHABLE. The caretaker is a named third party - the key-holder for a building - and this table\'s only account column is createdByID, whoever added the venue. An instruction that emptied this would wipe the caretaker\'s name from every venue the erased staff member ever added, losing the only record of who to ring for keys, and would still not touch anything of the erased person\'s own. The owner chose on 1 November 2026 to keep it and record the limit.',
+            'caretakerPhone' => 'PERSONAL, AND UNREACHABLE, for the same reason as caretakerName: a third party\'s telephone number, reachable only by matching whoever added the venue.',
+        ],
     ],
     'tblVisitor' => [
         'decision' => 'erase',
@@ -1436,6 +1585,9 @@ return [
         // name; nothing ties it to an account.
         'reason'   => 'A child being checked in to, and out of, a session. It is the CHILD\'S record and stays. Whichever helper checked the child in, and whichever checked them out, is detached.',
         'columns'  => ['checkedInByID', 'checkedOutByID', 'pickupName'],
+        'notEmptiedHere' => [
+            'pickupName' => 'PERSONAL, AND UNREACHABLE. Nothing on this row links the name to an account - the two account columns are the HELPERS who did the checking - so the only possible match is a text comparison against the erased person\'s stored name, which would miss a nickname and hit a namesake. It is also the only record of who collected a child, so a wrong match destroys a safeguarding trail. The owner decided on 1 November 2026 to keep it and record the limit; anything better needs a real link from a check-in to the collecting adult (#708).',
+        ],
     ],
     'tblMigrations' => [
         'decision' => 'unlink',
@@ -1466,11 +1618,17 @@ return [
         // record (the database deletes a visitor's notes with the visitor).
         'reason'   => 'A follow-up note about a visitor: how they were contacted and what was said. It is about the VISITOR, so it stays; who wrote it is detached.',
         'columns'  => ['contactedByID', 'summary'],
+        'notEmptiedHere' => [
+            'summary' => 'The erased person\'s OWN summary is already gone, by a different route: tblVisitor\'s instruction is \'delete\' matched on convertedUserID, and the link from a contact to its visitor cascades. What can survive is a summary about SOMEBODY ELSE, reachable only through the worker who wrote it - and emptying it there would destroy a third party\'s record because the person who typed it asked to be forgotten. Limit, under the owner\'s decision of 1 November 2026: a visitor who never got an account cannot be found at all.',
+        ],
     ],
     'tblWorkflowActions' => [
         'decision' => 'unlink',
         'reason'   => 'One step in an approval: approved, rejected or commented, with any comment written at the time. The organisation\'s record of how a decision was reached, so it stays; who acted is detached.',
         'columns'  => ['actedByID', 'comment'],
+        'notEmptiedHere' => [
+            'comment' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. One step in the audit trail of how the organisation decided about a record belonging to SOMEBODY ELSE - the subject is named on the parent row, never here. Their authorship goes when actedByID is cut, after which the comment is unattributed text. Said plainly because it is arguable: an approval can be read as "a decision they made", which the owner\'s rule puts on the empty side. It is read here as the organisation\'s record of its own process.',
+        ],
     ],
 
     // =========================================================================
@@ -1492,15 +1650,23 @@ return [
         // made the visit was left in place, pointing at an emptied account.
         // Migration 208 made the column emptiable and GdprEraser::catalogue()
         // now empties it, and `followUpAssignedToID`, with an instruction
-        // each. The visit and its notes still stay with the case, for as long
-        // as safeguarding policy keeps the case.
+        // each. The CASE HISTORY stays for as long as safeguarding policy keeps
+        // the case - but the note on a visit is the subject's own record and is
+        // to be emptied, which needs matching through the parent table (#709).
+        // An earlier version of this comment and of `reason` said the notes
+        // were kept on safeguarding grounds, which contradicted the line in
+        // `notEmptiedHere` below.
         //
         // NOT DECIDED: whether the NAME of whoever made a visit should be
         // kept on safeguarding grounds. That is for the organisation's
         // safeguarding lead. As built, it is not kept.
-        'reason'   => 'A pastoral visit. Safeguarding and pastoral record: the visit and its notes are kept with '
-                    . 'the case. Who made the visit, and who its follow-up was given to, are detached',
+        'reason'   => 'A pastoral visit. The case history is kept for as long as safeguarding policy keeps the '
+                    . 'case, and who made the visit and who its follow-up was given to are detached. The note on '
+                    . 'a visit is the subject\'s own record and is to be emptied: see notEmptiedHere, and #709',
         'columns'  => ['visitedByID', 'followUpAssignedToID', 'notes'],
+        'notEmptiedHere' => [
+            'notes' => 'TO BE EMPTIED, and it needs a capability that does not exist yet, so it is recorded here rather than left silent. The subject of a visit is not on this row: it is reached only through caseID to tblCareCase.personUserID, and every instruction this routine can express is one table and one column. Attaching it to visitedByID or followUpAssignedToID would destroy a THIRD PARTY\'s safeguarding notes because the worker who typed them asked to be forgotten. The owner chose on 1 November 2026 to build matching through a parent table; that ships as its own change (#709), and this line goes when it lands - at which point the check that refuses an explanation for a column that IS emptied will insist on it.',
+        ],
     ],
     'tblDbsChecks' => [
         'decision' => 'retain',

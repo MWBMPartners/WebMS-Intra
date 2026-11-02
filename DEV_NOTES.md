@@ -13183,3 +13183,149 @@ asserted on that column; two of them failed on correct code, and the one that
 written to — which is both stricter than a count and, unlike a count, actually
 about the behaviour. **Asserting on a column the harness cannot populate reads as
 a strict check and is really a check of the harness's own missing mail server.**
+
+## Thirty-five tables named a personal column and nothing emptied it (#635)
+
+*2 November 2026.*
+
+**The fault.** `web/_core/personal-data-catalogue.php` names, per table, the
+columns that make it personal. `GdprEraser` builds its instructions from that
+list — but only ever acted on the names holding an **account number**. A named
+column holding an address, a hand-typed name or a note got no instruction and
+was never emptied. The list promised to unlink the table; the column stayed.
+That was #626 on the activity log, and it was true of thirty-five other tables.
+
+**A NON-LINK `nullCols` ENTRY IS ONLY SAFE WHERE THE MATCHED COLUMN IS THE ROW'S
+SUBJECT. This is the whole lesson of the package.** In `processEntry()`, an
+account column is emptied with `IF(col = ?, NULL, col)` — scoped to this person.
+Any other column is emptied with a plain `col = NULL`, **on every row the
+instruction matched**. The comment beside it reads "the row was matched on this
+person, so it does belong to them", which is true when `userCol` says who the row
+is *about* and false when it says who *acted* on it. Match on an actor and you
+delete a third party's name, address or telephone from every row that actor ever
+touched, on a request that was never theirs.
+
+**I called four tables "mechanical — the same fault as #626" and was wrong about
+two of them, and the same flaw affected a third the owner had already decided.**
+In `tblLiveChatMessages`, `tblEventRSVPInvites`, `tblVenues` (caretaker),
+`tblKidCheckins` (pickup name) and `tblSmallGroups` (the meeting place), the only
+account column is the moderator who approved or hid the message — a chat sender
+has **no account at all**, being identified by an anonymous token — or the
+coordinator who sent the invitation, whoever added the venue, or the helper who
+did the checking. Emptying would have deleted a non-member invitee's e-mail, a
+chat visitor's address, a caretaker's telephone and the record of who collected a
+child — **while reaching none of the erased person's own data.** All four are kept
+now, each with its reason. **"It is the same shape as a fault we fixed before" is
+a hypothesis, not a finding**: check which column the instruction actually matches
+on before calling it settled. Twice in one package was twice too many.
+
+**A hand-written entry wins over the derived one for the WHOLE TABLE.** That is
+why `tblErrors` has both of its instructions written out by hand: the three
+diagnostic columns belong to the `userID` one alone, and writing only that one
+would have silently stopped `resolvedByID` being detached. The derived route
+cannot express "this `nullCols` entry belongs to that instruction", which is the
+reason a hand-written entry was needed at all.
+
+**A reason beside the column beats a name in a fixture.** The 35 tables were
+pinned by name in `tools/gdpr-coverage-selftest.php`, with no reason attached to
+any of them. They are now explained by `notEmptiedHere` in the catalogue itself —
+the file a request for somebody's information is answered from — so a person
+asking why a column is still there can read the answer. Three checks stop it
+becoming the excuse list the pinned list was forbidden from being: a reason must
+be long enough to be a reason, an explanation for a column the entry no longer
+names fails as stale, and **an explanation for a column that IS now emptied
+fails**, which is what makes the list shrink as the work is done. Four plants,
+each caught by the one check that should catch it.
+
+**Three honest reasons, and no fourth.** A column an instruction does not empty is
+either deliberately kept (the row is the organisation's record of a thing), emptied
+elsewhere (and the order matters — the profile images are read to find the file
+before the columns are cleared), or genuinely unreachable (the only match belongs
+to somebody else). Anything that is none of those three is a bug — and where such a bug is known,
+the catalogue records the column with its issue number rather than leaving the
+line silent, which is what `tblCareVisit.notes` does today (#709).
+
+**Do not quote SQL in a data file.** A `notEmptiedHere` reason explained the
+profile-image columns by quoting `UPDATE tblUsers SET …`, and
+`check_account_writes_guarded.py` — which matches on text — read the catalogue as a
+file that writes to an account table. The right fix was to reword the prose, not to
+add the file to that check's allow-list: the file writes nothing, and widening a
+real guard to accommodate a sentence is how a guard stops guarding.
+
+**What this did NOT fix, which is bigger than what it did (#706).** The pinned list
+was a list of what the catalogue **admits to**, not of what these tables hold.
+`tblAuditTrail`'s `oldValue`, `newValue` and `changeSet` hold `json_encode()` of a
+whole row, so a change to somebody's own account leaves their name, e-mail,
+telephone and home address in the trail; `tblErrors.errorDetail` holds a full
+backtrace and `requestURL` the whole query string; and ten more personal columns
+appear in **no catalogue entry at all**. None of them is visible to #635, to its
+checks, or to an erasure. It is the #645 shape: a guard that reads as complete
+because it is only ever compared against itself.
+
+**EMPTYING A FIXTURE KILLED A CHECK, AND THAT IS THE BEST LESSON OF THE round.**
+Taking all 35 names out of `$leftBehindOnPurpose` left the check "the pinned
+list holds no table that is now clean" **unable to fail** — its only input was
+that list — and left the `if ($pinned !== null)` branch as dead code whose only
+possible effect, if a name ever went back, was to SUPPRESS a real column. A
+check is not just its condition; it is its condition and whatever feeds it, and
+**emptying the thing that feeds it is a way of deleting a check without touching
+it.** The branch is gone and the list being empty is now pinned directly, which
+is a statement that can actually be falsified.
+
+**THE SILENT UNDO.** Every check here compared the erasure routine against the
+WRITTEN LIST, so deleting a column from an entry *and* taking its `nullCols`
+away passed all of them: the list no longer names it, so nothing is "left
+behind". The independent check proved it by undoing this package's own
+`tblAuditTrail` fix with all 71 green. The general cure is #706 — compare the
+list against the SCHEMA — and the narrow one is here: the five columns #635
+empties are pinned by name and must still be named AND still be emptied. **A
+guard that reads one document against another can always be satisfied by editing
+both.**
+
+**The actor trap is a check now, not a comment.** "A non-account `nullCols`
+entry on an instruction matched by WHO ACTED deletes a third party's data" was
+written into `processEntry()` as prose. It is a check in
+`tools/gdpr-coverage-selftest.php`, and planting proved it: the three diagnostic
+columns moved onto `tblErrors`' resolver instruction, and the attendance note
+moved onto the coordinator's, are each caught by it and by nothing else. Prose in
+the file that has the bug does not stop the bug coming back.
+
+**Three wrong counts in prose, in one package, and one was inherited from the
+comment it was correcting.** "Four columns are now emptied" where five are;
+"four tables are in this state" where five are; and "migration 192 made exactly
+those thirteen nullable" where the migration has fourteen `MODIFY COLUMN` lines —
+that last repeated from the stale comment being fixed. This repository's own rule
+is that counts in prose go stale within days and that you count from the code.
+**Where a number is not load-bearing, the fix is to delete it, not to correct
+it** — two of the three are now phrased without a number at all.
+
+**MY OWN FAILURE MODE, THREE PACKAGES RUNNING, AND IT IS NOT THE CODE.** Across
+#666/#616/#683, #694/#697 and now #635, the code has been right at or near the
+first attempt and every later check round has found the same three things in what
+I WROTE about it:
+
+1. **A count in prose.** "Four columns are now emptied" (five). "Four tables are
+   in this state" (five). "Four tables keep a personal column" (five again, in
+   two more places, after I had already dropped that number from the header for
+   exactly this reason). "Migration 192 made exactly those thirteen nullable"
+   (fourteen — repeated from the stale comment I was correcting). This
+   repository's own rule already says counts in prose go stale within days.
+   **The rule I was missing: where a number is not load-bearing, DELETE it; where
+   it is, a check must pin it.** Two of #635's three numbers are now phrased
+   without a number at all, and the one that matters is pinned.
+2. **A correction applied in one place and not the others.** The chat-sender
+   claim was fixed in the catalogue and left standing in CHANGELOG and DEV_NOTES.
+   **Before editing a wrong sentence, grep the whole repository for its clause,
+   list every hit, and edit them in ONE pass** — the hit list is the work item,
+   not the first occurrence.
+3. **A guard that iterates its own list.** The check I added to catch the silent
+   undo looped over `$shouldBeEmptied` and accumulated into one `check()`, so
+   deleting a line from that array stopped testing that column without failing
+   anything. This is #697's proof-26 lesson verbatim, and I reintroduced it while
+   fixing a different instance of the same family. **A check that walks a list
+   must pin the list's shape in the same `check()` call.**
+
+The useful conclusion is not "try harder on prose". It is that **the review rounds
+on this project are earning their keep on the WRITING, not the code** — so the
+cheapest thing I can do is apply the three rules above before asking for a round,
+rather than after.

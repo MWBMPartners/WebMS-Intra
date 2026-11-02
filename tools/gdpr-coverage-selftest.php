@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 68;
+const EXPECTED_CHECKS = 73;
 
 $failures = 0;
 $passes   = 0;
@@ -605,6 +605,55 @@ check(
 );
 
 // -----------------------------------------------------------------------------
+// 8a-ii. A FREE-TEXT COLUMN EMPTIED ON AN INSTRUCTION THAT MATCHES AN ACTOR
+//        (#635, 2 November 2026). This is the general form of the trap #635
+//        had to work around by hand, written as a check rather than left as a
+//        comment in the erasure routine.
+//
+//        In processEntry()'s anonymise branch, a column that IS an account
+//        number is emptied with `IF(col = ?, NULL, col)` - scoped to this one
+//        person. Any OTHER column in `nullCols` is emptied with a plain
+//        `col = NULL`, on EVERY row the instruction matched. That is right when
+//        the matched column says who the row is ABOUT, and wrong when it says
+//        who ACTED on it: match on an actor and the erasure deletes a THIRD
+//        PARTY's name, address or telephone from every row that actor ever
+//        touched, on a request that was never theirs.
+//
+//        tblErrors is why this exists. Its written list names two account
+//        columns, and its three diagnostic columns belong to the SUBJECT one;
+//        on the "who resolved it" instruction they would have blanked an
+//        unrelated visitor's address from every fault the erased administrator
+//        had ticked off. Nothing would have reported it.
+//
+//        What this cannot see: whether a column holds somebody else's data at
+//        all. It only judges the pairing of a non-account column with an
+//        actor-matched instruction, which is the shape that does the harm.
+$freeTextOnActor = [];
+foreach ($instructions as $instruction) {
+    $userCol = (string) ($instruction['userCol'] ?? '');
+    if (in_array($userCol, $actorColumns, true) === false) {
+        continue;
+    }
+    foreach ((array) ($instruction['nullCols'] ?? []) as $column) {
+        $column = (string) $column;
+        if (in_array($column, $linkColumns, true) === true) {
+            continue;
+        }
+        $freeTextOnActor[] = (string) ($instruction['table'] ?? '') . ': `' . $column
+            . '` would be emptied on every row matched by `' . $userCol . '`';
+    }
+}
+check(
+    'no instruction empties a non-account column on rows it matched by WHO ACTED, which would delete somebody else\'s data (#635)',
+    $freeTextOnActor === [],
+    implode('; ', $freeTextOnActor)
+    . ' -- `' . 'nullCols' . '` on an actor-matched instruction is emptied with a plain `= NULL` on EVERY'
+    . ' matched row, so this deletes a THIRD PARTY\'s details from rows that have nothing to do with the'
+    . ' person who asked, and still reaches none of their own. Put the column on the instruction that'
+    . ' matches the row\'s SUBJECT, or record in the written list that it cannot be reached and why.'
+);
+
+// -----------------------------------------------------------------------------
 // 8b. A COLUMN THE WRITTEN LIST NAMES AND NOTHING EMPTIES (#626, 27 October
 //     2026).
 //
@@ -633,54 +682,36 @@ check(
 //         that it is deliberately kept and why.
 //     Nothing may be ADDED to this list. Taking a table off it is the work.
 //
-//     Some of the 35 are explained and some look like the same fault as #626.
-//     `tblUsers`' two image columns are emptied by eraseProfileImages() once
-//     the file itself is dealt with, which is deliberate (emptying them here
-//     would lose the only record of where the file is). `tblErrors` holding an
-//     address, a browser name and headers is #626 over again on another table.
-//     A `notes` column is a judgement: free text somebody typed about a person
-//     may be the record the organisation must keep. None of that is settled
-//     here, and this check does not pretend to settle it.
+//     IT IS NOW EMPTY, AND IT MUST STAY EMPTY (#635, 2 November 2026). All 35
+//     were decided by the owner on 1 and 2 November 2026, and every reason now
+//     lives beside its column in the written list itself, under
+//     `notEmptiedHere` - not here. That is the point of the move: a reason in
+//     `web/_core/personal-data-catalogue.php` is in the file a data subject's
+//     request is answered from, and a reader of that list can see why a column
+//     they asked about is still there. A table name in a test fixture told
+//     nobody anything.
+//
+//     Four of the three dozen are worth knowing about, because they are the
+//     shape that nearly went in wrong. In tblLiveChatMessages, tblEventRSVPInvites,
+//     tblVenues (the caretaker's name and telephone) and tblKidCheckins
+//     (who collected a child), the column really is personal - and the only
+//     column an instruction could match on belongs to a DIFFERENT person: the
+//     sender, the coordinator who sent the invitation, whoever added the venue,
+//     the helper who did the checking. Emptying them would have deleted a third
+//     party's details from rows that have nothing to do with the person who
+//     asked, while reaching none of their own. They are kept, with that written
+//     down. An earlier draft of this work called them "the same fault as #626"
+//     and would have emptied all four.
+//
+//     Nothing may be added to this list. If you are tempted, the answer is a
+//     `notEmptiedHere` line with a real reason, which the three checks below
+//     judge.
 //
 //     Tables dealt with by a dedicated step or by the last step are left out:
 //     their columns are emptied by code of their own, which section 10 checks.
 // -----------------------------------------------------------------------------
 $leftBehindOnPurpose = [
-    'tblAssetEventAssignments'    => ['notes'],
-    'tblAssetIdentifiers'         => ['notes'],
-    'tblAssetLicenseAssignments'  => ['notes'],
-    'tblAssetLoans'               => ['notes'],
-    'tblAssetStocktakeItems'      => ['notes'],
-    'tblAssetStocktakes'          => ['notes'],
-    'tblAttendanceSessions'       => ['sessionID', 'notes'],
-    'tblAuditTrail'               => ['ipAddress'],
-    'tblCareVisit'                => ['notes'],
-    'tblCountSessions'            => ['notes'],
-    'tblDecisionMoments'          => ['notes'],
-    'tblErrors'                   => ['visitorIP', 'userAgent', 'requestHeaders'],
-    'tblEventAttendance'          => ['notes'],
-    'tblEventOccurrenceOverrides' => ['notes'],
-    'tblEventRSVPInvites'         => ['email', 'displayName'],
-    'tblKidCheckins'              => ['pickupName'],
-    'tblKidProfiles'              => ['fullName', 'dateOfBirth', 'allergies', 'medicalNotes'],
-    'tblLiveChatMessages'         => ['displayName', 'senderIP'],
-    'tblNoticeboardUploads'       => ['storedName'],
-    'tblResourceBooking'          => ['notes'],
-    'tblRotaSlot'                 => ['notes'],
-    'tblSalvationCards'           => ['fullName', 'email', 'phone', 'address', 'notes'],
-    'tblServicePlanItem'          => ['notes'],
-    'tblServicePlans'             => ['notes'],
-    'tblSmallGroupMeetings'       => ['notes'],
-    'tblSmallGroups'              => ['postcode', 'latitude', 'longitude', 'what3words'],
-    'tblUsers'                    => ['avatarPath', 'displayPhoto'],
-    'tblVenueAgreements'          => ['notes'],
-    'tblVenueBookings'            => ['notes'],
-    'tblVenueInvoicePayments'     => ['notes'],
-    'tblVenueInvoices'            => ['notes'],
-    'tblVenueUsageTypeWindows'    => ['note'],
-    'tblVenues'                   => ['postcode', 'latitude', 'longitude', 'what3words', 'caretakerName', 'caretakerPhone', 'notes'],
-    'tblVisitorContact'           => ['summary'],
-    'tblWorkflowActions'          => ['comment'],
+    // Deliberately empty - see the note above. Do not add a table here.
 ];
 
 // What each instruction deals with, per table: the column it matches on (which
@@ -699,7 +730,10 @@ foreach ($instructions as $instruction) {
 }
 
 $leftBehindNow  = [];
-$pinnedAndClean = [];
+// Faults in the written list's OWN explanations - see the long note below.
+$explainedNotNamed      = [];
+$explainedButEmptied    = [];
+$explainedWithoutReason = [];
 foreach ($catalogue as $table => $meta) {
     $table = (string) $table;
     if ((string) ($meta['decision'] ?? '') !== 'unlink') {
@@ -711,8 +745,44 @@ foreach ($catalogue as $table => $meta) {
         continue;
     }
 
+    // 📋 A column the written list EXPLAINS is not a column left behind (#635,
+    //    2 November 2026). `notEmptiedHere` is the entry's own answer to "this
+    //    named column is not emptied by this table's instruction, and here is
+    //    why that is right". It covers three kinds of reason, all of them real:
+    //    the column is deliberately kept; it is emptied somewhere else; or it is
+    //    personal and genuinely unreachable, because the only column an
+    //    instruction could match on belongs to a DIFFERENT person.
+    //
+    //    This is what the old failure message always asked for in words -
+    //    "change the written list to say the column is deliberately kept and
+    //    why" - and it replaces `$leftBehindOnPurpose`, which was a list of
+    //    table names in a TEST file with no reason attached to any of them.
+    //    A reason that lives beside the column, in the file a data subject's
+    //    request is answered from, is worth more than a name in a fixture.
+    //
+    //    THE THREE CHECKS BELOW ARE WHAT STOP IT BECOMING AN EXCUSE LIST, which
+    //    is exactly what the pinned list was forbidden from being: a reason must
+    //    actually be a reason, an explanation for a column the entry does not
+    //    name is stale, and an explanation for a column that IS now emptied must
+    //    go, so the list shrinks as the work is done.
+    $explained = (array) ($meta['notEmptiedHere'] ?? []);
+    $named     = array_map('strval', (array) ($meta['columns'] ?? []));
+
+    foreach ($explained as $column => $why) {
+        $column = (string) $column;
+        if (in_array($column, $named, true) === false) {
+            $explainedNotNamed[] = $table . '.' . $column;
+        }
+        if (in_array($column, $dealtWith[$table] ?? [], true) === true) {
+            $explainedButEmptied[] = $table . '.' . $column;
+        }
+        if (strlen(trim((string) $why)) < 40) {
+            $explainedWithoutReason[] = $table . '.' . $column;
+        }
+    }
+
     $leftHere = [];
-    foreach ((array) ($meta['columns'] ?? []) as $column) {
+    foreach ($named as $column) {
         $column = (string) $column;
         if (in_array($column, $dealtWith[$table] ?? [], true) === true) {
             continue;
@@ -721,25 +791,24 @@ foreach ($catalogue as $table => $meta) {
         if (in_array($column, $linkColumns, true) === true) {
             continue;
         }
+        // The entry says why this one is not emptied, in enough words to be a
+        // reason. The checks above judge whether that claim is still true.
+        if (array_key_exists($column, $explained) === true
+            && strlen(trim((string) $explained[$column])) >= 40
+        ) {
+            continue;
+        }
         $leftHere[] = $column;
     }
 
     sort($leftHere);
-    $pinned = $leftBehindOnPurpose[$table] ?? null;
-    if ($pinned !== null) {
-        sort($pinned);
-        if ($leftHere === []) {
-            // Good news, and it still has to be said out loud: the pinned list
-            // is now wrong and must shrink.
-            $pinnedAndClean[] = $table;
-            continue;
-        }
-        $extra = array_diff($leftHere, $pinned);
-        if ($extra !== []) {
-            $leftBehindNow[] = $table . ': ' . implode(', ', $extra) . ' (beyond what is pinned for it)';
-        }
-        continue;
-    }
+    // 🪦 THE PINNED-LIST BRANCH IS GONE (#635, 2 November 2026). It read
+    //    `$leftBehindOnPurpose[$table]` and, where a table was pinned, either
+    //    recorded it as "pinned but now clean" or subtracted the pinned names
+    //    from what was left behind. With the list empty that branch could never
+    //    run, so it was dead code that could only ever SUPPRESS a real column if
+    //    somebody put a name back. The list being empty is now pinned directly,
+    //    below, which is a check that can actually fail.
     if ($leftHere !== []) {
         $leftBehindNow[] = $table . ': ' . implode(', ', $leftHere);
     }
@@ -755,17 +824,111 @@ check(
 );
 
 check(
-    'the pinned list of tables that leave a column holds no table that is now clean',
-    $pinnedAndClean === [],
-    implode(', ', $pinnedAndClean)
-    . ' -- nothing is left behind on this table any more, so take it off $leftBehindOnPurpose. '
-    . 'A pinned list that is out of date stops this check seeing a fault come back.'
+    'every column the written list explains as not-emptied is one it actually names (#635)',
+    $explainedNotNamed === [],
+    implode(', ', $explainedNotNamed)
+    . ' -- `notEmptiedHere` explains a column the entry\'s own `columns` list does not name, so the'
+    . ' explanation is stale: the column was renamed or taken off the list and the reason was left'
+    . ' behind. Remove it, or put the column back if it is still personal.'
+);
+
+check(
+    'no column is explained as not-emptied while the erasure routine does empty it (#635)',
+    $explainedButEmptied === [],
+    implode(', ', $explainedButEmptied)
+    . ' -- the written list says this column is not emptied here and gives a reason, but an'
+    . ' instruction DOES empty it. One of the two is wrong, and a reader of the list is being told'
+    . ' something untrue about their own data. This is the check that makes the list SHRINK as the'
+    . ' work is done, exactly as the pinned list it replaced had to.'
+);
+
+check(
+    'every not-emptied explanation is long enough to be an actual reason (#635)',
+    $explainedWithoutReason === [],
+    implode(', ', $explainedWithoutReason)
+    . ' -- fewer than 40 characters is a label, not a reason. This is the guard that stops'
+    . ' `notEmptiedHere` becoming the excuse list $leftBehindOnPurpose was forbidden from being:'
+    . ' a column may only be left behind if somebody wrote down why, in words a data subject could'
+    . ' read.'
+);
+
+check(
+    'the old pinned list of tables that leave a column behind is EMPTY and stays empty (#635)',
+    $leftBehindOnPurpose === [],
+    'it holds ' . count($leftBehindOnPurpose) . ' table(s): ' . implode(', ', array_keys($leftBehindOnPurpose))
+    . ' -- every one of the 35 was decided on 1 and 2 November 2026 and its reason now lives beside its'
+    . ' column in the written list, under `notEmptiedHere`. Nothing may go back on this list. A table'
+    . ' name here explains nothing to the person whose data it is; a reason in'
+    . ' web/_core/personal-data-catalogue.php does.'
+);
+
+// 📌 WHAT THIS PACKAGE ITSELF EMPTIED, pinned by name so that undoing it cannot
+//    be green. The checks above compare the erasure routine against the WRITTEN
+//    LIST, so deleting a column from an entry AND taking its `nullCols` away
+//    passes both: the list no longer names it, so nothing is "left behind".
+//    That is the #706 shape - a guard that reads as complete because it is only
+//    ever compared against itself - and the independent check proved it by
+//    planting exactly that undo on tblAuditTrail.ipAddress with all 71 green.
+//
+//    The general cure is #706: compare the list against the SCHEMA, so a
+//    personal column that no entry names is found. That is its own sweep. This
+//    is the narrow version: the five columns #635 emptied must still be named
+//    AND still be emptied.
+$shouldBeEmptied = [
+    'tblErrors'           => ['visitorIP', 'userAgent', 'requestHeaders'],
+    'tblAuditTrail'       => ['ipAddress'],
+    'tblEventAttendance'  => ['notes'],
+];
+$noLongerEmptied = [];
+foreach ($shouldBeEmptied as $table => $columns) {
+    foreach ($columns as $column) {
+        $named   = in_array($column, array_map('strval', (array) ($catalogue[$table]['columns'] ?? [])), true);
+        $emptied = in_array($column, $dealtWith[$table] ?? [], true);
+        if ($named === false || $emptied === false) {
+            $noLongerEmptied[] = $table . '.' . $column
+                . ($named === false ? ' (no longer named in the written list)' : '')
+                . ($emptied === false ? ' (no longer emptied)' : '');
+        }
+    }
+}
+
+// ⚠️ THE LOOP ABOVE ITERATES THIS VERY ARRAY, so deleting a line from
+//    `$shouldBeEmptied` does not fail anything - it just stops testing that
+//    column, silently. That is #697's lesson (proof 26's refusal loop could not
+//    notice a deleted name) and the independent check found it here on 2
+//    November 2026 by deleting tblAuditTrail's line and watching 73 stay green.
+//    The shape is pinned inside the SAME check, so the count does not move.
+$pinnedShape = [];
+foreach ($shouldBeEmptied as $table => $columns) {
+    $pinnedShape[] = $table . ':' . implode('+', $columns);
+}
+sort($pinnedShape);
+
+check(
+    'the five columns #635 emptied are still named in the written list AND still emptied',
+    $noLongerEmptied === []
+    && $pinnedShape === [
+        'tblAuditTrail:ipAddress',
+        'tblErrors:visitorIP+userAgent+requestHeaders',
+        'tblEventAttendance:notes',
+    ],
+    implode('; ', $noLongerEmptied)
+    . ' -- #635 gave each of these an instruction after the written list had named it personal and'
+    . ' nothing had emptied it. Taking the column off the list as well as out of `nullCols` makes every'
+    . ' other check here pass, because they only ever compare the routine against the list. If one of'
+    . ' these is genuinely not personal, that is a decision to record in the entry with a reason, not a'
+    . ' deletion. The list itself is pinned: it must be exactly'
+    . ' tblAuditTrail:ipAddress, tblErrors:visitorIP+userAgent+requestHeaders, tblEventAttendance:notes'
+    . ' and it is ' . implode(', ', $pinnedShape) . ' -- if those differ, somebody shortened the list'
+    . ' instead of fixing the code, which would stop a column being tested without failing anything.'
 );
 
 check(
     'the activity log empties every detail the written list names for it (#626)',
     ($leftBehindOnPurpose['tblActivityLogs'] ?? null) === null
-    && in_array('tblActivityLogs', $pinnedAndClean, true) === false
+    // The `$pinnedAndClean` clause that used to sit here went with the pinned
+    // branch (#635): that list is empty now, so the clause could never fail.
+    // The five columns below are what this check is really about.
     && count(array_intersect(
         ['requestHeaders', 'sessionID', 'visitorIP', 'userAgent', 'sessionDataSnapshot'],
         $dealtWith['tblActivityLogs'] ?? []
