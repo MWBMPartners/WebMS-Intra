@@ -581,7 +581,15 @@ switch ($name) {
         break;
     case 'headers':
         header('Content-Type: application/json');
-        echo json_encode(['ua' => $_SERVER['HTTP_USER_AGENT'] ?? '', 'accept' => $_SERVER['HTTP_ACCEPT'] ?? '', 'host' => $_SERVER['HTTP_HOST'] ?? '']);
+        echo json_encode([
+            'ua'       => $_SERVER['HTTP_USER_AGENT'] ?? '',
+            'accept'   => $_SERVER['HTTP_ACCEPT'] ?? '',
+            'host'     => $_SERVER['HTTP_HOST'] ?? '',
+            // #716: what compressions we offered. The point is what is NOT
+            // here — `br`, which libcurl would decode in this process with the
+            // system Brotli library (CVE-2026-111497).
+            'encoding' => $_SERVER['HTTP_ACCEPT_ENCODING'] ?? '',
+        ]);
         break;
     case 'redirect':
         header('Location: ' . (string) ($_GET['to'] ?? ''), true, (int) ($_GET['code'] ?? 302));
@@ -696,6 +704,40 @@ ROUTER;
         $ua   = is_array($seen) === true ? (string) $seen['ua'] : '';
         st_check('User-Agent is "' . Site::productName() . ' calendar import", with no web address', $ua === Site::productName() . ' calendar import' && str_contains($ua, '://') === false && str_contains($ua, 'calendar.test') === false, st_show($seen));
         st_check('Accept header is the one asked for', is_array($seen) === true && $seen['accept'] === $calAccept, st_show($seen));
+
+        // 🛡️ #716 — HTTP2Shell (CVE-2026-111497). We must not ask for Brotli:
+        //    libcurl decodes what it accepts, in this process, using the
+        //    system's Brotli library, and an out-of-bounds write in that
+        //    decoder is remotely triggerable by a crafted stream. This fetches
+        //    an address somebody typed, so the reply is not ours to trust.
+        //
+        //    Checked on the REAL request the server received, not on the source
+        //    of SafeFetch: `CURLOPT_ENCODING => ''` would look harmless in the
+        //    code and still advertise `br` on a Brotli build, which is exactly
+        //    how this was there to begin with.
+        $offered = is_array($seen) === true ? strtolower((string) $seen['encoding']) : '(none seen)';
+        // Split into CODINGS rather than searching the text. `str_contains($offered, 'br')`
+        // would do the job today, because no other content coding's name holds those
+        // letters — but a test that happens to be right is not the same as one that asks
+        // the right question, and each coding may carry a `;q=` weight.
+        $codings = array_map(
+            static fn (string $part): string => trim(explode(';', $part)[0]),
+            explode(',', $offered)
+        );
+        st_check(
+            'it does NOT offer Brotli, so no reply is handed to the system Brotli decoder (#716, CVE-2026-111497)',
+            is_array($seen) === true
+            && in_array('br', $codings, true) === false
+            && in_array('brotli', $codings, true) === false,
+            'codings offered: ' . implode('|', $codings)
+        );
+        st_check(
+            'and it still offers gzip and deflate, so a large calendar is not fetched uncompressed',
+            is_array($seen) === true
+            && in_array('gzip', $codings, true) === true
+            && in_array('deflate', $codings, true) === true,
+            'codings offered: ' . implode('|', $codings)
+        );
         st_check('Host header is "calendar.test" (the address kept port 80; only the connection went to the test port)', is_array($seen) === true && $seen['host'] === 'calendar.test', st_show($seen));
 
         // D3. A proxy set in the environment is ignored.

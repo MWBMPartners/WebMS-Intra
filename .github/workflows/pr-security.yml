@@ -1154,6 +1154,20 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_table_name_comparisons.py
 
+      # CVE-2026-111497, the flaw called HTTP2Shell, is an out-of-bounds write
+      # in Google's Brotli decoder, remotely triggerable by a crafted stream and
+      # on CISA's actively-exploited list since 27 October 2026. This portal
+      # holds no Brotli code; what it controls is whether it ever asks something
+      # to decode Brotli for it, because libcurl decodes what it accepts inside
+      # the web server's own process. The trap this guards is that
+      # `CURLOPT_ENCODING => ''` reads as "no preference" and means "offer
+      # everything you were built with", Brotli included — which is how
+      # SafeFetch came to accept it without anybody deciding to (#716).
+      - name: 'Nothing asks for a reply it would decode with Brotli (hard gate, #716)'
+        id: no_brotli_decode
+        if: always()
+        run: python3 tools/audit-checks/check_no_brotli_decode.py
+
       # Nothing under web/ may ask another website to draw a QR picture (#623).
       # The rule existed for PHP and had no guard for JavaScript, which is how
       # the noticeboard bundle's api.qrserver.com fallback went unnoticed. It is

@@ -2,6 +2,44 @@
 
 
 ## [Unreleased] (alpha)
+- **Security — the portal no longer asks for a reply it would decode with Brotli (#716,
+  CVE-2026-111497 "HTTP2Shell")**
+  - **The flaw.** An out-of-bounds write in Google's Brotli decoder, in Brotli 1.0.3 to 1.2.0
+    (fixed in 1.0.10, 1.1.1 and 1.2.1). Remote, unauthenticated, no user interaction: it is enough
+    that something decodes a crafted Brotli stream. CVSS 9.8, and on CISA's actively-exploited list
+    since 27 October 2026.
+  - **The portal contains no Brotli code**, so the flaw cannot be in ours. What our code controlled
+    was whether we ever asked anything to decode Brotli *for* us — and exactly one place did.
+    `SafeFetch` set `CURLOPT_ENCODING` to an empty string, which reads as "no compression
+    preference" and means the **opposite**: libcurl advertises every coding it was built with,
+    Brotli included, and then decodes the reply itself, in the web server's own process, with
+    whatever Brotli library it is linked against. So a calendar feed at an address somebody typed
+    could hand a crafted stream to the system decoder.
+  - **It now names gzip and deflate and not Brotli.** One line. The bandwidth saving that matters
+    for a large calendar is kept, and the decode path is gone.
+  - **Why fixed here rather than waiting for a host to patch.** The portal is a product installed on
+    hosting we do not control, so we cannot know which Brotli a customer's PHP links — and a version
+    number could not prove a vendor-patched build either way, the rule #640 already records for PHP.
+    Not asking for it removes the path on every installation at once.
+  - **Measured, not assumed.** On the development machine on 2 November 2026, PHP's libcurl reported
+    `brotli/1.2.0` — inside the affected range — with the Brotli feature bit set. So this really
+    would have accepted and decoded it.
+  - **The size cap was not a guard against this**, and reading it as one was the mistake to avoid:
+    its own comment says it counts the bytes *after* decompression, so the decode has already
+    happened by the time it applies.
+  - **Nothing else was exposed**, checked rather than assumed: every other curl call site in the
+    repository leaves the encoding unset, so libcurl sends no `Accept-Encoding` and decodes nothing.
+    The `.woff2` fonts are decoded by the visitor's browser, not by us. Apache's `mod_brotli`
+    compresses what we send, which is the other direction and not this bug.
+  - Checks: `tools/audit-checks/check_no_brotli_decode.py`, a new hard gate, and two behavioural
+    checks in `tools/safefetch-selftest.php` (252 → 254) that read the `Accept-Encoding` the server
+    actually received — because `CURLOPT_ENCODING => ''` looks harmless in the source and still
+    offers Brotli. Five planted faults, each caught, each reverted byte-identically; the original
+    fault turns both the guard and the self-test red.
+  - **Still outstanding, and not the product:** this workstation's own Node is v26.11.1 against a
+    fixed 26.12.1, and its libcurl links the affected Brotli 1.2.0 — both want updating, and neither
+    ships to a customer. No workflow pins a Node version, so CI uses whatever its runner image
+    carries. Recorded on #716.
 - **Fixed — the change history about an erased person is emptied, and the easy way of doing it would
   have destroyed other people's records (#707, #708)**
   - **What could not be reached.** The change history records *who* made a change in one column and

@@ -2354,6 +2354,27 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     is DEV_NOTES.md, "Reaching a row that nothing says is about anybody (#707)".
     *(`.claude/CLAUDE.md` → the #707 bullet.)*
 
+37. **Nothing asks for a reply it would decode with BROTLI (#716, CVE-2026-111497 "HTTP2Shell").**
+    An out-of-bounds write in Google's Brotli decoder (1.0.3-1.2.0; fixed 1.0.10 / 1.1.1 / 1.2.1), remote,
+    unauthenticated, CVSS 9.8, on CISA's actively-exploited list since 27 October 2026. The portal holds NO Brotli code,
+    so its whole exposure was ONE LINE. **`CURLOPT_ENCODING => ''` READS AS "no preference" AND MEANS "OFFER EVERYTHING
+    YOU WERE BUILT WITH"**, Brotli included — and libcurl then DECODES the reply itself, in the web server's process,
+    with whatever Brotli it links. Measured 2 November 2026: this machine's PHP reported `brotli/1.2.0`, INSIDE the
+    affected range, with `CURL_VERSION_BROTLI` set. `SafeFetch` now names `'gzip, deflate'`. **FIX IT HERE, NEVER WAIT
+    FOR A HOST:** this is a product on hosting we do not control, we cannot know which Brotli a customer's PHP links,
+    and a version number cannot prove a vendor-patched build (#640's rule). **THE SIZE CAP IS NOT A GUARD** — its own
+    comment says it counts bytes AFTER decompression, so the decode has already happened; and SafeFetch's other
+    defences are all about WHERE it connects, not what the reply is decoded with. Every other curl site leaves the
+    encoding UNSET, which is safe; `.woff2` fonts are decoded by the BROWSER; Apache's `mod_brotli` COMPRESSES, the
+    other direction. Two guards, the behavioural one mattering more:
+    `tools/audit-checks/check_no_brotli_decode.py` (a hard gate, and it must treat an EMPTY value as a FAILURE, the
+    opposite of how empty usually reads) and two checks in `tools/safefetch-selftest.php` that ask the test server what
+    `Accept-Encoding` it REALLY received, split into codings rather than searched as text. Restoring `''` turns BOTH
+    red. **Not the product, and still outstanding:** this workstation's Node is v26.11.1 against a fixed 26.12.1 and
+    its libcurl links the affected brotli/1.2.0; no workflow pins a Node version. Recorded on #716, not changed. The
+    technical record is DEV_NOTES.md, "\"No compression preference\" means \"offer everything\" (#716)".
+    *(`.claude/CLAUDE.md` → the #716 bullet.)*
+
 ## A few more things worth knowing
 
 - **Branches are meant to be promoted through four steps on the way to

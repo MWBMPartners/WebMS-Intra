@@ -270,6 +270,23 @@ screens and didn't say what it meant.
     warn everybody on 8.6.0RC4, which is the first build that carries the
     October 2026 fix. Section C4 of the self-test pins that, and says why at
     the point of failure.
+- **An outside address is never fetched with Brotli compression (#716,
+  CVE-2026-111497).** The flaw called HTTP2Shell is an out-of-bounds write in
+  Google's Brotli decoder — remote, unauthenticated, and on CISA's
+  actively-exploited list since 27 October 2026. The portal has no Brotli code
+  of its own, but when it fetched an outside calendar it told the network
+  library "accept any compression you can", which includes Brotli, and that
+  library then decodes the reply itself inside the web server. So a feed at an
+  address somebody typed could have handed a crafted stream to the system
+  decoder. It now asks for gzip and deflate only, which keeps the bandwidth
+  saving and removes the decode path **on every installation, whatever the
+  hosting company has patched** — the portal cannot know which Brotli a host
+  links, and a version number cannot prove a build is patched anyway.
+  - The size limit on a download was **not** protection: it counts the bytes
+    after decompression, so the decode has already happened.
+  - Guarded two ways: a check that no code asks for it, and a test that reads
+    what the request actually sent, because the old setting looked harmless in
+    the source.
 - **The change history about an erased person is emptied (#707).** The history
   records *who* made a change and *what* was changed as a table name and a row
   number — there is no column saying who a row is **about**, so an entry

@@ -14068,3 +14068,84 @@ still passed. `affected_rows` already counts only rows whose values really
 changed, because the connection sets no `CLIENT_FOUND_ROWS`, so `NULL → NULL`
 counts zero either way. The clause is kept — it states the intent and narrows
 the UPDATE — but the comment now says what it actually earns.
+
+---
+
+## "No compression preference" means "offer everything" (#716)
+
+CVE-2026-111497 — **HTTP2Shell**, also Node2Shell, Python2Shell and
+Broccoli2Shell — is an out-of-bounds write in Google's Brotli decoder
+(`c/dec/decode.c`), Brotli 1.0.3 to 1.2.0, fixed in 1.0.10, 1.1.1 and 1.2.1.
+Remote, unauthenticated, CVSS 9.8, and on CISA's actively-exploited list since
+27 October 2026. It needs nothing but a crafted stream being decoded.
+
+This portal holds no Brotli code. The whole of its exposure was one line.
+
+### The trap, which is the thing to remember
+
+```php
+CURLOPT_ENCODING => '',   // looks like "no preference"
+```
+
+An empty string tells libcurl to advertise **every** coding it was built with
+— Brotli included — and libcurl then **decodes the reply itself**, inside the
+web server's process, with whatever Brotli library it links. The comment beside
+it said "accept every compression curl understands", which was accurate and
+still did not read as a risk.
+
+**Measured** on 2 November 2026: `curl_version()` reported `brotli/1.2.0`,
+inside the affected range, with `CURL_VERSION_BROTLI` set. So the portal really
+would have accepted and decoded `br` from an address somebody typed.
+
+### Two things that looked like protection and were not
+
+**The size cap.** Its own comment says it counts bytes *after* decompression —
+so the decode has already happened by the time the limit applies. A small
+crafted stream is decoded regardless. A cap on output is not a guard against a
+decoder bug.
+
+**`SafeFetch`'s other defences.** It checks addresses, refuses redirects to
+private ranges, follows hops by hand. All of that is about *where* it connects;
+none of it is about what the reply is decoded with.
+
+### Why the fix belongs in our code and not in a host's patch queue
+
+The portal is installed on hosting we do not control. We cannot know which
+Brotli a customer's PHP links, and a version number could not tell a
+vendor-patched build from an unpatched one — the rule #640 already records for
+PHP. Naming `gzip, deflate` removes the decode path on every installation at
+once, whatever the host has, and keeps the compression that actually matters
+for a large calendar file.
+
+### The behavioural check matters more than the source check
+
+`tools/audit-checks/check_no_brotli_decode.py` reads the source, and it has to
+treat an **empty** value as a failure, which is the opposite of how an empty
+value usually reads. But a source check could be satisfied while the real
+request still offered Brotli — so `safefetch-selftest.php` now asks the test
+server what `Accept-Encoding` it actually received, and splits it into codings
+rather than searching the text (no other coding's name contains "br" today, but
+a test that happens to be right is not one that asks the right question).
+
+Planted: restoring `''` turns **both** red. Five faults in all — the empty
+string, `br` named outright, `br` behind a `;q=` weight, a hand-written
+`Accept-Encoding` header, and PHP's Brotli extension called directly.
+
+### What was checked and found clean
+
+Every other curl call site leaves the encoding unset, so libcurl sends no
+`Accept-Encoding` and decodes nothing — `Hymnal`, `Translation`, `WebPush` and
+the rest. The `.woff2` fonts under `assets/fonts/` are decoded by the visitor's
+browser. Apache's `mod_brotli` compresses what we send, which is the other
+direction and not this bug.
+
+### The part that is not the product
+
+This workstation's Node is **v26.11.1** against a fixed **26.12.1**, and its
+libcurl links the affected **brotli/1.2.0**. Both want updating; neither ships
+to a customer. And **no workflow pins a Node version** — `grep -rn
+"node-version\|setup-node" .github/workflows/` finds nothing — so CI uses
+whatever its runner image carries, which is probably patched and is not
+knowable from the repository. Left as a recorded finding on #716 rather than
+changed here, because pinning CI runtimes is a decision about the build rather
+than part of reviewing one CVE.

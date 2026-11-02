@@ -996,9 +996,44 @@ final class SafeFetch
             CURLOPT_NOSIGNAL          => true,
             CURLOPT_SSL_VERIFYPEER    => true,
             CURLOPT_SSL_VERIFYHOST    => 2,
-            // '' = accept every compression curl understands. The size cap
-            // below counts the bytes AFTER decompression.
-            CURLOPT_ENCODING          => '',
+            // 🛡️ NAMED COMPRESSIONS ONLY, AND DELIBERATELY NOT BROTLI (#716).
+            //
+            //    This used to be `''`, which tells libcurl "advertise every
+            //    compression you were built with" — and libcurl then DECODES
+            //    the reply itself, in this process, with whatever library it is
+            //    linked against. On a build with Brotli that means a reply we
+            //    fetched from an address somebody typed is handed to the
+            //    system's Brotli decoder.
+            //
+            //    CVE-2026-111497, the flaw called HTTP2Shell, is an
+            //    out-of-bounds write in exactly that decoder (Brotli 1.0.3 to
+            //    1.2.0; fixed in 1.0.10, 1.1.1 and 1.2.1). It is remote,
+            //    unauthenticated and needs no more than a crafted stream being
+            //    decoded, and CISA listed it as actively exploited on
+            //    27 October 2026. Measured on the development machine that day:
+            //    PHP's libcurl reported `brotli/1.2.0` — inside the affected
+            //    range — and the CURL_VERSION_BROTLI feature bit was set, so
+            //    this really would have accepted and decoded `br`.
+            //
+            //    WHY FIX IT HERE RATHER THAN WAIT FOR A HOST. The portal is a
+            //    product installed on hosting we do not control, so we cannot
+            //    know which Brotli a customer's PHP links, and a version number
+            //    could not prove a vendor-patched build either way (the rule
+            //    #640 already records for PHP). Not asking for `br` removes the
+            //    decode path on every installation at once, whatever the host
+            //    has. gzip and deflate keep the bandwidth saving that matters
+            //    for a large calendar.
+            //
+            //    🛑 THE SIZE CAP BELOW IS NOT A GUARD AGAINST THIS, and reading
+            //       it as one is the mistake to avoid: it counts the bytes
+            //       AFTER decompression, so the decode has already happened by
+            //       the time it applies. A small crafted stream is decoded
+            //       before any limit is reached.
+            //
+            //    Do not put `br` back, and do not restore `''` — which is the
+            //    same thing on a Brotli build. `check_no_brotli_decode.py`
+            //    fails if either comes back.
+            CURLOPT_ENCODING          => 'gzip, deflate',
             CURLOPT_USERAGENT         => self::userAgent(),
             CURLOPT_HTTPHEADER        => ['Accept: ' . $o['accept']],
             CURLOPT_HEADERFUNCTION    => static function ($h, string $line) use ($state): int {
