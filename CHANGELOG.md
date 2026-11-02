@@ -2,6 +2,40 @@
 
 
 ## [Unreleased] (alpha)
+- **Security — correction: the Brotli fix of `8dc848a` did not work, and the real one is to ask for
+  no compression at all (#716, CVE-2026-111497 "HTTP2Shell")**
+  - **What was wrong.** `8dc848a` changed `SafeFetch` from `CURLOPT_ENCODING => ''` to
+    `'gzip, deflate'`, and six documents said that removed the decode path. **It did not.** Setting
+    that option to *any* non-null value switches libcurl's content decoding **on**, and libcurl then
+    chooses the decoder by name from the **reply's** `Content-Encoding` header — from everything it
+    was built with, Brotli included. What we advertise is irrelevant.
+  - **Measured against a server that declares `br` without being asked** (libcurl 8.22.0,
+    brotli/1.2.0): option unset → 33 raw bytes, not decoded; `''` → decoded; **`'gzip, deflate'` →
+    still decoded**. An independent check found this and it was reproduced before acting.
+  - **Why it mattered so much here.** The threat this guards against is a hostile or compromised
+    calendar feed — **the server is the attacker**. "We did not ask for it" is worth nothing against
+    somebody who simply sends it.
+  - **The fix is to set nothing.** `CURLOPT_ENCODING` is now absent, which is what every other curl
+    call site in the portal already did — and why every one of them was already immune. With the
+    option unset, libcurl sends no `Accept-Encoding` **and ignores a `Content-Encoding` the server
+    declares anyway**.
+  - **What that costs, plainly:** compression on the wire. A large calendar now downloads
+    uncompressed. Accepted deliberately rather than reaching for a cleverer option straight after
+    getting this wrong once. If the bandwidth ever matters more, the right answer is to switch
+    libcurl's decoding off and decode gzip in PHP — which would also make the size limit count
+    *compressed* bytes, closing a decompression-bomb gap that exists today.
+  - **The guard was wrong in the same way and is rebuilt.** It now fails on the option being set at
+    all, not merely on an empty value or one naming `br`. Two parsing faults found with it: a `//`
+    inside a string (a URL) deleted the rest of that line including the offence, and a `/*` inside a
+    string swallowed everything to the next `*/` — the same fault recorded twice for
+    `check_page_head_tags.py`. Masking strings instead **broke both detectors**, because the value
+    being read *is* a string; it now walks the source and steps over literals. Block comments are
+    replaced by their own newlines, so reported line numbers are right — they were 370 lines out.
+  - **The behavioural test now asks the real question.** It used to assert only that we do not
+    *offer* Brotli, with a label claiming that meant nothing reaches the decoder — the comforting
+    half of the sentence, and false. It now serves a reply that **declares** `Content-Encoding: br`
+    unasked and proves the bytes come back exactly as sent. Planted: the withdrawn `'gzip, deflate'`
+    fails it, which the old test passed.
 - **Security — the portal no longer asks for a reply it would decode with Brotli (#716,
   CVE-2026-111497 "HTTP2Shell")**
   - **The flaw.** An out-of-bounds write in Google's Brotli decoder, in Brotli 1.0.3 to 1.2.0

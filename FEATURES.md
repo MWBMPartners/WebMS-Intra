@@ -278,15 +278,23 @@ screens and didn't say what it meant.
   library "accept any compression you can", which includes Brotli, and that
   library then decodes the reply itself inside the web server. So a feed at an
   address somebody typed could have handed a crafted stream to the system
-  decoder. It now asks for gzip and deflate only, which keeps the bandwidth
-  saving and removes the decode path **on every installation, whatever the
-  hosting company has patched** — the portal cannot know which Brotli a host
-  links, and a version number cannot prove a build is patched anyway.
-  - The size limit on a download was **not** protection: it counts the bytes
-    after decompression, so the decode has already happened.
-  - Guarded two ways: a check that no code asks for it, and a test that reads
-    what the request actually sent, because the old setting looked harmless in
-    the source.
+  decoder. **It now asks for no compression at all**, which switches that
+  decoding off entirely — on every installation, whatever the hosting company
+  has patched. The portal cannot know which compression library a host links,
+  and a version number cannot prove a build is patched anyway.
+  - **A first attempt asked for "gzip and deflate only" and did not work**, and
+    the reason is worth knowing: asking for *anything* turns the decoding on,
+    and the network library then decodes whatever the **reply** says it is. A
+    hostile feed simply declares Brotli without being asked. Measured, caught
+    by an independent check, and corrected.
+  - **The cost:** a large calendar now downloads uncompressed. Accepted
+    deliberately in exchange for a protection that is simple enough to be sure
+    of.
+  - The size limit on a download was **not** protection: it counted the bytes
+    after decompression, so the decode had already happened.
+  - Guarded two ways: a check that no code switches the decoding on, and a test
+    that serves a reply falsely claiming to be Brotli and proves it comes back
+    untouched.
 - **The change history about an erased person is emptied (#707).** The history
   records *who* made a change and *what* was changed as a table name and a row
   number — there is no column saying who a row is **about**, so an entry

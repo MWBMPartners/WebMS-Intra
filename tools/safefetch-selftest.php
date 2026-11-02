@@ -591,6 +591,19 @@ switch ($name) {
             'encoding' => $_SERVER['HTTP_ACCEPT_ENCODING'] ?? '',
         ]);
         break;
+    case 'claims-brotli':
+        // #716 — declares `Content-Encoding: br` WITHOUT being asked, and sends
+        // PLAIN TEXT. This is the attacker's move: the threat here is a hostile
+        // feed server, so what we advertised is irrelevant.
+        //
+        // The body is deliberately not real Brotli. If libcurl's content
+        // decoding is on it will try to decode this and fail; if it is off,
+        // these exact bytes come back. Either way the test can tell, and it
+        // needs no Brotli library to write the fixture.
+        header('Content-Type: text/calendar');
+        header('Content-Encoding: br');
+        echo 'UNDECODED-MARKER-716';
+        break;
     case 'redirect':
         header('Location: ' . (string) ($_GET['to'] ?? ''), true, (int) ($_GET['code'] ?? 302));
         break;
@@ -725,18 +738,29 @@ ROUTER;
             explode(',', $offered)
         );
         st_check(
-            'it does NOT offer Brotli, so no reply is handed to the system Brotli decoder (#716, CVE-2026-111497)',
-            is_array($seen) === true
-            && in_array('br', $codings, true) === false
-            && in_array('brotli', $codings, true) === false,
+            'it asks for no compression at all, so libcurl\'s content decoding is never switched on (#716)',
+            is_array($seen) === true && $codings === [''],
             'codings offered: ' . implode('|', $codings)
         );
+
+        // 🛡️ THE CHECK THAT ACTUALLY MATTERS, and the first version of this
+        //    section did not have it. It asserted only that we do not OFFER
+        //    Brotli, with a label claiming that meant no reply reaches the
+        //    decoder. That inference is FALSE, and an independent check proved
+        //    it by measurement: setting CURLOPT_ENCODING to ANY non-null value
+        //    switches libcurl's content decoding on, and libcurl then picks the
+        //    decoder by NAME FROM THE REPLY. `'gzip, deflate'` was committed as
+        //    the fix and decoded Brotli just the same.
+        //
+        //    In this threat the SERVER IS THE ATTACKER — these are addresses
+        //    somebody typed — so the only question worth asking is what happens
+        //    when a reply DECLARES Brotli we never asked for.
+        $claimed = SafeFetch::get($base . '/claims-brotli', ['accept' => $calAccept]);
+        $bodyBack = is_array($claimed) === true ? (string) ($claimed['body'] ?? '') : '';
         st_check(
-            'and it still offers gzip and deflate, so a large calendar is not fetched uncompressed',
-            is_array($seen) === true
-            && in_array('gzip', $codings, true) === true
-            && in_array('deflate', $codings, true) === true,
-            'codings offered: ' . implode('|', $codings)
+            'a reply that DECLARES Content-Encoding: br unasked is NOT decoded: the bytes come back exactly as sent (#716, CVE-2026-111497)',
+            $bodyBack === 'UNDECODED-MARKER-716',
+            'got ' . strlen($bodyBack) . ' byte(s): ' . substr($bodyBack, 0, 60)
         );
         st_check('Host header is "calendar.test" (the address kept port 80; only the connection went to the test port)', is_array($seen) === true && $seen['host'] === 'calendar.test', st_show($seen));
 

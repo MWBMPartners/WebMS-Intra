@@ -14108,28 +14108,77 @@ decoder bug.
 private ranges, follows hops by hand. All of that is about *where* it connects;
 none of it is about what the reply is decoded with.
 
-### Why the fix belongs in our code and not in a host's patch queue
+### The first fix did not work, and this is the part to remember
+
+`CURLOPT_ENCODING => 'gzip, deflate'` was committed as the fix (`8dc848a`) and
+**still decoded Brotli.** Measured against a server that declares
+`Content-Encoding: br` without being asked, on libcurl 8.22.0 / brotli 1.2.0:
+
+| setting | bytes back | decoded? |
+|---|---|---|
+| option unset | 33 | **no** |
+| `''` | 73 | yes |
+| `'gzip, deflate'` | 73 | **yes** |
+| `'gzip, deflate'` + `CURLOPT_HTTP_CONTENT_DECODING => false` | 33 | no |
+
+**Setting the option to any non-null value switches libcurl's content decoding
+on, and libcurl then picks the decoder by NAME FROM THE REPLY.** What we
+advertise has nothing to do with it. The `Accept-Encoding` header is a request;
+`Content-Encoding` is what actually selects the decoder.
+
+**And the threat model is exactly the case where that matters.** These are
+outside calendar feeds at addresses somebody typed — *the server is the
+attacker*. "We did not ask for it" is worth nothing against somebody who sends
+it anyway. The change reduced the exposure from "any server" to "a hostile
+server", which for this threat is close to no reduction at all.
+
+The paradox worth keeping: **every other curl call site in the portal was
+already immune**, precisely because none of them sets the option. The one place
+that had been "configured" was the only vulnerable one, and the first fix kept
+it configured.
+
+### Why the fix still belongs in our code
 
 The portal is installed on hosting we do not control. We cannot know which
 Brotli a customer's PHP links, and a version number could not tell a
 vendor-patched build from an unpatched one — the rule #640 already records for
-PHP. Naming `gzip, deflate` removes the decode path on every installation at
-once, whatever the host has, and keeps the compression that actually matters
-for a large calendar file.
+PHP. Setting nothing removes the decode path on every installation at once,
+whatever the host has. **What it costs is compression on the wire**, accepted
+deliberately rather than reaching for a cleverer option immediately after
+getting this wrong once. If bandwidth ever matters more, switch libcurl's
+decoding off and gunzip in PHP — strictly safer than either, because the size
+cap would then count *compressed* bytes.
 
-### The behavioural check matters more than the source check
+### A check can pin the wrong invariant and look thorough doing it
 
-`tools/audit-checks/check_no_brotli_decode.py` reads the source, and it has to
-treat an **empty** value as a failure, which is the opposite of how an empty
-value usually reads. But a source check could be satisfied while the real
-request still offered Brotli — so `safefetch-selftest.php` now asks the test
-server what `Accept-Encoding` it actually received, and splits it into codings
-rather than searching the text (no other coding's name contains "br" today, but
-a test that happens to be right is not one that asks the right question).
+The first behavioural check asserted that we do not **offer** Brotli, under the
+label *"so no reply is handed to the system Brotli decoder"*. The header fact
+was true; the **"so" was false**. That is this repository's own "a check that
+pins a reassurance" shape — the comforting half of the sentence becomes
+load-bearing, and it was wrong.
 
-Planted: restoring `''` turns **both** red. Five faults in all — the empty
-string, `br` named outright, `br` behind a `;q=` weight, a hand-written
-`Accept-Encoding` header, and PHP's Brotli extension called directly.
+The check now serves a reply that **declares** `Content-Encoding: br` without
+being asked, carrying plain text, and asserts the bytes come back exactly as
+sent. It needs no Brotli library to write the fixture: if decoding were on,
+libcurl would try to decode that text and fail. Planted, the withdrawn
+`'gzip, deflate'` **fails it** — which the old check passed.
+
+### Two parsing faults in the guard, and the repair that broke it worse
+
+`strip_comments()` matched patterns over raw source, so a `//` inside a string
+— any URL — deleted the rest of that line, offence included. A one-line option
+array with a URL in it passed while holding `CURLOPT_ENCODING => ''`. A `/*`
+inside a string was worse: the block pattern spans newlines.
+
+**Masking every string literal is the repair the repo uses elsewhere, and here
+it broke both detectors**, because the thing being read *is* a string — the
+option's value and the `Accept-Encoding` header both. Caught by testing
+immediately, not by reading. The guard now **walks** the source and steps over
+literals, which is the lesson this project already records for brace-matching.
+
+And block comments are now replaced by their own newlines rather than deleted,
+because deleting them shifted every reported line number — 666 for a fault on
+line 1036, 370 out.
 
 ### What was checked and found clean
 

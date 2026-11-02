@@ -2357,10 +2357,14 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
 37. **Nothing asks for a reply it would decode with BROTLI (#716, CVE-2026-111497 "HTTP2Shell").**
     An out-of-bounds write in Google's Brotli decoder (1.0.3-1.2.0; fixed 1.0.10 / 1.1.1 / 1.2.1), remote,
     unauthenticated, CVSS 9.8, on CISA's actively-exploited list since 27 October 2026. The portal holds NO Brotli code,
-    so its whole exposure was ONE LINE. **`CURLOPT_ENCODING => ''` READS AS "no preference" AND MEANS "OFFER EVERYTHING
-    YOU WERE BUILT WITH"**, Brotli included — and libcurl then DECODES the reply itself, in the web server's process,
-    with whatever Brotli it links. Measured 2 November 2026: this machine's PHP reported `brotli/1.2.0`, INSIDE the
-    affected range, with `CURL_VERSION_BROTLI` set. `SafeFetch` now names `'gzip, deflate'`. **FIX IT HERE, NEVER WAIT
+    so its whole exposure was ONE LINE. **SETTING `CURLOPT_ENCODING` TO *ANY* NON-NULL VALUE SWITCHES LIBCURL'S
+    CONTENT DECODING ON, AND LIBCURL THEN PICKS THE DECODER BY NAME FROM THE *REPLY*'S `Content-Encoding`** — what you
+    advertise is irrelevant. **`'gzip, deflate'` WAS COMMITTED AS THE FIX (`8dc848a`) AND STILL DECODED BROTLI**;
+    an independent check caught it. Measured against a server declaring `br` unasked (libcurl 8.22.0, brotli/1.2.0):
+    unset → 33 raw bytes NOT decoded; `''` → decoded; `'gzip, deflate'` → STILL DECODED. **THE RULE IS: DO NOT SET THE
+    OPTION AT ALL.** `SafeFetch` sets nothing now — what every other curl site here already did, and why they were all
+    immune while the one "configured" site was the only vulnerable one. THE THREAT IS THE SERVER ITSELF, so "we did not
+    ask for it" is worth nothing. The cost is compression on the wire, accepted deliberately. **FIX IT HERE, NEVER WAIT
     FOR A HOST:** this is a product on hosting we do not control, we cannot know which Brotli a customer's PHP links,
     and a version number cannot prove a vendor-patched build (#640's rule). **THE SIZE CAP IS NOT A GUARD** — its own
     comment says it counts bytes AFTER decompression, so the decode has already happened; and SafeFetch's other

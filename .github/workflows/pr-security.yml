@@ -1157,12 +1157,12 @@ jobs:
       # CVE-2026-111497, the flaw called HTTP2Shell, is an out-of-bounds write
       # in Google's Brotli decoder, remotely triggerable by a crafted stream and
       # on CISA's actively-exploited list since 27 October 2026. This portal
-      # holds no Brotli code; what it controls is whether it ever asks something
-      # to decode Brotli for it, because libcurl decodes what it accepts inside
-      # the web server's own process. The trap this guards is that
-      # `CURLOPT_ENCODING => ''` reads as "no preference" and means "offer
-      # everything you were built with", Brotli included — which is how
-      # SafeFetch came to accept it without anybody deciding to (#716).
+      # holds no Brotli code; what it controls is whether libcurl's content
+      # decoding is switched on at all. The trap, measured after a first fix
+      # failed: setting `CURLOPT_ENCODING` to ANY non-null value turns that
+      # decoding on, and libcurl then picks the decoder by name from the
+      # REPLY's `Content-Encoding` — so `'gzip, deflate'` still decoded Brotli.
+      # The rule is therefore that the option must not be set at all (#716).
       - name: 'Nothing asks for a reply it would decode with Brotli (hard gate, #716)'
         id: no_brotli_decode
         if: always()

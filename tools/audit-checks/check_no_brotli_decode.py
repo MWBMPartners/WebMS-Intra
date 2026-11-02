@@ -20,21 +20,42 @@ CURL_VERSION_BROTLI feature bit set.
 So the one thing our code can do — and the only thing that works regardless of
 what a customer's host has installed — is not ask for `br`.
 
-🛑 THE TRAP, AND IT IS WHY THIS CHECK LOOKS FOR AN EMPTY STRING.
-   `CURLOPT_ENCODING => ''` reads as "no compression preference" and means the
-   OPPOSITE: libcurl advertises EVERY coding it was built with, Brotli
-   included. That is how `SafeFetch` came to accept `br` without anybody
-   deciding to. An empty value is therefore a failure here, not a pass.
+🛑 THE TRAP, AND THE FIRST VERSION OF THIS CHECK GOT IT WRONG.
+   The obvious reading is that the danger is `CURLOPT_ENCODING => ''` (which
+   advertises everything, Brotli included) or a value that names `br`. That is
+   what this check looked for on 2 November 2026, and an independent check
+   proved it insufficient the same day.
+
+   **Setting the option to ANY non-null value switches libcurl's content
+   decoding ON, and libcurl then chooses the decoder BY NAME FROM THE REPLY'S
+   `Content-Encoding` HEADER** — from everything it was compiled with, Brotli
+   included. What we advertised is irrelevant. Measured against a server that
+   replies `Content-Encoding: br` without being asked (libcurl 8.22.0,
+   brotli/1.2.0):
+
+       CURLOPT_ENCODING unset             -> 33 raw bytes, NOT decoded
+       CURLOPT_ENCODING = ''              -> decoded
+       CURLOPT_ENCODING = 'gzip, deflate' -> STILL DECODED
+
+   In the threat this guards against the SERVER IS THE ATTACKER — these are
+   addresses somebody typed — so "we did not ask for it" is worth nothing.
+
+   **So the rule is: the option must not be set at all.** Leaving it unset is
+   what every other curl call site in this portal already does, and it is why
+   every one of them is immune.
 
 WHAT IT CHECKS
 --------------
 Under `web/`, for every PHP file:
 
-  1. `CURLOPT_ENCODING` / `CURLOPT_ACCEPT_ENCODING` must not be set to an
-     empty string.
-  2. Its value must not name `br` or `brotli` as a coding.
-  3. A hand-written `Accept-Encoding:` header must not name them either.
-  4. PHP's optional Brotli extension must not be called
+  1. `CURLOPT_ENCODING` / `CURLOPT_ACCEPT_ENCODING` must not be SET AT ALL.
+     Not empty, not `'gzip, deflate'`, not anything — see the trap above. The
+     one exception the code may state is an explicit `null`, which is the same
+     as not setting it.
+  2. A hand-written `Accept-Encoding:` header must not name `br` or `brotli`.
+     (Advertising it is not what causes the decode, but asking for a thing we
+     refuse to handle is incoherent and worth catching.)
+  3. PHP's optional Brotli extension must not be called
      (`brotli_uncompress`, `brotli_uncompress_init`, …). Nothing uses it today;
      if somebody adds it, the decision belongs to a person, not to a commit.
 
@@ -93,12 +114,67 @@ def codings(value: str) -> list[str]:
 
 
 def strip_comments(src: str) -> str:
-    """A commented-out line is not live code, and a comment ABOUT brotli (there
-    is a long one in SafeFetch explaining this very rule) must not be read as
-    an offence. Block comments first, then line comments."""
-    src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
-    src = re.sub(r"(?m)//.*$", "", src)
-    return src
+    """Blank out comments, keeping every line number and every string intact.
+
+    🛑 THIS WALKS THE SOURCE RATHER THAN MATCHING PATTERNS, and both reasons
+       are faults that were measured on the first two versions of this file.
+
+       **A `//` inside a string ate the rest of the line.** Version 1 ran
+       `re.sub(r"//.*$")` straight over the source, so a one-line option array
+       holding `'https://api.example.com/v1/feed'` had everything after the URL
+       deleted — including `CURLOPT_ENCODING => ''`. The check passed on the
+       exact fault it exists for. A `/*` inside a string was worse: the block
+       pattern spans newlines and swallowed everything to the next `*/`.
+
+       **Masking strings instead BROKE BOTH DETECTORS.** Version 2 replaced
+       every literal with a run of `x`, which fixes the comment problem and
+       destroys the thing being read: the option's VALUE is a string, and so is
+       a hand-written `Accept-Encoding` header. Caught immediately by testing
+       rather than by reading, which is the only reason it is not in the
+       committed file.
+
+       So: step over strings, blank only real comments, and leave everything
+       else exactly where it was.
+
+       **Line numbers survive because a block comment is replaced by its own
+       newlines, not deleted.** Deleting one shifts every line below it —
+       version 1 reported line 666 for a fault on line 1036, 370 out.
+    """
+    out: list[str] = []
+    i, n = 0, len(src)
+    while i < n:
+        ch = src[i]
+        # A string: copy it through untouched, honouring backslash escapes.
+        if ch in "'\"":
+            quote = ch
+            out.append(ch)
+            i += 1
+            while i < n:
+                if src[i] == "\\" and i + 1 < n:
+                    out.append(src[i:i + 2])
+                    i += 2
+                    continue
+                out.append(src[i])
+                if src[i] == quote:
+                    i += 1
+                    break
+                i += 1
+            continue
+        # A block comment: keep only its newlines.
+        if src.startswith("/*", i):
+            close = src.find("*/", i + 2)
+            close = n if close == -1 else close + 2
+            out.append("\n" * src.count("\n", i, close))
+            i = close
+            continue
+        # A line comment: drop it, keep the newline that ends it.
+        if src.startswith("//", i) or src.startswith("#", i):
+            nl = src.find("\n", i)
+            i = n if nl == -1 else nl
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 def main() -> int:
@@ -125,17 +201,23 @@ def main() -> int:
 
         for m in OPTION.finditer(src):
             line_no = src[: m.start()].count("\n") + 1
-            value = m.group("value")
-            quoted = value[:1] in {"'", '"'}
-            if quoted and value.strip("'\"").strip() == "":
-                note(line_no, "CURLOPT_ENCODING is set to an EMPTY string, which tells libcurl to "
-                              "advertise every coding it has — Brotli included")
+            value = m.group("value").strip()
+            # An explicit null is the same as not setting it, and is allowed.
+            if value.lower() == "null":
                 continue
-            if quoted:
-                named = codings(value)
-                if "br" in named or "brotli" in named:
-                    note(line_no, f"CURLOPT_ENCODING names Brotli ({value})")
-            # A non-literal value cannot be judged here; the docstring says so.
+            quoted = value[:1] in {"'", '"'}
+            bare = value.strip("'\"").strip()
+            if quoted and bare == "":
+                why = ("set to an EMPTY string — libcurl then advertises every coding it has "
+                       "AND decodes whatever the reply declares")
+            elif quoted:
+                why = (f"set to {value} — any non-null value switches libcurl's content decoding "
+                       f"ON, and it then decodes whatever the REPLY declares, Brotli included. "
+                       f"What you advertise is irrelevant")
+            else:
+                why = ("set to a value this check cannot read — and ANY non-null value switches "
+                       "libcurl's content decoding on")
+            note(line_no, "CURLOPT_ENCODING is " + why)
 
         for m in HEADER.finditer(src):
             named = codings(m.group("value"))
@@ -162,10 +244,16 @@ def main() -> int:
         for rel, line_no, what in problems:
             print(f"  • {rel}:{line_no} — {what}")
         print()
-        print("  Name the codings you want instead, as web/_core/SafeFetch.php does:")
-        print("      CURLOPT_ENCODING => 'gzip, deflate',")
-        print("  Setting no encoding at all is also fine — libcurl then sends no")
-        print("  Accept-Encoding and decodes nothing.")
+        print("  DO NOT SET THE OPTION AT ALL. That is what web/_core/SafeFetch.php does")
+        print("  and what every other curl call site here already did — it is why they")
+        print("  are immune. With the option unset, libcurl sends no Accept-Encoding AND")
+        print("  ignores a Content-Encoding the server declares anyway.")
+        print()
+        print("  Naming codings does NOT help: 'gzip, deflate' was committed as the fix")
+        print("  on 2 November 2026 and measured still decoding Brotli, because any")
+        print("  non-null value turns content decoding on and the decoder is then chosen")
+        print("  from the REPLY. If you need compression badly enough, decode it in PHP")
+        print("  with CURLOPT_HTTP_CONTENT_DECODING => false — do not re-enable libcurl's.")
         print()
     if stale:
         print(f"{len(stale)} exemption(s) in ALLOWED_ON_PURPOSE are no longer true. Remove them:\n")
