@@ -4,7 +4,7 @@
 
 ## Branch
 
-`claude/alpha-wip` at **`a62872e`**, working tree clean. 580 ahead of `alpha`.
+`claude/alpha-wip` at **`0e0ddf4`**, pushed. 582 ahead of `alpha`.
 
 **The owner gave standing approval on 2 November 2026 to push this working
 branch after each commit** — never a release or protected branch, never a force
@@ -13,10 +13,33 @@ push, and no pull request until the Codex review is done. Everything else
 
 ## In flight right now
 
-Nothing. #709 is committed and closed; the next package is #705.
+**#706 — the personal-data catalogue is incomplete.** Planned and part drafted,
+nothing applied to the tree yet. The owner's decisions of 2 November: ONE
+package covering all of it, and a NARROW sweep rule with the judgement kept in
+the catalogue. Drafts and measurements are in this session's scratchpad.
+
+**The root cause is one level up from the issue.**
+`tools/audit-checks/check_personal_data_coverage.py` already reads the schema
+and is a green hard gate — but its detector is a hand-maintained allow-list of
+LITERAL column names, so it only ever finds a column somebody already thought
+of (it has `phone` anchored, so `phoneNumber` misses; `address`, so
+`addressLine1` misses; `visitorIP`, so `createdIP` misses). **Extend that
+check; do not add a second one.** Measured: 66 tables have no entry at all, 37
+contact- or person-name-shaped columns are named nowhere (zero false positives
+on the narrow rule), and 258 free-text columns are an inventory, not a gate.
 
 ## Just landed
 
+- **`0e0ddf4` — #705, #627.** PHP 8.6 supported, measured against a real
+  8.6.0RC4. `session.use_strict_mode` set explicitly; two `fclose()` return
+  values checked in `BackupArchive` plus one pre-existing instance of the same
+  class. **The issue's dated action is WRONG and was not done** — the 8.6 pin
+  must NOT move to `8.6.0`, because the finished release already passes and
+  moving it would warn every 8.6.0RC4 user. Nothing falls due on 19 November.
+  The independent check was NOT CLEAN: two untrue claims of mine, both
+  corrected (the backtick deprecation is 8.5's, not 8.6's; and the portal
+  already rotated the session id at every sign-in, so strict mode does NOT
+  replace those rotations).
 - **`a62872e` — #709.** An erasure can now reach a row through its PARENT
   table: `tblCareVisit.notes` is emptied through `tblCareCase.personUserID`,
   the only instruction in the catalogue that matches that way.
@@ -42,23 +65,23 @@ message as Codex's stand-in.
 
 ## Next, in order
 
-1. **#705 — PHP 8.6.** Four owner decisions in hand: support 8.6 with
-   `PREFERRED_SERIES` staying 8.5; `MIN_PHP` stays 8.4.0; move the 8.6 pin
-   autonomously when 8.6.0 final ships on 19 November; and do both
-   version-neutral fixes in the same package — audit the `fclose()` /
-   `file_put_contents()` / `copy()` return values in the backup, archive and
-   off-site paths, and set `session.use_strict_mode` explicitly (#627).
-   Unmeasured: 23 `scandir()` / `pathinfo()` call sites against 8.6 turning
-   some warnings into `ValueError`.
-2. **#706** (high) — the personal-data catalogue is incomplete: personal
-   columns that appear in no entry at all, so nothing can see them. Eleven
-   tables already measured. Found by #635.
-3. **#707** — an audit-trail row *about* the erased person is reachable by
+1. **#706** (high) — in flight, see above.
+2. **#707** — an audit-trail row *about* the erased person is reachable by
    nothing: `userID` is the actor and the subject is a table-and-id pair.
-4. **#708** — three loose ends from reading the catalogue.
-5. **#710** — a "dealt with by hand" action so a permanently-refusing erasure
-   step can be closed. The owner chose this remedy on 2 November 2026; see the
-   issue for why the other two were rejected.
+3. **#708** — three loose ends from reading the catalogue.
+4. **#710** — a "dealt with by hand" action so a permanently-refusing erasure
+   step can be closed. The owner chose this remedy on 2 November 2026.
+5. **New, raised 2 November, all high/security and all found while gathering
+   facts for #706:** **#712** raw IP addresses in two rate-limit tables that
+   nothing ever clears (one table has an index literally named
+   `idx_ratelimit_prune` and nothing prunes); **#713** payment webhook bodies
+   stored in full BEFORE verification is acted on and never cleared, carrying
+   donor name, e-mail and postal address, on a table with no foreign keys at
+   all; **#714** three places an erasure cannot reach (a recording's
+   transcript and its byte-for-byte search mirror, an expense receipt's
+   original filename — where the parent is deliberately KEPT for HMRC so no
+   cascade fires — and a workflow's subject label). Also **#711**,
+   `Pdf::create()` trusting `is_file()` after an unchecked write.
 6. **#582** (the key-loss escape only), **#586**, **#583g**.
 7. **#685 / #491 / #492.2 / #481**, then **#620 / #596.3 / #588.1**.
 8. **#649 / #596.7**, then **#541.2 / #703 / #539 / #619**, then
@@ -94,6 +117,12 @@ branch) are all in hand.
   (#709) — the audit line it writes and what an administrator sees. Reaching
   the ordering half needs a list the coverage test refuses outright, and the
   earlier-run half needs a trail a correct run never produces.
+- **#705's installer half is guarded by nothing**: the installer self-test
+  sends only #509's malformed cookie, never a well-formed id naming no
+  session, so deleting the installer's `ini_set` turns nothing red.
+- **Neither new `fclose()` refusal branch in `BackupArchive` is executed by any
+  test, and none can be** without a custom stream wrapper; nothing in `tools/`
+  registers one.
 
 ## How to verify this branch
 
