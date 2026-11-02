@@ -617,6 +617,85 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     proves the class has no dependencies) and
     `tools/audit-checks/check_php_version_one_place.py`.
 
+    **DO NOT MOVE THE 8.6 PIN TO `8.6.0` WHEN 8.6.0 SHIPS (#705,
+    measured 2 November 2026 against a real 8.6.0RC4).** #705 asks for
+    exactly that and calls it a dated action with a security
+    consequence; it is WRONG, and doing it causes the harm. The
+    finished `8.6.0` ALREADY counts as supported and patched with the
+    pin left at `8.6.0RC4`, because `version_compare` ranks a finished
+    release above its own candidates -- so NOTHING falls due on
+    19 November. Moving it warns everybody on 8.6.0RC4 that they are
+    unpatched, and RC4 is the FIRST build carrying the fix: planted,
+    that one edit turns RC4 from `ok` to `warn`. The constant means
+    "the first BUILD carrying the fix", never "the first finished
+    release". What does fall due is unrelated to it:
+    `PREFERRED_SERIES` (the owner's, 8.5 on purpose) and
+    `NEWEST_KNOWN_SERIES` (bump it when an 8.7 appears). Section C4 of
+    the test pins this and explains it at the point of failure.
+    Three more 8.6 facts, each measured rather than read: a
+    deprecation survey of FUNCTIONS misses a LANGUAGE change -- the
+    BACKTICK operator is deprecated, used by two audit fixtures on
+    purpose and by no portal code, and the pre-push hook judges
+    `php -l` by its exit code, which is 0 for a deprecation. **It is 8.5
+    that deprecated it, NOT 8.6, and my first version of this line said
+    8.6:** measured on all three, 8.4.27 is clean while 8.5.11 and
+    8.6.0RC4 both warn, so the notices were already printing on the
+    RECOMMENDED version before this work. Seeing a notice on the new
+    version tells you nothing about whether the old one was quiet; seven
+    filesystem TEST functions (`is_file`, `is_dir`, `file_exists`,
+    `is_readable`, `is_writable`, `filesize`, `filemtime`) THROW on a
+    NUL byte in the path where 8.4/8.5 answered `false`, which is
+    unreachable here only because every request-derived path is an
+    `(int)` or passes a strict allow-list before any file call (the
+    table is in DEV_NOTES.md; `strtotime()` does NOT reject a trailing
+    NUL); and `zend.exception_ignore_args` still exists, so argument
+    values still cannot reach a logged trace.
+
+    **A session id the portal never issued is REFUSED (#705).**
+    `Auth::prepareSessionStart()` sets `session.use_strict_mode` and is
+    the ONE place it is set for the portal (the installer sets its own,
+    because it cannot load `Auth`). Up to and including PHP 8.5 PHP
+    ADOPTS any well-formed session id a request sends, even one naming
+    no session, and starts a session under it. 8.6 turns this on by
+    default; setting it ourselves keeps the behaviour the SAME on 8.4,
+    8.5 and 8.6, which matters more than the default. **DO NOT CALL IT A
+    FIX FOR THE CLASSIC SIGN-IN FIXATION ATTACK -- my first version did
+    and the independent check killed it.** All six grants of
+    `$_SESSION['user_id']` are ALREADY preceded by
+    `session_regenerate_id(true)`, so the id somebody is signed in UNDER
+    was always one PHP minted. **THEREFORE THIS SETTING DOES NOT MAKE
+    THOSE ROTATIONS REDUNDANT:** strict mode refuses an unknown id, it
+    does not rotate one at a privilege boundary. What it DOES close is
+    session state with no rotation in front of it -- above all the kiosk
+    hand-over, `_apps/assets/kiosk-action.php` line 208, which puts a
+    REAL MEMBER'S account in the session in a file that rotates
+    nowhere.
+    **It must be set BEFORE `session_start()`**, which is why it lives
+    there and not in `bootstrap.php`. It is NOT the same check as
+    #509's, which drops a MALFORMED id; this one is about a well-formed
+    id that names nothing. A green suite proved only that nothing
+    broke -- section L of `tools/sign-in-limits-selftest.php` is what
+    proves it works, by sending such an id and finding, with the
+    setting removed, `sess_<the id the request chose>` really written
+    to disk. Its third check passes either way on purpose: it guards a
+    hardening that breaks the page.
+
+    **A file that could not be CLOSED is not written (#705).**
+    `BackupArchive` discarded `fclose()`'s answer when finishing an
+    archive and when writing each file out of one during a restore;
+    `DbBackup` already did it right and is the pattern. A close fails
+    on a full disk, so the old code left a truncated backup on disk
+    named like a good one, and counted a truncated restored file as
+    written. Two traps: **`fflush()` is NOT a substitute** (it pushes
+    PHP's buffer at the OS, which can still fail at close -- the old
+    code checked `fflush` and threw the close away), and **a second
+    `fclose()` THROWS a `TypeError`** on both 8.5 and 8.6 (measured;
+    the resource closes either way), so the extraction path nulls the
+    handle before throwing or the enclosing `finally` masks the honest
+    message. `fclose()` has ALWAYS returned `false` here; 8.6 only
+    reports more of it -- that was NOT measured, so the claim to rely
+    on needs no version at all.
+
     **The portal's own QR pictures (#623).** `Portal\Core\Qr` is the ONE
     place a QR picture is made (`QrEncoder` is its own helper); nothing
     under `web/` may ask another website to draw one, and

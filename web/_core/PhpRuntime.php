@@ -141,6 +141,29 @@ final class PhpRuntime
     //    BELOW 8.6.0RC4 and the finished 8.6.0 compares above it, which is
     //    exactly right. That is also why the comparison below must be made on
     //    the version WITH its marker and not on a tidied three-part number.
+    //
+    //    🛑 DO NOT "TIDY" THE 8.6 ENTRY TO '8.6.0' WHEN 8.6.0 SHIPS. Issue
+    //    #705 asks for exactly that, calls it a dated action with a security
+    //    consequence, and it is WRONG — measured on 2 November 2026 against
+    //    PHP 8.6.0RC4 itself, not reasoned about:
+    //
+    //      - The finished 8.6.0 ALREADY classifies as fixed and supported with
+    //        this entry left at 8.6.0RC4, because version_compare() ranks a
+    //        finished release above its own candidates. So there is nothing
+    //        that falls due on 19 November 2026.
+    //      - Moving it to '8.6.0' would warn everybody running 8.6.0RC4 that
+    //        they are unpatched, and RC4 is the first build that genuinely
+    //        carries the fix. Planted and measured: that one edit turns RC4's
+    //        verdict from `ok` to `warn`.
+    //
+    //    This constant means "the FIRST BUILD carrying the fix", not "the first
+    //    finished release carrying it". Read that way 8.6.0RC4 is the right
+    //    answer permanently. Section C4 of tools/php-runtime-selftest.php
+    //    pins all of this and explains it again at the point of failure.
+    //
+    //    What DOES fall due as 8.6 matures has nothing to do with this list:
+    //    PREFERRED_SERIES (the owner's decision — 8.5 on purpose) and
+    //    NEWEST_KNOWN_SERIES (bump it when an 8.7 line appears).
     public const PHP2SHELL_FIXED_IN = [
         '8.6' => '8.6.0RC4',
         '8.5' => '8.5.12',

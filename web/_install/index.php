@@ -425,6 +425,13 @@ foreach (preg_split('#[/\\\\]+#', rawurldecode($installPathAsked)) ?: [] as $ins
 //    alone on purpose: step 2 recognises somebody who is signed in to the
 //    portal by reading the portal's own session.
 if (session_status() !== PHP_SESSION_ACTIVE) {
+    // Refuse a session id we never issued, exactly as the portal does (#705).
+    // PHP adopts an unknown but well-formed id by default up to and including
+    // 8.5, which is session fixation; 8.6 turns this on itself. It matters
+    // here because the wizard's session carries the proof that this visitor
+    // typed the ownership code.
+    ini_set('session.use_strict_mode', '1');
+
     session_set_cookie_params([
         'lifetime' => 0,
         'path'     => '/',

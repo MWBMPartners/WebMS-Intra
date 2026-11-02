@@ -177,7 +177,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 114;
+const EXPECTED_CHECKS = 117;
 
 function refuse(string $why): never
 {
@@ -1766,6 +1766,71 @@ foreach (['Europe/London', 'America/New_York'] as $changing) {
 }
 date_default_timezone_set($phpZone);
 $clock->close();
+
+// =============================================================================
+head('L. A session id the portal never issued is refused (#705)');
+// =============================================================================
+// 🧠 WHAT THIS IS ABOUT. Up to and including PHP 8.5, PHP ADOPTS whatever
+//    well-formed session id a request sends — even one that names no session
+//    at all — and starts a session under it. PHP 8.6 refuses such an id by
+//    default; `Auth::prepareSessionStart()` now sets
+//    `session.use_strict_mode` itself, so the portal behaves the same on 8.4,
+//    8.5 and 8.6.
+//
+//    ⚠️ WHAT THIS IS *NOT* ABOUT, because the first version of this comment
+//    overstated it. It is NOT the classic "plant an id, wait for them to sign
+//    in, use it" attack: every place that grants `$_SESSION['user_id']` is
+//    already preceded by `session_regenerate_id(true)`, so the id somebody is
+//    signed in under was always one PHP minted. **This setting therefore does
+//    not make those rotations redundant** — strict mode refuses an unknown
+//    id, it does not rotate one at a privilege boundary.
+//
+//    What it closes is session state with no rotation in front of it, the
+//    kiosk hand-over above all (`_apps/assets/kiosk-action.php` line 208 puts
+//    a real member's account in the session and that file rotates nowhere).
+//
+//    WHY THIS CHECK AND NOT A SETTING TEST. Reading the ini value back would
+//    prove only that an ini_set() call exists. This sends a made-up id and
+//    asks what the portal DOES with it, which is the thing that matters and
+//    the thing that would break if the call were moved after session_start().
+//
+//    THIS IS A DIFFERENT CASE FROM THE MALFORMED COOKIE (#509), which the
+//    installer self-test covers: that id is not valid at all and is dropped
+//    before the session starts. This one is perfectly well formed. It simply
+//    names nothing, and the old behaviour was to accept it.
+$madeUp = str_repeat('a1b2c3d4', 4);   // 32 chars, all inside PHP's own id alphabet
+$answer = req('', 'GET', '/login', null, ip(121), ['Cookie: ' . session_name() . '=' . $madeUp]);
+
+// PHP tells the browser to use a DIFFERENT id, which is the refusal.
+$issued = preg_match('/^Set-Cookie:\s*' . preg_quote(session_name(), '/') . '=([^;\s]+)/mi', $answer['head'], $got) === 1
+    ? $got[1]
+    : '';
+ok(
+    'a well-formed session id that names no session is NOT adopted: the portal issues one of its own instead',
+    $issued !== '' && $issued !== $madeUp,
+    'sent: ' . $madeUp . '; portal issued: ' . ($issued === '' ? '(no Set-Cookie — the made-up id was ADOPTED)' : $issued)
+);
+
+// 🛑 AND THE FILE IS THE PROOF THAT NOTHING WAS STORED UNDER IT. A refusal
+//    that still wrote a session file under the attacker's chosen id would
+//    leave the fixation open: the attacker's id would then name a real
+//    session. The servers are started with a session.save_path of their own
+//    (see $startPortal), so this folder holds only sessions from this run.
+$sessionFile = $child . $sep . 'sessions' . $sep . 'sess_' . $madeUp;
+ok(
+    'and no session is stored under the id the visitor chose',
+    file_exists($sessionFile) === false,
+    $sessionFile . ' exists: ' . (file_exists($sessionFile) === true ? 'YES' : 'no')
+);
+
+// The page still works. A hardening that answered 500, or stopped showing the
+// sign-in form, would be a worse fault than the one it fixes — and a check
+// that only looked for "a different id" would pass on a broken page.
+ok(
+    'the sign-in page still answers normally to a request carrying such an id',
+    $answer['status'] === 200 && str_contains($answer['body'], 'name="password"') === true,
+    describe($answer)
+);
 
 // =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');

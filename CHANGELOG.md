@@ -2,6 +2,57 @@
 
 
 ## [Unreleased] (alpha)
+- **Added — PHP 8.6 is supported, and two fixes that are right on every version (#705, #627)**
+  - **Measured against a real PHP 8.6.0RC4, not read about.** All 1,069 PHP files in the
+    repository parse on it, and the self-tests that need no database pass on it unchanged. 8.4
+    stays the minimum and 8.5 stays the recommended version, both the owner's decisions.
+  - **A session id the portal never issued is now refused.** Up to and including PHP 8.5, PHP
+    *adopts* any well-formed session id a request sends — even one that names no session — and
+    starts a session under it. PHP 8.6 refuses such an id by default; the portal now sets
+    `session.use_strict_mode` itself, in `Auth::prepareSessionStart()` and in the installer, so the
+    behaviour is the same on 8.4, 8.5 and 8.6 rather than changing under a customer whose host
+    moves on. Proved by planting: with the setting removed, a session file really was written under
+    the id the request chose.
+    **What this does not fix, stated because the first draft of this entry got it wrong.** It is
+    not the familiar "plant an id, wait for them to sign in, then use it" attack — that never
+    worked here, because every place that signs somebody in already gives the session a new number
+    first. So this change does **not** make those renumberings unnecessary. What it closes is
+    session state that nothing renumbers: above all the asset kiosk, where a shared terminal puts a
+    real member's account into the session and never renumbers it, so an id somebody else chose
+    could be the one that member is identified under.
+  - **A file that could not be closed is no longer treated as written.** `BackupArchive` discarded
+    the result of `fclose()` when closing an archive it had just written, and when closing each
+    file written out of one during a restore. A close fails on a full disk or over quota, and the
+    old code carried on — so a truncated backup was left on disk, named and dated like a good one,
+    and a truncated restored file was counted as one that had been written. Both now refuse: the
+    archive is deleted rather than kept, and the restore stops with a message saying which file.
+    `DbBackup` already did this correctly and was the pattern followed.
+  - **What #705 asked for that would have done harm, and is therefore NOT done.** The issue says
+    `PhpRuntime::PHP2SHELL_FIXED_IN['8.6']` must move from `8.6.0RC4` to `8.6.0` when 8.6.0 ships
+    on 19 November, and calls it a dated action with a security consequence. Measured: the finished
+    8.6.0 **already** counts as supported and patched with the pin untouched, because
+    `version_compare()` ranks a finished release above its own candidates — and making the move
+    would tell everybody running 8.6.0RC4 that they are unpatched, when RC4 is the first build that
+    genuinely carries the October 2026 fix. Planted: that one edit turns RC4's verdict from `ok` to
+    `warn`. The constant means "the first **build** carrying the fix", so `8.6.0RC4` is the right
+    answer permanently. **Nothing falls due on 19 November.**
+  - **The 8.6 change that could have bitten, and why it cannot.** On 8.6 seven filesystem *test*
+    functions — `is_file`, `is_dir`, `file_exists`, `is_readable`, `is_writable`, `filesize`,
+    `filemtime` — throw an error on a NUL byte in the path, where 8.4 and 8.5 answered "no". A
+    visitor can send a NUL, so a page that built a path from a request and expected a tidy "not
+    found" would answer a bare 500 instead. Every such path was traced: each is either a whole
+    number, or narrowed by a strict allow-list before any file is touched, or filtered out by a
+    database look-up that no such value can match.
+  - **Also measured and needing no change:** no 8.6 deprecation is reached by any portal code.
+    The only two warnings anywhere in the tree are test fixtures holding a backtick on purpose, to
+    be caught by an audit check, and neither is ever run — and that deprecation is **8.5's, not
+    8.6's**: measured on all three, PHP 8.4.27 is clean while 8.5.11 and 8.6.0RC4 both warn, so it
+    was already printing on the version customers are pointed at. Argument values still cannot
+    reach a logged error trace. And `scandir()` and `pathinfo()`, the two functions 8.6 made
+    stricter about their second argument, are passed the proper constants at all five places that
+    call them — one `scandir(…, SCANDIR_SORT_DESCENDING)` and four `pathinfo(…, PATHINFO_*)`.
+  - Checks: `tools/php-runtime-selftest.php` 82 → 96, `tools/sign-in-limits-selftest.php`
+    114 → 117, whole suite 66 of 66 green.
 - **Fixed — an erasure can now reach a row through its PARENT table, so a pastoral visit's note is
   emptied for the person it is about (#709)**
   - **What could not be reached.** A pastoral visit's note describes the person being **cared

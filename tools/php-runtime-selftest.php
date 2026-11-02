@@ -211,6 +211,85 @@ check('…while a FINISHED release of that line is fine',
     $a['security']['state'] === 'ok', $a['security']['state']);
 
 // =============================================================================
+// C4. 19 NOVEMBER 2026: the pin must NOT move, and this says why
+// =============================================================================
+echo "\nC4. When 8.6.0 ships, leave the pin alone\n";
+
+// 🧠 WHY THIS SECTION EXISTS. Issue #705 says that when PHP 8.6.0 final ships
+//    on 19 November 2026, PHP2SHELL_FIXED_IN['8.6'] "must move from the
+//    pre-release to the finished release", and calls that a dated action with
+//    a security consequence. MEASURED ON 2 NOVEMBER 2026, THAT IS WRONG, and
+//    doing it would introduce the very fault the constant exists to prevent.
+//
+//    Two facts settle it, and both are checked below rather than asserted:
+//
+//    1. The finished 8.6.0 ALREADY judges as carrying the fix with the pin at
+//       8.6.0RC4, because version_compare() ranks a finished release ABOVE its
+//       own release candidates. So there is nothing to fix on 19 November.
+//
+//    2. Moving the pin to '8.6.0' would tell everybody running 8.6.0RC4 that
+//       they are NOT patched — and RC4, of 21 October 2026, is the first build
+//       that genuinely carries the fix. That is a false warning in the
+//       frightening direction, about a server that is actually fine.
+//
+//    The constant means "the FIRST build that carries the fix", not "the first
+//    finished release that carries it". Read that way, 8.6.0RC4 is simply the
+//    right answer and stays the right answer for ever.
+//
+//    What DOES fall due as 8.6 matures is nothing to do with this constant:
+//    PREFERRED_SERIES (the owner's decision, currently 8.5 on purpose) and
+//    NEWEST_KNOWN_SERIES (bump when an 8.7 appears).
+
+$rc4   = PhpRuntime::classify('8.6.0RC4');
+$final = PhpRuntime::classify('8.6.0');
+
+check('fact 1: the finished 8.6.0 already counts as fixed, with no change to the constant',
+    $final['security']['state'] === 'ok', $final['security']['state']);
+check('fact 1: and it is supported, so 19 November needs no edit at all',
+    $final['support']['state'] === 'ok', $final['support']['state']);
+check('fact 2: 8.6.0RC4 counts as fixed TODAY, which is what moving the pin would destroy',
+    $rc4['security']['state'] === 'ok', $rc4['security']['state']);
+
+// 🧪 WHY THE MOVE IS NOT COSMETIC — but read what this check is and is not.
+//    It runs the comparison the class makes, against the number somebody would
+//    "tidy" the constant to. If it ever came out true, moving the pin would be
+//    harmless and this whole section could go.
+//
+//    HONEST LIMIT, pointed out by the independent check: this pins PHP's OWN
+//    semantics, not anything in this repository, so NO edit here can make it
+//    fail — it stayed green under both plants that broke the constant. It is
+//    worth keeping because it states the reasoning where somebody will read it,
+//    and because it WOULD fail on a future PHP that ranked versions
+//    differently. The check that actually guards the constant is the
+//    pre-release test below, which does go red.
+check('why the move is not cosmetic: 8.6.0RC4 would FAIL a pin of 8.6.0 (PHP\'s own ranking, not ours)',
+    version_compare('8.6.0RC4', '8.6.0', '>=') === false,
+    'version_compare(8.6.0RC4, 8.6.0, >=) = '
+    . var_export(version_compare('8.6.0RC4', '8.6.0', '>='), true));
+
+// The 8.6 entry is a pre-release ON PURPOSE. A future reader who "corrects"
+// it should fail here and in C2, and read the reasoning above before deciding.
+check('the 8.6 entry is deliberately a pre-release number',
+    preg_match('/^\d+\.\d+\.\d+(RC|beta|alpha)\d+$/i',
+        PhpRuntime::PHP2SHELL_FIXED_IN['8.6'] ?? '') === 1,
+    (string) (PhpRuntime::PHP2SHELL_FIXED_IN['8.6'] ?? '(missing)'));
+
+// 🧮 Patch releases of 8.6, written out by hand. Deriving these from the
+//    constant would prove only that the constant agrees with itself — the
+//    lesson section C2 was built on.
+foreach (['8.6.0', '8.6.1', '8.6.2', '8.6.10'] as $later) {
+    $a = PhpRuntime::classify($later);
+    check("$later counts as carrying the fix", $a['security']['state'] === 'ok', $a['security']['state']);
+    check("$later is a supported runtime", $a['support']['state'] === 'ok', $a['support']['state']);
+}
+
+// 🛑 And the direction that must NOT change: an 8.6 build BELOW RC4 is still
+//    warned about. If somebody moves the pin backwards to catch "all of 8.6",
+//    this fails.
+$a = PhpRuntime::classify('8.6.0RC2');
+check('8.6.0RC2 is still warned about', $a['security']['state'] === 'warn', $a['security']['state']);
+
+// =============================================================================
 // D. The version this machine is actually running
 // =============================================================================
 echo "\nD. The running PHP, judged by the same rules\n";

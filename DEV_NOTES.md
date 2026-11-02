@@ -13579,3 +13579,148 @@ Count the planted faults from the code and the evidence folder, never from this
 paragraph (#671's rule). Tests: section 8c and the new section 8d of
 `tools/gdpr-coverage-selftest.php` (no database) and section 19 of
 `tools/gdpr-eraser-selftest.php` (a real database).
+
+---
+
+## PHP 8.6, and the four things worth keeping from supporting it (#705)
+
+Measured on 2 November 2026 against a real **PHP 8.6.0RC4** (the `php:8.6-rc-cli`
+image with `mysqli`, `mbstring`, `intl`, `gd`, `zip`, `bcmath` and `exif` added),
+alongside the 8.5.11 this machine runs. Everything below was run, not read about.
+
+### A pin that looks stale can be exactly right, and tidying it does harm
+
+`PhpRuntime::PHP2SHELL_FIXED_IN['8.6'] = '8.6.0RC4'` looks like a placeholder
+waiting for 19 November 2026, and issue #705 says in as many words that it
+"must move from the pre-release to the finished release", calling that a dated
+action with a security consequence.
+
+It is wrong, and the whole table of verdicts is what shows it:
+
+| Version | support | security |
+|---|---|---|
+| `8.6.0RC2` | warn | warn |
+| `8.6.0RC3` | warn | warn |
+| `8.6.0RC4` | warn (test build) | **ok** |
+| `8.6.0` | **ok** | **ok** |
+| `8.6.1`, `8.6.10` | ok | ok |
+
+The finished `8.6.0` already passes with the pin untouched, because
+`version_compare()` ranks a finished release above its own candidates. And
+moving the pin to `8.6.0` flips `8.6.0RC4` from `ok` to `warn` — measured by
+planting that exact edit — which is a false alarm in the frightening direction
+about a server that is patched. The constant means **the first build carrying
+the fix**, and RC4 (21 October 2026) is that build, permanently.
+
+**The general lesson: a dated action with a security consequence deserves
+measuring before the date, because the measurement may show there is no
+action.** What does fall due as 8.6 matures is unrelated to this list —
+`PREFERRED_SERIES` (the owner's decision) and `NEWEST_KNOWN_SERIES` (when an
+8.7 appears). Section C4 of `tools/php-runtime-selftest.php` pins all of it and
+explains it again at the point of failure, because a reader following the issue
+would otherwise "correct" the constant.
+
+### A deprecation survey that lists functions will miss a language change — and I got the version wrong proving it
+
+#705's survey checked 8.6's function and method deprecations individually and
+found none in use. It missed a **language** change rather than a function: the
+**backtick operator is deprecated**. Two files in the tree use one, both on
+purpose — they are fixtures that exist to be *caught* by audit checks looking
+for shell execution, and neither is ever executed.
+
+**The version attribution in the first draft of this section was WRONG, and
+the way it went wrong is the more useful lesson.** I wrote that 8.6 deprecates
+it, having run `php -l` over the tree on 8.6.0RC4, seen the two notices appear,
+and attributed them to the version I happened to be measuring. The independent
+check measured 8.5 and found it already there. Measured on all three:
+
+| Version | `php -l` on a backtick |
+|---|---|
+| 8.4.27 | clean, no notice |
+| **8.5.11** | **Deprecated: The backtick (`) operator is deprecated** |
+| 8.6.0RC4 | the same notice |
+
+So it arrived in **8.5** — the version this project RECOMMENDS and runs
+locally — and the notices were already printing before any of this work.
+**This is the error the section two above warns about, committed in the same
+document: a version claim is only measured if you measured the versions it
+distinguishes between.** Seeing a notice on the new version tells you nothing
+about whether the old one was quiet.
+
+Two details worth knowing before somebody "fixes" a fixture. `php -l` reports
+the deprecation at compile time, so those two files print a notice on 8.5 and
+8.6. And `.githooks/pre-push` judges `php -l` by its **exit code**, which is 0
+for a deprecation, so nothing fails. No portal code under `web/` uses a
+backtick.
+
+### A test function that stops answering and starts throwing
+
+8.6 turns seven filesystem **test** functions into throwers when the path holds
+a NUL byte — `is_file`, `is_dir`, `file_exists`, `is_readable`, `is_writable`,
+`filesize`, `filemtime` — where 8.4 and 8.5 return `false`. That is a different
+shape of change from a deprecation, because every call site is written on the
+assumption that a test function answers a question rather than raising one. A
+visitor can put a NUL in a path: PHP decodes `%00` into a real NUL and keeps it
+in `$_GET`.
+
+Nothing here is reachable, and the reason is a pattern rather than luck —
+**every request-derived path is narrowed before it reaches the filesystem**:
+
+| Where | What narrows it |
+|---|---|
+| `noticeboard/media.php` | `^[a-f0-9]{32}\.(png|jpg|jpeg|gif|webp|mp4|webm)$` before any file call, then re-derived from the database and `basename()` again |
+| `ApiRouter` | `^[a-z0-9\-]+$` on both the app and the action, before the path is built |
+| `Router` | the target is a `tblRoutes` column; an address with a NUL matches no route and 404s first |
+| the backup pages | `DbBackup::isSnapshotName()`, `\A[A-Za-z0-9_\-]+\z`, which throws before `pathOf()` can return |
+| `calendar/index.php` | an `in_array($view, $validViews, true)` allow-list with a fallback |
+| most download pages | `(int)` on the id, which no NUL survives |
+| `giving/statements-download.php` | `strtotime()` does **not** reject a trailing NUL (measured) — but `periodKey` filters the query, so no row matches and the page exits gracefully, and `ZipArchive::open()` already throws on 8.5 |
+
+The tracer that established this is deliberately **not** committed. It is a
+textual, single-file trace: it cannot follow a value through a function call or
+out of an array element, and a check that blind would give false confidence
+rather than cover. What is kept is the table above and the method's limits.
+
+### Checking a close is version-neutral work, and two details bite
+
+`fclose()` has always returned `false` on a failed flush or close; what 8.6
+changed is how much of that it reports rather than swallows. That distinction
+is written into the code comment on purpose, because it was **not** measured
+here — a failed flush cannot be provoked on this machine — and the claim worth
+relying on needs no version at all: the old code discarded the result on 8.4,
+8.5 and 8.6 alike.
+
+- **`fflush()` is not a substitute.** It pushes PHP's own buffer at the
+  operating system, which can still fail afterwards, at close. `BackupArchive`
+  checked `fflush()` and then threw the close's answer away.
+- **A second `fclose()` throws.** When a close returns `false` the resource is
+  closed anyway, and closing it again raises a `TypeError` on both 8.5 and 8.6
+  (measured). So the extraction path sets `$handle = null` before throwing, or
+  the enclosing `finally` would close it twice and replace an honest message
+  about a truncated file with a `TypeError` about a stream.
+
+### What a passing suite does and does not tell you
+
+The whole suite went green with the session hardening in place, which proves
+only that nothing **broke**. It says nothing about whether the hardening works.
+Section L of `tools/sign-in-limits-selftest.php` is the part that does: it sends
+a well-formed session id naming no session and asks what the portal does with
+it. With the `ini_set()` removed, that section reports
+`the made-up id was ADOPTED` and finds `sess_<the id the request chose>` on
+disk — demonstrated rather than argued. Its third check (that the page still
+answers normally) passes either way on purpose: it guards the opposite
+direction, a hardening that breaks the page.
+
+**Three gaps in this package's own testing, stated because an unstated gap is
+worse than a stated one.** First, **the installer's half of the session change
+is guarded by nothing**: section L drives the portal's `/login`, and
+`installer-selftest.php` sends only the MALFORMED cookie (#509's case), never a
+well-formed unknown id — so deleting the `ini_set` from
+`web/_install/index.php` would turn nothing red. Second, **neither new
+`fclose()` refusal branch is executed by any test, and none can be**: a failed
+close cannot be provoked without a custom stream wrapper, and nothing in
+`tools/` registers one. They were verified by reading, by measuring the
+`TypeError` a double close raises, and by confirming both callers clean up.
+Third, the `version_compare` check in section C4 pins PHP's own ranking rather
+than anything in this repository, so no edit here can make it fail; the
+pre-release test beside it is the one that guards the constant.

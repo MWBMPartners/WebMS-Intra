@@ -254,13 +254,42 @@ screens and didn't say what it meant.
     too, so an administrator asked about it can see the answer. Whether an
     install should instead be refused is one constant,
     `PhpRuntime::BLOCK_INSTALL_WHEN_UNPATCHED`.
-  - **`tools/php-runtime-selftest.php`** — 66 checks, no database and no
+  - **`tools/php-runtime-selftest.php`** — 96 checks, no database and no
     server needed (which also proves the class really has no dependencies).
     It checks both directions: that an unpatched version IS warned about, and
     that a future release line is NOT. Several checks exist purely to stop the
     wording being tightened into a claim the evidence does not support.
   - **`tools/audit-checks/check_php_version_one_place.py`** fails if any page
     under `web/` compares `PHP_VERSION` itself again.
+  - **PHP 8.6 is supported (#705).** Measured against a real 8.6.0RC4: every
+    PHP file in the repository parses on it, and nothing in the portal reaches
+    an 8.6 deprecation. PHP 8.4 stays the minimum and 8.5 stays the version
+    customers are pointed at. **Nothing falls due when 8.6.0 ships on
+    19 November 2026**: the finished release already counts as supported and
+    patched, and "tidying" the recorded fix number to `8.6.0` would wrongly
+    warn everybody on 8.6.0RC4, which is the first build that carries the
+    October 2026 fix. Section C4 of the self-test pins that, and says why at
+    the point of failure.
+- **A session id the portal never issued is refused (#705).** Up to and
+  including PHP 8.5, PHP accepts any well-formed session id a request sends —
+  even one naming no session — and starts a session under it. The portal now
+  sets `session.use_strict_mode` itself, so the behaviour is the same on PHP
+  8.4, 8.5 and 8.6 rather than changing under a customer whose host moves on.
+  Proved by removing the setting: a session file really was written under the
+  id the request chose. Section L of `tools/sign-in-limits-selftest.php`.
+  - **What it does not fix.** Signing in has always given the session a new
+    number first, so the familiar "plant an id and wait for them to sign in"
+    attack did not work here, and this change does not replace that. What it
+    closes is session state nothing renumbers — chiefly the asset kiosk, where
+    a shared terminal identifies a real member and never renumbers the
+    session.
+- **A backup file that could not be closed is not kept (#705).** Closing a
+  file can fail — a full disk, or over quota — and `BackupArchive` threw that
+  answer away in two places: finishing an archive, and writing each file out
+  of one during a restore. A truncated backup was left on disk looking like a
+  good one, and a truncated restored file was counted as written. Both now
+  refuse: the archive is deleted rather than kept, and a restore stops and
+  names the file.
 - **Database strictness (#593).** Every connection the portal opens asks the
   database to refuse a value that does not fit, instead of quietly changing
   it. The health page has a **Database strictness** check (green "Strict",

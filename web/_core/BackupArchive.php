@@ -399,7 +399,36 @@ final class BackupArchive
             throw $e instanceof RuntimeException ? $e : new RuntimeException($e->getMessage());
         }
 
-        fclose($out);
+        // 🧯 A FAILED CLOSE MEANS A FAILED BACKUP (#705).
+        //
+        //    fclose() returns false when the last flush or the close itself
+        //    fails — a full disk, a quota, a network filesystem giving up on
+        //    write-back. fflush() above catches most of that, but NOT all of
+        //    it: fflush() pushes PHP's own buffer at the operating system,
+        //    and the operating system can still fail afterwards, at close.
+        //
+        //    BE PRECISE ABOUT THE VERSIONS, because an overstated reason is
+        //    worse than none. fclose() has ALWAYS returned false on such a
+        //    failure; what #705 records is that PHP 8.6 reports more of them
+        //    rather than swallowing them. That was not measured here — a
+        //    failed flush cannot be provoked on this machine — so the claim
+        //    to rely on is the one that needs no version at all: checking the
+        //    return value is correct on 8.4, 8.5 and 8.6 alike, and the old
+        //    code discarded it on every one of them.
+        //
+        //    This is treated exactly as the `catch` above treats a failure:
+        //    the half-written file is deleted, because a backup somebody
+        //    KEEPS believing it is a copy of their data is worse than no
+        //    backup at all. That is the whole reason to check rather than
+        //    simply report — an unchecked close left a truncated file on
+        //    disk, named and dated like a good one.
+        if (fclose($out) === false) {
+            @unlink($intoFile);
+            sodium_memzero($key);
+            throw new RuntimeException(
+                'The backup file could not be closed, so it may be incomplete and was not kept.'
+            );
+        }
         sodium_memzero($key);
 
         $bytes = filesize($intoFile);
@@ -615,7 +644,28 @@ final class BackupArchive
                         if ($pendingBytes > 0) {
                             break;   // need more from the stream
                         }
-                        fclose($handle);
+                        // 🧯 The same rule as writing an archive (#705): a
+                        //    failed close means this file was NOT written out
+                        //    whole, so it must not be counted as one that was.
+                        //    Without this the unpack carried on, counted the
+                        //    file, and finished reporting success over a
+                        //    truncated file on disk — and `unpack()`'s caller
+                        //    then has no way to tell. The half-unpacked folder
+                        //    is cleared up by the caller's own `catch`, which
+                        //    is why throwing is enough here.
+                        //
+                        //    SAY "UNPACK", NOT "RESTORE". This is
+                        //    `backup-import.php` opening an archive into the
+                        //    backups folder — NOT `DbBackup::restoreAll()`.
+                        //    The harm is one step later: a truncated file left
+                        //    in that folder would poison a restore made from
+                        //    it afterwards.
+                        if (fclose($handle) === false) {
+                            $handle = null;
+                            throw new RuntimeException(
+                                'A file from the backup could not be closed, so it may be incomplete.'
+                            );
+                        }
                         $handle      = null;
                         $pendingName = null;
                         $count++;
@@ -705,7 +755,24 @@ final class BackupArchive
                 }
             }
         } finally {
-            if ($handle !== null) {
+            // 🧯 `!== false` AS WELL AS `!== null`, and the reason is the same
+            //    fault this package fixed one screen up (#705). `fopen(…,
+            //    'xb')` returns FALSE when the file cannot be created, and the
+            //    `throw` just after it leaves `$handle` holding false — not
+            //    null. So this line used to call `fclose(false)`, which raises
+            //    `TypeError: fclose(): Argument #1 ($stream) must be of type
+            //    resource, false given` and REPLACES the honest message ("A
+            //    file from the backup could not be created.") with a type
+            //    error about a stream. Measured, both the masking and the
+            //    wording.
+            //
+            //    Reachable whenever the folder is not writable, or when an
+            //    archive names the same file twice. The clean-up still ran and
+            //    the administrator still saw a refusal, so nothing was lost —
+            //    but they were told the wrong thing, and the standing rule
+            //    here is to fix the CLASS rather than the one instance that
+            //    was noticed.
+            if ($handle !== null && $handle !== false) {
                 fclose($handle);
             }
         }

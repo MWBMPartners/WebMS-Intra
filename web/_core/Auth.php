@@ -542,6 +542,58 @@ class Auth
      */
     private static function prepareSessionStart(): void
     {
+        // 🔒 Refuse a session id we never issued (#705).
+        //
+        //    With this off — PHP's default up to and including 8.5 — PHP
+        //    ADOPTS whatever well-formed session id a request sends, even one
+        //    that names no session, and starts a session under it. With it on,
+        //    PHP throws that id away and issues one of its own.
+        //
+        //    ⚠️ BE EXACT ABOUT WHAT THIS DOES AND DOES NOT FIX, because the
+        //    first version of this comment was overstated and an independent
+        //    check caught it. It claimed an attacker could plant an id, wait
+        //    for the victim to SIGN IN, and then use the id they chose. THAT
+        //    ATTACK NEVER WORKED HERE. Every one of the six places that grants
+        //    `$_SESSION['user_id']` is immediately preceded by
+        //    `session_regenerate_id(true)` — Auth.php 1568/1829/2113,
+        //    auth/login/webauthn.php 120, invites/accept.php 183, and the
+        //    two-factor step inherits the password step's rotation. So the id
+        //    somebody is signed in UNDER was already always one PHP minted.
+        //
+        //    🛑 WHICH MEANS: THIS SETTING DOES NOT MAKE THOSE
+        //    `session_regenerate_id(true)` CALLS REDUNDANT. Strict mode does
+        //    not rotate an id at a privilege boundary; it only refuses an id
+        //    nobody issued. Remove the rotations believing this covers them
+        //    and you open the real hole.
+        //
+        //    WHAT IT GENUINELY CLOSES is session state that is NOT behind a
+        //    sign-in rotation:
+        //      - the kiosk hand-over. `_apps/assets/kiosk-action.php` line 208
+        //        puts a REAL MEMBER'S account number in the session, and that
+        //        file calls `session_regenerate_id` NOWHERE. Before this, an
+        //        id chosen by somebody else could be the one a member is
+        //        identified under at a shared terminal.
+        //      - anything else kept before a sign-in ever happens.
+        //
+        //    And the plainest benefit, which needs no attack at all: 8.6 turns
+        //    this on itself, so setting it here keeps the behaviour the SAME on
+        //    8.4, 8.5 and 8.6. A setting that is on for some customers and off
+        //    for others is a difference nobody tests.
+        //
+        //    It must be set BEFORE session_start(), which is why it is here and
+        //    not in bootstrap.php: this method is the one place that runs
+        //    immediately before every session start, read-only looks included.
+        //
+        //    THIS IS NOT THE SAME CHECK AS THE ONE BELOW, and the two are not
+        //    interchangeable. This one is about an id that is well formed but
+        //    names no session; the one below is about an id that is not well
+        //    formed at all, which PHP itself would refuse with two warnings.
+        //
+        //    The return value is deliberately not read: if a host has disabled
+        //    ini_set for session settings there is nothing useful to do about
+        //    it in the request, and on 8.6 the default already does this.
+        ini_set('session.use_strict_mode', '1');
+
         // 🔒 Set secure cookie parameters before starting the session
         // See: https://www.php.net/manual/en/function.session-set-cookie-params.php
         session_set_cookie_params([
