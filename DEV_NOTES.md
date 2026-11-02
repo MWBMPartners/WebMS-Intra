@@ -14288,3 +14288,240 @@ fixes" and 8.4 as supported, and four callers display it — the installer, the
 admin dashboard, Server Information and the health probes. The end-to-end
 migration harness already runs against 8.4.11. **Checking before building was
 the whole of the work there.**
+
+## When the honest write-up is "nothing writes this", drop the column (#708, migration 235)
+
+`tblAssetStocktakes.notes` and `tblAssetStocktakeItems.notes` were dropped on
+2 November 2026. They had been there since the stocktake tables were created
+(`4764c06`, Asset Tracker Phase 3), and nothing had ever written to either.
+
+**The interesting part is not the columns; it is how they were found.** Both
+columns had an entry in `web/_core/personal-data-catalogue.php` from the day that
+file was created (`7a0f203`), and **#635** (`17dce1b`) then required every named
+column to carry a written reason. Writing an honest one meant writing, twice, a
+paragraph on why a note
+that nobody can type is nevertheless kept rather than emptied when somebody asks
+to be forgotten. That paragraph is true and useless, and it has a cost: the file
+a data subject's request is answered from reads as though the portal held two
+more kinds of personal information than it does, which makes the erasure
+coverage look **wider** than it is.
+
+So the rule worth keeping: **if the only honest thing you can write about a
+column is that nothing writes it, the change is to drop the column, not to write
+the paragraph.** A catalogue entry is an instruction about something real.
+
+**How to establish "nothing writes it" — and this is where the real lesson is,
+because every attempt at the evidence before this one was wrong, each in its own
+way. Four of them are set out below; no count is given in this sentence, because
+a draft said "three" above a list of four.** The standing rule says a claim about history carries the command that
+proved it. The command has to be one that *could* have shown the opposite.
+
+It takes TWO commands, and the second exists because the first has a blind
+spot that a draft of this section papered over with a false claim:
+
+```
+# 1. Every statement ever written against either table, anywhere, any quoting
+#    style. No path filter; the table name need not follow the verb.
+git log --all -p | grep "^+" | grep -i tblAssetStocktake \
+  | grep -Ei "insert|update|replace|load data" \
+  | sed 's/^+[[:space:]]*//' | sort -u
+      -> five statements, across every commit; not one names `notes`.
+
+# 2. Command 1 prints only the LINE carrying the table name, and this codebase
+#    builds SQL by concatenating strings, so a SET or ON DUPLICATE KEY UPDATE
+#    clause on a later line is INVISIBLE to it. Ask after the COLUMN instead:
+git log --all -p -- web/_core/AssetRegister.php \
+  | grep "^+" | grep -w "notes" | sed 's/^+[[:space:]]*//' | sort -u
+      -> every line belongs to tblAssetOrgs, an assignment, a kit loan or a
+         licence seat. None belongs to a stocktake table.
+```
+
+**A draft of command 1 was narrower still** - it required `INSERT INTO` and the
+like immediately followed by the BARE table name, under `web/` - and was
+therefore blind to the backticked FORM, which is how the rest of `web/_sql/`
+is written, and to any writer outside `web/`. (Said as a form and not as a
+statement on purpose: `web/_sql/` contains no stocktake INSERT in any style, so
+a reader told to look for a backticked one would go hunting for nothing — in the
+section whose whole subject is evidence that looks like proof and is not.)
+
+**And the draft justified skipping command 2 with a claim about MySQL that is
+simply false:** that `ON DUPLICATE KEY UPDATE` "can only name a column the
+INSERT list already holds". Measured on a real MySQL 8.0.36, that clause assigns
+to **any** column of the table, and a `notes = 'x'` in it really does write a
+column absent from the INSERT list. The true statement is about this code and
+not about MySQL: *in that upsert as written* the clause names only the four
+columns the INSERT list holds. **A false general rule that makes a gap
+"harmless by construction" is the most dangerous kind of comment**, because it
+stops anybody looking at the gap again.
+
+Three searches that look like proof and are not:
+
+```
+git log -S"notes" -- web/_apps/assets/
+    Returns the Phase 1 and Phase 2 commits, which predate these tables and are
+    about tblAssets.notes - a DIFFERENT column. Match the search to the column,
+    not to the word.
+
+git log -S"tblAssetStocktake" -- web/
+    BLIND to the very edit being ruled out. -S watches how many times a string
+    occurs; adding `notes` to an existing INSERT does not change how many times
+    the TABLE NAME occurs, so the count never moves. This was cited as evidence
+    in a draft of the migration header.
+
+grep -n "notes" <the stocktake block of AssetRegister.php>
+    True - the word is absent - but the conclusion drawn from it ("so nothing
+    reads them either") was FALSE. Three of those queries select `st.*` or
+    `i.*`, and a wildcard is a SELECT list that names no column, so both values
+    really were read back on every call. "The column name is not in a SELECT
+    list" does not establish "nothing reads it" in a codebase that uses
+    `alias.*`. An independent check caught this one.
+```
+
+What actually makes the drop safe on the read side is that nothing **consumed**
+the values: the three stocktake pages contain no occurrence of "note", none of
+them walks a row's keys generically (no `foreach ($row`, no `array_keys()`, no
+`json_encode()` of a whole row), and the scan handler builds its reply field by
+field. The wildcards fetched two values and threw them away.
+
+**Two things the drop needed besides the schema and the migration.** The
+catalogue entries had to lose the `notes` key from `columns` **and** from
+`notEmptiedHere` in the same edit — `gdpr-coverage-selftest.php` fails on an
+explanation for a column the entry does not name (#635) and on a named column
+the database does not have. And both columns go on `DbBackup::REMOVED_COLUMNS`,
+or a snapshot taken before the migration is refused with "Unknown column" by a
+database that has run it. That refusal is deliberate for a column nobody has
+written down; the list is how a removal somebody thought about is let through.
+
+**BOTH catalogue entries were wrong in the same way, in two sizes, and the
+bigger one is the one I nearly left out of this note.**
+
+- `tblAssetStocktakes` named `startedByID` and not `closedByID`, although a run
+  records both people and the erasure routine detaches both — so the entry read
+  as though the second were somebody else's business. **Half** of what it acts
+  on.
+- `tblAssetStocktakeItems` named **nothing** it acts on. Its only named column
+  was the dead `notes`, so an entry whose decision is "unlink" named no account
+  column at all. `scannedByID` was ADDED by this edit, not left behind by it;
+  `git show HEAD:web/_core/personal-data-catalogue.php` is where that is visible.
+
+An entry that names half of what it acts on, or none of it, is the same shape as
+one that names a column nothing writes: the list and the behaviour have to agree
+in both directions. A first draft of this section recorded only the first of the
+two and called it "one thing" — understating the lesson in the very place the
+lesson is kept, which an independent check caught.
+
+## `is_file()` is true for an empty file, and two permission facts (#711)
+
+`Pdf::create()` decided a write had worked by asking `is_file()`. It is true for
+a file that exists and holds nothing, which is precisely what a failed write
+leaves behind — so a truncated giving statement was served as a finished one and
+nothing recorded a problem. **Compare the byte count:**
+`file_put_contents($path, $bytes) !== strlen($bytes)`. The house pattern already
+existed — `DbBackup::snapshot()` compares it inline, and so do the installer's
+three writers (`install_common.php`, `index.php`'s `installWriteFile()`,
+`owner_code.php`) — and this one place did not follow it. (A draft of this
+paragraph credited a `DbBackup::writeManifest()` method, which does not exist,
+and said "two". Name a method only after opening the file it is in.)
+
+**THE FIRST FIX WAS WORSE THAN THE FAULT, and that is the most useful thing
+here.** It wrote straight to the real path and, when the write failed, deleted
+whatever was there. But `file_put_contents()` can fail at **open** — the target
+file read-only, a read-only mount, the name taken by a directory — and then the
+existing contents are untouched. Deleting them turned a working, if stale, PDF
+into nothing, while the database row went on naming it: a broken download link
+where a moment earlier there had been a working one. These paths use STABLE
+names (`_uploads/pdfs/claim_<id>.pdf`, recorded in `tblExpenseClaims.fileName`
+and in the HMRC-retained `tblExpenseClaimFiles`), so the damage persisted.
+
+**Write under a temporary name in the same folder and rename into place.** The
+real file is replaced only once a complete one exists, in one step, and any
+failure leaves what was there exactly as it was. The folder matters: `rename()`
+is atomic only within one filesystem. `DbBackup::snapshot()` writes its manifest
+this way and its comment gives the same reason — the pattern was two files away
+from the code being fixed.
+
+**And the message has to be as careful as the code.** The first version said
+"the part-written file was removed" whenever a boolean
+`is_file($p) === false || unlink($p) === true` came out true — which conflates
+"there was nothing to remove" with "I removed something". A write that failed at
+open told the administrator, in `tblErrors`, that a stub had been tidied away
+that never existed. Saying nothing is the honest answer when nothing happened.
+
+Three more things from fixing it that generalise.
+
+**1. Hold the bytes in a variable.** Calling the renderer inside the
+`file_put_contents()` arguments and again for `strlen()` renders the document
+twice and compares the length of the second rendering against the bytes of the
+first. For a PDF those differ, because it carries its own creation timestamp.
+
+**2. "Did my `mkdir()` win?" is the wrong question; "is the folder there?" is the
+right one.** Two requests can make the same folder at once and the loser gets
+`false` for a folder that now exists and is perfectly usable. Report the failure
+where it happens, too: the old code let an unmakeable folder fall through to the
+write, which then failed and blamed the write.
+
+**3. WRITING TO A FILE THAT ALREADY EXISTS NEEDS PERMISSION ON THE FILE, NOT ON
+THE FOLDER — and I got caught by this TWICE, the second time in the fixture
+written to guard the first.** A folder's permissions decide only whether a name
+may be created or removed in it; an existing file's own mode decides whether it
+may be written.
+
+- First time: a fixture meant to show a file existing while nothing was written
+  made the FOLDER read-only and put an empty file in it. The write succeeded.
+  The check went red and caught it.
+- **Second time, and this is the one worth the space.** The regression test for
+  the deleted-PDF fault used that same read-only-FOLDER fixture. So the write
+  SUCCEEDED there too, and the one check that names the harm — "the file that
+  was there is still there" — could never go red; in that fixture nothing can
+  delete the file either, because `unlink()` needs the folder. An independent
+  check measured the consequence: adding ONE line, `@unlink($filePath);`, to the
+  failure branch put the whole original fault back **with every check green**.
+
+The fixture that works needs the write to fail in a **WRITABLE** folder, and
+there is a way that needs no root, no quota and no special filesystem: give the
+file a basename long enough that the writer's 18-byte `.part-…` suffix crosses
+the limit on a name. The real file is created perfectly well and only the
+temporary one is refused — the same class of failure as a full disk, where the
+open never succeeds. With that fixture the plant above goes red, naming the harm:
+"now GONE - DESTROYED bytes, was 57".
+
+**The general lesson, which is not about permissions at all: a regression test
+must reproduce the MEASURED fault, not a cousin of it.** Both fixtures look like
+"a write that fails with a file already there". Only one of them is.
+
+**And the reason the write path answers a REASON rather than logging** is so that
+it can be tested at all: logging needs a database and a request, and dompdf is
+not in this repository (`_libraries/` is never committed), so a test that had to
+render could not run on this machine or on any runner. The rendered bytes arrive
+as an argument and the caller turns the reason into the log line — the same shape
+as `ExpenseRules::whyNotEditable()`, and for the same reason.
+
+**IT STILL TAKES TWO GUARDS, and the measurement is the point.** No test on this
+machine can force a genuine short write — the open succeeding and the disk
+filling part way through — without a quota or a tiny filesystem. Every write
+that fails in the self-test fails outright. Measured, with the writer written in
+place: replacing the byte comparison with "did anything get written" left EVERY
+check in that test green. So `tools/audit-checks/check_pdf_write_verified.py`
+pins the whole condition, and the self-test proves the behaviour the filesystem
+can actually be made to show. Neither catches the other's half (#646).
+
+**AND PINNING THE COMPARISON WAS NOT ENOUGH, which is #709's lesson arriving in
+a new file.** Measured in round 2: `if (false && $whyNot !== '')` at the call
+site, and deleting the call while leaving the method intact, EACH left all 23
+self-test checks and the whole audit check green — with `create()` handing back
+the path of a PDF that was never written. The self-test reaches the writer by
+reflection and never goes through `create()`, so it cannot see either. **When you
+pin a call, pin the gate that decides whether its block is entered at all.** The
+check now pins `$whyNot = self::writeOrWhyNot(...)` adjacent to exactly
+`if ($whyNot !== '') {}`. Round 2 also found a **commented-out** copy of the
+pinned temporary-name line satisfied the check, because that one branch read the
+raw file rather than the stripped source — #569's fault, in a check written with
+#569 in mind.
+
+**Finally, one of the same shape is still live elsewhere**, found while checking
+this and raised rather than fixed as **#720**: `web/_apps/documents/api/create.php`
+accepts `file_put_contents(...) !== false` for an uploaded document, so a
+truncated file is recorded as stored. The audit check above is deliberately scoped to
+`Pdf.php` rather than widened to catch it, because "a write whose count is not
+compared" matches a great deal of harmless code and a check that cries wolf gets
+switched off (#483).

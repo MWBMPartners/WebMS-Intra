@@ -167,6 +167,30 @@ class DbBackup
      */
     private const REMOVED_COLUMNS = [
         'tblEvents' => ['eventTimezone'],
+        // #708, migration 235. Two free-text note columns that arrived with
+        // the stocktake tables (4764c06) and that no version of the portal has
+        // ever written to - established by TWO commands, both quoted in that
+        // migration's header, where the second is not optional because the
+        // first cannot see a clause on a continuation line. So in a snapshot
+        // of a database the PORTAL filled,
+        // both columns are NULL in every row and discarding their saved values
+        // loses nothing.
+        //
+        // SAID EXACTLY, because this is the one place somebody looks to decide
+        // whether discarding a saved value is safe: that is a claim about this
+        // repository's history, NOT about any particular database. A note typed
+        // in by hand in a database client WOULD be lost here, and the drop
+        // itself cannot be undone either. No CUSTOMER's data is at risk,
+        // because there is no live installation of this portal yet (the owner,
+        // 2 November 2026); a developer's or a test database is the only place
+        // such a note could be, and that has not been checked - it cannot be,
+        // from the repository.
+        //
+        // They are listed here, not skipped silently, because an unknown column
+        // still stops a restore and only a removal somebody has thought about
+        // may pass.
+        'tblAssetStocktakes'     => ['notes'],
+        'tblAssetStocktakeItems' => ['notes'],
     ];
 
     /**

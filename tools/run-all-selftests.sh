@@ -137,6 +137,7 @@ TESTS=$(cat <<'LIST'
 gdpr-coverage|tools/gdpr-coverage-selftest.php|-|
 giving-retention|tools/giving-retention-selftest.php|-|
 php-runtime|tools/php-runtime-selftest.php|-|
+pdf-write|tools/pdf-write-selftest.php|-|
 asset-identifier|tools/asset-identifier-selftest.php|-|
 event-recurrence|tools/event-recurrence-selftest.php|-|
 series-repattern|tools/series-repattern-selftest.php|-|

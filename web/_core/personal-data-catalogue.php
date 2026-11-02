@@ -299,20 +299,37 @@ return [
         'columns'  => ['userID', 'notes'],
     ],
     'tblAssetStocktakeItems' => [
+        // #708, 2 November 2026. This used to name a `notes` column and
+        // explain, at length, why a note on a stocktake line is kept rather
+        // than emptied on an erasure request. Migration 235 DROPPED that
+        // column: nothing in the portal had ever written to it since the
+        // table was created (4764c06), so the explanation was answering a
+        // question nobody could ask, and two such paragraphs made the
+        // erasure coverage read wider than it is.
+        //
+        // `scannedByID` was ADDED by the same edit, not left behind by it, and
+        // that is the more useful half: before this, the ONLY column this
+        // entry named was the dead one, so an entry saying "unlink" named
+        // nothing an erasure could unlink. The column it now names is the one
+        // that really does tie a row here to a person and the one
+        // `GdprEraser`'s instruction really acts on.
         'decision' => 'unlink',
         'reason'   => 'An item counted during a stocktake. An audit record; deleting it would leave a gap in the count.',
-        'columns'  => ['notes'],
-        'notEmptiedHere' => [
-            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. A line in a stocktake of the organisation\'s property. Written by nothing in the portal today (#708).',
-        ],
+        'columns'  => ['scannedByID'],
     ],
     'tblAssetStocktakes' => [
+        // #708, 2 November 2026. A dead `notes` column was dropped from this
+        // table too (migration 235) for the reason written beside
+        // tblAssetStocktakeItems above. `closedByID` is named alongside
+        // `startedByID` because a run records TWO people and an erasure
+        // detaches both -- the entry named only one of them, which read as
+        // though the other were somebody else's business. Half of what it
+        // acts on, where the sibling entry above named NONE of it: the same
+        // fault, two sizes, found by writing the columns down rather than by
+        // reading the code.
         'decision' => 'unlink',
         'reason'   => 'A stocktake of the organisation\'s property - an audit record.',
-        'columns'  => ['startedByID', 'notes'],
-        'notEmptiedHere' => [
-            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. A stocktake of the organisation\'s property. Written by nothing in the portal today (#708).',
-        ],
+        'columns'  => ['startedByID', 'closedByID'],
     ],
     'tblAttendanceCounts' => [
         'decision' => 'not-personal',

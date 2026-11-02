@@ -2,6 +2,141 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — a PDF that was not written in full is no longer handed back as a finished one (#711)**
+  - `Pdf::create()` discarded `file_put_contents()`'s answer and decided success with
+    `is_file($filePath)`. **`is_file()` is true for a file that is empty or half written**, which is
+    exactly what a failed write leaves behind: on a full disk or over a hosting quota the write
+    returns a short count or `false`, and `is_file()` then said "yes". So the path came back and the
+    caller treated a truncated file as a finished PDF. This class makes giving statements, expense
+    paperwork, asset labels and venue invoices — a donor's annual giving statement that is half a
+    page, served as though it were correct, is worse than one that failed outright, because nothing
+    anywhere recorded a problem. Same reasoning as #705, where `fclose()`'s answer was thrown away.
+  - **Every caller was already written correctly**, which is what makes this worth saying: four of
+    the five test `!== false` on the spot and **three** of those four fall back to rendering the same
+    HTML as a print-CSS page; the fifth hands the answer up to two callers that both test it. The
+    fault was that `create()` never returned `false` for a short write, so none of that could be
+    reached. (Each is now named with its line in `Pdf.php`'s header, because two drafts of that
+    sentence miscounted and invented a method name.)
+  - `mkdir()`'s answer was discarded too, so a folder that could not be made carried on to the write
+    and failed there instead — reported as a write problem, which sends whoever is diagnosing it to
+    the wrong place. It is reported where it happens now. The question asked is still "is the folder
+    there?" and never "did my own `mkdir()` win?", because two requests can make the same folder at
+    once and the loser gets `false` for a folder that is perfectly usable.
+  - **The first version of this fix was worse than the fault, and an independent check measured it.**
+    It wrote straight to the real path and deleted whatever was there when the write failed — but
+    `file_put_contents()` can fail at **open** (the target read-only, a read-only mount, the name
+    taken by a directory), leaving the existing contents untouched, and it deleted them anyway.
+    These paths use stable names recorded in the database (`_uploads/pdfs/claim_<id>.pdf`, named in
+    `tblExpenseClaims.fileName` and in the HMRC-retained `tblExpenseClaimFiles`; and each donor's
+    statement). So a working, if stale, PDF was removed while the row went on naming it: **a broken
+    download link where a moment earlier there was a working one.** Measured on an existing 28-byte
+    PDF at mode 0444.
+  - **So the PDF is written under a temporary name in the same folder and renamed into place** — the
+    pattern `DbBackup::snapshot()` already uses for its manifest, for the same reason. The real file
+    is replaced only once a complete one is ready, in one step, and a failure anywhere leaves what
+    was there exactly as it was. It also made the message honest: the old code said "the part-written
+    file was removed" whenever there was nothing to remove, so an administrator diagnosing a full
+    disk was told a stub had been cleaned up that never existed.
+  - The write path answers a **reason** instead of logging, so that it can be tested: logging needs a
+    database and a request, and dompdf is not in this repository at all (`_libraries/` is never
+    committed), so a test that had to render could not run anywhere.
+  - **Two guards, because neither catches the other's half (#646).**
+    `tools/pdf-write-selftest.php` (23 checks, no database, no dompdf, no network) is wired into
+    `portal-selftests.yml` and `tools/run-all-selftests.sh` in the same change — a test in no
+    workflow is #646's exact failure. Its section F is the one that matters: a valid PDF already in
+    place must survive a failed write, byte for byte.
+    `tools/audit-checks/check_pdf_write_verified.py` is a new hard gate for the half no test on this
+    machine can reach — a genuine short write cannot be forced without a quota or a tiny
+    filesystem, and **replacing the byte comparison with "did anything get written" was measured to
+    leave every check in that test green.** It pins the whole condition, because a check that looks
+    for the text of a guard stays green when `&& false` is added to it.
+  - **A second review round found the regression test did not reproduce the fault it was written for,
+    and that is the lesson worth keeping.** Its fixture made the *folder* read-only with the existing
+    file inside it — but writing to a file that already exists needs permission on the **file**, so
+    the write succeeded and the one check that named the harm could never go red. Measured
+    consequence: adding one line, `@unlink($filePath);`, to the failure branch put the whole original
+    fault back **with every check green**. The fixture now forces the failure in a *writable* folder
+    by giving the file a name long enough that the temporary suffix crosses the limit on a name — the
+    same class of failure as a full disk, needing no quota and no root. **A regression test must
+    reproduce the measured fault, not a cousin of it.**
+  - That round also found the fix could be **switched off at the call site** with both guards green:
+    `if (false && $whyNot !== '')` in `create()`, or deleting the call while leaving the method
+    intact, each left all 23 self-test checks and the whole audit check green while `create()` handed
+    back the path of a PDF that was never written. The gate now pins the call and the condition that
+    acts on its answer — #709's lesson in a new file: when you pin a call, pin the gate that decides
+    whether it is entered at all. It also found a **commented-out** copy of the pinned line satisfied
+    one of the gate's five checks, because that one read the raw file instead of the stripped source.
+  - Two checks that **could not fail** were deleted rather than kept for the look of the thing, and
+    the costs of the new design are now written beside it: a killed process can leave a `.part-…`
+    file that nothing sweeps and an erasure would not match (**#721**), a rename replaces the inode
+    so a hand-tightened file mode returns to the default, and the gate refuses three correct
+    refactors by design.
+  - Faults planted across the two rounds, each caught by the guard that should catch it and the
+    source restored byte-identically: the original `is_file()` test; the clean-up switched off;
+    writing straight to the real path; accepting any non-false write; the comparison with `&& false`
+    appended; the call's gate switched off; the call deleted; the pinned line commented out; and the
+    one-line `@unlink()` that restored the original harm.
+  - **The same fault is still live elsewhere and is raised, not fixed here: #720**, the base64 branch
+    of the documents API. Widening the audit check to catch it would make it cry wolf, which is how a
+    check gets switched off (#483).
+- **Removed — two stocktake note columns nothing ever wrote (#708, migration 235)**
+  - `tblAssetStocktakes.notes` and `tblAssetStocktakeItems.notes` arrived with the stocktake tables
+    in `4764c06` ("Asset Tracker — Phase 3") and **no version of the portal has ever written to
+    either**. Two commands establish it, both quoted in the migration's header: one returns every
+    statement ever written against either table — **five**, across every commit, not one of them
+    naming `notes` — and a second closes that one's blind spot, because this codebase builds SQL by
+    concatenating strings, so a `SET` or `ON DUPLICATE KEY UPDATE` clause on a later line never
+    appears in the first command's output at all. So in a database the portal filled, both columns
+    are `NULL` in every row.
+  - **Two obvious searches look like proof and are not**, which is worth more than the columns.
+    `git log -S"notes" -- web/_apps/assets/` returns the Phase 1 and Phase 2 commits, which predate
+    these tables and are about `tblAssets.notes` — a different column. And
+    `git log -S"tblAssetStocktake" -- web/` is **blind to the very edit being ruled out**: adding a
+    column to an existing `INSERT` does not change how many times the table name appears, so the
+    count `-S` watches never moves.
+  - **Nor was "the word is not in a SELECT list" enough**, and an independent check caught that in a
+    draft of this entry. Three of the four stocktake queries select `st.*` or `i.*`, and a wildcard
+    is a `SELECT` list that names no column — so both values really were read back on every call.
+    What makes the drop safe is that nothing **consumed** them: only two files ever receive such a
+    row, neither contains any occurrence of "note", neither walks a row's keys generically, and the
+    scan handler, which writes rather than reads, builds its reply field by field.
+  - **A second check round found five more faults in the prose above, two of them inside the very
+    paragraph that corrected the first round.** The worst claimed MySQL's
+    `ON DUPLICATE KEY UPDATE` "can only name a column the INSERT list already holds" — which would
+    have made the first command's blind spot harmless by construction. **Measured false on a real
+    MySQL 8.0.36:** the clause assigns to any column of the table, and a `notes = 'x'` in it really
+    does write one absent from the INSERT list. The true statement is a fact about this code, not a
+    rule of MySQL — *in that upsert as written* the clause names only the four columns the INSERT
+    list holds — and the second command is what establishes it for every version of it.
+  - **Why drop rather than leave.** The same reason migration 201 gave for the check-in browser
+    description: a column that exists reads as a column meant to be used, so the next person to
+    touch these screens would reasonably start filling one in — and an untyped free-text box on an
+    audit record is where personal information lands without anybody deciding that it should.
+  - **The honest write-up was the tell.** Both columns had an entry in
+    `web/_core/personal-data-catalogue.php` from the day that file was created (`7a0f203`), and
+    **#635** (`17dce1b`) then required each to carry a written reason — a paragraph explaining why a
+    note that nobody can type is nevertheless kept rather than emptied on an erasure request.
+    (Earlier drafts of this entry, the migration header and the developer notes all credited #706.
+    Measured wrong: `git show e9934e7 -- web/_core/personal-data-catalogue.php` does not mention
+    either table. A wrong issue number is worse than none, which is the whole reason the rule is to
+    cite numbers and commit hashes.) Two such paragraphs in the
+    file a data subject's request is answered from made the erasure coverage read **wider than it
+    is**. Dropping the columns deletes the question instead of answering it. Both entries now name
+    the columns an erasure really acts on, and **both** entries needed it: `tblAssetStocktakes`
+    gained `closedByID` beside `startedByID`, because a run records two people and the erasure
+    detaches both; and `tblAssetStocktakeItems` gained `scannedByID`, which is the larger of the
+    two — before this edit the only column that entry named was the dead one, so an entry saying
+    "unlink" named nothing an erasure could unlink.
+  - **No data the portal wrote can be lost**, because there is none — a claim about this
+    repository's history and **not** about any particular database. No customer's data is at risk,
+    because there is no live installation yet; a note typed by hand into a developer's or a test
+    database would be lost, a drop cannot be undone, and whether such a note exists has not been
+    checked, because it cannot be from the repository. Both columns are on
+    `DbBackup::REMOVED_COLUMNS`, so a snapshot taken before migration 235 can still be restored into
+    a database that has run it — without that entry such a restore is refused with "Unknown
+    column", which is the deliberate behaviour for a column nobody has thought about.
+  - The migration is idempotent through the `information_schema` + `PREPARE`/`EXECUTE` guard
+    migrations 194 and 201 already use; MySQL 8.0 has no `DROP COLUMN IF EXISTS`.
 - **Added — a reserved word used as a database identifier must be backticked or qualified (#718,
   #276), before the reference host moves to MySQL 8.4 on 9 November 2026**
   - **The fault this guards already happened.** MySQL ignores case in keywords, so `fullText` **is**

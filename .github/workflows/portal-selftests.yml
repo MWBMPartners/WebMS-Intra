@@ -166,6 +166,24 @@ jobs:
         if: ${{ !cancelled() && steps.php.outcome == 'success' }}
         run: php tools/php-runtime-selftest.php
 
+      # 🖨️ A PDF that was not written in full is never kept (#711). Needs no
+      #    database, no dompdf and no server: the write path answers a REASON
+      #    rather than logging, exactly so that it can be tested here, and the
+      #    rendered bytes arrive as an argument. dompdf is not in this
+      #    repository at all (`_libraries/` is never committed), so a test that
+      #    had to render could not run on any runner. Section F is the one that
+      #    earns its place: an existing, valid PDF must survive a failed write
+      #    byte for byte, because the FIRST version of this fix deleted it and
+      #    the database row went on naming the removed file. Its fixture forces
+      #    the failure with a name too long for the temporary suffix, in a
+      #    WRITABLE folder - an earlier fixture made the FOLDER read-only, where
+      #    the write succeeds and the check could never go red. Section D needs
+      #    an ordinary (non-root) user, which a GitHub runner is; the test says
+      #    so and fails loudly if run as root.
+      - name: PDF short-write self-test (#711)
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/pdf-write-selftest.php
+
       # 🔢 Asset identifier check digits (#569). Needs no database: both
       #    routines are arithmetic over a string. `gmnMod1021Check()` was a
       #    STUB referred to by name from its caller for months, and the caller

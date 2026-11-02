@@ -1179,6 +1179,24 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_reserved_words_quoted.py
 
+      # A PDF is kept only when every byte of it was written (#711). `is_file()`
+      # is true for a file that exists and holds nothing, which is what a failed
+      # write leaves behind, so a truncated giving statement was handed back as a
+      # finished one. THE SELF-TEST CANNOT GUARD THIS HALF: a genuine short write
+      # cannot be forced without a quota or a tiny filesystem, and replacing the
+      # byte comparison with "did anything get written" leaves all 23 of its
+      # checks green (measured). It also pins the temporary-name-and-rename shape
+      # and, since the second round of review, create()'s own CALL and the gate
+      # that acts on its answer: `if (false && $whyNot !== '')` there, and
+      # deleting the call while leaving the method in place, each left all 23
+      # self-test checks and the rest of this gate green while create() handed
+      # back the path of a PDF that was never written (#709 round 2's lesson -
+      # when you pin a call, pin the gate that decides whether it is entered).
+      - name: 'A part-written PDF is never kept (hard gate, #711)'
+        id: pdf_write_verified
+        if: always()
+        run: python3 tools/audit-checks/check_pdf_write_verified.py
+
       # Nothing under web/ may ask another website to draw a QR picture (#623).
       # The rule existed for PHP and had no guard for JavaScript, which is how
       # the noticeboard bundle's api.qrserver.com fallback went unnoticed. It is

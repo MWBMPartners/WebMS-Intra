@@ -7881,6 +7881,16 @@ COMMENT='Asset Tracker Phase 2 — reminder single-shot dedupe log, no FKs by de
 -- here (after every Phase 1/2 Asset Tracker table above, all of which
 -- these depend on) to keep dependency order intact for a fresh install —
 -- see migration 161's own header for the full design notes.
+-- ── `notes` removed from BOTH stocktake tables below by
+--    235_drop_dead_stocktake_notes.sql (#708). Migration 161 still declares
+--    them, which is correct and must stay: it is the record of what that
+--    release created. No version of the portal ever wrote to either column —
+--    TWO commands establish that, both quoted in migration 235's own header,
+--    and the second is not optional. The searches that LOOK like proof and
+--    are not are written up in DEV_NOTES.md, "When the honest write-up is
+--    'nothing writes this'". A fresh install
+--    never creates them, so migration 235's guard finds nothing to drop on a
+--    brand-new database and runs a harmless `SELECT 1`.
 CREATE TABLE IF NOT EXISTS `tblAssetStocktakes` (
     `stocktakeID`   INT          NOT NULL AUTO_INCREMENT,
     `siteID`        INT          NOT NULL DEFAULT 1,
@@ -7892,7 +7902,6 @@ CREATE TABLE IF NOT EXISTS `tblAssetStocktakes` (
     `startedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `closedByID`    INT          DEFAULT NULL,
     `closedAt`      DATETIME     DEFAULT NULL,
-    `notes`         TEXT         DEFAULT NULL,
     PRIMARY KEY (`stocktakeID`),
     KEY `idx_astst_site_status` (`siteID`, `status`),
     CONSTRAINT `fk_astst_site`     FOREIGN KEY (`siteID`)       REFERENCES `tblSites`(`siteID`),
@@ -7912,7 +7921,6 @@ CREATE TABLE IF NOT EXISTS `tblAssetStocktakeItems` (
     `scannedByID`     INT          DEFAULT NULL,
     `scannedAt`       DATETIME     DEFAULT NULL,
     `foundLocationID` INT          DEFAULT NULL COMMENT 'Where the asset was actually scanned, when different from its recorded locationID (verifyStatus=moved)',
-    `notes`           VARCHAR(500) DEFAULT NULL,
     PRIMARY KEY (`itemID`),
     UNIQUE KEY `uq_aststi_stocktake_asset` (`stocktakeID`, `assetID`),
     KEY `idx_aststi_status` (`stocktakeID`, `verifyStatus`),
@@ -10670,4 +10678,14 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('233_restore_held_rows.sql')
 -- never overwrites a ceiling somebody has chosen — and it is here so the
 -- installer's replay of every numbered migration finds nothing left to do.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('234_giving_retention_ceiling.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 235_drop_dead_stocktake_notes.sql (#708) ────────────────────
+-- Nothing to do here: the two dead `notes` columns are simply absent from the
+-- `tblAssetStocktakes` and `tblAssetStocktakeItems` blocks above, so a fresh
+-- install never has them. The mark is written UNCONDITIONALLY -- there is no
+-- "do this once" work to test for, the migration only drops two columns -- and
+-- it is here so the installer's replay of every numbered migration finds
+-- nothing left to do.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('235_drop_dead_stocktake_notes.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
