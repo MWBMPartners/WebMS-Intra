@@ -226,10 +226,11 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 235; // 230 before section 18 (#694) added five
+const EXPECTED_CHECKS = 251; // 235 before section 19 (#709) added nine; the fix round
+                             // replaced its single guard check with eight
 
 // The headings that must all be reached for a pass.
-const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18'];
+const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19'];
 
 // 🗺️ The made-up people and requests. Every number is 920000 or higher, far
 //    above anything the fresh-install script seeds.
@@ -284,6 +285,8 @@ const REQ_LOG = 940201;
 
 const P_HELD   = 920202; // erased in section 18: his kept rows must go from the holding table too (#694)
 const REQ_HELD = 940202;
+const P_CARE   = 920301; // erased in section 19: a pastoral visit's notes are reached through the case (#709)
+const REQ_CARE = 940301;
 const SITE_G1     = 3;      // "tax gifts only" (the default rule), in Europe/London
 const SITE_G2     = 4;      // "every gift", in Pacific/Auckland
 const SITE_K      = 12;     // section 16: "tax gifts only", in Pacific/Kiritimati, fourteen hours AHEAD of UTC
@@ -1165,6 +1168,100 @@ function ge_buildWorld(int $person, string $email, string $name): array
         }
     }
 
+    // 🧬 #709: MAKE THE PARENT LINK REAL, or the one instruction that matches
+    //    through another table is exercised by nothing here.
+    //
+    //    A parent-matched instruction finds its rows by looking the subject up
+    //    one table higher - a pastoral visit's notes are reached through
+    //    `tblCareCase.personUserID`, because the only account numbers on the
+    //    visit itself are the WORKERS who dealt with it. Every made-up row is
+    //    built generically, and `ge_ensureParents()` gives it a parent whose
+    //    person columns name the ADMINISTRATOR (who is never erased), so the
+    //    look-up found nothing and the step reported "nothing held for this
+    //    person". That is the harness being honest, not the engine being
+    //    wrong - but it left the feature covered by no check in this file.
+    //
+    //    So the child's row is pointed at the row the PARENT's own instruction
+    //    already made for this person. Nothing new is inserted: that row
+    //    exists, belongs to the person, is already in `$allowed` and is
+    //    already counted by the audit check. The made-up parent that
+    //    `ge_ensureParents()` created is simply left orphaned, and it names
+    //    only the administrator, so no instruction finds it and check 4
+    //    ("nothing else in the whole database changed") still holds.
+    //
+    //    WHAT THIS BUYS, and it is the valuable part: the ORDER is now proved
+    //    by behaviour here as well as by position in the coverage test. The
+    //    parent's step empties the very column this look-up uses, so if the
+    //    parent-matched instruction were moved below it, these rows would come
+    //    back with their notes intact and section 3 would go red.
+    $viaByIndex = [];
+    foreach ($instructions as $i => $instruction) {
+        if (isset($instruction['subjectVia']) === true) {
+            $viaByIndex[$i] = (array) $instruction['subjectVia'];
+        }
+    }
+    $viaRowsFor = [];
+    foreach ($viaByIndex as $viaIndex => $via) {
+        $childTable = (string) $instructions[$viaIndex]['table'];
+        // The parent row this person already has, found by the instruction
+        // that made it rather than by guessing at a key.
+        $parentKeyValue = null;
+        foreach ($rows as $tracked) {
+            $of = $instructions[$tracked['i']];
+            if ((string) $of['table'] === (string) $via['parent']
+                && (string) $of['userCol'] === (string) $via['personCol']
+                && $tracked['kind'] === 'R1'
+            ) {
+                $parentKeyValue = $tracked['ref']['key'][(string) $via['parentKey']] ?? null;
+            }
+        }
+        if ($parentKeyValue === null) {
+            throw new RuntimeException(
+                $childTable . ' matches through `' . (string) $via['parent'] . '`.`' . (string) $via['personCol']
+                . '`, but this test has no row of that table for the person - so the instruction could not be '
+                . 'exercised and a silent pass would mean nothing. Give the parent an instruction that matches '
+                . 'on that column, or fix this.'
+            );
+        }
+        // ⚠️ ONLY THIS INSTRUCTION'S OWN ROWS. `tblCareVisit` carries three
+        //    instructions, and the other two have rows of their own whose
+        //    notes must stay exactly as they are - that is what proves the via
+        //    step empties the notes and the other two steps do not. Pointing
+        //    every row of the table at the person's case made all three look
+        //    alike and turned three by-name checks red.
+        foreach ($rows as $tracked) {
+            if ($tracked['i'] !== $viaIndex || $tracked['ref']['table'] !== $childTable) {
+                continue;
+            }
+            $where = implode(' AND ', array_map(
+                static fn (string $c): string => '`' . $c . '` = ?',
+                array_keys($tracked['ref']['key'])
+            ));
+            ge_q(
+                'UPDATE `' . $childTable . '` SET `' . (string) $via['childCol'] . '` = ? WHERE ' . $where,
+                str_repeat('s', 1 + count($tracked['ref']['key'])),
+                array_merge([$parentKeyValue], array_values($tracked['ref']['key']))
+            );
+        }
+
+        // 📌 How many rows this step should report, counted NOW while the link
+        //    is still there: the erasure empties the parent's own column, so
+        //    after the run the question cannot be asked at all.
+        //
+        //    Written as an explicit join rather than by calling
+        //    `GdprEraser::whereForEntry()`. Asking the code under test what it
+        //    expects to find would make this agree with the code by
+        //    construction, which is the shape that let a page test hold its
+        //    own copy of a rule and pass on a change that broke the page.
+        $viaRowsFor[$viaIndex] = (int) (ge_one(
+            'SELECT COUNT(*) AS n FROM `' . $childTable . '` c INNER JOIN `' . (string) $via['parent'] . '` p '
+            . 'ON p.`' . (string) $via['parentKey'] . '` = c.`' . (string) $via['childCol'] . '` '
+            . 'WHERE p.`' . (string) $via['personCol'] . '` = ?',
+            'i',
+            [$person]
+        )['n'] ?? -1);
+    }
+
     // 🧪 The Demo Data page's list: two entries point at this person and go;
     //    an entry for an announcement that merely has the same NUMBER stays.
     $userSite = null;
@@ -1215,7 +1312,7 @@ function ge_buildWorld(int $person, string $email, string $name): array
 
     return ['person' => $person, 'email' => $email, 'instructions' => $instructions, 'rows' => $rows,
         'allowed' => $allowed, 'demo' => $demo, 'emailLog' => $emailLog, 'file' => $file, 'photo' => $photo,
-        'linkedBefore' => $extra];
+        'linkedBefore' => $extra, 'viaRowsFor' => $viaRowsFor];
 }
 
 /**
@@ -1649,6 +1746,13 @@ function ge_checkAudit(array $world, array $lines, bool $demoLine, array $failTa
     // Each is counted for every instruction whose column names the person on
     // it, and each line's row count has to match EXACTLY: a count that is one
     // too high would mean an instruction touched a row it should not.
+    // 🧬 A parent-matched instruction's count was worked out while the world
+    //    was built (#709), because the erasure empties the parent's own column
+    //    and the question cannot be asked afterwards. It REPLACES the R1 count
+    //    rather than adding to it: the join counted every row, R1 included.
+    foreach ((array) ($world['viaRowsFor'] ?? []) as $i => $n) {
+        $rowsFor[$i] = (int) $n;
+    }
     foreach ($world['instructions'] as $i => $instruction) {
         foreach ($world['linkedBefore'] ?? [] as $row) {
             $column = (string) $instruction['userCol'];
@@ -2034,11 +2138,24 @@ ge_ok('every table the audit trail says "no column ties to an account" really ha
 // made it emptiable, so there are now two lines, one per person column, each
 // saying the visit is kept and who is detached.
 $visitLine = array_values(array_filter($auditA, static fn (array $l): bool => $l['tableName'] === 'tblCareVisit'));
-ge_ok('tblCareVisit: two audit lines, one for who made a visit and one for who its follow-up was given to, each saying the visit is kept',
-    count($visitLine) === 2 && $visitLine[0]['action'] === 'anonymise' && $visitLine[1]['action'] === 'anonymise'
-    && str_contains((string) $visitLine[0]['details'], 'who made the visit is detached')
-    && str_contains((string) $visitLine[1]['details'], 'who its follow-up was given to is detached')
-    && str_contains((string) $visitLine[0]['details'], 'kept with the case')
+// CHANGED by #709 (2 November 2026): there are now THREE lines, not two. The
+// first is the one that empties the NOTE, found through the case; the other two
+// are the ones that detach the two workers, unchanged. The order is part of it -
+// the note's line must come FIRST, because the step that empties the case's own
+// `personUserID` runs between the first line and the last two, and after it the
+// look-up through the case can find nothing (see whyParentLookUpUnsafe()).
+//
+// The `not searched` clause is kept: before migration 208 this table's line
+// said "no column ties a row of this table to an account", which was untrue.
+ge_ok('tblCareVisit: THREE audit lines, in order - the note emptied through the case, then who made the visit, then who its follow-up was given to',
+    count($visitLine) === 3
+    && $visitLine[0]['action'] === 'anonymise' && $visitLine[1]['action'] === 'anonymise' && $visitLine[2]['action'] === 'anonymise'
+    && str_starts_with((string) $visitLine[0]['details'], 'matched through `tblCareCase`.`personUserID`.')
+    && str_contains((string) $visitLine[0]['details'], 'the note on a pastoral visit describes the person the case is about')
+    && str_contains((string) $visitLine[0]['details'], 'a visit on somebody else\'s case is untouched')
+    && str_contains((string) $visitLine[1]['details'], 'who made the visit is detached')
+    && str_contains((string) $visitLine[2]['details'], 'who its follow-up was given to is detached')
+    && str_contains((string) $visitLine[1]['details'], 'kept with the case')
     && str_contains((string) $visitLine[0]['details'], 'not searched') === false, json_encode($visitLine));
 
 // =============================================================================
@@ -2143,6 +2260,14 @@ ge_ok('...one already accepted keeps its status (that is history), and a request
     ge_same($was['swapAccepted'], $now['swapAccepted'], ['targetUserID']) === true && $now['swapAccepted']['status'] === 'accepted'
     && $now['swapAccepted']['targetUserID'] === null && $now['swapOfOthers'] === $was['swapOfOthers'],
     json_encode([$now['swapAccepted'], $now['swapOfOthers']]));
+// 🧬 #709 MADE THE TWO VISIT CLAUSES BELOW LOAD-BEARING, and they were not
+//    before. Until 2 November 2026 nothing in the portal could empty a visit's
+//    notes at all, so "the notes are still there" was a statement about a thing
+//    that could not happen. Now one instruction DOES empty them - through the
+//    case - and these two visits are on CAL'S case, not the erased person's, so
+//    they are the proof that a worker's own erasure does not destroy a third
+//    party's safeguarding record. If the parent column were ever pointed at an
+//    actor (`openedByID`, say), these are the clauses that would go red.
 ge_ok('a CHILD\'S CHECK-IN made by somebody else and checked OUT by the person loses only the check-out number; the child\'s profile is untouched',
     ge_same($was['checkin'], $now['checkin'], ['checkedOutByID']) === true && $now['checkin']['checkedOutByID'] === null
     && (int) $now['checkin']['checkedInByID'] === C && $now['child'] === $was['child'], json_encode($now['checkin']));
@@ -4921,5 +5046,364 @@ ge_ok('nothing of the erased person is left anywhere in the holding table, asked
     json_encode(ge_q('SELECT heldID, userID, rowJson FROM tblRestoreHeldRows')));
 
 ge_q('DELETE FROM tblRestoreHeldRows WHERE heldID IN (?, ?)', 'ii', [$heldOther, $heldNobody]);
+
+// =============================================================================
+ge_section('19', 'A pastoral visit\'s notes, reached through the case: emptied for the subject, untouched for anybody else (#709, 2 November 2026)');
+// =============================================================================
+// WHY THIS SECTION EXISTS. Every other instruction in the erasure says "this
+// table, this column, this person's number". A pastoral visit does not work
+// that way: its notes describe the person being CARED FOR, and the only
+// account numbers on the row are the WORKER who made the visit and the worker
+// its follow-up was given to. The subject is one table up, on
+// `tblCareCase.personUserID`. So since #709 one instruction finds its rows
+// through a parent table, and this is the section that proves what it does.
+//
+// 🛑 THE OBVIOUS SHORTCUT IS THE DESTRUCTIVE ONE, which is why the third
+//    person below matters more than the first. Hanging the notes off
+//    `visitedByID` would empty the safeguarding notes of every visit the
+//    erased WORKER ever made - other people's records, about people who never
+//    asked for anything - and would still reach not one note about the person
+//    who did ask. Both halves are bad, and the second half is why nobody would
+//    notice the first.
+//
+// The world, four cases on purpose:
+//   1. The person's OWN case, with two visits: one they made themselves and
+//      one a colleague made. BOTH notes must go - the note is about the
+//      subject whoever typed it.
+//   2. Somebody else's case, with a visit the erased person made. Its note
+//      must SURVIVE, and only their own number comes off it.
+//   3. A case with NO subject at all (`personUserID` is null). Nothing on it
+//      may change: a null must never match a person.
+//   4. Section 3b already covers a second visit on somebody else's case,
+//      through a different column, and its two clauses are load-bearing for
+//      this feature now - see the note there.
+//
+// WHAT THIS CANNOT SHOW, said plainly, and it was UNDERSTATED until the fix
+// round. A correctly ordered run never reaches the run-time guard's refusal at
+// all: reaching the ordering half needs the instruction to sit BELOW its
+// parent's in the list, which `tools/gdpr-coverage-selftest.php` refuses
+// outright, and reaching the earlier-run half needs a trail a correct run does
+// not produce. So the guard's LOGIC is asked directly at the end of this
+// section, over a hand-made audit trail, and that is the only cover it has.
+//
+// What is covered, and was not before: the coverage test now pins that
+// `processEntry()` still CALLS the guard and still fails the step on its
+// answer. Both were planted and both went red. Before that, replacing the
+// whole call with `if (false)` left every check in this file and that one
+// green.
+//
+// What is still covered by NOTHING: the live path through `processEntry()`
+// with a real refusal - the audit line it writes, and what an administrator
+// sees afterwards. Those are read, not run.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+ge_user(P_CARE, 'Ces Cared', 'ces.cared@selftest.invalid');
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+
+// 1. The person's own case.
+$ownCase   = ge_linked('tblCareCase', ['personUserID' => P_CARE, 'openedByID' => D], ['siteID' => 1, 'summary' => 'Ces is in hospital']);
+$ownVisitA = ge_linked('tblCareVisit', ['visitedByID' => P_CARE, 'followUpAssignedToID' => D],
+    ['caseID' => ge_id($ownCase), 'notes' => 'Ces says the ward is noisy.']);
+$ownVisitB = ge_linked('tblCareVisit', ['visitedByID' => D, 'followUpAssignedToID' => P_CARE],
+    ['caseID' => ge_id($ownCase), 'notes' => 'Took Ces some shopping; family are worried.']);
+// 2. Somebody else's case, visited by the person being erased.
+$otherCase  = ge_linked('tblCareCase', ['personUserID' => C, 'openedByID' => D], ['siteID' => 1, 'summary' => 'Cal is bereaved']);
+$otherVisit = ge_linked('tblCareVisit', ['visitedByID' => P_CARE, 'followUpAssignedToID' => D],
+    ['caseID' => ge_id($otherCase), 'notes' => 'Cal is coping; will ring again next week.']);
+// 3b. A case the erased person OPENED, about somebody else. This is the one
+//     that catches the destructive mistake, and WITHOUT IT NOTHING DOES -
+//     measured, not assumed. Pointing `personCol` at `tblCareCase.openedByID`
+//     was planted with the rule's guard disabled, and every other case in this
+//     world was opened by the control person, so the step matched NOTHING: the
+//     plant went red only on "the person's own notes are emptied", and the
+//     third-party check passed because nothing had been emptied at all. A
+//     plant that will not go red for the right reason means the FIXTURE is
+//     dead, and a passing run cannot tell you which.
+$openedCase  = ge_linked('tblCareCase', ['personUserID' => C, 'openedByID' => P_CARE], ['siteID' => 1, 'summary' => 'Cal is in hospital too']);
+$openedVisit = ge_linked('tblCareVisit', ['visitedByID' => D, 'followUpAssignedToID' => D],
+    ['caseID' => ge_id($openedCase), 'notes' => 'Cal is comfortable; ward staff are kind.']);
+// 3. A case with nobody named on it, and a visit on it.
+// ⚠️ `personUserID` goes in `$fixed`, NOT in the people list. ge_insert()
+//    reads the people list with `?? $other`, and `null ?? D` is D - so writing
+//    it there named this case after the CONTROL person and the fixture proved
+//    nothing it claimed to. Caught by its own "the world is as it should be"
+//    check, which is what that check is for.
+$noOneCase  = ge_linked('tblCareCase', ['openedByID' => D], ['siteID' => 1, 'personUserID' => null, 'summary' => 'A walk-in, name not taken']);
+$noOneVisit = ge_linked('tblCareVisit', ['visitedByID' => D, 'followUpAssignedToID' => D],
+    ['caseID' => ge_id($noOneCase), 'notes' => 'Spoke at the door; nothing needed.']);
+
+$careWas = [
+    'ownVisitA'  => ge_row($ownVisitA),
+    'ownVisitB'  => ge_row($ownVisitB),
+    'otherVisit' => ge_row($otherVisit),
+    'noOneVisit' => ge_row($noOneVisit),
+    'otherCase'  => ge_row($otherCase),
+    'noOneCase'  => ge_row($noOneCase),
+    'openedCase' => ge_row($openedCase),
+    'openedVisit' => ge_row($openedVisit),
+];
+
+ge_ok('the made-up world is as it should be before the erasure: three notes on three different cases, and the person\'s own case really names them',
+    $careWas['ownVisitA']['notes'] === 'Ces says the ward is noisy.'
+    && $careWas['ownVisitB']['notes'] === 'Took Ces some shopping; family are worried.'
+    && $careWas['otherVisit']['notes'] === 'Cal is coping; will ring again next week.'
+    && $careWas['noOneVisit']['notes'] === 'Spoke at the door; nothing needed.'
+    && (int) ge_row($ownCase)['personUserID'] === P_CARE
+    && (int) $careWas['otherCase']['personUserID'] === C
+    && $careWas['noOneCase']['personUserID'] === null
+    // The fourth case: OPENED by the person being erased, ABOUT Cal. Both
+    // halves are checked, because if either were wrong the plant that matters
+    // would pass on a dead fixture again.
+    && (int) $careWas['openedCase']['openedByID'] === P_CARE
+    && (int) $careWas['openedCase']['personUserID'] === C
+    && $careWas['openedVisit']['notes'] === 'Cal is comfortable; ward staff are kind.',
+    json_encode($careWas));
+
+ge_request(REQ_CARE, P_CARE, 'ces.cared@selftest.invalid', 'Ces Cared', 'processing');
+$resultCare = ge_execute(REQ_CARE, P_CARE);
+$careNow    = [
+    'ownVisitA'  => ge_row($ownVisitA),
+    'ownVisitB'  => ge_row($ownVisitB),
+    'otherVisit' => ge_row($otherVisit),
+    'noOneVisit' => ge_row($noOneVisit),
+    'otherCase'  => ge_row($otherCase),
+    'noOneCase'  => ge_row($noOneCase),
+    'openedCase' => ge_row($openedCase),
+    'openedVisit' => ge_row($openedVisit),
+];
+
+ge_ok('the run finished with no failed step',
+    is_array($resultCare) === true && $resultCare['failed'] === 0,
+    $resultCare instanceof Throwable ? get_class($resultCare) . ': ' . $resultCare->getMessage() : json_encode($resultCare));
+
+// 📌 The note the person typed about THEMSELVES, and the note a colleague
+//    typed about them. Both go, and both are needed: if only the first went,
+//    the instruction would be matching on the worker after all.
+ge_ok('BOTH notes on the person\'s OWN case are emptied - the one they typed themselves AND the one a colleague typed about them',
+    $careNow['ownVisitA']['notes'] === null && $careNow['ownVisitB']['notes'] === null,
+    json_encode([$careWas['ownVisitA']['notes'], $careNow['ownVisitA']['notes'],
+        $careWas['ownVisitB']['notes'], $careNow['ownVisitB']['notes']]));
+
+// 📌 And NOTHING ELSE about those visits changed. The date, the kind of visit,
+//    the follow-up date and - the one that matters - `caseID` are all as they
+//    were: a visit detached from its case is not an anonymised record, it is
+//    rubble with every word of the note still in it. The colleague's number
+//    stays on the visit they made; only the erased person's own comes off.
+ge_ok('...and only the note and the erased person\'s own number change: the visit keeps its date, its kind, its follow-up and its CASE, and the colleague keeps their name on their own visit',
+    ge_same($careWas['ownVisitA'], $careNow['ownVisitA'], ['notes', 'visitedByID']) === true
+    && $careNow['ownVisitA']['visitedByID'] === null
+    && (int) $careNow['ownVisitA']['caseID'] === ge_id($ownCase)
+    && (int) $careNow['ownVisitA']['followUpAssignedToID'] === D
+    && ge_same($careWas['ownVisitB'], $careNow['ownVisitB'], ['notes', 'followUpAssignedToID']) === true
+    && (int) $careNow['ownVisitB']['visitedByID'] === D
+    && $careNow['ownVisitB']['followUpAssignedToID'] === null
+    && (int) $careNow['ownVisitB']['caseID'] === ge_id($ownCase),
+    json_encode([$careNow['ownVisitA'], $careNow['ownVisitB']]));
+
+// 📌 THE ONE THAT WOULD CATCH THE DESTRUCTIVE MISTAKE. This visit was made BY
+//    the erased person, on CAL's case. Cal never asked for anything. If the
+//    instruction matched on `visitedByID`, or if the parent column were
+//    pointed at `openedByID`, this note would be gone.
+ge_ok('A VISIT THE ERASED PERSON MADE ON SOMEBODY ELSE\'S CASE KEEPS ITS NOTE: only their own number comes off, because the note is Cal\'s record and not theirs to erase',
+    $careNow['otherVisit']['notes'] === 'Cal is coping; will ring again next week.'
+    && ge_same($careWas['otherVisit'], $careNow['otherVisit'], ['visitedByID']) === true
+    && $careNow['otherVisit']['visitedByID'] === null
+    && ge_same($careWas['otherCase'], $careNow['otherCase']) === true
+    && (int) $careNow['otherCase']['personUserID'] === C,
+    json_encode([$careNow['otherVisit'], $careNow['otherCase']]));
+
+// 📌 THE OTHER HALF OF THE DESTRUCTIVE MISTAKE, one table up. This case was
+//    OPENED by the person being erased and is ABOUT Cal. If `personCol` named
+//    who opened the case rather than who it is about, this note - somebody
+//    else's safeguarding record - would be gone, and the erased person's own
+//    notes would still be there. Only this fixture can make that plant fail
+//    for the right reason.
+ge_ok('A CASE THE ERASED PERSON OPENED, ABOUT SOMEBODY ELSE, KEEPS ITS VISIT NOTE: the case is Cal\'s record, and who opened it is not who it is about',
+    $careNow['openedVisit']['notes'] === 'Cal is comfortable; ward staff are kind.'
+    && ge_same($careWas['openedVisit'], $careNow['openedVisit']) === true
+    && ge_same($careWas['openedCase'], $careNow['openedCase'], ['openedByID']) === true
+    && $careNow['openedCase']['openedByID'] === null
+    && (int) $careNow['openedCase']['personUserID'] === C,
+    json_encode([$careNow['openedVisit'], $careNow['openedCase']]));
+
+// 📌 A null must never match a person. In SQL it does not, but the whole point
+//    of this form is a subquery, and `IN (SELECT ... WHERE col = ?)` would
+//    behave very differently if somebody "helpfully" added a COALESCE.
+ge_ok('a case with NOBODY named on it is not touched, nor is its visit: a missing subject never matches the person being erased',
+    ge_same($careWas['noOneCase'], $careNow['noOneCase']) === true
+    && ge_same($careWas['noOneVisit'], $careNow['noOneVisit']) === true
+    && $careNow['noOneVisit']['notes'] === 'Spoke at the door; nothing needed.',
+    json_encode([$careNow['noOneCase'], $careNow['noOneVisit']]));
+
+// 📌 The audit trail. Two rows reported, not four: the two visits on the
+//    person's own case. A count of 3 or 4 would mean the step had reached
+//    somebody else's record, which is the whole thing this guards.
+$careLines = array_values(array_filter(ge_audit(REQ_CARE), static fn (array $l): bool => $l['tableName'] === 'tblCareVisit'));
+ge_ok('the trail says the step reached exactly TWO rows and HOW it found them, before the two lines that detach the workers',
+    count($careLines) === 3
+    && $careLines[0]['recordKey'] === '2 rows'
+    && str_starts_with((string) $careLines[0]['details'], 'matched through `tblCareCase`.`personUserID`.')
+    && $careLines[1]['recordKey'] === '2 rows'
+    && str_contains((string) $careLines[1]['details'], 'who made the visit is detached')
+    && $careLines[2]['recordKey'] === '1 rows'
+    && str_contains((string) $careLines[2]['details'], 'who its follow-up was given to is detached'),
+    json_encode($careLines));
+
+// 📌 THE RUN-TIME GUARD, asked directly. Its logic has been wrong TWICE, in
+//    opposite directions, and both are pinned below.
+//
+//    Version 1 read the WHOLE request's audit trail. A request whose first run
+//    had a failed step is put back to `pending_review` and run again, so the
+//    second run always saw the first run's `tblCareCase` line and refused this
+//    step for ever: the request could never be completed. Section 6 found it.
+//
+//    Version 2 read only THIS run's lines - and that reopened the very fault
+//    the guard exists to stop, one step further on. On a second run the
+//    parent's change is not "from this run", so the step was ALLOWED, the link
+//    was already gone, the look-up found nothing, and the step wrote "nothing
+//    held for this person" while the request closed as COMPLETED with the
+//    safeguarding note still in it. No mistake by anybody was needed: one
+//    transient error on this one step in run 1 is enough, because the walk
+//    carries on and the parent's step still cuts the link. THE TEST BELOW USED
+//    TO ASSERT THAT BEHAVIOUR AS CORRECT - `$saysClearAfterwards === false` -
+//    which is why nothing caught it.
+//
+//    Version 3 asks all three questions, and each is checked here with ONE
+//    variable changed from the case beside it.
+//
+// No `setAccessible()`: it has had no effect since PHP 8.1 and is deprecated
+// in 8.5, where it prints a notice on every run.
+$guardAsk = new ReflectionMethod(GdprEraser::class, 'whyParentLookUpUnsafe');
+$markNow  = (int) (ge_one('SELECT COALESCE(MAX(auditID), 0) AS n FROM tblErasureAudit WHERE requestID = ?', 'i', [REQ_CARE])['n'] ?? 0);
+$runMark  = new ReflectionProperty(GdprEraser::class, 'runStartedAfterAuditId');
+
+// 🧪 Two made-up table names, so these lines cannot be confused with any real
+//    step's. The guard reads the audit trail and nothing else, so a hand-made
+//    trail is a fair test of it - and it is the ONLY way to reach the
+//    earlier-run states, which a correctly ordered run never produces.
+//    The planted DETAILS matter as much as the action: the guard tells this
+//    instruction's own lines from another instruction's for the same table by
+//    the "matched through" sentence, so a planted line that is meant to COUNT
+//    has to carry it, exactly as the portal writes it.
+$plantAudit = static function (string $action, string $table, string $details = 'planted by the self-test') use ($mysqli): int {
+    $stmt = $mysqli->prepare(
+        'INSERT INTO tblErasureAudit (requestID, action, tableName, recordKey, details, chainHash) '
+        . 'VALUES (?, ?, ?, NULL, ?, ?)'
+    );
+    $req    = REQ_CARE;
+    $hash   = str_repeat('0', 64);
+    $stmt->bind_param('issss', $req, $action, $table, $details, $hash);
+    $stmt->execute();
+    $id = (int) $mysqli->insert_id;
+    $stmt->close();
+
+    return $id;
+};
+// The real instruction's four names, so case 2 and case 3 read the REAL audit
+// lines this run wrote.
+$realVia    = ['childCol' => 'caseID', 'parent' => 'tblCareCase', 'parentKey' => 'caseID', 'personCol' => 'personUserID'];
+$plantedVia = ['childCol' => 'zzKey', 'parent' => 'tblZzPlantedParent', 'parentKey' => 'zzKey', 'personCol' => 'zzPersonID'];
+$orderedVia = ['childCol' => 'zzKey', 'parent' => 'tblZzOrderedParent', 'parentKey' => 'zzKey', 'personCol' => 'zzPersonID'];
+$failedVia  = ['childCol' => 'zzKey', 'parent' => 'tblZzFailedParent', 'parentKey' => 'zzKey', 'personCol' => 'zzPersonID'];
+$markerFor  = static fn (array $via): string => 'matched through `' . $via['parent'] . '`.`' . $via['personCol'] . '`';
+
+// Case 1: the parent has never been touched. Always safe.
+$runMark->setValue(null, 0);
+$untouched = (string) $guardAsk->invoke(null, $mysqli, REQ_CARE, 'tblCareVisit', ['childCol' => 'caseID', 'parent' => 'tblNoSuchParentTable', 'parentKey' => 'caseID', 'personCol' => 'personUserID']);
+
+// Case 2: the parent was changed EARLIER IN THIS RUN - an ordering mistake.
+//         Every `tblCareCase` line of this request reads as "this run" when the
+//         mark is 0.
+$withinRun = (string) $guardAsk->invoke(null, $mysqli, REQ_CARE, 'tblCareVisit', $realVia);
+
+// Case 3: an EARLIER run changed the parent, and this step HAD already
+//         answered while the link was intact. That is what the real run just
+//         did - the child's line comes first - so it must be allowed.
+$runMark->setValue(null, $markNow);
+$earlierRunButDone = (string) $guardAsk->invoke(null, $mysqli, REQ_CARE, 'tblCareVisit', $realVia);
+
+// Case 4: an EARLIER run changed the parent and this step NEVER answered while
+//         the link was intact. THE FAULT VERSION 2 ALLOWED. One variable apart
+//         from case 5: the order of the two planted lines.
+$plantAudit('anonymise', 'tblZzPlantedParent');
+$plantAudit('none', 'tblZzPlantedChild', 'nothing held for this person (' . $markerFor($plantedVia) . ')');
+$runMark->setValue(null, (int) (ge_one('SELECT COALESCE(MAX(auditID), 0) AS n FROM tblErasureAudit WHERE requestID = ?', 'i', [REQ_CARE])['n'] ?? 0));
+$earlierRunNeverDone = (string) $guardAsk->invoke(null, $mysqli, REQ_CARE, 'tblZzPlantedChild', $plantedVia);
+
+// Case 5: the SAME two lines in the other order - the child answered BEFORE
+//         the link went - so the answer stands and the step is allowed.
+$plantAudit('none', 'tblZzOrderedChild', 'nothing held for this person (' . $markerFor($orderedVia) . ')');
+$plantAudit('anonymise', 'tblZzOrderedParent');
+$runMark->setValue(null, (int) (ge_one('SELECT COALESCE(MAX(auditID), 0) AS n FROM tblErasureAudit WHERE requestID = ?', 'i', [REQ_CARE])['n'] ?? 0));
+$earlierRunAnsweredFirst = (string) $guardAsk->invoke(null, $mysqli, REQ_CARE, 'tblZzOrderedChild', $orderedVia);
+
+// Case 6: the SAME shape as case 5 - this step's table has a line written
+//         BEFORE the link went - except that the line belongs to a DIFFERENT
+//         instruction for that table, so it says nothing about whether THIS
+//         one ran. `tblCareVisit` really does carry three instructions, so
+//         this is the shape, not a contrivance. It must still refuse.
+$plantAudit('anonymise', 'tblZzOtherChild', 'the two workers were detached');
+$plantAudit('anonymise', 'tblZzOtherParent');
+$runMark->setValue(null, (int) (ge_one('SELECT COALESCE(MAX(auditID), 0) AS n FROM tblErasureAudit WHERE requestID = ?', 'i', [REQ_CARE])['n'] ?? 0));
+$earlierRunOtherInstruction = (string) $guardAsk->invoke(null, $mysqli, REQ_CARE, 'tblZzOtherChild', ['childCol' => 'zzKey', 'parent' => 'tblZzOtherParent', 'parentKey' => 'zzKey', 'personCol' => 'zzPersonID']);
+
+// Case 7: this step's OWN line, carrying the right "matched through" sentence,
+//         written BEFORE the link went - but its action is `failed`. That is
+//         what a PROBE failure writes, and its details BEGIN "could not look
+//         for this person (matched through ...)", so it carries the
+//         discriminator and sits in the right place. It must NOT count as the
+//         step having answered: counting it allows run 2 to look, find
+//         nothing, and close the request as completed with the note still in
+//         it. One variable apart from case 5: the action word.
+$plantAudit('failed', 'tblZzFailedChild', 'could not look for this person (' . $markerFor($failedVia) . '): the server went away');
+$plantAudit('anonymise', 'tblZzFailedParent');
+$runMark->setValue(null, (int) (ge_one('SELECT COALESCE(MAX(auditID), 0) AS n FROM tblErasureAudit WHERE requestID = ?', 'i', [REQ_CARE])['n'] ?? 0));
+$earlierRunOnlyFailed = (string) $guardAsk->invoke(null, $mysqli, REQ_CARE, 'tblZzFailedChild', $failedVia);
+
+$runMark->setValue(null, 0);
+
+ge_ok('the guard allows a look-up whose parent nothing has touched',
+    $untouched === '', $untouched);
+
+ge_ok('the guard refuses, and names the order, when the parent was changed earlier in THIS run',
+    $withinRun !== '' && str_contains($withinRun, 'earlier in this same run') === true
+    && str_contains($withinRun, 'must come BEFORE') === true,
+    $withinRun);
+
+ge_ok('the guard allows the step on a LATER run when it had already answered while the link was intact (version 1 refused this for ever, so the request could never be completed)',
+    $earlierRunButDone === '', $earlierRunButDone);
+
+ge_ok('THE VERSION 2 FAULT: when an EARLIER run took the link away and this step never answered while it was intact, the guard REFUSES and says the rows need checking by hand - it does not allow a look-up that would report "nothing held"',
+    $earlierRunNeverDone !== ''
+    && str_contains($earlierRunNeverDone, 'EARLIER run') === true
+    && str_contains($earlierRunNeverDone, 'checked by hand') === true,
+    $earlierRunNeverDone);
+
+ge_ok('and the SAME two lines in the opposite order are allowed, so the refusal above turns on WHEN this step answered and not merely on a line existing',
+    $earlierRunAnsweredFirst === '', $earlierRunAnsweredFirst);
+
+ge_ok('a line written by a DIFFERENT instruction for the same table does NOT count as this step having answered: the guard tells them apart by the "matched through" sentence, because all three of `tblCareVisit`\'s instructions write the same table name',
+    $earlierRunOtherInstruction !== ''
+    && str_contains($earlierRunOtherInstruction, 'EARLIER run') === true,
+    $earlierRunOtherInstruction);
+
+ge_ok('a `failed` line of this step\'s OWN does NOT count as it having answered, although it carries the same "matched through" sentence and sits before the link went: a probe that could not run proves nothing about what the rows held, and counting it would let a later run report "nothing held" over a note that is still there',
+    $earlierRunOnlyFailed !== ''
+    && str_contains($earlierRunOnlyFailed, 'EARLIER run') === true
+    && str_contains($earlierRunOnlyFailed, 'checked by hand') === true,
+    $earlierRunOnlyFailed);
+
+// 📏 WHAT THIS DOES AND DOES NOT CHECK, because its first version claimed more
+//    than it could do. It reads the sentence the GUARD RETURNS and asserts it
+//    ends in a whole word. It CANNOT see truncation, because the cut that
+//    caused #709 is applied by the CALLER when it writes the audit line, and no
+//    value here changes when that happens - putting `mb_substr(..., 0, 250)`
+//    back around the audit call left this green. The source pin in section 8d
+//    of the coverage test is what guards the cut; this guards the sentence.
+ge_ok('each refusal the guard returns ends in a whole word rather than mid-identifier (the shape of #709; the CUT itself is pinned in the coverage test, because it is applied by the caller and is invisible here)',
+    str_ends_with($withinRun, '`') === false
+    && str_ends_with($earlierRunNeverDone, '`') === false
+    && str_ends_with($withinRun, 'table') === true
+    && str_ends_with($earlierRunNeverDone, 'hand') === true,
+    json_encode(['ordering' => $withinRun, 'earlier run' => $earlierRunNeverDone]));
 
 ge_finish();

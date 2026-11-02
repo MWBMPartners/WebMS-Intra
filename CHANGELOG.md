@@ -2,6 +2,87 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — an erasure can now reach a row through its PARENT table, so a pastoral visit's note is
+  emptied for the person it is about (#709)**
+  - **What could not be reached.** A pastoral visit's note describes the person being **cared
+    for**, but the only account numbers on the row are the two workers who dealt with it:
+    `visitedByID` and `followUpAssignedToID`. Every instruction in the erasure said "this table,
+    this column, this person's number", so that note could not be reached at all, and
+    `personal-data-catalogue.php` recorded it as owed with its issue number. An instruction may now
+    find its rows by looking the subject up one table higher. `tblCareVisit.notes` is emptied
+    through `tblCareCase.personUserID`, and it is the only instruction that works this way.
+  - **A visit on somebody else's case keeps its note.** The obvious shortcut — hanging the note off
+    the worker who made the visit — would have emptied the safeguarding notes of every visit that
+    worker ever made, about people who never asked for anything, and would still have reached none
+    of the erased person's own. The same mistake is available one table up: a case the erased
+    person **opened**, about somebody else, must keep its notes too.
+    `GdprEraser::whyParentMatchUnusable()` is the one test of whether an instruction may match this
+    way, and it refuses a parent column that says who **acted** rather than who the row is
+    **about**.
+  - **The visit keeps its date, its kind, its follow-up and its case.** Only the note goes, plus
+    whichever worker's number named the person being erased. The link to the case is never emptied:
+    a visit detached from its case is not an anonymised record, it is rubble with every word of the
+    note still in it.
+  - **The order is guarded twice, because getting it wrong is silent.** The parent's own step
+    empties the column this look-up uses, so running the child's step afterwards finds nothing,
+    leaves every note where it was, and writes "nothing held for this person" into the sealed audit
+    trail. In the list as it stood the parent came first, so an instruction added in the obvious
+    place would have done exactly nothing. One check pins the position in the list; another refuses
+    at run time.
+  - **The run-time guard was wrong twice, in opposite directions, and the independent check found
+    the second one.** Reading the request's whole history refused the step on every later run, so a
+    request with one failed step could never be completed. Reading only the current run's lines
+    then reopened the original fault one step further on: on a second run the parent's change is
+    not "from this run", so the step was allowed, the link was already gone, and the step wrote
+    "nothing held for this person" while the request closed as **completed** with the safeguarding
+    note still in it. **No mistake by anybody was needed** — one transient error on that single
+    step in the first run is enough, because the walk carries on and the parent's step still cuts
+    the link. It now tells "changed earlier in this run" (an ordering mistake) from "changed by an
+    earlier run" (the link is gone for good), and in the second case allows the step only where it
+    had already answered while the link was intact. Where it had not, the step **fails and says the
+    rows must be checked by hand**, because running the request again will not reach them. A
+    request that needs a human look is far better than one that reports success it has not earned.
+  - **"What we hold about you" counts these rows too**, through the same clause the erasure itself
+    uses, so the count and the change cannot disagree about which rows are the person's.
+  - **`personUserID` is now on the one list of columns that tie a record to a person.** It was on
+    neither list, although the database links it to the account table and a hand-written
+    instruction had always matched on it — so nothing could judge whether it named a row's subject
+    or somebody who acted on one.
+  - **Eight things were covered by nothing, across two rounds of independent checking, and every
+    one was found by planting rather than by reading.** Round 1: replacing the run-time guard's
+    whole call with `if (false)` left both self-tests and all 46 audit scripts green; reverting the
+    "what we hold about you" half was equally invisible; swapping two of the four names in the
+    clause builder could not be seen, because the one real instruction uses `caseID` for both; and
+    deleting a case from the list of ways a parent match can be wrong stopped testing it instead of
+    failing. Round 2, after those were closed: `if (false && isset(...))` on the line ABOVE switched
+    **both** guards off in one word, with every check still green — the inner pins were satisfied by
+    text that never ran; the rule's own call was pinned by nothing at all; putting the
+    250-character cut back around the refusal's audit line was invisible, because the check whose
+    label claimed to guard it measured the guard's returned sentence rather than the line as
+    stored; and adding `failed` to the list of actions counting as "this step already answered" put
+    the whole fault back, because a probe failure writes the same "matched through" sentence the
+    look-up matches on. All eight are now pinned, the outer condition included.
+  - **One step can now refuse for ever, and that is deliberate — but it means such a request cannot
+    be closed.** Raised as **#710**. Every other step still runs, so the rest of the erasure is
+    done, and both the help page and the failed-run message say plainly that running it again will
+    not help and that the request will go on showing as not complete. Before this change those
+    notes were never erased at all, so nothing erased got worse; what is missing is a way to record
+    that they were dealt with by hand.
+  - **A parent-matched step names two tables, and only one of them going missing is safe.** Error
+    1146 against the CHILD is still a skip, because nothing can be held in a table that is not
+    there. Against the PARENT it is now a FAILED step: the child's rows may be sitting there with
+    every word of the note in them, unmatchable because the table that says whose they are is
+    absent — and the old branch called that "table-missing" against the child's name and skipped it,
+    so the request would have closed as completed having never looked.
+  - **What nothing covers**, said plainly: the live path through the step with a real refusal — the
+    audit line it writes and what an administrator sees afterwards. Reaching the ordering half needs
+    a list the other check refuses outright, and reaching the earlier-run half needs an audit trail
+    a correct run never produces, so the guard's logic is asked directly over a hand-made trail.
+  - Tests: sections 8c and 8d of `tools/gdpr-coverage-selftest.php` (90 checks, no database) and
+    section 19 of `tools/gdpr-eraser-selftest.php` (251 checks, on a real database). Count the
+    planted faults from this commit's own message, not from here. No database change, so no
+    migration.
+
 - **Fixed — switching "Event reminders" off now stops the reminder e-mails, and the morning summary no
   longer crosses organisations (#666, #616, #683)**
   - **The consent failure.** A member could switch "Event reminders" off, the portal saved the

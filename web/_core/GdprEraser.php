@@ -500,6 +500,50 @@ class GdprEraser
             // tblAssetOwners/tblAssetKioskPins hard-delete precedent above.
             // Deleting only WHERE viewerID = ? never touches other staff's
             // access-log rows or the case/visit history itself.
+            // 🧬 #709: THE NOTES OF A PASTORAL VISIT, reached through the case.
+            //
+            //    This is the only instruction in the whole list that finds its
+            //    rows through another table, and it exists because there is no
+            //    honest alternative. A visit's notes describe the person being
+            //    cared for. The only account numbers on the row are the worker
+            //    who made the visit and the worker its follow-up was given to -
+            //    so hanging the notes off either of those, which is the obvious
+            //    thing to do, would empty the safeguarding notes of every visit
+            //    that worker ever made (other people's records, on a request
+            //    that was never theirs) and reach not one note about the person
+            //    who asked. The subject is one table up, on
+            //    `tblCareCase.personUserID`.
+            //
+            // 🛑 IT MUST STAY ABOVE THE TWO `tblCareCase` INSTRUCTIONS BELOW.
+            //    They empty `personUserID` - the very column this one matches
+            //    through. Run after them and this look-up finds nothing, every
+            //    note stays, and the trail says "nothing held for this person":
+            //    a complete failure that reads exactly like success. The run
+            //    refuses rather than allowing that (whyParentLookUpUnsafe())
+            //    and
+            //    `tools/gdpr-coverage-selftest.php` pins the position, so
+            //    moving this line down turns the step red instead of silent.
+            //
+            //    What it does NOT touch: `visitedByID`, `followUpAssignedToID`
+            //    (each has its own instruction above and below), the date, the
+            //    kind of visit, the follow-up date, or `caseID` itself - the
+            //    visit stays attached to its case, because a note-less visit on
+            //    a known case is a record and a detached one is rubble.
+            [
+                'table'      => 'tblCareVisit',
+                'userCol'    => '',
+                'action'     => 'anonymise',
+                'nullCols'   => ['notes'],
+                'subjectVia' => [
+                    'childCol'  => 'caseID',
+                    'parent'    => 'tblCareCase',
+                    'parentKey' => 'caseID',
+                    'personCol' => 'personUserID',
+                ],
+                'reason'     => 'the note on a pastoral visit describes the person the case is about, so it is '
+                    . 'emptied on their own erasure; the visit, its date and its kind stay with the case, and a '
+                    . 'visit on somebody else\'s case is untouched',
+            ],
             ['table' => 'tblCareCase',       'userCol' => 'personUserID', 'action' => 'anonymise', 'nullCols' => ['personName'], 'reason' => 'case history retained for pastoral/safeguarding continuity; subject identity detached'],
             ['table' => 'tblCareCase',       'userCol' => 'openedByID',   'action' => 'anonymise', 'nullCols' => [], 'reason' => 'authorship attribution detached'],
             ['table' => 'tblCareVisit',      'userCol' => 'visitedByID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the pastoral visit and its notes are kept with the case; who made the visit is detached'],
@@ -960,6 +1004,18 @@ class GdprEraser
         // Records ABOUT the person.
         'userID', 'memberID', 'donorID', 'submitterID', 'recipientUserID',
         'convertedUserID', 'leaderID',
+        // `personUserID` - who a pastoral or wellbeing case is ABOUT - added
+        // on 2 November 2026 by #709. It was on NEITHER list, although the
+        // database links it to the account table and a hand-written
+        // instruction has always matched on it, so nothing could judge whether
+        // it named the subject of a row or somebody who acted on one. #709
+        // needs that answer: it is the column a visit's notes are reached
+        // through, and reaching them through an ACTOR column instead would
+        // empty a third party's safeguarding notes. It is in this first group
+        // because a case is about the person being cared for. It is on exactly
+        // one table, `tblCareCase`, and no catalogue entry lists it among its
+        // own columns, so adding it builds no new derived instruction.
+        'personUserID',
         // `acceptedByID` moved UP here on 12 October 2026 (Salem874's
         // decision). It is on one table, tblInvitation, and it is not "who
         // did something to somebody else's record": it is the account of the
@@ -2462,14 +2518,29 @@ class GdprEraser
         foreach (self::catalogue() as $entry) {
             $table = (string) $entry['table'];
             $col   = (string) $entry['userCol'];
-            if ($col === '') {
-                // A kept table that no column ties to an account: there is
-                // nothing to count this person's rows by.
+            // 🧬 A parent-matched instruction has no column of its own, so it
+            //    is counted through its parent (#709). Without this the person
+            //    asking what is held about them would be shown everything
+            //    EXCEPT the rows only this form can reach - a pastoral visit's
+            //    notes among them - which is the opposite of the point.
+            //
+            //    The clause comes from the same builder the erasure itself
+            //    uses, so the count and the change cannot disagree about which
+            //    rows are the person's.
+            $via   = isset($entry['subjectVia']) === true && is_array($entry['subjectVia']) === true
+                ? (array) $entry['subjectVia']
+                : null;
+            $where = self::whereForEntry($col, $via);
+            if ($where === '') {
+                // Either a kept table that no column ties to an account, or an
+                // instruction whose parent match could not be built. Neither
+                // can be counted, and a count of 0 would be a claim, not a
+                // measurement.
                 continue;
             }
             try {
                 $count = 0;
-                $stmt = $db->prepare('SELECT COUNT(*) FROM `' . $table . '` WHERE `' . $col . '` = ?');
+                $stmt = $db->prepare('SELECT COUNT(*) FROM `' . $table . '` WHERE ' . $where);
                 if ($stmt !== false) {
                     $stmt->bind_param('i', $userId);
                     $stmt->execute();
@@ -2582,12 +2653,491 @@ class GdprEraser
      *
      * @return string One of the STEP_ constants.
      */
+    /**
+     * 🧬 THE ONE TEST of whether an instruction may find its rows through a
+     *    PARENT table, and the ONE place a refusal is worded (#709).
+     *
+     * Every other instruction in catalogue() says "this table, this column,
+     * this person's number". Some rows do not work that way. A pastoral visit
+     * (`tblCareVisit`) carries notes ABOUT the person being cared for, but the
+     * only account numbers on the row are the WORKER who made the visit and
+     * the worker its follow-up was given to. The person the notes are about is
+     * named one table up, on `tblCareCase.personUserID`.
+     *
+     * So this form exists: match the child's rows by looking the subject up on
+     * the parent.
+     *
+     *     'subjectVia' => [
+     *         'childCol'  => 'caseID',        // the link on the row being changed
+     *         'parent'    => 'tblCareCase',   // the table one step up
+     *         'parentKey' => 'caseID',        // the parent's own key
+     *         'personCol' => 'personUserID',  // who the parent's row is ABOUT
+     *     ],
+     *
+     * ⚠️ WHY THIS IS GUARDED AS TIGHTLY AS IT IS. The obvious shortcut - hang
+     *    the notes off `visitedByID` instead - is the most destructive thing
+     *    that could be done here. It would empty the safeguarding notes of
+     *    every visit the erased WORKER ever made, which are a THIRD PARTY's
+     *    records about people who never asked for anything, and it would still
+     *    not reach a single note about the person who did ask. The same
+     *    mistake is available one table up: point `personCol` at
+     *    `tblCareCase.openedByID` and it empties the notes of every case that
+     *    worker opened. That is the one condition below that stops real harm;
+     *    the rest stop nonsense.
+     *
+     * The rules, and why each is a refusal rather than a best effort:
+     *
+     *   1. `personCol` must say who the parent's row is ABOUT, never who acted
+     *      on it. This is the harm above. LINK_COLUMNS minus ACTOR_COLUMNS is
+     *      exactly "about the person", and it is asked of those two lists so
+     *      that a column reclassified later is judged by the new answer.
+     *   2. `userCol` must be empty. An instruction that named a column on the
+     *      child as well would have two possible WHERE clauses and no way to
+     *      choose between them. Refusing ambiguity is cheaper than picking.
+     *   3. The action must be `anonymise`. Deleting a child row because of who
+     *      the parent is about is a far bigger hammer than anything needs
+     *      today, and a parent link is one indirection further from the
+     *      evidence that the row really is the person's. If a delete is ever
+     *      genuinely wanted, that is a decision to take deliberately.
+     *   4. `nullCols` must name something. Without the account link the other
+     *      instructions drop, an empty `nullCols` leaves nothing to change at
+     *      all, so the instruction is a no-op that reads like coverage.
+     *   5. All four names must be plain identifiers. They are written in code
+     *      and never come from a request, so this cannot be reached by input -
+     *      it is here to make that plain, and to catch a typo before it
+     *      becomes a prepared statement.
+     *
+     * Public so that `tools/gdpr-coverage-selftest.php` asks THIS method
+     * rather than keeping its own copy of the rule.
+     *
+     * @param array<string, mixed> $entry One instruction from catalogue().
+     *
+     * @return string '' when there is nothing wrong - INCLUDING when the
+     *   instruction does not use this form at all. Otherwise one plain
+     *   sentence saying what is wrong, fit for the audit trail.
+     */
+    public static function whyParentMatchUnusable(array $entry): string
+    {
+        if (isset($entry['subjectVia']) === false) {
+            return '';
+        }
+        $via = $entry['subjectVia'];
+        if (is_array($via) === false) {
+            return 'the instruction\'s `subjectVia` is not a list of the four names it needs';
+        }
+
+        foreach (['childCol', 'parent', 'parentKey', 'personCol'] as $needed) {
+            $value = (string) ($via[$needed] ?? '');
+            if ($value === '') {
+                return 'the instruction matches through a parent table but does not say its `' . $needed . '`';
+            }
+            if (preg_match('/\A[A-Za-z0-9_]+\z/', $value) !== 1) {
+                return 'the instruction\'s `' . $needed . '` is not a plain table or column name';
+            }
+        }
+
+        if ((string) ($entry['userCol'] ?? '') !== '') {
+            return 'the instruction matches through a parent table AND names `'
+                . (string) $entry['userCol'] . '` on the row itself, so there are two ways to find '
+                . 'the rows and no way to choose between them';
+        }
+
+        if ((string) ($entry['action'] ?? '') !== 'anonymise') {
+            return 'only an "anonymise" instruction may match through a parent table; this one is "'
+                . (string) ($entry['action'] ?? '') . '"';
+        }
+
+        if ((array) ($entry['nullCols'] ?? []) === []) {
+            return 'the instruction matches through a parent table but names no column to empty, so it '
+                . 'would change nothing while reading as coverage';
+        }
+
+        $personCol = (string) $via['personCol'];
+        if (in_array($personCol, self::LINK_COLUMNS, true) === false) {
+            return 'the parent column `' . $personCol . '` is not a known account column, so it cannot be '
+                . 'relied on to say who the parent\'s row is about';
+        }
+        if (in_array($personCol, self::ACTOR_COLUMNS, true) === true) {
+            return 'the parent column `' . $personCol . '` says who ACTED on the parent\'s row, not who it '
+                . 'is about, so matching through it would empty a third party\'s records and reach none of '
+                . 'this person\'s own';
+        }
+
+        return '';
+    }
+
+    /**
+     * 🔎 THE ONE PLACE the "which rows belong to this person" clause is
+     *    written, for both shapes of instruction (#709).
+     *
+     * Three readers ask it - the probe that decides whether the table holds
+     * anything, the statement that makes the change, and `inventory()`, which
+     * shows the person what is held about them - so they cannot drift apart.
+     * Whichever shape it returns, it binds exactly ONE value, the account
+     * number, which is what lets the binding code stay as it was.
+     *
+     * FIXED TEXT: every name in it is written in code, in catalogue() or in
+     * the hand-written list, and `whyParentMatchUnusable()` has already
+     * refused anything that is not a plain identifier.
+     *
+     * @param string                    $userCol A column on the row itself, or
+     *   '' when the subject is found through a parent.
+     * @param array<string, mixed>|null $via     The instruction's `subjectVia`,
+     *   or null when it has none.
+     *
+     * @return string The clause, or '' when neither shape can be built - which
+     *   a caller must treat as "cannot look", never as "nothing held".
+     */
+    public static function whereForEntry(string $userCol, ?array $via): string
+    {
+        if ($via !== null) {
+            foreach (['childCol', 'parent', 'parentKey', 'personCol'] as $needed) {
+                $value = (string) ($via[$needed] ?? '');
+                if ($value === '' || preg_match('/\A[A-Za-z0-9_]+\z/', $value) !== 1) {
+                    return '';
+                }
+            }
+
+            return '`' . (string) $via['childCol'] . '` IN (SELECT `' . (string) $via['parentKey']
+                . '` FROM `' . (string) $via['parent'] . '` WHERE `' . (string) $via['personCol'] . '` = ?)';
+        }
+
+        if ($userCol === '') {
+            return '';
+        }
+
+        return '`' . $userCol . '` = ?';
+    }
+
+    /**
+     * 📝 How a parent-matched step describes its own reach in the audit trail.
+     *
+     * Written into every line that step produces, including the "nothing held"
+     * one. Without it a trail reading "nothing held for this person" gives no
+     * clue that the look-up went through another table at all, which is the
+     * one thing a reader needs to know to judge whether it looked in the right
+     * place.
+     *
+     * @param array<string, mixed>|null $via The instruction's `subjectVia`.
+     */
+    private static function matchedThrough(?array $via): string
+    {
+        if ($via === null) {
+            return '';
+        }
+
+        return 'matched through `' . (string) ($via['parent'] ?? '?') . '`.`'
+            . (string) ($via['personCol'] ?? '?') . '`';
+    }
+
+    /**
+     * ⛔ Can this step still TRUST a look-up through its parent table? (#709)
+     *
+     * THIS IS THE TRAP THE WHOLE FEATURE TURNS ON, and it was live before the
+     * feature existed. The parent's own instruction empties the very column
+     * this one matches through: `tblCareCase.personUserID` is set to NULL by
+     * the `tblCareCase` step. Run the child's step after it and the look-up
+     * finds nothing, every note stays exactly where it was, and the audit
+     * trail says "nothing held for this person" - a silent, complete failure
+     * that reads like success. In the hand-written list as it stood, the
+     * parent's instruction came FIRST, so a parent-matched instruction added
+     * in the obvious place would have done nothing at all.
+     *
+     * The order is also pinned by `tools/gdpr-coverage-selftest.php`, which
+     * fails if a parent-matched instruction appears after any instruction for
+     * its parent table. BOTH are needed: the test judges the list, this judges
+     * the run, and only this one survives somebody calling the steps in a
+     * different order.
+     *
+     * 🕰️ THERE ARE TWO WAYS THE LINK CAN BE GONE, AND THE FIRST VERSION OF
+     *    THIS GUARD ONLY SAW ONE OF THEM. It asked "was the parent changed in
+     *    THIS run", and a request whose step failed is put back to
+     *    `pending_review` and RUN AGAIN - so on that second run the parent's
+     *    change was not "from this run", the step was allowed, the link was
+     *    already gone, and the step wrote "nothing held for this person" and
+     *    the request closed as COMPLETED with the notes still in it. One
+     *    transient error on one step was enough: the walk carries on, so the
+     *    parent's step still cut the link. That is the silent, permanent
+     *    failure this guard exists to prevent, reached THROUGH the guard.
+     *
+     *    An earlier version asked about the request's WHOLE history instead,
+     *    which refused on every second run and meant such a request could
+     *    never be completed at all (section 6 of the eraser test found that).
+     *    Neither alone is right, so this asks all three questions:
+     *
+     *      - the parent has not been changed at all  -> the link is intact
+     *      - it was changed EARLIER IN THIS RUN      -> an ordering mistake,
+     *        recoverable by putting the instruction back in its place
+     *      - it was changed BY AN EARLIER RUN        -> the link is gone for
+     *        good, and the answer depends on whether this step had already
+     *        given a trustworthy answer BEFORE that happened
+     *
+     *    "A trustworthy answer" is any line from this step - `anonymise`,
+     *    `partial` or `none` - written BEFORE the parent's first change. A
+     *    `none` from before the change really does mean the person held
+     *    nothing here; a `none` from after it means only that the look-up
+     *    could no longer see. That distinction is why the comparison is on
+     *    `auditID` and not on the mere existence of a line.
+     *
+     *    Where no trustworthy answer exists, the rows CANNOT be reached by
+     *    re-running, so the step fails and SAYS they need checking by hand.
+     *    A request that needs a human look is worse than one that just works
+     *    and far better than one that reports success it has not earned.
+     *
+     * 📏 DELIBERATELY COARSE about WHICH column was emptied. It asks whether
+     *    the parent table was changed, not whether the one column was, because
+     *    the audit trail records the table and not the column - `tblCareCase`
+     *    carries two instructions and a line from either looks the same. So it
+     *    can refuse when the link it needs is in fact untouched. Refusing is
+     *    the recoverable direction; missing is not.
+     *
+     * A trail that cannot be read refuses, for the same reason.
+     *
+     * @param string $child  The table this instruction empties.
+     * @param string $parent The table it finds the person through.
+     *
+     * @return string Empty when the look-up can be trusted. Otherwise the
+     *   reason, in words, ready to be written into the audit trail. It is
+     *   written in this file and is therefore never truncated - see the note
+     *   on the 250-character cuts further down.
+     */
+    /**
+     * 🔍 Is this table in the database we are connected to?
+     *
+     * `SHOW TABLES LIKE`, not a blanket try/catch around a query: the question
+     * is "is it there", and a try/catch would answer "yes" for a table that is
+     * there and unreadable for some other reason (#694's rule).
+     *
+     * The name is a plain identifier - every caller either types it in this
+     * file or has had it through the parent-match rule - but it is bound as a
+     * parameter all the same, because `SHOW TABLES LIKE` takes one.
+     *
+     * Answers FALSE when it cannot tell, which makes the one caller treat the
+     * table as absent and SKIP. That is the quieter direction, so the caller
+     * reaches here only when it already knows something is missing.
+     */
+    private static function tableIsPresent(\mysqli $db, string $table): bool
+    {
+        try {
+            $stmt = $db->prepare('SHOW TABLES LIKE ?');
+            if ($stmt === false) {
+                return false;
+            }
+            $stmt->bind_param('s', $table);
+            $stmt->execute();
+            $there = $stmt->get_result()->fetch_row() !== null;
+            $stmt->close();
+
+            return $there;
+        } catch (\Throwable $ignored) {
+            return false;
+        }
+    }
+
+    private static function whyParentLookUpUnsafe(
+        \mysqli $db,
+        int $requestId,
+        string $child,
+        array $via
+    ): string {
+        $parent     = (string) ($via['parent'] ?? '');
+        $unreadable = 'the audit trail of this request could not be read, so whether the link this step '
+            . 'matches through is still intact is unknown. Refusing is the recoverable answer';
+
+        // 🔎 How THIS instruction's own audit lines are told apart from any
+        //    other instruction for the same table. `tblCareVisit` carries
+        //    THREE instructions - the note, and the two that detach the
+        //    workers - and all three write `tableName = 'tblCareVisit'`, so
+        //    asking "has this table a line" would accept a line written by a
+        //    different instruction entirely. Only a parent-matched step says
+        //    HOW it reached its rows, so that sentence is the discriminator.
+        //    Today the pinned order happens to make the two readings agree;
+        //    nothing pins where the OTHER two instructions sit relative to the
+        //    parent, so moving one of them above it - harmless in itself,
+        //    because neither matches through the parent - would otherwise have
+        //    made this guard allow a step it must refuse.
+        $ownLine = self::matchedThrough($via);
+
+        // 🧹 Closed on EVERY path, the throw included. An earlier version left
+        //    these open when the trail could not be read.
+        $first = null;
+        $done  = null;
+        try {
+            // 1️⃣ When was the parent FIRST changed in this request? `MIN`, not
+            //    "does a line exist", because everything below compares this
+            //    step's own lines against the moment the link went.
+            $first = $db->prepare(
+                'SELECT COALESCE(MIN(auditID), 0) AS firstChange FROM tblErasureAudit '
+                . "WHERE requestID = ? AND tableName = ? AND action IN ('anonymise', 'partial')"
+            );
+            if ($first === false) {
+                return $unreadable;
+            }
+            $first->bind_param('is', $requestId, $parent);
+            $first->execute();
+            $firstChange = (int) ($first->get_result()->fetch_assoc()['firstChange'] ?? 0);
+
+            // ✅ Nothing has touched the parent, so the link is still there.
+            if ($firstChange === 0) {
+                return '';
+            }
+
+            // ⛔ Changed earlier in THIS run: the instructions are in the wrong
+            //    order. Recoverable, and the message says how.
+            if ($firstChange > self::$runStartedAfterAuditId) {
+                return '`' . $parent . '` was changed earlier in this same run, so the link this step matches '
+                    . 'through may already be gone and a look-up now could wrongly report that nothing is '
+                    . 'held. This step must come BEFORE every instruction for that table';
+            }
+
+            // 2️⃣ Changed by an EARLIER run. Had this step already answered
+            //    while the link was still intact?
+            //
+            // ⚠️ `'failed'` IS DELIBERATELY NOT IN THIS LIST, and adding it
+            //    puts the whole fault back. A probe that could not run logs
+            //    `failed` with details that BEGIN "could not look for this
+            //    person (matched through ...)" - so it carries the very
+            //    sentence the clause below matches on, and its `auditID` is
+            //    below the parent's change. Count it and run 2 would allow the
+            //    step, find nothing, write "nothing held for this person", and
+            //    close the request as completed with the note still in it.
+            //    `'skip'` is out for a different reason: it means the rows WERE
+            //    found and deliberately left, so "check them by hand" is still
+            //    the right answer later. Only an action that means "this step
+            //    reached its rows and dealt with them" belongs here. Section 19
+            //    has a case for the `failed` line specifically.
+            //    `details LIKE` is the only way to ask this, because the trail
+            //    records the table and not the instruction. The pattern cannot
+            //    be one that never matches: `matchedThrough()` builds both this
+            //    and the sentence written into every line of such a step, so
+            //    case 3 of section 19 reads a REAL via line back through this
+            //    clause and a pattern that stopped matching turns that check
+            //    red rather than quietly refusing everything.
+            //
+            //    ON WILDCARDS, precisely, because a draft of this comment said
+            //    something false. The rule is `/\A[A-Za-z0-9_]+\z/`, which
+            //    ALLOWS an underscore - and `_` matches any single character in
+            //    `LIKE`. `%` cannot appear. So a name with an underscore makes
+            //    this pattern match slightly MORE than it should: it could
+            //    accept a line from another instruction whose names differ from
+            //    these only where the underscores are. That direction allows a
+            //    step rather than refusing one, so it is escaped below rather
+            //    than argued away. Neither `tblCareCase` nor `personUserID`
+            //    has an underscore today, which is exactly why the looseness
+            //    would not have been noticed.
+            $done = $db->prepare(
+                'SELECT 1 FROM tblErasureAudit WHERE requestID = ? AND tableName = ? '
+                . "AND action IN ('anonymise', 'partial', 'none') AND auditID < ? "
+                . 'AND details LIKE ? LIMIT 1'
+            );
+            if ($done === false) {
+                return $unreadable;
+            }
+            // 🛡️ `_` is a single-character wildcard, and the identifier rule
+            //    allows it. Escaped with a backslash, which is MySQL's and
+            //    MariaDB's default escape character for `LIKE`.
+            $ownLineLike = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $ownLine) . '%';
+            $done->bind_param('isis', $requestId, $child, $firstChange, $ownLineLike);
+            $done->execute();
+            if ($done->get_result()->fetch_row() !== null) {
+                // ✅ It ran while the link was intact, so its answer stands and
+                //    there is nothing left for it to do.
+                return '';
+            }
+
+            return '`' . $parent . '` was changed by an EARLIER run of this request, so the link this step '
+                . 'matches through is gone and nothing can be found through it now. This step never '
+                . 'completed while that link was intact, so running the request again will NOT reach these '
+                . 'rows: they must be checked by hand';
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] GdprEraser: could not read the audit trail of erasure #'
+                . $requestId . ' to check the order of a parent-matched step: ' . $e->getMessage());
+
+            return $unreadable;
+        } finally {
+            // 🚫 No `return` in here: returning from `finally` is deprecated in
+            //    PHP 8.6 and would swallow the answer above (#705).
+            //
+            // 🧯 And nothing in here may THROW. Under
+            //    `MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR` - which is what
+            //    `DbServer::connect()` sets, and it takes BOTH - `close()` can
+            //    throw, and a throw from `finally` replaces the answer this
+            //    method had already worked out. That would turn one step's
+            //    refusal into a whole run stopping, which is the shape #694
+            //    was bitten by: a fault escaping with the transaction open.
+            foreach ([$first, $done] as $statement) {
+                if ($statement instanceof \mysqli_stmt === false) {
+                    continue;
+                }
+                try {
+                    $statement->close();
+                } catch (\Throwable $ignored) {
+                    // Nothing to do and nothing to say: the answer above
+                    // stands, and the connection is closed with the request.
+                }
+            }
+        }
+    }
+
     private static function processEntry(\mysqli $db, int $requestId, int $userId, array $entry): string
     {
         $table  = (string) $entry['table'];
         $col    = (string) $entry['userCol'];
         $action = (string) $entry['action'];
         $reason = (string) ($entry['reason'] ?? '');
+
+        // 🧬 Does this instruction find its rows through a PARENT table (#709)?
+        //    Read first, because it changes what every step below asks the
+        //    database, and refused first, because a malformed one must never
+        //    reach a statement.
+        $via = isset($entry['subjectVia']) === true && is_array($entry['subjectVia']) === true
+            ? (array) $entry['subjectVia']
+            : null;
+        if (isset($entry['subjectVia']) === true) {
+            $whyNotViaParent = self::whyParentMatchUnusable($entry);
+            if ($whyNotViaParent !== '') {
+                // 📏 NOT truncated: this reason is written in this file, so its
+                //    length is ours and the 250-character cut is for fault text
+                //    whose length nobody controls. Cutting it sliced the words
+                //    `personUserID` in half once already (#709).
+                self::logAudit(
+                    $db,
+                    $requestId,
+                    'failed',
+                    $table,
+                    null,
+                    'refused, nothing was changed: ' . $whyNotViaParent
+                );
+
+                return self::STEP_FAILED;
+            }
+
+            // ⛔ The order, and whether an earlier run has already taken the
+            //    link away. See whyParentLookUpUnsafe() - this is the fault
+            //    that would otherwise be silent and permanent, and the second
+            //    of its two shapes was reached THROUGH the first version of
+            //    this guard.
+            //
+            //    NOT truncated, for the reason given at the call above.
+            $whyLookUpUnsafe = self::whyParentLookUpUnsafe(
+                $db,
+                $requestId,
+                $table,
+                $via
+            );
+            if ($whyLookUpUnsafe !== '') {
+                self::logAudit(
+                    $db,
+                    $requestId,
+                    'failed',
+                    $table,
+                    null,
+                    'refused, nothing was changed: ' . $whyLookUpUnsafe . '.'
+                );
+
+                return self::STEP_FAILED;
+            }
+        }
 
         // 🛑 An instruction this class will not carry out. STOP, do not guess.
         //
@@ -2617,7 +3167,9 @@ class GdprEraser
         // 🔒 A kept table that no column ties to an account. There is nothing
         //    to look the person up by, so say that, rather than run a look-up
         //    that cannot work and report its failure as "table missing".
-        if ($col === '') {
+        //    A parent-matched instruction is exempt: it genuinely has no column
+        //    of its own, and `whereForEntry()` below builds its look-up instead.
+        if ($col === '' && $via === null) {
             if ($action !== 'retain') {
                 self::logAudit($db, $requestId, 'failed', $table, null, 'refused, nothing was changed: the instruction names no column to find the person by');
 
@@ -2640,8 +3192,17 @@ class GdprEraser
         $held    = false;
         $problem = null;
         $errno   = 0;
+        $where = self::whereForEntry($col, $via);
+        if ($where === '') {
+            // Neither shape could be built. Never read as "nothing held".
+            self::logAudit($db, $requestId, 'failed', $table, null, 'refused, nothing was changed: the '
+                . 'instruction gives no usable way to find this person\'s rows');
+
+            return self::STEP_FAILED;
+        }
+        $lookedBy = $via !== null ? self::matchedThrough($via) : 'looked by `' . $col . '`';
         try {
-            $stmt = $db->prepare('SELECT 1 FROM `' . $table . '` WHERE `' . $col . '` = ? LIMIT 1');
+            $stmt = $db->prepare('SELECT 1 FROM `' . $table . '` WHERE ' . $where . ' LIMIT 1');
             if ($stmt === false) {
                 $problem = (string) $db->error;
                 $errno   = (int) $db->errno;
@@ -2665,11 +3226,34 @@ class GdprEraser
             // exist, a lock that timed out - which was untrue, and let a
             // request be closed with the table never looked at.
             if ($errno === 1146) {
+                // 🧬 A parent-matched step names TWO tables, and only one of
+                //    them being missing is safe (#709). `$table` is the CHILD,
+                //    so "table-missing" against it was untrue whenever it was
+                //    the PARENT that had gone - and, far worse, it was a SKIP:
+                //    the child's rows may be sitting there with every word of
+                //    the note in them, unmatchable because the table that says
+                //    whose they are is absent, and the request would close as
+                //    completed having never looked. So the child's absence is
+                //    still a skip (nothing can be held in a table that is not
+                //    there) and the parent's absence is a FAILED step.
+                //
+                //    Asked of the database rather than read out of the error
+                //    message, which is a sentence MySQL and MariaDB are free to
+                //    word differently.
+                if ($via !== null && self::tableIsPresent($db, $table) === true) {
+                    self::logAudit($db, $requestId, 'failed', $table, null, 'refused, nothing was changed: `'
+                        . (string) ($via['parent'] ?? '?') . '` - the table this step finds the person through - '
+                        . 'is not in this database, so these rows cannot be matched to anybody. This table itself '
+                        . 'is present and may still hold their records. The database probably needs its upgrade '
+                        . 'running first');
+
+                    return self::STEP_FAILED;
+                }
                 self::logAudit($db, $requestId, 'skip', $table, null, 'table-missing');
 
                 return self::STEP_UNCHANGED;
             }
-            self::logAudit($db, $requestId, 'failed', $table, null, mb_substr('could not look for this person by `' . $col . '`: ' . $problem, 0, 250));
+            self::logAudit($db, $requestId, 'failed', $table, null, mb_substr('could not look for this person (' . $lookedBy . '): ' . $problem, 0, 250));
 
             return self::STEP_FAILED;
         }
@@ -2677,7 +3261,7 @@ class GdprEraser
         if ($held === false) {
             // Written down, not passed over: without this line nothing could
             // show that the step ran at all (#510).
-            self::logAudit($db, $requestId, 'none', $table, null, 'nothing held for this person (looked by `' . $col . '`)');
+            self::logAudit($db, $requestId, 'none', $table, null, 'nothing held for this person (' . $lookedBy . ')');
 
             return self::STEP_UNCHANGED;
         }
@@ -2721,7 +3305,7 @@ class GdprEraser
         $sql = '';
 
         if ($action === 'delete') {
-            $sql = 'DELETE FROM `' . $table . '` WHERE `' . $col . '` = ?';
+            $sql = 'DELETE FROM `' . $table . '` WHERE ' . $where;
         } elseif ($action === 'anonymise') {
             $nulls = (array) ($entry['nullCols'] ?? []);
             $overrides = (array) ($entry['overrides'] ?? []);
@@ -2822,13 +3406,55 @@ class GdprEraser
             // For tblUsers, the user-row anonymisation also nulls the email/etc.
             if ($table === 'tblUsers') {
                 $sets[] = "`emailAddress` = '" . $db->real_escape_string(str_replace('{rid}', (string) $requestId, self::TOMBSTONE_EMAIL)) . "'";
-                $sql = 'UPDATE `' . $table . '` SET ' . implode(', ', array_unique($sets)) . ' WHERE `' . $col . '` = ?';
+                $sql = 'UPDATE `' . $table . '` SET ' . implode(', ', array_unique($sets)) . ' WHERE ' . $where;
                 // The address may not be empty, so it was "refused" above -
                 // but the line just above REPLACES it with a made-up one. It
                 // is therefore not left in place, and the audit line must not
                 // say it was. (It always did, on every erasure, until the
                 // real-database test read the trail on 11 October 2026.)
                 $refused = array_values(array_diff($refused, ['emailAddress']));
+            } elseif ($via !== null) {
+                // 🧬 A PARENT-MATCHED instruction has no account link of its own
+                //    to drop, and the link it DOES have must survive (#709).
+                //
+                //    `childCol` is how the row belongs to its parent -
+                //    `tblCareVisit.caseID`. Emptying it would detach a
+                //    safeguarding record from the case it belongs to, which is
+                //    not anonymising anything: it destroys the record's
+                //    meaning while leaving every word of it in the database.
+                //    It is `NOT NULL` in the schema as well, so the statement
+                //    would simply fail - but the reason it must not be emptied
+                //    is the first one, and a schema can be changed.
+                //
+                //    So the columns named in `nullCols` are the whole of the
+                //    change here. `whyParentMatchUnusable()` refuses an
+                //    instruction that names none, which is what stops this
+                //    branch producing an empty SET.
+                if ($sets === []) {
+                    // Every column this instruction wanted to empty was refused
+                    // by the database. There is no account link to fall back on
+                    // here, so nothing at all can be done - and saying so is the
+                    // whole point: a step that changed nothing must never read as
+                    // a step that had nothing to change.
+                    self::logAudit(
+                        $db,
+                        $requestId,
+                        'skip',
+                        $table,
+                        null,
+                        mb_substr(
+                            'nothing could be emptied (' . self::matchedThrough($via) . '): the database '
+                            . 'does not allow ' . implode(', ', $refused) . ' to be empty. The rows were '
+                            . 'found, and they are still exactly as they were.',
+                            0,
+                            250
+                        )
+                    );
+
+                    return self::STEP_UNCHANGED;
+                }
+
+                $sql = 'UPDATE `' . $table . '` SET ' . implode(', ', $sets) . ' WHERE ' . $where;
             } else {
                 // Anonymise = drop the link to the person as well, where the
                 // database allows it to be dropped.
@@ -2857,7 +3483,7 @@ class GdprEraser
                     return self::STEP_UNCHANGED;
                 }
 
-                $sql = 'UPDATE `' . $table . '` SET ' . implode(', ', $sets) . ' WHERE `' . $col . '` = ?';
+                $sql = 'UPDATE `' . $table . '` SET ' . implode(', ', $sets) . ' WHERE ' . $where;
             }
         }
 
@@ -2898,6 +3524,22 @@ class GdprEraser
         //    (This used to be a second, separate line written BEFORE the
         //    change was made, so it stayed in the trail even when the change
         //    then failed.)
+        //    A parent-matched step also says HOW it reached the rows, on every
+        //    line including this one. Without it the trail gives no clue that
+        //    the look-up went through another table, which is the one thing a
+        //    reader needs in order to judge whether it looked in the right
+        //    place (#709).
+        //
+        // 📏 IT GOES FIRST, AND IT IS NOT TRUNCATED. Both were got wrong in the
+        //    first version. It was written at the END of the line and the whole
+        //    line cut to 250 characters - so on the one instruction that uses
+        //    this form the reason ran long and the words `personUserID` were
+        //    sliced in half, losing exactly the fact nothing else records.
+        //    `details` is a TEXT column and the ordinary lines here have never
+        //    been truncated; the 250-character cuts in this method are on
+        //    FAULT messages, whose length nobody controls. A reason written in
+        //    this file is not one of those.
+        $how = $via !== null ? self::matchedThrough($via) . '. ' : '';
         if ($refused !== []) {
             self::logAudit(
                 $db,
@@ -2905,11 +3547,11 @@ class GdprEraser
                 'partial',
                 $table,
                 (string) $affected . ' rows',
-                'left in place because the database does not allow them to be empty: '
+                $how . 'left in place because the database does not allow them to be empty: '
                 . implode(', ', $refused) . '. ' . $reason
             );
         } else {
-            self::logAudit($db, $requestId, $action, $table, (string) $affected . ' rows', $reason);
+            self::logAudit($db, $requestId, $action, $table, (string) $affected . ' rows', $how . $reason);
         }
 
         return $affected > 0 ? self::STEP_CHANGED : self::STEP_UNCHANGED;
@@ -3050,6 +3692,27 @@ class GdprEraser
     private static array $unkeptGiftDates = [];
 
     /**
+     * 📍 The last audit line of this request BEFORE this run started (#709).
+     *
+     * Only `whyParentLookUpUnsafe()` reads it, to tell "the parent was changed
+     * EARLIER IN THIS RUN" from "an earlier run changed it". Those two need
+     * different answers, which is why the mark exists: a run with a failed
+     * step puts the request back to `pending_review` and it is RUN AGAIN, so
+     * the trail of a second run already holds the first run's lines. An
+     * earlier version of the guard read the whole trail and so refused the
+     * parent-matched step on every later run, and the request could never be
+     * completed - measured, section 6 of `tools/gdpr-eraser-selftest.php` went
+     * red on exactly that.
+     *
+     * 0 means "nothing is known about where this run began". Every line then
+     * reads as belonging to this run, so the guard reports an ordering mistake
+     * rather than letting the step proceed. That is the safe default for a
+     * caller that did not set it - but note it is the WRONG REASON for the
+     * right refusal, which is why nothing relies on 0 except as a backstop.
+     */
+    private static int $runStartedAfterAuditId = 0;
+
+    /**
      * The organisations whose gifts THIS run sorted by "every gift keeps the
      * donor's name", for the envelope step that follows in the same run.
      * Emptied at the start of every run.
@@ -3153,6 +3816,23 @@ class GdprEraser
         $changed = false;
         $doing   = 'checking that this database has been upgraded for this version';
         self::$unkeptGiftDates = [];
+        // 📍 Where this run begins in the audit trail (#709). Read only by
+        //    whyParentLookUpUnsafe(), to tell a change made earlier in THIS
+        //    run from one an earlier run made - the two need different
+        //    answers. Nothing is known if it cannot be read, and 0 makes that
+        //    guard refuse rather than let a step proceed.
+        self::$runStartedAfterAuditId = 0;
+        try {
+            $mark = $db->prepare('SELECT COALESCE(MAX(auditID), 0) AS n FROM tblErasureAudit WHERE requestID = ?');
+            if ($mark !== false) {
+                $mark->bind_param('i', $requestId);
+                $mark->execute();
+                self::$runStartedAfterAuditId = (int) ($mark->get_result()->fetch_assoc()['n'] ?? 0);
+                $mark->close();
+            }
+        } catch (\Throwable $ignored) {
+            self::$runStartedAfterAuditId = 0;
+        }
         self::$everyGiftSites  = [];
         self::$dueAtErasure    = [];
 

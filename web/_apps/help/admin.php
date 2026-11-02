@@ -699,14 +699,54 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         is the case.
     </p>
 
+    <h3 class="h6 mt-3">Pastoral notes, and whose record they are</h3>
+    <p>
+        A pastoral visit is written up on the <strong>case</strong> it belongs to, and the note
+        describes the person being cared for &mdash; not whoever wrote it. So the portal decides what
+        to do with a note by asking who the case is about:
+    </p>
+    <ul>
+        <li>
+            <strong>If the case is about the person being erased</strong>, the notes of every visit on
+            it are emptied, whoever wrote them. The visit itself stays, with its date, the kind of
+            visit it was and its follow-up date, so the record that care was given is not lost.
+        </li>
+        <li>
+            <strong>If the case is about somebody else</strong>, the notes stay exactly as they are
+            &mdash; even on a visit the erased person made themselves, and even on a case they opened.
+            Those notes are the other person's record, and that person has not asked for anything.
+            Only the erased person's own name comes off the visit.
+        </li>
+    </ul>
+    <p>
+        The same goes for the case itself: it is kept, and the name of whoever it is about, or who
+        opened it, is removed.
+    </p>
+
     <h3 class="h6 mt-3">If an erasure stops part way</h3>
-    <p class="mb-0">
+    <p>
         An erasure works through many steps. It deals with the giving records first and empties the
         account about half way through. If it stops part way, run the request again: every step is
         safe to repeat. Until the account has been emptied, the person is still treated as a member
         and nothing kept for them is cleared. Once a run has removed or changed anything, the request
         <strong>cannot be cancelled</strong>, because what it changed cannot be put back. A request
         that has never changed anything can be cancelled as before.
+    </p>
+    <p class="mb-0">
+        There is <strong>one step that running the request again cannot always finish</strong>, and
+        the portal says so rather than passing over it. Pastoral visit notes are found through the
+        case they belong to, so if an earlier run emptied the name on the case before it reached the
+        notes, there is no longer anything to find them by. When that happens the step
+        <strong>fails and tells you the notes must be checked by hand</strong> &mdash; it does not
+        report that nothing was held. Every other step still runs, so the rest of the erasure is
+        done. <strong>Be aware of what this costs:</strong> running the request again will not reach
+        those notes, and there is at present <strong>no button that marks them as dealt with</strong>,
+        so the request will keep showing as <em>pending review</em> even after somebody has emptied
+        them. It cannot be cancelled either, because earlier steps have already changed records. Deal
+        with the notes directly in the database, and treat the request's own report &mdash; which
+        names the step and its reason &mdash; as the record of what was left. We would rather leave
+        you a request that plainly says it is unfinished than one that reports success it has not
+        earned.
     </p>
 </div>
 

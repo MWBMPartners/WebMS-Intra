@@ -323,7 +323,14 @@ if ($outcome['failed'] > 0) {
         . $outcome['steps'] . ' steps could not be done. The request is back at pending review, so run it again. '
         . 'If the same step fails again, open its report: each step marked "failed" shows its reason. A reason that '
         . 'names a missing column means the database needs its upgrade first, and running the request again will '
-        . 'not help until that is done.';
+        . 'not help until that is done. '
+        // 🧷 The one reason that NO number of further runs can clear (#709). Without
+        //    this, the sentence above sends somebody round a loop that cannot end:
+        //    a parent-matched step whose link an earlier run already cut refuses on
+        //    every run, so the request can never reach "completed".
+        . 'A reason saying the rows must be CHECKED BY HAND will not be helped by running it again at all: '
+        . 'those rows can no longer be found automatically, so they have to be dealt with directly, and this '
+        . 'request will go on showing as not complete.';
     $_SESSION['flash_type'] = 'warning';
     header('Location: ' . Router::url('admin/erasure-requests'));
     exit();

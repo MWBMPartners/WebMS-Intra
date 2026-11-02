@@ -170,9 +170,94 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
   old whole-session copy is the only place such a record names anybody), and which CLEARS rather than links a
   record whose account has been erased — linking it would undo that erasure. Migration 221 resets
   `activityLog.cleanedThrough` to send the cleaner back through the log. The pinned list `$leftBehindOnPurpose` in
-  `tools/gdpr-coverage-selftest.php` names the 35 tables still leaving a named column (#635): nothing may be added
-  to it. Tests: `tools/activity-log-selftest.php`, section 17 of `tools/gdpr-eraser-selftest.php`,
+  `tools/gdpr-coverage-selftest.php` is **EMPTY and pinned empty** since #635 (2 November 2026) — it used to name
+  35 tables and this line used to say so, which is now the stale shape #678 warns about. The decision for every
+  one of those tables moved into `web/_core/personal-data-catalogue.php`, beside the column, as `notEmptiedHere`.
+  Nothing may be added to the pinned list. Tests: `tools/activity-log-selftest.php`, section 17 of `tools/gdpr-eraser-selftest.php`,
   `tools/gdpr-coverage-selftest.php`, phases 1 and 7 of the migration harness.
+- **An erasure can match a row through its PARENT table, and the shortcut is the destructive one (#709).**
+  `GdprEraser::whyParentMatchUnusable()` is the ONE test of whether an instruction may do this, and it is public so
+  `tools/gdpr-coverage-selftest.php` asks it rather than keeping a copy; `GdprEraser::whereForEntry()` is the ONE
+  place the "which rows are this person's" clause is written for BOTH shapes, asked by the probe, the statement and
+  `inventory()`. Only ONE instruction uses it: `tblCareVisit.notes`, through `tblCareCase.personUserID`, because a
+  visit's note is about the person being CARED FOR while the only account numbers on the row are the two WORKERS.
+  **`personCol` must be in `LINK_COLUMNS` and NOT in `ACTOR_COLUMNS` — two of the eight refusals, and the pair that
+  stops real harm:** pointing it at `tblCareCase.openedByID` empties the notes of every case the erased worker
+  opened — a third party's safeguarding records — and reaches none of their own. `personUserID` was on NEITHER list
+  until #709 although the database links it to `tblUsers`. **THE ORDER IS THE TRAP AND IT WAS LIVE:** the parent's
+  own step empties the column the look-up uses, and in the list as it stood the parent came FIRST, so an instruction
+  added in the obvious place would have found nothing, changed nothing, and written "nothing held for this person"
+  into the sealed trail. Two guards, both needed — the coverage test pins the POSITION (it judges the list, before
+  anybody runs an erasure) and `whyParentLookUpUnsafe()` judges the RUN. **THAT GUARD WAS WRONG TWICE, IN OPPOSITE
+  DIRECTIONS, AND THE SECOND IS THE LESSON.** Version 1 read the whole request's trail, so it refused the step on
+  every SECOND run — a run with a failed step is put back and run again, so the request could never be completed
+  (section 6 of the eraser test found it). Version 2 therefore read only the CURRENT run's lines, **and that
+  reopened the very fault the guard exists to stop, one step further on:** on a second run the parent's change is
+  not "from this run", so the step was ALLOWED, the link was already gone, and it wrote "nothing held for this
+  person" while the request closed as COMPLETED with the note still in it. **No mistake by anybody was needed** —
+  one transient error on that one step in run 1 is enough, because the walk carries on and the parent's step still
+  cuts the link. **The docblock is what let it stand:** it claimed a refusal "leaves every note in place for a
+  second run, whereas a miss is silent and permanent", which was false in the reassuring direction — the #645 shape,
+  a comment stating the guarantee the code had forgotten to implement — and four documents carried the same words.
+  **Worse, the self-test ASSERTED the fault as correct** (`$saysClearAfterwards === false`), which is why nothing
+  caught it. Version 3 asks all three questions: parent untouched (safe); changed EARLIER IN THIS RUN (an ordering
+  mistake, recoverable); changed BY AN EARLIER RUN (the link is gone for good, and the answer turns on whether this
+  step had already answered while it was intact — any line of its own with a LOWER `auditID` than the parent's
+  first change, because **a `none` from before the change means the person held nothing, while a `none` from after
+  it means only that the look-up could no longer see**). Where it never answered in time the step FAILS and says
+  the rows must be checked by hand: **a request needing a human look beats one reporting success it has not
+  earned**, and that is a product decision, not a tidy-up. `self::$runStartedAfterAuditId` (`MAX(auditID)` at the
+  start) exists ONLY to tell those two "changed" cases apart.
+  **And the child side was coarse too, found by reading:** the "had this step already answered" question was asked
+  by TABLE NAME, and `tblCareVisit` carries THREE instructions, so another instruction's line counted as this one
+  having run. The pinned order makes them agree TODAY, but nothing pins where the other two sit relative to the
+  parent, so moving one above it — harmless in itself — would have made the guard allow a step it must refuse.
+  Only a parent-matched step writes HOW it reached its rows, so that sentence is the discriminator (`details
+  LIKE`), and it is deliberately a clause that CAN fail: case 3 reads a REAL via line back through it, so a
+  pattern that stopped matching goes red rather than refusing everything. `childCol` is NEVER emptied (a visit detached from its case is
+  rubble with the note still in it), and an instruction naming no `nullCols` is refused because without an account
+  link to drop it would change nothing while reading as coverage. The audit line says HOW it matched, FIRST and
+  untruncated — written last and cut to 250 characters it sliced `personUserID` in half, losing the one fact nothing
+  else records. **THREE THINGS WERE PINNED BY NOTHING AND PLANTING FOUND ALL THREE:** replacing the run-time guard's
+  whole CALL with `if (false)` left both self-tests and all 46 audit scripts green; reverting the `inventory()`
+  half was equally invisible, although "what we hold about you counts these rows too" is listed as delivered; and
+  swapping two of the four names in the clause builder could not be seen, because the one real instruction uses
+  `caseID` for BOTH `childCol` and `parentKey` — **a pin whose fixture uses one value for two names cannot tell
+  them apart.** Section 8d closes all three (the whole condition, a refusal that must return `STEP_FAILED`, and a
+  made-up instruction whose four names all differ), and `$mustRefuse` is now pinned with
+  `array_keys(...) === [...]` because ITERATING it meant deleting a case stopped testing it while the label still
+  said eight (#697's remedy). **Nothing covers the LIVE path through `processEntry()` with a real refusal** — the
+  audit line it writes and what an administrator sees — because reaching the ordering half needs a list the
+  coverage test refuses and the earlier-run half needs a trail a correct run never produces. **`$where === ''`
+  there is a clause that CANNOT FAIL** and is a backstop, not a tested one. Tests: sections 8c and 8d of
+  `tools/gdpr-coverage-selftest.php` and section 19 of `tools/gdpr-eraser-selftest.php`; count the plants from
+  the commit message, never from here (#671).
+  **ROUND 2 FOUND FOUR MORE PINNED BY NOTHING, AND THE FIRST IS THE ONE TO REMEMBER:** `if (false && isset(...))`
+  on the line ABOVE switched BOTH guards off in ONE WORD with all 336 checks green, because the inner pins matched
+  text that never ran — **when you pin a call, pin the gate that decides whether its block is entered at all**, or
+  you have pinned a label on a door nobody opens; the rule's own call was pinned by NOTHING. **A CHECK CAN NAME
+  THE RIGHT FAULT AND MEASURE THE WRONG VALUE:** the check labelled "not a 250-character slice" measured the
+  guard's RETURNED sentence, a literal in the same file, so putting `mb_substr(..., 0, 250)` back around the AUDIT
+  LINE — where the fault was — left it green; the cut is applied by the CALLER and no value inside the guard
+  changes when it is (measured: 261 and 317 characters as stored). **And widening a list of "good" actions put the
+  whole fault back:** adding `'failed'` to the actions counting as "this step already answered" left both tests
+  green and is LIVE HARM, because a probe failure writes "could not look for this person (matched through ...)" —
+  carrying the very discriminator the `LIKE` clause matches — below the parent's change; `'skip'` is out for a
+  different reason (the rows WERE found and left). Also: the comment justifying the unescaped pattern claimed the
+  identifier rule allows neither `%` nor `_`, and it ALLOWS `_`, a single-character wildcard — harmless today only
+  because neither name contains one, which is why it went unnoticed. **And error 1146 was the silent-success shape
+  again:** a parent-matched step names TWO tables, and a missing PARENT was logged as `skip` under the CHILD's
+  name, so the child's rows kept every word of the note while the request closed as completed; the parent's
+  absence is a FAILED step now, asked of the database rather than read out of an error message. **The cost of all
+  this is #710:** a step that refuses for ever is right, but `closeRequest()` runs only when nothing failed, so
+  such a request can never be closed and cannot be cancelled — the help page and the failed-run message say so
+  plainly, which is honest and not a fix. **Two fixture lessons worth keeping:** every case in the
+  first version of that world was opened by the control person, so the actor-column plant matched NOTHING and went
+  red only on the wrong check while the third-party check passed vacuously — a fourth case, opened BY the erased
+  person and ABOUT somebody else, is what makes it fail for the right reason; and `['personUserID' => null]` does
+  NOT give a null column, because `ge_insert()` reads the people list as `$people[$name] ?? $other` and `null ?? D`
+  is D, so a null must go through `$fixed`. The technical record is DEV_NOTES.md, "Matching an erasure through a
+  parent table (#709)".
 - **Every two-factor gate takes the sign-in away FIRST (27 October 2026).** There are FOUR gates that demote a session to "waiting for a code" — the two sign-in callbacks in `Auth.php`, `_apps/auth/login/index.php` and `_apps/auth/login/webauthn.php` — and in each, `unset($_SESSION['user_id'], $_SESSION['2fa_passed'])` comes BEFORE anything else, `login_redirect` included. All four had it the other way round: a request chooses the TYPE of what it sends as well as the value, so `?redirect[]=x` made `Auth::safeRedirectUrl()` throw while `user_id` was still set, PHP wrote the session at shutdown, and the next request saw somebody signed in who was never asked for a code. **On the password form that needed nothing but the person's password.** `Auth::safeRedirectUrl()` therefore takes `mixed` and refuses a non-string with the fallback: never narrow it back to `string`, and never put a call that can throw between granting an identity and the check that earns it. A gate found by searching for `$_GET` will be missed — the passkey path reads the posted JSON. Checks, and BOTH are needed because neither catches the other's half: `tools/audit-checks/check_2fa_gate_order.py` (the order) and section Z of `tools/two-step-selftest.php` (the behaviour). Reversing the order alone is invisible to the self-test; that was measured, not assumed.
 - **An OAuth `state` must be a non-empty STORED value (27 October 2026).** Both callbacks compared `$_SESSION['oauth_state'] ?? ''` with `$_GET['state'] ?? ''`, so an address carrying an empty `state=` passed when no sign-in had been started: `hash_equals('', '')` is true. That signed a visitor into whoever's authorization code was supplied. The stored value is now required to be non-empty before anything is compared, and a non-string is refused so `?state[]=x` cannot reach `hash_equals()`. Do not simplify that condition back.
 - **Two-factor authentication (#613).** `auth/2fa/setup.php` is the ONE place backup codes are made, and it shows them only in the answer to the request that made them: never put a code, or the authenticator key, readable in `$_SESSION`. A code is single-use by `… AND isUsed = 0` plus "one row changed" in `auth/2fa/verify.php`, and is looked for among the person's own codes only. The old set is removed row by row after locking the person's own account row, never by `DELETE … WHERE userID = ?` (two people at once deadlock). Test: `tools/two-step-selftest.php`, alone on its server.

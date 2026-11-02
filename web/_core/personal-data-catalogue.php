@@ -67,10 +67,13 @@
  *
  * There are three honest reasons, and each appears below. A FOURTH state is
  * allowed only while work is in flight and must name its issue: a column that is
- * TO BE emptied, where the routine cannot yet reach it. `tblCareVisit.notes` is
- * the one such line today (#709). Recording it here beats leaving it silent, and
- * the check that refuses an explanation for a column that IS emptied is what
- * forces the line out again when the work lands.
+ * TO BE emptied, where the routine cannot yet reach it. NO LINE IS IN THAT STATE
+ * TODAY. `tblCareVisit.notes` was the one, and #709 closed it by teaching the
+ * routine to match rows through a PARENT table - so a visit's note is now
+ * emptied through the case it belongs to. The line was then forced out of this
+ * file by the check that refuses an explanation for a column that IS emptied,
+ * which is exactly what that check is for: an in-flight state that nothing
+ * removes becomes a permanent excuse.
  *
  *   it is deliberately KEPT    The row is the organisation's record of a thing
  *                              or a transaction, not the person's own record -
@@ -1662,11 +1665,8 @@ return [
         // safeguarding lead. As built, it is not kept.
         'reason'   => 'A pastoral visit. The case history is kept for as long as safeguarding policy keeps the '
                     . 'case, and who made the visit and who its follow-up was given to are detached. The note on '
-                    . 'a visit is the subject\'s own record and is to be emptied: see notEmptiedHere, and #709',
+                    . 'a visit is the subject\'s own record and IS emptied, matched through the case (#709)',
         'columns'  => ['visitedByID', 'followUpAssignedToID', 'notes'],
-        'notEmptiedHere' => [
-            'notes' => 'TO BE EMPTIED, and it needs a capability that does not exist yet, so it is recorded here rather than left silent. The subject of a visit is not on this row: it is reached only through caseID to tblCareCase.personUserID, and every instruction this routine can express is one table and one column. Attaching it to visitedByID or followUpAssignedToID would destroy a THIRD PARTY\'s safeguarding notes because the worker who typed them asked to be forgotten. The owner chose on 1 November 2026 to build matching through a parent table; that ships as its own change (#709), and this line goes when it lands - at which point the check that refuses an explanation for a column that IS emptied will insist on it.',
-        ],
     ],
     'tblDbsChecks' => [
         'decision' => 'retain',

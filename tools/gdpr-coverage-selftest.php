@@ -68,7 +68,8 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 73;
+const EXPECTED_CHECKS = 90; // 81 before the #709 fix round added section 8d; round 2
+                            // added four more after three plants went uncaught
 
 $failures = 0;
 $passes   = 0;
@@ -651,6 +652,206 @@ check(
     . ' matched row, so this deletes a THIRD PARTY\'s details from rows that have nothing to do with the'
     . ' person who asked, and still reaches none of their own. Put the column on the instruction that'
     . ' matches the row\'s SUBJECT, or record in the written list that it cannot be reached and why.'
+);
+
+// -----------------------------------------------------------------------------
+// 8c. MATCHING THROUGH A PARENT TABLE (#709, 2 November 2026).
+//
+//     One instruction in the list finds its rows by looking the subject up on
+//     another table. `tblCareVisit`'s notes describe the person being cared
+//     for, and the only account numbers on that row are the WORKER who made
+//     the visit and the worker its follow-up was given to - so the subject is
+//     one table up, on `tblCareCase.personUserID`.
+//
+//     This is the most dangerous shape in the whole routine, for a reason
+//     worth stating plainly: get the parent column wrong and the erasure
+//     empties a THIRD PARTY's safeguarding notes - every visit the erased
+//     worker ever made, about people who never asked for anything - while
+//     reaching not one note about the person who did ask. Both halves of that
+//     are bad, and the second half is why nobody would notice the first.
+//
+//     The rule lives in `GdprEraser::whyParentMatchUnusable()` and these
+//     checks ASK IT rather than keeping a second copy, which is the project's
+//     standing rule after a password-reset test was found comparing its own
+//     reimplementation of a portal rule.
+// -----------------------------------------------------------------------------
+$parentMatched = [];
+foreach ($instructions as $position => $instruction) {
+    if (isset($instruction['subjectVia']) === true) {
+        $parentMatched[$position] = $instruction;
+    }
+}
+
+check(
+    'at least one instruction matches through a parent table, so the checks below are about something real',
+    $parentMatched !== [],
+    'none found -- if the only such instruction has been removed, remove these checks too rather than '
+    . 'leaving them passing on an empty list'
+);
+
+// Every one of them is acceptable to the portal's own rule.
+$viaRefused = [];
+foreach ($parentMatched as $instruction) {
+    $why = \Portal\Core\GdprEraser::whyParentMatchUnusable($instruction);
+    if ($why !== '') {
+        $viaRefused[] = (string) $instruction['table'] . ': ' . $why;
+    }
+}
+check(
+    'every parent-matched instruction passes the portal\'s own test of whether it may match that way',
+    $viaRefused === [],
+    implode('; ', $viaRefused) . ' -- processEntry() would refuse it at run time and the step would FAIL'
+);
+
+// 🛑 THE ORDERING TRAP, and the one check that catches it.
+//
+//    The parent's own instruction empties the very column the child matches
+//    through: `tblCareCase.personUserID` is set to NULL by the `tblCareCase`
+//    step. Put the child's instruction after it and the look-up finds nothing,
+//    every note stays where it was, and the trail says "nothing held for this
+//    person" - a silent, permanent, complete failure that reads like success.
+//
+//    In the list as it stood before #709 the parent came FIRST, so an
+//    instruction added in the obvious place would have done exactly nothing.
+//    That is not a hypothetical: it is the state of the file this check was
+//    written against.
+//
+//    The run refuses too (GdprEraser::whyParentLookUpUnsafe()). Both are
+//    needed. This one judges the LIST, which is where the mistake is made and
+//    where it can be seen before anybody runs an erasure; that one judges the
+//    RUN, and is the only half that survives the steps being called in some
+//    other order.
+$outOfOrder = [];
+foreach ($parentMatched as $position => $instruction) {
+    $parent = (string) $instruction['subjectVia']['parent'];
+    foreach ($instructions as $otherPosition => $other) {
+        if ((string) $other['table'] !== $parent) {
+            continue;
+        }
+        if ($otherPosition < $position) {
+            $outOfOrder[] = (string) $instruction['table'] . ' (position ' . (string) $position
+                . ') matches through `' . $parent . '`, which is already changed at position '
+                . (string) $otherPosition;
+        }
+    }
+}
+check(
+    'a parent-matched instruction comes BEFORE every instruction for its parent table, or its look-up would find nothing',
+    $outOfOrder === [],
+    implode('; ', $outOfOrder)
+    . ' -- the parent step empties the column this one matches through, so running it later finds no rows,'
+    . ' changes nothing, and writes "nothing held for this person" into the sealed audit trail'
+);
+
+// The link to the parent must survive. Emptying `childCol` would detach a
+// safeguarding record from its case, which is not anonymising anything: it
+// destroys the record's meaning and leaves every word of the note in place.
+$wouldDetach = [];
+foreach ($parentMatched as $instruction) {
+    $childCol = (string) $instruction['subjectVia']['childCol'];
+    if (in_array($childCol, array_map('strval', (array) ($instruction['nullCols'] ?? [])), true) === true) {
+        $wouldDetach[] = (string) $instruction['table'] . '.' . $childCol;
+    }
+}
+check(
+    'a parent-matched instruction never empties the link to its own parent',
+    $wouldDetach === [],
+    implode(', ', $wouldDetach)
+    . ' -- that detaches the row from the case it belongs to while leaving every word of the note in place'
+);
+
+// 🧪 THE RULE ITSELF, exercised on instructions built here on purpose. Without
+//    this the three checks above only prove that today's one instruction is
+//    fine; they say nothing about whether the rule would catch a bad one. Each
+//    case names the fault it stands for, and each MUST be refused.
+$good = [
+    'table'      => 'tblCareVisit',
+    'userCol'    => '',
+    'action'     => 'anonymise',
+    'nullCols'   => ['notes'],
+    'subjectVia' => [
+        'childCol'  => 'caseID',
+        'parent'    => 'tblCareCase',
+        'parentKey' => 'caseID',
+        'personCol' => 'personUserID',
+    ],
+];
+$mustRefuse = [
+    'the parent column says who ACTED (the one that would destroy a third party\'s notes)'
+        => ['subjectVia' => ['personCol' => 'openedByID'] + $good['subjectVia']],
+    'the parent column is not an account column at all'
+        => ['subjectVia' => ['personCol' => 'summary'] + $good['subjectVia']],
+    'it also names a column on the row itself, so there are two ways to find the rows'
+        => ['userCol' => 'visitedByID'],
+    'it would DELETE rows because of who the parent is about'
+        => ['action' => 'delete'],
+    'it names no column to empty, so it changes nothing while reading as coverage'
+        => ['nullCols' => []],
+    'a name that is not a plain identifier'
+        => ['subjectVia' => ['parent' => 'tblCareCase; DROP TABLE x'] + $good['subjectVia']],
+    'one of the four names is missing'
+        => ['subjectVia' => ['childCol' => 'caseID', 'parent' => 'tblCareCase', 'personCol' => 'personUserID']],
+    'subjectVia is not a list at all'
+        => ['subjectVia' => 'tblCareCase.personUserID'],
+];
+$notRefused = [];
+foreach ($mustRefuse as $fault => $change) {
+    if (\Portal\Core\GdprEraser::whyParentMatchUnusable(array_replace($good, $change)) === '') {
+        $notRefused[] = $fault;
+    }
+}
+check(
+    'the rule refuses all eight ways a parent match can be wrong, the actor column among them',
+    $notRefused === [],
+    'accepted when it should have refused: ' . implode('; ', $notRefused)
+);
+
+check(
+    'the rule accepts the shape that is right, and says nothing about an instruction that does not use this form',
+    \Portal\Core\GdprEraser::whyParentMatchUnusable($good) === ''
+        && \Portal\Core\GdprEraser::whyParentMatchUnusable(['table' => 'tblUsers', 'userCol' => 'userID', 'action' => 'anonymise']) === '',
+    'the rule refuses a correct instruction, or objects to one that does not match through a parent at all'
+);
+
+// The clause builder, pinned WHOLE for both shapes. A builder that quietly
+// returned something else - the parent's whole table, say, or a clause with no
+// WHERE at all - would widen an erasure to every row in the table, and the
+// three checks above would not notice.
+check(
+    'the one clause builder writes exactly the right SQL for both shapes, and refuses to guess when it can write neither',
+    \Portal\Core\GdprEraser::whereForEntry('userID', null) === '`userID` = ?'
+        && \Portal\Core\GdprEraser::whereForEntry('', $good['subjectVia'])
+            === '`caseID` IN (SELECT `caseID` FROM `tblCareCase` WHERE `personUserID` = ?)'
+        && \Portal\Core\GdprEraser::whereForEntry('', null) === ''
+        && \Portal\Core\GdprEraser::whereForEntry('', ['childCol' => 'caseID']) === '',
+    'got: ' . \Portal\Core\GdprEraser::whereForEntry('', $good['subjectVia'])
+);
+
+// 📌 THE PIN. The three checks at the top of this section all walk a list built
+//    from the instructions themselves, so deleting the instruction makes them
+//    stop examining it rather than go red - the shape that let a removed
+//    guarantee pass thirty green checks in #697. This names the one fact #709
+//    exists to deliver, so that removing it fails.
+$visitNotes = null;
+foreach ($parentMatched as $instruction) {
+    if ((string) $instruction['table'] === 'tblCareVisit') {
+        $visitNotes = $instruction;
+    }
+}
+check(
+    'a pastoral visit\'s notes are emptied, matched through the case\'s own subject (#709)',
+    $visitNotes !== null
+        && (string) $visitNotes['action'] === 'anonymise'
+        && array_map('strval', (array) $visitNotes['nullCols']) === ['notes']
+        && $visitNotes['subjectVia'] === [
+            'childCol'  => 'caseID',
+            'parent'    => 'tblCareCase',
+            'parentKey' => 'caseID',
+            'personCol' => 'personUserID',
+        ],
+    $visitNotes === null
+        ? 'there is no parent-matched instruction for tblCareVisit at all'
+        : 'it is: ' . json_encode($visitNotes)
 );
 
 // -----------------------------------------------------------------------------
@@ -1995,6 +2196,207 @@ if ($unreachable !== []) {
 } else {
     echo "Every table holding personal information can be traced to a person.\n";
 }
+
+// -----------------------------------------------------------------------------
+// 🧷 SECTION 8d — the parent-matched code that NOTHING pinned (#709, fix round)
+// -----------------------------------------------------------------------------
+// The independent check planted five faults that no check anywhere caught.
+// Four of them are closed here; the fifth is dead code and is written up in
+// the eraser test instead. They are all the same shape: a guard whose
+// BEHAVIOUR is tested somewhere, while nothing says the portal still CALLS it.
+//
+//   - Replacing the whole run-time guard's call with `if (false)` left the
+//     coverage test, the eraser test and all 46 audit scripts green.
+//   - Reverting `inventory()` to its old "skip an instruction with no column
+//     of its own" left both tests green, although the change is listed as
+//     delivered - so "what we hold about you" would have stopped counting
+//     these rows and nothing would have said so.
+//   - Swapping `parentKey` for `childCol` in the clause builder left
+//     everything green, because the one real instruction uses `caseID` for
+//     BOTH, so the builder pin could not tell the two names apart.
+//   - Deleting a case from the rule's own `$mustRefuse` list STOPPED TESTING
+//     it rather than failing, while the label went on claiming eight ways.
+//
+// The source checks below read the class with comments removed and every
+// string literal masked, because a `}` or the words `whereForEntry` inside a
+// message would answer them falsely in either direction.
+
+$eraserMasked = $maskedCode($eraserFile);
+
+/**
+ * The body of one method, found by walking braces over MASKED source.
+ *
+ * Masked, so a brace inside a log message cannot end the body early - the
+ * fault that once let a check pass on a removed gate.
+ */
+$methodBody = static function (string $masked, string $signature): string {
+    $at = strpos($masked, $signature);
+    if ($at === false) {
+        return '';
+    }
+    $open = strpos($masked, '{', $at);
+    if ($open === false) {
+        return '';
+    }
+    $depth = 0;
+    for ($i = $open, $len = strlen($masked); $i < $len; $i++) {
+        if ($masked[$i] === '{') {
+            $depth++;
+        } elseif ($masked[$i] === '}') {
+            $depth--;
+            if ($depth === 0) {
+                return substr($masked, $open, $i - $open + 1);
+            }
+        }
+    }
+
+    return '';
+};
+
+$processEntryBody = $methodBody($eraserMasked, 'function processEntry(');
+$inventoryBody    = $methodBody($eraserMasked, 'function inventory(');
+
+// 📌 THE OUTER GATE FIRST, because pinning only the inner calls was not enough
+//    and a second check round proved it: `if (false && isset(...))` on the one
+//    line above switched BOTH guards off - the rule and the run-time guard -
+//    with all 336 checks across the two files still green. The inner pins were
+//    satisfied by text that never ran. So the whole `if` that decides whether
+//    a parent-matched instruction is examined at all is pinned here, with
+//    nothing before `isset` and nothing after `=== true`.
+check(
+    'a parent-matched instruction is still EXAMINED at all: the whole outer condition is pinned, so `if (false && isset(...))` - which switches off both guards in one word - fails here',
+    $processEntryBody !== ''
+        && str_contains($processEntryBody, 'if (isset($entry[xxxxxxxxxxxx]) === true) { $whyNotViaParent = self::whyParentMatchUnusable($entry);') === true,
+    'the gate that examines a parent-matched instruction has changed, or something was added to its condition'
+);
+
+// 📌 And the RULE's own call, which nothing pinned until round 2 - only the
+//    run-time guard's was pinned, so deleting the rule's call was invisible.
+check(
+    'the rule that refuses an unusable parent match is still ASKED by the step, and still fails it',
+    $processEntryBody !== ''
+        && str_contains($processEntryBody, '$whyNotViaParent = self::whyParentMatchUnusable($entry);') === true
+        && preg_match('/if \(\$whyNotViaParent !== xx\) \{[^}]*?return self::STEP_FAILED;/', $processEntryBody) === 1,
+    'processEntry() no longer asks whyParentMatchUnusable() and fails the step on its answer'
+);
+
+// 📌 The WHOLE condition, not the mere mention of the method. `&& false` on it,
+//    or `if (false)`, must fail this - which is exactly what was planted.
+check(
+    'the step that empties a child table still ASKS the run-time guard and refuses on its answer: the whole condition is pinned, so `if (false)` or `&& false` fails here',
+    $processEntryBody !== ''
+        && str_contains($processEntryBody, '$whyLookUpUnsafe = self::whyParentLookUpUnsafe( $db, $requestId, $table, $via );') === true
+        && str_contains($processEntryBody, 'if ($whyLookUpUnsafe !== xx) {') === true,
+    'processEntry() no longer asks whyParentLookUpUnsafe() and acts on its whole answer'
+);
+
+// 📌 NEITHER refusal may be truncated, and the check that claimed to guard this
+//    COULD NOT. It measured the guard's own returned sentence - a literal in
+//    the same file - so putting `mb_substr(..., 0, 250)` back around the audit
+//    line, which is where the fault was, left everything green. Measured, the
+//    two refusals are 261 and 317 characters as stored, so they really would be
+//    cut. `details` is a TEXT column; the 250-character cuts in that method are
+//    for FAULT text whose length nobody controls.
+check(
+    'neither parent-matched refusal is written into the audit trail through a 250-character cut: the fault #709 records is an identifier sliced in half, and the reasons here are 261 and 317 characters long',
+    $processEntryBody !== ''
+        && str_contains($processEntryBody, 'null, xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx . $whyNotViaParent );') === true
+        && str_contains($processEntryBody, 'null, xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx . $whyLookUpUnsafe . xxx );') === true,
+    'one of the two parent-matched refusals is no longer logged whole - look for mb_substr() around it'
+);
+
+// 📌 The list of actions that count as "this step already answered". Widening it
+//    puts the whole fault back and nothing noticed: a PROBE failure logs
+//    `failed` with details beginning "could not look for this person (matched
+//    through ...)", so it carries the discriminator and sits before the
+//    parent's change. Section 19 proves the behaviour; this pins the list, so
+//    the two cannot drift.
+//    This one cannot use the masked source, because masking replaces the whole
+//    SQL literal with 'x' and the list is INSIDE it. So comments are stripped
+//    and the strings kept - which means a COMMENTED-OUT copy cannot satisfy it,
+//    the trap this project has been caught by, while the SQL itself is still
+//    readable. Section 19 proves the behaviour; this pins the text, so the two
+//    cannot drift apart.
+$eraserCodeOnly = static function (string $path): string {
+    $code = '';
+    foreach (token_get_all((string) @file_get_contents($path)) as $token) {
+        if (is_array($token) === false) {
+            $code .= $token;
+            continue;
+        }
+        if (in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true) === true) {
+            continue;
+        }
+        $code .= $token[1];
+    }
+
+    return (string) preg_replace('/\s+/', ' ', $code);
+};
+
+check(
+    'only an action meaning "this step reached its rows" counts as it having answered: the list is exactly anonymise, partial and none - adding `failed` restores the fault the guard exists to prevent, because a probe failure writes the same "matched through" sentence',
+    str_contains(
+        $eraserCodeOnly($eraserFile),
+        "AND action IN ('anonymise', 'partial', 'none') AND auditID < ? "
+    ) === true,
+    'the trustworthy-action list has changed; `failed` and `skip` must stay out of it'
+);
+
+// 📌 And the refusal must still REFUSE. Matching the condition alone passed
+//    once with the body emptied (#668's section-D lesson, and #569's).
+check(
+    'and that refusal still fails the step rather than carrying on: the guard cannot be reduced to a condition with nothing behind it',
+    $processEntryBody !== ''
+        && preg_match(
+            '/if \(\$whyLookUpUnsafe !== xx\) \{[^}]*?return self::STEP_FAILED;/',
+            $processEntryBody
+        ) === 1,
+    'the run-time guard\'s refusal no longer returns STEP_FAILED'
+);
+
+// 📌 "What we hold about you" counts these rows. Reverting this was invisible.
+check(
+    'the "what we hold about you" count asks the ONE clause builder too, so a parent-matched instruction is counted rather than skipped',
+    $inventoryBody !== '' && str_contains($inventoryBody, 'self::whereForEntry(') === true,
+    'inventory() no longer builds its clause with whereForEntry(), so parent-matched rows are left out of what the person is told'
+);
+
+// 📌 Four DIFFERENT names, so swapping any two of them fails. With the real
+//    instruction alone this check cannot tell `childCol` from `parentKey`,
+//    because that instruction uses `caseID` for both.
+check(
+    'the clause builder puts each of the four names in its own place: a made-up instruction whose four names all differ pins the shape, which the real one cannot because its child column and parent key are both `caseID`',
+    \Portal\Core\GdprEraser::whereForEntry('', [
+        'childCol'  => 'zzChildKey',
+        'parent'    => 'tblZzParent',
+        'parentKey' => 'zzParentKey',
+        'personCol' => 'zzPersonID',
+    ]) === '`zzChildKey` IN (SELECT `zzParentKey` FROM `tblZzParent` WHERE `zzPersonID` = ?)',
+    'got: ' . \Portal\Core\GdprEraser::whereForEntry('', [
+        'childCol'  => 'zzChildKey',
+        'parent'    => 'tblZzParent',
+        'parentKey' => 'zzParentKey',
+        'personCol' => 'zzPersonID',
+    ])
+);
+
+// 📌 The exhaustiveness pin. `$mustRefuse` is ITERATED, so deleting a case
+//    stops testing it instead of failing, while the label above still says
+//    "all eight ways". #697 had the same fault and the same remedy.
+check(
+    'the list of ways a parent match can be wrong is pinned BY NAME, so deleting one stops the run rather than quietly shrinking what is tested',
+    array_keys($mustRefuse) === [
+        'the parent column says who ACTED (the one that would destroy a third party\'s notes)',
+        'the parent column is not an account column at all',
+        'it also names a column on the row itself, so there are two ways to find the rows',
+        'it would DELETE rows because of who the parent is about',
+        'it names no column to empty, so it changes nothing while reading as coverage',
+        'a name that is not a plain identifier',
+        'one of the four names is missing',
+        'subjectVia is not a list at all',
+    ],
+    'the eight ways are no longer the eight named here: ' . implode(' | ', array_keys($mustRefuse))
+);
 
 echo "\n" . str_repeat('=', 78) . "\n";
 printf("%d passed, %d failed\n", $passes, $failures);

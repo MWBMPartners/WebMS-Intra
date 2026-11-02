@@ -13329,3 +13329,253 @@ The useful conclusion is not "try harder on prose". It is that **the review roun
 on this project are earning their keep on the WRITING, not the code** — so the
 cheapest thing I can do is apply the three rules above before asking for a round,
 rather than after.
+
+---
+
+## Matching an erasure through a parent table (#709)
+
+**What the problem was.** Every instruction in `GdprEraser::catalogue()` says
+"this table, this column, this person's number". A pastoral visit does not work
+that way. `tblCareVisit.notes` describes the person being **cared for**, and the
+only account numbers on the row are `visitedByID` (the worker who made the
+visit) and `followUpAssignedToID` (the worker its follow-up was given to). The
+subject is one table up, on `tblCareCase.personUserID`. So until 2 November 2026
+that note could not be reached at all, and `personal-data-catalogue.php`
+recorded it as "TO BE EMPTIED" with its issue number — the one line ever in that
+state.
+
+**The shape of the fix.** An instruction may now carry `subjectVia`, naming four
+things: the link on the row (`childCol`), the table one step up (`parent`), that
+table's own key (`parentKey`) and the column on it that says who the row is
+**about** (`personCol`). `GdprEraser::whereForEntry()` is the ONE place the
+"which rows are this person's" clause is written, for both shapes, and three
+readers ask it — the probe, the statement that makes the change, and
+`inventory()`, which is what a person is shown when they ask what is held about
+them. Either shape binds exactly one value, which is what let the binding code
+stay as it was.
+
+**The obvious shortcut is the destructive one, and that is why the rule is a
+refusal rather than a best effort.** Hanging the notes off `visitedByID` would
+empty the safeguarding notes of every visit the erased **worker** ever made —
+other people's records, about people who never asked for anything — and would
+still reach not one note about the person who did ask. Both halves are bad, and
+the second half is why nobody would notice the first. The same mistake is
+available one table up: point `personCol` at `tblCareCase.openedByID` and it
+empties the notes of every case that worker opened.
+`GdprEraser::whyParentMatchUnusable()` is the ONE test of whether an instruction
+may match this way, and it is public so the coverage test asks it rather than
+keeping a second copy of the rule. It refuses eight things; only one of them
+stops real harm (`personCol` must be in `LINK_COLUMNS` and not in
+`ACTOR_COLUMNS`), and the other seven stop nonsense.
+
+**`personUserID` was on NEITHER list**, although the database links it to
+`tblUsers` and a hand-written instruction had always matched on it — so nothing
+could judge whether it named a row's subject or somebody who acted on one. It is
+in `LINK_COLUMNS`'s first group now. It is on exactly one table and no catalogue
+entry lists it among its own columns, so adding it builds no new derived
+instruction; that was checked rather than assumed.
+
+**THE TRAP THE WHOLE FEATURE TURNS ON, and it was live before the feature
+existed.** The parent's own instruction empties the very column the child
+matches through: the `tblCareCase` step sets `personUserID` to NULL. Run the
+child's step after it and the look-up finds nothing, every note stays exactly
+where it was, and the sealed audit trail says "nothing held for this person" — a
+silent, permanent, complete failure that reads like success. **In the list as it
+stood, the parent's instruction came FIRST**, so an instruction added in the
+obvious place would have done exactly nothing. Two guards, and both are needed:
+`tools/gdpr-coverage-selftest.php` pins the POSITION (it judges the list, where
+the mistake is made and where it can be seen before anybody runs an erasure),
+and `whyParentLookUpUnsafe()` judges the RUN (the only half that survives the
+steps being called in some other order). The run-time guard is deliberately
+coarse about WHICH column was emptied — the trail records the table and not the
+column, and `tblCareCase` carries two instructions — so it can refuse when the
+link it needs is in fact untouched. Refusing is the recoverable direction;
+missing is not.
+
+**That guard was wrong TWICE, in opposite directions, and the second one is the
+lesson.** Version 1 read the WHOLE request's audit trail. A run with a failed
+step is put back to `pending_review` and **run again**, so a second run's trail
+already holds the first run's lines — the step refused on every later run and
+the request could never be completed. Section 6 of
+`tools/gdpr-eraser-selftest.php` went red on exactly that.
+
+Version 2 therefore read only the lines written by the run in hand — **and that
+reopened the very fault the guard exists to stop, one step further on.** On a
+second run the parent's change is not "from this run", so the step was ALLOWED,
+the link was already gone, the look-up found nothing, and the step wrote
+"nothing held for this person" while the request closed as **completed** with
+the safeguarding note still in it. **No mistake by anybody was needed:** one
+transient error on this one step in run 1 is enough, because the walk carries on
+and the parent's step still cuts the link. A lock wait while the safeguarding
+team edits visits would do it.
+
+**It was the docblock that let version 2 stand.** It said a refusal "leaves
+every note in place for a second run, whereas a miss is silent and permanent" —
+and that sentence was false, because the second run could not do it and was
+itself silent and permanent. DEV_NOTES, `CHANGELOG.md` and both instruction
+files carried the same words. The #645 shape again: **a comment stating the
+guarantee the code had forgotten to implement.** Worse, **the self-test asserted
+the fault as correct** (`$saysClearAfterwards === false`), which is why nothing
+caught it.
+
+Version 3 asks all three questions. The parent untouched means the link is
+intact. Changed EARLIER IN THIS RUN is an ordering mistake, recoverable by
+moving the instruction back. Changed BY AN EARLIER RUN means the link is gone
+for good, and the answer then turns on whether this step had already given a
+trustworthy answer BEFORE that happened — any line of its own (`anonymise`,
+`partial` or `none`) with a LOWER `auditID` than the parent's first change. **A
+`none` from before the change really does mean the person held nothing here; a
+`none` from after it means only that the look-up could no longer see**, which is
+why the comparison is on `auditID` and not on a line merely existing. Where no
+trustworthy answer exists the step fails and SAYS the rows must be checked by
+hand, because re-running will not reach them. **A request that needs a human
+look is worse than one that just works and far better than one that reports
+success it has not earned** — and that is a decision about product behaviour, not
+a tidy-up, so it is written here beside the code.
+
+`self::$runStartedAfterAuditId` is `MAX(auditID)` as it stood when the run
+began, held beside the other per-run state, and it exists only to tell those two
+"changed" cases apart. 0 means "nothing is known about where this run began";
+every line then reads as belonging to this run, so the guard reports an ordering
+mistake rather than letting the step proceed. That is the safe refusal for the
+WRONG REASON, so nothing relies on it except as a backstop.
+
+**One more thing the fix round found, by reading rather than by a test going
+red.** The "had this step already answered" question was asked of the audit
+trail by TABLE NAME — and `tblCareVisit` carries THREE instructions: the note,
+and the two that detach the workers. All three write
+`tableName = 'tblCareVisit'`, so a line from a different instruction would have
+counted as this one having run. Today the pinned order happens to make the two
+readings agree, because the only child instruction above the parent's is the
+via one. **But nothing pins where the other two sit relative to the parent**,
+and moving one of them above it is harmless in itself — neither matches through
+the parent — so that edit would silently have made the guard allow a step it
+must refuse. Only a parent-matched step writes HOW it reached its rows, so that
+sentence is now the discriminator, through `details LIKE`. **It is deliberately
+a clause that CAN fail:** `matchedThrough()` builds both the pattern and the
+sentence, so case 3 of section 19 reads a REAL via line back through it, and a
+pattern that stopped matching turns that check red instead of quietly refusing
+everything — measured by planting a pattern that can never match, which failed
+section 6's second-run checks.
+
+**ROUND 2 FOUND FOUR MORE THINGS PINNED BY NOTHING, AND THE FIRST IS THE ONE TO
+REMEMBER.** Round 1's lesson was "pin the call, not just the behaviour". Round 2
+showed that pinning the call is not enough either: **`if (false && isset(...))`
+on the line ABOVE switched BOTH guards off — the rule and the run-time guard — in
+one word, with all 336 checks across the two files green.** The inner pins
+matched text that never ran. **When you pin a call, pin the gate that decides
+whether the block containing it is entered**, or you have pinned a label on a
+door nobody opens. The rule's own call (`whyParentMatchUnusable()`) turned out to
+be pinned by nothing at all; only the look-up guard's had been.
+
+**A CHECK CAN NAME THE RIGHT FAULT AND MEASURE THE WRONG VALUE.** The check
+labelled "every refusal is a whole sentence, not a 250-character slice with an
+identifier cut in half" measured the sentence the GUARD RETURNS — a literal in
+the same file — so putting `mb_substr(..., 0, 250)` back around the audit line,
+which is where #709's fault actually was, left it green. **The cut is applied by
+the CALLER, and no value inside the guard changes when it is.** Measured, the two
+refusals are 261 and 317 characters as stored, so they really would have been cut
+again. The cut is now pinned in the source, in the coverage test; the sentence
+check is relabelled to say what it can and cannot see.
+
+**AND WIDENING A LIST OF "GOOD" ACTIONS PUT THE WHOLE FAULT BACK.** Adding
+`'failed'` to the actions that count as "this step already answered" left both
+tests green, and it is live harm: a PROBE failure logs `failed` with details
+beginning "could not look for this person (matched through ...)", so **it carries
+the very discriminator the `details LIKE` clause matches on**, and its `auditID`
+is below the parent's change. Count it and run 2 looks, finds nothing, writes
+"nothing held for this person", and closes the request as completed with the note
+still there. `'skip'` is excluded for a different reason — it means the rows WERE
+found and deliberately left, so "check them by hand" remains the right later
+answer. Section 19 now has a case for the `failed` line specifically, one word
+apart from the case beside it.
+
+**Two wording faults of the same family as every other round's.** The comment
+justifying the unescaped `LIKE` pattern said the identifier rule means "neither
+`%` nor `_` can appear" — the rule is `/\A[A-Za-z0-9_]+\z/`, which **allows the
+underscore**, and `_` is a single-character wildcard. No harm today, because
+neither `tblCareCase` nor `personUserID` contains one, **which is exactly why it
+would not have been noticed**; the pattern is escaped now rather than argued
+about. And `CHANGELOG.md` said the eraser test had 249 checks when it had 251.
+
+**One more real fault, and it is the silent-success shape yet again.** A
+parent-matched step names TWO tables, and error 1146 was handled as though it
+named one: `skip`, with the CHILD's name, for "table-missing". If it is the
+PARENT that has gone, the child's rows may be sitting there with every word of
+the note in them — unmatchable, because the table that says whose they are is
+absent — and a skip let the request close as completed having never looked. The
+child's absence is still a skip; the parent's is a FAILED step, and which one it
+is is asked of the database rather than read out of an error message.
+
+**And the cost of the fix is written up as #710.** A step that refuses for ever
+is right, but `closeRequest()` runs only when no step failed, so such a request
+sits at `pending_review` with no way to finish it and cannot be cancelled either.
+The help page and the failed-run message both say so plainly now, which is honest
+and not a fix.
+
+**Two smaller things got wrong first, both worth keeping.**
+
+*The "how it matched" clause was at the END of the audit line and the line was
+cut to 250 characters*, so on the one instruction that uses this form the reason
+ran long and the words `personUserID` were sliced in half — losing exactly the
+fact nothing else records. It goes FIRST now and is not truncated: `details` is
+a TEXT column, and the 250-character cuts in that method are on FAULT messages,
+whose length nobody controls. A reason written in the source is not one of those.
+
+*`['personUserID' => null]` does not give a null column.* `ge_insert()` reads
+the people list as `$people[$name] ?? $other`, and `null ?? D` is D — so the
+fixture for "a case with nobody named on it" was quietly named after the control
+person and proved nothing it claimed to. A null has to go through `$fixed`,
+which is read with `array_key_exists()`. Caught by that section's own "the world
+is as it should be" check, which is what such a check is for.
+
+**What the child keeps.** `childCol` is never emptied. A visit detached from its
+case is not an anonymised record: it is rubble with every word of the note still
+in it. It is `NOT NULL` in the schema as well, so the statement would simply
+fail — but the reason it must not be emptied is the first one, and a schema can
+be changed. The columns in `nullCols` are therefore the whole of the change,
+which is why an instruction naming none is refused: without the account link the
+other instructions drop, an empty `nullCols` is a no-op that reads like coverage.
+
+**How the generic world came to exercise it.** Every made-up row in
+`tools/gdpr-eraser-selftest.php` is built generically and
+`ge_ensureParents()` gives it a parent whose person columns name the
+administrator, who is never erased — so the look-up found nothing and the step
+reported "nothing held". That was the harness being honest, not the engine being
+wrong, but it left the feature covered by nothing. The child's row is now pointed
+at the row the PARENT's own instruction already made for this person: nothing new
+is inserted, so the row is already allowed and already counted. **Only that
+instruction's own rows are re-pointed** — `tblCareVisit` carries three
+instructions, and the other two have rows whose notes must stay exactly as they
+are; pointing every row of the table at the person's case made all three look
+alike and turned three by-name checks red. The side benefit is the valuable part:
+the ORDER is now proved by behaviour as well as by position, because moving the
+instruction below its parent's brings those rows back with their notes intact.
+
+**What nothing covers, and the first version of this paragraph UNDERSTATED it.**
+It named only the three lines in `processEntry()` that act on the guard's
+answer. Two more things were covered by nothing, and an independent check found
+both by planting: **the guard's CALL** — replacing the whole condition with
+`if (false)` left both self-tests and all 46 audit scripts green — and **the
+`inventory()` half**, whose reversion to the old "skip an instruction with no
+column of its own" was equally invisible, although "what we hold about you
+counts these rows too" is listed as delivered. Section 8d of the coverage test
+closes both, pinning the whole condition and requiring the refusal to return
+`STEP_FAILED`, so neither the condition nor the body behind it can be removed
+quietly.
+
+Still covered by nothing: the LIVE path through `processEntry()` with a real
+refusal — the audit line it writes, and what an administrator sees afterwards.
+Reaching the ordering half needs a list the coverage test refuses outright, and
+reaching the earlier-run half needs a trail a correct run does not produce, so
+the guard's logic is asked directly over a hand-made audit trail and that is its
+only cover. **`$where === ''` in `processEntry()` is also a clause that cannot
+fail** — by the time it is reached a non-via entry has a column and a via entry
+has passed the rule, so the builder always returns a clause. Its comment reads
+like a live safety net and it is unreachable; left in place deliberately as a
+backstop, and recorded here so nobody mistakes it for one that is tested.
+
+Count the planted faults from the code and the evidence folder, never from this
+paragraph (#671's rule). Tests: section 8c and the new section 8d of
+`tools/gdpr-coverage-selftest.php` (no database) and section 19 of
+`tools/gdpr-eraser-selftest.php` (a real database).
