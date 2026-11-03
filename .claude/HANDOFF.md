@@ -4,79 +4,79 @@
 
 ## Branch
 
-`claude/alpha-wip` at **`1b78e98`**, pushed (#710 + #715 + #719, all three closed).
-One package is uncommitted on top of it: **#723 + #721 + #720**.
+`claude/alpha-wip` at **`6f77b57`**, pushed. Working tree clean of package work.
 
 **The owner gave standing approval on 2 November 2026 to push this working branch
 after each commit** — never a release or protected branch, never a force push, and
 no pull request until the Codex review is done. Everything else (pull requests,
 merges, tags, releases) still needs their explicit say-so.
 
-## In flight: #723 + #721 + #720, one commit
+## Nothing is in flight
 
-They share `GdprEraser.php` and the shared documents, so they are not worth slicing.
-**Independent check running now** (a fresh agent, Codex's named stand-in); its report
-lands at `.claude-work/resume/p723-independent-check.md`.
+The last four commits, all pushed and all with their issues closed and labelled:
 
-- **#723** — `tblResourceBooking.bookedByID` has LEFT `ACTOR_COLUMNS`, so the
-  booker's `purpose` and `declineReason` are emptied on erasure. `approvedByID`
-  STAYS an actor column. No migration: both columns were already nullable.
-- **#721** — the eraser's statement glob is widened to `*.pdf*`, and
-  `Pdf::sweepPartFiles()` removes strays older than an hour from the nightly job.
-  `Pdf::PART_MARK` is the ONE place the mark is named.
-- **#720** — the documents API's base64 branch compares the written byte count,
-  removes a part-written file and refuses before the INSERT. Built by a separate
-  agent in parallel (different files). Two new hard gates in `pr-security.yml`.
-
-## Verification so far
-
-| Check | Result |
+| Commit | What |
 |---|---|
-| e2e harness, MySQL 8.0.36 | 7 phases, 42/42, exit 0 |
-| e2e harness, MariaDB 11.4.13 | 7 phases, 42/42, exit 0 |
-| `gdpr-eraser-selftest.php` | 266/266 |
-| `gdpr-coverage-selftest.php` | 93/93 |
-| `pdf-write-selftest.php` | 31/31 (sections H and I are new) |
-| `document-write-check-selftest.py` | 15 plants, all as expected |
-| 51 audit scripts | all pass |
-| `php -l` | clean on every changed file |
-
-**STILL OWED: the whole suite** (`tools/run-all-selftests.sh`). Deliberately held
-until the independent check finishes, so its plants cannot collide with a suite run.
-
-Evidence: `.claude-work/evidence/p723/` and `.claude-work/evidence/p720/`.
-
-My own container `p723-mysql` is on port 33399 (database `selftest_p723`) and must
-be removed before the commit: `docker rm -f -v p723-mysql`.
+| `6f77b57` | #724 Data Controller role + erasure review · #586 password really stored (migrations 241, 242) |
+| `6ce56ee` | #723 booking's stated reason · #721 part-written PDF · #720 short-written upload |
+| `1b78e98` | #710 finish by hand · #715 a person's own words · #719 reserved list checked live (migration 240) |
+| `a112ac0` | #714 three unreachable places (migrations 238, 239) |
 
 ## Next, in this order
 
-The owner reordered this on 3 November.
-
-1. Finish #723/#721/#720: act on the check, run the whole suite, commit, push,
-   close #723, #721, #720 with comments and `status: done`.
-2. **#724** — the case-by-case erasure review role. Scope it against what is left
-   now #723 has landed, not against the older list.
-3. Block A: #582, #586, #583 · B: #685 **+ #722** (same `SettingLimit` shape, one
-   package), #491, #492, #481 · C: #620, #596, #588 · D: #649, #541 ·
-   E: #703 (now decided), #539, #619 · F: #476, #146, #637 · G: #474, #678.
+1. **#727 — gate features on roles, no hard-coding.** The owner moved it here on
+   3 November, immediately after #724, because #724's gate is its first real
+   consumer and that gate asks ONE function in one place, so re-pointing it is a
+   one-line change rather than rework.
+   **Design notes already measured: `.claude-work/evidence/p727/design-notes.md`.**
+   **THREE QUESTIONS ARE OWED TO THE OWNER BEFORE BUILDING** — which capabilities
+   to start with, whether a set may be emptied to "nobody", and whether a mapping
+   belongs to the organisation or the installation.
+2. Block B: **#685 + #722 together** (the same `SettingLimit` shape, one package),
+   then #491, #492, #481.
+3. #582, #583 · #620, #596, #588 · #649, #541 · #703 (decided), #539, #619 ·
+   #476, #146, #637 · #474, #678.
 4. Then the comprehensive Codex review of the whole branch, then the merge.
 
 ## Decisions in force that a reader needs
 
-- **#703 (3 November): KEEP** the name of who made a pastoral visit or recorded a
-  safeguarding check. It is part of the record, not the worker's own personal data.
-- **#723 (3 November): the booker IS the subject** — reclassify, do not weaken the
-  guard. **#724 next, before block A.**
-- **#721 (3 November): BOTH fixes, glob first**, and **one hour** for the sweep.
+- **#703:** KEEP the name of who made a pastoral visit or recorded a safeguarding
+  check. It is part of the record, not the worker's own personal data.
+- **#723:** the booker IS the booking's subject — reclassify, never weaken the guard.
+- **#721:** both fixes, glob first; one hour for the sweep; the sweep is scoped by
+  a folder allow-list AND a strict name.
+- **#724:** a real `data_controller` role, gated on `Roles::has()` DIRECTLY (the one
+  exception among 86 gates) with the installer granting it; all seven columns from
+  the catalogue; the review filtered by organisation where the schema allows.
+- **#586:** an administrator may NOT add a password to an SSO-only or passkey-only
+  account. The person doing it for their own account is #731.
+- **#727:** a capability maps to a SET of roles, any-of; an empty set must be a
+  decision; the standard role stays unless somebody removes it.
 - **Full check depth stays on every package** (the owner, asked directly whether to
-  narrow it). Build → independent check by a fresh agent → fix → re-plant → commit,
-  however many rounds that takes.
-- **Codex has reviewed none of this.** The whole-branch review happens at the end of
-  the queue, and every commit message says so.
+  narrow it). Build → independent check by a fresh agent → fix → re-plant → commit.
+- **Codex has reviewed none of this.** The whole-branch review happens at the end
+  of the queue, and every commit message says so.
 
 ## Open, unscheduled, each with an issue
 
-#722 (per-organisation transcript period — folded into block B) · #725 (nothing
-exercises the documents API over HTTP at all) · #726 (can `move_uploaded_file()`
-report success after a partial write? not established either way).
+| Issue | What |
+|---|---|
+| #725 | Nothing exercises the documents API over HTTP |
+| #726 | Can `move_uploaded_file()` report success after a partial write? |
+| #728 | No single place sets a password — six writers now |
+| #729 | The Edit dialog's "leave blank to keep current" for an account with none |
+| #730 | `check_bind_param_arity.py` cries wolf (verified: 11 letters, 11 placeholders) |
+| #731 | **Blocked** — SSO fallback password; decision spans SIGNula.id |
+| #732 | **No HTTP test for the two review pages** — the most valuable one left |
+| #733 | Migration 241 can grant the role to an account that cannot sign in |
+| #734 | A person erased at one organisation keeps free text at another |
+| #735 | The review's two races are backstops no test forces |
+| #736 | Three small things: breadcrumb, twice-written address, unpinned refusal |
+
+## Two limits of #724 worth knowing before touching it
+
+- **A brand-new organisation grants the role to nobody and cannot** —
+  `fk_user_role_membership` refuses a non-member. The page says nobody holds it.
+- **Counting and showing are separate jobs on purpose.** The close counts in the
+  database with NO limit; `SHOW_AT_MOST` is a page-full and nothing more. A single
+  `LIMIT 500` on the counting side let a request close with a line undecided.
