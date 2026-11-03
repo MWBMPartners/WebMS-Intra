@@ -192,7 +192,36 @@ class GdprEraser
             ['table' => 'tblEventAttendance',  'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => ['notes'], 'reason' => 'aggregate attendance stats retained — userID nulled, and a note about this person goes with it'],
             // Expense claims live in `tblExpenseClaims`.`userID` — there is
             // no `tblExpenseClaim` (singular) table or `submittedByID` column.
-            ['table' => 'tblExpenseClaims',    'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'UK HMRC requires 6-year retention of expense records'],
+            //
+            // 🧾 THE CLAIMANT'S IDENTITY STAYS WITH THE CLAIM, AND THAT IS NOW
+            //    A DECISION (#492 part 4, the owner, 3 November 2026). It used
+            //    to be an accident of the schema, which is a different thing
+            //    and a worse one: `userID` is `INT NOT NULL` here, so nobody
+            //    had to decide anything, and a reader could not tell whether
+            //    the position had been thought about. The owner chose to keep
+            //    it: an expense claim is a financial record kept for six years
+            //    because HMRC requires it, and a claim that cannot say who was
+            //    paid is of little use as one. No schema change.
+            //
+            //    BE EXACT ABOUT WHAT THE CODE DOES, because the decision and
+            //    the mechanism are not the same thing and saying "we keep it"
+            //    would read as "we do not try". This instruction says
+            //    `anonymise`, so the run DOES attempt to empty the column, the
+            //    database REFUSES it, and the step is recorded in the sealed
+            //    trail as a `skip` whose words are "nothing could be emptied:
+            //    the database does not allow userID to be empty…" (measured on
+            //    MySQL 8.0.36, 3 November 2026). It is also the one entry in
+            //    `KNOWN_LEFT_IN_PLACE` in `tools/gdpr-eraser-selftest.php`.
+            //    Nothing was changed to make the words match the decision,
+            //    because an honest record of a failed attempt is worth more
+            //    than a tidy one — and if the column is ever made emptiable,
+            //    the decision above is what must be reconsidered first.
+            //
+            //    What stops this naming the person in practice: the account row
+            //    itself is emptied at the end of the run, so the claim points
+            //    at an account that names nobody. The NUMBER remains, which is
+            //    why this is a retention decision and not a no-op.
+            ['table' => 'tblExpenseClaims',    'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'an expense claim is a financial record kept for six years because HMRC requires it, and the claimant is deliberately kept with it (the owner, 3 November 2026): a claim that cannot say who was paid is of little use as one. The database also will not allow this column to be empty, so the attempt fails and the trail records that'],
             // 🧾 KEPT, since roll-out package A2b (Salem874, 11 October 2026).
             //    This line said 'anonymise' until then: every gift lost its
             //    donor at once. A gift given before the erasure but not yet
@@ -628,43 +657,49 @@ class GdprEraser
             // just clutter, unlike e.g. an authorship attribution which
             // stays useful once detached.
             ['table' => 'tblAssetOwners',               'userCol' => 'userID',               'action' => 'delete'],
-            // 📞 `counterpartyContact` IS NOT EMPTIED HERE, AND IT IS NOT AN
-            //    OVERSIGHT: it needs a decision only the owner can take
-            //    (#492 part 2, looked at 3 November 2026).
+            // 📞 THE BORROWER'S OWN CONTACT DETAILS ARE EMPTIED NOW (#492
+            //    part 2, the owner, 3 November 2026). They were not, until
+            //    that decision, and the reason was a guard rather than an
+            //    oversight.
             //
             //    WHAT IS REALLY THERE. The loan form's "Contact details
-            //    (optional)" box is shown whichever kind of counterparty is
+            //    (optional)" box is shown whichever kind of borrower is
             //    chosen — only the three PICKERS are hidden by
             //    `assets/loan.php` — and `AssetRegister::createLoanRequest()`
             //    stores whatever is in it regardless of `counterpartyType`.
-            //    So on a loan whose counterparty IS an account holder, that
-            //    box routinely holds that MEMBER's own telephone number or
-            //    e-mail address, and an erasure empties the account number
+            //    So on a loan whose borrower IS an account holder, that box
+            //    routinely holds that MEMBER's own telephone number or e-mail
+            //    address, and an erasure used to empty the account number
             //    while leaving their telephone number on the row beside it.
             //
-            //    WHY IT CANNOT SIMPLY BE ADDED TO `nullCols`.
-            //    `counterpartyUserID` is in `ACTOR_COLUMNS`, and
+            //    WHAT CHANGED IS THE CLASSIFICATION, NOT THE GUARD.
+            //    `counterpartyUserID` was in `ACTOR_COLUMNS`, and
             //    `processEntry()` empties a non-account column in `nullCols`
-            //    with a plain `= NULL` on EVERY row the instruction matched.
-            //    `tools/gdpr-coverage-selftest.php` refuses that pairing
-            //    outright, and it is right to: as a general rule, text emptied
-            //    on an actor's number is a third party's data destroyed on a
-            //    request that was never theirs. It was tried, and that gate
-            //    caught it.
+            //    with a plain `= NULL` on EVERY row the instruction matched —
+            //    so `tools/gdpr-coverage-selftest.php` refuses that pairing
+            //    outright, and it is right to: text emptied on an ACTOR's
+            //    number is a third party's data destroyed on a request that
+            //    was never theirs. The previous builder tried adding the
+            //    column to `nullCols` and that gate caught it. The guard was
+            //    NOT weakened to get this. Instead `counterpartyUserID` has
+            //    left `ACTOR_COLUMNS` and stayed in `LINK_COLUMNS`, because a
+            //    loan's counterparty is the person the loan is ABOUT — the
+            //    borrower or the lender — and every row it matches is theirs.
+            //    `approvedByID` and `requestedByID` STAY actor columns, and
+            //    that pair is exactly why the two lists exist.
             //
-            //    SO THE REAL QUESTION IS WHAT THIS COLUMN NAMES, and that is
-            //    the decision. A loan's counterparty is the person the loan is
-            //    ABOUT — the borrower or the lender — rather than somebody who
-            //    acted on somebody else's record, which would make it a link
-            //    column and not an actor column. That is EXACTLY the move the
-            //    owner made for `bookedByID` on 3 November 2026 (#723): "a room
-            //    booking is made BY the person it is about". It is recorded as
-            //    a question on #492 rather than taken here, because a
-            //    reclassification changes what the two lists MEAN and the
-            //    owner took the identical decision himself last time. The
-            //    catalogue entry for this column says the same thing in the
-            //    words a person asking about their own data would read.
-            ['table' => 'tblAssetLoans',                'userCol' => 'counterpartyUserID',   'action' => 'anonymise', 'nullCols' => [], 'reason' => 'loan history retained for asset custody chain; borrower/lender identity detached'],
+            //    `counterpartyName` IS NAMED BELOW AND CAN NEVER MATCH, which
+            //    is recorded rather than hidden (#708's precedent, and #723's
+            //    `declineReason` three days earlier). It is the free-text name
+            //    of a borrower who has no account, and
+            //    `createLoanRequest()`'s own switch fills exactly ONE of
+            //    `counterpartyUserID` / `counterpartyOrgID` /
+            //    `counterpartyName` per loan, so a row this instruction finds
+            //    always has that name empty already. `cascadeKitCheckout()`
+            //    copies the pair from the parent loan together, so it keeps
+            //    that exclusivity. Naming it costs nothing and means a future
+            //    writer that filled both would already be reached.
+            ['table' => 'tblAssetLoans',                'userCol' => 'counterpartyUserID',   'action' => 'anonymise', 'nullCols' => ['counterpartyName', 'counterpartyContact'], 'reason' => 'the loan is kept so the asset\'s custody chain is intact — which item went out, when, and when it came back; who borrowed or lent it is detached, and so are the contact details typed about them. `counterpartyName` is named here too and CAN NEVER MATCH, because a loan names its counterparty by EITHER an account or that free-text name and never both: the limit is recorded rather than the column dropped, the #708 precedent, so that a row filling both in future is already reached'],
             ['table' => 'tblAssetLicenseAssignments',   'userCol' => 'userID',               'action' => 'anonymise', 'nullCols' => [], 'reason' => 'seat-assignment history retained for licence compliance; assignee identity detached'],
             ['table' => 'tblAssetAudit',                'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'audit history retained (mirrors tblAuditTrail — no FK, immutable record); actor identity detached'],
             // #404 Phase 2 Pass 2 (#410). tblAssetScanLog rows are retained
@@ -843,17 +878,51 @@ class GdprEraser
             ['table' => 'tblAssetLicenseAssignments', 'userCol' => 'releasedByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'seat-assignment history retained for licence compliance; who released the seat is detached'],
             ['table' => 'tblAssetLicenseAssignments', 'userCol' => 'linkedByID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'seat-assignment history retained for licence compliance; who gave out the seat is detached'],
             ['table' => 'tblVenueBookings',           'userCol' => 'createdByID',      'action' => 'anonymise', 'nullCols' => [], 'reason' => 'booking history retained for the venue hire schedule; who entered the booking is detached'],
-            // A child's event registration. The first line is what the
-            // derived route already did (the registration holds a child's
-            // medical details and is deleted when whoever submitted it is
-            // erased; see DELETE_ON_ACTOR_COLUMN). It is written out by hand
-            // now for one reason: the table has a SECOND person column, who
-            // reviewed the registration, and the derived route picks the
-            // column to delete on by its place in LINK_COLUMNS. With both
-            // listed it would have picked `reviewedByID`, and deleted a
-            // child's registration because of who REVIEWED it. Hand-written,
-            // each column can only do what its own line says.
-            ['table' => 'tblEventRegistrations',      'userCol' => 'submittedByUserID', 'action' => 'delete', 'reason' => 'a child\'s registration, with their medical details, submitted by this person'],
+            // 📝 A CHILD'S EVENT REGISTRATION. Three columns, three different
+            //    people, and which one the DELETE goes on is the whole point
+            //    (#492 part 3, the owner, 3 November 2026).
+            //
+            //    The row holds a child's name, date of birth, allergies and
+            //    medical notes, so deleting it on request is right — it is the
+            //    purpose. What was wrong was finding it through
+            //    `submittedByUserID`, which records only whoever was signed in
+            //    when the form was sent, with no test of their relationship to
+            //    the child. A volunteer may enter one at a welcome desk, over
+            //    the telephone or from a paper form, so erasing that volunteer
+            //    DELETED a child's registration, and that child's family had
+            //    asked for nothing.
+            //
+            //    Migration 246 adds `registeredForUserID`, which says whose
+            //    record it is, and the delete goes on THAT. The submitter is
+            //    now merely detached, exactly as the reviewer always was. For
+            //    rows that existed before the migration the two columns hold
+            //    the same number (the owner's decision: whoever typed one is
+            //    treated as the person it is for, which is true of anyone who
+            //    registered themselves), so nothing changed for them.
+            //
+            //    THE DELETE COMES FIRST, deliberately. Where somebody
+            //    registered themselves both columns name them, and the row is
+            //    going anyway, so the two lines below never look at it. The
+            //    end state is the same in either order — neither later line
+            //    empties the column this one matches on — but the audit trail
+            //    reads honestly this way round, and #709's trap is the general
+            //    rule: never let one step empty the column another step looks
+            //    rows up by.
+            //
+            //    ALL THREE LINES ARE WRITTEN OUT HERE ON PURPOSE. Registering
+            //    a table in this hand-written list makes
+            //    `fromPersonalDataCatalogue()` SKIP IT ENTIRELY, so leaving
+            //    either of the other two to the deriver would silently drop
+            //    it. And the derived route picks the column to delete on by
+            //    its place in LINK_COLUMNS, so it would have to be trusted to
+            //    pick between three — hand-written, each column can only do
+            //    what its own line says.
+            //
+            //    `tblEventRegistrations` has accordingly LEFT
+            //    DELETE_ON_ACTOR_COLUMN: nothing is deleted here because of
+            //    what somebody DID any more.
+            ['table' => 'tblEventRegistrations',      'userCol' => 'registeredForUserID', 'action' => 'delete', 'reason' => 'the registration is this person\'s own record — their name, date of birth, allergies and medical notes — so the whole row goes'],
+            ['table' => 'tblEventRegistrations',      'userCol' => 'submittedByUserID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'a registration this person only TYPED IN stays, with the registered person\'s details, because it is not theirs to erase; who submitted it is detached (#492 part 3)'],
             ['table' => 'tblEventRegistrations',      'userCol' => 'reviewedByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s registration stays; who reviewed it is detached'],
 
             // 🤝 OTHER PEOPLE'S RECORDS, AND THE ORGANISATION'S WORK
@@ -1118,6 +1187,17 @@ class GdprEraser
         // one table, `tblCareCase`, and no catalogue entry lists it among its
         // own columns, so adding it builds no new derived instruction.
         'personUserID',
+        // `registeredForUserID` — who an event registration is FOR — added on
+        // 3 November 2026 by #492 part 3, with migration 246. It is in this
+        // first group because a registration IS that person's record: their
+        // name, date of birth, allergies and medical notes. It exists because
+        // `submittedByUserID` records only who TYPED the form, and an erasure
+        // deletes a registration rather than merely unnaming it, so erasing a
+        // volunteer who registered somebody else's child deleted that child's
+        // registration. It is on exactly one table,
+        // `tblEventRegistrations`, which has hand-written instructions, so
+        // adding it builds no new derived instruction.
+        'registeredForUserID',
         // `acceptedByID` moved UP here on 12 October 2026 (Salem874's
         // decision). It is on one table, tblInvitation, and it is not "who
         // did something to somebody else's record": it is the account of the
@@ -1208,7 +1288,28 @@ class GdprEraser
         'assignedToID', 'targetUserID',
         'uploadedByUserID', 'approverID', 'reviewedByID', 'startedByID',
         'submittedByUserID', 'createdByID', 'updatedByID',
-        'parentUserID', 'counterpartyUserID', 'recordedByID',
+        'parentUserID', 'recordedByID',
+        // 🔁 `counterpartyUserID` LEFT THIS LIST on 3 November 2026 (#492
+        //    part 2), on the owner's decision, and for the same reason
+        //    `bookedByID` left it on the same day (#723). It holds the account
+        //    of the person an item was lent TO or borrowed FROM — the person
+        //    the loan is ABOUT — so it is a LINK column and not an actor
+        //    column. The difference is load-bearing: while it was here, the
+        //    guard refused `nullCols` on it, so the telephone number or e-mail
+        //    address typed into the loan's "Contact details" box could not be
+        //    emptied on an erasure request, even where it was the erased
+        //    member's own.
+        //
+        //    `approvedByID` AND `requestedByID` STAY actor columns, and that
+        //    is the half that stops real harm: emptying text on an APPROVER's
+        //    number is a blanket `= NULL` over every loan they ever approved,
+        //    which destroys the borrower's details on somebody else's record.
+        //    This list's own docblock gives "who APPROVED it" as its example.
+        //
+        //    It is on exactly ONE table, `tblAssetLoans` (measured in
+        //    `full_schema.sql`: `counterpartyUserID` appears in one CREATE
+        //    TABLE, one KEY and one FOREIGN KEY, all of them that table's), so
+        //    nothing else changes meaning.
         'approvedByID', 'assignedByID',
         // A further twenty-one found by Codex on 11 September 2026. Every one
         // of them names somebody who DID something to a record rather than
@@ -1258,9 +1359,17 @@ class GdprEraser
      * @var array<string, string> Table name => why deleting is right here.
      */
     public const DELETE_ON_ACTOR_COLUMN = [
-        // A parent signs a child up. The record holds the CHILD's name, date of
-        // birth, allergies and medical notes - deleting it is the entire point.
-        'tblEventRegistrations' => 'A child\'s medical details; deletion is the purpose',
+        // 🪦 `tblEventRegistrations` LEFT THIS LIST on 3 November 2026 (#492
+        //    part 3, migration 246). Its entry read "A child's medical
+        //    details; deletion is the purpose", which was true of the row and
+        //    missed the question this list is actually about: deletion on WHICH
+        //    column. It was deleted on `submittedByUserID` — whoever typed the
+        //    form in — so erasing a volunteer who had registered somebody
+        //    else's child deleted that child's registration. The cure was not
+        //    an exception but a column that says whose record it is,
+        //    `registeredForUserID`, which is in LINK_COLUMNS' first group. The
+        //    delete goes on that, so no exception is needed and this list is
+        //    one shorter. See the instructions for this table above.
         // One line saying "this person opened this pastoral file". It is about
         // the person's own actions and nothing else, so it goes with them. The
         // pastoral case, and the notes of every visit, stay. It is listed here

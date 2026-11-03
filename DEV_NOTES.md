@@ -15873,3 +15873,220 @@ exact shape somebody produces by "simplifying" a built address away, and
 `.htaccess` answers 404 for it. Raised as a follow-up.
 
 ---
+
+### Whose record is it? Three reclassifications in one week (#723, #492 parts 2 and 3)
+
+`GdprEraser::LINK_COLUMNS` and `ACTOR_COLUMNS` answer one question: is this
+column the person the row is ABOUT, or somebody who acted on it? The answer
+decides whether free text on the row may be emptied, because `processEntry()`
+empties a non-account column in `nullCols` with a plain `= NULL` on EVERY row the
+instruction matched. On a subject column that is the person's own row; on an
+actor column it is a third party's record destroyed on a request that was never
+theirs.
+
+Three columns were on the wrong side of that line, and all three were found the
+same way — by asking what the column HOLDS rather than what it is called:
+
+| Column | Looked like | Really is |
+|---|---|---|
+| `tblResourceBooking.bookedByID` (#723) | who made the booking | the person the booking is about |
+| `tblAssetLoans.counterpartyUserID` (#492 part 2) | a party to a transaction | the person the loan is about |
+| `tblEventRegistrations.submittedByUserID` (#492 part 3) | who the registration is for | **only who typed the form in** |
+
+The third is the interesting one, because it goes the other way. The first two
+were subjects misfiled as actors, and the cure was to reclassify. The third was
+an actor misfiled as a subject — there was no subject column at all — and
+reclassifying would have fixed nothing: the cure was a NEW column
+(`registeredForUserID`, migration 246). **So "the classification was the fault"
+is not a general answer; the general question is which real person each column
+names, and sometimes the answer is that nobody records the one you need.**
+
+Two things worth keeping about the guards:
+
+- **A limit cannot be recorded in two places.** `counterpartyName` is named by
+  the loan instruction and can never match it. Writing that in the catalogue's
+  `notEmptiedHere` AND leaving the column in `nullCols` fails the #635 check,
+  because a column may be explained as not-emptied or be emptied, not both. The
+  limit goes in the INSTRUCTION's reason. #723 learned this for `declineReason`
+  three days earlier and it had to be learned again in the same sitting — the
+  comment saying so was written and then broken two edits later.
+- **The control row is the half that stops real harm, and the coverage test
+  cannot supply it.** Widening the reclassification to `approvedByID` and
+  `requestedByID` left `gdpr-coverage-selftest.php` entirely GREEN (93 of 93 at
+  the time the plant was run) and failed only the two real-row checks on loans
+  somebody else borrowed. Without a loan the erased person only APPROVED, the
+  widening would have shipped.
+
+### A migration that "looks idempotent" and is not (#492 part 3, migration 246)
+
+Migration 246 copies `submittedByUserID` into the new `registeredForUserID` once.
+The obvious guard is `WHERE registeredForUserID IS NULL`, and it is WRONG: an
+empty value is the honest answer for "this registration is for somebody else", so
+once the form starts recording that, a replay would fill it in from the submitter
+and put the original fault back one row at a time. The installer replays every
+numbered migration over `full_schema.sql` and ignores `tblMigrations`, so the
+replay really happens. The guard is `@col_exists` as read BEFORE the column was
+added, so the copy runs only on the run that creates the column.
+
+Measured on MySQL 8.0.36 (3 November 2026). With the correct guard, a row holding
+`submittedByUserID = 777001` and `registeredForUserID = NULL` survived a second
+run untouched. With `WHERE registeredForUserID IS NULL` planted instead, the
+same row came back with `registeredForUserID = 777001` — the volunteer's number
+written into the subject column, which is exactly the harm the column exists to
+prevent.
+
+Also: **no foreign key on the new column, deliberately.** `submittedByUserID` has
+none, so it can hold the number of an account that has since been deleted;
+adding a key to the new column would make the migration refuse with error 1452 on
+any database where it does. Measured: a row with a dangling submitter copied
+through without complaint.
+
+### `docker run --rm` does not always remove the anonymous volume (3 November 2026)
+
+The standing rule reads "Start test containers with `docker run --rm`, or remove
+them with `docker rm -v`". Measured on Docker Desktop on this Mac, those are not
+equivalent and the difference is in how the container ENDS:
+
+- `docker run --rm …` then `docker stop <name>` — the anonymous data volume IS
+  removed.
+- `docker run --rm …` then `docker rm -f <name>` — the anonymous data volume is
+  LEFT BEHIND, and it is a full MySQL data directory.
+
+Identified by content: the leftover held exactly this package's `selftest_*`
+databases. Use `docker stop`, or `docker rm -v`.
+
+### Whether a snapshot was really read at one moment (#581)
+
+`DbBackup::snapshot()` reads the tables one after another inside one
+transaction. Two lines give it a single consistent view of all of them, and
+**the first is the one that does the work on a host whose own isolation level is
+READ COMMITTED**:
+
+```sql
+SET TRANSACTION ISOLATION LEVEL REPEATABLE READ
+START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY
+```
+
+**Measured on 3 November 2026, on `mysql:8.0.36 --transaction-isolation=READ-COMMITTED`:**
+deleting the first line alone made every snapshot stop being taken at one
+moment. A parent row saved into a table the snapshot had already read, and its
+child into one it had not, gave a snapshot holding the child and not the parent;
+the snapshot still answered `success`; and the restore then refused it with "a
+row of tblUserSites points, through its column siteID, at the row of tblSites
+whose siteID is 970481, and that row is not in the snapshot". **On a server
+whose own level is REPEATABLE READ — MySQL's default, and what every self-test
+in this repository runs on — the same deletion changes nothing and proof 11
+stays green.** That is the #646 shape: a correct guard over a fault that has
+already happened, with nothing able to run it.
+
+**`@@transaction_isolation` IS A DECOY, and it is the obvious thing to reach
+for.** Measured on the same server: inside a transaction the SET line had
+already put right, and which really did give a consistent view, that variable
+still answers `READ-COMMITTED` — because `SET TRANSACTION` with no scope word
+sets the NEXT transaction only and never touches the session value the variable
+reports. A guard or a check built on it would condemn a working snapshot on
+every such host.
+
+**The statement's own warning is what answers the real question.** MySQL says
+`Warning 138: InnoDB: WITH CONSISTENT SNAPSHOT was ignored because this phrase
+can only be used with REPEATABLE READ isolation level.` A clean server says
+nothing at all, and `START TRANSACTION WITH CONSISTENT SNAPSHOT` **clears the
+warning list** (measured: a `SELECT 1/0` immediately before it leaves
+`@@warning_count` at 0 and `SHOW WARNINGS` empty), so a leftover warning cannot
+be mistaken for this one. Hence three answers and not two: no warnings is
+`yes`, a warning naming the phrase is `no`, and any other warning is
+`cannot tell` — because a check that cries wolf gets switched off (#483).
+
+**MariaDB 11.4.13 prints no warning at all** when it ignores the phrase
+(measured). So there the answer is always `yes` and means only "nothing was
+said". What was **not** measured is whether MariaDB's read is really
+inconsistent in that case.
+
+A fourth word, `ONE_MOMENT_NOT_RECORDED`, is never written into a manifest and
+exists only for the restore: "it looked and could not tell" and "it never
+looked, because it was taken before snapshots looked" are different facts about
+different snapshots, and the first draft of the sentence said "an older one
+never looked" for both — untrue, in the reassuring direction, of a snapshot that
+really did look.
+
+Guards: `tools/audit-checks/check_snapshot_one_moment.py` (a hard gate; 17
+plants, each caught) and proof 29 of `tools/backup-restore-selftest.php`, which
+reaches the fault **on one server** by taking the isolation level away from the
+backup's own connection. Its section A proves, with the test's own two
+connections and none of the class's code, that doing so really does destroy the
+isolation — so section B is not testing nothing.
+
+### Is anything actually calling the scheduled backup job? (#581)
+
+The portal could take a backup on a timer (`cron/backup-run`, #569) and could
+offer the choices on a page, and **nothing anywhere could say whether the
+hosting company's scheduler was calling it.** The page's only words were
+conditional — "this only happens if your hosting company's scheduler is calling
+the portal" — which is true and no use to somebody deciding whether their data
+is safe. `backup.schedule.frequency` ships as `daily`, so that is the state
+every new installation is in.
+
+`DbBackup::recordScheduledCall()` writes the moment into
+`_backups/.backup-run-last`. **A FILE, NOT A SETTINGS ROW OR A COLUMN, and the
+reason is the whole design:** every table goes into every snapshot, so a value
+kept in one travels backwards whenever a snapshot is put back — restore a
+snapshot taken while the scheduler was working and the portal would say the
+scheduler is working, on a server where it has since stopped. That is a false
+reassurance about backups. `cron/backup-run.php` already drew the same line for
+working out whether a snapshot is due.
+
+**Where the call is recorded is three decisions, all load-bearing:** after the
+token check (a stranger who guesses the address must not be able to make the
+page claim the scheduler is working); before the "switched off" answer (an
+installation that has chosen `off` must still be able to find out, or the only
+way to find out would be to switch backups on); and before the
+one-run-at-a-time lock (a second overlapping call still counts).
+
+The check for that last one was **deleted after planting proved it could never
+fail on its own** — the lock sits after the switched-off answer, so the earlier
+clause always fires first. What is checked instead is that the lock still comes
+after that answer, which is what makes the lock ordering follow, and that clause
+*can* fail. A clause that cannot fail makes a check look stronger than it is.
+
+`DbBackup::scheduleIsRunning()` is the ONE test of "recently" (two days, so one
+missed night does not read as "nothing is calling it"), asked by
+`scheduleWords()` and by the Backup page for its colour. The page's first
+version chose the colour by looking at how the sentence **started**, which would
+have gone wrong the first time anybody improved the wording — and would have
+drawn "your scheduler is calling but backups are switched off" in green.
+
+**Never say a backup was taken.** Being called and taking one are different
+things: a call that decides nothing is due answers in one query and takes
+nothing, which is correct. Proof 29 has a computed check that none of the six
+sentences blurs them — computed, because the first version ended in an
+unconditional `brs_check(true, ...)`.
+
+### #472 is finished, and every number in its title was stale
+
+Measured on a real MySQL 8.0.36 loaded from `web/_sql/full_schema.sql`:
+
+| The issue said | Measured on 3 November 2026 |
+|---|---|
+| 209 tables | **232** (`SELECT COUNT(*) FROM information_schema.TABLES`) |
+| 71 cannot be restored | **0**. All 232 come back identical through `restoreAll()` |
+| 71 named in a foreign key | **76**, of which the database really refuses `TRUNCATE` on **74** |
+| — | `restoreTable()` refuses **78** of 232, by design and in plain words |
+
+The two the `REFERENCES` grep over-counts are `tblAssetLoans` and `tblTasks`,
+whose only foreign key is to **themselves** — MySQL allows `TRUNCATE` on such a
+table. So a grep of the schema cannot give this number; the database can.
+
+A failed restore no longer destroys anything. Measured: a snapshot taken, the
+live data then changed, a column added to `tblRoutes` that must have a value, so
+the refill is refused after all 232 tables have been emptied and about half
+refilled — **0 rows lost, every table's row count unchanged, and the one test
+row still holding its pre-restore value.** The old shape is still demonstrable
+in two lines: `TRUNCATE` inside a transaction followed by `ROLLBACK` leaves 0 of
+3 rows; `DELETE` leaves 3.
+
+The one acceptance criterion that is **not** met, and is documented rather than
+fixed: a whole restore can still delete rows from a table it is not restoring,
+through the database's own cascade rules. Measured — a table named outside
+`tbl*` with a link into `tblSites` lost its row — and the restore counts it,
+names it and says a snapshot cannot bring it back. No table in the portal's own
+schema is in that position: all 232 are `tbl*`.

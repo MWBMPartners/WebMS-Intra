@@ -147,6 +147,61 @@ if ($captchaConfigured === true) {
         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
         <input type="hidden" name="slug" value="<?php echo htmlspecialchars($slug, ENT_QUOTES, 'UTF-8'); ?>">
 
+        <?php
+        // 👤 WHO IS THIS REGISTRATION FOR? (#492 part 3, the owner, 3 November
+        //    2026.) Only a signed-in person is asked, because only they have
+        //    an account to attach the registration to.
+        //
+        //    WHY THE QUESTION EXISTS. A registration is DELETED, not merely
+        //    unnamed, when the person it belongs to asks to be forgotten —
+        //    rightly, because it holds the registered person's name, date of
+        //    birth, allergies and medical notes. Until now the portal recorded
+        //    only who TYPED the form in, so erasing a volunteer who had
+        //    registered somebody else's child deleted that child's
+        //    registration, and that child's family had asked for nothing.
+        //    There was no way for the volunteer to say so. This is it.
+        //
+        //    NEITHER ANSWER IS PRE-SELECTED, on purpose. A default would
+        //    decide for somebody who did not read the question, and both
+        //    defaults are wrong in a way that matters: "me" put the old fault
+        //    back whenever a volunteer did not notice, and "somebody else"
+        //    would quietly leave a member's own registration beyond the reach
+        //    of their own erasure request. `required` makes a browser ask.
+        //
+        //    AND THE HANDLER DOES NOT REFUSE A REQUEST THAT ANSWERS NEITHER,
+        //    which is said here rather than left to be discovered: this form
+        //    can be posted to directly, and `required` is a courtesy to
+        //    somebody filling the form in, never a boundary. An unanswered
+        //    request is treated as "somebody else" — the registration stays
+        //    and nobody else's record is destroyed, which is the safe
+        //    direction of the two.
+        if (isset($_SESSION['user_id']) === true && (int) $_SESSION['user_id'] > 0) {
+            ?>
+        <fieldset class="mb-4">
+            <legend class="h6">Whose registration is this?</legend>
+            <p class="text-muted small mb-2">
+                You are signed in, so please tell us whether this registration is your own. It
+                decides whose it is if either of you later asks us to delete everything we hold
+                about them.
+            </p>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="registeredFor" id="registeredForMe" value="me" required>
+                <label class="form-check-label" for="registeredForMe">
+                    It is for <strong>me</strong>
+                </label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="registeredFor" id="registeredForOther" value="other" required>
+                <label class="form-check-label" for="registeredForOther">
+                    It is for <strong>somebody else</strong> &mdash; my child, or someone I am
+                    filling this in on behalf of
+                </label>
+            </div>
+        </fieldset>
+            <?php
+        }
+        ?>
+
         <fieldset class="mb-4">
             <legend class="h6">Participant</legend>
             <div class="row g-2">

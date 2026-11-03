@@ -952,6 +952,17 @@ This repository commits its own copy, `tools/watchdog.sh`, so the rule works on 
 Set by the owner on 24 September 2026. Every agent here starts MySQL containers to test against, and **a plain `docker rm` leaves the container's data behind** in a separate volume: on 24 September this machine held 415 of them, taking 101 GB, though every agent had reported its clean-up as done.
 
 - Start test containers with `docker run --rm`, or remove them with `docker rm -v`.
+- **`docker run --rm` IS NOT ENOUGH ON ITS OWN, and `docker rm -f` IS NOT THE SAME AS `docker stop` —
+  measured on 3 November 2026.** A container started with `--rm` and then killed with `docker rm -f`
+  left an anonymous volume behind; the same image **stopped** with `docker stop` left nothing. This file
+  treated the two as equivalent and they are not. So **stop a container rather than force-removing it**,
+  and read the dangling count afterwards instead of assuming `--rm` did the work.
+- **An agent cannot tidy its own leftover volume, and must not try.** `docker volume rm <id>` is refused
+  by the permission classifier as "Irreversible Deletion" — refused three times on 3 November 2026, to
+  two different agents and to the commissioning session, for a volume nothing referenced and which the
+  session itself had created. **Report the exact id to the owner and leave it.** Do not look for a way
+  round it, and never reach for `prune`: that is the thing the refusal exists to protect, and it would
+  take other projects' volumes with it.
 - Name each after its work (`p514p6chk-mysql`), so it can be identified later.
 - **Report the count of left-behind volumes before and after** (`docker volume ls -q -f dangling=true | wc -l`), and `docker ps -a`. Your own work must add none. Remove only your own containers and volumes, by name.
 - Never remove another project's container, a running one, or a NAMED volume without asking — `g2ml-mysql` and `wrapper-v2` belong to other projects. Never run `docker volume prune` or `docker system prune`: they remove every unused unnamed volume, other projects' included. A deny rule for both was recorded on 5 October 2026 as being in force; on 1 November 2026 `~/.claude/settings.json` had no `permissions` block, so **the written rule above is what binds** — check the file before claiming a deny rule stops you, and note it would not bind Codex even if it were there (#678).

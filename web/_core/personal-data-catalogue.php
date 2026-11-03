@@ -311,47 +311,45 @@ return [
     ],
     'tblAssetLoans' => [
         'decision' => 'unlink',
-        'reason'   => 'Who borrowed an item. Deleting the loan would erase the item\'s history, and the organisation still needs to know where its property went. The name goes, the loan stays.',
+        'reason'   => 'A loan of a piece of equipment, in or out. Deleting the loan would erase the item\'s history, and the '
+                    . 'organisation still needs to know where its property went. So on erasure the loan is kept — which item, '
+                    . 'when it went out, when it came back — and what goes is the borrower\'s account link, the free-text name '
+                    . 'recorded for them, and the telephone number or e-mail address typed into the loan\'s "Contact details" '
+                    . 'box (#492 part 2, 3 November 2026). Where the borrower is somebody OUTSIDE the organisation nothing on '
+                    . 'the row links it to an account, so an erasure request cannot find it at all and an administrator clears '
+                    . 'those details on the loan instead. Detaching the row because the person who APPROVED or ASKED FOR the '
+                    . 'loan has left would take away the borrower\'s own details on somebody else\'s record, so those two links '
+                    . 'are cut on their own and nothing else on the row is touched. One limit, recorded in the erasure '
+                    . 'instruction\'s own reason because it cannot be recorded here as well: a loan names its counterparty by '
+                    . 'either an account or a typed name and never both, so emptying the typed name on a row found through the '
+                    . 'account can never actually do anything, and it is named only so that a future change filling both in '
+                    . 'would already be reached.',
         'columns'  => ['notes', 'counterpartyUserID', 'approvedByID', 'requestedByID', 'counterpartyName', 'counterpartyContact', 'declineReason', 'conditionOutNotes', 'conditionInNotes'],
-        // 📞 `counterpartyContact`'s REASON WAS UNTRUE OF THE COMMONEST CASE
-        //    and is corrected (#492 part 2, 3 November 2026). It read "How to
-        //    reach that outside borrower. As above", which meant "they need
+        // 📞 `counterpartyContact`'s REASON WAS UNTRUE OF THE COMMONEST CASE,
+        //    and the cure was not a better sentence — it was the owner's
+        //    decision of 3 November 2026 (#492 part 2) that the borrower is
+        //    the person a loan record is about. The old reason read "they need
         //    not have an account, so nothing links the row to one and an
-        //    erasure request cannot reach it". That is right for a loan to an
-        //    outside person or organisation and WRONG for a loan to a member:
-        //    the loan form shows that box whichever kind of counterparty is
-        //    chosen, so it is routinely a member's own telephone number on a
-        //    row that names their account — a row an erasure does reach. What
-        //    stops it being emptied is not reachability, it is that
-        //    `counterpartyUserID` is classed as a column saying somebody
-        //    ACTED on a record, and emptying text on such a column is a
-        //    blanket `= NULL` over every row it matched. Reclassifying it
-        //    needs the owner's decision; it is on #492 and the reason below
-        //    says so plainly, because this is the file somebody's own request
-        //    is answered from.
+        //    erasure request cannot reach it", which is right for a loan to an
+        //    outside person and WRONG for a loan to a member: the loan form
+        //    shows that box whichever kind of borrower is chosen, so it is
+        //    routinely a member's own telephone number on a row that names
+        //    their account — a row an erasure does reach. Both columns are
+        //    emptied now by the `counterpartyUserID` instruction in
+        //    GdprEraser, so neither may be explained here as not-emptied: the
+        //    #635 check fails a column given a reason while an instruction
+        //    empties it, because the two mechanisms cannot both describe one
+        //    column. `counterpartyName` is the one that proved it: this entry
+        //    explained it AND the instruction empties it, and the check went
+        //    red on the first run of this change. Its limit is recorded in the
+        //    instruction's reason and in this entry's own `reason` above,
+        //    which is the one a data subject reads.
         'notEmptiedHere' => [
-            'counterpartyName' => 'The name of somebody OUTSIDE the organisation who borrowed a piece of equipment. They '
-                . 'need not have an account, so nothing links the row to one and an erasure request '
-                . 'cannot reach it. An administrator can clear it on the loan. (Where the borrower IS '
-                . 'an account holder this column is never written at all: the free-text name belongs to '
-                . 'the "someone else" kind of loan only.)',
-            'counterpartyContact' => 'A telephone number or e-mail address for whoever borrowed or lent the item, typed '
-                . 'into the loan by hand. For a loan to somebody outside the organisation nothing links '
-                . 'the row to an account, so an erasure request cannot reach it, and an administrator '
-                . 'clears it on the loan. WHERE THE BORROWER IS A MEMBER the row DOES name their '
-                . 'account and the erasure does reach it, so this column is their own contact details '
-                . 'being kept after the account link has gone. It is not emptied today for one reason: '
-                . 'the column naming them, counterpartyUserID, is classed as "this person acted on the '
-                . 'record", and text emptied on such a column is emptied on every row matched, which '
-                . 'for an approver or a recorder would destroy somebody else\'s details. Whether a '
-                . 'loan\'s counterparty is instead the person the loan is ABOUT - as the owner decided '
-                . 'a room booking\'s booker is, on 3 November 2026 - is a decision recorded on issue '
-                . '#492 and not taken here',
             'declineReason' => 'Why a request to borrow something was refused. The organisation\'s own reasoning about '
                 . 'its own property',
             'conditionOutNotes' => 'What condition an item was in when it went out. About the item',
             'conditionInNotes' => 'What condition it was in when it came back. About the item',
-            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. The organisation\'s record of lending its property out, kept as the loan\'s own history. (The sentence that used to end this reason said counterpartyName and counterpartyContact "are named in no entry at all - #706". Both ARE named in this entry, each with its own reason above; the #706 wording was already stale when it was written here.)',
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. The organisation\'s record of lending its property out, kept as the loan\'s own history.',
         ],
     ],
     'tblAssetOrgs' => [
@@ -659,10 +657,26 @@ return [
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['userID'],
     ],
+    // 📝 WHOSE RECORD A REGISTRATION IS (#492 part 3, the owner, 3 November
+    //    2026, migration 246). The row is deleted on an erasure request, which
+    //    is right — it holds a child's name, date of birth, allergies and
+    //    medical notes. What was wrong was WHICH column found it:
+    //    `submittedByUserID` records only whoever was signed in when the form
+    //    was sent, and nothing tested their relationship to the child, so
+    //    erasing a volunteer who had registered somebody else's child deleted
+    //    that child's registration. `registeredForUserID` now says whose
+    //    record it is, the delete goes on that, and the submitter is merely
+    //    detached.
     'tblEventRegistrations' => [
         'decision' => 'erase',
-        'reason'   => 'Holds information about the person themselves',
-        'columns'  => ['fullName', 'dateOfBirth', 'gender', 'allergies', 'medicalNotes', 'parentName', 'parentPhone', 'parentEmail', 'emergencyContactName', 'emergencyContactPhone', 'submittedByUserID', 'reviewedByID', 'notes'],
+        'reason'   => 'A registration for an event, holding the registered person\'s own details — their name, date of birth, '
+                    . 'allergies and medical notes, with a parent or guardian\'s telephone number and e-mail address beside '
+                    . 'them. Where the registration is the person\'s own the whole row is deleted on request. Where they only '
+                    . 'TYPED IT IN for somebody else, or only reviewed it, the row stays with the registered person\'s details '
+                    . 'and their own link to it is cut: it is not their record to erase. Registrations made by somebody with no '
+                    . 'account cannot be found by an erasure request at all, and are deleted on a timer instead — see '
+                    . '`registrationRetentionDays` on the event',
+        'columns'  => ['fullName', 'dateOfBirth', 'gender', 'allergies', 'medicalNotes', 'parentName', 'parentPhone', 'parentEmail', 'emergencyContactName', 'emergencyContactPhone', 'registeredForUserID', 'submittedByUserID', 'reviewedByID', 'notes'],
     ],
     // 🛑 tblExpenseClaimApprovals said "delete" until 11 September 2026, and
     //    the column it matched on is named userID - which everywhere else in
@@ -2123,9 +2137,30 @@ return [
         'period'   => 'as required by safeguarding policy',
         'columns'  => ['userID', 'notes', 'recordedByID'],
     ],
+    // 🧾 THE CLAIMANT IS KEPT WITH THE CLAIM, AS A DECISION (#492 part 4, the
+    //    owner, 3 November 2026). The reason here used to end "...and the
+    //    claimant's name is removed", which was UNTRUE: `userID` on this table
+    //    is `INT NOT NULL`, so the erasure's attempt to empty it is refused by
+    //    the database and recorded in the sealed trail as a step that could do
+    //    nothing. So the position was settled by a column nobody had decided
+    //    about, and the reason a data subject reads described the opposite of
+    //    what happened. The owner has now decided it deliberately: the claim is
+    //    kept for six years because HMRC requires it, and a claim that cannot
+    //    say who was paid is of little use as one.
+    //
+    //    The wording below says what REALLY happens, including the failed
+    //    attempt, rather than implying the portal chose not to try.
     'tblExpenseClaims' => [
         'decision' => 'unlink',
-        'reason'   => 'An expense claim. Financial records must be kept for six years for HMRC, so the claim and its amounts stay and the claimant\'s name is removed.',
+        'reason'   => 'An expense claim: what was claimed, how much, and who was paid. The claim and its amounts are kept for '
+                    . 'six years because HMRC requires financial records to be kept, and the claimant is kept with them '
+                    . 'DELIBERATELY (the owner, 3 November 2026) — a record of a payment that cannot say who was paid is of '
+                    . 'little use as one. Be clear about the mechanism as well as the decision, because they are not the same '
+                    . 'thing: the erasure does still TRY to remove the account link, the database refuses it (the column '
+                    . 'cannot be empty on this table), and the report of the erasure records that it could do nothing here. '
+                    . 'What stops the claim naming anybody is that the account itself is emptied, so it points at an account '
+                    . 'with no name on it; the account NUMBER stays. Receipts attached to the claim keep the filename they '
+                    . 'were uploaded with, which is often a person\'s name',
         'columns'  => ['userID'],
     ],
     'tblGivingStatementLog' => [

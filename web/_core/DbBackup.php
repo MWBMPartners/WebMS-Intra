@@ -110,6 +110,20 @@
  *     for these and says so at once, in its result and in the manifest, so
  *     that nobody first hears of it on the day the restore is needed; see
  *     unlistedWarning().
+ *   • PROVE that a snapshot was read at one moment in time on an engine that
+ *     will not say. The tables are read one after another inside one
+ *     transaction that asks the database for a single consistent view, and the
+ *     snapshot then asks whether that view was really given and writes the
+ *     answer into the manifest as `one_moment` (#581). On MySQL the answer is
+ *     real: the server warns when it ignores the request, and the restore
+ *     repeats the answer to whoever is putting the snapshot back. On MariaDB
+ *     11.4.13 the server says nothing in that case (measured), so there the
+ *     answer is always "yes" and means only "nothing was said". Three things
+ *     this does NOT do: refuse a snapshot over it (the snapshot is still worth
+ *     keeping, and one taken while nobody is using the portal is unaffected);
+ *     refuse a RESTORE over it (the fault shows up as a row pointing at a row
+ *     that is not in the snapshot, which the restore already refuses by
+ *     itself); or claim that an engine which says nothing was consistent.
  *   • Tested on MariaDB: it never has been.
  *
  * @package   Portal\Core
@@ -1796,6 +1810,205 @@ class DbBackup
     // =========================================================================
 
     /**
+     * 🧊 The three answers to "was this snapshot taken at one moment?" (#581).
+     *
+     * Three and not two, because "the database said nothing" and "this code
+     * could not find out" are different facts and reading them as one is how a
+     * reassurance comes to be printed over a snapshot nobody checked. They are
+     * written into the manifest and are the words a reader compares against, so
+     * changing one changes what every snapshot already on disk means: don't.
+     */
+    public const ONE_MOMENT_YES         = 'yes';
+    public const ONE_MOMENT_NO          = 'no';
+    public const ONE_MOMENT_CANNOT_TELL = 'cannot tell';
+
+    /**
+     * 🧊 A FOURTH word, which a snapshot is never TAKEN with and which only a
+     * RESTORE ever uses: the manifest holds no answer at all.
+     *
+     * It is a separate word from ONE_MOMENT_CANNOT_TELL on purpose, and the
+     * distinction is not a nicety. "It looked and could not tell" and "it
+     * never looked, because it was taken before snapshots looked" are
+     * different facts about different snapshots, and the first draft of the
+     * sentence below said "an older one never looked" for BOTH — which is
+     * untrue, in the reassuring direction, of a snapshot that really did look.
+     * It is never written into a manifest.
+     */
+    public const ONE_MOMENT_NOT_RECORDED = 'not recorded';
+
+    /**
+     * 🧊 Did the database really give this connection one consistent view of
+     * every table, or did it ignore being asked? (#581)
+     *
+     * Called by snapshot() IMMEDIATELY after
+     * `START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY`, and nowhere
+     * else, because what it reads is that statement's own answer.
+     *
+     * ⚠️ `@@transaction_isolation` IS THE WRONG THING TO READ, AND READING IT
+     *    WOULD HAVE BEEN THE OBVIOUS WAY. Measured on mysql:8.0.36 started
+     *    with `--transaction-isolation=READ-COMMITTED`: inside a transaction
+     *    that the `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ` line above
+     *    had already put right, and which really did give a consistent view,
+     *    `SELECT @@transaction_isolation` still answers READ-COMMITTED —
+     *    because `SET TRANSACTION` with no scope word sets the NEXT
+     *    transaction only and never touches the session value that variable
+     *    reports. So a check built on it would have condemned a working
+     *    snapshot on every such host. The statement's own warning is the only
+     *    thing measured to answer the real question.
+     *
+     * HOW THE WARNING IS READ, and why "any warning" is safe here. MySQL says
+     * `Warning 138: InnoDB: WITH CONSISTENT SNAPSHOT was ignored because this
+     * phrase can only be used with REPEATABLE READ isolation level.` A clean
+     * server says nothing at all, and `START TRANSACTION WITH CONSISTENT
+     * SNAPSHOT` CLEARS the warning list (measured: a `SELECT 1/0` immediately
+     * before it leaves `@@warning_count` at 0 and `SHOW WARNINGS` empty), so a
+     * leftover warning from an earlier statement cannot be mistaken for this
+     * one. A warning that does NAME the phrase is a plain no; any OTHER
+     * warning means the database said something about this statement that this
+     * code has not been taught, which is "cannot tell" and not "no", because a
+     * check that cries wolf gets switched off (#483).
+     *
+     * ⚠️ WHAT THIS CANNOT TELL YOU, measured rather than assumed. MariaDB
+     *    11.4.13 prints NO WARNING when it ignores the phrase: asked for
+     *    `SET TRANSACTION ISOLATION LEVEL READ COMMITTED` and then the
+     *    consistent snapshot, it answered with an empty warning list. So on
+     *    MariaDB this method answers ONE_MOMENT_YES whatever happened, and
+     *    that answer means only "nothing was said". What was NOT measured is
+     *    whether MariaDB's read is really inconsistent in that case — only
+     *    that it would not say so. MySQL is the engine this portal is built
+     *    for, and on MySQL the answer is real.
+     *
+     * @return string One of the three ONE_MOMENT_* words above.
+     */
+    private function consistentReadVerdict(): string
+    {
+        try {
+            $answer = $this->db->query('SHOW WARNINGS');
+        } catch (\Throwable $e) {
+            // Never the database's own words anywhere this class reports: a
+            // message can quote a value. "Could not find out" is the honest
+            // answer, and it is not "no".
+            return self::ONE_MOMENT_CANNOT_TELL;
+        }
+        if ($answer === false) {
+            return self::ONE_MOMENT_CANNOT_TELL;
+        }
+
+        $said = [];
+        while (($row = $answer->fetch_assoc()) !== null) {
+            $said[] = (string) ($row['Message'] ?? '');
+        }
+        $answer->free();
+
+        if ($said === []) {
+            return self::ONE_MOMENT_YES;
+        }
+        foreach ($said as $message) {
+            if (stripos($message, 'CONSISTENT SNAPSHOT') !== false) {
+                return self::ONE_MOMENT_NO;
+            }
+        }
+
+        return self::ONE_MOMENT_CANNOT_TELL;
+    }
+
+    /**
+     * 🧊 What a manifest says about being read at one moment, tidied (#581).
+     *
+     * The same reasoning as unlistedIn(): a manifest is a file a person can
+     * edit and what comes out of here is shown on pages, so a word that is not
+     * one of the three a snapshot can be written with is treated as no answer
+     * rather than trusted or echoed back.
+     *
+     * @param array<string, mixed> $manifest A decoded `_manifest.json`.
+     *
+     * @return string ONE_MOMENT_YES, ONE_MOMENT_NO, ONE_MOMENT_CANNOT_TELL, or
+     *         ONE_MOMENT_NOT_RECORDED when the manifest holds no usable answer.
+     */
+    public static function oneMomentIn(array $manifest): string
+    {
+        $said = $manifest['one_moment'] ?? null;
+        if (is_string($said) === true
+            && in_array($said, [self::ONE_MOMENT_YES, self::ONE_MOMENT_NO, self::ONE_MOMENT_CANNOT_TELL], true) === true
+        ) {
+            return $said;
+        }
+
+        return self::ONE_MOMENT_NOT_RECORDED;
+    }
+
+    /**
+     * 🧊 What to tell somebody about a snapshot that was not taken at one
+     * moment, or that cannot say whether it was (#581).
+     *
+     * ⚠️ FIVE COMPLETE SENTENCES, ONE PER BRANCH THAT CAN BE REACHED, and
+     *    deliberately not one sentence with the differences spliced into it.
+     *    #694 collected four separate wording faults inside a single
+     *    ninety-line assembled sentence, every one of them a ternary in the
+     *    middle of a clause and not one of them findable by any check. So each
+     *    case is written out whole, here, where it can be read.
+     *
+     *    The five are: no/taking, no/restoring, cannot tell/taking,
+     *    cannot tell/restoring, and not recorded/restoring. There is no
+     *    not-recorded/taking case — a snapshot being taken always has an
+     *    answer — and ONE_MOMENT_YES has no sentence at all, because there is
+     *    nothing to warn about and a reassurance printed on every snapshot is
+     *    how a real warning stops being read (#694's "a check that pins a
+     *    reassurance" shape, in prose).
+     *
+     * @param string $verdict  One of the ONE_MOMENT_* words.
+     * @param bool   $restoring True when this is said to somebody PUTTING the
+     *                          snapshot back, false when it is said to
+     *                          somebody who has just taken it. The facts are
+     *                          the same; what they can do about them is not.
+     */
+    public static function oneMomentWarning(string $verdict, bool $restoring): string
+    {
+        if ($verdict === self::ONE_MOMENT_NOT_RECORDED && $restoring === true) {
+            return 'This snapshot does not say whether it was read as one moment in time. It was taken '
+                 . 'before snapshots recorded that, so it never looked, and nothing can work it out after '
+                 . 'the event. Nothing is lost by trying: a restore that is refused changes nothing at all. '
+                 . 'If it is refused with a message about a row pointing at a row that is not in the '
+                 . 'snapshot, that is the fault this answer would have warned you about.';
+        }
+        if ($verdict === self::ONE_MOMENT_NO && $restoring === false) {
+            return 'This snapshot was NOT read as one moment in time. The database would not give this '
+                 . 'connection a single consistent view, so the tables were read one after another: if '
+                 . 'anybody saved anything while the snapshot ran, it can hold one half of a record and '
+                 . 'not the other, and putting it back would then be refused. The snapshot is still worth '
+                 . 'keeping, and a snapshot taken while nobody is using the portal is unaffected. Ask your '
+                 . 'hosting company to let the portal read at the REPEATABLE READ isolation level, which is '
+                 . 'MySQL\'s own default.';
+        }
+        if ($verdict === self::ONE_MOMENT_NO && $restoring === true) {
+            return 'This snapshot says it was NOT read as one moment in time: its tables were read one '
+                 . 'after another, so it may hold one half of a record saved while it was being taken. '
+                 . 'That is why a restore can be refused partway with a message about a row pointing at a '
+                 . 'row that is not in the snapshot. Nothing is lost by trying — a restore that is refused '
+                 . 'changes nothing at all — but if it is refused for that reason, this snapshot cannot be '
+                 . 'put back whole, and the one to use is a later snapshot whose own answer is "yes".';
+        }
+        if ($verdict === self::ONE_MOMENT_CANNOT_TELL && $restoring === false) {
+            return 'Whether this snapshot was read as one moment in time could not be established. The '
+                 . 'portal asked the database for a single consistent view of every table and the database '
+                 . 'answered with something the portal has not been taught to read, so this is "not known" '
+                 . 'rather than "no". Most likely it was fine. If it was not, the snapshot can hold one '
+                 . 'half of a record saved while it ran, and putting it back would be refused rather than '
+                 . 'go wrong quietly.';
+        }
+        if ($verdict === self::ONE_MOMENT_CANNOT_TELL && $restoring === true) {
+            return 'This snapshot looked at whether it was being read as one moment in time and could not '
+                 . 'establish it: the database answered with something the portal has not been taught to '
+                 . 'read. So this is "not known" rather than "no", and most likely it was fine. Nothing is '
+                 . 'lost by trying: a restore that is refused changes nothing at all. If it is refused '
+                 . 'with a message about a row pointing at a row that is not in the snapshot, that is what '
+                 . 'this answer could not rule out.';
+        }
+
+        return '';
+    }
+
+    /**
      * Take a snapshot of every `tbl*` table.
      *
      * A snapshot that fails removes its own folder, so a failure can never be
@@ -1804,21 +2017,25 @@ class DbBackup
      * unchanged for 24 hours, and until then it is listed as unfinished.)
      *
      * A snapshot that SUCCEEDS can still carry a warning: see
-     * unlistedWarning(). `warnings` is then not empty, and the caller must
-     * show it.
+     * unlistedWarning() and oneMomentWarning(). `warnings` is then not empty,
+     * and the caller must show it.
      *
      * @param string $reason Short label kept in the manifest
      *                       (e.g. 'pre-upgrade-1.4.0').
      *
      * @return array{success: bool, directory: string, tables: int, rows: int, error?: string,
-     *               warnings: array<int, string>,
+     *               warnings: array<int, string>, one_moment: string,
      *               unlisted_values: array<int, array{table: string, column: string, cells: int}>}
+     *         one_moment is one of ONE_MOMENT_YES, ONE_MOMENT_NO or
+     *         ONE_MOMENT_CANNOT_TELL; see consistentReadVerdict() for what
+     *         each one does and does not promise. On a failure it is
+     *         ONE_MOMENT_CANNOT_TELL, because no snapshot was read.
      */
     public function snapshot(string $reason = ''): array
     {
         $fail = static function (string $why): array {
             return ['success' => false, 'directory' => '', 'tables' => 0, 'rows' => 0, 'error' => $why,
-                    'warnings' => [], 'unlisted_values' => []];
+                    'warnings' => [], 'one_moment' => self::ONE_MOMENT_CANNOT_TELL, 'unlisted_values' => []];
         };
 
         // 🗂️ Make sure the backups folder exists.
@@ -1918,6 +2135,20 @@ class DbBackup
             //    rights on one database only (tried).
             $this->ask('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
             $this->ask('START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY');
+            // 🔎 AND ASK WHETHER THE DATABASE REALLY GAVE ONE (#581). The two
+            //    lines above USED TO BE TRUSTED, and the first of them is the
+            //    one that does the work on a host whose own setting is READ
+            //    COMMITTED: measured on mysql:8.0.36 started with
+            //    `--transaction-isolation=READ-COMMITTED`, deleting it alone
+            //    made every snapshot stop being taken at one moment, the
+            //    snapshot still answered "success", and the restore then
+            //    refused it as a child row with no parent. On a server whose
+            //    setting is REPEATABLE READ — which is MySQL's default and what
+            //    every self-test in this repository runs on — that same
+            //    deletion changes nothing, so no test here could have seen it.
+            //    See consistentReadVerdict() for what the answer can and
+            //    cannot tell you.
+            $oneMoment = $this->consistentReadVerdict();
 
             $manifest = [
                 'format'         => self::FORMAT,
@@ -1947,6 +2178,15 @@ class DbBackup
                 //    and says so rather than guessing.
                 'whole_database' => true,
                 'table_count'    => count($tables),
+                // 🧊 WAS THIS SNAPSHOT TAKEN AT ONE MOMENT? One of the three
+                //    words consistentReadVerdict() answers. Written for the
+                //    person who has to put it back: a snapshot that was read
+                //    table by table can hold half a record, and the restore
+                //    finds that out only when it refuses the second half.
+                //    NOT in the schema's `required` list, for the same reason
+                //    `whole_database` is not: a snapshot written before this
+                //    existed does not carry it, and must still restore.
+                'one_moment'     => $oneMoment,
                 'tables'         => [],
             ];
             $totalRows = 0;
@@ -1985,12 +2225,21 @@ class DbBackup
 
             $finished = true;
             $warning  = self::unlistedWarning($unlisted);
+            $warnings = $warning === '' ? [] : [$warning];
+            // 🧊 SAY IT HERE TOO, not only in the manifest. Nobody reads a
+            //    manifest until the day they need the backup, which is the one
+            //    day this is no use to them.
+            $oneMomentWarning = self::oneMomentWarning($oneMoment, false);
+            if ($oneMomentWarning !== '') {
+                $warnings[] = $oneMomentWarning;
+            }
             return [
                 'success'         => true,
                 'directory'       => $dir,
                 'tables'          => count($tables),
                 'rows'            => $totalRows,
-                'warnings'        => $warning === '' ? [] : [$warning],
+                'warnings'        => $warnings,
+                'one_moment'      => $oneMoment,
                 'unlisted_values' => $unlisted,
             ];
         } catch (\Throwable $e) {
@@ -2589,6 +2838,10 @@ class DbBackup
                     'reason'     => '(unfinished: this is not a backup)',
                     'complete'   => false,
                     'unlisted_values' => [],
+                    // No manifest means no answer, which is exactly what
+                    // ONE_MOMENT_NOT_RECORDED is for. It is never 'yes' here:
+                    // an unfinished folder is not a backup at all.
+                    'one_moment' => self::ONE_MOMENT_NOT_RECORDED,
                 ];
                 continue;
             }
@@ -2606,6 +2859,7 @@ class DbBackup
                 'reason'     => (string) ($manifest['reason'] ?? ''),
                 'complete'   => true,
                 'unlisted_values' => self::unlistedIn($manifest),
+                'one_moment' => self::oneMomentIn($manifest),
             ];
         }
         return $snapshots;
@@ -2667,6 +2921,217 @@ class DbBackup
             }
         }
         return $count;
+    }
+
+    // =========================================================================
+    // ⏰ Is anything actually calling the scheduled backup job? (#581)
+    // =========================================================================
+
+    /**
+     * The file that records the last time `cron/backup-run` was called.
+     *
+     * ⚠️ A FILE, AND NOT A SETTINGS ROW OR A COLUMN, ON PURPOSE. Every table
+     *    in the database goes into every snapshot, so a value kept in one
+     *    travels backwards whenever a snapshot is put back: restore a snapshot
+     *    taken while the scheduler was working and the portal would say the
+     *    scheduler is working, on a server where it has since stopped. That is
+     *    a false reassurance about backups, which is the worst direction for
+     *    this particular sentence to be wrong in. `cron/backup-run.php` draws
+     *    the same line for the same reason and says so in its own header:
+     *    "restoring the database cannot confuse it, because the answer is not
+     *    in the database at all."
+     *
+     *    It begins with a dot so that nothing lists it as a snapshot, and it
+     *    sits beside `.backup-run.lock`, which that job already keeps here.
+     *    What it CANNOT survive: somebody copying a whole `_backups` folder
+     *    from one server to another, which carries this file with it. That is
+     *    a recovery, not an ordinary day, and the first call after it puts the
+     *    answer right.
+     */
+    private const SCHEDULED_CALL_FILE = '.backup-run-last';
+
+    /**
+     * How recently the job must have been called to count as "being called".
+     *
+     * Two days, because the job is meant to be called ONCE A DAY whatever the
+     * frequency setting says (see `cron/backup-run.php`), so one missed night
+     * — a host's scheduler running late, a server restarted — must not read as
+     * "nothing is calling it". Three days would hide a scheduler that stopped
+     * on Friday until Monday; one day would cry wolf every time a host ran
+     * twenty-five hours apart. `MailQueue::JOB_RECENT_SECONDS` is the
+     * precedent for the idea, with a much shorter window because that job is
+     * meant to run every minute.
+     */
+    private const SCHEDULED_CALL_RECENT_SECONDS = 172800;
+
+    /**
+     * ⏰ Write down that the scheduled backup job was called, just now.
+     *
+     * Called by `cron/backup-run.php` on EVERY call that gets past the token,
+     * including one that decides no snapshot is due and one that finds the
+     * schedule switched off. That is the whole point: the question this
+     * answers is "is anything calling the portal?", which is a different
+     * question from "has a backup been taken lately", and the Backup page can
+     * only tell somebody the truth if it can tell those two apart.
+     *
+     * Never throws. A backups folder that cannot be written to is a real
+     * problem, but it is the SNAPSHOT's problem to report, and a job that
+     * failed because it could not write a note about itself would be absurd.
+     *
+     * @return bool True when the note was written. The caller may ignore it;
+     *              it is returned so a test can tell "not written" from
+     *              "written and then not read back".
+     */
+    public function recordScheduledCall(): bool
+    {
+        if (is_dir($this->backupsRoot) === false) {
+            // Not made here: the folder is the snapshot's to create (see
+            // snapshot()), and making it from a note about a job would hide a
+            // misconfigured path behind a file nobody looks at.
+            //
+            // THE COST, said plainly: on an installation whose backups folder
+            // does not exist yet, a call is not recorded, so the Backup page
+            // says nothing is calling the job when something is. That is the
+            // wrong answer in the SAFE direction — it under-claims, never
+            // over-claims — and it lasts only until the first snapshot, which
+            // makes the folder.
+            return false;
+        }
+        $path = $this->backupsRoot . DIRECTORY_SEPARATOR . self::SCHEDULED_CALL_FILE;
+        $text = (string) time();
+
+        return @file_put_contents($path, $text) === strlen($text);
+    }
+
+    /**
+     * ⏰ When was the scheduled backup job last called, as a Unix moment?
+     *
+     * @return int|null Null when nothing has ever called it on this server, or
+     *         when the note cannot be read or does not hold a moment. All of
+     *         those mean the same thing to a reader — "there is no evidence
+     *         anything is calling it" — and none of them is allowed to read as
+     *         evidence that something is.
+     */
+    public function scheduledCallLastSeen(): ?int
+    {
+        $path = $this->backupsRoot . DIRECTORY_SEPARATOR . self::SCHEDULED_CALL_FILE;
+        if (is_file($path) === false) {
+            return null;
+        }
+        $text = @file_get_contents($path);
+        if (is_string($text) === false || preg_match('/\A\d{1,12}\z/', trim($text)) !== 1) {
+            return null;
+        }
+
+        return (int) trim($text);
+    }
+
+    /**
+     * ⏰ THE ONE TEST of "is anything calling the scheduled backup job?" (#581)
+     *
+     * `scheduleWords()` asks this, and so does the Backup page when it chooses
+     * which colour to draw its answer in. It exists so that there is exactly
+     * one place where "recently" is decided: the page's first version worked
+     * the colour out by looking at how the sentence STARTED, which is the
+     * shape of thing that turns into a wrong colour the day somebody improves
+     * the wording.
+     *
+     * A moment in the FUTURE is not evidence: a clock put back, or a whole
+     * `_backups` folder copied from another server, would otherwise read as
+     * "called just now" for as long as the difference lasted.
+     *
+     * @param int|null $lastSeen From scheduledCallLastSeen().
+     * @param int      $now      The present moment, passed in; nothing here
+     *                           reads the clock.
+     */
+    public static function scheduleIsRunning(?int $lastSeen, int $now): bool
+    {
+        if ($lastSeen === null || $lastSeen > $now) {
+            return false;
+        }
+
+        return ($now - $lastSeen) <= self::SCHEDULED_CALL_RECENT_SECONDS;
+    }
+
+    /**
+     * ⏰ THE ONE SENTENCE that says whether backups are really being taken on a
+     * timer (#581).
+     *
+     * WHY THIS EXISTS. The portal gained a scheduled backup job, a setting for
+     * how often, and a page that offered the choices — and nothing anywhere
+     * could say whether the hosting company's scheduler was calling it. The
+     * page said "this only happens if your scheduler is calling the portal",
+     * which is true and useless: an administrator who has not set up the
+     * scheduler sees "Every day" chosen in a box and reasonably believes a
+     * backup is being taken every day. The setting ships as `daily`, so that
+     * is the state every new installation is in. A SCHEDULE NOBODY SET UP MUST
+     * NOT LOOK LIKE A SCHEDULE THAT IS RUNNING.
+     *
+     * ⚠️ SIX COMPLETE SENTENCES, ONE PER BRANCH, spelled out rather than
+     *    assembled from pieces — the #694 rule. Three states of the setting
+     *    collapse to two here (off, or any of the three periods), times three
+     *    states of the evidence (never called, called recently, called but not
+     *    recently).
+     *
+     * ⚠️ IT NEVER SAYS A BACKUP WAS TAKEN. Being called and taking a snapshot
+     *    are different things: a call that decides nothing is due answers in
+     *    one query and takes nothing, which is correct behaviour. Whether
+     *    there is a fresh backup is what `cron/backup-check` and the freshness
+     *    line on the health page are for, and this sentence must not be read
+     *    as covering it.
+     *
+     * @param string   $frequency The stored `backup.schedule.frequency` word.
+     * @param int|null $lastSeen  From scheduledCallLastSeen().
+     * @param int      $now       The present moment, passed in so a test can
+     *                            choose it; nothing here reads the clock.
+     */
+    public static function scheduleWords(string $frequency, ?int $lastSeen, int $now): string
+    {
+        $isOff  = in_array($frequency, ['daily', 'weekly', 'monthly'], true) === false;
+        // ONE place decides "recently": see scheduleIsRunning(). A note from
+        // the future is not evidence of anything, and it reads as "called, but
+        // not recently", which is the cautious one of the two.
+        $recent = self::scheduleIsRunning($lastSeen, $now);
+        $stale  = $lastSeen !== null && $recent === false;
+
+        if ($isOff === true && $lastSeen === null) {
+            return 'No backup is being taken on a timer. Automatic backups are switched off here, and '
+                 . 'nothing has ever called the portal\'s backup job on this server either. Backups are '
+                 . 'being taken only when somebody presses the button on this page, and before an upgrade.';
+        }
+        if ($isOff === true && $recent === true) {
+            return 'Your hosting company\'s scheduler IS calling the portal\'s backup job — it last called '
+                 . 'on ' . date('j F Y \a\t H:i', $lastSeen) . ' — but automatic backups are switched off '
+                 . 'here, so every call answers "switched off" and takes nothing. Choose how often below to '
+                 . 'make those calls take a backup.';
+        }
+        if ($isOff === true && $stale === true) {
+            return 'No backup is being taken on a timer. Automatic backups are switched off here, and the '
+                 . 'last time anything called the portal\'s backup job was ' . date('j F Y \a\t H:i', $lastSeen)
+                 . ', which is not recent. Backups are being taken only when somebody presses the button on '
+                 . 'this page, and before an upgrade.';
+        }
+        if ($isOff === false && $lastSeen === null) {
+            return 'NOTHING IS CALLING THE PORTAL\'S BACKUP JOB, so no backup is being taken on a timer, '
+                 . 'whatever this page is set to. The portal cannot call itself: your hosting company\'s '
+                 . 'scheduler has to, once a day, at the address below. Nothing has ever called it on this '
+                 . 'server. Until it does, backups are being taken only when somebody presses the button on '
+                 . 'this page, and before an upgrade.';
+        }
+        if ($isOff === false && $recent === true) {
+            return 'Your hosting company\'s scheduler is calling the portal\'s backup job. It last called on '
+                 . date('j F Y \a\t H:i', $lastSeen) . '. That is what this page needs in order to work, and '
+                 . 'it is happening. Whether there is a FRESH backup is a separate question, answered by the '
+                 . 'list of backups below: a call that decides none is due yet takes nothing, which is '
+                 . 'correct.';
+        }
+
+        return 'SOMETHING WAS CALLING THE PORTAL\'S BACKUP JOB AND HAS STOPPED. The last call was on '
+             . date('j F Y \a\t H:i', (int) $lastSeen) . ', and it is meant to be called once a day. So no '
+             . 'backup is being taken on a timer at the moment, whatever this page is set to. Ask your '
+             . 'hosting company whether the scheduled task is still there and still working. Until it is, '
+             . 'backups are being taken only when somebody presses the button on this page, and before an '
+             . 'upgrade.';
     }
 
     /**
@@ -3504,6 +3969,22 @@ class DbBackup
         $emptied        = [];
         $outsideChanged = [];
         $warnings       = [];
+
+        // 🧊 SAY IF THIS SNAPSHOT WAS NOT READ AT ONE MOMENT, or does not say
+        //    (#581). It belongs here rather than only in snapshot()'s own
+        //    answer because the person putting a backup back is not usually
+        //    the person who took it, and may be reading a snapshot taken
+        //    months ago by a scheduled job nobody watched. A restore is not
+        //    refused over it: the fault it warns about shows up as a row
+        //    pointing at a row that is not in the snapshot, which the restore
+        //    already refuses by itself and says so in those words — and
+        //    refusing in advance would turn "this snapshot may not go back"
+        //    into "this snapshot cannot be tried", at the one moment somebody
+        //    is trying to recover.
+        $oneMomentSays = self::oneMomentWarning(self::oneMomentIn($manifest), true);
+        if ($oneMomentSays !== '') {
+            $warnings[] = $oneMomentSays;
+        }
 
         // 🧾 SAY what was held back, if anything. A restore that quietly skips
         //    a table is the silent kind of failure this portal keeps being

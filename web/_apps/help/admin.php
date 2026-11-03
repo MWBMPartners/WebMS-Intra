@@ -676,9 +676,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <ul>
         <li>
             <strong>Kept because the law or the organisation's duty requires it.</strong> Giving
-            records as above. Expense claims, which HMRC requires for six years &mdash; the
-            claimant's name comes off the claim, but the receipts attached to it keep the filename
-            they were uploaded with, which is often a person's name. The adults authorised to
+            records as above. <strong>Expense claims, which HMRC requires for six years &mdash; and
+            the claimant is kept with them.</strong> That was decided deliberately on 3 November
+            2026: a record of a payment that cannot say who was paid is of little use as one. This
+            page used to say the claimant's name came off the claim, and that was wrong in the
+            reassuring direction &mdash; the erasure does try to remove the account link, and the
+            database will not allow that column to be empty, so the report of the erasure records
+            that it could do nothing there. What stops the claim naming anybody is that the account
+            itself is emptied, so the claim points at an account with no name on it; the account
+            number stays. The receipts attached to a claim also keep the filename they were
+            uploaded with, which is often a person's name. The adults authorised to
             collect a child, because the organisation's duty of care to that child does not end
             because an adult asked to be erased. A Gift Aid declaration, with the network address
             it was made from, because that is part of the evidence it was made.
@@ -764,24 +771,56 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             them would take a record from the organisation to no benefit of the person asking.
         </li>
         <li>
-            <strong>Not reached, which is a fault rather than a decision.</strong> Two are left, and
-            each has a number against it so neither is forgotten:
+            <strong>Emptied on request since 3 November 2026, because the person is the one the
+            record is ABOUT.</strong> Two of these were decided that day, and both are the same
+            decision: the portal had been treating the person as <em>somebody who acted on a
+            record</em> when they were in fact its subject, and emptying text on an actor's name
+            would wipe somebody else's details, so the portal would not do it.
             <ul>
                 <li>
-                    <strong>A salvation card's prayer request.</strong> Nothing on the card says
-                    whose it is &mdash; the only account on it is the follow-up worker it was given
-                    to, and emptying on that would wipe a card about somebody else because a
-                    volunteer left.
+                    <strong>Why somebody wanted a room, and the note refusing them.</strong> A
+                    booking is made by the person it is about, so their stated reason is emptied.
+                    The booking itself stays, so the room's history is intact, and a booking
+                    somebody else made and this person only <em>approved</em> keeps its reason.
+                    (This page used to list this under "not reached"; that stopped being true when
+                    the change was made and the page had not been brought into line.)
                 </li>
                 <li>
-                    <strong>Why somebody wanted a room, and why a booking was turned down.</strong>
-                    The booking does name the person who made it, but it names them as
-                    <em>somebody who acted</em>, and emptying text on that basis is the same
-                    mistake as the one above. Reclassifying it is tracked as its own change.
+                    <strong>The contact details typed on to an equipment loan.</strong> The loan
+                    form asks for a telephone number or e-mail address for whoever borrowed the
+                    item, whether they are a member or not, so on a member's own loan that is their
+                    own number. It is emptied now. The loan stays &mdash; which item went out, when
+                    it went, when it came back &mdash; and a loan somebody else borrowed, which
+                    this person only approved or asked for, keeps that borrower's details.
                 </li>
             </ul>
-            <strong>If somebody asks to be erased and either of these matters to them, deal with it
-            directly and record that you have.</strong>
+        </li>
+        <li>
+            <strong>Not reached, which is a fault rather than a decision.</strong> One is left, with
+            a number against it so it is not forgotten: <strong>a salvation card's prayer
+            request</strong>. Nothing on the card says whose it is &mdash; the only account on it is
+            the follow-up worker it was given to, and emptying on that would wipe a card about
+            somebody else because a volunteer left.
+            <strong>If somebody asks to be erased and this matters to them, deal with it directly
+            and record that you have.</strong>
+        </li>
+        <li>
+            <strong>Deleted, not merely unnamed &mdash; and since 3 November 2026 the portal asks
+            whose record it is.</strong> An <strong>event registration</strong> holds the registered
+            person's name, date of birth, allergies and medical notes, so when it is theirs the
+            whole row is deleted. The portal used to find those by who <em>typed the form in</em>,
+            with nothing to say whether that was the same person &mdash; so erasing a volunteer who
+            had signed somebody else's child up <strong>deleted that child's registration</strong>,
+            and that child's family had asked for nothing. The registration form now asks a
+            signed-in person whether it is their own, and an erasure deletes only the ones that are;
+            for anyone else it removes their link and leaves the registration alone.
+            <br>
+            Two things to know. For registrations made <em>before</em> that change, whoever typed
+            one in is treated as the person it is for &mdash; true of anyone who registered
+            themselves, which is most of them, and where a volunteer typed one for a child the
+            child's name is still on it, so nothing was lost. And a registration made by somebody
+            with no account at all still cannot be found by an erasure request; those are deleted on
+            the event's own time limit instead.
         </li>
     </ul>
     <p>

@@ -226,7 +226,7 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 267; // 235 before section 19 (#709) added nine; the fix round
+const EXPECTED_CHECKS = 272; // 235 before section 19 (#709) added nine; the fix round
                              // replaced its single guard check with eight, giving 251.
                              // Section 20 (#707) then added seven: five on which rows the
                              // change-history step reaches, one on the actor link still
@@ -246,13 +246,23 @@ const EXPECTED_CHECKS = 267; // 235 before section 19 (#709) added nine; the fix
                              // the part-written statement file: 266. Its check
                              // round added one more, in the world where the
                              // donor's records are KEPT — the branch the first
-                             // version could not reach: 267. (#492 part 2 added two
-                             // and they were taken out again in the same
-                             // sitting: emptying an asset loan's contact
-                             // details needs `counterpartyUserID` reclassified
-                             // as a subject column, which is the owner's
-                             // decision. A test asserting today's behaviour as
-                             // correct would be #709's worst shape.)
+                             // version could not reach: 267. #492 part 2 then added
+                             // THREE, once the owner had taken the decision the
+                             // previous builder correctly refused to take for him
+                             // (it had added two and taken them out again, because
+                             // a test asserting today's behaviour as correct would
+                             // be #709's worst shape): a loan the person
+                             // BORROWED loses the telephone number typed about
+                             // them; a loan they only APPROVED keeps the real
+                             // borrower's number and details; and a loan to
+                             // somebody with no account keeps that outsider's
+                             // typed name and details. 267 + 3 = 270. #492 part 3
+                             // added TWO, one per ground, because one account
+                             // holding both cannot tell them apart (#616): a
+                             // registration the person only TYPED IN for
+                             // somebody else's child is KEPT, and one that is
+                             // their own but somebody else typed in is DELETED.
+                             // 270 + 2 = 272.
 
 // The headings that must all be reached for a pass.
 const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21'];
@@ -387,6 +397,22 @@ const MUST_BE_EMPTIED = [
     // dropping two of them again, each with a plausible catalogue excuse, left
     // every gate green.
     'tblResourceBooking.bookedByID' => ['purpose', 'declineReason'],
+    // #492 part 2, 3 November 2026: the telephone number or e-mail address
+    // typed into a loan's "Contact details" box, on a loan the erased person
+    // BORROWED. Added here IN THE SAME CHANGE as the instruction, for the
+    // reason the comment above gives.
+    //
+    // `counterpartyName` is deliberately NOT listed, although the instruction
+    // names it, and the reason is worth being exact about. A loan records its
+    // counterparty as EITHER an account OR that typed name and never both
+    // (`createLoanRequest()`'s switch), so no row a real erasure finds through
+    // the account has a name to empty. Listing it here WOULD pass — the loop
+    // below reads the generic world row, which `ge_insert()` fills column by
+    // column and so holds both at once — and that pass would be a pass on a
+    // state production cannot reach, which proves nothing (#694's lesson). The
+    // limit is written down in the instruction's own reason instead (#708's
+    // precedent), and section 3b's loan rows are shaped the way real ones are.
+    'tblAssetLoans.counterpartyUserID' => ['counterpartyContact'],
 ];
 
 // Columns the database will not allow to be emptied, so the person's number
@@ -1497,6 +1523,36 @@ function ge_buildLinked(int $p): array
     //    great deal that reviewing one is not treated the same way.
     $r['registration']   = ge_linked('tblEventRegistrations', ['submittedByUserID' => C, 'reviewedByID' => $p], ['fullName' => 'Kit Control']);
 
+    // 📝 #492 PART 3 (3 November 2026). Three people can be named on a
+    //    registration and they mean three different things, so each of the two
+    //    that matter here gets a ROW OF ITS OWN in which the erased person
+    //    holds that ground AND NOTHING ELSE (#616's lesson: one account
+    //    holding several grounds cannot tell them apart).
+    //
+    //    First: a registration the person TYPED IN for somebody else's child.
+    //    This is the fault the issue was about. Until migration 246 the
+    //    erasure deleted a registration found through `submittedByUserID`, so
+    //    erasing this volunteer destroyed the child's record — the child's
+    //    name, date of birth, allergies and medical notes — and that child's
+    //    family had asked for nothing. It must now SURVIVE, losing only the
+    //    volunteer's link to it.
+    $r['registrationTyped'] = ge_linked('tblEventRegistrations', ['submittedByUserID' => $p, 'registeredForUserID' => C, 'reviewedByID' => D], [
+        'fullName'     => 'Kit Control',
+        'medicalNotes' => 'Carries an inhaler.',
+        'parentPhone'  => '07700 900789',
+    ]);
+
+    //    Second, and the other way round: a registration that IS the person's
+    //    own, which SOMEBODY ELSE typed in for them. It must be DELETED, which
+    //    is what proves the delete follows the SUBJECT rather than the typist.
+    //    Without this row the delete could be moved back on to
+    //    `submittedByUserID` and the row above would then be the only thing
+    //    that failed, which reads like one fault rather than two.
+    $r['registrationOwn'] = ge_linked('tblEventRegistrations', ['submittedByUserID' => C, 'registeredForUserID' => $p, 'reviewedByID' => D], [
+        'fullName'     => 'Pat Erased',
+        'medicalNotes' => 'Allergic to penicillin.',
+    ]);
+
     // 🫶 A pastoral case about C: one visit the person made, and one D made
     //    whose follow-up was given to the person.
     $r['case']           = ge_linked('tblCareCase', ['personUserID' => C, 'openedByID' => D]);
@@ -1538,6 +1594,59 @@ function ge_buildLinked(int $p): array
     //    columns and every check would still pass.
     $r['bookingApproved'] = ge_linked('tblResourceBooking', ['bookedByID' => C, 'approvedByID' => $p], ['status' => 'approved', 'purpose' => 'Cal wants the hall for a baby shower', 'declineReason' => null]);
 
+    // 📦 A LOAN THE PERSON BORROWED, with their own telephone number typed
+    //    into the loan's "Contact details" box — which is what
+    //    `assets/loan.php` really does, because only the three counterparty
+    //    PICKERS are hidden and the box is shown for every kind of borrower.
+    //    `counterpartyName` is left EMPTY here on purpose: a real loan names
+    //    its counterparty by EITHER an account or that typed name and never
+    //    both (`createLoanRequest()`'s switch), so filling both would be a
+    //    state production cannot reach, and a fixture in such a state tests
+    //    nothing (#694's lesson).
+    $r['loanBorrowed'] = ge_linked('tblAssetLoans', ['counterpartyUserID' => $p, 'approvedByID' => D, 'requestedByID' => D], [
+        'counterpartyType'    => 'user',
+        'counterpartyName'    => null,
+        'counterpartyContact' => '07700 900123',
+        'status'              => 'returned',
+        'notes'               => 'Borrowed the PA speaker for the youth weekend.',
+    ]);
+
+    // 🛡️ AND A LOAN SOMEBODY ELSE BORROWED, which this person only APPROVED.
+    //    This is the control that makes #492 part 2 provable rather than
+    //    asserted. `counterpartyUserID` moved out of ACTOR_COLUMNS so the
+    //    borrower's own contact details can be emptied; `approvedByID` and
+    //    `requestedByID` STAYED actor columns, and if that ever changed,
+    //    emptying on one of them would be a blanket `= NULL` over the contact
+    //    details of every loan this person ever approved — a third party's
+    //    record. Without this row the reclassification could be widened to
+    //    both columns and every check would still pass.
+    $r['loanApproved'] = ge_linked('tblAssetLoans', ['counterpartyUserID' => C, 'approvedByID' => $p, 'requestedByID' => $p], [
+        'counterpartyType'    => 'user',
+        'counterpartyName'    => null,
+        'counterpartyContact' => '07700 900456',
+        'status'              => 'active',
+        'notes'               => 'Cal has the projector until the end of term.',
+    ]);
+
+    // 🏷️ A loan to somebody OUTSIDE the organisation, with a typed name and
+    //    their contact details, which this person approved. Nothing on the
+    //    row links it to the erased person's account as a BORROWER, so the
+    //    outside person's name and number must survive untouched — this is
+    //    the case the catalogue's reason describes as unreachable, and it is
+    //    the one a blanket emptying on `approvedByID` would destroy.
+    //    The empty account number goes through `$fixed`, NEVER through the
+    //    people list: `ge_insert()` reads that list as `$people[$name] ?? $other`
+    //    and `null ?? D` is D, so a null asked for there silently becomes the
+    //    second control's number.
+    $r['loanOutside'] = ge_linked('tblAssetLoans', ['approvedByID' => $p, 'requestedByID' => D], [
+        'counterpartyType'    => 'other',
+        'counterpartyUserID'  => null,
+        'counterpartyName'    => 'St Swithun\'s, next door',
+        'counterpartyContact' => 'office@stswithuns.selftest.invalid',
+        'status'              => 'returned',
+        'notes'               => 'Lent them the gazebo for their fete.',
+    ]);
+
     // 🎥 Zoom: the person's own connection with a meeting made through it,
     //    and a meeting the person made through C's connection.
     $r['zoomOfPerson']   = ge_linked('tblZoomAccount', ['userID' => $p]);
@@ -1554,7 +1663,10 @@ function ge_buildLinked(int $p): array
 
     // Everything NOT named here must come through the erasure byte for byte:
     // the whole-database comparison in section 4 holds it to that.
-    $mayChange = ['inviteAccepted', 'inviteSent', 'swapAsked', 'swapAskedDone', 'booking', 'bookingApproved', 'registration', 'visitor', 'noteByPerson', 'visitorIsC', 'visitorIsP', 'noteAboutP', 'card', 'taskGiven', 'taskMade',
+    $mayChange = ['inviteAccepted', 'inviteSent', 'swapAsked', 'swapAskedDone', 'booking', 'bookingApproved',
+        'loanBorrowed', 'loanApproved', 'loanOutside',
+        'registration', 'registrationTyped', 'registrationOwn',
+        'visitor', 'noteByPerson', 'visitorIsC', 'visitorIsP', 'noteAboutP', 'card', 'taskGiven', 'taskMade',
         'slotOfPerson', 'slotOfC', 'swapWaiting', 'swapAccepted', 'checkin', 'visitByPerson', 'visitFollowUp', 'payment',
         'pledge', 'giftToPledge', 'zoomOfPerson', 'meetingViaPerson', 'meetingViaC'];
 
@@ -2341,7 +2453,7 @@ foreach (MUST_BE_EMPTIED as $where => $columns) {
         }
     }
 }
-ge_ok('typed details about the person are emptied, by name: a prayer request\'s name, e-mail address, sender address, subject, body and partner note, a pastoral case\'s name and summary (#715), and a room booking\'s stated reason and decline note (#723)',
+ge_ok('typed details about the person are emptied, by name: a prayer request\'s name, e-mail address, sender address, subject, body and partner note, a pastoral case\'s name and summary (#715), a room booking\'s stated reason and decline note (#723), and an asset loan\'s contact details (#492 part 2)',
     $stillThere === [], implode('; ', $stillThere));
 $twoColumnTables = [];
 foreach ($worldA['rows'] as $tracked) {
@@ -2471,11 +2583,80 @@ ge_ok('...while a booking SOMEBODY ELSE made and this person only APPROVED keeps
     && (int) $now['bookingApproved']['bookedByID'] === C
     && $now['bookingApproved']['purpose'] === 'Cal wants the hall for a baby shower',
     json_encode(['before' => $was['bookingApproved'], 'after' => $now['bookingApproved']]));
+// 📦 #492 PART 2 (3 November 2026). Same shape as the two booking checks
+//    above, on a different table and for the same reason: the borrower is the
+//    person a loan record is ABOUT, so `counterpartyUserID` left
+//    ACTOR_COLUMNS and the contact details typed about them are emptied.
+ge_ok('a LOAN THE PERSON BORROWED keeps which item went out, its status and the organisation\'s note, and loses the account link AND the telephone number typed about them (#492 part 2)',
+    (int) $was['loanBorrowed']['counterpartyUserID'] === P_A
+    && $was['loanBorrowed']['counterpartyContact'] === '07700 900123'
+    && ge_same($was['loanBorrowed'], $now['loanBorrowed'], ['counterpartyUserID', 'counterpartyContact']) === true
+    && $now['loanBorrowed']['counterpartyUserID'] === null
+    && $now['loanBorrowed']['counterpartyContact'] === null
+    && (int) $now['loanBorrowed']['assetID'] === (int) $was['loanBorrowed']['assetID']
+    && $now['loanBorrowed']['status'] === 'returned'
+    && $now['loanBorrowed']['notes'] === 'Borrowed the PA speaker for the youth weekend.',
+    json_encode(['before' => $was['loanBorrowed'], 'after' => $now['loanBorrowed']]));
+// 🛡️ THE CONTROL, and it is the half that stops real harm. `approvedByID` and
+//    `requestedByID` are still actor columns: emptying text on either would
+//    wipe the contact details of every loan this person ever approved or
+//    asked for, and those details belong to whoever borrowed the item.
+//    Without this row the reclassification could have been widened to both
+//    columns and nothing would have noticed.
+ge_ok('...while a loan SOMEBODY ELSE borrowed, which this person only APPROVED and ASKED FOR, keeps that borrower\'s number and contact details; only the approver and the requester are detached (#492 part 2)',
+    (int) $was['loanApproved']['approvedByID'] === P_A
+    && (int) $was['loanApproved']['requestedByID'] === P_A
+    && (int) $was['loanApproved']['counterpartyUserID'] === C
+    && ge_same($was['loanApproved'], $now['loanApproved'], ['approvedByID', 'requestedByID']) === true
+    && $now['loanApproved']['approvedByID'] === null
+    && $now['loanApproved']['requestedByID'] === null
+    && (int) $now['loanApproved']['counterpartyUserID'] === C
+    && $now['loanApproved']['counterpartyContact'] === '07700 900456',
+    json_encode(['before' => $was['loanApproved'], 'after' => $now['loanApproved']]));
+// 🏷️ And the case the catalogue's reason describes as out of reach: a loan to
+//    somebody with no account. Nothing on the row names the erased person as
+//    the borrower, so the outside person's typed name and contact details must
+//    come through untouched — an administrator clears those on the loan. This
+//    is also the row that would be destroyed if `nullCols` were ever moved on
+//    to the approver's instruction.
+ge_ok('...and a loan to somebody OUTSIDE the organisation, which this person approved, keeps that outsider\'s typed name and contact details (#492 part 2)',
+    $was['loanOutside']['counterpartyUserID'] === null
+    && (int) $was['loanOutside']['approvedByID'] === P_A
+    && ge_same($was['loanOutside'], $now['loanOutside'], ['approvedByID']) === true
+    && $now['loanOutside']['approvedByID'] === null
+    && $now['loanOutside']['counterpartyName'] === 'St Swithun\'s, next door'
+    && $now['loanOutside']['counterpartyContact'] === 'office@stswithuns.selftest.invalid',
+    json_encode(['before' => $was['loanOutside'], 'after' => $now['loanOutside']]));
 ge_ok('a CHILD\'S EVENT REGISTRATION that somebody else submitted and the person only REVIEWED is kept, with the child\'s name and medical details; only the reviewer is detached',
     (int) $was['registration']['reviewedByID'] === P_A && ge_same($was['registration'], $now['registration'], ['reviewedByID']) === true
     && $now['registration']['reviewedByID'] === null && (int) $now['registration']['submittedByUserID'] === C
     && $now['registration']['fullName'] === 'Kit Control' && $now['registration']['medicalNotes'] === $was['registration']['medicalNotes']
     && $now['registration']['medicalNotes'] !== null, json_encode($now['registration']));
+// 📝 #492 PART 3 (3 November 2026). The fault the issue was about, and its
+//    mirror. The first row is a registration the erased person only TYPED IN
+//    for somebody else's child: before migration 246 the erasure deleted it,
+//    taking the child's name, date of birth, allergies and medical notes with
+//    it. It must now survive with the volunteer merely detached.
+ge_ok('a CHILD\'S EVENT REGISTRATION the person TYPED IN FOR SOMEBODY ELSE is KEPT, with the child\'s name, medical notes and parent\'s telephone number; only the person who typed it is detached (#492 part 3)',
+    (int) $was['registrationTyped']['submittedByUserID'] === P_A
+    && (int) $was['registrationTyped']['registeredForUserID'] === C
+    && $now['registrationTyped'] !== null
+    && ge_same($was['registrationTyped'], $now['registrationTyped'], ['submittedByUserID']) === true
+    && $now['registrationTyped']['submittedByUserID'] === null
+    && (int) $now['registrationTyped']['registeredForUserID'] === C
+    && $now['registrationTyped']['fullName'] === 'Kit Control'
+    && $now['registrationTyped']['medicalNotes'] === 'Carries an inhaler.'
+    && $now['registrationTyped']['parentPhone'] === '07700 900789',
+    json_encode(['before' => $was['registrationTyped'], 'after' => $now['registrationTyped']]));
+// 🗑️ And the other way round, which is what proves the delete follows the
+//    SUBJECT rather than the typist: a registration that IS the person's own,
+//    typed in by somebody else, is DELETED.
+ge_ok('...while a registration that IS the person\'s own, typed in by somebody else, is DELETED with its medical notes (#492 part 3)',
+    (int) $was['registrationOwn']['registeredForUserID'] === P_A
+    && (int) $was['registrationOwn']['submittedByUserID'] === C
+    && $was['registrationOwn']['medicalNotes'] === 'Allergic to penicillin.'
+    && $now['registrationOwn'] === null,
+    json_encode(['before' => $was['registrationOwn'], 'after' => $now['registrationOwn']]));
 ge_ok('a PASTORAL CASE about somebody else is untouched; a visit the person made is kept with its notes and no number; so is a visit whose follow-up was given to them',
     $now['case'] === $was['case']
     && ge_same($was['visitByPerson'], $now['visitByPerson'], ['visitedByID']) === true && $now['visitByPerson']['visitedByID'] === null

@@ -29,11 +29,12 @@
  *   tblFormResponses      (your Forms Builder responses — internal channel
  *                          only, public/anonymous responses have no
  *                          submitterID to match — #153)
- *   tblEventRegistrations (children you registered for an event while signed
- *                          in — name, date of birth, allergies, medical
- *                          notes, parent contact details. Registrations made
- *                          without an account record nobody to match against,
- *                          and are removed on a time limit instead — #479)
+ *   tblEventRegistrations (event registrations that are yours, and ones you
+ *                          typed in for somebody else while signed in — name,
+ *                          date of birth, allergies, medical notes, parent
+ *                          contact details. Registrations made without an
+ *                          account record nobody to match against, and are
+ *                          removed on a time limit instead — #479, #492)
  *   tblDemoDataRegister   (Demo Data list entries pointing at your account or
  *                          your memberships — only possible if a made-up demo
  *                          person was edited into your real account — #498)
@@ -92,7 +93,15 @@ if ($userId <= 0) {
  * 🛠️ Helper — run a SELECT * style query bound to the current user and
  * return rows with sensitive columns removed.
  *
- * @param string $sql           Prepared SQL with one '?' (the user ID)
+ * Every '?' in the query is the SAME account number. It used to be exactly
+ * one, and became "however many there are" on 3 November 2026 (#492 part 3),
+ * because a table can name a person in more than one column and the download
+ * has to cover each — an event registration can be one the person submitted OR
+ * one that is about them, and the erasure now reaches both, so the download
+ * must too. Counting the marks rather than taking a number as an argument
+ * keeps every caller's query the only place that decides.
+ *
+ * @param string $sql           Prepared SQL whose every '?' is the user ID
  * @param string[] $stripFields Column names to drop from each row
  */
 $fetchUserRows = static function (string $sql, array $stripFields = []) use ($mysqli, $userId): array {
@@ -100,7 +109,12 @@ $fetchUserRows = static function (string $sql, array $stripFields = []) use ($my
     if ($stmt === false) {
         return [];
     }
-    $stmt->bind_param('i', $userId);
+    // 🔢 One bound value per '?'. The SQL here is written by this file alone —
+    //    never built from a request — so counting the marks in it is safe, and
+    //    a query with none would be refused by prepare() long before this.
+    $marks  = substr_count($sql, '?');
+    $values = array_fill(0, max(1, $marks), $userId);
+    $stmt->bind_param(str_repeat('i', count($values)), ...$values);
     $stmt->execute();
     $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
@@ -368,17 +382,26 @@ $payload = [
         // child's name, date of birth, allergies and medical notes, beside a
         // parent's telephone number and email address.
         //
-        // Only registrations submitted while signed in appear here, because
-        // only those record whose account made them. Anybody may register a
-        // child WITHOUT an account, and those carry nothing to match a person
-        // against - the same reasoning as the public form responses above.
-        // Those are covered by a time limit instead: they are deleted a set
-        // number of days after the event, whether anybody asks or not. See
-        // migration 191 and the clear-out on the Retention page.
+        // Only registrations with an account recorded against them appear
+        // here, because only those record anybody to match. Anybody may
+        // register a child WITHOUT an account, and those carry nothing to
+        // match a person against - the same reasoning as the public form
+        // responses above. Those are covered by a time limit instead: they are
+        // deleted a set number of days after the event, whether anybody asks
+        // or not. See migration 191 and the clear-out on the Retention page.
         //
         // This is the matching half of the erasure entry: the portal must be
         // able to both HAND OVER and REMOVE the same information, and until
-        // now it could do neither for this table.
+        // #479 it could do neither for this table.
+        //
+        // 👤 TWO COLUMNS SINCE #492 PART 3 (3 November 2026, migration 246),
+        //    and both are needed. `registeredForUserID` says whose record the
+        //    registration IS, and that is the column an erasure DELETES on; it
+        //    can be a registration somebody else typed in, so matching only on
+        //    the submitter would hand back less than the erasure removes.
+        //    `submittedByUserID` says who typed it, and those registrations
+        //    stay here because the person really does hold them: they filled
+        //    the form in, and they may need to see what they sent.
         'eventRegistrations' => $fetchUserRows(
             'SELECT r.registrationID, r.eventID, e.eventName, e.startDateTime, '
             . 'r.fullName, r.dateOfBirth, r.grade, r.gender, r.shirtSize, '
@@ -387,7 +410,7 @@ $payload = [
             . 'r.emergencyContactPhone, r.status, r.source, r.createdAt '
             . 'FROM tblEventRegistrations AS r '
             . 'INNER JOIN tblEvents AS e ON e.eventID = r.eventID '
-            . 'WHERE r.submittedByUserID = ?'
+            . 'WHERE r.submittedByUserID = ? OR r.registeredForUserID = ?'
         ),
         // 👥 Small Groups (#150) — export↔erasure parity with the six
         // GdprEraser::catalogue() entries added alongside this block.

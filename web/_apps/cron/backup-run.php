@@ -91,6 +91,32 @@ if ($expected === '' || is_string($supplied) === false || hash_equals($expected,
 
 header('Content-Type: application/json');
 
+// -----------------------------------------------------------------------------
+// ⏰ WRITE DOWN THAT WE WERE CALLED, before anything else is decided (#581).
+// -----------------------------------------------------------------------------
+// The portal could take a backup on a timer and could offer the choices on a
+// page, but nothing anywhere could say whether the hosting company's scheduler
+// was actually calling this address. The setting ships as `daily`, so every new
+// installation showed "Every day" chosen in a box while, on most of them,
+// nothing was calling this job at all. A SCHEDULE NOBODY SET UP MUST NOT LOOK
+// LIKE A SCHEDULE THAT IS RUNNING.
+//
+// 📍 WHY IT IS HERE AND NOT FURTHER DOWN, which is the whole design:
+//    • AFTER the token check, so a stranger guessing at the address cannot
+//      write a note that makes the page say the scheduler is working;
+//    • BEFORE the "switched off" answer, so an installation that has chosen
+//      `off` can still be told that its scheduler IS calling — otherwise the
+//      only way to find out would be to switch backups on;
+//    • BEFORE the one-run-at-a-time lock, so a second overlapping call still
+//      counts as a call. Two notes a second apart do no harm: the file holds
+//      one moment, and the later one is the true answer.
+//
+// It is kept in a FILE beside the snapshots, never in the database — see
+// DbBackup::recordScheduledCall() for why, and note this job's own header
+// already draws the same line about working out whether a snapshot is due.
+$backup = new DbBackup($mysqli);
+$backup->recordScheduledCall();
+
 /**
  * How often a snapshot should be taken, in hours, or 0 for "never".
  *
@@ -160,8 +186,6 @@ if ($lockHandle !== false && flock($lockHandle, LOCK_EX | LOCK_NB) === false) {
 }
 // Released when the handle closes, which PHP does at the end of the request
 // however the request ends.
-
-$backup = new DbBackup($mysqli);
 
 // 📅 Due? The newest finished snapshot THIS INSTALLATION TOOK decides.
 //

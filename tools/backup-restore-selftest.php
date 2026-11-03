@@ -114,6 +114,10 @@
  *       with it: the refusal, that it happens before anything is read or
  *       emptied, that a table NOT on the list still goes back, and that a
  *       whole-database restore still puts every one of them back
+ *   29  A snapshot SAYS whether it was read at one moment in time, and the
+ *       Backup page can say whether anything is really calling the scheduled
+ *       job. Reaches, on one server, the state a host set to READ COMMITTED is
+ *       in when the isolation line is missing                        (#581)
  *   24  A value that is not on its column's list of choices: the snapshot is
  *       taken and SAYS it cannot be put back whole, naming the table, the
  *       column and how many; mended, a new snapshot goes back exactly
@@ -4660,6 +4664,317 @@ function brs_proof28(): void
     brs_checkSame($before, 'the whole database is back to how this proof found it, and the holding table is empty');
 }
 
+/**
+ * 29 — a snapshot says whether it was read at ONE moment in time (#581).
+ *
+ * WHY THIS PROOF EXISTS, and why it can be run on one database server.
+ *   `snapshot()` reads the tables one after another inside a transaction that
+ *   asks the database for a single consistent view of all of them. TWO lines
+ *   give that view, and the FIRST of them is the one that does the work on a
+ *   host whose own isolation level is READ COMMITTED:
+ *
+ *       SET TRANSACTION ISOLATION LEVEL REPEATABLE READ
+ *       START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY
+ *
+ *   Measured on 3 November 2026 on `mysql:8.0.36 --transaction-isolation=
+ *   READ-COMMITTED`: deleting the first line alone made every snapshot stop
+ *   being taken at one moment — a parent row saved into a table the snapshot
+ *   had already read, and its child into one it had not, gave a snapshot
+ *   holding the child and not the parent — and the snapshot still answered
+ *   "success". On a server whose own level is REPEATABLE READ, which is MySQL's
+ *   default and what THIS test runs on, the same deletion changes nothing and
+ *   proof 11 stays green.
+ *
+ *   So this proof does not need a second server. It takes the isolation level
+ *   away from the BACKUP'S OWN CONNECTION instead: section A shows, with the
+ *   test's own two connections and none of the class's code, that doing so
+ *   really does destroy the isolation; and section B shows that the portal
+ *   then SAYS so, in its answer, in the manifest, and to whoever puts the
+ *   snapshot back.
+ *
+ * WHAT IT CANNOT SHOW
+ *   - That a real shared host behaves this way. Only a server actually set to
+ *     READ COMMITTED proves that, and nothing in this repository runs one;
+ *     `tools/audit-checks/check_snapshot_one_moment.py` is what stops the line
+ *     being deleted.
+ *   - Anything about MariaDB, which prints no warning when it ignores the
+ *     phrase (measured on 11.4.13), so the portal's answer there is always
+ *     "yes" and means only "nothing was said".
+ *   - That the sentences read well. Nothing judges prose.
+ */
+function brs_proof29(): void
+{
+    $before = brs_fingerprint();
+
+    // ---------------------------------------------------------------------
+    // A. THE MECHANISM, measured by this test and not by the class. A
+    //    consistent read hides a row another connection commits afterwards;
+    //    a READ COMMITTED read does not.
+    // ---------------------------------------------------------------------
+    brs_sql('CREATE TABLE tblZzBrsMoment (id INT PRIMARY KEY, label VARCHAR(40) NOT NULL) ENGINE=InnoDB');
+    $tried = [];
+    foreach ([true, false] as $withTheLine) {
+        $reader = brs_connect();
+        $reader->query('SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED');
+        if ($withTheLine === true) {
+            $reader->query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+        }
+        $reader->query('START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY');
+        // Committed by ANOTHER connection after the read began.
+        brs_sql("INSERT INTO tblZzBrsMoment (id, label) VALUES (" . ($withTheLine === true ? 1 : 2) . ", 'later')");
+        $sees = $reader->query('SELECT COUNT(*) FROM tblZzBrsMoment')->fetch_row()[0];
+        $reader->query('ROLLBACK');
+        $reader->close();
+        $tried[$withTheLine === true ? 'with' : 'without'] = (int) $sees;
+    }
+    brs_check(
+        $tried['with'] === 0,
+        'with the isolation level set, a read begun before a row was saved does not see it',
+        'it saw ' . $tried['with'] . ' row(s), so this test cannot tell a consistent read from an inconsistent one'
+    );
+    brs_check(
+        $tried['without'] === 2,
+        'WITHOUT it, on a connection whose session level is READ COMMITTED, the same read DOES see it '
+        . '— which is the fault, and it means section B is not testing nothing',
+        'it saw ' . $tried['without'] . ' row(s)'
+    );
+    brs_sql('DROP TABLE tblZzBrsMoment');
+
+    // ---------------------------------------------------------------------
+    // B. WHAT THE PORTAL SAYS. An ordinary snapshot, then one taken on a
+    //    connection that cannot be given a consistent view.
+    // ---------------------------------------------------------------------
+    $good = brs_backup('p29-good')->snapshot('proof 29 good');
+    if (brs_check(($good['success'] ?? false) === true, 'an ordinary snapshot is taken', brs_say($good)) === true) {
+        brs_check(
+            ($good['one_moment'] ?? '') === DbBackup::ONE_MOMENT_YES,
+            'and its own answer is that it WAS read at one moment',
+            brs_say($good['one_moment'] ?? null)
+        );
+        $manifest = json_decode((string) file_get_contents($good['directory'] . '/_manifest.json'), true);
+        brs_check(
+            ($manifest['one_moment'] ?? null) === DbBackup::ONE_MOMENT_YES,
+            'the manifest on disk says so too, which is the only thing that reaches whoever puts it back',
+            brs_say($manifest['one_moment'] ?? null)
+        );
+        brs_check(
+            $good['warnings'] === [],
+            'and NOTHING is said about it, because a reassurance printed on every snapshot is how a real '
+            . 'warning stops being read',
+            brs_say($good['warnings'])
+        );
+    }
+
+    // 🎭 A connection that swallows the one statement that puts the isolation
+    //    level right, on a session set to READ COMMITTED. Together those are
+    //    exactly the state a host set to READ COMMITTED is in if that line is
+    //    ever deleted — which is what this cannot otherwise reach on a server
+    //    whose own level is REPEATABLE READ.
+    $odd = brs_connect('', BrsNoLevel::class);
+    $odd->query('SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED');
+    $root = Brs::$root . '/p29-bad';
+    mkdir($root, 0750, true);
+    $bad = (new DbBackup($odd, $root))->snapshot('proof 29 bad');
+    if (brs_check(($bad['success'] ?? false) === true, 'a snapshot is still TAKEN when the database will not give one moment', brs_say($bad)) === true) {
+        brs_check(
+            ($bad['one_moment'] ?? '') === DbBackup::ONE_MOMENT_NO,
+            'but its own answer is NO',
+            brs_say($bad['one_moment'] ?? null)
+        );
+        $manifest = json_decode((string) file_get_contents($bad['directory'] . '/_manifest.json'), true);
+        brs_check(
+            ($manifest['one_moment'] ?? null) === DbBackup::ONE_MOMENT_NO,
+            'the manifest on disk says no',
+            brs_say($manifest['one_moment'] ?? null)
+        );
+        $said = implode(' ', $bad['warnings']);
+        brs_check(
+            str_contains($said, 'NOT read as one moment in time') === true,
+            'and the person who took it is told so at once',
+            brs_say($bad['warnings'])
+        );
+
+        // ⏪ AND THE RESTORE REPEATS IT. Whoever puts a backup back is not
+        //    usually whoever took it, and may be reading one taken months ago
+        //    by a job nobody watched.
+        $rehearsal = (new DbBackup(brs_connect(), $root))->restoreAll((string) $bad['directory'], true);
+        brs_check(
+            ($rehearsal['success'] ?? false) === true,
+            'such a snapshot is NOT refused — nothing about this stops a recovery being tried',
+            brs_say($rehearsal)
+        );
+        brs_check(
+            str_contains(implode(' ', $rehearsal['warnings']), 'says it was NOT read as one moment in time') === true,
+            'and the rehearsal tells whoever is putting it back, in its own words',
+            brs_say($rehearsal['warnings'])
+        );
+    }
+    $odd->close();
+
+    // ---------------------------------------------------------------------
+    // C. A MANIFEST THAT NEVER LOOKED is a different fact from one that
+    //    looked and could not tell, and must not be told as the same one.
+    // ---------------------------------------------------------------------
+    $dir      = (string) $good['directory'];
+    $manifest = json_decode((string) file_get_contents($dir . '/_manifest.json'), true);
+    unset($manifest['one_moment']);
+    file_put_contents($dir . '/_manifest.json', (string) json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    brs_check(
+        DbBackup::oneMomentIn($manifest) === DbBackup::ONE_MOMENT_NOT_RECORDED,
+        'a manifest with no answer at all reads as "not recorded", not as "cannot tell"',
+        DbBackup::oneMomentIn($manifest)
+    );
+    $old = (new DbBackup(brs_connect(), Brs::$root . '/p29-good'))->restoreAll($dir, true);
+    brs_check(
+        str_contains(implode(' ', $old['warnings']), 'taken before snapshots recorded that') === true,
+        'and putting such a snapshot back says it never looked, rather than claiming it could not tell',
+        brs_say($old['warnings'])
+    );
+    brs_check(
+        DbBackup::oneMomentIn(['one_moment' => 'something else']) === DbBackup::ONE_MOMENT_NOT_RECORDED,
+        'a word a snapshot can never be written with is not trusted, and is never echoed back onto a page',
+        DbBackup::oneMomentIn(['one_moment' => 'something else'])
+    );
+
+    // The five sentences, printed by CALLING THE REAL CODE rather than copied
+    // here, and each required to be different from the others: #694's package
+    // collected four wording faults inside one assembled sentence.
+    $sentences = [];
+    foreach ([DbBackup::ONE_MOMENT_YES, DbBackup::ONE_MOMENT_NO, DbBackup::ONE_MOMENT_CANNOT_TELL, DbBackup::ONE_MOMENT_NOT_RECORDED] as $word) {
+        foreach ([false, true] as $restoring) {
+            $sentences[$word . ($restoring === true ? '/restoring' : '/taking')] = DbBackup::oneMomentWarning($word, $restoring);
+        }
+    }
+    $withWords = array_filter($sentences, static fn (string $s): bool => $s !== '');
+    brs_check(
+        count($withWords) === 5,
+        'five of the eight (answer, who is reading) pairs have a sentence and three deliberately have none',
+        brs_say(array_keys($withWords))
+    );
+    brs_check(
+        count(array_unique($withWords)) === 5,
+        'and no two of those five are the same words',
+        brs_say($withWords)
+    );
+    brs_check(
+        $sentences[DbBackup::ONE_MOMENT_YES . '/taking'] === '' && $sentences[DbBackup::ONE_MOMENT_YES . '/restoring'] === '',
+        '"yes" says nothing at all, either way round',
+        brs_say([$sentences[DbBackup::ONE_MOMENT_YES . '/taking'], $sentences[DbBackup::ONE_MOMENT_YES . '/restoring']])
+    );
+    brs_check(
+        $sentences[DbBackup::ONE_MOMENT_NOT_RECORDED . '/taking'] === '',
+        'and a snapshot being TAKEN can never answer "not recorded", so that pair says nothing either',
+        brs_say($sentences[DbBackup::ONE_MOMENT_NOT_RECORDED . '/taking'])
+    );
+
+    // ---------------------------------------------------------------------
+    // D. IS ANYTHING ACTUALLY CALLING THE SCHEDULED BACKUP JOB? (#581)
+    //    A schedule nobody set up must not look like a schedule that is
+    //    running. The note is a FILE and not a table, so that putting a
+    //    snapshot back cannot make the portal claim the scheduler is working
+    //    on a server where it has since stopped.
+    // ---------------------------------------------------------------------
+    $folder = Brs::$root . '/p29-schedule';
+    mkdir($folder, 0750, true);
+    $job = new DbBackup(brs_connect(), $folder);
+    brs_check($job->scheduledCallLastSeen() === null, 'before anything has called the job, there is no evidence that anything has');
+    brs_check($job->recordScheduledCall() === true, 'a call is written down');
+    $seen = $job->scheduledCallLastSeen();
+    brs_check($seen !== null && abs($seen - time()) <= 5, 'and read back as the moment it happened', brs_say($seen));
+    brs_check(
+        is_file($folder . '/.backup-run-last') === true && glob($folder . '/upgrade-*') === [],
+        'the note is a file beside the snapshots, beginning with a dot, and nothing lists it as a snapshot'
+    );
+    file_put_contents($folder . '/.backup-run-last', "whenever\n");
+    brs_check($job->scheduledCallLastSeen() === null, 'a note that does not hold a moment is no evidence, rather than a moment of zero');
+    $noFolder = new DbBackup(brs_connect(), Brs::$root . '/p29-no-such-folder');
+    brs_check(
+        $noFolder->recordScheduledCall() === false && $noFolder->scheduledCallLastSeen() === null,
+        'with no backups folder the call is not recorded, and the answer under-claims rather than over-claims'
+    );
+
+    $now = 1793000000;
+    brs_check(DbBackup::scheduleIsRunning(null, $now) === false, 'nothing ever calling it is not "running"');
+    brs_check(DbBackup::scheduleIsRunning($now - 3600, $now) === true, 'a call an hour ago is');
+    brs_check(DbBackup::scheduleIsRunning($now - 86400 - 3600, $now) === true, 'and so is one yesterday, because one missed night must not read as "nothing is calling it"');
+    brs_check(DbBackup::scheduleIsRunning($now - (3 * 86400), $now) === false, 'a call three days ago is not');
+    brs_check(
+        DbBackup::scheduleIsRunning($now + 99999, $now) === false,
+        'and a note from the FUTURE is not evidence either — a clock put back, or a folder copied from another server'
+    );
+
+    $words = [];
+    foreach (['off', 'daily'] as $frequency) {
+        foreach ([null, $now - 3600, $now - (5 * 86400)] as $seenAt) {
+            $words[$frequency . '/' . ($seenAt === null ? 'never' : (string) ($now - $seenAt))] =
+                DbBackup::scheduleWords($frequency, $seenAt, $now);
+        }
+    }
+    brs_check(count(array_filter($words)) === 6, 'all six (setting, evidence) pairs have a sentence', brs_say(array_keys(array_filter($words))));
+    brs_check(count(array_unique($words)) === 6, 'and all six are different words', brs_say($words));
+    brs_check(
+        str_contains($words['daily/never'], 'NOTHING IS CALLING') === true,
+        'the sentence for "set to daily, nothing has ever called it" says so plainly: that is the state every '
+        . 'new installation is in, because the setting ships as daily',
+        $words['daily/never']
+    );
+    brs_check(
+        str_contains($words['off/3600'], 'IS calling') === true && str_contains($words['off/3600'], 'switched off') === true,
+        'an installation that has chosen "off" is still told that its scheduler IS calling, so finding out does '
+        . 'not mean switching backups on',
+        $words['off/3600']
+    );
+    brs_check(
+        str_contains($words['daily/432000'], 'HAS STOPPED') === true,
+        'and a scheduler that was calling and has stopped is not reported as one that is calling',
+        $words['daily/432000']
+    );
+    // ⚠️ COMPUTED, not asserted. The first version of this was a loop that
+    //    added a FAILING check for each bad sentence and then an unconditional
+    //    `brs_check(true, ...)` — a clause that cannot fail, which is the shape
+    //    #694's package was caught by four times. Being CALLED and TAKING a
+    //    backup are different things, and a sentence that blurred them would
+    //    tell somebody their data was safe when it is not.
+    $claimsABackup = [];
+    foreach ($words as $where => $sentence) {
+        if (str_contains($sentence, 'backup was taken') === true
+            || str_contains($sentence, 'backup has been taken') === true
+            || str_contains($sentence, 'is being taken every') === true
+        ) {
+            $claimsABackup[] = $where;
+        }
+    }
+    brs_check(
+        $claimsABackup === [],
+        'and none of the six claims a BACKUP was taken: being called and taking one are different things, '
+        . 'and the freshness of the backups is a separate question with its own answer',
+        brs_say($claimsABackup)
+    );
+
+    brs_checkSame($before, 'the whole database is back to how this proof found it');
+}
+
+/**
+ * A connection that cannot be given the isolation level a consistent read
+ * needs: the one statement that asks for it is swallowed and answers yes.
+ * Everything else is the real thing.
+ *
+ * This is how proof 29 reaches, on a server whose own level is REPEATABLE
+ * READ, the state a host set to READ COMMITTED is in when that line is
+ * missing. Nothing in a real database can be made to behave this way on
+ * demand, which is the same reason BrsNoUndo and BrsOddDb exist.
+ */
+final class BrsNoLevel extends mysqli
+{
+    public function query(string $query, int $result_mode = MYSQLI_STORE_RESULT): mysqli_result|bool
+    {
+        if (str_starts_with($query, 'SET TRANSACTION ISOLATION LEVEL') === true) {
+            return true;
+        }
+        return parent::query($query, $result_mode);
+    }
+}
+
 mkdir(Brs::$root, 0750, true);
 Brs::$root    = (string) realpath(Brs::$root);
 // The scratch folder holds whole copies of the database, so it is removed
@@ -4694,6 +5009,7 @@ $proofs = [
     26 => ['The tables a one-table restore refuses by name, and a whole restore still puts back', 'brs_proof26', false],
     27 => ['Rows a restore cannot put back are kept, not lost (#694)', 'brs_proof27', false],
     28 => ['Rows waiting to be put back survive a restore (#697)', 'brs_proof28', false],
+    29 => ['A snapshot says whether it was read at one moment in time, and whether anything is calling the scheduled job (#581)', 'brs_proof29', false],
     // These four need the large table, so they run together at the end.
     5  => ['A large table under a fixed memory limit (#579)', 'brs_proof5', true],
     7  => ['A snapshot that fails or is killed is never counted as a backup', 'brs_proof7', true],

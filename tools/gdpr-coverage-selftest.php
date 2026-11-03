@@ -68,8 +68,13 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 93; // 81 before the #709 fix round added section 8d; round 2
-                            // added four more after three plants went uncaught
+const EXPECTED_CHECKS = 96; // 81 before the #709 fix round added section 8d; round 2
+                            // added four more after three plants went uncaught, giving 93.
+                            // #492 part 3 added one: a child's event registration is
+                            // deleted on the column saying whose record it is and
+                            // nowhere else, and one on the handler that fills that
+                            // column, and #492 part 4 one on the wording a person reads
+                            // about their expense claims. 93 + 3 = 96.
 
 $failures = 0;
 $passes   = 0;
@@ -532,14 +537,22 @@ check(
     implode(', ', $actorDeletes)
 );
 
-// GdprEraser::DELETE_ON_ACTOR_COLUMN lets two TABLES be deleted from on a column
+// GdprEraser::DELETE_ON_ACTOR_COLUMN lets a TABLE be deleted from on a column
 // that says the person acted on the record. It names the table, not the
-// column, and one of those tables now has a second such column: who REVIEWED
-// a child's event registration. A delete on that would destroy a child's
-// record, medical details and all, because of who looked it over. So the one
-// column each of those tables may be deleted on is written out here, exactly.
+// column, so the one column each listed table may be deleted on is written out
+// here, exactly.
+//
+// 🪦 `tblEventRegistrations` CAME OFF BOTH LISTS on 3 November 2026 (#492 part
+//    3). It used to be deleted on `submittedByUserID` — whoever typed the form
+//    in — so erasing a volunteer who had registered somebody else's child
+//    deleted that child's registration. Migration 246 adds
+//    `registeredForUserID`, which says whose record it is and is a SUBJECT
+//    column, so the delete needs no exception at all. The table being absent
+//    from DELETE_ON_ACTOR_COLUMN is what the check above now holds: a delete
+//    put back on either `submittedByUserID` or `reviewedByID` fails it. And
+//    `$wrongDelete` below starts from `array_diff()` of the two lists, so
+//    taking a table off only one of them fails too.
 $mayOnlyDeleteOn = [
-    'tblEventRegistrations' => 'submittedByUserID', // whoever signed the child up
     'tblCareAccessLog'      => 'viewerID',          // a line saying this person opened a file
 ];
 $wrongDelete = array_diff(array_keys($deliberateDeletes), array_keys($mayOnlyDeleteOn));
@@ -552,9 +565,122 @@ foreach ($instructions as $instruction) {
     }
 }
 check(
-    'where a whole record MAY be deleted because of what somebody did, it is only on the one column decided: a child\'s registration on who submitted it, never on who reviewed it',
+    'where a whole record MAY be deleted because of what somebody did, it is only on the one column decided: a line saying this person opened a pastoral file, and nothing else',
     $wrongDelete === [],
     implode('; ', $wrongDelete)
+);
+
+// 📝 #492 PART 3, pinned HERE as well as in the real-database test, because
+//    this half judges the LIST before anybody runs an erasure and the other
+//    half judges the run — #709's lesson that both are needed.
+//
+//    A registration must be deleted on exactly one column, the one that says
+//    whose record it is, and the other two must merely detach. Written out as
+//    an exact map rather than "no delete on the submitter", so that deleting
+//    the delete altogether, or moving it, fails here.
+$registrationActions = [];
+foreach ($instructions as $instruction) {
+    if ((string) $instruction['table'] === 'tblEventRegistrations') {
+        $registrationActions[(string) $instruction['userCol']] = (string) $instruction['action'];
+    }
+}
+ksort($registrationActions);
+check(
+    'a child\'s event registration is DELETED only on the column saying whose record it is, and merely detached from whoever typed it in or reviewed it (#492 part 3)',
+    $registrationActions === [
+        'registeredForUserID' => 'delete',
+        'reviewedByID'        => 'anonymise',
+        'submittedByUserID'   => 'anonymise',
+    ],
+    'the instructions for tblEventRegistrations are ' . json_encode($registrationActions)
+    . ' -- a registration holds a child\'s name, date of birth, allergies and medical notes, so deleting'
+    . ' it on request is right; finding it through `submittedByUserID` was not, because that column'
+    . ' records only whoever was signed in when the form was sent, so erasing a volunteer who had'
+    . ' registered somebody else\'s child deleted that child\'s registration. The delete belongs on'
+    . ' `registeredForUserID` (migration 246) and nowhere else.'
+);
+
+// 📝 AND THE WRITER, because the column is only worth anything if something
+//    honest fills it (#492 part 3, 3 November 2026).
+//
+//    `registeredForUserID` is what an erasure DELETES on. If the registration
+//    handler simply copied the submitter into it — the obvious tidy-up, and
+//    what the one-time backfill in migration 246 does for rows that already
+//    existed — then every NEW registration would be back to the old fault:
+//    erasing a volunteer would delete the child's registration. So the write
+//    is pinned here, and the WHOLE condition is pinned, not the words in it:
+//    adding `&& false`, or widening the test to accept anything but the exact
+//    answer "me", fails this.
+//
+//    Nothing in this repository exercises that page over HTTP (there is no
+//    registration page test), which is why this static pin is the only guard
+//    on the write. It cannot tell you the form renders, or that a browser
+//    sends the field — only that the handler still asks the right question.
+$registerSave = __DIR__ . '/../web/_apps/calendar/event-register-save.php';
+$registerText = is_readable($registerSave) === true ? (string) file_get_contents($registerSave) : '';
+$registerTidy = (string) preg_replace('/\s+/', ' ', $registerText);
+$theCondition = 'if ($submittedByArg !== null '
+    . '&& is_string($_POST[\'registeredFor\'] ?? null) === true '
+    . '&& (string) $_POST[\'registeredFor\'] === \'me\' '
+    . ') { $registeredForArg = $submittedByArg; }';
+check(
+    'the registration handler records "who it is for" ONLY when the person said the registration is their own, and the INSERT names that column (#492 part 3)',
+    $registerText !== ''
+    && str_contains($registerTidy, $theCondition) === true
+    // Assigned in exactly two places: the empty default, and inside that block.
+    && preg_match_all('/\$registeredForArg\s*=(?!=)/', $registerText) === 2
+    // Named in the INSERT's column list, AND really bound: the column name on
+    // its own would pass on a statement that lists it and binds nothing.
+    && str_contains($registerTidy, '`submittedByUserID`, `registeredForUserID`,') === true
+    && str_contains($registerTidy, '$submittedByArg, $registeredForArg') === true,
+    $registerText === ''
+        ? 'web/_apps/calendar/event-register-save.php could not be read, so this check proves nothing'
+        : 'the whole condition must be present exactly, `$registeredForArg` must be assigned in exactly two places'
+        . ' (the empty default and inside that block), and the INSERT must both NAME `registeredForUserID` and'
+        . ' BIND $registeredForArg. Found '
+        . preg_match_all('/\$registeredForArg\s*=(?!=)/', $registerText) . ' assignment(s); condition present: '
+        . (str_contains($registerTidy, $theCondition) === true ? 'yes' : 'NO')
+        . '; column in the INSERT: ' . (str_contains($registerTidy, '`submittedByUserID`, `registeredForUserID`,') === true ? 'yes' : 'NO')
+        . '; value bound: ' . (str_contains($registerTidy, '$submittedByArg, $registeredForArg') === true ? 'yes' : 'NO')
+);
+
+// 🧾 #492 PART 4 — THE ONE SENTENCE A PERSON READS ABOUT THEIR EXPENSE CLAIMS.
+//
+//    `tblExpenseClaims`.`userID` is `INT NOT NULL`, so the claimant stays on
+//    the claim whatever anybody intends. Until 3 November 2026 both the
+//    written list and the in-app help said the claimant's name "is removed" /
+//    "comes off the claim", which is UNTRUE and untrue in the REASSURING
+//    direction: the erasure tries, the database refuses, and the report of the
+//    erasure records that it could do nothing. The owner has now decided the
+//    claimant is kept deliberately, for HMRC, so both places say that.
+//
+//    THE POSITIVE CLAUSE COMES FIRST on purpose. A check made only of
+//    ABSENCES passes the day the sentence disappears altogether, which is
+//    #694's section-P lesson. And the forbidden wording is not invented: it is
+//    quoted from what was there, which `git show HEAD:web/_apps/help/admin.php`
+//    produces until this change lands.
+$claimReason  = (string) ($catalogue['tblExpenseClaims']['reason'] ?? '');
+$helpAdmin    = __DIR__ . '/../web/_apps/help/admin.php';
+$helpText     = is_readable($helpAdmin) === true ? (string) file_get_contents($helpAdmin) : '';
+$helpTidy     = (string) preg_replace('/\s+/', ' ', $helpText);
+$claimSays    = str_contains($claimReason, 'the claimant is kept with them') === true
+    && str_contains($claimReason, 'the database refuses it') === true;
+$helpSays     = str_contains($helpTidy, 'the claimant is kept with them') === true;
+$claimDenies  = str_contains($claimReason, 'the claimant\'s name is removed') === true;
+$helpDenies   = str_contains($helpTidy, 'claimant\'s name comes off the claim') === true;
+check(
+    'the written list and the help page both say an expense claim KEEPS its claimant, deliberately and for HMRC, and neither says the name comes off (#492 part 4)',
+    $helpText !== '' && $claimSays === true && $helpSays === true
+    && $claimDenies === false && $helpDenies === false,
+    $helpText === ''
+        ? 'web/_apps/help/admin.php could not be read, so this check proves nothing'
+        : 'the written list must say the claimant is kept with the claim AND that the database refuses the attempt'
+        . ' (found: ' . ($claimSays === true ? 'yes' : 'NO') . '), the help page must say the claimant is kept with'
+        . ' them (found: ' . ($helpSays === true ? 'yes' : 'NO') . '), and neither may say the name is removed'
+        . ' (written list says it: ' . ($claimDenies === true ? 'YES' : 'no')
+        . ', help page says it: ' . ($helpDenies === true ? 'YES' : 'no') . ').'
+        . ' `tblExpenseClaims`.`userID` is INT NOT NULL: the erasure tries, the database refuses, and the report'
+        . ' records that it could do nothing. Saying the name comes off is untrue in the reassuring direction.'
 );
 
 // -----------------------------------------------------------------------------

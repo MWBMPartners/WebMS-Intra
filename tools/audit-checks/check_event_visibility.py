@@ -326,7 +326,14 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # Not a query at all (#604): the backup's list of columns a migration has
     # removed NAMES the table, so that a snapshot taken before migration 217
     # can still be put back. It reads no event.
-    ("_core/DbBackup.php", 169): (
+    # ⚠️ THIS ENTRY IS KEYED BY LINE NUMBER, so ANY change higher up
+    #    DbBackup.php moves it and this check goes red. It was 169 until
+    #    3 November 2026, when #581 added the one-moment bullet to the class's
+    #    header. The entry carries the line's own TEXT as well, which is what
+    #    makes the breakage say "stale entry" rather than something mysterious
+    #    — but it still has to be edited by hand each time. Worth replacing
+    #    with a text-only entry one day; see the note in the run's report.
+    ("_core/DbBackup.php", 183): (
         "'tblEvents' => ['eventTimezone'],",
         "names tblEvents in the backup's list of removed columns; no row of any event is read on this line",
     ),

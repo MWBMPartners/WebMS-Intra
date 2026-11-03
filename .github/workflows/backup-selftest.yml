@@ -101,6 +101,8 @@ on:
       - 'tools/backup-page-selftest.php'
       - 'tools/restore-order-selftest.php'
       - 'tools/audit-checks/check_backup_column_types.py'
+      # 🧊 The snapshot's one-moment read, and whether anything calls the job (#581)
+      - 'tools/audit-checks/check_snapshot_one_moment.py'
       - 'tools/audit-checks/check_giving_retention_data.py'
       - 'tools/audit-checks/fixtures/backup_column_types/**'
       - 'tools/audit-checks/fixtures/backup_format/**'
@@ -206,6 +208,17 @@ jobs:
       - name: Column types, links and snapshot format (Python only)
         if: ${{ !cancelled() }}
         run: python3 tools/audit-checks/check_backup_column_types.py --strict
+
+      # 🧊 Also a hard gate in pr-security.yml. It runs here too because this is
+      #    the workflow that is triggered by a change to DbBackup.php, and
+      #    because the fault it guards cannot be seen by any test in this
+      #    repository: measured on 'mysql:8.0.36 --transaction-isolation=
+      #    READ-COMMITTED', deleting one line broke every snapshot while
+      #    changing nothing on a server whose own level is REPEATABLE READ,
+      #    which is what both images below are (#581).
+      - name: 'A snapshot is read at one moment and says so (hard gate, #581)'
+        if: ${{ !cancelled() }}
+        run: python3 tools/audit-checks/check_snapshot_one_moment.py
 
       - name: The same check, proving each of its rules fires
         if: ${{ !cancelled() }}

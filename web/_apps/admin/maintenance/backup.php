@@ -755,14 +755,20 @@ foreach ($backup->rowsWaitingToBePutBack() as $heldRow) {
 //    to read the manifest file itself, followed such a link, and showed the
 //    outside folder's manifest with its Restore buttons.
 $inspect = $_GET['inspect'] ?? '';
-$inspectManifest = null;
-$inspectUnlisted = '';
+$inspectManifest  = null;
+$inspectUnlisted  = '';
+$inspectOneMoment = '';
 if (DbBackup::isSnapshotName($inspect) === true) {
     $opened = $backup->manifestOf($inspect);
     if (is_array($opened) === true) {
         $inspectManifest = $opened;
         // 🚩 Said on the snapshot's own page, above its buttons.
         $inspectUnlisted = DbBackup::unlistedWarning(DbBackup::unlistedIn($opened));
+        // 🧊 And whether it was read at one moment in time (#581). The words
+        //    are the RESTORING ones, because this is the page somebody reads
+        //    with their finger over the Restore button — what they can do
+        //    about it differs from what the person who took it could.
+        $inspectOneMoment = DbBackup::oneMomentWarning(DbBackup::oneMomentIn($opened), true);
     } elseif (is_dir($backup->pathOf($inspect)) === true || is_link($backup->pathOf($inspect)) === true) {
         // Something by that name IS there and was not opened: say why. (A
         // name with nothing behind it draws the plain list, as before.)
@@ -968,10 +974,42 @@ $frequencyChoices  = [
     'weekly'  => 'Every week',
     'monthly' => 'Every four weeks',
 ];
+
+// ⏰ IS ANYTHING ACTUALLY CALLING THE JOB? (#581)
+//
+//    The sentence below used to be the only thing said about this, and it is
+//    conditional: "this only happens if your hosting company's scheduler is
+//    calling the portal". True, and no use to somebody deciding whether their
+//    data is safe — the setting ships as `daily`, so a new installation showed
+//    "Every day" chosen in a box while nothing was calling the job.
+//
+//    `DbBackup::scheduleWords()` is the ONE place that decides what to say;
+//    the page does not work any of it out, and the moment is passed in rather
+//    than read inside the class. A schedule nobody set up must not look like a
+//    schedule that is running.
+$scheduleLastSeen = $backup->scheduledCallLastSeen();
+$scheduleNow      = time();
+$scheduleRunning  = DbBackup::scheduleWords($scheduleFrequency, $scheduleLastSeen, $scheduleNow);
+// 🎨 The colour comes from the SAME ONE test the sentence comes from
+//    (DbBackup::scheduleIsRunning()), never from reading the sentence. The
+//    first version chose the colour by looking at how the words started, which
+//    would have gone wrong the first time anybody improved the wording — and
+//    would have drawn "your scheduler is calling but backups are switched off"
+//    in green.
+$scheduleIsCalled = DbBackup::scheduleIsRunning($scheduleLastSeen, $scheduleNow);
+$scheduleBadge    = $scheduleFrequency === 'off'
+    ? 'alert-secondary'
+    : ($scheduleIsCalled === true ? 'alert-success' : 'alert-danger');
 ?>
 <div class="card mb-4">
     <div class="card-body">
         <h2 class="h5 card-title"><i class="fa-solid fa-clock me-2"></i>Backups taken automatically</h2>
+
+        <?php // ⏰ WHAT IS REALLY HAPPENING, before the instructions. One sentence from DbBackup::scheduleWords(), which is the only thing that decides it (#581). ?>
+        <div class="alert <?php echo htmlspecialchars($scheduleBadge, ENT_QUOTES, 'UTF-8'); ?>">
+            <i class="fa-solid <?php echo $scheduleIsCalled === true ? 'fa-circle-check' : 'fa-triangle-exclamation'; ?> me-2"></i>
+            <?php echo htmlspecialchars($scheduleRunning, ENT_QUOTES, 'UTF-8'); ?>
+        </div>
 
         <div class="alert alert-info">
             <i class="fa-solid fa-circle-info me-2"></i>
@@ -1090,6 +1128,10 @@ $frequencyChoices  = [
                 <?php // 🚩 Above the buttons on purpose: "Restore ALL tables" below will be refused for this snapshot, and this says why and what to do. ?>
                 <div class="alert alert-warning" id="snapshot-unlisted-warning"><?php echo htmlspecialchars($inspectUnlisted, ENT_QUOTES, 'UTF-8'); ?></div>
             <?php endif; ?>
+            <?php if ($inspectOneMoment !== ''): ?>
+                <?php // 🧊 Also above the buttons (#581). Unlike the warning above it, this does NOT mean the restore will be refused — it means it MIGHT be, and the sentence says which message to look for. Nothing is said at all when the snapshot's answer is "yes". ?>
+                <div class="alert alert-secondary" id="snapshot-one-moment-warning"><?php echo htmlspecialchars($inspectOneMoment, ENT_QUOTES, 'UTF-8'); ?></div>
+            <?php endif; ?>
             <?php // 🎭 The check comes first and looks harmless on purpose: it is the thing to press before the dangerous button below it. ?>
             <form method="post" class="mb-2" data-confirm="Check that this snapshot can be restored? This is a full rehearsal: every row is written into the database and then taken out again, so nothing is changed. It takes as long as a real restore, and the portal is closed to everyone else while it runs. Stay on this page until it finishes." data-confirm-confirm-label="Run the check">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
@@ -1172,6 +1214,12 @@ $frequencyChoices  = [
                                 <?php if ($snap['unlisted_values'] !== []): ?>
                                     <?php // 🚩 See DbBackup::unlistedWarning(). The snapshot's own page (Inspect) says which values and what to do. ?>
                                     <span class="badge text-bg-warning">Cannot be put back whole</span>
+                                <?php endif; ?>
+                                <?php // 🧊 Only when the answer is NOT "yes" (#581). A badge on every snapshot saying "one moment" would be a reassurance printed so often that nobody reads the one that matters; the Inspect page carries the whole sentence. ?>
+                                <?php if ($snap['one_moment'] === DbBackup::ONE_MOMENT_NO): ?>
+                                    <span class="badge text-bg-warning">Not one moment in time</span>
+                                <?php elseif ($snap['one_moment'] === DbBackup::ONE_MOMENT_CANNOT_TELL): ?>
+                                    <span class="badge text-bg-secondary">One moment: not known</span>
                                 <?php endif; ?>
                             </div>
                         <?php else: ?>

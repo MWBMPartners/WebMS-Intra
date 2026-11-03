@@ -6461,6 +6461,39 @@ CREATE TABLE IF NOT EXISTS `tblEventRegistrations` (
     -- covered by the time limit instead — see registrationRetentionDays on
     -- tblEvents, and the clear-out on the Retention page.
     `submittedByUserID`      INT          DEFAULT NULL COMMENT 'The account of whoever submitted this, when they were signed in. Empty is normal and allowed: anybody may register a child without an account.',
+
+    -- 👤 WHO THE REGISTRATION IS FOR, which is not the same question as who
+    -- typed it in (#492 part 3 — added by migration 246).
+    --
+    -- `submittedByUserID` above records whoever was signed in when the form was
+    -- sent. Nothing tested their relationship to the person being registered,
+    -- and a volunteer may well enter one at a desk, over the telephone or from
+    -- a paper form. Because an erasure DELETES a registration found through the
+    -- submitter — rightly, because it holds a child's name, date of birth,
+    -- allergies and medical notes — erasing that volunteer took the child's
+    -- registration with them, and that child's family had asked for nothing.
+    --
+    -- So the two facts are now recorded separately: this column says whose
+    -- record it is. An erasure deletes a registration found through THIS
+    -- column and merely detaches the submitter from one found through the
+    -- other. The shape is `tblCareCase.personUserID`'s (#709): the subject of
+    -- a record and the people who worked on it are different columns.
+    --
+    -- Empty is normal and allowed, for two different reasons. Anybody may
+    -- register somebody without an account at all; and where a signed-in
+    -- person says the registration is for somebody else, there is no account
+    -- to put here, because the person being registered is named by `fullName`
+    -- and may well have no account either. An empty value is the safe
+    -- direction: the row stays, and the time limit
+    -- (`registrationRetentionDays` on `tblEvents`) reaches it in the ordinary
+    -- way.
+    --
+    -- No foreign key, deliberately, matching `submittedByUserID` above. Adding
+    -- one would make migration 246 refuse on any database where
+    -- `submittedByUserID` already holds the number of an account that has
+    -- since been deleted — which it can, because that column has no foreign
+    -- key either, and the migration copies it into this one.
+    `registeredForUserID`    INT          DEFAULT NULL COMMENT 'The account of the person this registration is FOR, where they have one and it is known. Not the same as submittedByUserID: a volunteer may enter a registration for somebody else. Empty is normal and allowed (#492 part 3).',
     `createdAt`              DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `reviewedByID`           INT          DEFAULT NULL,
     `reviewedAt`             DATETIME     DEFAULT NULL,
@@ -6470,6 +6503,9 @@ CREATE TABLE IF NOT EXISTS `tblEventRegistrations` (
   -- So an erasure request can find one person's registrations quickly rather
   -- than reading every row in the table (#479 — added by migration 191).
   KEY `idx_registration_submitted_by` (`submittedByUserID`),
+  -- And the same for the person the registration is FOR, which is the column
+  -- an erasure deletes on (#492 part 3 — added by migration 246).
+  KEY `idx_registration_registered_for` (`registeredForUserID`),
     CONSTRAINT `fk_reg_event`    FOREIGN KEY (`eventID`)     REFERENCES `tblEvents`(`eventID`) ON DELETE CASCADE,
     CONSTRAINT `fk_reg_reviewer` FOREIGN KEY (`reviewedByID`) REFERENCES `tblUsers`(`userID`)  ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -10929,4 +10965,32 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('244_transcript_retention_per_site.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 246_registration_subject.sql (#492 part 3) ─────────────────────────
+-- One column and one index, both declared on `tblEventRegistrations` above:
+-- `registeredForUserID`, which says who an event registration is FOR rather
+-- than who typed it in. Nothing else — no table, no setting, no address.
+--
+-- WHY IT MATTERS. An erasure DELETES a registration it finds for somebody,
+-- rather than merely removing a name, because the row holds the registered
+-- person's name, date of birth, allergies and medical notes. Until this column
+-- existed the portal recorded only `submittedByUserID` — whoever was signed in
+-- when the form was sent — so erasing a volunteer who had registered somebody
+-- else's child DELETED that child's registration, and that child's family had
+-- asked for nothing. The delete now goes on this column, and the submitter is
+-- merely detached.
+--
+-- THE MIGRATION ALSO COPIES `submittedByUserID` INTO THE NEW COLUMN ONCE, for
+-- registrations that already existed: the owner decided on 3 November 2026 that
+-- whoever typed one in is treated as the person it is for, because that is true
+-- of anyone who registered themselves. THAT COPY IS NOT NEEDED HERE and the
+-- mark is written unconditionally all the same, which is safe for one reason
+-- worth stating: a database built from this script has the column from the
+-- start and no registrations at all, so there is nothing to copy. The
+-- migration itself does the copy only on the run that CREATES the column, so
+-- the installer's replay of it over this script is a no-op too (measured on
+-- MySQL 8.0.36, run twice).
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('246_registration_subject.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;

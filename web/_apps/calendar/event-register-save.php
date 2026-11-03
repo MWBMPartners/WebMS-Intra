@@ -144,12 +144,49 @@ if (isset($_SESSION['user_id']) === true && (int) $_SESSION['user_id'] > 0) {
     $submittedByArg = (int) $_SESSION['user_id'];
 }
 
+// 👤 AND WHO THE REGISTRATION IS FOR, which is a different question (#492
+//    part 3, the owner, 3 November 2026; migration 246).
+//
+//    Recording the submitter is not the same as establishing a relationship,
+//    and that mattered because an erasure DELETES a registration it finds for
+//    somebody rather than merely unnaming it — the row holds the registered
+//    person's name, date of birth, allergies and medical notes, so deleting it
+//    is the purpose. With only the submitter recorded, erasing a volunteer who
+//    had registered somebody else's child deleted that child's registration,
+//    and that child's family had asked for nothing.
+//
+//    So the form asks, and only of a signed-in person, because nobody else has
+//    an account to record. The answer is taken as "me" ONLY when it says so
+//    exactly; everything else — the other option, a blank, an array, a request
+//    that carries no such field at all — means this is not their own record.
+//
+//    THAT IS THE SAFE DIRECTION, and it is chosen deliberately. An empty value
+//    here means an erasure leaves the row alone and detaches the submitter, so
+//    nobody else's record is destroyed on a request that was never theirs.
+//    What it costs is that a member's OWN registration is beyond the reach of
+//    their own request if they did not answer: the time limit on the event
+//    (`registrationRetentionDays`, migration 191) still deletes it, and an
+//    administrator can deal with it directly. Destroying a third party's
+//    record cannot be undone; leaving one to a timer can.
+//
+//    ASK WHETHER THE FIELD SAYS "me", NEVER WHAT IT CONTAINS OTHERWISE. A
+//    request chooses the TYPE of what it sends as well as the value, so
+//    `?registeredFor[]=me` would arrive as an array; `=== 'me'` on a value
+//    cast to string refuses it.
+$registeredForArg = null;
+if ($submittedByArg !== null
+    && is_string($_POST['registeredFor'] ?? null) === true
+    && (string) $_POST['registeredFor'] === 'me'
+) {
+    $registeredForArg = $submittedByArg;
+}
+
 $stmt = $mysqli->prepare(
-    'INSERT INTO tblEventRegistrations '
-    . '(eventID, fullName, dateOfBirth, grade, gender, shirtSize, allergies, medicalNotes, '
-    . ' parentName, parentPhone, parentEmail, photoConsent, emergencyContactName, '
-    . ' emergencyContactPhone, submittedByUserID, status, source) '
-    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending", "public-form")'
+    'INSERT INTO `tblEventRegistrations` '
+    . '(`eventID`, `fullName`, `dateOfBirth`, `grade`, `gender`, `shirtSize`, `allergies`, `medicalNotes`, '
+    . ' `parentName`, `parentPhone`, `parentEmail`, `photoConsent`, `emergencyContactName`, '
+    . ' `emergencyContactPhone`, `submittedByUserID`, `registeredForUserID`, `status`, `source`) '
+    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending", "public-form")'
 );
 // ⚠️ The letters below must match the values after them, one for one and in
 //    order: i = a whole number, s = text. Adding a value without adding its
@@ -157,10 +194,10 @@ $stmt = $mysqli->prepare(
 //    (check_bind_param_arity.py), because it fails at the moment somebody uses
 //    the form rather than when the code is written.
 $stmt->bind_param(
-    'issssssssssissi',
+    'issssssssssissii',
     $eventIdInt, $fullName, $dobArg, $grade, $genderArg, $shirtArg,
     $allergies, $medical, $parentName, $parentPhone, $parentEmailArg,
-    $photoConsent, $emergName, $emergPhone, $submittedByArg
+    $photoConsent, $emergName, $emergPhone, $submittedByArg, $registeredForArg
 );
 $stmt->execute();
 $newId = (int) $stmt->insert_id;

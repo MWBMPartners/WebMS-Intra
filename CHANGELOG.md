@@ -2,6 +2,99 @@
 
 
 ## [Unreleased] (alpha)
+<!-- #492 parts 2, 3 and 4 -->
+
+### Erasure: the borrower, the registration's subject, and the claimant (#492 parts 2, 3 and 4, migration 246)
+
+Three follow-ups from `4349c76`, all three decided by the owner on 3 November 2026.
+
+**Part 2 — the borrower is the person a loan record is about.** `assets/loan.php`
+hides only the three counterparty pickers, so the free-text "Contact details"
+box is shown for every kind of borrower, and `AssetRegister::createLoanRequest()`
+stores it whatever the kind. So a MEMBER's own telephone number sat on a row that
+named their account, and an erasure emptied the account number and left the
+telephone number beside it. **The classification was the fault, not the guard:**
+`tblAssetLoans.counterpartyUserID` has left `GdprEraser::ACTOR_COLUMNS` and
+stayed in `LINK_COLUMNS`, and `counterpartyName` and `counterpartyContact` are
+now emptied. `approvedByID` and `requestedByID` STAY actor columns — emptying
+text on an approver's number is a blanket `= NULL` over the borrower's details
+on every loan they ever approved. No migration: both columns were already
+nullable (read out of a loaded MySQL 8.0.36). `counterpartyName` is named by the
+instruction and CAN NEVER MATCH, because a loan records its counterparty as
+EITHER an account OR that typed name and never both; the limit is in the
+instruction's reason, the #708/#723 precedent, because the #635 check fails a
+column explained in `notEmptiedHere` while an instruction empties it — that
+check went red on the first run of this change and is what moved the sentence.
+
+**Part 3 — a registration records who it is FOR as well as who typed it.**
+`calendar/event-register-save.php` recorded whoever was signed in, with no test
+of their relationship to the person being registered. Because an erasure DELETES
+a registration rather than merely unnaming it — the row holds the registered
+person's name, date of birth, allergies and medical notes — erasing a volunteer
+who had registered somebody else's child **deleted that child's registration**,
+and that child's family had asked for nothing. Migration 246 adds
+`tblEventRegistrations.registeredForUserID`, which says whose record it is; the
+delete goes on that and the submitter is merely detached. The public form now
+asks a signed-in person whether the registration is their own, with neither
+answer pre-selected. **For rows that already existed the person who typed one in
+is treated as the person it is for** (the owner: true of anyone who registered
+themselves, which is most of them; where a volunteer typed one the child's name
+is still on it). Rejected, with the reason: matching the typed name to an
+account, because a wrong match attaches one person's record to another.
+`tblEventRegistrations` has accordingly left
+`GdprEraser::DELETE_ON_ACTOR_COLUMN` — nothing on that table is deleted because
+of what somebody DID any more — and the data download now reads both columns, so
+it hands back what the erasure removes.
+
+**Part 4 — the claimant's identity stays, as a decision.**
+`tblExpenseClaims.userID` is `INT NOT NULL`, so "we keep the claimant for six
+years for HMRC" was an accident of the schema rather than anybody's decision. No
+schema change; the reason is written into the catalogue and the in-app help as a
+deliberate retention decision. **And the old wording was untrue in the
+reassuring direction**: both the catalogue and the help page said the claimant's
+name "is removed" / "comes off the claim". It is not — the erasure tries, the
+database refuses, and the sealed trail records a step that could do nothing
+("nothing could be emptied: the database does not allow userID to be empty…",
+measured on MySQL 8.0.36). Both now say the claimant is kept, say why, and say
+that the attempt fails.
+
+**Also corrected, found while writing the help page:** that page still listed a
+room booking's stated reason and decline note under "not reached, which is a
+fault rather than a decision". #723 fixed both on 3 November and the page had not
+been brought into line — a document asserting a fault that has been repaired.
+
+---
+
+<!-- #472 and #581: the restore, and a snapshot taken at one moment -->
+
+### A snapshot says whether it was read at one moment in time (#581)
+
+`DbBackup::snapshot()` already asked the database for one consistent view of
+every table. It now asks whether it was really **given** one, and writes the
+answer into the manifest as `one_moment` (`yes`, `no` or `cannot tell`). The
+snapshot's own result says so at once, the Backup page badges a snapshot that
+was not read at one moment, the Inspect page carries the whole sentence, and a
+restore repeats it to whoever is putting the snapshot back. Nothing is refused
+over it: a snapshot taken while nobody was using the portal is unaffected, and
+the fault it warns about already shows up as a row pointing at a row that is not
+in the snapshot, which the restore refuses by itself.
+
+### The Backup page says whether anything is really calling the backup job (#581)
+
+`cron/backup-run` records every call it accepts, in a file beside the snapshots.
+The Backup page then says, in one sentence from `DbBackup::scheduleWords()`,
+whether the hosting company's scheduler is calling the portal — or that nothing
+ever has. The setting ships as `daily`, so until now every new installation
+showed "Every day" chosen in a box while, on most of them, nothing was calling
+the job at all.
+
+### Fixed in passing
+
+`tools/audit-checks/check_event_visibility.py`'s allowlist entry for
+`DbBackup.php` is keyed by line number and was moved by the header addition
+above.
+
+---
 <!-- #491, #492 and #481 -->
 
 ### Fixed

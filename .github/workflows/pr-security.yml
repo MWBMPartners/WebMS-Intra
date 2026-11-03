@@ -1179,6 +1179,21 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_reserved_words_quoted.py
 
+      # A snapshot reads the tables one after another, so without ONE consistent
+      # view it can hold half a record - and it still answers success, while the
+      # restore is the thing that finds out. TWO lines give that view, and
+      # measured on 'mysql:8.0.36 --transaction-isolation=READ-COMMITTED',
+      # deleting the first alone broke every snapshot while changing nothing at
+      # all on a server whose own level is REPEATABLE READ. Every self-test here
+      # runs the latter, so no test in this repository can see that fault
+      # return - the #646 situation. This check also pins that the scheduled
+      # backup job records being called, which is what stops the Backup page
+      # showing a schedule nobody set up as though it were running (#581).
+      - name: 'A snapshot is read at one moment and says so (hard gate, #581)'
+        id: snapshot_one_moment
+        if: always()
+        run: python3 tools/audit-checks/check_snapshot_one_moment.py
+
       # A PDF is kept only when every byte of it was written (#711). `is_file()`
       # is true for a file that exists and holds nothing, which is what a failed
       # write leaves behind, so a truncated giving statement was handed back as a

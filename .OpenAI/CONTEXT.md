@@ -2625,6 +2625,20 @@ So, in any question:
 The test to apply before sending: *could somebody who has never seen this
 codebase answer it?* If not, it is not ready.
 
+## Throwaway containers: two measured facts that contradict the older rule
+
+- **`docker run --rm` IS NOT ENOUGH ON ITS OWN, and `docker rm -f` IS NOT THE SAME AS `docker stop` —
+  measured on 3 November 2026.** A container started with `--rm` and then killed with `docker rm -f`
+  left an anonymous volume behind; the same image **stopped** with `docker stop` left nothing. This file
+  treated the two as equivalent and they are not. So **stop a container rather than force-removing it**,
+  and read the dangling count afterwards instead of assuming `--rm` did the work.
+- **An agent cannot tidy its own leftover volume, and must not try.** `docker volume rm <id>` is refused
+  by the permission classifier as "Irreversible Deletion" — refused three times on 3 November 2026, to
+  two different agents and to the commissioning session, for a volume nothing referenced and which the
+  session itself had created. **Report the exact id to the owner and leave it.** Do not look for a way
+  round it, and never reach for `prune`: that is the thing the refusal exists to protect, and it would
+  take other projects' volumes with it.
+
 ## A few more things worth knowing
 
 - **Branches are meant to be promoted through four steps on the way to

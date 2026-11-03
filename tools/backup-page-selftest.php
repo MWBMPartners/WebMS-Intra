@@ -1064,7 +1064,53 @@ if (brs_check($newest !== '', 'there is a finished snapshot to inspect') === tru
 // the word becomes a period.
 echo "\nK. Backups taken on a schedule\n";
 
+// ⏰ FIRST: does the page say whether anything is ACTUALLY calling the job?
+//    (#581) Until 3 November 2026 it did not, and could not: the only thing it
+//    said was the conditional "this only happens if your hosting company's
+//    scheduler is calling the portal". The setting ships as `daily`, so every
+//    new installation showed "Every day" chosen in a box while, on most of
+//    them, nothing was calling the job at all. A SCHEDULE NOBODY SET UP MUST
+//    NOT LOOK LIKE A SCHEDULE THAT IS RUNNING.
+//
+//    Checked here, at the top of this section, because nothing has called the
+//    job yet in this run — section N is what calls it. The note is removed
+//    again at the end of this block so that section N still starts from
+//    "nothing has ever called it".
+$note = $backups . '/.backup-run-last';
+brs_check(is_file($note) === false, 'nothing has called the scheduled job yet in this run, so the page is answering from no evidence');
 $page = bps_request($jar['root'], 'GET', '/admin/maintenance/backup')['body'];
+brs_check(
+    str_contains(bps_text($page), 'NOTHING IS CALLING THE PORTAL') === true,
+    'with nothing calling it, the page says so plainly rather than only "this happens if your scheduler calls"',
+    substr(bps_text($page), max(0, (int) strpos(bps_text($page), 'automatically')), 400)
+);
+brs_check(
+    str_contains($page, 'alert-danger') === true,
+    'and it is drawn as a problem, not as information'
+);
+
+file_put_contents($note, (string) (time() - 3600));
+$page = bps_request($jar['root'], 'GET', '/admin/maintenance/backup')['body'];
+brs_check(
+    str_contains(bps_text($page), 'scheduler is calling the portal') === true
+    && str_contains(bps_text($page), 'NOTHING IS CALLING') === false,
+    'with a call an hour ago it says the scheduler IS calling, and stops saying nothing is',
+    substr(bps_text($page), max(0, (int) strpos(bps_text($page), 'automatically')), 400)
+);
+brs_check(
+    str_contains($page, 'alert-success') === true,
+    'and it is drawn as working'
+);
+
+file_put_contents($note, (string) (time() - (5 * 86400)));
+$page = bps_request($jar['root'], 'GET', '/admin/maintenance/backup')['body'];
+brs_check(
+    str_contains(bps_text($page), 'HAS STOPPED') === true,
+    'a scheduler that was calling and has stopped is NOT reported as one that is calling',
+    substr(bps_text($page), max(0, (int) strpos(bps_text($page), 'automatically')), 400)
+);
+unlink($note);
+
 brs_check(
     str_contains($page, 'name="action" value="save_schedule"') === true,
     'the Backup page offers the schedule'
@@ -1480,11 +1526,24 @@ Brs::$writer->prepare(
 
 $noJar = $child . '/jar-nobody.txt';
 
+$note = $backups . '/.backup-run-last';
+@unlink($note);
+
 $got = bps_request($noJar, 'GET', '/cron/backup-run');
 brs_check($got['status'] === 403, 'the job refuses a call with no token', 'HTTP ' . $got['status']);
 
 $got = bps_request($noJar, 'GET', '/cron/backup-run?token=' . urlencode($cronToken . '-wrong'));
 brs_check($got['status'] === 403, 'and a wrong token', 'HTTP ' . $got['status']);
+
+// ⏰ A REFUSED CALL IS NOT A CALL (#581). Recording one would let a stranger
+//    who guessed the address make the Backup page claim the scheduler is
+//    working — the page's answer is about backups, so a false reassurance
+//    there is the worst direction for it to be wrong in.
+brs_check(
+    is_file($note) === false,
+    'neither refused call is written down as the scheduler calling, so a stranger cannot make the page '
+    . 'claim backups are being taken'
+);
 
 // Switched off: answers plainly rather than as an error, so a daily call does
 // not fill the hosting company's log with failures.
@@ -1496,6 +1555,24 @@ brs_check(
     'with the schedule off it answers "nothing to do" rather than an error',
     mb_substr($got['body'], 0, 200)
 );
+// ⏰ AND IT STILL COUNTS AS A CALL (#581). This is the branch that matters
+//    most: an installation that has chosen "off" must still be able to find
+//    out whether its scheduler is calling, or the only way to find out would
+//    be to switch backups on.
+$noteAt = is_file($note) === true ? (int) trim((string) file_get_contents($note)) : null;
+brs_check(
+    $noteAt !== null && abs($noteAt - time()) <= 60,
+    'a call that answers "switched off" is still written down as a call',
+    var_export($noteAt, true) . ' against ' . time()
+);
+$pageNow = bps_request($jar['root'], 'GET', '/admin/maintenance/backup')['body'];
+brs_check(
+    str_contains(bps_text($pageNow), 'IS calling the portal') === true
+    && str_contains(bps_text($pageNow), 'switched off') === true,
+    'and the page then says the scheduler IS calling AND that backups are switched off here — two facts, '
+    . 'not one',
+    substr(bps_text($pageNow), max(0, (int) strpos(bps_text($pageNow), 'automatically')), 400)
+);
 
 // Daily, with a snapshot taken moments ago: not due.
 bps_press($jar['root'], ['action' => 'save_schedule', 'frequency' => 'daily', 'keep' => '7']);
@@ -1506,6 +1583,14 @@ brs_check(
     && str_contains((string) ($answer['reason'] ?? ''), 'not old enough') === true,
     'a backup taken moments ago means today\'s call takes no second one',
     mb_substr($got['body'], 0, 200)
+);
+// ⏰ A "not due" call is a call too (#581): being CALLED and TAKING a backup
+//    are different things, and the page says so in separate sentences.
+@unlink($note);
+bps_request($noJar, 'GET', '/cron/backup-run?token=' . urlencode($cronToken));
+brs_check(
+    is_file($note) === true,
+    'a call that decides no backup is due yet is still written down as a call'
 );
 
 // 📅 MAKE EVERY FINISHED SNAPSHOT LOOK OLDER.
