@@ -46,3 +46,32 @@ jobs:
           # genuine errors (plus all of actionlint's own native checks).
           SHELLCHECK_OPTS: --severity=error
         run: ./actionlint -color
+
+      # =======================================================================
+      # A script long enough to break its own workflow file (#745) — hard gate.
+      #
+      # WHY THIS SITS HERE, NEXT TO actionlint RATHER THAN IN pr-security.yml.
+      # GitHub refuses a whole workflow file when any one value carrying a
+      # ${{ ... }} goes over 21,000 characters, and a step's script is one
+      # value. That really happened on 27 October 2026: "PR Security Checks"
+      # started no jobs at all for a week, so all thirty-five of its hard
+      # gates ran on GitHub without running anything. A check CANNOT guard
+      # that from inside pr-security.yml, because a workflow cannot run from
+      # a file GitHub will not read. So it runs in the workflow that is about workflow files.
+      #
+      # actionlint cannot see this and neither can any YAML parser: the ceiling
+      # belongs to GitHub's service, not to the workflow schema. This job was
+      # GREEN on every one of those failing days.
+      #
+      # `if: always()` so that a failing actionlint never skips it — the point
+      # of #646 is that a check which looks wired and is skipped is worse than
+      # no check.
+      #
+      # WHAT THIS DOES NOT COVER: this workflow runs only when a file under
+      # .github/workflows/ changes, so editing the check script alone does not
+      # run it here. The pre-push hook does, on every push, because it globs
+      # tools/audit-checks/.
+      # =======================================================================
+      - name: No workflow script is long enough to break its file (hard gate)
+        if: always()
+        run: python3 tools/audit-checks/check_workflow_expression_length.py

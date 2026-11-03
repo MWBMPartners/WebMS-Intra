@@ -16090,3 +16090,128 @@ through the database's own cascade rules. Measured — a table named outside
 `tbl*` with a link into `tblSites` lost its row — and the restore counts it,
 names it and says a snapshot cannot bring it back. No table in the portal's own
 schema is in that position: all 232 are `tbl*`.
+
+---
+
+## One `${{ }}` in a long script stops a whole workflow file (#745)
+
+**The shortest version: a workflow step's script that holds a `${{ ... }}` must
+stay under 21,000 characters, or GitHub refuses the entire file and starts no
+job at all.** A script is one value, so the ceiling applies to the whole of it,
+not to the expression inside it.
+
+### What happened
+
+Commit `c61211e` (27 October 2026) took the "Heuristic anti-pattern scan" script
+in `.github/workflows/pr-security.yml` from 14,910 characters to 24,525. That
+script held two `${{ ... }}` on its ninth and tenth lines. From the next push
+onwards, every run of "PR Security Checks" failed with **no jobs**, for a week,
+while all thirty-five of that file's hard gates sat doing nothing
+(`grep -c "^      - name:.*hard gate" .github/workflows/pr-security.yml`).
+
+### Why no check here could see it
+
+| What was asked | What it said |
+|---|---|
+| Ruby's YAML parser | Valid |
+| actionlint 1.7.12, locally and in `lint.yml` | Valid — green on every failing day |
+| `php -l`, the audit scripts, the pre-push hook | Not their business |
+| GitHub | A run with **zero jobs** and "This run likely failed because of a workflow file issue" |
+
+**The ceiling is enforced by GitHub's own service, not by the workflow schema**,
+so no local tool knows about it. That is the whole trap: every parser that can
+be run here accepts the file.
+
+### How to recognise it in thirty seconds
+
+Ask the API for the run and look at its **name**:
+
+```bash
+gh api repos/<owner>/<repo>/actions/runs/<run_id> -q '{name,path,conclusion}'
+```
+
+```json
+{ "name": ".github/workflows/pr-security.yml", "conclusion": "failure" }
+```
+
+**`name` equal to `path` is the giveaway.** GitHub falls back to the file path
+when it cannot read the file, so a run that should be called "PR Security
+Checks" and is called `.github/workflows/pr-security.yml` has never been parsed.
+A second tell: the run's `event` is `push` for a workflow whose only trigger is
+`pull_request` — GitHub cannot know whether the file matches the event, so it
+reports the error against the pushed commit regardless.
+
+### The ceiling, honestly
+
+21,000 is the figure in GitHub's own error message ("Exceeded max expression
+length 21000"). **The exact boundary was not measured.** What was measured, on
+this repository against the real service: **14,910 characters with an expression
+was accepted; 24,525 with an expression was refused.** 21,000 lies between them.
+
+### The fix, and why it is the better shape anyway
+
+Pass the value in as an environment variable and read it as an ordinary shell
+variable:
+
+```yaml
+      - name: Heuristic anti-pattern scan
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          BASE_SHA="$PR_BASE_SHA"
+```
+
+The script then holds no expression and has no ceiling on it. **This is also
+GitHub's own hardening advice:** a `${{ ... }}` pasted into a shell script
+becomes part of the script, so whatever the value holds runs.
+
+### The guard, and where it had to live
+
+`tools/audit-checks/check_workflow_expression_length.py`. It fails on a script
+over the ceiling that carries an expression, on a workflow file over GitHub's
+500 KB file limit, and on a script over the ceiling with no expression that is
+not listed in `LONG_SCRIPTS_ON_PURPOSE` with a reason — that list fails both
+ways, so it cannot go stale the way the migration harness's exceptions did.
+
+**It cannot be a step in `pr-security.yml`, and that is the point: a workflow
+cannot run from a file GitHub will not read.** It lives in
+`tools/audit-checks/`, which `.githooks/pre-push` globs, so it runs before the
+push that would break things, and it is also a hard gate in `lint.yml` for the
+push made with `--no-verify`.
+
+**What it cannot see**, said plainly: a long `${{ ... }}` in a `with:`, `env:`
+or `if:` value hits the same ceiling and is not measured — nothing here is
+remotely near it, and measuring those needs a real YAML parser, which this
+machine has not got (no pyyaml, and an audit script must run with no
+dependencies so the hook can run all of them in about nine seconds). It is also
+not a YAML parser: it finds `run:` by indentation, so a workflow written in flow
+style would be measured short.
+
+### Two things this does NOT establish
+
+**The file is readable again; the gates have not run.** `pr-security.yml`
+triggers on `pull_request` only, there is no open pull request, and its last
+completed run was 26 October 2026. So nothing here shows that the thirty-five
+gates pass — only that GitHub will read the file. In a repository where this
+package exists *because* checks looked wired and were not (#646), that is not a
+quibble.
+
+**And the loss was the GitHub half, not all of it.** `.githooks/pre-push`
+arrived on 29 October (`1e4da0e`) and globs `tools/audit-checks/*.py`, so from
+the outage's second day every audit-check script still ran locally before every
+push. What really went unrun for the week is what only GitHub does: the PHP lint
+on a clean runner, gitleaks, the inline heuristic greps, and the pull-request
+comment — plus everything, the audit scripts included, for the first two days.
+
+### The lesson worth keeping
+
+**A service-side limit is invisible to every local validator, so "the linter is
+green" says nothing about whether the file will run.** The thing to check is not
+whether the file parses but whether the run that should exist exists — and when
+a run reports zero jobs, read its `name`, because GitHub has already told you it
+could not read the file.
+
+Planting also taught something about the guard: putting an expression back into
+the long script produced the real complaint **and** a second one telling the
+reader to delete an allow-list entry that was still perfectly correct. **A
+check that cries wolf beside a true finding teaches the reader to skim both.**

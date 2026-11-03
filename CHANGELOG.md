@@ -2,6 +2,88 @@
 
 
 ## [Unreleased] (alpha)
+<!-- #745 -->
+
+### Every security gate stopped running a week ago, and one `${{ }}` was why (#745)
+
+**"PR Security Checks" had failed on every push since 28 October 2026 with no
+jobs at all** — so every hard gate in that file (thirty-five steps whose names
+say so: the PHP lint, the two-factor gate
+order, the account-change guard, the reserved-word check, the personal-data
+coverage check and the rest) ran on GitHub for a week without running anything.
+It had succeeded 234 times before that, twelve of them on the version of the
+script this change replaced. (**An earlier draft of this entry, and commit
+`812d992`'s message, said "eleven times"** — that was the number of RUNS in
+October 2026, nine of them successful, read as a count of successes. Corrected
+after the independent check counted them: `gh api --paginate
+'.../actions/workflows/pr-security.yml/runs?per_page=100' -q
+'.workflow_runs[].conclusion' | sort | uniq -c`.)
+
+**The cause.** GitHub's Actions service puts a ceiling of 21,000 characters on
+any single value that carries a `${{ ... }}` inside it, and a step's script is
+one value. The "Heuristic anti-pattern scan" script held two of them, on its
+ninth and tenth lines, so the whole script counted. Commit `c61211e`
+(27 October) took that script from 14,910 characters to 24,525 — over the
+ceiling — and GitHub then refused the entire file before starting any job.
+
+**Nothing here could see it, which is why it lasted a week.** The file is valid
+YAML and every parser on this machine accepted it. **actionlint accepted it too,
+and still does** — the ceiling belongs to GitHub's service, not to the workflow
+schema — so the "Lint Workflows" job was green on every one of those failing
+days. The only sign on GitHub is a run with zero jobs, the words "This run
+likely failed because of a workflow file issue", and the run named after the
+**file path** instead of "PR Security Checks", which is the real giveaway:
+GitHub falls back to the path when it cannot read the file.
+
+**The fix** (`812d992`): the two commit names come in through `env:`, so the
+script itself holds no `${{ ... }}` and has no ceiling on it. That is also the
+safer way round and GitHub's own hardening advice — never paste a `${{ ... }}`
+straight into a shell script, because whatever the value holds becomes part of
+the script. Proved by pushing: before the fix every push to the branch produced
+an error run for the file, and the push carrying the fix produced none.
+
+**TWO THINGS THIS DOES NOT CLAIM, both raised by the independent check.**
+First, the file is **readable** again — the gates themselves have **not run**.
+`pr-security.yml` triggers on `pull_request` only, there is no open pull
+request, and its last completed run was 26 October. Given that this package
+exists because checks looked wired and were not (#646), that distinction is the
+whole point: nothing here proves the thirty-five gates pass, only that GitHub
+will read the file again. Second, **the loss was the GitHub half, not all of
+it.** `.githooks/pre-push` arrived on 29 October (`1e4da0e`) and globs
+`tools/audit-checks/*.py`, so from the outage's second day every audit-check
+script still ran locally before every push. What really went unrun for the week
+is what only GitHub does: the PHP lint on a clean runner, gitleaks, the inline
+heuristic greps, and the pull-request comment — plus everything, including the
+audit scripts, for the first two days.
+
+**The guard**, because a note in a comment is not a check:
+`tools/audit-checks/check_workflow_expression_length.py` fails when a script
+carrying a `${{ ... }}` goes over the ceiling, when a workflow file goes over
+GitHub's 500 KB file limit, and when a script with no expression is over the
+ceiling anyway and is not listed in `LONG_SCRIPTS_ON_PURPOSE` with a reason —
+that list fails BOTH ways, so it cannot quietly stop describing the code. It
+runs in the pre-push hook (which globs `tools/audit-checks/`) and as a hard gate
+in `lint.yml`. **It cannot live in `pr-security.yml`: a workflow cannot run from
+a file GitHub will not read.** Planted faults, named rather than counted, because
+which shapes were tried matters and a number does not: an expression put back
+into the long script; a one-line `run:` over the ceiling; a `.yaml` file; a
+`${{` inside a shell comment; a `run: >` folded script; a renamed step; a
+script shortened below the ceiling with its allow-list entry left behind; a
+file over 500 KB; and — found by the independent check, each of which the first
+version MISSED while printing OK — a trailing comment on the `run: |` line, a
+quoted `"run":` key, and a step whose first key is `run:`. **The first of those
+three is the one that matters: adding a comment to the very script the guard
+protects switched the guard off, silently.** Each plant was restored
+byte-identically. Planting also found a real wording fault in the guard, which
+told the reader to delete an allow-list entry that was still correct.
+
+**What this does not do.** It does not measure a long `${{ ... }}` in a `with:`,
+`env:` or `if:` value, which would hit the same ceiling — nothing here is near
+it, and doing it properly needs a YAML parser this machine has not got. And the
+24,500-character script is still a 24,500-character script: splitting it into a
+file under `tools/` is better engineering and is its own piece of work.
+
+## [Unreleased] (alpha)
 <!-- #492 parts 2, 3 and 4 -->
 
 ### Erasure: the borrower, the registration's subject, and the claimant (#492 parts 2, 3 and 4, migration 246)

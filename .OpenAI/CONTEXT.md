@@ -2477,7 +2477,8 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     atomic within one filesystem). **#721 was a cost of #711's own fix, recorded at the time:** a process killed
     between the write and the rename leaves `statement-7-2026.pdf.part-…`, and the eraser's glob was
     `statement-<donorId>-*.pdf`, which does not match it — a giving statement holds the donor's name, home address
-    and every gift. **Before #711 the same crash left a TRUNCATED `…-2026.pdf`, which DID match and was erased**THE PRIVACY HALF TOOK TWO CHANGES AND THE GLOB ALONE WAS NOT ENOUGH:** widening it made the erasure FIND the file
+    and every gift. **Before #711 the same crash left a TRUNCATED `…-2026.pdf`, which DID match and was erased**, so it was a narrow regression in erasure reach taken in exchange for not
+    destroying good files. **THE PRIVACY HALF TOOK TWO CHANGES AND THE GLOB ALONE WAS NOT ENOUGH:** widening it made the erasure FIND the file
     and `statementFileIsKept()` then KEPT it — "every gift" answers kept for anything, and under "receipted only"
     the `-4` chop for `.pdf` left an unparseable period so the "no period means keep" fallback applied to rubble;
     measured, the genuine statement came back NOT kept and the part file KEPT, and the step then COUNTED it and told
@@ -2520,6 +2521,30 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     (#646). Open: **#725** (nothing exercises the documents API over HTTP at all) and **#726** (whether
     `move_uploaded_file()` can report success after a partial write — not established either way).
     *(`.claude/CLAUDE.md` → the #721/#720 bullet.)*
+
+42. **A GREEN WORKFLOW LINTER PROVES NOTHING ABOUT WHETHER THE FILE RUNS (#745).** GitHub's Actions service puts a
+    ceiling of 21,000 characters on any ONE value that carries a `${{ ... }}`, and a step's script IS one value — so
+    a script holding a single `${{ ... }}` counts in its entirety, and over the ceiling GitHub refuses **the whole
+    file** and starts no job at all. That cost a week here: commit `c61211e` (27 October 2026) took
+    `pr-security.yml`'s heuristic script from 14,910 to 24,525 characters, and ALL THIRTY-FIVE of that file's
+    hard gates ran on GitHub
+    without running anything until 3 November. **Every parser on the machine accepted the file, and the `lint.yml`
+    actionlint job was GREEN on every failing day**, because the ceiling belongs to the service and not to the
+    workflow schema. **The tell is the run's own `name`: when GitHub cannot read a file it names the run after the
+    FILE PATH instead of the workflow** — `gh api repos/<owner>/<repo>/actions/runs/<id> -q '{name,path}'`, and
+    `name == path` means the file was never parsed; such a run also arrives under `event: push` for a
+    `pull_request`-only workflow, because GitHub cannot tell whether the file matches the event. **Never read "This
+    run likely failed because of a workflow file issue" as the answer** — it is a generic guess, and the API's
+    `name` field is the fact. The cure is to pass the value in through `env:` and read it as an ordinary shell
+    variable, never `${{ ... }}` inside a script, which is GitHub's own hardening advice as well, since the value
+    becomes part of the script. Guarded by `tools/audit-checks/check_workflow_expression_length.py`, which **cannot
+    be a step in `pr-security.yml`, because a workflow cannot run from a file GitHub will not read** — it is in the
+    pre-push glob and a hard gate in `lint.yml`. It also fails on a workflow file over GitHub's 500 KB limit, and on
+    a script over the ceiling carrying no expression that is not listed in `LONG_SCRIPTS_ON_PURPOSE` with a reason
+    (the list fails BOTH ways). What it cannot see: a long `${{ ... }}` in a `with:`, `env:` or `if:` value, which
+    hits the same ceiling — nothing here is near it, and measuring those needs a YAML parser this machine has not
+    got. **The exact boundary was not measured**; 21,000 is the figure in GitHub's own error message, and what was
+    measured against the real service is that 14,910 characters with an expression was accepted and 24,525 refused.
 
 ## Gating a feature is a CAPABILITY, never a hard-coded role (the owner, 3 November 2026)
 
