@@ -2245,9 +2245,26 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     again:** a parent-matched step names TWO tables, and a missing PARENT was logged as `skip` under the CHILD's
     name, so the child's rows kept every word of the note while the request closed as completed; the parent's
     absence is a FAILED step now, asked of the database rather than read out of an error message. **The cost of all
-    this is #710:** a step that refuses for ever is right, but `closeRequest()` runs only when nothing failed, so
-    such a request can never be closed and cannot be cancelled — the help page and the failed-run message say so
-    plainly, which is honest and not a fix. **Two fixture lessons worth keeping:** every case in the
+    this was #710, now FIXED (3 November 2026):** a step that refuses for ever is right, but `closeRequest()` ran
+    only when nothing failed, so such a request could never be closed and could not be cancelled either.
+    `GdprEraser::finishByHand()` is the ONE other way to reach `closeRequest()`, and it RUNS the request one final
+    time rather than asking whether a step *would* refuse — because that question says nothing about whether some
+    OTHER step still has work left, so it would close a request with real work outstanding. It closes only when
+    every failure of that run is the permanent kind, and `self::$onlyHandWorkLeft` is the ONE place a step is
+    recorded as that kind: do not add a second, and do not match on the refusal's WORDS — an older run's line
+    would be found too, and the request would be closed although its latest run failed for a quite different
+    reason. There is no force-close and no free-text box (a description of what somebody did by hand to a
+    safeguarding note would put that note's content into `tblErasureAudit`, which is deliberately absent from the
+    catalogue by #510 rule 7d and is never erased). Cancelling such a request is STILL refused, correctly, because
+    earlier steps have already changed records. Two things that were pinned by NOTHING and an independent check
+    found both: the guard that leaves the administrator's number out when the request is THEIR OWN (every fixture
+    used an administrator who was never the person being erased — a fixture in which a guard's condition cannot be
+    true cannot test the guard), and the surface of `$onlyHandWorkLeft` itself, where the check counted ONE
+    SPELLING of the write, so the same fault written `$x = $x + [...]` in the could-not-read branch passed every
+    gate — and that branch needs no second mistake, one failed read of `tblErasureAudit` would close the request
+    and write into the sealed trail that no further run could help. Section 22 of `gdpr-coverage-selftest.php`
+    pins the whole surface now (exactly four mentions, comments removed by `token_get_all()`, never a regular
+    expression). **Two fixture lessons worth keeping:** every case in the
     first version of that world was opened by the control person, so the actor-column plant matched NOTHING and went
     red only on the wrong check while the third-party check passed vacuously — a fourth case, opened BY the erased
     person and ABOUT somebody else, is what makes it fail for the right reason; and `['personUserID' => null]` does
@@ -2398,6 +2415,44 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     needed for the upgrade — the 8.0 end-of-life warning already existed (#489/#640) and the harness already runs
     8.4.11. The technical record is DEV_NOTES.md, "Take a reserved-word list from MySQL, not from a summary of MySQL".
     *(`.claude/CLAUDE.md` → the #718 bullet.)*
+
+39. **The hard-coded reserved-word list is CHECKED AGAINST A REAL SERVER (#719).** It has to be hard-coded —
+    an audit script must run with no database, which is what lets the pre-push hook run every one of them in about
+    nine seconds — and a hard-coded list goes stale SILENTLY. `tools/reserved-words-live-selftest.php` reads the
+    `RESERVED` set OUT OF the Python (never a second copy) and compares it with the server: on MySQL,
+    `INFORMATION_SCHEMA.KEYWORDS WHERE RESERVED = 1`; on MariaDB, which has `WORD` and no `RESERVED` flag, by TRYING
+    each candidate as a column name, because membership does not mean reserved. **Only "the server reserves a word
+    we LACK" fails**; the other direction means the list is conservative, which is safe. It earned its place on the
+    first run: 8.0.36 reserves `master_bind` and `master_ssl_verify_server_cert`, which the list lacked, and
+    **MariaDB 11.4 reserves seventeen more including `offset` and `returning`** — both thoroughly plausible column
+    names. The list is now the UNION of all three engines. Wired into `portal-selftests.yml` (8.0.36 and 8.4.11)
+    and `calendar-selftests.yml` (those two plus MariaDB 11.4). **What it cannot see, measured:** a MariaDB reserved
+    word containing a DIGIT — the probe tries only `^[a-z_]+$`, so `float4`, `float8` and `int1`-`int8` are never
+    tried there. All seven are already in the list and no column here is named any of them, so it costs nothing
+    today. *(`.claude/CLAUDE.md` → the #718 bullet.)*
+
+40. **A person's own words about themselves are emptied on an erasure request (#715, migration 240; the owner,
+    3 November 2026).** A prayer request's `subject`, `body` and `partnerNote`, and `tblCareCase.summary` — a third
+    party's description of the erased person's circumstances, which sat beside visit notes #709 already empties. The
+    rows stay. **Migration 240 makes three of those columns nullable, and the hard gate
+    `check_erasure_columns_nullable.py` is what found it: a NOT NULL column CANNOT be emptied and the failure is
+    QUIET** — the erasure records a line saying so, carries on, and the request can still close as completed with
+    the person's words in place. **KEPT on purpose, because the words are about the organisation:** `presenterText`
+    (twice), `deviceName`, `seatLabel`, `meetingNotes`, and the `tblErrors` columns, which expire on that table's
+    own timer — with the honest condition stated, that the sweep is a scheduled job a customer must set up.
+    **NOT reached, each recorded rather than forced:** a salvation card's `prayerRequest` (nothing on the card says
+    whose it is) and a room booking's text, which `GdprEraser`'s own guard refuses because `bookedByID` is in
+    `ACTOR_COLUMNS` — **the owner decided on 3 November that it IS the subject, so #723 moves it to `LINK_COLUMNS`;
+    `approvedByID` STAYS an actor column.** A case-by-case review role is #724, built next. **Two lessons from the
+    independent check.** `prayer-requests/index.php` printed `$req['subject']` with NO cast, twice, and the
+    congregation feed is not filtered by submitter — so the page would really have thrown
+    `htmlspecialchars(): Argument #1 must be of type string, null given`, mid-render, giving an HTTP 200 ending in
+    an ordinary `</html>` with the feed missing; migration 240's own header had claimed every reader cast, and said
+    three writers where there are five. **And #715's whole behaviour was pinned by NOTHING:** dropping `body` and
+    `summary` again, each with a plausible catalogue excuse, left 263 eraser checks, 93 coverage checks and both
+    hard gates green. `MUST_BE_EMPTIED` in `gdpr-eraser-selftest.php` exists for exactly that and its own comment
+    says so; #715 had added four columns to the instructions and not to the list.
+    *(`.claude/CLAUDE.md` → the #715 bullet.)*
 
 ## A few more things worth knowing
 

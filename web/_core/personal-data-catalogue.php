@@ -824,16 +824,16 @@ return [
         'decision' => 'unlink',
         'reason'   => 'A prayer request. The request itself is kept for the people praying; the name and contact details are removed.',
         'columns'  => ['submitterID', 'moderatorID', 'assignedToUserID', 'submitterName', 'submitterEmail', 'submitterIP', 'subject', 'body', 'partnerNote'],
-            'notEmptiedHere' => [
-            'subject' => 'The short description of what somebody asked to be prayed for. Their own words about '
-                . 'themselves, and nothing empties it: the name, address and network address beside it '
-                . 'ARE emptied, so the request survives without the person attached to it',
-            'body' => 'The request itself, in full and in the person\'s own words. Not emptied, for the same '
-                . 'reason as the subject. An administrator can delete a request outright from the prayer '
-                . 'list if the person asks',
-            'partnerNote' => 'A note written by whoever took the request to pray for it. Somebody else\'s words about '
-                . 'this person, kept as the record that the request was taken up',
-        ],
+        // 🙏 #715, the owner's decision of 3 November 2026. `subject`, `body` and
+        //    `partnerNote` USED to be explained here as not emptied. They are
+        //    emptied now, on the submitter's own instruction, so their
+        //    explanations are gone rather than reworded — a reason for a column
+        //    the routine does empty is an untruth about somebody's own data,
+        //    and the coverage test fails on one.
+        //
+        //    What was hard to defend was the half-measure: the portal emptied
+        //    their name, e-mail and network address from the very same row and
+        //    left what they had said about themselves.
     ],
     'tblProjectPledge' => [
         'decision' => 'erase',
@@ -860,8 +860,14 @@ return [
         'reason'   => 'Who approved a room or equipment booking. The booking belongs to whoever made it. Deleting it because the approver left would cancel other people\'s bookings.',
         'columns'  => ['notes', 'approvedByID', 'bookedByID', 'purpose', 'declineReason'],
         'notEmptiedHere' => [
-            'purpose' => 'Why somebody wanted the room, in their own words. Their own text, and nothing empties '
-                . 'it. Tracked as #715',
+            'purpose' => 'Why somebody wanted the room, in their own words. The owner decided on 3 November '
+                . '2026 that a person\'s own words about themselves should be emptied on request, and it '
+                . 'is NOT done here — the only column that could find the right rows, `bookedByID`, is '
+                . 'classified as "who acted", and the guard against emptying a column on an '
+                . 'actor-matched instruction refuses it. That guard exists because seven tables were '
+                . 'once set to delete a whole row on such a column, and it was not weakened for this. '
+                . 'Whether the booker should count as the booking\'s SUBJECT rather than its actor is '
+                . '#723.',
             'declineReason' => 'Why the booking was refused, written by whoever refused it. It can describe the person '
                 . 'who asked',
             'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. The organisation\'s record of a room booking. (purpose and declineReason are free text and are named in no entry - #706.)',
@@ -902,7 +908,14 @@ return [
         'columns'  => ['fullName', 'email', 'phone', 'address', 'assignedToID', 'notes', 'prayerRequest'],
         'notEmptiedHere' => [
             'prayerRequest' => 'What the person asked to be prayed for, in their own words, up to a thousand '
-                . 'characters. Their own words about themselves, and nothing empties it. Tracked as #715',
+                . 'characters. The owner decided on 3 November 2026 that a person\'s own words about '
+                . 'themselves should be emptied on request, and that is done for a prayer request and '
+                . 'a pastoral case (#715) - but it CANNOT BE DONE HERE, for the reason recorded '
+                . 'against `fullName` below: nothing ties a card\'s SUBJECT to an account. The only '
+                . 'account column on the row is the follow-up worker the card was given to, so '
+                . 'emptying on it would destroy a card about somebody else because a volunteer left, '
+                . 'and reach none of the erased person\'s own. The limit is recorded rather than '
+                . 'guessed at by matching a typed e-mail address (#715).',
             'fullName' => 'This describes the card\'s SUBJECT - the person who came to an event - not the erased follow-up worker the card was given to. Only the worker is detached. A card about the erased person themselves cannot be found: nothing ties a card\'s subject to an account. The owner decided on 1 November 2026 to record that limit rather than guess by matching on a typed e-mail address, which would miss a mistyped one and could erase a different person who shares a mailbox.',
             'email' => 'The card subject\'s, not the erased worker\'s. See fullName.',
             'phone' => 'The card subject\'s, not the erased worker\'s. See fullName.',
@@ -1418,10 +1431,20 @@ return [
             'notEmptiedHere' => [
             'errorDetail' => 'The full detail of a fault, including the trace through the code. A trace can quote a '
                 . 'value that was being handled, so it can name somebody. The network address, the '
-                . 'browser string and the request headers ARE emptied; this is not, so it survives an '
-                . 'erasure. Tracked as #715',
+                . 'browser string and the request headers ARE emptied; this is not. KEPT BECAUSE IT '
+                . 'EXPIRES ANYWAY: this table is the one on this list that already has a time limit '
+                . '(`errors.retentionDays`, 365 days by default), and the nightly sweep deletes the '
+                . 'whole row. Nobody intends this column to hold a name — it holds one only when a '
+                . 'fault happens to quote a value — so a time limit is the proportionate answer and '
+                . 'emptying a trace would destroy the one thing it is for (#715). ONE CONDITION ON '
+                . 'THAT, said plainly: the sweep is a scheduled job the customer has to set up, so on '
+                . 'an installation where nothing runs it, nothing expires and this column is simply '
+                . 'kept. The health page says whether the job is running.',
             'requestURL' => 'The whole address asked for, including everything after the question mark — which can '
-                . 'carry an e-mail address or a name. Not emptied. Tracked as #715',
+                . 'carry an e-mail address or a name. Not emptied, and kept for the same reason as the '
+                . 'detail beside it: the row is deleted outright by the nightly sweep once '
+                . '`errors.retentionDays` has passed — on an installation where that scheduled job '
+                . 'is set up and running, which is the same condition as the detail beside it (#715).',
         ],
     ],
     'tblEventHubResources' => [
@@ -1867,11 +1890,13 @@ return [
         'decision' => 'unlink',
         'reason'   => 'A pastoral or wellbeing case. Safeguarding continuity matters to the remaining team, so the case stays and the person\'s name and details are removed. Kept rather than deleted because safeguarding records carry their own retention obligations.',
         'columns'  => ['personName', 'summary'],
-            'notEmptiedHere' => [
-            'summary' => 'A short description of what a pastoral case is about, written by whoever opened it. '
-                . 'The notes of the visits on the case ARE emptied when the case is about the person '
-                . 'being erased (#709); this summary is not, so it can still describe them',
-        ],
+        // 🤝 #715, the owner's decision of 3 November 2026. `summary` used to be
+        //    explained here as not emptied, and the explanation said the thing
+        //    that made it indefensible out loud: the VISIT NOTES on the case
+        //    are emptied (#709) "this summary is not, so it can still describe
+        //    them". Both are a third party's words about the erased person's
+        //    health or circumstances. It is emptied now, and the explanation is
+        //    gone rather than reworded.
     ],
     'tblCareVisit' => [
         'decision' => 'unlink',

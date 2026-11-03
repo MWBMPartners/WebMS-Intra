@@ -168,6 +168,7 @@ held-texts|tools/held-texts-selftest.php|selftest_heldtexts|
 setting-limit|tools/setting-limit-selftest.php|selftest_limit|
 rate-limit-privacy|tools/rate-limit-privacy-selftest.php|selftest_ratelimit|
 webhook-retention|tools/webhook-retention-selftest.php|selftest_webhookret|
+reserved-words-live|tools/reserved-words-live-selftest.php|selftest_reservedwords|
 event-visibility|tools/event-visibility-selftest.php|selftest_visibility|
 feed-resolver|tools/feed-resolver-selftest.php|selftest_resolver|
 import-notifier|tools/import-notifier-selftest.php|selftest_notifier|

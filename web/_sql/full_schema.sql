@@ -3208,7 +3208,7 @@ CREATE TABLE IF NOT EXISTS `tblCareCase` (
     `personUserID`  INT          DEFAULT NULL,
     `personName`    VARCHAR(255) DEFAULT NULL,
     `category`      ENUM('illness','hospital','bereavement','family','transition','other') NOT NULL DEFAULT 'other',
-    `summary`       VARCHAR(500) NOT NULL,
+    `summary`       VARCHAR(500) DEFAULT NULL COMMENT 'What the case is about. EMPTIABLE on purpose (#715, migration 240): an erasure empties it, as it already empties the visit notes, and a NOT NULL column cannot be emptied',
     `status`        ENUM('active','resolved','long-term') NOT NULL DEFAULT 'active',
     `openedByID`    INT          DEFAULT NULL,
     `openedAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -3827,10 +3827,10 @@ CREATE TABLE IF NOT EXISTS `tblPrayerRequests` (
                      COMMENT 'Optional contact email supplied by an anonymous submitter (for follow-up)',
     `submitterIP`    VARCHAR(45)  DEFAULT NULL
                      COMMENT 'IPv4 or IPv6 of the submitter — for spam analysis only',
-    `subject`        VARCHAR(255) NOT NULL
-                     COMMENT 'Short title for the request',
-    `body`           TEXT         NOT NULL
-                     COMMENT 'Full text of the prayer request',
+    `subject`        VARCHAR(255) DEFAULT NULL
+                     COMMENT 'Short title for the request. EMPTIABLE on purpose (#715, migration 240): an erasure empties what the submitter said about themselves, and a NOT NULL column cannot be emptied - the attempt fails quietly and the request can still close with their words in place',
+    `body`           TEXT         DEFAULT NULL
+                     COMMENT 'Full text of the prayer request. EMPTIABLE for the same reason as subject above (#715, migration 240)',
     `kind`           ENUM('request','praise','testimony') NOT NULL DEFAULT 'request'
                      COMMENT 'request=prayer ask, praise=answered/gratitude, testimony=longer-form (#260)',
     `visibility`     ENUM('leadership','congregation') NOT NULL DEFAULT 'leadership'
@@ -10741,4 +10741,12 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('238_expense_receipt_label.sql'
 -- period somebody has chosen -- and it is here so the installer's replay of
 -- every numbered migration finds nothing left to do.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('239_transcript_retention.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 240_free_text_emptiable.sql (#715) ────────────────────────
+-- Nothing to do here: the three columns are already declared nullable in the
+-- blocks above, so a fresh install can empty them. The mark is written
+-- UNCONDITIONALLY -- the migration only relaxes three columns -- and it is here
+-- so the installer's replay of every numbered migration finds nothing left to do.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('240_free_text_emptiable.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;

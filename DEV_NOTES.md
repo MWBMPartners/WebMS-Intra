@@ -13509,11 +13509,12 @@ absent — and a skip let the request close as completed having never looked. Th
 child's absence is still a skip; the parent's is a FAILED step, and which one it
 is is asked of the database rather than read out of an error message.
 
-**And the cost of the fix is written up as #710.** A step that refuses for ever
-is right, but `closeRequest()` runs only when no step failed, so such a request
-sits at `pending_review` with no way to finish it and cannot be cancelled either.
-The help page and the failed-run message both say so plainly now, which is honest
-and not a fix.
+**And the cost of the fix was written up as #710 — now fixed.** A step that
+refuses for ever is right, but `closeRequest()` runs only when no step failed, so
+such a request sat at `pending_review` with no way to finish it and could not be
+cancelled either. `GdprEraser::finishByHand()` closes it now, and the lesson from
+building that is below under "Closing a request nobody can finish (#710)". This
+paragraph is kept because it records the state #709 shipped in.
 
 **Two smaller things got wrong first, both worth keeping.**
 
@@ -14740,3 +14741,261 @@ widened check names it.
 The general shape: **a guard's SCOPE is as much a part of it as its rule.** This
 one had the right rule and the wrong reach, and the proof is that it passed the
 exact identifier it exists for.
+
+## Closing a request nobody can finish (#710)
+
+#709 left a request that could reach no final state: one step refused for ever
+and correctly, `execute()` closes only when nothing failed, and cancelling was
+refused because earlier steps really had changed records. Three things from
+building the way out.
+
+**ASKING "COULD A STEP REFUSE FOR EVER?" IS THE WRONG QUESTION, even answered
+correctly.** It says nothing about whether some *other* step still has work left,
+so a close based on it would close a request with real work outstanding. The
+design that works is blunter: **run the request one final time and close only if
+every single failure of that run is permanent.** You cannot close by hand without
+the portal having just tried everything it can, and there is no force-close.
+
+**DO NOT RECOGNISE THE REFUSAL BY ITS WORDS.** Reading the audit trail for the
+refusal's sentence finds a line from an *older* run too, and would then offer to
+close a request whose latest run failed for a quite different reason. The branch
+that produces the permanent refusal records the step in a run-scoped list
+instead — emptied at the start of every run, the way `$dueAtErasure` is — and
+`execute()` reports it. The comparison is then `count($hand) === $failed`, which
+is a fact about the run that just happened.
+
+**THE RECORD HAS TO BE UNAVOIDABLE, NOT ENCOURAGED.** The risk is a button that
+closes any request nobody has acted on. So `closeRequest()` stays private and
+`finishByHand()` is the only other route to it, and the audit line and the close
+are written **in one transaction**.
+
+**That last part was a claim before it was a fact.** The line was written before
+`closeRequest()` opened its transaction, so it committed immediately — and that
+method throws deliberately when a transaction cannot be started or committed. On
+that path the sealed trail permanently said "closed after work done outside the
+portal" about a request still at `pending_review`, and a second press wrote a
+second such line. Three places asserted there was no route to one without the
+other; an independent check found the route. **Writing the line first is the
+right order; claiming atomicity it did not have was the problem.** The facts are
+passed in and the line is written inside the transaction now. And **there is no
+free-text box on purpose** — asking an administrator to describe what they did by
+hand invites them to describe what they did to a safeguarding note, which would
+write that note's content into `tblErasureAudit`, a table deliberately absent
+from the personal-data catalogue and never erased. The line is composed from
+facts the portal already holds.
+
+**One more thing it forced:** `closeRequest()`'s own audit line said "All N steps
+ran and none failed" unconditionally. For a close after hand work that is a plain
+untruth, in the one record nobody can correct afterwards. It takes the fact as an
+argument now and says which it is.
+
+**And a fixture lesson, because the test passed for the wrong reason first.** The
+decisive case needs a SECOND, recoverable failure beside the permanent one. My
+first version gave the extra row `startedByID`, where the column is
+`triggeredByID` — so the row belonged to nobody, that step matched nothing, the
+extra failure never happened, and the check went **green reporting
+"closed-by-hand"**, which is exactly what it exists to forbid. A fixture that
+cannot produce the condition makes the check agree with the fault. The catalogue
+entry names the column; read it rather than guessing.
+
+## A hard-coded list has to be checked against the thing it describes (#719)
+
+`check_reserved_words_quoted.py` carries MySQL's reserved words in code, because
+an audit script must run with no database — that is what lets the pre-push hook
+run every one of them in about nine seconds. The price is that the list goes stale
+silently, and the reserved set moves: 8.4 added `QUALIFY` and `TABLESAMPLE` to
+8.0's.
+
+**It was already behind, on both engines, and the verification found that on its
+first run.** MySQL 8.0.36 reserves `master_bind` and
+`master_ssl_verify_server_cert`, which the list did not carry. MariaDB 11.4
+reserves seventeen more — `offset` and `returning` among them, both thoroughly
+plausible column names. None of the schema's 1,170 distinct column names is any
+of the nineteen, so nothing was broken; **that was luck, not coverage**, and the
+difference is the whole reason to measure.
+
+**THE TWO DIRECTIONS ARE NOT THE SAME, AND ONLY ONE MAY FAIL.**
+
+- The server reserves a word the list lacks → the check **cannot catch** a bare
+  reference to it, which will then fail to parse on a customer's database. FAIL.
+- The list carries a word the server does not reserve → the list is
+  conservative, which is **safe**, and happens in both directions as versions
+  move. REPORT.
+
+Failing the second direction would mean the test could not run on both MySQL
+versions this portal supports — and a test that cannot run is not a guard.
+
+**The list is the union of both engines**, deliberately. The check runs with no
+database, so it cannot know which engine a customer has; asking for a backtick
+on a word that is legal on the engine in front of it costs nothing, because a
+backtick is never wrong. A per-engine list would need the check to choose, which
+is exactly what it cannot do.
+
+**MariaDB cannot be asked, so it is tried.** Its `INFORMATION_SCHEMA.KEYWORDS`
+has a `WORD` column only, no `RESERVED` flag, and **membership does not mean
+reserved**: `FULLTEXT`, `STATUS` and `WINDOW` are all listed, yet only
+`FULLTEXT` fails as a bare identifier. So on MariaDB each candidate is used as a
+column name in a temporary table. Slower, and the only thing that answers the
+question.
+
+**Two details that make it a guard rather than a guard-shaped object.** It reads
+the word list **out of the audit script** rather than keeping its own copy —
+two copies would agree with each other and with nothing else. And it verifies
+its own probe: a bare `fullText` must be refused and a backticked one accepted,
+because if the probe stopped working the whole comparison would be measuring
+nothing and still passing.
+
+**Where it runs is the design.** A self-test on one version would have found the
+8.0 words and missed MariaDB's seventeen entirely. It is wired into
+`portal-selftests.yml` (a matrix over 8.0.36 and 8.4.11) and into
+`calendar-selftests.yml`, which is the one matrix here that runs self-tests on
+all three engines. **Wiring decides what a test can see.**
+
+## Fifteen free-text columns, fifteen decisions (#715)
+
+The useful thing here is not which columns were emptied. It is that **one
+decision for all of them would have been wrong whichever way it went**, and the
+four groups that fell out are worth recognising next time.
+
+1. **The person's own words, where the row keeps its value without them** —
+   emptied. A prayer request's subject and body, a pastoral case summary, a
+   prayer partner's note about the person. The request still shows one was made
+   and answered; the case still shows care was given.
+2. **Text that belongs to the organisation rather than to the person** — kept. A
+   presenter's name typed by hand, a licence seat's device label, a group's
+   meeting notes.
+3. **Text that expires anyway** — kept, because `tblErrors` already has a
+   retention rule and the sweep deletes the whole row. Nobody intends an error
+   trace to hold a name; it holds one only when a fault quotes a value.
+4. **Text nothing can reach** — recorded. A salvation card's prayer request has
+   no account link to its subject at all.
+
+**THE HALF-MEASURE IS WHAT GAVE THE FIRST GROUP AWAY.** The portal already
+emptied a prayer request's submitter name, e-mail and network address from the
+very same row and left what they had said. Look for that shape: a row where some
+personal columns are emptied and an adjacent free-text one is not usually means
+nobody decided about the text, rather than that somebody decided to keep it.
+
+**AND AN EXPLANATION CAN CONTAIN ITS OWN REFUTATION.** `tblCareCase.summary`'s
+catalogue note read: *"The notes of the visits on the case ARE emptied … this
+summary is not, so it can still describe them."* That is the argument against
+itself, written down and left for a year. When a reason has to describe the
+inconsistency to explain itself, the reason is the problem.
+
+**MATCH ON THE SUBJECT'S COLUMN, NEVER ON AN ACTOR'S.** A prayer request has
+three instructions — submitter, moderator, assignee. Only the submitter's
+empties text. Emptying on the moderator's would destroy somebody else's request
+because the person who moderated it left: #709's lesson, in a table #709 never
+touched.
+
+**AND SOMETIMES THE GUARD SAYS NO AND IS RIGHT TO.** A room booking's `purpose`
+should be emptied by this decision and is not, because `bookedByID` is in
+`ACTOR_COLUMNS` and the coverage test refuses `nullCols` there — emptying on an
+actor-matched instruction is a blanket `= NULL` over every matched row. For
+*this* table the emptying really would be correct, because every row it matches
+is the booker's own, and `ACTOR_COLUMNS`' own docblock names `approvedByID`
+rather than `bookedByID` as its example. **The right response was to record the
+limit and raise the classification as its own question (#723), not to weaken the
+guard on my own judgement** — that guard exists because seven tables were once
+set to delete a whole row on such a column.
+
+**Finally: "Tracked as #715" is not a decision.** Three explanations still said
+it. To the next reader, a record saying somebody will decide later looks exactly
+like a record nobody has looked at (#678).
+
+## What the independent check of #710, #715 and #719 found (3 November 2026)
+
+Ten real problems. Three of them are shapes worth recognising, and all three
+have happened in this repository before.
+
+**1. A reassuring paragraph was wrong in the one direction that breaks a page.**
+Migration 240's header said "every reader prints the column through
+`htmlspecialchars((string) …)`, so a NULL shows as an empty string rather than
+throwing". `web/_apps/prayer-requests/index.php` printed `$req['subject']` with
+**no cast**, twice. Under `declare(strict_types=1)` that is
+`TypeError: htmlspecialchars(): Argument #1 ($string) must be of type string,
+null given`, and the congregation feed's query filters on site, kind, visibility
+and status — **not on submitter** — so an erased person's congregation-visible
+request stays in the list and the page really would have met a NULL. The failure
+is the quiet kind: the page throws mid-render, the error handler prints the
+footer, and the answer is an HTTP 200 ending in an ordinary `</html>` with the
+feed missing. `php -l` cannot see it. The same paragraph said there were three
+writers; there are five (`prayer-requests/save.php`,
+`prayer-requests/anonymous-save.php`, `prayer-requests/api/create.php`,
+`praise/new.php` — a praise report is a row in the same table — and
+`care/case-save.php`).
+
+**Establish both halves by reading, one at a time.** Writers:
+`grep -rn "INSERT INTO tblPrayerRequests\|INSERT INTO tblCareCase" web/_apps web/_core`.
+Readers: `grep -rn --include='*.php' -e "\['subject'\]" … web/_apps web/_core | grep -v '(string)'`
+— the `grep -v` is the whole point, because a cast reader is not the question.
+
+**2. The behavioural pin existed, was written for exactly this, and was not
+updated.** `MUST_BE_EMPTIED` in `tools/gdpr-eraser-selftest.php` lists, by name,
+the columns an instruction must empty, and is kept separate from the
+instructions on purpose — its own comment records that an earlier independent
+check planted a column quietly dropped from an instruction's list and the test
+passed, because the rest of the file works out what to expect from the
+instruction itself. #715 added four columns to two instructions and not to that
+list. The checker then dropped `body` and `summary` again, each with a plausible
+catalogue excuse, and **everything stayed green**: 263 eraser checks, 93
+coverage checks, `check_erasure_columns_nullable.py`,
+`check_personal_data_coverage.py`. One static check caught a *partial* revert.
+Nothing read the columns back out of a database.
+
+**3. A fixture in which a guard's condition can never be true cannot test the
+guard.** `closeRequest()` leaves the administrator's account number out of
+`tblErasureAudit` when the request is their own, because that table is
+deliberately absent from the personal-data catalogue (#510 rule 7d) and is never
+erased — writing the number would undo the erasure permanently. Removing the
+guard left all 263 checks green: every case in section 21 used an `ADMIN` who
+was never the person being erased. Case D exists only to make the condition
+reachable, and it checks **both** halves — the number must be absent AND the line
+must still record the hand work, so a guard that stopped writing the line at all
+would not pass.
+
+### And a check can pin one SPELLING of a write
+
+Section 22 of `tools/gdpr-coverage-selftest.php` counted
+`/\$onlyHandWorkLeft\s*\[/` and required exactly one. The same fault written
+`self::$onlyHandWorkLeft = self::$onlyHandWorkLeft + [$child => …]` has no `[`
+after the name, so adding it to the ordering-mistake branch — or to the
+could-not-read branch — left the count at one, left the original write in the
+permanent branch for the position check below it, and passed both checks.
+
+The could-not-read plant needs **no second mistake by anybody**: one failed read
+of `tblErasureAudit` would then record the step as work only a human can finish,
+`finishByHand()` would close the request, and the sealed trail would say no
+further run could help — about a step that would have worked on the next try.
+
+The remedy is the repository's usual one: pin the whole surface, not one form of
+it. The static may be mentioned in **exactly four places** — the read in
+`execute()`, the one write, the reset at the start of a run, and the declaration
+— each appearing once, in one spelling. Any edit to those four lines fails the
+check on purpose (#697 pins two helper bodies whole for the same reason).
+
+**Comments are removed with `token_get_all()`, never a regular expression.**
+Every hand-rolled stripper here has been wrong at least once: a `//` inside a
+string literal (a URL is the usual one) eats the rest of the line, and a `/*`
+inside one swallows everything to the next `*/` (#716, #675). PHP's own tokeniser
+cannot make either mistake.
+
+### Two smaller lessons
+
+**A claim about a count needs the query.** "None of the schema's 1,161 distinct
+column names is any of the nineteen" was offered in three documents as the
+evidence for #719's safety. The substance is true; the figure is **1,170**
+(`SELECT COUNT(DISTINCT COLUMN_NAME) FROM information_schema.COLUMNS WHERE
+TABLE_SCHEMA = DATABASE()`, measured on a database built from both the old and
+the new `full_schema.sql`). A wrong number beside a true claim is how the next
+reader stops trusting the claim.
+
+**And a limitation stated without measuring was false.** A first version of
+#719's "what it cannot prove" said no reserved word contains a digit. Measured —
+`SELECT WORD FROM INFORMATION_SCHEMA.KEYWORDS WHERE RESERVED = 1 AND WORD REGEXP
+'[0-9]'` on MySQL 8.0.36 — there are **seven**: `float4`, `float8`, `int1`,
+`int2`, `int3`, `int4`, `int8`. All seven are already in the hard-coded list and
+no column in this schema is named any of them, so the MariaDB parse test's
+`^[a-z_]+$` filter costs nothing today. It would cost something the day MariaDB
+reserved a new digit-bearing word the list lacked, because that is the one
+direction the test fails on.

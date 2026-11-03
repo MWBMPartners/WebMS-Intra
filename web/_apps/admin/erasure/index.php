@@ -113,6 +113,54 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <input type="hidden" name="action" value="cancel">
                                 <button class="btn btn-outline-secondary btn-sm" type="submit" data-confirm="Cancel this request?">Cancel</button>
                             </form>
+                            <?php
+                            // 🖐️ "Dealt with by hand" (#710). Offered on every
+                            //    row of this status and the SERVER decides
+                            //    whether to CLOSE it. The page works nothing
+                            //    out, so it still opens on a database that has
+                            //    not had its upgrade yet.
+                            //
+                            //    ⚠️ BE EXACT ABOUT WHAT THE SERVER PROTECTS,
+                            //       because a first version of this comment
+                            //       drew the wrong analogy. "Put back to
+                            //       waiting" below REFUSES to act when a run
+                            //       showed life. This never refuses to RUN: it
+                            //       runs the erasure exactly as Execute does,
+                            //       and only the CLOSE is conditional. On a
+                            //       request that has never been run, that is
+                            //       the whole erasure — which is why the
+                            //       confirm text says so first, and says it as
+                            //       plainly as Execute's own does.
+                            //
+                            //    It cannot become a way to close a request
+                            //    nobody has acted on, because closing needs a
+                            //    run in which EVERY failure is one no further
+                            //    run can clear. Anything else is refused with
+                            //    the numbers, and nothing is recorded as done
+                            //    by hand.
+                            //
+                            //    ⚠️ "EITHER WAY YOUR ACCOUNT NUMBER GOES INTO
+                            //       THE REPORT" WAS UNTRUE and an independent
+                            //       check found it. On the refused path — the
+                            //       likeliest one, and the reason this button
+                            //       exists — the only writes are the claim's
+                            //       `status`/`claimedAt` and the put-back's
+                            //       `status`; `report.php` never selects
+                            //       `processedByID`. The ONLY record is the
+                            //       activity log, and that IS erasable (#626).
+                            //       It was untrue in the self-erasure case too,
+                            //       where the number is deliberately left out.
+                            //       The sentence now promises the record only
+                            //       where it is really written.
+                            ?>
+                            <form method="post" action="<?php echo htmlspecialchars(Router::url('admin/erasure-requests/process'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="requestID" value="<?php echo (int) $r['requestID']; ?>">
+                                <input type="hidden" name="action" value="finish_by_hand">
+                                <button class="btn btn-outline-secondary btn-sm" type="submit" data-confirm="THIS RUNS THE ERASURE. It deletes and anonymises this person&#39;s data exactly as Execute does — and on a request that has never been run, that is the whole erasure. It then closes the request ONLY IF every failure in that run is one no further run can fix: the kind whose reason says the rows must be CHECKED BY HAND. If anything else failed, nothing is closed and nothing is recorded as done by hand. When it DOES close the request, the report records that you dealt with those rows yourself, by account number and time &mdash; and that report is never erased. Unless the request is your own, in which case you are not named at all.">
+                                    <i class="fa-solid fa-hand me-1"></i>Dealt with by hand
+                                </button>
+                            </form>
                         <?php elseif ((string) $r['status'] === 'pending_confirmation'): ?>
                             <?php
                             // ✅ Waiting for the person to click the link that

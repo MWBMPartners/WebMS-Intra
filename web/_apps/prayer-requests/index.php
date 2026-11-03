@@ -120,6 +120,30 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 /**
  * 🎨 Helper — render a Bootstrap-coloured status badge for a request row
  */
+// 🙏 The subject of a request, ready to print.
+//
+// WHY THIS EXISTS. `subject` and `body` became NULLABLE in migration 240 (#715),
+// because an erasure request now empties what somebody said about themselves and
+// a NOT NULL column cannot be emptied. A congregation-visible request stays in
+// the feed below after its submitter has been erased, so this page really does
+// meet a NULL — and `htmlspecialchars(null)` is a TypeError under
+// `declare(strict_types=1)`, which `php -l` cannot see. The page would then
+// throw mid-render and the error handler would print the footer, so the answer
+// is an HTTP 200 ending in an ordinary `</html>` with the feed missing. That is
+// the hardest kind of fault to notice, and this repository has had it before
+// (the `(string)` cast on a numeric array key, #669).
+//
+// It says "Prayer request" rather than anything about removal ON PURPOSE:
+// telling every member that this particular row was erased would hand them a
+// fact about somebody that the erasure exists to take away.
+$requestSubject = static function (?string $subject): string {
+    $text = (string) $subject;
+    if ($text === '') {
+        return 'Prayer request';
+    }
+    return $text;
+};
+
 $renderStatusBadge = static function (string $status): string {
     $map = [
         'pending'  => ['warning', 'fa-hourglass-half', 'Pending'],
@@ -192,7 +216,7 @@ $renderStatusBadge = static function (string $status): string {
                 <?php foreach ($myRequests as $req): ?>
                     <div class="portal-data-row">
                         <div class="portal-data-cell col-12 col-md-5" data-label="Subject">
-                            <strong><?php echo htmlspecialchars($req['subject'], ENT_QUOTES, 'UTF-8'); ?></strong>
+                            <strong><?php echo htmlspecialchars($requestSubject($req['subject']), ENT_QUOTES, 'UTF-8'); ?></strong>
                             <?php if ((int) $req['isAnonymous'] === 1): ?>
                                 <span class="badge bg-secondary ms-1">Anon</span>
                             <?php endif; ?>
@@ -251,7 +275,7 @@ $renderStatusBadge = static function (string $status): string {
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between align-items-start mb-2">
                                         <h3 class="h6 mb-0">
-                                            <?php echo htmlspecialchars($req['subject'], ENT_QUOTES, 'UTF-8'); ?>
+                                            <?php echo htmlspecialchars($requestSubject($req['subject']), ENT_QUOTES, 'UTF-8'); ?>
                                         </h3>
                                         <?php echo $renderStatusBadge((string) $req['status']); ?>
                                     </div>

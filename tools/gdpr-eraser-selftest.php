@@ -226,15 +226,23 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 258; // 235 before section 19 (#709) added nine; the fix round
+const EXPECTED_CHECKS = 264; // 235 before section 19 (#709) added nine; the fix round
                              // replaced its single guard check with eight, giving 251.
                              // Section 20 (#707) then added seven: five on which rows the
                              // change-history step reaches, one on the actor link still
                              // being cut by the ordinary instruction, and one on a second
-                             // run. 251 + 7 = 258.
+                             // run. 251 + 7 = 258. Section 21 (#710) added four:
+                             // a clean run reported as such, a request whose every
+                             // failure is permanent being closed, one that also failed
+                             // recoverably NOT being closed, and a guard that the
+                             // permanent refusal really was among its failures.
+                             // 258 + 4 = 262. The fix round added one more — the
+                             // `completed` line must not claim none failed — giving 263.
+                             // The #715 check round added case D, where the administrator
+                             // IS the person being erased: 264.
 
 // The headings that must all be reached for a pass.
-const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20'];
+const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21'];
 
 // 🗺️ The made-up people and requests. Every number is 920000 or higher, far
 //    above anything the fresh-install script seeds.
@@ -291,6 +299,14 @@ const P_HELD   = 920202; // erased in section 18: his kept rows must go from the
 const REQ_HELD = 940202;
 const P_CARE   = 920301; // erased in section 19: a pastoral visit's notes are reached through the case (#709)
 const REQ_CARE = 940301;
+const P_HAND_A = 920501; // section 21: a request that simply finishes on a "dealt with by hand" press
+const P_HAND_B = 920502; // section 21: a request whose ONLY failure is permanent, so it may be closed
+const P_HAND_C = 920503; // section 21: one permanent failure AND one recoverable, so it may NOT be
+const P_HAND_D = 920504; // section 21: the administrator IS the person being erased (#715 check round)
+const REQ_HAND_A = 940501;
+const REQ_HAND_B = 940502;
+const REQ_HAND_C = 940503;
+const REQ_HAND_D = 940504;
 const P_AUDIT   = 920401; // erased in section 20: the change history ABOUT them is emptied (#707)
 const P_AUDIT_2 = 920402; // section 20: somebody else, whose history must survive untouched
 const REQ_AUDIT = 940401;
@@ -338,9 +354,19 @@ const SITE_F6 = 11;     // "tax gifts only" at first, in Europe/London, with a h
 // expectation with it and nothing failed. The independent check of
 // 11 October 2026 planted exactly that and this test passed.
 // "table.matched column" => the columns that must be empty afterwards.
+// ADDED 3 November 2026 (#715): the four free-text columns. The independent
+// check found that #715's whole behaviour was pinned by NOTHING -- it stopped
+// the portal emptying a prayer request's `body` and a pastoral case's
+// `summary`, gave each a plausible catalogue excuse, and every gate stayed
+// green (eraser 263/263, coverage "All good.", both hard gates OK). The one
+// check that did catch a partial revert was static; nothing read the columns
+// back out of a database. This list is exactly the remedy its own comment
+// above describes, and it had not been updated with the instructions it
+// covers -- the "corrected in one place" shape, in the test written to stop it.
 const MUST_BE_EMPTIED = [
-    'tblPrayerRequests.submitterID' => ['submitterName', 'submitterEmail', 'submitterIP'],
-    'tblCareCase.personUserID'      => ['personName'],
+    'tblPrayerRequests.submitterID' => ['submitterName', 'submitterEmail', 'submitterIP',
+                                        'subject', 'body', 'partnerNote'],
+    'tblCareCase.personUserID'      => ['personName', 'summary'],
 ];
 
 // Columns the database will not allow to be emptied, so the person's number
@@ -2231,7 +2257,7 @@ foreach (MUST_BE_EMPTIED as $where => $columns) {
         }
     }
 }
-ge_ok('typed details about the person are emptied, by name: a prayer request\'s name, email address and sender address, and a pastoral case\'s name',
+ge_ok('typed details about the person are emptied, by name: a prayer request\'s name, e-mail address, sender address, subject, body and partner note, and a pastoral case\'s name and summary (#715)',
     $stillThere === [], implode('; ', $stillThere));
 $twoColumnTables = [];
 foreach ($worldA['rows'] as $tracked) {
@@ -5600,6 +5626,200 @@ ge_ok('running the request again empties nothing a second time, and the line it 
     json_encode(['the run' => is_array($again) === true ? ['failed' => $again['failed']] : (string) $again,
         'its change-history line' => $secondLine,
         'the third party is still whole' => $readAudit($adaChangedBob)['oldValue'] !== null]));
+
+ge_section('21', 'A request whose only remaining work is work done by hand can be finished (#710)');
+// =============================================================================
+// 🧠 WHY THIS SECTION EXISTS. #709 gave the routine a step that can refuse
+//    PERMANENTLY and CORRECTLY: once an earlier run has cut the link a
+//    parent-matched step looks through, no number of further runs will reach
+//    those rows, and saying so beats writing "nothing held for this person"
+//    over a safeguarding note that is still there.
+//
+//    But `execute()` closes a request only when NOTHING failed, so such a
+//    request could never be closed — and never cancelled either, because
+//    `runHasChangedAnything()` is correctly true. An administrator who had done
+//    exactly the right thing was left with a request reading as unfinished for
+//    ever, and no action that resolved it.
+//
+// 🛑 THE CHECK THAT MATTERS IS THE THIRD ONE. `finishByHand()` must NOT close a
+//    request that also failed for a recoverable reason, because "run it again"
+//    is still the right answer for that one — and closing would bury it. The
+//    design makes that the only way through: it RUNS the request and closes
+//    only if every single failure of that run is permanent.
+// =============================================================================
+
+// 🅰️ A request with nothing wrong with it. Pressing "dealt with by hand" on one
+//    of these must report that it simply finished, and must NOT claim anybody
+//    did work outside the portal.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+ge_user(P_HAND_A, 'Hana Handa', 'hana.handa@selftest.invalid');
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+ge_request(REQ_HAND_A, P_HAND_A, 'hana.handa@selftest.invalid', 'Hana Handa', 'processing');
+$handA = GdprEraser::finishByHand(REQ_HAND_A, P_HAND_A, ADMIN);
+$handALines = array_values(array_filter(
+    ge_audit(REQ_HAND_A),
+    static fn (array $l): bool => (string) $l['action'] === 'by hand'
+));
+ge_ok('a request with no failures is reported as having finished normally, and NOTHING is recorded as done by hand',
+    $handA['done'] === true
+    && $handA['outcome'] === 'finished-normally'
+    && $handA['failed'] === 0
+    && $handALines === [],
+    json_encode(['answer' => $handA, 'by-hand lines' => $handALines]));
+
+// 🅱️ A request whose ONLY failure is the permanent one. The state is built the
+//    way section 19 builds its earlier-run cases — by planting the audit trail,
+//    because a correctly ordered run never produces it: the parent changed by
+//    an EARLIER run, and this step never having answered while the link was
+//    intact.
+ge_user(P_HAND_B, 'Hugo Handa', 'hugo.handa@selftest.invalid');
+$handBCase  = ge_linked('tblCareCase', ['personUserID' => P_HAND_B, 'openedByID' => D],
+    ['siteID' => 1, 'summary' => 'Hugo is unwell']);
+$handBVisit = ge_linked('tblCareVisit', ['visitedByID' => D, 'followUpAssignedToID' => D],
+    ['caseID' => ge_id($handBCase), 'notes' => 'Hugo asked that this not be written down.']);
+ge_request(REQ_HAND_B, P_HAND_B, 'hugo.handa@selftest.invalid', 'Hugo Handa', 'processing');
+// The parent, changed by an earlier run of THIS request. `auditID` below every
+// line this run will write, which is what makes it "an earlier run".
+ge_q(
+    'INSERT INTO tblErasureAudit (requestID, action, tableName, recordKey, details, chainHash) '
+    . 'VALUES (?, ?, ?, NULL, ?, ?)',
+    'issss',
+    [REQ_HAND_B, 'anonymise', 'tblCareCase', 'planted: an earlier run cut the link', str_repeat('0', 64)]
+);
+$handB = GdprEraser::finishByHand(REQ_HAND_B, P_HAND_B, ADMIN);
+$handBStatus = (string) (ge_one('SELECT status FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_HAND_B])['status'] ?? '');
+$handBLine   = null;
+foreach (ge_audit(REQ_HAND_B) as $line) {
+    if ((string) $line['action'] === 'by hand') {
+        $handBLine = $line;
+    }
+}
+$handBCompleted = null;
+foreach (ge_audit(REQ_HAND_B) as $line) {
+    if ((string) $line['action'] === 'completed') {
+        $handBCompleted = $line;
+    }
+}
+// 🧷 THE `completed` LINE'S OWN WORDING, pinned because it was pinned by
+//    NOTHING. Calling closeRequest() with 0 instead of the failure count left
+//    all 262 checks green while the sealed trail said "All 230 steps ran and
+//    none failed" about a request closed after work done by hand — the plain
+//    untruth this feature exists to stop, in the one record nobody can correct
+//    afterwards. An independent check planted exactly that.
+ge_ok('the `completed` line does NOT claim none failed, and says the work was done outside the portal',
+    is_array($handBCompleted) === true
+    && str_contains((string) $handBCompleted['details'], 'none failed') === false
+    && str_contains((string) $handBCompleted['details'], 'dealt with outside the portal') === true,
+    json_encode($handBCompleted));
+
+ge_ok('a request whose every failure is permanent IS closed, and the line names the administrator and the step',
+    $handB['done'] === true
+    && $handB['outcome'] === 'closed-by-hand'
+    && $handB['failed'] > 0
+    && count($handB['handWorkOnly']) === $handB['failed']
+    && $handBStatus === 'completed'
+    && is_array($handBLine) === true
+    && str_contains((string) $handBLine['details'], 'administrator #' . ADMIN) === true
+    && str_contains((string) $handBLine['details'], 'tblCareVisit') === true,
+    json_encode(['answer' => $handB, 'status' => $handBStatus, 'line' => $handBLine]));
+
+// 🅲 THE DECISIVE CASE. The same permanent refusal, PLUS one step made to fail
+//    for a reason a later run could clear. It must NOT be closed, and nothing
+//    may be recorded as done by hand — otherwise the recoverable failure is
+//    buried under a closed request.
+ge_user(P_HAND_C, 'Hilda Handa', 'hilda.handa@selftest.invalid');
+$handCCase  = ge_linked('tblCareCase', ['personUserID' => P_HAND_C, 'openedByID' => D],
+    ['siteID' => 1, 'summary' => 'Hilda is unwell']);
+$handCVisit = ge_linked('tblCareVisit', ['visitedByID' => D, 'followUpAssignedToID' => D],
+    ['caseID' => ge_id($handCCase), 'notes' => 'Hilda spoke about her family.']);
+// A row for the step that is made to fail below, so that step has work to do.
+// The feed comes first: `tblExternalFeedRuns.feedID` has a foreign key, and
+// letting the helper invent a number for it fails the constraint.
+// 🪤 THE COLUMN IS `triggeredByID`, not `startedByID`. A first version named the
+//    wrong one, so the row was nobody's, the step matched nothing, the trigger
+//    never fired and there was no second failure — and the check went green
+//    reporting "closed-by-hand", which is the very thing it exists to forbid.
+//    The catalogue entry names the column; read it rather than guessing.
+$handCFeed = ge_linked('tblExternalFeeds', ['createdByID' => D], ['siteID' => 1, 'isActive' => 1]);
+ge_linked('tblExternalFeedRuns', ['triggeredByID' => P_HAND_C], ['siteID' => 1, 'feedID' => ge_id($handCFeed)]);
+ge_request(REQ_HAND_C, P_HAND_C, 'hilda.handa@selftest.invalid', 'Hilda Handa', 'processing');
+ge_q(
+    'INSERT INTO tblErasureAudit (requestID, action, tableName, recordKey, details, chainHash) '
+    . 'VALUES (?, ?, ?, NULL, ?, ?)',
+    'issss',
+    [REQ_HAND_C, 'anonymise', 'tblCareCase', 'planted: an earlier run cut the link', str_repeat('0', 64)]
+);
+// One ordinary step made to fail, the way section 6 does it.
+ge_trigger('selftest_gdpr_hand_fail', "CREATE TRIGGER `selftest_gdpr_hand_fail` BEFORE UPDATE ON `tblExternalFeedRuns` "
+    . "FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'selftest: this update was made to fail'");
+$handC = GdprEraser::finishByHand(REQ_HAND_C, P_HAND_C, ADMIN);
+ge_dropTrigger('selftest_gdpr_hand_fail');
+$handCStatus = (string) (ge_one('SELECT status FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_HAND_C])['status'] ?? '');
+$handCLines  = array_values(array_filter(
+    ge_audit(REQ_HAND_C),
+    static fn (array $l): bool => (string) $l['action'] === 'by hand'
+));
+ge_ok('A REQUEST THAT ALSO FAILED FOR A RECOVERABLE REASON IS NOT CLOSED, and nothing is recorded as done by hand',
+    $handC['done'] === false
+    && $handC['outcome'] === 'other-failures'
+    && $handC['failed'] > count($handC['handWorkOnly'])
+    && $handCStatus === 'pending_review'
+    && $handCLines === [],
+    json_encode(['answer' => $handC, 'status' => $handCStatus, 'by-hand lines' => $handCLines]));
+
+ge_ok('and the permanent refusal really was among its failures, so the case is not passing because nothing was permanent',
+    count($handC['handWorkOnly']) > 0
+    && array_key_exists('tblCareVisit', $handC['handWorkOnly']) === true,
+    json_encode($handC['handWorkOnly']));
+
+// 🅳 THE ADMINISTRATOR IS THE PERSON BEING ERASED. Same shape as case B, with
+//    one difference: the person pressing the button is the person the request
+//    is about, which is an ordinary thing to happen because somebody may ask
+//    for their own account to be erased and still be an administrator while it
+//    is being done.
+//
+// 🧷 WHY THIS CHECK EXISTS AT ALL. The guard that leaves the number out was
+//    pinned by NOTHING. An independent check removed it and all 263 checks
+//    stayed green, because cases A, B and C all use an ADMIN who is never the
+//    person being erased — a fixture in which the guard's condition can never
+//    be true. `tblErasureAudit` is deliberately absent from the personal-data
+//    catalogue (#510 rule 7d) and is NEVER erased, so writing the number here
+//    would put it back permanently, in the one record that cannot be corrected
+//    afterwards: the erasure would undo itself.
+//
+//    It checks BOTH halves. The number must not be there, AND the line must
+//    still say the work was done by hand and name the step — a guard that
+//    stopped writing the line at all would otherwise pass.
+ge_user(P_HAND_D, 'Hamish Handa', 'hamish.handa@selftest.invalid');
+$handDCase  = ge_linked('tblCareCase', ['personUserID' => P_HAND_D, 'openedByID' => D],
+    ['siteID' => 1, 'summary' => 'Hamish is unwell']);
+$handDVisit = ge_linked('tblCareVisit', ['visitedByID' => D, 'followUpAssignedToID' => D],
+    ['caseID' => ge_id($handDCase), 'notes' => 'Hamish spoke in confidence.']);
+ge_request(REQ_HAND_D, P_HAND_D, 'hamish.handa@selftest.invalid', 'Hamish Handa', 'processing');
+ge_q(
+    'INSERT INTO tblErasureAudit (requestID, action, tableName, recordKey, details, chainHash) '
+    . 'VALUES (?, ?, ?, NULL, ?, ?)',
+    'issss',
+    [REQ_HAND_D, 'anonymise', 'tblCareCase', 'planted: an earlier run cut the link', str_repeat('0', 64)]
+);
+// The third argument is who pressed the button: the person being erased.
+$handD     = GdprEraser::finishByHand(REQ_HAND_D, P_HAND_D, P_HAND_D);
+$handDLine = null;
+foreach (ge_audit(REQ_HAND_D) as $line) {
+    if ((string) $line['action'] === 'by hand') {
+        $handDLine = $line;
+    }
+}
+$handDDetails = (string) ($handDLine['details'] ?? '');
+ge_ok('an administrator closing THEIR OWN request is not named by number in the sealed trail, and the line still records the hand work',
+    $handD['done'] === true
+    && $handD['outcome'] === 'closed-by-hand'
+    && is_array($handDLine) === true
+    && str_contains($handDDetails, (string) P_HAND_D) === false
+    && str_contains($handDDetails, 'administrator #') === false
+    && str_contains($handDDetails, 'they are the person being erased') === true
+    && str_contains($handDDetails, 'tblCareVisit') === true,
+    json_encode(['answer' => $handD, 'line' => $handDLine]));
 
 
 ge_finish();

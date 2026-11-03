@@ -716,43 +716,71 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             it to, which is the only reason it was typed in the first place.
         </li>
         <li>
-            <strong>Not reached, which is a fault rather than a decision.</strong> These are
-            recorded as open problems and each has a number against it, so none is forgotten:
+            <strong>Emptied on request now, where it is the person's own words about themselves.</strong>
+            A <strong>prayer request's subject and body</strong> and a <strong>prayer partner's note
+            about them</strong> are emptied, and so is a <strong>pastoral case's summary</strong>
+            &mdash; which is somebody else's description of the person's circumstances, and sat
+            beside visit notes that were already emptied. The rows stay, so the request still shows
+            that one was made and answered, and the case still shows who opened it and when.
+        </li>
+        <li>
+            <strong>Cleared on a timer rather than on request, because nothing on the row says who
+            it is about.</strong> Each of these is kept for a period you set, and then emptied or
+            deleted by the nightly job. An erasure request cannot reach them, because there is no
+            account number on the row to match &mdash; and a rule that searched the text for a name
+            would match somebody else of the same name and miss a nickname.
             <ul>
                 <li>
-                    <strong>Messages from a payment provider</strong> are kept whole and
-                    indefinitely, and a payment message normally carries the payer's name, e-mail
-                    address and billing address. This is the most sensitive item on the page.
+                    <strong>Messages from a payment provider.</strong> A payment message routinely
+                    carries the payer's name, e-mail address and billing address. The body is now
+                    kept only once the message has been proved genuine, and emptied after the
+                    period you set. <strong>These used to be kept whole and for ever.</strong>
                 </li>
                 <li>
-                    <strong>Messages the portal sent to another system</strong> keep what was in
-                    them &mdash; a registration carries somebody's full name, an event sent in by
-                    a visitor carries their e-mail address.
-                </li>
-                <li>
-                    <strong>Visitors' network addresses</strong> in two places that nothing ever
-                    clears.
+                    <strong>Messages the portal sent to another system</strong> &mdash; a
+                    registration carries somebody's full name, an event sent in by a visitor
+                    carries their e-mail address. Emptied after the same period, but
+                    <strong>only once the message has been delivered or given up on</strong>: one
+                    still waiting to be sent keeps its body, because that is what a retry sends.
                 </li>
                 <li>
                     <strong>A recording's written-out transcript</strong>, and a second searchable
-                    copy of it &mdash; whatever was said aloud.
-                </li>
-                <li>
-                    <strong>Free text in the person's own words</strong>: a prayer request, a
-                    salvation card, why somebody wanted a room. Also a pastoral case's summary, and
-                    a presenter's name typed by hand.
-                </li>
-                <li>
-                    <strong>An expense receipt's original filename</strong>, which is the name the
-                    file had on the claimant's own computer.
+                    copy of it &mdash; whatever was said aloud. Deleted after the period you set.
                 </li>
                 <li>
                     <strong>The fault log's detail and the address asked for</strong>, which can
-                    quote a name or an e-mail address. These do expire on the fault log's own
-                    timer, unlike the rest of this list.
+                    quote a name or an e-mail address. These expire on the fault log's own timer.
                 </li>
             </ul>
-            <strong>If somebody asks to be erased and any of these matters to them, deal with it
+            <strong>If the period matters for somebody who has asked to be erased, shorten it, or
+            deal with those rows directly and record that you have.</strong>
+        </li>
+        <li>
+            <strong>Kept on purpose, because the words are about the organisation rather than the
+            person.</strong> Decided on 3 November 2026: a <strong>presenter's name typed in by
+            hand</strong> on a service plan or a recording, a licence seat's
+            <strong>device name and label</strong>, and a small group's
+            <strong>meeting notes</strong>. These describe how the organisation runs, and emptying
+            them would take a record from the organisation to no benefit of the person asking.
+        </li>
+        <li>
+            <strong>Not reached, which is a fault rather than a decision.</strong> Two are left, and
+            each has a number against it so neither is forgotten:
+            <ul>
+                <li>
+                    <strong>A salvation card's prayer request.</strong> Nothing on the card says
+                    whose it is &mdash; the only account on it is the follow-up worker it was given
+                    to, and emptying on that would wipe a card about somebody else because a
+                    volunteer left.
+                </li>
+                <li>
+                    <strong>Why somebody wanted a room, and why a booking was turned down.</strong>
+                    The booking does name the person who made it, but it names them as
+                    <em>somebody who acted</em>, and emptying text on that basis is the same
+                    mistake as the one above. Reclassifying it is tracked as its own change.
+                </li>
+            </ul>
+            <strong>If somebody asks to be erased and either of these matters to them, deal with it
             directly and record that you have.</strong>
         </li>
     </ul>
@@ -838,14 +866,28 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         notes, there is no longer anything to find them by. When that happens the step
         <strong>fails and tells you the notes must be checked by hand</strong> &mdash; it does not
         report that nothing was held. Every other step still runs, so the rest of the erasure is
-        done. <strong>Be aware of what this costs:</strong> running the request again will not reach
-        those notes, and there is at present <strong>no button that marks them as dealt with</strong>,
-        so the request will keep showing as <em>pending review</em> even after somebody has emptied
-        them. It cannot be cancelled either, because earlier steps have already changed records. Deal
-        with the notes directly in the database, and treat the request's own report &mdash; which
-        names the step and its reason &mdash; as the record of what was left. We would rather leave
-        you a request that plainly says it is unfinished than one that reports success it has not
-        earned.
+        done.
+    </p>
+    <p class="mb-0">
+        <strong>What to do about it.</strong> Deal with those notes directly, then press
+        <strong>Dealt with by hand</strong> on the request. That runs the request one final time and
+        closes it <strong>only if every remaining failure is one no further run can fix</strong> &mdash;
+        and its report records that you dealt with those rows yourself. <strong>It records your account
+        number and the time, not your name</strong> &mdash; the report shows neither your name nor
+        anybody else's, which is deliberate: that record is kept for ever and is never erased. If the
+        request is <em>your own</em>, your account number is left out as well, because putting it in
+        that record would put back the one thing the erasure had just taken away. <strong>Nothing goes
+        into that report on a run it refuses to close</strong>, only into the activity log.
+        If anything else failed in that run, nothing is closed and nothing is recorded: you are told
+        how many failures were of each kind, because &ldquo;run it again&rdquo; is still the right
+        answer for the rest.
+        <br>
+        Two things that follow from how it works. It <strong>cannot</strong> be used to close a
+        request nobody has acted on, because the portal has to have just tried everything it can. And
+        a request in this state still cannot be <em>cancelled</em>, because earlier steps have already
+        changed records &mdash; cancelling would leave somebody with part of their records gone and a
+        request saying nothing happened. We would rather leave you a request that plainly says it is
+        unfinished than one that reports success it has not earned.
     </p>
 </div>
 

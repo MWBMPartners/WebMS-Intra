@@ -2,6 +2,174 @@
 
 
 ## [Unreleased] (alpha)
+- **Changed — a person's own words are emptied on an erasure request, and the fifteen free-text
+  columns each have a decision (#715)**
+  - **Emptied now, on the owner's decision of 3 November 2026:** a prayer request's `subject` and
+    `body` (what somebody asked to be prayed for, in their own words), its `partnerNote` (a prayer
+    partner's note **about** them), and a pastoral case's `summary`.
+  - **The prayer request's half-measure was the hard part to defend.** The portal already emptied the
+    submitter's name, e-mail and network address from the very same row and left what they had said
+    about themselves — often the most sensitive thing they ever typed into the portal. The row keeps
+    its value without the text: the request still shows that one was made, moderated and answered.
+  - **The pastoral case exposed an inconsistency inside one feature.** #709 carefully empties a visit
+    note ("Ces says the ward is noisy") while the case **summary** ("Ces is in hospital") was left on
+    the parent row — and the catalogue's own explanation said so out loud: *"this summary is not, so
+    it can still describe them"*. Both are a third party's words about the erased person's health. The
+    case, who opened it, when and its status all stay.
+  - **Matched on the subject's column and nothing else.** A prayer request's two other instructions
+    (moderator, assignee) empty no text, because emptying there would destroy **somebody else's**
+    request because the person who moderated it left — #709's lesson, which is about this exact shape.
+  - **Kept, on the owner's decision:** a presenter's name typed by hand (on service plans and on
+    recordings), a licence seat's `deviceName` and `seatLabel`, and a small group's `meetingNotes` —
+    these relate to the organisation directly. `tblErrors.errorDetail` and `.requestURL` are kept
+    because they **expire anyway**: that table is the one on the list with a time limit already, and
+    the nightly sweep deletes the whole row.
+  - **Two things the decision could not reach, and both are recorded rather than forced.** A salvation
+    card's `prayerRequest` **cannot be found**: nothing ties a card's subject to an account, and the
+    only account column is the follow-up worker it was given to — emptying on that would destroy a
+    card about somebody else because a volunteer left. And a room booking's `purpose` and
+    `declineReason` are blocked by a guard I would not weaken: `bookedByID` is classified as "who
+    acted", and emptying a column on an actor-matched instruction is a blanket `= NULL` over every
+    matched row. **For this table the emptying would in fact be right**, and `ACTOR_COLUMNS`' own
+    docblock names `approvedByID` rather than `bookedByID` as its example — but reclassifying a
+    load-bearing list is more than #715 asked for. That is **#723**.
+  - **Every one of the fifteen now carries a decision rather than a tracking note.** Three still said
+    "Tracked as #715", which is the stale shape #678 warns about: a record that says somebody will
+    decide later reads, to the next person, exactly like a record that nobody has looked at.
+  - **And the owner's own suggestion is raised as #724:** a case-by-case review step, for a global
+    administrator or a data-controller role, over the free text an automatic rule deliberately does
+    not touch — because whether "Jane's laptop" matters depends on the request in front of you.
+  - **The independent check found ten real problems and the two worst were mine. First: a page that
+    would really have thrown.** `prayer-requests/index.php` printed `$req['subject']` with **no
+    cast**, twice, and the congregation feed is not filtered by submitter — so an erased person's
+    congregation-visible request stays in the list and `htmlspecialchars(null)` is a `TypeError`
+    under `strict_types`. The page would have thrown mid-render, the error handler would have printed
+    the footer, and the answer would have been an **HTTP 200 ending in an ordinary `</html>` with the
+    feed missing**. `php -l` cannot see it. Migration 240's own header had claimed "every reader
+    prints the column through `htmlspecialchars((string) …)`" — and also said there were three
+    writers where there are **five**. Both halves of a paragraph written to reassure the next reader
+    about NULL safety.
+  - **Second: #715's whole behaviour was pinned by NOTHING.** The checker stopped the portal emptying
+    a prayer request's `body` and a pastoral case's `summary`, gave each a plausible catalogue
+    excuse, and **every gate stayed green** — 263 eraser checks, 93 coverage checks, both hard gates.
+    Nothing read those columns back out of a database. `MUST_BE_EMPTIED` exists for exactly this and
+    its own comment says so ("an instruction that quietly promised LESS changed the expectation with
+    it and nothing failed"); #715 had added four columns to the instructions and **not** to that
+    list. Both reverts now fail one check each, proved by planting.
+  - **And the customer-facing help page was stale for four packages, not one.** Its "Not reached,
+    which is a fault" list still named the payment-provider bodies (#713 gave them a time limit),
+    visitors' network addresses (#712 replaced them with salted fingerprints and a prune), the
+    transcript (#714 gave it one) and the expense receipt's filename (#714 renamed it) — and listed
+    the prayer request and case summary as unreached in the same change that empties them. It is the
+    one sentence a customer reads before accepting a loss, and it understated the fix in three places
+    and overstated it in none. It is now four separate lists: emptied on request, cleared on a timer,
+    kept on purpose, and the two genuinely not reached.
+- **Added — the hard-coded reserved-word list is now checked against a real server, and it was
+  already behind on both engines (#719)**
+  - **Why a hard-coded list at all.** `check_reserved_words_quoted.py` has to carry MySQL's reserved
+    words in code, because an audit script must run with **no database** — that is what lets the
+    pre-push hook run every one of them in about nine seconds. The cost is that a hard-coded list **goes
+    stale silently**, and the reserved set is not static: 8.4 added `QUALIFY` and `TABLESAMPLE` to
+    8.0's. That was your concern when you asked about reading the words dynamically, and it was a
+    fair one.
+  - **The answer to the dynamic half is still no**, for the reason already recorded: escaping
+    identifiers at run time means parsing SQL in PHP, where a parser bug corrupts queries silently —
+    worse than the fault being fixed. **The verification half is yes**, and this is it.
+  - **It earned its place on the first run.** MySQL 8.0.36 reserves `master_bind` and
+    `master_ssl_verify_server_cert`, and the list did not carry either — so a bare reference to one
+    would have passed review and then failed to parse. **MariaDB 11.4 reserves seventeen more**:
+    `current_role`, `delete_domain_id`, `do_domain_ids`, `ignore_domain_ids`,
+    `master_demote_to_replica`, `master_demote_to_slave`, **`offset`**, `page_checksum`,
+    `parse_vcol_expr`, `portion`, `ref_system_id`, **`returning`**, `sql_after_gtids`,
+    `sql_before_gtids`, `stats_auto_recalc`, `stats_persistent` and `stats_sample_pages`.
+  - **`offset` and `returning` are the ones to notice:** both are thoroughly plausible column names,
+    and a column called either would have passed review and then broken on a customer running
+    MariaDB. **None of this schema's 1,170 distinct column names is any of the nineteen** — checked,
+    not assumed — so nothing was broken. That was luck rather than coverage, which is the point.
+  - **The list is now the union of both engines**, which is what a product supporting both needs: the
+    check runs with no database and cannot know which engine a customer has, so it asks for a
+    backtick on a word that may be legal on the one in front of it. That costs nothing — a backtick is
+    never wrong.
+  - **The two directions are not symmetrical and only one fails.** A word the server reserves that
+    the list lacks is a word the check cannot catch: that **fails**. A word the list carries that the
+    server does not reserve means the list is conservative, which is safe and happens in both
+    directions as versions move — that is **reported**, never failed. Otherwise the test could not run
+    on both the MySQL versions this portal supports.
+  - **MariaDB cannot be asked, so it is measured.** Its `INFORMATION_SCHEMA.KEYWORDS` has a `WORD`
+    column only, with no `RESERVED` flag, and membership does not mean reserved — `FULLTEXT`,
+    `STATUS` and `WINDOW` are all listed, yet only `FULLTEXT` fails bare. So there the test **tries**
+    each candidate as a column name, which is the only thing that answers the question.
+  - Wired into **both** places that give it value: `portal-selftests.yml`, whose matrix is MySQL
+    8.0.36 **and** 8.4.11, and `calendar-selftests.yml`, the one matrix in the repository that runs
+    self-tests on all three engines including MariaDB 11.4. Test:
+    `tools/reserved-words-live-selftest.php`, which reads the list **out of the audit script** rather
+    than keeping a second copy — two copies would agree with each other and with nothing else.
+- **Added — an erasure request whose only remaining work is work done by hand can be finished
+  (#710)**
+  - **What was wrong.** #709 gave the routine a step that can refuse **permanently and correctly**:
+    once an earlier run has cut the link a parent-matched step looks through, no number of further
+    runs will reach those rows, and saying so beats writing "nothing held for this person" over a
+    safeguarding note that is still there. But `execute()` closes a request only when **nothing**
+    failed, so such a request could never be closed — and never cancelled either, because
+    `runHasChangedAnything()` is correctly true. An administrator who had done exactly the right
+    thing was left with a request reading as unfinished for ever and no action that resolved it.
+  - **It runs the request one final time, and that is the design.** The obvious shape — ask whether a
+    step *would* refuse, then close — answers the wrong question: it says nothing about whether some
+    **other** step still has work left, so it would close a request with real work outstanding.
+    `GdprEraser::finishByHand()` calls `execute()` and judges what actually happened, so **you cannot
+    close a request by hand without the portal having just tried everything it can.** There is no
+    force-close.
+  - **The record is the feature, not a side effect.** The risk was this becoming a button that closes
+    any request nobody has acted on, so the design makes that impossible rather than discouraged:
+    `closeRequest()` stays private and this is the only other way to reach it, with the audit line and
+    the close in one method. **There is no free-text box**, deliberately — asking an administrator what
+    they did by hand invites them to describe what they did to a safeguarding note, which would put
+    that note's content into `tblErasureAudit`, a table deliberately absent from the personal-data
+    catalogue (#510 rule 7d) and never erased. The line is composed from facts: who, when, which steps
+    cannot run, and why.
+  - **How a permanent refusal is told from any other failure, without matching on words.** The one
+    branch that produces it records the step in a run-scoped list, the way `$dueAtErasure` is
+    collected, and `execute()` reports it. Reading the audit trail for the refusal's wording would
+    have found a line from an **older** run too, and then offered to close a request whose latest run
+    failed for a quite different reason — a real hole.
+  - **`closeRequest()`'s own line had to stop claiming "none failed"**, which a close after hand work
+    would have made a plain untruth in the sealed trail — the one record nobody can correct
+    afterwards.
+  - The in-app help and the failed-run message both said there was **no such button**; both are
+    corrected in the same change, and #709's own changelog entry carries a forward pointer rather than
+    being rewritten, because it records what was true when it shipped.
+  - Test: section 21 of `tools/gdpr-eraser-selftest.php`. Its decisive case is the third:
+    a request that **also** failed for a recoverable reason must not be closed, and nothing may be
+    recorded as done by hand, because closing would bury the failure that a later run could clear.
+    Its fourth case exists because the independent check found that the guard leaving an
+    administrator's number out of the sealed trail — when the request is their **own** — was pinned by
+    nothing: removing it left every check green, because cases A to C all use an administrator who is
+    never the person being erased. **A fixture in which a guard's condition can never be true cannot
+    test the guard.** Count the planted faults from this commit message, never from here (#671).
+  - **A fixture lesson worth keeping:** my first version of that third case named `startedByID` where
+    the column is `triggeredByID`, so the row belonged to nobody, the step matched nothing, the extra
+    failure never happened — and the check went **green reporting "closed-by-hand"**, which is the
+    very thing it exists to forbid. The catalogue entry names the column; read it rather than guessing.
+  - **Two guards here were pinned by nothing, and the second is the lesson.** The guard that leaves an
+    administrator's account number OUT of the sealed trail when the request is **their own** — the
+    trail is never erased, so writing it would undo the erasure — could be deleted with every check
+    green, because cases A, B and C all use an administrator who is never the person being erased.
+    **A fixture in which a guard's condition can never be true cannot test the guard.** Case D gives
+    it one. And section 22 counted `/\$onlyHandWorkLeft\s*\[/`, which is **one spelling of the
+    write**: the same fault written `$x = $x + [$child => …]` has no `[` after the name, so adding it
+    to the could-not-read branch left the count at one, the original write still in the permanent
+    branch for the position check, and both checks green. **That branch needs no second mistake** —
+    one failed read of `tblErasureAudit` would close the request and write into the sealed trail that
+    no further run could help. The whole surface is pinned now: exactly four mentions, each in one
+    form, with comments removed by **`token_get_all()`** rather than a regular expression, because
+    every hand-rolled stripper in this repository has been broken at least once by a `//` inside a
+    string (#716, #675).
+  - **The button's confirm text promised a record that the refused path does not write.** "Either way
+    your account number and the time go into the report" — false on the `other-failures` path, which
+    is the likeliest one and the reason the button exists: the only writes there are the claim's
+    status and the put-back's, and `report.php` never selects `processedByID`. The only record is the
+    activity log, and that **is** erasable (#626). It was false in the self-erasure case too. Both the
+    button and the help page now promise the record only where it is really written.
 - **Fixed — three places that held personal data an erasure could not reach (#714, migrations 238
   and 239)**
   - **An expense receipt kept the uploader's own filename, twice.** The database held
@@ -661,7 +829,9 @@
     the whole fault back, because a probe failure writes the same "matched through" sentence the
     look-up matches on. All eight are now pinned, the outer condition included.
   - **One step can now refuse for ever, and that is deliberate — but it means such a request cannot
-    be closed.** Raised as **#710**. Every other step still runs, so the rest of the erasure is
+    be closed.** Raised as **#710 — and fixed later in this same release: there is a "Dealt with by
+    hand" action now, so the paragraph below records what was true when #709 shipped.** Every other
+    step still runs, so the rest of the erasure is
     done, and both the help page and the failed-run message say plainly that running it again will
     not help and that the request will go on showing as not complete. Before this change those
     notes were never erased at all, so nothing erased got worse; what is missing is a way to record

@@ -8,8 +8,13 @@
  * one of three plain messages (#510). It used to say "Erasure completed"
  * whatever had happened, and a run that crashed showed a server error.
  *
- * Four actions, each only for a request of the organisation being looked at:
+ * FIVE actions, each only for a request of the organisation being looked at:
  *   execute  run a request that is at "pending review";
+ *   finish_by_hand
+ *            run it once more and, ONLY IF every failure in that run is one no
+ *            further run can clear, close it with a record that somebody dealt
+ *            with those rows outside the portal (#710). It shares every step
+ *            below with execute; only the ending differs;
  *   cancel   cancel one that has not been run yet;
  *   putback  put one stuck at "processing" back to "pending review", when its
  *            run stopped without finishing (roll-out package A2a);
@@ -218,7 +223,13 @@ if ($action === 'putback') {
     exit();
 }
 
-if ($action !== 'execute' || (string) $row['status'] !== 'pending_review') {
+// 🖐️ "Dealt with by hand" (#710) shares everything below with Execute: the
+//    same claim, the same run, the same put-back on a stop. Only the ending
+//    differs, which is why it is one branch here and not a second copy of
+//    ninety lines.
+$byHand = $action === 'finish_by_hand';
+
+if (($action !== 'execute' && $byHand === false) || (string) $row['status'] !== 'pending_review') {
     $_SESSION['flash_msg']  = 'Request is not in a reviewable state.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Router::url('admin/erasure-requests'));
@@ -277,7 +288,9 @@ if ($userId === 0) {
     exit();
 }
 
-// 🗑️ Run it, and report what REALLY happened. Three outcomes, three messages.
+// 🗑️ Run it, and report what REALLY happened. Three outcomes and three
+//    messages for Execute, and three more for "dealt with by hand" (#710),
+//    which are handled in their own block further down.
 //
 //    All three go back to the LIST of requests, not to the report page. This
 //    page used to send the administrator to the report, and the report page
@@ -287,7 +300,9 @@ if ($userId === 0) {
 //    beside it, and has the Report button and (when the request is back at
 //    pending review) the Execute button the message tells them to press.
 try {
-    $outcome = GdprEraser::execute($requestId, $userId, $adminId);
+    $outcome = $byHand === true
+        ? GdprEraser::finishByHand($requestId, $userId, $adminId)
+        : GdprEraser::execute($requestId, $userId, $adminId);
 } catch (\Throwable $e) {
     // The run had to stop before the end - in practice because its audit
     // trail could not be written. GdprEraser has already tried to put the
@@ -305,6 +320,58 @@ try {
         . 'missing from it). If the request shows as "pending review" below, run it again. If it shows as '
         . '"processing", it could not be put back and needs setting back by whoever looks after the portal.';
     $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Router::url('admin/erasure-requests'));
+    exit();
+}
+
+// 🖐️ The by-hand ending (#710). `GdprEraser::finishByHand()` has already run
+//    the request and decided: there is deliberately no way to close one from
+//    here. The audit line and the close are written in ONE TRANSACTION inside
+//    that method, and nothing else may reach `closeRequest()`.
+if ($byHand === true) {
+    $hand = (array) ($outcome['handWorkOnly'] ?? []);
+    if ((string) ($outcome['outcome'] ?? '') === 'closed-by-hand') {
+        Logger::activity(
+            'GdprErasureClosedByHand',
+            'Erasure request #' . $requestId . ' for user #' . $userId . ' was closed after work done '
+            . 'outside the portal; ' . (int) $outcome['failed'] . ' of ' . (int) $outcome['steps']
+            . ' steps cannot be completed by any number of further runs',
+            $adminId
+        );
+        $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' is closed, and its report records '
+            . 'that you dealt with the remaining rows yourself. ' . (int) $outcome['failed'] . ' of '
+            . (int) $outcome['steps'] . ' step(s) could not be completed by any number of further runs; '
+            . 'every other step ran and did not fail.';
+        $_SESSION['flash_type'] = 'success';
+        header('Location: ' . Router::url('admin/erasure-requests'));
+        exit();
+    }
+    if ((string) ($outcome['outcome'] ?? '') === 'finished-normally') {
+        Logger::activity('GdprErasureExecuted', 'Erasure request #' . $requestId . ' for user #' . $userId
+            . ' finished normally on a "dealt with by hand" press; nothing needed doing by hand', $adminId);
+        $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' is completed: this time every one of '
+            . 'its ' . (int) $outcome['steps'] . ' steps ran and none failed, so there was nothing left for '
+            . 'you to deal with by hand. Nothing was recorded as done outside the portal.';
+        $_SESSION['flash_type'] = 'success';
+        header('Location: ' . Router::url('admin/erasure-requests'));
+        exit();
+    }
+
+    // ⛔ Something recoverable also failed, so the request is NOT closed.
+    //    Saying how many of each is the point: "run it again" is still the
+    //    right advice for the rest.
+    Logger::activity(
+        'GdprErasureByHandRefused',
+        'Erasure request #' . $requestId . ': ' . (int) $outcome['failed'] . ' step(s) failed and only '
+        . count($hand) . ' of them permanently, so it was not closed',
+        $adminId
+    );
+    $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' was NOT closed, and nothing was recorded '
+        . 'as done by hand. ' . (int) $outcome['failed'] . ' step(s) failed in that run and only '
+        . count($hand) . ' of them for a reason that running the request again cannot clear. The rest may '
+        . 'well work next time, so run it again; its report shows each failed step and its reason. This '
+        . 'button only closes a request when EVERY remaining failure is one no further run can fix.';
+    $_SESSION['flash_type'] = 'warning';
     header('Location: ' . Router::url('admin/erasure-requests'));
     exit();
 }
@@ -329,8 +396,9 @@ if ($outcome['failed'] > 0) {
         //    a parent-matched step whose link an earlier run already cut refuses on
         //    every run, so the request can never reach "completed".
         . 'A reason saying the rows must be CHECKED BY HAND will not be helped by running it again at all: '
-        . 'those rows can no longer be found automatically, so they have to be dealt with directly, and this '
-        . 'request will go on showing as not complete.';
+        . 'those rows can no longer be found automatically, so they have to be dealt with directly. Once you '
+        . 'have, press "Dealt with by hand" on the request — it closes the request and records that you did '
+        . 'that work, but only if every remaining failure is one no further run can fix (#710).';
     $_SESSION['flash_type'] = 'warning';
     header('Location: ' . Router::url('admin/erasure-requests'));
     exit();

@@ -606,7 +606,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_ratelimit selftest_webhookret selftest_offsite; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_ratelimit selftest_webhookret selftest_reservedwords selftest_offsite; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -1020,6 +1020,28 @@ jobs:
         env:
           SELFTEST_DB_NAME: selftest_webhookret
         run: php tools/webhook-retention-selftest.php
+
+      # 🗝️ The hard-coded reserved-word list is checked against the REAL server
+      #    (#719). `check_reserved_words_quoted.py` has to carry that list in
+      #    code, because an audit script must run with no database — and a
+      #    hard-coded list goes stale silently, which is the whole worry.
+      #
+      #    THIS JOB IS WHERE IT BELONGS, because it is a matrix over MySQL
+      #    8.0.36 AND 8.4.11, and the two versions disagree: `qualify` and
+      #    `tablesample` are reserved only from 8.4, `master_bind` and
+      #    `master_ssl_verify_server_cert` only up to 8.0. The list is the union,
+      #    so each version reports the other's words as "ahead of the server",
+      #    which is the safe direction and never fails.
+      #
+      #    It earned its place on its first run: 8.0.36 reserves two words the
+      #    list did not carry, and MariaDB 11.4 reserves seventeen more —
+      #    `offset` and `returning` among them, both thoroughly plausible column
+      #    names. Nothing in the schema used any of them, which was luck.
+      - name: 'Reserved-word list checked against the server (#719)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_reservedwords
+        run: php tools/reserved-words-live-selftest.php
 
       # ☁️ The off-site backup's settings really decide what a run does (#671).
       #    WIRED ON 31 OCTOBER 2026: it had never run in any workflow either.

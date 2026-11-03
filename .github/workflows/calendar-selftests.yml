@@ -218,7 +218,7 @@ jobs:
             sleep 1
           done
           docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP -e 'SELECT VERSION(), @@collation_server'
-          for db in selftest_visibility selftest_resolver selftest_importer selftest_feedadmin selftest_notifier; do
+          for db in selftest_visibility selftest_resolver selftest_importer selftest_feedadmin selftest_notifier selftest_reservedwords; do
             docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE ${db}"
             docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -253,6 +253,27 @@ jobs:
       - name: "Ambiguous clock readings in every time zone (hard gate, #653)"
         if: ${{ !cancelled() && steps.php.outcome == 'success' }}
         run: php -d memory_limit=1024M tools/ics-zone-sweep.php --dense
+
+      # 🗝️ The reserved-word list, checked against THIS engine (#719).
+      #
+      #    IT IS HERE FOR MARIADB. `portal-selftests.yml` already runs it on
+      #    MySQL 8.0.36 and 8.4.11, but MariaDB reserves words MySQL does not and
+      #    CANNOT BE ASKED which: its `INFORMATION_SCHEMA.KEYWORDS` has a `WORD`
+      #    column only, with no `RESERVED` flag, and membership does not mean
+      #    reserved — `FULLTEXT`, `STATUS` and `WINDOW` are all listed, yet only
+      #    `FULLTEXT` fails as a bare identifier. So on MariaDB the test TRIES
+      #    each candidate as a column name, which is slower and is the only
+      #    thing that answers the question.
+      #
+      #    This is the one matrix in the repository that runs self-tests on all
+      #    three engines, which is why it hangs here rather than in a job of its
+      #    own. It found seventeen MariaDB-reserved words the list did not carry
+      #    on its first run, `offset` and `returning` among them.
+      - name: 'Reserved-word list checked against this engine (#719)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_reservedwords
+        run: php tools/reserved-words-live-selftest.php
 
       - name: Event visibility self-test
         if: ${{ !cancelled() && steps.databases.outcome == 'success' }}

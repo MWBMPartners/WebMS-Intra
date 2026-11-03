@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 91; // 81 before the #709 fix round added section 8d; round 2
+const EXPECTED_CHECKS = 93; // 81 before the #709 fix round added section 8d; round 2
                             // added four more after three plants went uncaught
 
 $failures = 0;
@@ -2459,6 +2459,113 @@ check(
     . ' -- add the missing one to GdprEraser::eraseAuditTrailAboutPerson(), with its own key column, '
     . 'and bind one more userID. An audited membership table the step does not reach is #707\'s fault '
     . 'waiting for somebody to put a name in that payload.'
+);
+
+// -----------------------------------------------------------------------------
+// 22. ONLY THE PERMANENT REFUSAL MAY BE RECORDED AS "work for a human" (#710).
+//
+//     `whyParentLookUpUnsafe()` gives THREE refusals and only ONE of them is
+//     permanent:
+//       - the parent was changed EARLIER IN THIS RUN  -> an ordering mistake,
+//         recoverable: fix the list and run the request again;
+//       - the trail could not be read                 -> recoverable: try again;
+//       - the parent was changed by an EARLIER RUN    -> PERMANENT.
+//
+//     `finishByHand()` closes a request when every failure of its run is the
+//     third kind. So if either recoverable answer ever recorded itself in
+//     `$onlyHandWorkLeft`, a request whose only failure is FIXABLE would be
+//     closed by hand and the failure buried — under an audit line saying it
+//     "cannot be completed by any number of further runs", which is false of an
+//     ordering mistake by that branch's own words.
+//
+//     THIS IS PINNED BECAUSE IT WAS PINNED BY NOTHING. An independent check
+//     added that one line to the ordering-mistake branch and all 262 checks of
+//     the eraser self-test stayed green. The invariant was asserted in three
+//     comments and guarded nowhere, which is the #706 shape: a guard measured
+//     only against itself.
+//
+//     Read from the source, because no behavioural test can reach the ordering
+//     branch — producing it needs an instruction list the coverage test itself
+//     refuses (section 8c pins the order).
+// -----------------------------------------------------------------------------
+$eraserText = (string) file_get_contents(
+    dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core'
+    . DIRECTORY_SEPARATOR . 'GdprEraser.php'
+);
+// 🧹 Comments out with PHP'S OWN TOKENISER, not a regular expression.
+//
+//    Every hand-rolled comment stripper in this repository has been wrong at
+//    least once: a `//` inside a string literal (a URL is the usual one) eats
+//    the rest of the line, and a `/*` inside one swallows everything to the
+//    next `*/` (#716, #675). `token_get_all()` cannot make either mistake
+//    because it is the parser PHP itself uses. Comments are replaced by a
+//    single space so nothing on either side is joined together.
+$eraserCode = '';
+foreach (token_get_all($eraserText) as $token) {
+    if (is_array($token) === true && in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true) === true) {
+        $eraserCode .= ' ';
+        continue;
+    }
+    $eraserCode .= is_array($token) === true ? $token[1] : $token;
+}
+
+// 🧷 COUNT EVERY MENTION, NOT EVERY MENTION OF ONE SPELLING. This check used to
+//    count `/\$onlyHandWorkLeft\s*\[/`, which is one way of writing the write
+//    and not the only one. An independent check added the same fault as
+//    `self::$onlyHandWorkLeft = self::$onlyHandWorkLeft + [$child => …]` in the
+//    ordering-mistake branch, and again in the could-not-read branch: that form
+//    has no `[` after the name, so the count stayed at one, the original write
+//    was still in the permanent branch for the position check below, and BOTH
+//    checks passed on code that would close a request whose only failure was
+//    fixable. The could-not-read plant needed no second mistake at all — one
+//    failed read of `tblErasureAudit` would have closed the request and written
+//    into the sealed, never-erased trail that no further run could help.
+//
+//    So the whole surface is pinned instead: the static may be mentioned in
+//    EXACTLY FOUR places, each named below, and the one write must be written
+//    in exactly one form. Any edit to those four lines fails this check ON
+//    PURPOSE — that is the repository's own remedy for a guard that a reworded
+//    fault walks past (#697 pins two helper bodies whole for the same reason).
+$expectedMentions = [
+    'read'        => "'handWorkOnly' => self::\$onlyHandWorkLeft,",
+    'write'       => 'self::$onlyHandWorkLeft[$child] = self::HAND_WORK_SENTENCE;',
+    'reset'       => 'self::$onlyHandWorkLeft = [];',
+    'declaration' => 'private static array $onlyHandWorkLeft = [];',
+];
+$mentionCount = preg_match_all('/onlyHandWorkLeft/', $eraserCode);
+$mentionsFound = [];
+foreach ($expectedMentions as $what => $text) {
+    $mentionsFound[$what] = substr_count($eraserCode, $text);
+}
+
+check(
+    'the "only a human can finish this" list is mentioned in exactly FOUR places and written to in exactly ONE, whatever form the write is spelt in (#710)',
+    $mentionCount === 4
+    && $mentionsFound === ['read' => 1, 'write' => 1, 'reset' => 1, 'declaration' => 1],
+    $mentionCount . ' mention(s) of $onlyHandWorkLeft in the code (comments removed by token_get_all), '
+    . 'and the four expected lines were found ' . json_encode($mentionsFound) . ' time(s) each. '
+    . 'There must be exactly four mentions — the read in execute(), the one write, the reset at the '
+    . 'start of a run, and the declaration — each appearing once. A FIFTH mention is a second way of '
+    . 'recording a step as work only a human can finish, and a write in the ordering-mistake branch or '
+    . 'the could-not-read branch would let finishByHand() close a request whose only failure is '
+    . 'FIXABLE, burying it under a line claiming no further run can help.'
+);
+
+// And that the one write really is in the permanent branch: the sentence it
+// records is the one that branch returns, and no other branch mentions it.
+$permanentBranch = strpos((string) $eraserCode, 'was changed by an EARLIER run of this request');
+$theWrite        = strpos((string) $eraserCode, '$onlyHandWorkLeft[');
+$orderingBranch  = strpos((string) $eraserCode, 'was changed earlier in this same run');
+
+check(
+    'and that one write sits in the PERMANENT branch, after the ordering branch has already returned (#710)',
+    $permanentBranch !== false && $theWrite !== false && $orderingBranch !== false
+    && $theWrite > $orderingBranch && $theWrite < $permanentBranch,
+    'ordering branch at ' . var_export($orderingBranch, true)
+    . ', the write at ' . var_export($theWrite, true)
+    . ', permanent branch at ' . var_export($permanentBranch, true)
+    . ' -- the write must come after the ordering branch and immediately before the permanent '
+    . 'refusal it belongs to.'
 );
 
 echo "\n" . str_repeat('=', 78) . "\n";

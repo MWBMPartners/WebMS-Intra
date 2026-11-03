@@ -109,7 +109,14 @@ if ($isOwner === false && $isMod === false && $isCongregationVisible === false) 
 }
 
 // 🏷️ Now that we have the row, refine the page title
+// An erased submitter's request keeps its row and loses its words (#715,
+// migration 240), so this can be empty. An empty `<title>` is one of the things
+// the "nothing may look unfinished" checklist forbids, and `head-meta.php`
+// prints whatever it is given.
 $pageTitle = (string) $req['subject'];
+if ($pageTitle === '') {
+    $pageTitle = 'Prayer request';
+}
 
 // 🎨 Display helpers
 $submitterDisplay = (int) $req['isAnonymous'] === 1
@@ -142,7 +149,7 @@ $badge = $statusBadges[$req['status']] ?? ['secondary', 'fa-circle', ucfirst((st
 
 <div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
     <div>
-        <h1 class="mb-1"><?php echo htmlspecialchars((string) $req['subject'], ENT_QUOTES, 'UTF-8'); ?></h1>
+        <h1 class="mb-1"><?php echo htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8'); ?></h1>
         <div>
             <span class="badge bg-<?php echo $badge[0]; ?> me-1">
                 <i class="fa-solid <?php echo $badge[1]; ?> me-1"></i><?php echo $badge[2]; ?>

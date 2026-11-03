@@ -228,7 +228,24 @@ class GdprEraser
             //    ONLY by a typed name (`giverName`), with no account number.
             ['table' => 'tblCountEnvelopes',    'userCol' => 'giverID',      'action' => 'retain', 'nullCols' => [], 'reason' => 'an envelope in an offering count that is not yet closed, whose gift will keep the donor\'s name for tax reasons when the count is closed; see the "CountEnvelopes" line of this report. Every other envelope of this person\'s has already lost its giver'],
             ['table' => 'tblPayment',           'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'Payment processor reconciliation requires retention'],
-            ['table' => 'tblPrayerRequests',    'userCol' => 'submitterID',  'action' => 'anonymise', 'nullCols' => ['submitterName','submitterEmail','submitterIP'], 'reason' => 'request body preserved for congregational continuity; PII blanked'],
+            // 🙏 #715, the owner's decision of 3 November 2026: the free text goes
+            //    too. `subject` and `body` are what somebody asked to be prayed
+            //    for IN THEIR OWN WORDS — often the most sensitive thing they
+            //    ever typed into the portal — and `partnerNote` is a prayer
+            //    partner's note ABOUT them. The row keeps its value without
+            //    them: the request still shows that one was made, moderated and
+            //    answered.
+            //
+            //    The half-measure before this was the hard part to defend: the
+            //    portal already emptied their name, e-mail and address from the
+            //    very same row and left what they had said.
+            //
+            //    ⚠️ MATCHED ON `submitterID` AND NOTHING ELSE. The two other
+            //       instructions for this table (moderator, assignee) empty no
+            //       text, because emptying on those would destroy SOMEBODY
+            //       ELSE'S request because the person who moderated it left —
+            //       #709's lesson, which is about this exact shape.
+            ['table' => 'tblPrayerRequests',    'userCol' => 'submitterID',  'action' => 'anonymise', 'nullCols' => ['submitterName','submitterEmail','submitterIP','subject','body','partnerNote'], 'reason' => 'the request is kept as a record that one was made and answered; the person\'s name, address and their own words are emptied, and so is a partner\'s note about them (#715)'],
             ['table' => 'tblAnnouncements',    'userCol' => 'createdByID',  'action' => 'anonymise', 'nullCols' => [], 'reason' => 'authorship attribution detached'],
             ['table' => 'tblEvents',           'userCol' => 'createdByID',  'action' => 'anonymise', 'nullCols' => [], 'reason' => 'authorship attribution detached'],
             ['table' => 'tblRecording',        'userCol' => 'uploadedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'authorship attribution detached'],
@@ -544,8 +561,50 @@ class GdprEraser
                     . 'emptied on their own erasure; the visit, its date and its kind stay with the case, and a '
                     . 'visit on somebody else\'s case is untouched',
             ],
-            ['table' => 'tblCareCase',       'userCol' => 'personUserID', 'action' => 'anonymise', 'nullCols' => ['personName'], 'reason' => 'case history retained for pastoral/safeguarding continuity; subject identity detached'],
+            // 🤝 #715, the owner's decision of 3 November 2026: `summary` goes
+            //    with `personName`. The split before this was the thing that
+            //    could not be justified — #709 carefully empties a visit note
+            //    ("Ces says the ward is noisy") while leaving the case summary
+            //    ("Ces is in hospital") on the parent row. Both are a third
+            //    party's words about the erased person's health or
+            //    circumstances. The case, who opened it, when and its status
+            //    all stay, so the organisation keeps its record that care was
+            //    given.
+            ['table' => 'tblCareCase',       'userCol' => 'personUserID', 'action' => 'anonymise', 'nullCols' => ['personName','summary'], 'reason' => 'the case is kept for pastoral and safeguarding continuity; the person\'s name and what the case says about them are emptied, as the visit notes already are (#715)'],
             ['table' => 'tblCareCase',       'userCol' => 'openedByID',   'action' => 'anonymise', 'nullCols' => [], 'reason' => 'authorship attribution detached'],
+
+            // 🚪 Room bookings (#715, the owner's decision of 3 November 2026).
+            //    `purpose` is the person's own stated reason for wanting the
+            //    room and `declineReason` is somebody else's note about why
+            //    they were refused. Both go when the person who BOOKED it is
+            //    erased; the booking itself stays, so the room's history is
+            //    intact.
+            //
+            //    ⚠️ THE TEXT IS NOT EMPTIED, AND THE REASON IS A GUARD I WOULD
+            //       NOT WEAKEN. `bookedByID` is in `ACTOR_COLUMNS`, so the
+            //       coverage test refuses `nullCols` on it: emptying a column
+            //       on an actor-matched instruction is a blanket `= NULL` over
+            //       every matched row, which is how one person's request
+            //       destroys a third party's details. That guard exists because
+            //       seven tables were once set to delete a whole row on such a
+            //       column.
+            //
+            //       For THIS table the emptying would in fact be right, because
+            //       every row `bookedByID` matches is the booker's own — the
+            //       guard cannot tell "the person who did X" from "the person X
+            //       is about", and the classification is arguably wrong here:
+            //       `ACTOR_COLUMNS`' own docblock gives "deleted a room booking
+            //       because of who APPROVED it" as its example, naming
+            //       `approvedByID` and not this column. But reclassifying it
+            //       changes a load-bearing list for every guard that reads it,
+            //       which is more than #715 asked for. It is #723.
+            //
+            //       BOTH LINK COLUMNS ARE WRITTEN OUT HERE ON PURPOSE:
+            //       registering a table in this hand-written list makes
+            //       `fromPersonalDataCatalogue()` SKIP IT ENTIRELY, so leaving
+            //       `approvedByID` to the deriver would silently drop it.
+            ['table' => 'tblResourceBooking', 'userCol' => 'bookedByID',   'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the booking is kept so the room\'s history is intact; who booked it is detached. Their stated reason and the note refusing them are NOT emptied: see #723 and this instruction\'s comment'],
+            ['table' => 'tblResourceBooking', 'userCol' => 'approvedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s booking stays; who approved it is detached'],
             ['table' => 'tblCareVisit',      'userCol' => 'visitedByID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the pastoral visit and its notes are kept with the case; who made the visit is detached'],
             ['table' => 'tblCareVisit',      'userCol' => 'followUpAssignedToID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the pastoral visit and its notes are kept with the case; who its follow-up was given to is detached'],
             ['table' => 'tblCareAccessLog',  'userCol' => 'viewerID',     'action' => 'delete'],
@@ -1690,7 +1749,15 @@ class GdprEraser
             if ($failed === 0) {
                 self::closeRequest($db, $requestId, $userId, $processedByID, $steps);
 
-                return ['changed' => $changed, 'steps' => $steps, 'failed' => 0];
+                return [
+                    'changed' => $changed,
+                    'steps'   => $steps,
+                    'failed'  => 0,
+                    // Nothing failed, so nothing is left for anybody to do by
+                    // hand. Present on BOTH return paths so a caller never has
+                    // to test whether the key is there (#710).
+                    'handWorkOnly' => [],
+                ];
             }
 
             // At least one step failed. The request goes back exactly as it
@@ -1717,7 +1784,18 @@ class GdprEraser
             );
         }
 
-        return ['changed' => $changed, 'steps' => $steps, 'failed' => $failed];
+        return [
+            'changed' => $changed,
+            'steps'   => $steps,
+            'failed'  => $failed,
+            // 🖐️ The steps whose only remaining answer is work outside the
+            //    portal (#710). `finishByHand()` compares its SIZE with
+            //    `failed`: equal means every failure of this run is permanent
+            //    and the request can be closed with a record of who did the
+            //    work; anything else means something recoverable also failed
+            //    and running the request again is still the right answer.
+            'handWorkOnly' => self::$onlyHandWorkLeft,
+        ];
     }
 
     /**
@@ -1860,7 +1938,146 @@ class GdprEraser
      * @throws \Throwable If anything here fails. Nothing is then changed, and
      *   execute() puts the request back to `pending_review`.
      */
-    private static function closeRequest(\mysqli $db, int $requestId, int $userId, ?int $processedByID, int $steps): void
+    /**
+     * 🖐️ Finish a request whose only remaining work is work done by hand, and
+     *    record who said so (#710).
+     *
+     * Answers an array: `done` (true when the request is now closed),
+     * `outcome` (a word for the caller to act on) and `steps` / `failed` /
+     * `handWorkOnly` exactly as `execute()` reports them.
+     *
+     * -------------------------------------------------------------------------
+     * WHY THIS EXISTS
+     * -------------------------------------------------------------------------
+     * #709 introduced a step that can refuse PERMANENTLY and CORRECTLY: when an
+     * earlier run cut the link a parent-matched step looks through, no number of
+     * further runs will reach those rows, and the honest answer is to say so
+     * rather than write "nothing held for this person" over a safeguarding note
+     * that is still there.
+     *
+     * But `execute()` closes a request only when NOTHING failed, so such a
+     * request could never be closed — and it could not be cancelled either,
+     * because `runHasChangedAnything()` is true, correctly, since earlier steps
+     * really did change records. An administrator who had done exactly the right
+     * thing was left with a request that read as unfinished for ever, and no
+     * action that resolved it.
+     *
+     * -------------------------------------------------------------------------
+     * IT RUNS THE REQUEST ONE FINAL TIME. THAT IS THE DESIGN.
+     * -------------------------------------------------------------------------
+     * The obvious shape — ask whether a step WOULD refuse, then close — answers
+     * the wrong question. It says nothing about whether some OTHER step still
+     * has work left, so it would close a request with real work outstanding.
+     *
+     * So this calls `execute()` and judges what actually happened. You cannot
+     * close a request by hand without the portal having just tried everything it
+     * can, which is also why there is no "force close": the only way through is
+     * a run in which every single failure is permanent.
+     *
+     * -------------------------------------------------------------------------
+     * THE RECORD IS THE FEATURE, NOT A SIDE EFFECT
+     * -------------------------------------------------------------------------
+     * The risk this has to avoid is becoming a button that closes any request
+     * nobody has acted on. So `closeRequest()` stays private and this is the
+     * ONLY way to reach it other than a clean run.
+     *
+     * THE LINE AND THE CLOSE ARE IN ONE TRANSACTION, and they were not at
+     * first. The line was written here, before `closeRequest()` opened its
+     * transaction, so it COMMITTED immediately (nothing in `web/_core` touches
+     * autocommit) — and `closeRequest()` throws deliberately when a transaction
+     * cannot be started or committed. On that path the sealed trail
+     * permanently said "closed after work done outside the portal" about a
+     * request still at `pending_review`, and a second press wrote a second such
+     * line. This docblock claimed there was no route to one without the other;
+     * an independent check found the route. The facts are passed into
+     * `closeRequest()` now and the line is written inside its transaction, so
+     * the claim is true because of the transaction rather than in spite of it.
+     *
+     * The line is composed from FACTS — who pressed it, when, which steps cannot
+     * run and why — and NOT from anything typed in. A box asking an
+     * administrator what they did by hand would invite them to describe what
+     * they did to a safeguarding note, which would put that note's content into
+     * `tblErasureAudit`: a table deliberately absent from the personal-data
+     * catalogue (#510 rule 7d) and never erased. That is the #708 lesson in a
+     * new place.
+     *
+     * @param int      $requestId     The request to finish.
+     * @param int      $userId        The account being erased.
+     * @param int|null $processedByID The administrator pressing the button.
+     *
+     * @return array{done: bool, outcome: string, steps: int, failed: int, handWorkOnly: array<string, string>}
+     */
+    public static function finishByHand(int $requestId, int $userId, ?int $processedByID = null): array
+    {
+        $outcome = self::execute($requestId, $userId, $processedByID);
+        $failed  = (int) $outcome['failed'];
+        $hand    = (array) ($outcome['handWorkOnly'] ?? []);
+
+        // ✅ It simply finished. `execute()` has already closed it, and there was
+        //    nothing for anybody to do by hand after all — which is worth
+        //    saying rather than reporting a hand-work close that did not happen.
+        if ($failed === 0) {
+            return [
+                'done'         => true,
+                'outcome'      => 'finished-normally',
+                'steps'        => (int) $outcome['steps'],
+                'failed'       => 0,
+                'handWorkOnly' => [],
+            ];
+        }
+
+        // ⛔ Something recoverable also failed. Running the request again is
+        //    still the right answer, so this must NOT close it. `count()` and
+        //    not `!== []`: one permanent refusal beside two broken steps must
+        //    not be read as "all permanent".
+        if ($hand === [] || count($hand) !== $failed) {
+            return [
+                'done'         => false,
+                'outcome'      => 'other-failures',
+                'steps'        => (int) $outcome['steps'],
+                'failed'       => $failed,
+                'handWorkOnly' => $hand,
+            ];
+        }
+
+        // 🔒 THE LINE IS WRITTEN INSIDE `closeRequest()`'S TRANSACTION, not here.
+        //    Written here it was COMMITTED before that transaction opened
+        //    (nothing in web/_core touches autocommit), so a `closeRequest()`
+        //    that threw — it throws deliberately when a transaction cannot be
+        //    started or committed — left the sealed trail permanently saying
+        //    "closed after work done outside the portal" about a request still
+        //    at pending_review, and a second press wrote a second such line.
+        //    Three places claimed there was no route to one without the other;
+        //    an independent check found the route. Passing the facts in is what
+        //    makes that claim true.
+        self::closeRequest(
+            App::db(),
+            $requestId,
+            $userId,
+            $processedByID,
+            (int) $outcome['steps'],
+            $failed,
+            array_keys($hand)
+        );
+
+        return [
+            'done'         => true,
+            'outcome'      => 'closed-by-hand',
+            'steps'        => (int) $outcome['steps'],
+            'failed'       => $failed,
+            'handWorkOnly' => $hand,
+        ];
+    }
+
+    private static function closeRequest(
+        \mysqli $db,
+        int $requestId,
+        int $userId,
+        ?int $processedByID,
+        int $steps,
+        int $handWorkSteps = 0,
+        array $handWorkTables = []
+    ): void
     {
         if ($db->begin_transaction() === false) {
             throw new \RuntimeException('a transaction could not be started: ' . $db->error);
@@ -1898,13 +2115,52 @@ class GdprEraser
             $handled = (int) $stmt->affected_rows;
             $stmt->close();
 
+            // 🖐️ The hand-work line FIRST, inside this transaction, so it and
+            //    the close stand or fall together (#710).
+            //
+            //    THE ADMINISTRATOR'S NUMBER IS GUARDED THE SAME WAY the status
+            //    update below guards it: an administrator closing THEIR OWN
+            //    erasure request must not have their account number written
+            //    into `tblErasureAudit`, which is deliberately absent from the
+            //    personal-data catalogue (#510 rule 7d) and is never erased —
+            //    that would put the number straight back, for ever. A first
+            //    version wrote it unconditionally, ten lines above the guard it
+            //    ignored, and an independent check found it.
+            if ($handWorkSteps > 0) {
+                $whoDidIt = $processedByID === null || $processedByID === $userId
+                    ? 'an administrator (not named here: they are the person being erased)'
+                    : 'administrator #' . (string) $processedByID;
+                self::logAudit(
+                    $db,
+                    $requestId,
+                    'by hand',
+                    'tblErasureRequest',
+                    null,
+                    'closed after work done outside the portal, by ' . $whoDidIt . '. '
+                    . $handWorkSteps . ' of ' . $steps . ' step(s) cannot be completed by any number '
+                    . 'of further runs and were dealt with by hand'
+                    . ($handWorkTables === [] ? '' : ': ' . implode(', ', $handWorkTables))
+                    . '. Every other step ran and did not fail.'
+                );
+            }
+
             self::logAudit(
                 $db,
                 $requestId,
                 'completed',
                 'tblErasureRequest',
                 null,
-                'All ' . $steps . ' steps ran and none failed. The request is closed, and the account number, '
+                // 🪧 The first sentence has to be TRUE OF BOTH WAYS IN (#710).
+                //    It said "All N steps ran and none failed" unconditionally,
+                //    which a close after work done by hand would have made a
+                //    plain untruth in the sealed trail — the one record nobody
+                //    can correct afterwards.
+                ($handWorkSteps === 0
+                    ? 'All ' . $steps . ' steps ran and none failed.'
+                    : 'All ' . $steps . ' steps ran; ' . $handWorkSteps . ' could not be completed by any '
+                        . 'number of further runs and were dealt with outside the portal (see the line '
+                        . 'above). No other step failed.')
+                . ' The request is closed, and the account number, '
                 . 'name, email address and notes are cleared from it'
                 . ($others === [] ? '.' : ' and from ' . count($others) . ' other open request(s) from the same account.')
                 . ($handled === 0 ? '' : ' On ' . $handled . ' other request(s) that this person handled as an '
@@ -1925,7 +2181,11 @@ class GdprEraser
                         // that is not their organisation's, so they are not
                         // sent to it, and are not given its number.
                         : 'Closed: this account was erased under a request handled by another organisation on this '
-                            . 'installation. All ' . $steps . ' steps ran and none failed, so nothing more needs doing '
+                            . 'installation. All ' . $steps . ' steps ran'
+                            . ($handWorkSteps === 0
+                                ? ' and none failed'
+                                : ', with ' . $handWorkSteps . ' dealt with outside the portal')
+                            . ', so nothing more needs doing '
                             . 'here. The list of steps is kept by the organisation that handled it.'
                 );
             }
@@ -3059,10 +3319,21 @@ class GdprEraser
                 return '';
             }
 
+            // 🏷️ THE ONE PLACE THIS REFUSAL IS RECOGNISED (#710). The step is
+            //    recorded in `self::$onlyHandWorkLeft` as well as described,
+            //    because this is the ONLY refusal in the whole routine that no
+            //    number of further runs can clear — and `finishByHand()` has
+            //    to be able to tell it from every other kind of failure
+            //    WITHOUT matching on the words. The two other answers this
+            //    method gives are both recoverable: an ordering mistake (fix
+            //    the list and run again) and "the trail could not be read"
+            //    (try again).
+            self::$onlyHandWorkLeft[$child] = self::HAND_WORK_SENTENCE;
+
             return '`' . $parent . '` was changed by an EARLIER run of this request, so the link this step '
                 . 'matches through is gone and nothing can be found through it now. This step never '
                 . 'completed while that link was intact, so running the request again will NOT reach these '
-                . 'rows: they must be checked by hand';
+                . 'rows: ' . self::HAND_WORK_SENTENCE;
         } catch (\Throwable $e) {
             error_log('[WebMS-Intra] GdprEraser: could not read the audit trail of erasure #'
                 . $requestId . ' to check the order of a parent-matched step: ' . $e->getMessage());
@@ -3849,6 +4120,7 @@ class GdprEraser
         }
         self::$everyGiftSites  = [];
         self::$dueAtErasure    = [];
+        self::$onlyHandWorkLeft = [];
 
         try {
             // The table the kept names go in. Asked for BEFORE anything else
@@ -3974,6 +4246,28 @@ class GdprEraser
      * @var int[]
      */
     private static array $dueAtErasure = [];
+
+    /**
+     * 🏷️ The words that mean "no number of further runs will reach these rows"
+     *    (#710). ONE owner, so the refusal, the message an administrator reads
+     *    and the in-app help cannot drift apart.
+     */
+    private const HAND_WORK_SENTENCE = 'they must be checked by hand';
+
+    /**
+     * 🖐️ The steps of THIS run whose only remaining answer is work done outside
+     *    the portal: table name => why. Emptied at the start of every run.
+     *
+     * WHY A LIST AND NOT A SENTENCE MATCH. `finishByHand()` has to know whether
+     * EVERY failure of the run it just made was permanent. Reading the audit
+     * trail for the refusal's words would find a line from an OLDER run too,
+     * and would then offer to close a request whose latest run failed for a
+     * quite different reason — a real hole, which is why it is collected here,
+     * at the one branch that produces it, in the same way `$dueAtErasure` is.
+     *
+     * @var array<string, string>
+     */
+    private static array $onlyHandWorkLeft = [];
 
     /**
      * 🏢 The giving-records step for ONE organisation. Runs inside the

@@ -132,8 +132,52 @@ TOOLS = REPO / "tools"
 # why it is a lower risk and not no risk.
 SCAN_ROOTS = (WEB, TOOLS)
 
-# MySQL 8.4 reserved words, from MySQL's own keyword list. Lower-case; the
-# comparison ignores case because MySQL does.
+# MySQL's reserved words, lower-case; the comparison ignores case because MySQL
+# does. It covers 8.0 AND 8.4, which is not the same as either one's list:
+# `qualify` and `tablesample` are reserved only from 8.4, and `master_bind` and
+# `master_ssl_verify_server_cert` only up to 8.0 (8.4 renamed that replication
+# family). Carrying all four is the SAFE direction — the check then asks for a
+# backtick on a word that may be legal on the server in front of it, and a
+# backtick is never wrong.
+#
+# ⚠️ THIS LIST IS VERIFIED AGAINST A REAL SERVER, and it has to be, because a
+#    hard-coded list goes stale silently and the reserved set is not static.
+#    `tools/reserved-words-live-selftest.php` compares it with
+#    `INFORMATION_SCHEMA.KEYWORDS` on MySQL and, on MariaDB, tries each
+#    candidate as an identifier because MariaDB's KEYWORDS table has no
+#    RESERVED flag. It FAILS when the server reserves something this list lacks
+#    and merely reports the other direction.
+#
+#    It earned its place on the first run: MySQL 8.0.36 reserves `master_bind`
+#    and `master_ssl_verify_server_cert` and this list did not carry them, so a
+#    bare reference to either would have passed review and then failed to parse
+#    (#719). Neither appears in this schema, but that was luck rather than
+#    coverage.
+#
+#    The list stays hard-coded here on purpose: an audit script must run with no
+#    database, which is what lets the pre-push hook run every one of them in about nine
+#    seconds. The verification lives where a database already exists.
+#
+# 🐬🦭 IT IS THE UNION OF BOTH ENGINES, which is what a product supporting both
+#    needs. MariaDB 11.4 reserves SEVENTEEN words MySQL does not, found by that
+#    same verification on its first MariaDB run: `current_role`,
+#    `delete_domain_id`, `do_domain_ids`, `ignore_domain_ids`,
+#    `master_demote_to_replica`, `master_demote_to_slave`, `offset`,
+#    `page_checksum`, `parse_vcol_expr`, `portion`, `ref_system_id`,
+#    `returning`, `sql_after_gtids`, `sql_before_gtids`, `stats_auto_recalc`,
+#    `stats_persistent` and `stats_sample_pages`.
+#
+#    `offset` and `returning` are the ones to notice: both are thoroughly
+#    plausible column names, and a column called either would have passed review
+#    here and then failed to parse on a customer running MariaDB. None of this
+#    schema's 1,170 distinct column names is any of the seventeen, so nothing was
+#    broken — but that was luck, not coverage.
+#
+#    The union means the check asks for a backtick on a word that may be legal on
+#    whichever engine is in front of it. That is deliberate and costs nothing: a
+#    backtick is never wrong, and the alternative is a per-engine list the check
+#    cannot choose between, because it runs with no database and does not know
+#    which engine the customer has.
 RESERVED = set("""
 accessible add all alter analyze and as asc asensitive before between bigint binary blob both by
 call cascade case change char character check collate column condition constraint continue convert
@@ -146,7 +190,7 @@ having high_priority hour_microsecond hour_minute hour_second if ignore in index
 insensitive insert int int1 int2 int3 int4 int8 integer intersect interval into io_after_gtids
 io_before_gtids is iterate join json_table key keys kill lag last_value lateral lead leading leave
 left like limit linear lines load localtime localtimestamp lock long longblob longtext loop
-low_priority match maxvalue mediumblob mediumint mediumtext middleint minute_microsecond
+low_priority match maxvalue mediumblob mediumint mediumtext middleint minute_microsecond master_bind master_ssl_verify_server_cert
 minute_second mod modifies natural not no_write_to_binlog nth_value ntile null numeric of on
 optimize optimizer_costs option optionally or order out outer outfile over partition percent_rank
 precision primary procedure purge qualify range rank read reads read_write real recursive
@@ -157,6 +201,7 @@ sql_small_result ssl starting stored straight_join system table tablesample term
 tinyblob tinyint tinytext to trailing trigger true undo union unique unlock unsigned update usage
 use using utc_date utc_time utc_timestamp values varbinary varchar varcharacter varying virtual
 when where while window with write xor year_month zerofill
+current_role delete_domain_id do_domain_ids ignore_domain_ids master_demote_to_replica master_demote_to_slave offset page_checksum parse_vcol_expr portion ref_system_id returning sql_after_gtids sql_before_gtids stats_auto_recalc stats_persistent stats_sample_pages
 """.split())
 
 # Identifiers that ARE reserved words and are named that way on purpose.
