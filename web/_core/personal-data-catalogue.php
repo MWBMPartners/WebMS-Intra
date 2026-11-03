@@ -1722,11 +1722,18 @@ return [
         'columns'  => ['startedByID', 'subjectLabel', 'contextJson'],
             'notEmptiedHere' => [
             'subjectLabel' => 'A copy of the name of the thing being approved, kept so an approval list can be read '
-                . 'without opening every item. Today that is always an announcement\'s title, which is '
-                . 'free text and can name somebody; it is also used in the subject line of the approval '
-                . 'e-mail. Nothing empties it. Tracked as #714',
+                . 'without opening every item. Today that is always an announcement\'s TITLE, and an '
+                . 'announcement is the organisation\'s own notice rather than the person\'s record — so '
+                . 'under the owner\'s rule of 1 November 2026 it stays, exactly as the announcement it '
+                . 'copies does. Whoever started the approval is detached by cutting the account link. It '
+                . 'is also used in the subject line of the approval e-mail. THE LIMIT TO WATCH: '
+                . '`tableName` is documented as "Source table (e.g. tblExpenseClaims)", so the moment a '
+                . 'second kind of thing can be approved this could hold a person\'s name directly, and '
+                . 'the decision would have to be made again (#714).',
             'contextJson' => 'A small amount of machine-readable context for the item being approved — today just a '
-                . 'link to it. Nothing empties it. Tracked as #714',
+                . 'link to it, which names nobody. Kept for the same reason as the label beside it, and '
+                . 'with the same limit: it is whatever the thing being approved needs, so a second kind '
+                . 'of approval could put something else in it (#714).',
         ],
     ],
     'tblZoomMeeting' => [
@@ -2336,19 +2343,29 @@ return [
                     . 'including any name, address or telephone number somebody read out. Nothing on the '
                     . 'row links it to an account: it belongs to a recording, and an erasure request '
                     . 'deliberately KEEPS the recording and only detaches who uploaded it, so the usual '
-                    . 'cascade never happens. Only an administrator deleting the recording removes it. '
-                    . 'Nothing drains the transcription queue by itself (#672), so on most installations '
-                    . 'this table is empty. Tracked as #714',
-        'period'   => 'as long as the recording is kept: nothing clears it on a timer (#714)',
+                    . 'cascade never happens — and no column says whose words these are, so an erasure '
+                    . 'has nothing to match on anyway. It is also a record of a meeting involving other '
+                    . 'people, so deleting it on one participant\'s request would destroy what everybody '
+                    . 'else said. The owner decided (3 November 2026) on a recorded limit and a time '
+                    . 'limit instead. Nothing drains the transcription queue by itself (#672), so on most '
+                    . 'installations this table is empty.',
+        'period'   => 'the organisation\'s own transcript period, capped by the installation '
+                    . '(`transcription.retentionDays`, 365 days unless changed). Past it the transcript '
+                    . 'row is DELETED by the nightly clear-out and its search copy goes with it; the '
+                    . 'recording itself is untouched. A transcript that never finished has no date and no '
+                    . 'words, and is left alone (#714).',
         'columns'  => ['fullText', 'jsonSegments'],
     ],
     'tblTranscriptSearch' => [
         'decision' => 'retain',
         'reason'   => 'A second copy of the words above, held in a form that can be searched quickly. It is '
                     . 'the same text, so it carries the same risk, and it is two steps away from the '
-                    . 'recording rather than one. Removed only when the transcript is, which happens only '
-                    . 'when an administrator deletes the recording. Tracked as #714',
-        'period'   => 'as long as the transcript is kept: nothing clears it on a timer (#714)',
+                    . 'recording rather than one. Removed when the transcript is — which now happens on '
+                    . 'a timer as well as when an administrator deletes the recording, because '
+                    . '`fk_ts_transcript` cascades from `tblTranscript`. There is no way for this copy to '
+                    . 'outlive the original.',
+        'period'   => 'the same period as the transcript it mirrors, and by the same statement: deleting '
+                    . 'the transcript row takes this one with it (#714).',
         'columns'  => ['body'],
     ],
     'tblWebhookDeliveries' => [
@@ -2452,17 +2469,36 @@ return [
         'columns'  => ['output', 'errorMsg', 'triggeredBy'],
     ],
     'tblExpenseClaimFiles' => [
+        // #714, 3 November 2026, and migration 238. This entry used to record a
+        // live fault, and ALSO got one detail wrong in the reassuring
+        // direction: it said the stored name was "made up by the portal", when
+        // the stored name was built FROM the uploader's own
+        // (`$claimID . '_' . time() . '_' . preg_replace(…, $orig)`). So the
+        // name was kept twice — in the database and as the name of the file on
+        // disk, where it appears in any directory listing, backup or off-site
+        // copy and where no erasure reaches it either.
+        //
+        // Both names are generated now, at submission rather than on erasure
+        // (the owner, 3 November 2026), so there is nothing left to clear and
+        // no link to break.
         'decision' => 'retain',
-        'reason'   => 'The receipts attached to an expense claim. The stored name is made up by the portal, '
-                    . 'but the ORIGINAL name is the name the file had on the claimant\'s own computer, kept '
-                    . 'so they recognise it — so "Jane Smith receipt.pdf" is stored exactly as given, and '
-                    . 'shown back on the claim. An erasure request cannot reach it, and the reason is worth '
-                    . 'understanding: the claim itself is kept for six years for HMRC and only has the '
-                    . 'account number detached, so the row is never deleted and the usual cascade never '
-                    . 'happens. Matching through the parent cannot help either, because the parent is kept '
-                    . 'on purpose. Tracked as #714',
-        'period'   => 'as long as the claim, which HMRC requires for six years (#714)',
-        'columns'  => ['originalFilename'],
+        'reason'   => 'The receipts attached to an expense claim. Both names are made up by the portal: the '
+                    . 'label is `Claim_<id>_Receipt_<n>_<date>.<ext>` for an upload and '
+                    . '`Claim_<id>_<Stage>.pdf` for a form the portal generated, and the name on disk '
+                    . 'carries nothing from the uploader either. So there is no personal detail in either '
+                    . 'name to reach. Said exactly: that is true of everything uploaded from 3 November '
+                    . '2026. Migration 238 relabelled any row written before then, but it could not '
+                    . 'rename the FILES already on disk - it is SQL and they are not - so on an '
+                    . 'installation that had already received uploads those filenames would need '
+                    . 'dealing with by hand. There is no live installation of this portal, so there '
+                    . 'are none. That matters here more than elsewhere, because an erasure request '
+                    . 'could not have reached one: the claim is kept for six years for HMRC and only has '
+                    . 'the account number detached, so the row is never deleted, the cascade never fires, '
+                    . 'and matching through the parent cannot help because the parent is retained on '
+                    . 'purpose. The receipt FILE itself is evidence and is kept with the claim.',
+        'period'   => 'as long as the claim, which HMRC requires for six years. Nothing in the names '
+                    . 'expires, because nothing in them identifies anybody (#714).',
+        'columns'  => ['fileLabel'],
     ],
     'tblHymnalEntries' => [
         'decision' => 'not-personal',

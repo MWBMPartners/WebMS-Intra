@@ -47,6 +47,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\TranscriptRetention;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\InstallationSettings;
@@ -354,6 +355,36 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         &pound;<?php echo number_format($installCap / 100, 2); ?> a month.
                         This is the MOST any organisation on the installation may spend; an organisation can
                         hold itself to less and can never give itself more.
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <?php
+                    // 🎙️ How long a transcript is kept (#714).
+                    //
+                    //    WHY IT IS HERE and not on an organisation's own
+                    //    settings page: a transcript is the VERBATIM words of a
+                    //    recording, nothing removed one before this, and an
+                    //    erasure request cannot reach one (no column says whose
+                    //    words they are, and it is a record of a meeting
+                    //    involving other people). So a time limit is the only
+                    //    mechanism there is, and it belongs with the other
+                    //    installation-wide transcription settings.
+                    //
+                    //    READ FROM THE INSTALLATION'S OWN LAYER, never from the
+                    //    merged array (#674): a box filled from the merged
+                    //    settings would show the open organisation's value while
+                    //    Save writes the installation's, so one press of Save on
+                    //    an untouched form would make it everybody's.
+                    $installDays = TranscriptRetention::installationAllows();
+                    ?>
+                    <label class="form-label" for="tKeep">Keep transcripts for (days)</label>
+                    <input type="number" min="0" max="<?php echo (int) TranscriptRetention::HARD_MAX_DAYS; ?>" class="form-control" id="tKeep" name="transcriptDays" value="<?php echo (int) $installDays; ?>">
+                    <div class="form-text">
+                        <?php echo $installDays === 0
+                            ? 'Kept for ever.'
+                            : 'Past ' . (int) $installDays . ' days the written-out words are deleted and the recording is kept.'; ?>
+                        A transcript is everything that was said aloud, so this is the only limit on how long
+                        the portal holds it. 0 means keep for ever.
                     </div>
                 </div>
                 <div class="col-md-2 d-flex align-items-end">

@@ -2,6 +2,84 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — three places that held personal data an erasure could not reach (#714, migrations 238
+  and 239)**
+  - **An expense receipt kept the uploader's own filename, twice.** The database held
+    "Jane Smith receipt.pdf" exactly as given and showed it back on the claim — and the **stored name
+    was built from it too**, so the same name was the name of the file *on disk*, where it appears in
+    any directory listing, backup or off-site copy. The personal-data catalogue said the stored name
+    was "made up by the portal"; it was derived from the claimant's. An erasure could reach neither:
+    a claim is kept six years for HMRC and only has the account number detached, so the row is never
+    deleted, the cascade never fires, and #709's parent matching cannot help because the parent is
+    retained on purpose.
+  - **Both names are generated at submission now** — your decision, 3 November 2026, and the better
+    one: name the file generically when it arrives and there is nothing to clear later and no link to
+    break. `Claim_412_Receipt_1_2026-11-03.pdf` says which claim, which attachment and when, which is
+    all a treasurer needs to tell receipts apart and all HMRC needs beside the figures.
+    `ExpensePdf::generate()` already wrote a generated name into that column, so the column was
+    half untrue already; it is `fileLabel` now rather than `originalFilename`.
+  - **A transcript is the verbatim words of a recording and nothing ever removed one.** The only
+    route was the cascade from the recording, and an erasure never deletes a recording — it detaches
+    the uploader and presenter and leaves the row. So a transcript, and its byte-for-byte search
+    copy, were kept for ever.
+  - **An erasure could not reach them and an instruction would have been worse than nothing:** no
+    column says whose words they are (somebody who merely *spoke* is nowhere on the row), and a
+    transcript is a record of a meeting involving other people, so deleting it on one participant's
+    request would destroy what everybody else said. One keyed on the presenter would have **looked**
+    like coverage while reaching only the transcripts where the erased person was presenting. Your
+    decision was a recorded limit plus a time limit, and `Portal\Core\TranscriptRetention` is the one
+    place the period is decided — 365 days, capped by the installation per #668, zero meaning "for
+    ever" and therefore the largest value. The rows are **deleted** rather than emptied, because a
+    transcript with no words is not a record of anything, and the search copy goes with it by
+    cascade. **The recording is untouched.**
+  - A transcript still in the queue has no date and no words and is left alone, so a recording
+    waiting to be transcribed is never quietly dropped from the queue.
+  - The third part of #714 — the workflow subject label — **was already named by #706**; what it
+    lacked was a decision rather than a tracking note. All three entries now record one, including
+    the limit to watch: `tableName` is documented as "Source table", so a second kind of approval
+    could put a person's name in that label directly.
+  - **Two mistakes of mine here, both worth more than the fix.** I renamed the wrong table's column:
+    `tblPhoto` also has an `originalFilename` and **that one keeps its meaning**, because the photo
+    download hands it back as the filename. The two declarations were in fact distinguishable — one
+    carries a `COLLATE` clause and the other does not — but my search matched on the column **name**,
+    where they are identical, so the difference never came into it. (A first write-up of this said
+    they "differ only in whitespace"; an independent check measured that false, and it matters
+    because the stated difference was the evidence for the mistake.) The
+    coverage self-test caught the half that broke; nothing would have caught the half that silently
+    broke three photo pages. That is the same conflation migration 236 was written to prevent one
+    package earlier — and knowing about it was not enough.
+  - And I wrote a **bare `fullText`** in a transcript fixture — the reserved word `FULLTEXT`, the very
+    identifier whose bare reference shipped a statement that could not save a transcript (#276), in
+    the same session as the guard for it. `check_reserved_words_quoted.py` could not see it, because
+    it read only `web/`. **It reads `tools/` too now**, and planted at the exact line it missed, it
+    names it. Self-tests write SQL by hand against the real schema; the rule applies there too.
+  - Test: section F of `tools/webhook-retention-selftest.php` (9 of the file's 33 checks), which proves
+    the transcript goes, its search copy goes with it, the recent one stays, a queued one is left
+    alone, and every recording survives.
+  - **The check round found four real problems, and two were checks of mine that could not fail.**
+    The per-organisation `siteID` predicate was pinned by **nothing** — the fixture had one
+    organisation, so replacing `r.siteID = ?` with `(r.siteID = ? OR 1 = 1)` left all 32 checks green.
+    There are two organisations in it now, with different periods, and that plant goes red. And the
+    "a queued transcript is left alone" check could not fail either, because its row's `queuedAt` was
+    left at today: the sweep's basis column could be changed from `generatedAt` to `queuedAt` and the
+    check stayed green. It is backdated now.
+  - **One clause turned out to be redundant, and saying so is the fix.**
+    `AND t.generatedAt IS NOT NULL` guards nothing: `NULL < <date>` is NULL in SQL, so the comparison
+    already excludes a row with no date — deleting the clause leaves every check green, measured. It
+    is kept as documentation and both the code and the test now say plainly that it is not
+    load-bearing, because a clause that looks protective and is not is worse than no clause.
+  - **`totalDeleted` and the breakdown an administrator reads had come apart.** Transcripts are
+    really deleted, so they belong in the total — but the sweep's message itemised only three
+    figures, so "deleted N rows" had no breakdown reaching N. The message names transcripts now, and
+    the assertion in `gdpr-eraser-selftest.php` that pinned the old three-term formula **both
+    described the wrong formula and could never fail**, because that test's transcript rows are
+    orphans the sweep's `INNER JOIN` cannot reach.
+  - **And three public methods existed for a page that does not exist.**
+    `daysForThisOrganisation()`, `installationAllowsForEver()` and `whyNotAllowed()` were called by no
+    file under `web/`, under a docblock saying "an organisation may tighten it" that nothing could
+    achieve. #687's shape exactly. They are removed, the period is now settable where the other
+    transcription settings live (installation-wide, global administrator only, refused rather than
+    clamped), and **#722** records what removing them gave up.
 - **Fixed — the change history about an erased person now covers every kind of membership (#717)**
   - `GdprEraser::eraseAuditTrailAboutPerson()` (#707) reached an entry about somebody's account and
     about which **organisations** they belonged to. Three more membership tables are audited and were

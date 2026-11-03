@@ -54,7 +54,7 @@
 
 declare(strict_types=1);
 
-const WR_EXPECTED_CHECKS = 24;
+const WR_EXPECTED_CHECKS = 33;
 
 $dbName = (string) getenv('SELFTEST_DB_NAME');
 if (str_starts_with($dbName, 'selftest_') === false) {
@@ -97,9 +97,11 @@ require_once $core . 'InstallationSettings.php';
 require_once $core . 'App.php';
 require_once $core . 'SettingLimit.php';
 require_once $core . 'WebhookRetention.php';
+require_once $core . 'TranscriptRetention.php';
 
 use Portal\Core\App;
 use Portal\Core\InstallationSettings;
+use Portal\Core\TranscriptRetention;
 use Portal\Core\WebhookRetention;
 
 /** Stand the two layers up the way bootstrap does: installation alone, and merged. */
@@ -289,6 +291,154 @@ wr_check('the insert binds a body that is NULL unless the signature verified',
     'the pinned lines are not both present');
 wr_check('and the row is still written for a refused request, so the attempt is on record',
     str_contains($payments, 'signature not verified, so the body was not kept') === true);
+
+// -----------------------------------------------------------------------------
+// 🪤 EVERY IDENTIFIER IN THE SQL BELOW IS BACKTICKED, and the first draft of
+//    this section was not: `fullText` IS the reserved word `FULLTEXT` (MySQL
+//    ignores case in keywords), so a bare reference does not parse and the test
+//    died on the fixture. That is the #276 fault — the one that shipped a
+//    statement unable to save a transcript, throwing after the outside provider
+//    had been called and charged — reproduced in a test written in the same
+//    session as the guard for it.
+//
+//    `tools/audit-checks/check_reserved_words_quoted.py` could not see it,
+//    because it read only `web/`. It reads `tools/` too now.
+// -----------------------------------------------------------------------------
+wr_head('F. A transcript is deleted past its period, and the recording is not (#714)');
+// -----------------------------------------------------------------------------
+// The same three-tier shape as the webhook period above, and the same reason for
+// a time limit: no column says whose words a transcript holds, and it is a
+// record of a meeting involving other people. What differs is that the rows are
+// DELETED rather than emptied — a transcript with no words is not a record of
+// anything — and that the search copy must go with it.
+$mysqli->query('DELETE FROM tblSettings WHERE settingKey = ' . "'" . TranscriptRetention::KEY . "'");
+$mysqli->query(
+    "INSERT INTO tblSettings (siteID, settingKey, settingValue) VALUES "
+    . "(NULL, '" . TranscriptRetention::KEY . "', '30'), (1, '" . TranscriptRetention::KEY . "', '9999')"
+);
+$trLayer = ['transcription' => ['retentionDays' => '30']];
+$GLOBALS['SETTINGS'] = $trLayer;
+InstallationSettings::remember($trLayer);
+App::init($mysqli, $trLayer);
+
+wr_check('a hand-written transcript period above the ceiling is still held to it',
+    TranscriptRetention::daysForSite(1) === 30, (string) TranscriptRetention::daysForSite(1));
+// `whyNotAllowed()` is gone: it was a reader for a per-organisation page that
+// does not exist (#687's "a public method nothing calls" shape, found by an
+// independent check). What IS live is the clear-out's own capping, so that is
+// what is checked: "for ever" survives only where the installation allows it.
+wr_check('"for ever" in an organisation\'s own row does NOT survive a period at the installation',
+    TranscriptRetention::daysForSite(1) !== 0, (string) TranscriptRetention::daysForSite(1));
+
+$mysqli->query('DELETE FROM `tblTranscriptSearch`');
+$mysqli->query('DELETE FROM `tblTranscript`');
+$mysqli->query('DELETE FROM `tblRecording` WHERE `recordingID` IN (9801, 9802, 9803)');
+
+// Four recordings, one transcript each — `uq_t_recording` allows only one per
+// recording, which a first draft of this fixture tripped over by giving two
+// transcripts the same recording.
+//
+// 🪤 A SECOND ORGANISATION, because without one the `r.siteID = ?` predicate was
+//    pinned by NOTHING. Measured by an independent check: replacing it with
+//    `(r.siteID = ? OR 1 = 1)` — scoping gone, placeholder count unchanged —
+//    left all 32 checks green. One organisation's period deleting another's
+//    transcripts was invisible. Organisation 2 keeps its transcripts for 900
+//    days, so its 400-day-old one must SURVIVE a run in which organisation 1's
+//    goes.
+$mysqli->query("INSERT IGNORE INTO `tblSites` (`siteID`, `siteName`) VALUES (2, 'second org')");
+$mysqli->query(
+    "INSERT INTO `tblRecording` (`recordingID`, `siteID`, `title`, `recordedAt`) VALUES "
+    . "(9801, 1, 'an old talk',               NOW() - INTERVAL 400 DAY),"
+    . "(9802, 1, 'a recent talk',             NOW() - INTERVAL 2 DAY),"
+    . "(9803, 1, 'a talk still in the queue', NOW() - INTERVAL 400 DAY),"
+    . "(9804, 2, 'another org\'s old talk',    NOW() - INTERVAL 400 DAY)"
+);
+$mysqli->query(
+    "INSERT INTO `tblTranscript` (`transcriptID`, `recordingID`, `status`, `fullText`, `generatedAt`) VALUES "
+    // Past the period: must go, with its search copy.
+    . "(9901, 9801, 'completed', 'the old words somebody spoke',    NOW() - INTERVAL 400 DAY),"
+    // Inside the period: must stay.
+    . "(9902, 9802, 'completed', 'the recent words somebody spoke', NOW() - INTERVAL 2 DAY),"
+    // Never finished, so no date and no words: must be left alone even though
+    // its recording is old, or a recording still waiting in the queue would be
+    // quietly dropped from it.
+    . "(9903, 9803, 'queued',    NULL,                              NULL),"
+    // Another organisation's, equally old. It must survive, because that
+    // organisation keeps transcripts for 900 days.
+    . "(9904, 9804, 'completed', 'what the other org said',         NOW() - INTERVAL 400 DAY)"
+);
+// 🪤 AND ITS `queuedAt` IS BACKDATED TOO. Left at its default of "now", the
+//    queued row was not past the period on ANY column, so the check below could
+//    not fail: an independent check changed the sweep's basis from
+//    `generatedAt` to `queuedAt` and that check stayed green. Backdated, the
+//    row is past the period on `queuedAt` and inside it on `generatedAt`
+//    (which is NULL), so it is only safe while the sweep judges the right
+//    column.
+$mysqli->query('UPDATE `tblTranscript` SET `queuedAt` = NOW() - INTERVAL 400 DAY WHERE `transcriptID` = 9903');
+// 🪤 THE PERIODS FOR THE SWEEP, and the first version of this fixture got them
+//    wrong in a way the new check caught: it left the installation's ceiling at
+//    30 days and gave organisation 2 a row of 900, expecting 900 to apply. The
+//    cap meant organisation 2 was held to 30 as well, so its transcript was
+//    rightly deleted and the check went red about CORRECT behaviour.
+//
+//    To test SCOPING rather than CAPPING, the ceiling has to allow the longer
+//    period: the installation allows 900, organisation 1 holds itself to 30,
+//    and organisation 2 has no row of its own so it inherits 900. Then
+//    organisation 1's 400-day-old transcript goes and organisation 2's stays,
+//    which can only happen if the statement really is scoped by organisation.
+$mysqli->query('DELETE FROM `tblSettings` WHERE `settingKey` = ' . "'" . TranscriptRetention::KEY . "'");
+$mysqli->query(
+    "INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`) VALUES "
+    . "(NULL, '" . TranscriptRetention::KEY . "', '900'), (1, '" . TranscriptRetention::KEY . "', '30')"
+);
+$trSweep = ['transcription' => ['retentionDays' => '900']];
+$GLOBALS['SETTINGS'] = $trSweep;
+InstallationSettings::remember($trSweep);
+App::init($mysqli, $trSweep);
+$mysqli->query(
+    // `recordingID` and `siteID` are NOT NULL on this table too — it carries its
+    // own copies so a search can be scoped without joining back.
+    "INSERT INTO `tblTranscriptSearch` (`transcriptID`, `recordingID`, `siteID`, `body`) VALUES "
+    . "(9901, 9801, 1, 'the old words somebody spoke'),"
+    . "(9902, 9802, 1, 'the recent words somebody spoke')"
+);
+
+$gone = run_transcript_sweep();
+
+$there = static fn (int $id): bool => (int) ($mysqli->query(
+    'SELECT COUNT(*) AS n FROM tblTranscript WHERE transcriptID = ' . $id
+)->fetch_assoc()['n'] ?? 0) > 0;
+$mirror = static fn (int $id): bool => (int) ($mysqli->query(
+    'SELECT COUNT(*) AS n FROM tblTranscriptSearch WHERE transcriptID = ' . $id
+)->fetch_assoc()['n'] ?? 0) > 0;
+
+wr_check('the transcript past the period is gone', $there(9901) === false);
+wr_check('AND ITS SEARCH COPY WENT WITH IT, so the words cannot outlive the original',
+    $mirror(9901) === false);
+wr_check('the recent transcript is untouched', $there(9902) === true && $mirror(9902) === true);
+// 🪧 WHAT THIS CHECK CAN AND CANNOT FAIL ON, because the distinction was
+//    measured rather than assumed. It goes red if the sweep judges the WRONG
+//    COLUMN (the row's `queuedAt` is backdated past the period on purpose, so a
+//    sweep reading that column would take it). It CANNOT go red for deleting
+//    the statement's `generatedAt IS NOT NULL` clause, because `NULL < <date>`
+//    is NULL in SQL and the comparison already excludes the row — an
+//    independent check deleted that clause and all 33 checks stayed green. The
+//    clause is documentation; the three-valued logic is the protection.
+wr_check('a transcript still in the queue is left alone, so it is not dropped from it',
+    $there(9903) === true);
+wr_check('ANOTHER ORGANISATION\'S TRANSCRIPT IS UNTOUCHED, because its own period is longer',
+    $there(9904) === true,
+    'organisation 2 keeps transcripts for 900 days and its 400-day-old one was deleted anyway');
+wr_check('THE RECORDINGS THEMSELVES ARE ALL STILL THERE',
+    (int) $mysqli->query('SELECT COUNT(*) AS n FROM tblRecording WHERE recordingID IN (9801, 9802, 9803, 9804)')
+        ->fetch_assoc()['n'] === 4);
+wr_check('and the sweep reported what it deleted', $gone === 1, 'reported ' . $gone);
+
+$mysqli->query('DELETE FROM `tblTranscriptSearch`');
+$mysqli->query('DELETE FROM `tblTranscript`');
+$mysqli->query('DELETE FROM `tblRecording` WHERE `recordingID` IN (9801, 9802, 9803, 9804)');
+$mysqli->query('DELETE FROM `tblSettings` WHERE `settingKey` = ' . "'" . TranscriptRetention::KEY . "'");
+$mysqli->query('DELETE FROM `tblSites` WHERE `siteID` = 2');
 
 echo "\n" . str_repeat('=', 78) . "\n";
 $ran = $passes + $failures;

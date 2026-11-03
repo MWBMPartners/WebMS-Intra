@@ -12,7 +12,16 @@
  * keeping for tax reasons, once that organisation's keep-until date has
  * passed. The JSON answer reports those separately (`givingIdentityCleared`,
  * `givingIdentityOnHold`, `givingIdentityWaiting`, `givingIdentityFailed`) and
- * never adds them to `totalDeleted`. It is
+ * never adds them to `totalDeleted`.
+ *
+ * WHAT `totalDeleted` COUNTS, said exactly because the two came apart once
+ * (#714): the figures for rows really DELETED, which are `activityDeleted`,
+ * `errorsDeleted`, `registrationsDeleted` and `transcriptsDeleted`. Everything
+ * else the answer reports is a row that was EMPTIED and remains -- the
+ * check-in detail, the giving identities, the webhook payloads -- and is
+ * deliberately outside the total, because "deleted N rows" has to be true.
+ * Adding a figure to the total means itemising it wherever the total is shown.
+ * It is
  * meant to be called once a night by the hosting company's scheduler:
  *
  *   curl -fsS "https://<your-portal>/cron/retention-sweep?token=<TOKEN>"

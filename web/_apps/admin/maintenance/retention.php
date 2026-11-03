@@ -184,9 +184,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $result = run_retention_sweep();
         Logger::activity('AuditRetentionSweep', 'Admin sweep deleted ' . $result['totalDeleted'] . ' rows');
+        // 🧾 EVERY FIGURE IN `totalDeleted` IS ITEMISED HERE, and transcripts
+        //    joined the total when #714 gave them a period. The logged line
+        //    above says "deleted N rows", so a breakdown that does not reach N
+        //    leaves somebody unable to account for the difference — which is
+        //    exactly why the emptied figures below are a separate sentence
+        //    with the word "emptied", and why webhook payloads are NOT in the
+        //    total at all. An independent check caught the total and the
+        //    breakdown having come apart.
         $flashMsg  = 'Sweep complete. Deleted ' . $result['activityDeleted']
-                   . ' activity log row(s), ' . $result['errorsDeleted'] . ' error row(s) and '
-                   . $result['registrationsDeleted'] . ' event registration(s). '
+                   . ' activity log row(s), ' . $result['errorsDeleted'] . ' error row(s), '
+                   . $result['registrationsDeleted'] . ' event registration(s) and '
+                   . $result['transcriptsDeleted'] . ' transcript(s). '
                    // 🚪 Said as a separate sentence, with the word "emptied"
                    //    rather than "deleted", because nothing was deleted here
                    //    and the difference matters: the check-in rows and every

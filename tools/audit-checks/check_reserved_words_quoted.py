@@ -111,6 +111,26 @@ import sys
 REPO = pathlib.Path(__file__).resolve().parents[2]
 SCHEMA = REPO / "web" / "_sql" / "full_schema.sql"
 WEB = REPO / "web"
+TOOLS = REPO / "tools"
+
+# 🔭 WHAT IS SCANNED, and why `tools/` joined on 3 November 2026.
+#
+# It read `web/` only, and that left the self-tests invisible to it. They write
+# SQL BY HAND against the real schema, and a bare reserved word there fails the
+# same way it fails in the portal. Measured, in the worst possible place: a
+# transcript fixture written for #714 used a bare `fullText` — the very
+# identifier this check exists for, the one whose bare reference shipped a
+# statement that could not save a transcript (#276) — and this script passed it
+# because the file was under `tools/`.
+#
+# `tools/` is the only addition, and it completes the PHP half: every tracked
+# `*.php` file lives under `web/` or `tools/`. It does NOT complete the job, and
+# saying otherwise would overreach — `web/_sql/*.sql` (the migrations themselves)
+# and `tools/e2e-migrations/run.sh` hold SQL that this script never reads. A
+# migration's own SQL is executed by MySQL on the way in, so a bare reserved word
+# there fails loudly at upgrade time rather than quietly at run time, which is
+# why it is a lower risk and not no risk.
+SCAN_ROOTS = (WEB, TOOLS)
 
 # MySQL 8.4 reserved words, from MySQL's own keyword list. Lower-case; the
 # comparison ignores case because MySQL does.
@@ -254,7 +274,10 @@ def main() -> int:
     bare: list[tuple[str, int, str]] = []
     watched = {n.split(".")[-1]: n for n in RESERVED_ON_PURPOSE}
     files = 0
-    for path in sorted(WEB.rglob("*.php")):
+    scanned: list[pathlib.Path] = []
+    for root in SCAN_ROOTS:
+        scanned.extend(sorted(root.rglob("*.php")))
+    for path in scanned:
         files += 1
         rel = str(path.relative_to(REPO))
         for line_no, text in php_strings(path.read_text(encoding="utf-8", errors="replace")):

@@ -144,12 +144,34 @@ try {
     }
     $allowedExts = ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv'];
     $maxFileSize = 10 * 1024 * 1024; // 10 MB
-    $fileStmt = $mysqli->prepare('INSERT INTO tblExpenseClaimFiles (claimID, originalFilename, storedFilename, fileSize, fileType) VALUES (?, ?, ?, ?, ?)');
+    // 📝 THE UPLOADER'S OWN FILENAME IS NEVER STORED (#714). It used to be,
+    //    `basename()`'d and nothing else, so "Jane Smith receipt.pdf" was kept
+    //    exactly as given and shown back on the claim. A claim is kept for six
+    //    years for HMRC and only has the account number detached, so the row is
+    //    never deleted, the cascade never fires, and an erasure request could
+    //    not reach that name — it would have sat there for six years after
+    //    somebody asked to be forgotten.
+    //
+    //    The owner's decision (3 November 2026) was to name the file generically
+    //    AT SUBMISSION rather than rename it on erasure: then there is nothing
+    //    to clear later and no link to break. What HMRC needs is the claim, the
+    //    figures and the evidence — not what the claimant happened to call the
+    //    file on their laptop.
+    //
+    //    `ExpensePdf::generate()` already wrote a generated name into this same
+    //    column (`Claim_412_Approved.pdf`), so the shape below matches what the
+    //    column already held half the time.
+    $fileStmt = $mysqli->prepare('INSERT INTO tblExpenseClaimFiles (claimID, fileLabel, storedFilename, fileSize, fileType) VALUES (?, ?, ?, ?, ?)');
     if ($fileStmt !== false) {
+        // Counts the receipts actually SAVED, so the numbering has no gaps when
+        // a file is skipped for being too big or the wrong kind.
+        $labelsUsed = [];
         foreach ($_FILES['files']['error'] ?? [] as $i => $err) {
             if ($err !== UPLOAD_ERR_OK) {
                 continue;
             }
+            // The uploader's own name, read ONLY for its extension (#714).
+            // It is never stored, in the database or on disk.
             $orig = basename($_FILES['files']['name'][$i]);
             $tmp  = $_FILES['files']['tmp_name'][$i];
             $size = $_FILES['files']['size'][$i];
@@ -168,10 +190,29 @@ try {
             // 🛡️ Server-side MIME detection (do not trust client-supplied type)
             $type = mime_content_type($tmp) ?: 'application/octet-stream';
 
-            $stored = $claimID . '_' . time() . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '', $orig);
+            // 🏷️ BOTH NAMES ARE GENERATED, and the second one matters more than
+            //    it looks. The stored name used to be
+            //    `$claimID . '_' . time() . '_' . preg_replace(…, $orig)` — so
+            //    "Jane Smith receipt.pdf" was kept TWICE, once in the database
+            //    and once as the name of the file on disk, where no erasure
+            //    could reach it either and where it appears in any directory
+            //    listing or backup. The personal-data catalogue said the stored
+            //    name was "made up by the portal"; it was derived from the
+            //    uploader's.
+            //
+            //    Nothing is lost by generating both. The claim number says which
+            //    claim, the receipt number says which attachment, the date says
+            //    when, and the extension keeps the file openable — which is all
+            //    a treasurer needs to tell one receipt from another, and all
+            //    HMRC needs beside the figures.
+            $receiptNo = count($labelsUsed) + 1;
+            $label     = 'Claim_' . $claimID . '_Receipt_' . $receiptNo . '_'
+                       . date('Y-m-d') . '.' . $ext;
+            $stored    = $claimID . '_' . time() . '_receipt' . $receiptNo . '.' . $ext;
             if (move_uploaded_file($tmp, $upDir . DIRECTORY_SEPARATOR . $stored) === true) {
-                $fileStmt->bind_param('issis', $claimID, $orig, $stored, $size, $type);
+                $fileStmt->bind_param('issis', $claimID, $label, $stored, $size, $type);
                 $fileStmt->execute();
+                $labelsUsed[] = $label;
             }
         }
         $fileStmt->close();

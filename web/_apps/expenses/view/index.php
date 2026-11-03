@@ -150,7 +150,7 @@ if ($stmt !== false) {
 // -----------------------------------------------------------------------------
 $files = [];
 $stmt = $mysqli->prepare(
-    'SELECT fileID, originalFilename, storedFilename, fileSize, fileType, stage, uploadedAt '
+    'SELECT fileID, fileLabel, storedFilename, fileSize, fileType, stage, uploadedAt '
     . 'FROM tblExpenseClaimFiles WHERE claimID = ? ORDER BY uploadedAt'
 );
 if ($stmt !== false) {
@@ -373,7 +373,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="col-12 col-md-5">
                         <span class="d-md-none fw-semibold">File: </span>
                         <i class="fa-solid fa-file me-1"></i>
-                        <?php echo htmlspecialchars($f['originalFilename'], ENT_QUOTES, 'UTF-8'); ?>
+                        <?php echo htmlspecialchars((string) $f['fileLabel'], ENT_QUOTES, 'UTF-8'); ?>
                         <?php if ($f['stage'] !== null && $f['stage'] !== ''): ?>
                             <span class="badge bg-secondary ms-1"><?php echo htmlspecialchars(ucfirst($f['stage']), ENT_QUOTES, 'UTF-8'); ?></span>
                         <?php endif; ?>

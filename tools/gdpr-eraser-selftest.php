@@ -517,9 +517,15 @@ require_once $coreDir . 'AnonymousCheckins.php';
 //    WebhookRetention how long that is. There is no autoloader here, so the
 //    class has to be loaded by hand like the others above — without it the
 //    whole run stops at the first line of the sweep that mentions it.
+// ⚠️ THE SWEEP'S OWN DEPENDENCIES, IN ORDER. There is no autoloader here, so
+//    requiring that file by hand means owning its whole chain — and this has
+//    now bitten twice in one session, once for #713's WebhookRetention and
+//    again for #714's TranscriptRetention. `_retention-sweep.php`'s header
+//    lists what it needs; add to BOTH when the sweep gains a class.
 require_once $coreDir . 'InstallationSettings.php';
 require_once $coreDir . 'SettingLimit.php';
 require_once $coreDir . 'WebhookRetention.php';
+require_once $coreDir . 'TranscriptRetention.php';
 require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_apps' . DIRECTORY_SEPARATOR . 'cron'
     . DIRECTORY_SEPARATOR . '_retention-sweep.php';
 
@@ -3799,7 +3805,18 @@ $nRow = ge_one('SELECT fullName, clearedAt FROM tblGivingKeptDonors WHERE keptDo
 ge_ok('THE JOB ITSELF: with the file now deletable, the whole sweep clears that record, reports it under its own name, and does NOT count it as a deletion',
     $full['givingIdentityCleared'] === 1 && $full['givingIdentityFailed'] === 0 && $nRow['fullName'] === null && $nRow['clearedAt'] !== null
     && is_file($issuedN['file']) === false && array_key_exists('givingIdentityOnHold', $full) === true && array_key_exists('givingIdentityWaiting', $full) === true
-    && $full['totalDeleted'] === $full['activityDeleted'] + $full['errorsDeleted'] + $full['registrationsDeleted'], json_encode($full));
+    // 🧮 `totalDeleted` is the sum of the figures for rows really DELETED, and
+    //    #714 added transcripts to it. This clause named three of the four
+    //    until then, which was a formula the code contradicted — AND IT COULD
+    //    NOT FAIL, because this world's tblTranscript rows are orphans
+    //    (ge_insert() writes with FOREIGN_KEY_CHECKS off and never makes the
+    //    parent recording), so the sweep's INNER JOIN can never reach them and
+    //    the transcript figure is always 0. An independent check measured that
+    //    by backdating every date in the world and watching nothing be
+    //    deleted. Naming the fourth term keeps the clause honest even while
+    //    that term is 0 here.
+    && $full['totalDeleted'] === $full['activityDeleted'] + $full['errorsDeleted']
+        + $full['registrationsDeleted'] + $full['transcriptsDeleted'], json_encode($full));
 // A donor whose last gift is so old that the keep-until date has ALREADY
 // passed on the day they are erased, at an organisation that has confirmed
 // its figure and has no hold. Nothing has to be kept any longer, so the

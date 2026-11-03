@@ -427,7 +427,7 @@ try {
     claim(917206, 'Pending', 'WITHDRAW pressed on a loose server, one', $ago(6));
     claim(917207, 'Pending', 'WITHDRAW pressed on a loose server, two', $ago(7));
     q("INSERT INTO tblExpenseClaimApprovals (claimID, userID, decision, approverRole) VALUES (917206, ?, 'Approved', 'dept_approver')", 'i', [APPROVER]);
-    q("INSERT INTO tblExpenseClaimFiles (claimID, originalFilename, storedFilename) VALUES (917206, 'receipt.jpg', 'withdraw-selftest-receipt.jpg')");
+    q("INSERT INTO tblExpenseClaimFiles (claimID, fileLabel, storedFilename) VALUES (917206, 'Claim_917206_Receipt_1_2026-11-03.jpg', 'withdraw-selftest-receipt.jpg')");
     q("INSERT INTO tblExpenseClaimItems (claimID, itemName, unitCost, quantity, lineTotal) VALUES (917206, 'WITHDRAW item', 7.50, 1, 7.50)");
     // The page's own statement, word for word, with strict checking off for this connection.
     $pageUpdate = 'UPDATE tblExpenseClaims SET status = ?, updatedAt = NOW() WHERE claimID = ? AND siteID = ?';

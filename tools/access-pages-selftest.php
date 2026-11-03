@@ -2342,7 +2342,7 @@ $mClaim(916320, MEM, 'ACCESS-W claim pressed with another person\'s form token')
 // The history each of those would really have, so "nothing changed" has something to lose.
 q("INSERT INTO tblExpenseClaimApprovals (claimID, userID, decision, approverRole) VALUES (916312, ?, 'Approved', 'dept_lead'), (916313, ?, 'Approved', 'dept_lead'), (916314, ?, 'Rejected', 'dept_approver')", 'iii', [LEAD, LEAD, APPR]);
 q("INSERT INTO tblExpenseClaimPayments (claimID, payReference, payAmount, paidByID) VALUES (916313, 'ACCESS-W-BACS', 12.50, ?)", 'i', [TRS]);
-q("INSERT INTO tblExpenseClaimFiles (claimID, originalFilename, storedFilename) VALUES (916311, 'receipt.jpg', 'access-w-receipt.jpg')");
+q("INSERT INTO tblExpenseClaimFiles (claimID, fileLabel, storedFilename) VALUES (916311, 'Claim_916311_Receipt_1_2026-11-03.jpg', 'access-w-receipt.jpg')");
 q("INSERT INTO tblExpenseClaimItems (claimID, itemName, unitCost, quantity, lineTotal) VALUES (916311, 'ACCESS-W item', 12.50, 1, 12.50)");
 // "Last changed" two days back, so that a claim which was written to shows it.
 q('UPDATE tblExpenseClaims SET updatedAt = DATE_SUB(NOW(), INTERVAL 2 DAY) WHERE claimID BETWEEN 916311 AND 916320');
@@ -2622,7 +2622,7 @@ foreach ([ADDR_A . '/expenses/view?id=916311' => 'the claim\'s page', ADDR_A . '
 // two; and the paid claim is given a document with no row at all.
 q("UPDATE tblExpenseClaims SET fileName = CONCAT('claim_', claimID, '.pdf') WHERE claimID IN (916311, 916312, 916313)");
 q(
-    "INSERT INTO tblExpenseClaimFiles (claimID, originalFilename, storedFilename, fileType, stage) VALUES "
+    "INSERT INTO tblExpenseClaimFiles (claimID, fileLabel, storedFilename, fileType, stage) VALUES "
     . "(916311, 'Claim_916311_Pending.pdf', 'claim_916311.pdf', 'application/pdf', 'Pending'), "
     . "(916312, 'Claim_916312_Pending.pdf', 'claim_916312.pdf', 'application/pdf', 'Pending'), "
     . "(916312, 'Claim_916312_Approved.pdf', 'claim_916312.pdf', 'application/pdf', 'Approved')"

@@ -250,13 +250,15 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;margin:0;p
 
             // 📋 Record file version in tblExpenseClaimFiles with stage
             $fileStmt = $mysqli->prepare(
-                'INSERT INTO tblExpenseClaimFiles (claimID, originalFilename, storedFilename, fileSize, fileType, stage) '
+                'INSERT INTO tblExpenseClaimFiles (claimID, fileLabel, storedFilename, fileSize, fileType, stage) '
                 . 'VALUES (?, ?, ?, 0, ?, ?)'
             );
             if ($fileStmt !== false) {
-                $origName = 'Claim_' . $claimID . '_' . ucfirst(strtolower($status)) . '.pdf';
+                // Named `$label` and not `$origName` since #714: it never was
+                // an original name, and the column is `fileLabel` now.
+                $label   = 'Claim_' . $claimID . '_' . ucfirst(strtolower($status)) . '.pdf';
                 $pdfType  = 'application/pdf';
-                $fileStmt->bind_param('issss', $claimID, $origName, $filename, $pdfType, $status);
+                $fileStmt->bind_param('issss', $claimID, $label, $filename, $pdfType, $status);
                 $fileStmt->execute();
                 $fileStmt->close();
             }

@@ -14694,3 +14694,49 @@ a file by hand means owning its whole dependency chain, in order.**
 
 Neither fault could have been found by the tests for the package that caused
 them: both live in other tests, and both were green before.
+
+## Two columns of one name, and a reserved word in a fixture (#714)
+
+Two mistakes while fixing #714, both more useful than the fix.
+
+**I RENAMED THE WRONG TABLE'S COLUMN.** `tblExpenseClaimFiles` and `tblPhoto`
+both have an `originalFilename`, and a search-and-replace matched the photo one.
+Their declarations were in fact distinguishable — one carries
+`COLLATE utf8mb4_general_ci`, the other does not — but **the search matched on
+the column NAME, where they are identical**, so the difference never came into
+it. (A first version of this note said they "differ only in whitespace". An
+independent check measured that false. It matters because the stated difference
+was the whole evidence for how the mistake happened.) `tblPhoto`'s **keeps its
+meaning**: `_apps/photos/serve-raw.php` hands it back as the download name, so a
+visitor gets the file called what it was called.
+
+`gdpr-coverage-selftest.php` caught the half that mattered to it
+(`tblExpenseClaimFiles.fileLabel` does not exist) within seconds. **Nothing would
+have caught the other half** — three working photo pages reading a column that
+no longer existed — until somebody opened one.
+
+This is the same conflation migration 236 was written to prevent **one package
+earlier**, where `tblLiveRateLimits.senderIP` and `tblLiveChatMessages.senderIP`
+had to be told apart and one had to stay raw. Writing that lesson down did not
+stop me repeating it an hour later. The practical rule: **when a column name
+appears in more than one table, confirm which table a match landed in before
+replacing anything** — `awk '/CREATE TABLE .*`tblX`/,/ENGINE=/'` answers it, and
+`git diff` on the schema afterwards shows exactly which declaration moved.
+
+**AND I WROTE A BARE `fullText` IN A FIXTURE.** `fullText` IS the reserved word
+`FULLTEXT` — MySQL ignores case in keywords — so the statement does not parse.
+That is #276: the fault that shipped a statement unable to save a transcript,
+throwing *after* the outside provider had been called and charged. I wrote it in
+the same session as the guard for it, and the test died on its own fixture.
+
+**`check_reserved_words_quoted.py` could not see it, because it read only
+`web/`.** It reads `tools/` too now. The reasoning for the widening is narrow and
+worth keeping: a self-test writes SQL **by hand against the real schema**, so a
+bare reserved word there fails exactly as it fails in the portal, and the
+standing rule ("backtick every identifier in hand-written SQL") was never
+qualified by which directory the SQL lives in. Planted at the line it missed, the
+widened check names it.
+
+The general shape: **a guard's SCOPE is as much a part of it as its rule.** This
+one had the right rule and the wrong reach, and the proof is that it passed the
+exact identifier it exists for.

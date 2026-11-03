@@ -28,6 +28,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\TranscriptRetention;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
@@ -143,6 +144,32 @@ if (preg_match('/^\d+$/', $capWanted) === 1) {
         false
     );
 }
+// 🎙️ How long a transcript is kept (#714). REFUSED rather than clamped, which
+//    is #668's rule and the opposite of what the monthly cap above does: a
+//    period somebody typed is a decision about how long verbatim speech is
+//    kept, and silently shortening it is how a person comes to believe a limit
+//    is in force when it is not. A field that did not arrive is left alone
+//    (#677) rather than read as 0, which would mean "keep for ever".
+if (array_key_exists('transcriptDays', $_POST) === true) {
+    $daysWanted = trim((string) $_POST['transcriptDays']);
+    if (preg_match('/^\d+$/', $daysWanted) !== 1
+        || (int) $daysWanted > TranscriptRetention::HARD_MAX_DAYS
+    ) {
+        Logger::activity(
+            'TranscriptRetentionRefused',
+            'A transcript retention period of "' . mb_substr($daysWanted, 0, 20) . '" was refused: it must '
+            . 'be a whole number of days up to ' . TranscriptRetention::HARD_MAX_DAYS,
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = 'How long transcripts are kept must be a whole number of days between 0 and '
+            . TranscriptRetention::HARD_MAX_DAYS . ', where 0 means "keep for ever". Nothing was saved.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('admin/transcription'));
+        exit();
+    }
+    $upsert($db, TranscriptRetention::KEY, $daysWanted, false);
+}
+
 $upsert($db, 'transcription.openai.model', trim((string) ($_POST['oa_model'] ?? 'whisper-1')), false);
 $upsert($db, 'transcription.local.binPath', trim((string) ($_POST['local_bin'] ?? '')), false);
 

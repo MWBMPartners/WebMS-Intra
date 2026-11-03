@@ -730,7 +730,7 @@ CREATE TABLE IF NOT EXISTS `tblExpenseClaimItems` (
 CREATE TABLE IF NOT EXISTS `tblExpenseClaimFiles` (
     `fileID`           INT          NOT NULL AUTO_INCREMENT,
     `claimID`          INT          NOT NULL,
-    `originalFilename` VARCHAR(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+    `fileLabel`        VARCHAR(255) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'A name the PORTAL makes up, never the uploaders own (#714): Claim_<id>_Receipt_<n>_<date>.<ext> for an upload, Claim_<id>_<Stage>.pdf for a generated form. The claim is kept six years for HMRC, so a name taken from the claimant could not be erased.',
     `storedFilename`   VARCHAR(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
     `fileSize`         INT          DEFAULT NULL,
     `fileType`         VARCHAR(100) COLLATE utf8mb4_general_ci DEFAULT NULL,
@@ -5120,6 +5120,14 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     --    the two administrators may be different people. Worked out only by
     --    Transcription::capFrom(). Migration 229.
     (NULL, 'transcription.monthCapPence',   '5000', '5000', 0),
+    -- 🎙️ How long a transcript is kept, in days (#714). A transcript is the
+    --    VERBATIM words of a recording, and nothing removed one before: the
+    --    only route was the cascade from the recording, and an erasure never
+    --    deletes a recording. 0 would mean "for ever" and is deliberately not
+    --    the default. A LIMIT, so the installation's value caps an
+    --    organisation's (#668); worked out only by
+    --    Portal\Core\TranscriptRetention. Migration 239.
+    (NULL, 'transcription.retentionDays',   '365', '365', 0),
     (NULL, 'transcription.openai.apiKey',   '', '', 1),
     (NULL, 'transcription.openai.model',    'whisper-1', 'whisper-1', 0),
     (NULL, 'transcription.assemblyai.apiKey','', '', 1),
@@ -10714,4 +10722,23 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('236_rate_limit_addresses.sql')
 -- chosen -- and it is here so the installer's replay of every numbered
 -- migration finds nothing left to do.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('237_webhook_payload_retention.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 238_expense_receipt_label.sql (#714) ─────────────────────
+-- Nothing to do here: `tblExpenseClaimFiles` above already declares `fileLabel`
+-- rather than `originalFilename`, so a fresh install never holds an uploader's
+-- own filename. The mark is written UNCONDITIONALLY -- the migration renames one
+-- column and relabels any row that still carries an uploaded name -- and it is
+-- here so the installer's replay of every numbered migration finds nothing left
+-- to do.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('238_expense_receipt_label.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 239_transcript_retention.sql (#714) ──────────────────────
+-- Nothing to do here: `transcription.retentionDays` is seeded with the other
+-- transcription settings in the block above. The mark is written
+-- UNCONDITIONALLY -- the migration only seeds a setting and never overwrites a
+-- period somebody has chosen -- and it is here so the installer's replay of
+-- every numbered migration finds nothing left to do.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('239_transcript_retention.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;

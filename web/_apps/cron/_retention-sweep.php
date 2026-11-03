@@ -46,11 +46,28 @@
 
 declare(strict_types=1);
 
+// -----------------------------------------------------------------------------
+// 📦 WHAT THIS FILE NEEDS, for anybody requiring it WITHOUT the autoloader
+// -----------------------------------------------------------------------------
+// The two real callers (the scheduled job and the staff page) come through
+// bootstrap, which autoloads. `tools/gdpr-eraser-selftest.php` requires this
+// file directly and must load each class itself, IN DEPENDENCY ORDER:
+//
+//   App, Logger, Site, Giving, GivingRetention, GdprEraser, AnonymousCheckins,
+//   InstallationSettings -> SettingLimit -> WebhookRetention (#713),
+//   InstallationSettings -> SettingLimit -> TranscriptRetention (#714)
+//
+// Adding a class here without adding it there stops that test dead at the first
+// line that mentions it. That happened twice in one session, which is why the
+// list is written down rather than remembered.
+// -----------------------------------------------------------------------------
+
 use Portal\Core\AnonymousCheckins;
 use Portal\Core\App;
 use Portal\Core\GdprEraser;
 use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
+use Portal\Core\TranscriptRetention;
 use Portal\Core\WebhookRetention;
 
 /**
@@ -721,6 +738,84 @@ if ($stmt !== false) {
     return $webhookPayloadsCleared;
 }
 
+/**
+ * 🎙️ Delete transcripts past their period. Answers how many were deleted.
+ *
+ * A transcript is the VERBATIM written-out words of a recording's audio —
+ * whatever was spoken, including any name, address or telephone number somebody
+ * read out — and `tblTranscriptSearch` holds a second copy for searching.
+ * NOTHING EVER REMOVED EITHER: the only route was the cascade from
+ * `tblRecording`, and an erasure never deletes a recording (it detaches
+ * `uploadedByID` and `presenterID` and leaves the row), so the cascade never
+ * fired.
+ *
+ * AN ERASURE COULD NOT REACH THEM, and not for want of a column to add: no
+ * column says whose words they are. Somebody who merely SPOKE at the meeting is
+ * nowhere on the row, and the transcript is a record of a meeting involving
+ * other people, so deleting it on one participant's request would destroy what
+ * everybody else said. The owner chose a recorded limit and a time limit
+ * (3 November 2026). `Portal\Core\TranscriptRetention` decides the period.
+ *
+ * DELETED RATHER THAN EMPTIED, unlike a webhook payload: a transcript with no
+ * text is not a record of anything, and deleting the row takes its search copy
+ * with it through `fk_ts_transcript … ON DELETE CASCADE` — one statement, and no
+ * way for the mirror to outlive the original. THE RECORDING IS UNTOUCHED.
+ *
+ * ONE ORGANISATION AT A TIME, for the reason the registration sweep sets out: a
+ * transcript belongs to a recording, which belongs to an organisation, and this
+ * job has no current organisation (#683).
+ *
+ * `generatedAt` is the basis, because that is when the words came into
+ * existence. A row that never completed has none and no text either, so it is
+ * left alone rather than swept on `queuedAt` — a recording still waiting in the
+ * queue must not be quietly dropped from it.
+ *
+ * ⚠️ `AND t.generatedAt IS NOT NULL` IS REDUNDANT, AND IS KEPT AS DOCUMENTATION
+ *    RATHER THAN AS A GUARD. `NULL < <date>` is NULL in SQL, so the comparison
+ *    below already excludes a row with no date; deleting the clause changes
+ *    nothing, which an independent check measured by deleting it and watching
+ *    all 33 checks stay green. It is NOT load-bearing and no test can make it
+ *    so — said here because a clause that looks protective and is not is worse
+ *    than no clause, and somebody would otherwise write a check for it and
+ *    believe the result. What DOES protect the queued row is the three-valued
+ *    logic of the comparison itself, and the test proves the row survives
+ *    whichever way it is written.
+ */
+function run_transcript_sweep(): int
+{
+    $db      = App::db();
+    $deleted = 0;
+
+    $stmt = $db->prepare(
+        'DELETE t FROM tblTranscript AS t '
+        . 'INNER JOIN tblRecording AS r ON r.recordingID = t.recordingID '
+        . 'WHERE r.siteID = ? AND t.generatedAt IS NOT NULL '
+        . 'AND t.generatedAt < DATE_SUB(NOW(), INTERVAL ? DAY)'
+    );
+    if ($stmt === false) {
+        return 0;
+    }
+
+    $sites = $db->query('SELECT siteID FROM tblSites');
+    if ($sites !== false) {
+        while ($one = $sites->fetch_assoc()) {
+            $siteId = (int) $one['siteID'];
+            $days   = TranscriptRetention::daysForSite($siteId);
+            if ($days <= 0) {
+                // This organisation keeps them for ever, and the installation
+                // allows that. Nothing to do for it.
+                continue;
+            }
+            $stmt->bind_param('ii', $siteId, $days);
+            $stmt->execute();
+            $deleted += (int) $stmt->affected_rows;
+        }
+    }
+    $stmt->close();
+
+    return $deleted;
+}
+
 function run_retention_sweep(): array
 {
     $activityDays = (int) (App::settings('audit.retentionDays')  ?? '365');
@@ -861,6 +956,7 @@ function run_retention_sweep(): array
     $offboardErase = run_offboarding_erasure_sweep();
 
     $webhookPayloadsCleared = run_webhook_payload_sweep();
+    $transcriptsDeleted    = run_transcript_sweep();
 
     return [
         'activityDeleted'      => $activityDeleted,
@@ -891,6 +987,11 @@ function run_retention_sweep(): array
         // 🧾 Emptied, not deleted, so NOT added to totalDeleted — same rule as
         //    the figures above it.
         'webhookPayloadsCleared' => $webhookPayloadsCleared,
-        'totalDeleted'         => $activityDeleted + $errorsDeleted + $registrationsDeleted,
+        // 🎙️ Transcripts really ARE deleted, so this one IS counted in
+        //    totalDeleted — unlike every figure above it, which empties rows
+        //    that remain.
+        'transcriptsDeleted'   => $transcriptsDeleted,
+        'totalDeleted'         => $activityDeleted + $errorsDeleted + $registrationsDeleted
+                                + $transcriptsDeleted,
     ];
 }

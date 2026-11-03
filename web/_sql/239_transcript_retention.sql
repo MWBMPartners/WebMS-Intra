@@ -1,0 +1,89 @@
+-- =============================================================================
+-- Migration 239: a transcript is kept for a bounded time (#714)
+-- =============================================================================
+-- One seeded setting. No table change, nothing deleted here.
+--
+--   transcription.retentionDays = '365', installation-wide
+--
+-- -----------------------------------------------------------------------------
+-- WHAT WAS WRONG BEFORE
+-- -----------------------------------------------------------------------------
+-- `tblTranscript.fullText` and `.jsonSegments` are the VERBATIM machine
+-- transcription of a recording's audio: whatever was spoken, including any name,
+-- address or telephone number somebody read out. `tblTranscriptSearch.body` is
+-- a byte-for-byte second copy, kept so it can be searched.
+--
+-- NOTHING EVER REMOVED EITHER. The only route was
+-- `fk_t_recording … ON DELETE CASCADE` from `tblRecording`, and an erasure NEVER
+-- deletes a recording — it detaches `uploadedByID` and `presenterID` and leaves
+-- the row. So the cascade never fired, no scheduled job touched these tables,
+-- and a transcript was kept for ever.
+--
+-- `Portal\Core\Transcription` shows the sensitivity was understood: it refuses
+-- to record a provider's error text, because "a message from a provider can
+-- quote what was sent to it, which here is somebody speaking." The transcript is
+-- that same material, in full.
+--
+-- -----------------------------------------------------------------------------
+-- WHY A TIME LIMIT AND NOT AN ERASURE INSTRUCTION
+-- -----------------------------------------------------------------------------
+-- The owner weighed both and chose this (3 November 2026).
+--
+-- NO COLUMN SAYS WHOSE WORDS THEY ARE. The only account columns on the parent
+-- recording are the person who uploaded it and the person named as presenter;
+-- somebody who merely SPOKE is nowhere on the row. So an erasure has nothing to
+-- match on, and searching the text for a name was rejected for #707's reason —
+-- it would match a namesake and miss a nickname.
+--
+-- AND A TRANSCRIPT IS A RECORD OF A MEETING INVOLVING OTHER PEOPLE. Deleting it
+-- on one participant's request would destroy what everybody else said, which is
+-- the reasoning that keeps a pastoral visit note. An instruction keyed on the
+-- presenter would have LOOKED like coverage while reaching only the transcripts
+-- where the erased person happened to be presenting.
+--
+-- -----------------------------------------------------------------------------
+-- WHY 365 DAYS, AND WHY NOT 0
+-- -----------------------------------------------------------------------------
+-- A year: long enough that a transcript is still there for the season or series
+-- it belongs to, short enough that verbatim speech is not kept indefinitely.
+--
+-- 0 means "keep for ever" everywhere in this portal, and is deliberately not the
+-- default. An installation may still choose it; an organisation may choose it
+-- only where the installation allows it, which is #668's rule.
+--
+-- -----------------------------------------------------------------------------
+-- WHAT THIS CANNOT DO
+-- -----------------------------------------------------------------------------
+-- It seeds a figure. The deleting happens in the nightly retention sweep, which
+-- removes a `tblTranscript` row past the period and takes its search copy with
+-- it through `fk_ts_transcript … ON DELETE CASCADE`.
+--
+-- THE RECORDING IS UNTOUCHED: the audio stays, with its date, title and
+-- presenter. What goes is the written-out words, and anybody who wants them
+-- again can have the recording transcribed again.
+--
+-- A row that never completed has no `generatedAt` and no text, and is left
+-- alone — a recording still waiting in the queue must not be quietly dropped
+-- from it.
+--
+-- Note that on most installations these tables are EMPTY: nothing drains the
+-- transcription queue by itself (#672), so a transcript exists only where an
+-- administrator configured a provider and pressed "Process next". That limits
+-- today's exposure; it does not make keeping them for ever right.
+--
+-- -----------------------------------------------------------------------------
+-- SAFE TO RUN TWICE
+-- -----------------------------------------------------------------------------
+-- `INSERT ... ON DUPLICATE KEY UPDATE defaultValue = VALUES(defaultValue)` is
+-- the shape every settings seed here uses: it writes the built-in default and
+-- NEVER overwrites a value somebody has chosen.
+--
+-- @link https://github.com/MWBMPartners/WebMS-Intra/issues/714
+-- =============================================================================
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'transcription.retentionDays', '365', '365', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('239_transcript_retention.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;
