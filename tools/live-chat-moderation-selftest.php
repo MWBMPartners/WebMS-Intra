@@ -830,7 +830,17 @@ lcm_check(strlen($memberToken) === 64, 'the member has a genuine form token of t
 $page   = lcm_readPage($jar['admin']);
 $answer = lcm_post($jar['member'], ['url' => $page['url'], 'token' => $memberToken], LCM_REFUSED, 'hide');
 lcm_check(
-    $answer['status'] === 403 && (lcm_json($answer)['message'] ?? '') === 'Admin or stream_moderator role required' && lcm_message(LCM_REFUSED)['status'] === 'pending',
+    // ⚠️ THE WORDS CHANGED ON 3 NOVEMBER 2026 (#727) AND THE REASON MATTERS.
+    //    The handler's refusal used to name the `stream_moderator` role. The
+    //    roles that open this are now the organisation's own to choose, so
+    //    naming one would tell somebody to go and get a role their
+    //    organisation may not use. The message names no role; what this check
+    //    still proves is that the refusal comes from the ACCESS test in the
+    //    handler's own words and not from the form-token check above it.
+    $answer['status'] === 403
+    && (lcm_json($answer)['message'] ?? '')
+        === 'You need to be an administrator, or hold a role that may moderate the livestream chat'
+    && lcm_message(LCM_REFUSED)['status'] === 'pending',
     'a member\'s request, with their own good token, is refused (403) by the handler\'s ROLE test, in its own words, and the message is unchanged',
     lcm_said($answer)
 );

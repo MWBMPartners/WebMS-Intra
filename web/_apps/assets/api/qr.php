@@ -53,6 +53,7 @@ use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
+use Portal\Core\Capabilities;
 use Portal\Core\Barcode;
 use Portal\Core\Qr;
 use Portal\Core\Site;
@@ -83,7 +84,7 @@ if ($asset === null) {
 // by requesting its label. Uniform 404, matching detail.php/item.php.
 $privileged = ApiAuth::isBearer() === false
     && (App::isAdmin() === true
-        || App::hasRole('asset_manager') === true
+        || App::can(Capabilities::ASSETS_MANAGE) === true
         || AssetRegister::isResponsibleFor($assetId) === true);
 if ((int) ($asset['isConfidential'] ?? 0) === 1 && $privileged === false) {
     ApiResponse::error('Asset not found', 404);

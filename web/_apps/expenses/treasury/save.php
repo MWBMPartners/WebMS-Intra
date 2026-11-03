@@ -28,6 +28,7 @@ require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEP
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\ExpenseRules;
 use Portal\Core\Logger;
 use Portal\Core\ExpensePdf;
@@ -39,7 +40,9 @@ use Portal\Core\Site;
 Auth::ensureSession();
 Auth::requireLogin();
 
-// 🛡️ Only a treasurer of THIS organisation, or an administrator, may record a
+// 🛡️ Only an administrator of THIS organisation, or somebody holding a role
+//    it has pointed "Pay approved expense claims" at (#727; the `treasurer`
+//    role as shipped), may record a
 //    payment — the same test the list page (index.php) now asks before it
 //    shows anything (#538), asked here BEFORE the form-token check, in the
 //    order the other management handlers use (payments/save.php, the calendar
@@ -55,7 +58,7 @@ Auth::requireLogin();
 //    opened next (confirmed on a real database: it appeared on the approvals
 //    page). A POST from somebody who cannot even see the form is a forged or
 //    stale request, and now gets the same 403 page as the list.
-if (App::hasRole('treasurer') === false && App::isAdmin() === false) {
+if (App::can(Capabilities::EXPENSES_TREASURY) === false && App::isAdmin() === false) {
     Router::renderError(403);
     return;
 }

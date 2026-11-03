@@ -54,6 +54,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -94,7 +95,7 @@ if ($asset === null) {
 // manager-only gate. AssetRegister's own methods re-derive the IDOR/
 // eventID-existence checks independently regardless (see file header) —
 // this is purely the AUTHORITY gate, computed once, here.
-$canManage = App::isAdmin() === true || App::hasRole('asset_manager') === true;
+$canManage = App::isAdmin() === true || App::can(Capabilities::ASSETS_MANAGE) === true;
 if ($canManage === false && AssetRegister::isResponsibleFor($assetId, $userId) === false) {
     http_response_code(403);
     exit('Forbidden');

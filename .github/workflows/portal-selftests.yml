@@ -606,7 +606,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_ratelimit selftest_webhookret selftest_reservedwords selftest_offsite; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_reservedwords selftest_offsite; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -682,6 +682,17 @@ jobs:
         run: |
           mkdir -p "$SELFTEST_WEB_DIR"
           php -d memory_limit=512M tools/erasure-review-selftest.php
+
+      # Who opens which door (#727). No web server and no scratch folder: it
+      # runs the real Capabilities class against the database and reads the two
+      # gate files as text. Its database is in the list above -- a step whose
+      # database was never created fails while LOOKING wired (#646), and that
+      # exact omission happened on 2 November 2026.
+      - name: Capability registry self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_capabilities
+        run: php tools/capabilities-selftest.php
 
       # -----------------------------------------------------------------------
       # 🖥️ Tests that drive the real pages through PHP's built-in web server
@@ -1012,6 +1023,26 @@ jobs:
         env:
           SELFTEST_DB_NAME: selftest_limit
         run: php -d memory_limit=512M tools/setting-limit-selftest.php
+
+      # 🧹 The other half of #668, which the test above cannot reach: that the
+      #    readers the nightly clear-out ACTUALLY USES apply the rule, against
+      #    rows really in a database — including an organisation holding more
+      #    than the installation now allows, which no form would accept any
+      #    more but which every database predating the check can contain
+      #    (#685). A save-time cap is not a cap.
+      #
+      #    And the LOCK (#722). The save re-reads the installation's ceiling
+      #    live, `FOR UPDATE`, inside the transaction that writes, because #687
+      #    measured two overlapping ordinary web requests storing fifty years
+      #    under a ceiling of seven — 60 pairs out of 60. Proving that needs
+      #    two connections at once, so it cannot be an HTTP test: the page
+      #    harnesses run one worker, and such a test passes on the broken code.
+      #    This one starts a second process to hold the row.
+      - name: 'Retention caps self-test (#685, #722)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_retcaps
+        run: php -d memory_limit=512M tools/retention-caps-selftest.php
 
       # 🔒 A rate-limit row never holds a network address (#712). Two tables
       #    held one unchanged and NOTHING ever cleared either of them: no

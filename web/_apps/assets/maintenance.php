@@ -51,6 +51,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -65,7 +66,7 @@ $assetId = (int) ($_GET['assetID'] ?? 0);
 // 🛡️ Site-wide manager flag — used both for the confidential-asset filter
 // on the site-wide view below AND as the first half of the per-asset
 // privileged check (see item.php's identical ACCESS MODEL note).
-$canManageSiteWide = App::isAdmin() === true || App::hasRole('asset_manager') === true;
+$canManageSiteWide = App::isAdmin() === true || App::can(Capabilities::ASSETS_MANAGE) === true;
 
 $asset               = null;
 $canManageMaintenance = false;

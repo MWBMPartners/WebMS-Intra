@@ -50,6 +50,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -101,7 +102,7 @@ $isVaultResource = in_array((string) $resource['resourceType'], AssetRegister::A
 $isConfidentialAsset = (int) $asset['isConfidential'] === 1;
 if ($isVaultResource === true || $isConfidentialAsset === true) {
     $privileged = App::isAdmin() === true
-        || App::hasRole('asset_manager') === true
+        || App::can(Capabilities::ASSETS_MANAGE) === true
         || AssetRegister::isResponsibleFor($assetId) === true;
     if ($privileged === false) {
         Router::renderError(404);

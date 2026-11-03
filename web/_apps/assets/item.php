@@ -132,7 +132,9 @@
  *
  * ACCESS MODEL (#395-style — read before changing):
  *   `Auth::requireLogin()` gates every viewer. On top of that, when the
- *   asset is `isConfidential`, only an admin, the asset_manager role, or a
+ *   asset is `isConfidential`, only an administrator, somebody holding a
+ *   role this organisation has pointed "Manage the asset register" at
+ *   (#727 — `asset_manager` as shipped), or a
  *   responsible owner-party (`AssetRegister::isResponsibleFor()`) may view
  *   it — everyone else gets a plain `Router::renderError(404)`, the SAME
  *   response as "this assetID doesn't exist", so a logged-in-but-
@@ -221,6 +223,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\UserGroups;
@@ -239,7 +242,7 @@ if ($asset === null || (int) $asset['siteID'] !== $siteId) {
     return;
 }
 
-$canManage    = App::isAdmin() === true || App::hasRole('asset_manager') === true;
+$canManage    = App::isAdmin() === true || App::can(Capabilities::ASSETS_MANAGE) === true;
 $isResponsible = $canManage === false && AssetRegister::isResponsibleFor($assetId, $userId);
 $privileged   = $canManage === true || $isResponsible === true;
 

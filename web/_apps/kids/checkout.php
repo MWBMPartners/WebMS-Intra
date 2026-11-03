@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -14,8 +15,8 @@ Auth::requireLogin();
 // 🛡️ Safeguarding gate (#298 gap fix) — the checkout terminal resolves
 //     ANY badge code at the site to a child's full name + authorised
 //     pickup list, and releases the child on a typed name match, so it
-//     must be staff-only. Mirrors care/index.php's gate exactly.
-if (App::isAdmin() === false && App::hasRole('kids_team') === false) {
+//     must be staff-only. The same capability checkin.php asks (#727).
+if (App::isAdmin() === false && App::can(Capabilities::KIDS_CHECKIN) === false) {
     Router::renderError(403);
     return;
 }

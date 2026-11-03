@@ -28,6 +28,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -52,9 +53,12 @@ $breadcrumbs = ['Dashboard' => Router::url(''), 'Expenses' => Router::url('expen
 //
 // THE FIX: the same test the Pay handler uses, asked here BEFORE the claims
 // are fetched, so a refused visitor never causes the claims query to run.
-// Since #516, App::hasRole() answers for the organisation whose address is
-// open, and only through an active membership there — so a treasurer of
-// organisation B is refused on organisation A's address, and so is somebody
+// The test is `App::can()` and the capability is the ONE place the roles
+// that open it are decided (#727). Like `App::hasRole()` before it, it
+// answers for the organisation whose address is open and only through an
+// active membership there (`Roles::hasAnyOf()` joins the same row) — so a
+// treasurer of organisation B is refused on organisation A's address, and so
+// is somebody
 // whose membership here has ended. App::isAdmin() is true for an
 // administrator of THIS organisation (through their active membership row),
 // for a global administrator, and for an account carrying the older
@@ -76,10 +80,14 @@ $breadcrumbs = ['Dashboard' => Router::url(''), 'Expenses' => Router::url('expen
 // refusal page — every page of the portal behaves that way today, and that
 // is not this page's to change.
 //
-// 'treasurer' is written as the stored key. Roles::has() lower-cases the key
-// before comparing, so the 'Treasurer' spelling other files use works too;
-// the stored form is used here so this test and save.php's read identically.
-if (App::hasRole('treasurer') === false && App::isAdmin() === false) {
+// THE ROLE IS NO LONGER NAMED HERE (#727). This page, save.php and the
+// claim page all ask `Capabilities::EXPENSES_TREASURY`, which ships
+// pointing at the `treasurer` role — so the three read identically, as
+// they did when each spelled the key for itself, and an organisation can
+// now point the door at a finance officer of its own without anybody
+// editing PHP. Capital letters never mattered and still do not: the
+// registry lower-cases every key.
+if (App::can(Capabilities::EXPENSES_TREASURY) === false && App::isAdmin() === false) {
     Router::renderError(403);
     return;
 }

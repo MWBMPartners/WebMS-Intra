@@ -237,6 +237,22 @@ PER_ORG_INSERT = re.compile(
 #    taking the cap out of MailQueue would leave this check green. The mail
 #    queue's half of #668 is guarded by section F8 of
 #    `tools/mail-queue-selftest.php`, not by this file.
+#
+#    ⚠️ A CORE CLASS THAT BOTH RESOLVES THE LIMIT AND WRITES THE ROW CANNOT BE
+#       JUDGED BY THIS, and it is worth knowing because two of the six writers
+#       are now that shape. `TranscriptRetention` (#722) holds its own
+#       `installationAllows()` and calls it as `self::installationAllows()`, so
+#       the bare word is satisfied by the class's own name for the idea — not by
+#       any cap being applied to the row it writes. MEASURED on 3 November 2026
+#       by deleting every `SettingLimit::` call from it: this check stayed
+#       green. Tightening the token to `::installationAllows` was tried and
+#       changes nothing, because `self::` carries the `::` too.
+#
+#       That is limitation 2 at the top of this file in its sharpest form, and
+#       the answer is not a cleverer pattern: it is a behaviour test. Section C
+#       of `tools/retention-caps-selftest.php` is what catches a save path that
+#       has stopped refusing — it asks the method to store a figure above the
+#       ceiling and requires nothing to be written.
 ASKS_THE_RULE = ("SettingLimit::", "installationAllows", "ownNumberCheck")
 
 PHP_STRIP = r"""<?php

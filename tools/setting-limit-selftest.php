@@ -64,7 +64,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 47;
+const EXPECTED_CHECKS = 52;
 
 $dbName = (string) getenv('SELFTEST_DB_NAME');
 if (str_starts_with($dbName, 'selftest_') === false) {
@@ -233,6 +233,50 @@ check('the words say what the limit is, and tell the person what to do', str_con
 check('…and they never name the setting key or blame anybody', str_contains($words, KEY) === false && stripos($words, 'you cannot') === false, $words);
 check('the hard-maximum words are different, and do not mention the installation', str_contains(SettingLimit::refusalWords('above-hard-max', 365, 'days'), 'installation') === false);
 check('no reason gives no words', SettingLimit::refusalWords('', 365, 'days') === '');
+
+// -----------------------------------------------------------------------------
+// 🚫 THE ADVICE FOR A POSTED ZERO USED TO CONTRADICT THE REFUSAL
+// -----------------------------------------------------------------------------
+// Where 0 means "for ever" it is the LARGEST value, so posting 0 under a
+// ceiling of 7 is refused — and the words then read "This installation allows
+// at most 7 days … You can choose 7 or fewer", and 0 IS fewer than 7. Somebody
+// following that advice would post the number just refused. Wrong in the
+// direction that reads as help, which is the worse direction.
+//
+// The caller now says whether the refused number was the for-ever zero. The
+// three checks below assert what the sentence MUST say and what it must NOT,
+// and the first is positive on purpose: a check made only of absences passes
+// when the sentence stops being produced at all (#694's section-P lesson).
+$zeroWords = SettingLimit::refusalWords('above-installation', 7, 'days', true);
+check('a refused "for ever" is told so, and given the range that IS allowed',
+    str_contains($zeroWords, 'does not allow "keep for ever"') === true
+    && str_contains($zeroWords, 'between 1 and 7') === true
+    && str_contains($zeroWords, 'nothing was saved') === true, $zeroWords);
+check('…and it never offers "7 or fewer", which would include the 0 just refused',
+    str_contains($zeroWords, 'or fewer') === false, $zeroWords);
+check('…while an ordinary too-large number still gets the ordinary sentence',
+    str_contains(SettingLimit::refusalWords('above-installation', 7, 'days', false), '7 or fewer') === true);
+// The hard maximum is the same sentence either way: a number above 3650 is too
+// large whatever 0 means, and 0 can never be above it.
+check('the hard-maximum words do not change for the for-ever case',
+    SettingLimit::refusalWords('above-hard-max', 7, 'days', true)
+    === SettingLimit::refusalWords('above-hard-max', 7, 'days', false));
+// And the attendance handler must PASS the flag, or the class cannot know.
+// Pinned on the code with comments stripped, because this is the one live
+// caller where 0 means for ever and the page's own `min` hides the fault.
+$slAttendance = '';
+foreach (token_get_all((string) file_get_contents(dirname(__DIR__) . '/web/_apps/admin/settings/attendance/save.php')) as $t) {
+    if (is_array($t) === true && in_array($t[0], [T_COMMENT, T_DOC_COMMENT], true) === true) {
+        continue;
+    }
+    $slAttendance .= is_array($t) === true ? $t[1] : $t;
+}
+check('the attendance handler tells refusalWords() when the refused number was "for ever"',
+    preg_match(
+        '/SettingLimit::refusalWords\(\s*\$retentionRefusal\s*,\s*\$retentionAllowed\s*,'
+        . '\s*\'days\'\s*,\s*\$days === 0\s*,?\s*\)/s',
+        $slAttendance
+    ) === 1);
 
 // =============================================================================
 head('D. The attendance handler asks the rule, on the right branch');

@@ -225,6 +225,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
             header('Location: ' . Site::url('settings'));
             exit();
         }
+
+        // 🔒 Nor can the reserved-capability list be deleted here (#727), by
+        //    anybody. With the row gone every capability becomes re-pointable
+        //    by every organisation, which is a decision belonging to whoever
+        //    runs the installation — and the two levels may be different
+        //    parties (the standing rule of 29 October 2026). The Roles page is
+        //    where the list is emptied, with both records written. See
+        //    Capabilities::lockedInGeneralEditor().
+        if ($lockedKey !== null && \Portal\Core\Capabilities::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
+            Logger::activity(
+                'SettingsDeleteRefused',
+                'Refused: "' . (string) $lockedKey['settingKey'] . '" lists the capabilities this installation reserves and cannot be deleted here',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = \Portal\Core\Capabilities::LOCKED_MESSAGE;
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('settings'));
+            exit();
+        }
     }
 
     if ($deleteId > 0 && $isRoot === false) {
@@ -605,6 +624,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     // 🔒 And for the version the database is recorded at (#499): the
                                     //    Upgrade page's button writes it, and both handlers refuse it.
                                     $versionLocked = \Portal\Core\Maintenance::lockedInGeneralEditor((string) $row['settingKey']);
+                                    // 🔒 And for the capabilities this installation reserves (#727):
+                                    //    ticked on the Roles page, which any administrator can open,
+                                    //    but only a global administrator can change that card.
+                                    $capabilityLocksLocked = \Portal\Core\Capabilities::lockedInGeneralEditor((string) $row['settingKey']);
                                     // 🔒 And for an organisation's time zone (#604): chosen at Admin,
                                     //    Organisations, which only a global administrator can open.
                                     $zoneLocked = Site::zoneLockedInGeneralEditor((string) $row['settingKey']);
@@ -622,6 +645,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/upgrade'), ENT_QUOTES, 'UTF-8'); ?>">Recorded by the Upgrade page</a>
                                     <?php elseif ($versionLocked === true): ?>
                                         <span class="small text-secondary">Recorded by a global administrator, on the Upgrade page</span>
+                                    <?php elseif ($capabilityLocksLocked === true && $isRoot === true): ?>
+                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/roles'), ENT_QUOTES, 'UTF-8'); ?>">Ticked at Admin, Roles</a>
+                                    <?php elseif ($capabilityLocksLocked === true): ?>
+                                        <span class="small text-secondary">Ticked by a global administrator, at Admin, Roles</span>
                                     <?php elseif ($organisationsLocked === true && $isRoot === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/sites/setup'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Organisations</a>
                                     <?php elseif ($organisationsLocked === true): ?>
@@ -638,7 +665,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         <i class="fa-solid fa-pen"></i>
                                     </button>
                                     <?php endif; ?>
-                                    <?php if ($isRoot === true && $isGivingRule === false && $organisationsLocked === false && $mailLocked === false && $versionLocked === false && $zoneLocked === false): ?>
+                                    <?php /* 🔒 `$capabilityLocksLocked` joined this list with #727: the delete handler
+                                             refuses the row anyway, so drawing the button would offer a
+                                             control that cannot work. */ ?>
+                                    <?php if ($isRoot === true && $isGivingRule === false && $organisationsLocked === false && $mailLocked === false && $versionLocked === false && $capabilityLocksLocked === false && $zoneLocked === false): ?>
                                         <form method="post" action="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                             <input type="hidden" name="action" value="delete">

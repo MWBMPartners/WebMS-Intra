@@ -2521,6 +2521,80 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     `move_uploaded_file()` can report success after a partial write — not established either way).
     *(`.claude/CLAUDE.md` → the #721/#720 bullet.)*
 
+## Gating a feature is a CAPABILITY, never a hard-coded role (the owner, 3 November 2026)
+
+Set when the owner decided #727's scope: *"all remaining features pointable as
+gated features, all standard roles' gates. with organisational global admin
+having automatic access to everything, who can then re-assign later. **This
+should also be the mechanism going forward for all new features**, giving
+flexibility and security"*.
+
+**So a new feature that needs gating DECLARES A CAPABILITY. It does not add an
+`App::hasRole('some_role')` call.** `Portal\Core\Capabilities` is the one list,
+and an organisation points a capability at the role or roles of its own choosing.
+
+- **A capability maps to a SET of roles, ANY-OF.** Holding one listed role opens
+  the door. All-of is a two-person rule, a different feature, and nobody has
+  asked for it.
+- **A capability is COARSE.** Group by what a person is trying to open, never one
+  per call site: `asset_manager` alone accounted for 37 of the **61** literal
+  gates on commit `b12ff44`, and all 37 are one capability. A page of 60
+  switches is a page no customer can read, and 60 new ways to lock somebody out.
+  *(This bullet said "37 of the 62" until the independent check measured it. 62
+  is the FILE count, stated correctly two bullets below — one number doing two
+  jobs, in the rule written to stop that.)*
+- **An organisation's global administrator has automatic access to everything**
+  and can re-assign later, so a capability declares
+  `globalAdminFallsOpen = true`. **`erasure.review` is the deliberate exception
+  and stays FALSE** (#724): a hosting provider's administrator must not be the
+  person reading a member's own words, because the installation's administrator
+  and the organisation's may be different parties. An entry that omits the
+  property must fail loudly rather than pick a default.
+- **An organisation that never opens the roles page sees NO difference.** Every
+  capability ships with the role its gate had hard-coded. That is the only way
+  this can be released — #499's "fail closed" was built first and locked members
+  out.
+- **An EMPTY set is allowed and is a decision, never an accident:** it needs a
+  second confirmation carrying the capability's own sentence about what will
+  happen, and "chosen and empty" is stored differently from "never chosen".
+- **The installation may mark a capability not-re-pointable**
+  (`organisationMayRepoint`, plus the installation-wide `capabilities.locked`).
+  A layer that cannot be READ locks everything, not nothing.
+- **A VARIABLE role key cannot be re-pointed, and there are only TWO of them.**
+  This bullet said "roughly a quarter of the calls work their key out at run
+  time — a workflow's assignee, a notification audience, a report filter", and
+  **every part of that was wrong**, which matters because it is the sentence
+  #739 would use to decide how much cannot be converted. Measured on commit
+  `b12ff44` with PHP's tokeniser: **4 of 65** calls do not pass a literal, and
+  **two of those four pass a class constant** (`ExpenseRules::EXPORT_ROLE`,
+  `Giving::ROLE_KEY`), which is a fixed key written once rather than one worked
+  out. Genuinely variable: **two**, about **3%** —
+  `ReportRegistry::userPassesGates()`, which walks a report's own list of gate
+  names, and `web/_apps/tours/api/active.php`, which walks a guided tour's
+  comma-separated `forRoles` column. Both take the key from a row a customer
+  filled in, so neither is a page gate. "A quarter" was 24 of 86, i.e. the
+  comment-inclusive `grep` again, and **the three examples it named are not
+  `App::hasRole()` call sites at all** — they are SQL joins against
+  `tblUserRoles`. Never claim "every gate" while the two exist; list them with
+  their reason instead.
+- **Count the call sites, never quote a number — and this rule did not obey
+  itself.** Run `php tools/role-gate-count.php`, which exists for this: PHP's
+  tokeniser, comments and docblocks dropped, with the literal / run-time split
+  and the comment-inclusive `grep` printed side by side so the gap is visible.
+  **Never `grep`.** It counts every mention in a comment, and converting a gate
+  LEAVES A COMMENT BEHIND naming the gate it replaced, so the grep figure does
+  not even fall by one per conversion: on 3 November 2026
+  `grep -rn "App::hasRole('asset_manager')"` returned 19 hits of which **zero
+  were calls**. Three figures have stood in this repository's own files and
+  every one was wrong — "66 call sites across 61 files", then "86, the real
+  figure" (a grep), then "62 literal and 24 variable" (the file count and the
+  grep). The honest tokeniser figure on `b12ff44` was 65 calls across 62 files;
+  by `grep` the same commit answers 87. Cite the command, not the answer.
+
+Phase two — converting the remaining standard-role gates, and an audit check
+that fails when a new hard-coded gate appears — is **#739**. That check is the
+part that stops the conversion being undone one feature at a time.
+
 ## A few more things worth knowing
 
 - **Branches are meant to be promoted through four steps on the way to

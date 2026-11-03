@@ -38,6 +38,7 @@ use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
+use Portal\Core\Capabilities;
 use Portal\Core\Site;
 
 ApiAuth::requireRead('assets:read');
@@ -71,7 +72,7 @@ if ($search !== '') {
 // NEVER a bearer key, and never an ordinary logged-in user (see file
 // header). Matches index.php's own $canManage gate exactly.
 $canSeeConfidential = ApiAuth::isBearer() === false
-    && (App::isAdmin() === true || App::hasRole('asset_manager') === true);
+    && (App::isAdmin() === true || App::can(Capabilities::ASSETS_MANAGE) === true);
 $allMatching = AssetRegister::listForSite($siteId, $filters, $canSeeConfidential);
 
 $totalItems = count($allMatching);

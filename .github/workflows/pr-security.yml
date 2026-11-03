@@ -1453,6 +1453,18 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_erasure_review_items.py
 
+      # The capability registry and its storage cannot drift (#727). A HARD
+      # GATE because the thing it guards is invisible: one word in
+      # `Capabilities::CAPABILITIES` decides whether #724's erasure review
+      # falls open for a global administrator who has not been given the Data
+      # Controller role, and changing it looks like nothing on every page.
+      # It also fails when a capability is offered that nothing asks, which is
+      # #671's shape -- a control with a Save button that changes nothing.
+      - name: 'The capability registry and its storage agree (hard gate, 727)'
+        id: capability_registry
+        if: always()
+        run: python3 -I tools/audit-checks/check_capability_registry.py
+
       # =====================================================================
       # Summary in the Actions UI
       # =====================================================================

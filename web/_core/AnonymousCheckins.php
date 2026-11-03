@@ -92,6 +92,20 @@ class AnonymousCheckins
      * (#530) this also governed a browser-description column; that column
      * is now dropped, not merely left empty, so there is nothing left for
      * this timer to clear except the address.
+     *
+     * ⚠️ THE STORED NUMBER IS NOT NECESSARILY THE NUMBER IN FORCE (#685,
+     *    3 November 2026). An organisation's own figure is held down to what
+     *    the installation allows, so a row saying 1000 days is obeyed as 90
+     *    where the installation allows 90 — and **0, which means "for ever"
+     *    here, is held down too unless the installation itself allows for
+     *    ever.** Ask `readRetentionDays()`, which is the one reader that
+     *    applies the cap; never read this key straight out of the settings.
+     *
+     *    That is not a nicety: before #685 the clear-out obeyed the stored
+     *    figure, so attendance personal data could be kept ten years on an
+     *    installation intending ninety days — and a save-time check could not
+     *    reach a row written by SQL, predating the check, or restored from a
+     *    backup.
      */
     public const RETENTION_KEY = 'attend.detailRetentionDays';
 
@@ -239,23 +253,53 @@ class AnonymousCheckins
     }
 
     /**
-     * How many days of detail this organisation keeps.
+     * How many days of detail this organisation keeps, HELD TO WHAT THE
+     * INSTALLATION ALLOWS (#685).
      *
      * Same two-level lookup as the visibility choice, and the same note
      * applies: #526 is expected to widen it, here and nowhere else.
      *
+     * 🚧 THE CAP IS APPLIED HERE, NOT ONLY ON THE FORM, AND THAT WAS #685.
+     *    #668 part 1 made `/admin/settings/attendance` REFUSE a figure above
+     *    the installation's. It did nothing about the organisations that
+     *    already had one: this reader is what the nightly clear-out uses, so an
+     *    organisation holding 1000 days — or 0, "keep for ever" — on an
+     *    installation that now allows 90 simply kept it. That is the live
+     *    breach #668 was raised for, surviving in every database that predates
+     *    the check. A SAVE-TIME CAP IS NOT A CAP: a row written by hand,
+     *    restored from a whole-database backup, or stored before the refusal
+     *    existed is obeyed unless the READER caps too. `MailQueue::numbers()`
+     *    had to learn the same thing for the four queue numbers.
+     *
+     *    IT SHORTENS RETENTION OF DATA ALREADY HELD, which is worth saying out
+     *    loud rather than leaving somebody to discover: an organisation above
+     *    the installation's figure starts having its technical detail cleared
+     *    at the installation's figure instead. That is the safe direction for
+     *    privacy and it is still a change to what happens to existing rows.
+     *    The owner's choice, recorded on #685 (option 1 of the two there), with
+     *    the page saying plainly when a figure is being held down.
+     *
+     *    `SettingLimit::cappedForSite()` is the rule, and it takes a figure
+     *    this method has already read, so the two sentences below about what a
+     *    stored value MEANS stay here where they are explained. It is NOT
+     *    `SettingLimit::effective()`: that reads the merged `$SETTINGS`, which
+     *    is the organisation being SERVED, and the clear-out walks every
+     *    organisation (#683).
+     *
      * @param int $siteId The organisation to read the setting for.
      *
-     * @return int Days to keep. 0 means keep for ever.
+     * @return int Days to keep. 0 means keep for ever — now only where the
+     *             installation itself allows for ever.
      */
     public static function readRetentionDays(int $siteId): int
     {
         $raw = App::settingForSite(self::RETENTION_KEY, $siteId);
-        if ($raw === null || trim($raw) === '') {
-            return self::DEFAULT_RETENTION_DAYS;
-        }
 
-        $days = (int) $raw;
+        // Nothing stored at EITHER level (settingForSite falls back to the
+        // installation-wide row itself), so the built-in default stands — and
+        // is then capped like any other figure, which costs nothing while the
+        // default is the smallest of the three and is correct if it ever is not.
+        $days = $raw === null || trim($raw) === '' ? self::DEFAULT_RETENTION_DAYS : (int) $raw;
 
         // A negative number is not "keep for ever backwards"; it is a typing
         // mistake. Treated as 0 (keep for ever) because for a clear-out the
@@ -266,11 +310,68 @@ class AnonymousCheckins
         // ever is the dangerous outcome, so erring towards clearing is right.
         // Here nothing sensitive is being kept, so erring towards not touching
         // anything is right. The two differ on purpose.
+        //
+        // Since #685 that "for ever" is itself capped, so a negative buys
+        // for-ever ONLY where the installation allows for ever. That is a real
+        // change and it follows from the rule rather than from this line: 0 is
+        // the LARGEST value for this setting, and an installation may forbid it.
         if ($days < 0) {
-            return 0;
+            $days = 0;
         }
 
-        return $days;
+        return SettingLimit::cappedForSite(
+            $days,
+            self::RETENTION_KEY,
+            self::DEFAULT_RETENTION_DAYS,
+            self::MAX_RETENTION_DAYS,
+            true
+        );
+    }
+
+    /**
+     * 🚧 The organisation's OWN stored figure, before the installation's cap —
+     *    null when it has no row of its own.
+     *
+     * For saying on a page that a figure is being held down, which is the
+     * notice half of #685: without it the page can only show the capped number,
+     * and an administrator who chose 1000 days would see "90 days — your
+     * organisation's own choice", which is two true halves making a false
+     * sentence.
+     *
+     * Read at that organisation's own level, never from the merged array or
+     * from `App::settingForSite()`, both of which fall back to the
+     * installation's row — a box or a sentence filled from either shows a
+     * number this organisation never chose (#674, and #677 where exactly that
+     * happened).
+     *
+     * @param \mysqli $db     An open connection.
+     * @param int     $siteId The organisation.
+     *
+     * @return int|null The figure as stored, or null when there is no own row.
+     */
+    public static function ownRetentionDays(\mysqli $db, int $siteId): ?int
+    {
+        $stmt = $db->prepare(
+            'SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?'
+        );
+        if ($stmt === false) {
+            return null;
+        }
+        $key = self::RETENTION_KEY;
+        $stmt->bind_param('si', $key, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null) {
+            return null;
+        }
+        $text = trim((string) ($row['settingValue'] ?? ''));
+        if (preg_match('/^-?\d{1,18}$/', $text) !== 1) {
+            return null;
+        }
+
+        return (int) $text;
     }
 
     /**

@@ -11,7 +11,7 @@
  * startStocktake()` for the pre-populate/audit logic. Each run links through
  * to `assets/stocktake?id=` for the scan-to-verify screen / variance report.
  *
- * Manager-gated (admin OR asset_manager role) — mirrors every other
+ * Manager-gated (an administrator, or a role this organisation has pointed "Manage the asset register" at — #727, `asset_manager` as shipped) — mirrors every other
  * mutating/manager-only Asset Tracker screen (categories.php, orgs.php, …).
  *
  * @package   Portal\Assets
@@ -28,15 +28,17 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
 // 🔐 Session + manager gate — mirrors every other mutating/manager-only
-// Asset Tracker screen (orgs.php, categories.php, …): admin OR the
-// asset_manager role.
+// Asset Tracker screen (orgs.php, categories.php, …): an administrator, or
+// a role this organisation has pointed "Manage the asset register" at
+// (#727).
 Auth::ensureSession();
 Auth::requireLogin();
-$canManage = App::isAdmin() === true || App::hasRole('asset_manager') === true;
+$canManage = App::isAdmin() === true || App::can(Capabilities::ASSETS_MANAGE) === true;
 if ($canManage === false) {
     Router::renderError(403);
     return;

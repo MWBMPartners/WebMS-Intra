@@ -26,6 +26,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Departments;
 use Portal\Core\ExpenseRules;
 use Portal\Core\Router;
@@ -77,7 +78,7 @@ $currentUserId = (int) ($_SESSION['user_id'] ?? 0);
 $isClaimant    = ((int) $claim['userID'] === $currentUserId);
 $isAdmin       = App::isAdmin();
 $hasApprover   = App::hasRole('Approver');
-$hasTreasurer  = App::hasRole('Treasurer');
+$hasTreasurer  = App::can(Capabilities::EXPENSES_TREASURY);
 
 // 🏢 #542: a lead, approver or required approver of THIS claim's department,
 //    through an active membership of this organisation, may open the claim

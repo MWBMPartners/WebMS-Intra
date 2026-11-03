@@ -3839,14 +3839,16 @@ class AssetRegister
     /**
      * Does the given user (default: current session user) have LENDING
      * authority for this asset? True when EITHER:
-     *   - The user is an admin or holds the asset_manager role, OR
+     *   - The user is an administrator, or holds a role this organisation
+     *     has pointed "Manage the asset register" at (#727 — the
+     *     `asset_manager` role as the portal ships it), OR
      *   - The user is a direct `tblAssetOwners` party for this asset with
      *     `isLendingAuthority = 1`, or belongs to a dept/group that IS such
      *     a party (modelled on isResponsibleFor()'s own three joins above,
      *     narrowed to the lending-authority flag).
      *
      * UNLIKE isResponsibleFor(), this method folds the admin/manager bypass
-     * in itself (per #398's spec) — but `App::isAdmin()`/`App::hasRole()`
+     * in itself (per #398's spec) — but `App::isAdmin()`/`App::can()`
      * are both session-bound (they read `App::user()`, which is keyed off
      * `$_SESSION['user_id']` — see App.php), so that bypass is applied ONLY
      * when `$userId` is null (defaults to the session user) or explicitly
@@ -3876,9 +3878,12 @@ class AssetRegister
             return false;
         }
 
-        // 🛡️ Admin / asset_manager bypass — session-user-only, see doc above.
+        // 🛡️ Administrator / "Manage the asset register" bypass (#727) —
+        //    session-user-only, see doc above. `App::can()` reads the
+        //    SESSION account, which is why the bypass is applied only when
+        //    the id asked about is the session user's.
         if ($checkingSessionUser === true
-            && (App::isAdmin() === true || App::hasRole('asset_manager') === true)
+            && (App::isAdmin() === true || App::can(Capabilities::ASSETS_MANAGE) === true)
         ) {
             return true;
         }
@@ -5304,7 +5309,9 @@ class AssetRegister
      * session-scoped admin/asset_manager bypass and why `$userId` is
      * treated the way it is; every line below is identical to that method
      * except the ownership flag it checks. True when EITHER:
-     *   - The user is an admin or holds the asset_manager role, OR
+     *   - The user is an administrator, or holds a role this organisation
+     *     has pointed "Manage the asset register" at (#727 — the
+     *     `asset_manager` role as the portal ships it), OR
      *   - The user is a direct `tblAssetOwners` party for this asset with
      *     `isMaintenanceAuthority = 1`, or belongs to a dept/group that IS
      *     such a party.
@@ -5325,10 +5332,10 @@ class AssetRegister
             return false;
         }
 
-        // 🛡️ Admin / asset_manager bypass — session-user-only, see
-        // canApproveLoan()'s doc for why.
+        // 🛡️ Administrator / "Manage the asset register" bypass (#727) —
+        //    session-user-only, see canApproveLoan()'s doc for why.
         if ($checkingSessionUser === true
-            && (App::isAdmin() === true || App::hasRole('asset_manager') === true)
+            && (App::isAdmin() === true || App::can(Capabilities::ASSETS_MANAGE) === true)
         ) {
             return true;
         }
@@ -8549,6 +8556,19 @@ class AssetRegister
         // hierarchy App::isAdmin() checks (tblUsers.isRootAdmin,
         // tblUserSites.isSiteAdmin/isSiteRootAdmin, legacy tblUsers.isAdmin)
         // plus the asset_manager role.
+        //
+        // ⚠️ DELIBERATELY THE ROLE ITSELF AND NOT THE `assets.manage`
+        //    CAPABILITY (#727). This is an AUDIENCE — who gets an e-mail
+        //    about a found asset — and not a gate deciding who may do
+        //    something. The capability is a per-person question asked of
+        //    the signed-in account; this needs a LIST of addresses out of
+        //    the database, which is a different query and a different
+        //    decision. Pointing an audience at a re-pointable door would
+        //    also mean an organisation changing who may manage assets
+        //    silently changed who is e-mailed, which is not what somebody
+        //    ticking a box on the roles page is asking for. If it should
+        //    follow the capability, that is a decision for the owner and a
+        //    new reader on `Capabilities`, not a tidy-up here.
         $roleKey = 'asset_manager';
         $stmt = $db->prepare(
             'SELECT DISTINCT u.emailAddress AS email FROM tblUsers u '

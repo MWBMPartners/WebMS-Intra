@@ -2,6 +2,138 @@
 
 
 ## [Unreleased] (alpha)
+<!-- #727: gating a feature is a capability, not a hard-coded role -->
+
+### A feature can be gated on a role an organisation created (#727, migration 243)
+
+`Portal\Core\Capabilities` is the one place a gated "capability" is declared,
+the one place an organisation's chosen roles for it are read or written, and
+the one place "may this person do this?" is answered. A capability is a door a
+person recognises — "decide the free text an erasure cannot" — rather than a
+line of PHP, and an organisation can point it at roles of its own from
+Admin → Roles without anybody editing code, which a customer on shared hosting
+cannot do.
+
+- **Any-of, never all-of.** A capability holds zero or more role keys and
+  holding any ONE of them opens the door.
+- **An organisation that never opens the page sees no change.** With nothing
+  chosen, the roles in force are the ones the capability ships with — the same
+  role its hard-coded gate used.
+- **The empty set is allowed and must be confirmed in as many words**, with the
+  capability's own sentence about what it costs. It is never permanent: the page
+  that changes a mapping is gated on `App::isAdmin()` and on no capability, so
+  any administrator can put it back. **Both halves of that are now checked** —
+  check J of `check_capability_registry.py` refuses a capability being asked
+  anywhere under `web/_apps/admin/roles/`, and check P pins the administrator
+  gate itself in both files of that page, which nothing did until the
+  independent check turned it into `if (false)` with every test green.
+- **A capability can declare that it does NOT fall open for a global
+  administrator**, which is what makes #724's erasure-review gate expressible
+  as a capability at all. Its two files now ask
+  `App::can(Capabilities::ERASURE_REVIEW)`, and a global administrator who has
+  not been granted the Data Controller role is still refused.
+- **The installation can reserve a capability to itself** (`capabilities.locked`,
+  installation-wide), because the two administrator levels may be different
+  parties.
+- Deleting a role that is the LAST one opening a capability is refused, naming
+  the door to point elsewhere first.
+- `Capabilities::NOT_YET_ASKED` — the list a capability sits in while its gate
+  is still hard-coded — is **empty**, because all five of the capabilities that
+  were written down there on the morning of 3 November 2026 had their gates
+  converted the same day (see the next entry). It is kept, not deleted: it is
+  where the next one goes.
+- New: `tblCapabilityMap`, `tblCapabilityMapRole`,
+  `tools/audit-checks/check_capability_registry.py` (a hard gate),
+  `tools/capabilities-selftest.php` and `tools/role-gate-count.php` (which
+  counts the remaining hard-coded gates with PHP's tokeniser, because four
+  documents had quoted a `grep` figure as a fact). **Count a test's checks from
+  its own last line, never from here.**
+
+---
+
+
+### Added
+- **Five more features can be pointed at a role an organisation created
+  (#727).** The asset register, the pastoral care register, children's
+  check-in, the treasury side of expenses and the livestream chat moderation
+  queue are now gated on a *capability* rather than on a role key typed into
+  PHP. 49 gates across 48 files were converted, and
+  `web/_core/Capabilities.php` is still the ONE place that decides which roles
+  open which door. An organisation that never opens Admin → Roles sees **no
+  difference**: each capability ships pointing at the role its hard-coded gate
+  used.
+- All five declare `globalAdminFallsOpen => true`, which is the owner's
+  decision of 3 November 2026 — "organisational global admin having automatic
+  access to everything, who can then re-assign later". #724's erasure review
+  keeps `false` and is the one door a global administrator does not open
+  without the role.
+
+### Changed
+- The live chat moderation handler's refusal no longer names the
+  `stream_moderator` role ("You need to be an administrator, or hold a role
+  that may moderate the livestream chat"), because which roles open it is now
+  the organisation's own choice. `tools/live-chat-moderation-selftest.php` was
+  updated with it.
+- `Capabilities` now remembers *which roles open a door here* for the rest of
+  one request. A person's answer is never remembered, so granting a role still
+  takes effect on the next call.
+
+### Fixed
+- `Capabilities::definition()` throws, naming the capability and the field,
+  when an entry leaves a field out. There is no default for any field, because
+  `globalAdminFallsOpen` is true for five capabilities and false for one.
+
+<!-- #685 and #722: a limit the clear-out really uses -->
+
+### Fixed
+
+- **An organisation already over the attendance retention limit is now held to
+  the installation's figure (#685).** #668 part 1 made
+  `/admin/settings/attendance` refuse a longer period; it did nothing about the
+  organisations that already had one, and the nightly clear-out reads the stored
+  value. So attendance personal data could still be kept ten years on an
+  installation intending ninety days — in every database that predates the
+  check, and in any that got such a row by hand or from a whole-database
+  restore. `AnonymousCheckins::readRetentionDays()` now asks
+  `SettingLimit::cappedForSite()`, so the reader caps as well as the form. **It
+  shortens retention of data already held**, which is the safe direction for
+  privacy and is still a change to what happens to existing rows; both pages
+  that show the figure now say when a stored figure is being held down.
+- **An installation that chose "keep transcripts for ever" really keeps them
+  (#722).** `TranscriptRetention::daysForSite()` worked its own three-tier
+  arithmetic out against `installationAllows()`, which never answers 0 — it
+  hands back the hard maximum, because what a form's `max` needs is a number of
+  days. So "for ever" was impossible and every transcript was deleted at ten
+  years, under a branch in `run_transcript_sweep()` whose comment said it kept
+  them: a guarantee the code had forgotten to implement. The arithmetic now goes
+  through `SettingLimit::cappedForSite()`.
+- **Admin, Transcription prefilled 3650 where the installation had chosen "for
+  ever"**, so the "Kept for ever." sentence could never print and a plain Save
+  over an untouched form turned for-ever into ten years. The page asks both of
+  #668's questions now.
+- **Admin, Maintenance, Retention printed the uncapped figure.** It read the
+  merged settings array, so after #685 it would have stated a period the
+  clear-out does not use — on the page whose job is to say what the clear-out
+  will do. It asks `readRetentionDays()` now.
+
+### Added
+
+- **A per-organisation transcript retention page (#722, migration 244).**
+  `/admin/settings/transcription`, for an organisation's own administrator. One
+  field: how long this organisation keeps the written-out words of a recording,
+  up to — never beyond — what the installation allows. An empty box means
+  "follow the installation" and removes the organisation's own row, which is the
+  limitation the attendance page states and cannot fix. The save re-reads the
+  ceiling live with the installation's own row locked inside the transaction
+  that writes (#687, #647), refuses with the reason rather than clamping, and
+  records both the refusal and the save.
+- **`tools/retention-caps-selftest.php`** (56 checks), wired into
+  `tools/run-all-selftests.sh` and `portal-selftests.yml`: the clear-out's own
+  readers against rows put in by SQL, and the lock proved from a second process.
+- **Section T of `tools/transcription-pages-selftest.php`** (12 checks, 165 in
+  all): the new page over real HTTP.
+
+---
 <!-- #724: the Data Controller role and the erasure review -->
 ### Added
 

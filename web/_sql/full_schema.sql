@@ -10851,3 +10851,75 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('242_erasure_review.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 243_capability_roles.sql (#727) ────────────────────────────────────
+-- Which roles open which door, chosen per organisation. See that migration's
+-- header for why there are TWO tables (an EMPTY set has to be distinguishable
+-- from "never chosen"), why the role is stored by its KEY rather than its
+-- number, and why `fk_capmaprole_role` can point at `tblRoles(siteID, roleKey)`
+-- at all (MySQL 8.4 refuses a foreign key that does not point at a unique key
+-- covering exactly those columns in that order — ERROR 6125, #552).
+--
+-- NOTHING IS SEEDED FOR ANY ORGANISATION, and that is the design rather than an
+-- omission: with no row here `Portal\Core\Capabilities` uses the capability's
+-- own `standard` role list, which is the role its gate was hard-coded to before
+-- this existed. So a fresh install, and an organisation that never opens the
+-- roles page, behave exactly as they did (#499: "fail closed" was built first
+-- and locked members out).
+CREATE TABLE IF NOT EXISTS `tblCapabilityMap` (
+    `mapID`         INT          NOT NULL AUTO_INCREMENT,
+    `siteID`        INT          NOT NULL COMMENT 'The organisation whose choice this is. One installation may serve many, and each chooses for itself',
+    `capabilityKey` VARCHAR(64)  NOT NULL COMMENT 'A key from Capabilities::CAPABILITIES, e.g. erasure.review. Written by the portal from its own list, never from a request',
+    `decidedAtUtc`  DATETIME     NOT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP() only - never a time on the server clock, so two installations in different countries agree about the order of things',
+    `decidedByID`   INT          DEFAULT NULL COMMENT 'Who last chose, or empty where that account has since been removed. Outside the unique key on purpose, so an empty value can never make the key stand aside (#487)',
+    PRIMARY KEY (`mapID`),
+    UNIQUE KEY `uq_capmap_site_cap` (`siteID`, `capabilityKey`),
+    CONSTRAINT `fk_capmap_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_capmap_decider` FOREIGN KEY (`decidedByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='One row per organisation per capability, saying that organisation HAS chosen which roles open it. The roles themselves are in tblCapabilityMapRole; a row here with no rows there means "nobody, deliberately" (#727)';
+
+CREATE TABLE IF NOT EXISTS `tblCapabilityMapRole` (
+    `mapRoleID` INT         NOT NULL AUTO_INCREMENT,
+    `mapID`     INT         NOT NULL COMMENT 'The choice this role belongs to',
+    `siteID`    INT         NOT NULL COMMENT 'The organisation, repeated here so the link to tblRoles can be made on (siteID, roleKey) - a role key only means anything inside one organisation',
+    `roleKey`   VARCHAR(50) NOT NULL COMMENT 'The role that opens the capability. Holding ANY ONE of a capability''s roles is enough: any-of, never all-of',
+    PRIMARY KEY (`mapRoleID`),
+    UNIQUE KEY `uq_capmaprole_map_role` (`mapID`, `roleKey`),
+    KEY `idx_capmaprole_site_role` (`siteID`, `roleKey`),
+    CONSTRAINT `fk_capmaprole_map` FOREIGN KEY (`mapID`) REFERENCES `tblCapabilityMap`(`mapID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_capmaprole_role` FOREIGN KEY (`siteID`, `roleKey`) REFERENCES `tblRoles`(`siteID`, `roleKey`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Which roles open one capability for one organisation. A deleted role leaves every set it was in through fk_capmaprole_role, and the roles page refuses to delete a role that is the LAST one in a set (#727)';
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'capabilities.locked', '', '', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('243_capability_roles.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 244_transcript_retention_per_site.sql (#722) ───────────────────────
+-- Two addresses, and nothing else. No table and no column changes, and no new
+-- setting: `transcription.retentionDays` is seeded installation-wide with the
+-- other transcription settings above (migration 239, #714), and an
+-- organisation's own, SHORTER figure is an ordinary row with a real `siteID`,
+-- written by the page below.
+--
+-- WHY THE PAGE HAD TO EXIST. `TranscriptRetention::daysForSite()` has always
+-- honoured a per-organisation row and held it to the installation's ceiling,
+-- because such a row can exist without a page to write it — put in by hand, or
+-- restored from a backup; a save-time cap alone is not a cap (#668). But
+-- nothing could WRITE one: the ordinary settings editor refuses to ADD a
+-- per-organisation row for a key the installation already holds, and the
+-- transcription admin page writes installation-wide rows only, because one API
+-- key pays for every organisation. So the third tier was reachable and
+-- unsettable. See that migration's header for the rest.
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/settings/transcription',      'admin/settings/transcription/index.php', 1),
+    ('admin/settings/transcription/save', 'admin/settings/transcription/save.php',  1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('244_transcript_retention_per_site.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;

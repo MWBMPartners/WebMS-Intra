@@ -15,11 +15,32 @@
  * their own copy of the same join by hand, and NOTHING anywhere could
  * ever put a row into `tblUserRoles` at all — the members page SHOWED a
  * person's roles, the help page DESCRIBED where they live, but no
- * button, form or script could give one. Every one of the 61 files
- * (66 call sites) that call `App::hasRole()` — plus `App.php` itself —
+ * button, form or script could give one. Every file that calls
+ * `App::hasRole()` — count them with `php tools/role-gate-count.php`,
+ * NEVER with `grep` and never from a number written down here (see the
+ * warning below) — plus `App.php` itself,
  * only ever answered yes for a global administrator, because a global
  * administrator is given every role automatically regardless of what
  * `tblUserRoles` contains.
+ *
+ * ⚠️ THREE DIFFERENT NUMBERS HAVE STOOD IN THIS HEADER AND EVERY ONE WAS
+ *    WRONG. It said "61 files (66 call sites)"; that was corrected on
+ *    3 November 2026 to "86 call sites", described as "the real figure",
+ *    and that was wrong too — 86 was what
+ *    `grep -rhoE "App::hasRole\(" web --include='*.php' | wc -l` happened
+ *    to answer, and THAT COMMAND COUNTS COMMENTS AND DOCBLOCKS. Measured
+ *    with PHP's tokeniser on commit `b12ff44`, the honest figure was 65
+ *    calls across 62 files, of which 61 passed a literal key and FOUR did
+ *    not — and two of the four pass a class constant, so only TWO work
+ *    their key out at run time. The same header claimed "62 pass a literal
+ *    key and 24 a variable", which took the file count for the literal
+ *    count and the comment-inclusive grep for the variable one. Then #727
+ *    converted 49 gates to capabilities and the figure moved again.
+ *    THE LESSON IS NOT "use a better number": it is that a count of
+ *    something the next package will change does not belong in a comment.
+ *    Run `tools/role-gate-count.php`, which uses the tokeniser, drops
+ *    comments, and prints the literal / run-time split and the
+ *    comment-inclusive grep side by side so the difference is visible.
  *
  * WHAT CHANGED, AND WHY IT IS SAFE FOR A KEY TO STAY FIXED WHILE THE LABEL
  * CHANGES
@@ -31,10 +52,9 @@
  * RENAME any of
  * them, and may add roles of its own. The role's KEY (`roleKey`, e.g.
  * 'treasurer') never changes once a role exists — it is what every one of
- * every `App::hasRole()` call site (count them with
- * `grep -rhoE "App::hasRole\(" web --include='*.php' | wc -l` — it was
- * written here as 66 and measured 86 on 3 November 2026, of which 62 pass a
- * literal key and 24 a variable), every workflow assignee, every
+ * every `App::hasRole()` and `App::can()` gate (count them with
+ * `php tools/role-gate-count.php`, and read the warning above before
+ * quoting any figure), every workflow assignee, every
  * newsletter segment and every report gate compares against. The role's
  * LABEL (`roleName`, e.g. "Treasurer") is what a person actually sees, and
  * an organisation may change it freely at any time — see
@@ -300,6 +320,90 @@ final class Roles
             return false;
         }
         $stmt->bind_param('iis', $userId, $siteId, $key);
+        $stmt->execute();
+        $has = $stmt->get_result()->fetch_assoc() !== null;
+        $stmt->close();
+
+        return $has;
+    }
+
+    /**
+     * Does this account hold ANY ONE of these roles, IN THIS ORGANISATION,
+     * through an ACTIVE membership?
+     *
+     * Added for `Portal\Core\Capabilities` (#727), where a capability is
+     * opened by a SET of roles and holding one of them is enough. One query
+     * rather than a loop over `has()`, so the answer cannot change part way
+     * through.
+     *
+     * AN EMPTY LIST ANSWERS FALSE, and that is the feature rather than a
+     * guard: a capability an organisation has deliberately pointed at no
+     * roles at all is opened by nobody, and the page it is set on makes
+     * somebody confirm that in as many words first.
+     *
+     * Like `has()`, there is no global-administrator shortcut here. That
+     * lives in `App::hasRole()` for ordinary gates and in
+     * `Capabilities::allows()` for a capability, where it is honoured only
+     * when the capability's own declaration allows it.
+     *
+     * ⚠️ THE JOIN RULE IS THE SAME AS `has()`'s, BUT THE TEXT IS NOT, and a
+     *    reader comparing the two strings should know why. The three joins,
+     *    the `us`.`isActive` = 1 term and both scope terms are identical in
+     *    MEANING — that equivalence is what makes every converted gate
+     *    answer what `App::hasRole()` answered before it — but this
+     *    statement backticks every identifier and `has()` does not, because
+     *    the owner's rule binds new and changed SQL and `has()` predates it.
+     *    Do not "tidy" the two into one string by dropping the backticks.
+     *
+     * @param mysqli   $db       An open connection.
+     * @param int      $userId   The account.
+     * @param int      $siteId   The organisation.
+     * @param string[] $roleKeys Role keys (case-insensitive); an empty list always answers false.
+     *
+     * @return bool
+     */
+    public static function hasAnyOf(mysqli $db, int $userId, int $siteId, array $roleKeys): bool
+    {
+        if (count($roleKeys) === 0) {
+            return false;
+        }
+        $keys = [];
+        foreach ($roleKeys as $raw) {
+            $key = self::normaliseKey((string) $raw);
+            if ($key !== '' && in_array($key, $keys, true) === false) {
+                $keys[] = $key;
+            }
+        }
+        if (count($keys) === 0) {
+            return false;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($keys), '?'));
+        // 🪧 EVERY IDENTIFIER IS BACKTICKED, table and column alike, which is
+        //    the owner's standing rule for new and changed SQL in every
+        //    project. None of these names is a reserved word today, but a
+        //    reserved set GROWS between versions and differs between engines,
+        //    a bare identifier that is a reserved word does not PARSE, and
+        //    `php -l` cannot see inside a string — which is exactly how the
+        //    statement that saves a transcript shipped unable to run
+        //    (`fullText` is `FULLTEXT`, #276). Backticking needs no version
+        //    check and no lookup, which is why it beats the alternatives.
+        //    `hasAnywhere()` below is pre-#727 code and is deliberately left
+        //    as it stands; the rule binds what is new or changed.
+        $stmt = $db->prepare(
+            'SELECT 1 FROM `tblUserRoles` `ur` '
+            . 'JOIN `tblRoles` `r` ON `r`.`roleID` = `ur`.`roleID` AND `r`.`siteID` = `ur`.`siteID` '
+            . 'JOIN `tblUserSites` `us` ON `us`.`userID` = `ur`.`userID` '
+            . 'AND `us`.`siteID` = `ur`.`siteID` AND `us`.`isActive` = 1 '
+            . 'WHERE `ur`.`userID` = ? AND `ur`.`siteID` = ? '
+            . 'AND `r`.`roleKey` IN (' . $placeholders . ') LIMIT 1'
+        );
+        if ($stmt === false) {
+            return false;
+        }
+        $types  = 'ii' . str_repeat('s', count($keys));
+        $params = array_merge([$userId, $siteId], $keys);
+        $stmt->bind_param($types, ...$params);
         $stmt->execute();
         $has = $stmt->get_result()->fetch_assoc() !== null;
         $stmt->close();

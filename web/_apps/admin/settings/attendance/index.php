@@ -148,6 +148,29 @@ $effectiveRetention  = AnonymousCheckins::readRetentionDays($siteId);
 $visibilityIsOwn     = ($ownVisibility !== null);
 $retentionIsOwn      = ($ownRetention !== null);
 
+// 🚧 #685 — IS THIS ORGANISATION'S OWN FIGURE BEING HELD DOWN RIGHT NOW?
+//
+//    `readRetentionDays()` now holds every organisation to what the
+//    installation allows, including one that stored a longer period while that
+//    was allowed. Without saying so, the card below would read "90 days —
+//    your organisation's own choice" to an administrator who chose 1000: two
+//    true halves making a false sentence, and the kind of thing somebody acts
+//    on without checking.
+//
+//    The stored figure is read at this organisation's OWN level
+//    (`ownRetentionDays()`), never from the merged array or from
+//    `App::settingForSite()` — both fall back to the installation's row, so
+//    every organisation with no row of its own would look as though it were
+//    being held down (#674, #677).
+//
+//    The negative-means-for-ever reading is the reader's, repeated here only
+//    to compare like with like. It is one line and it is in the reader's own
+//    docblock; a second call into the reader could not tell "held down" from
+//    "chose exactly the ceiling".
+$ownRetentionDays   = AnonymousCheckins::ownRetentionDays($mysqli, $siteId);
+$ownRetentionMeant  = $ownRetentionDays === null ? null : max(0, $ownRetentionDays);
+$retentionHeldDown  = $ownRetentionMeant !== null && $ownRetentionMeant !== (int) $effectiveRetention;
+
 $effectiveReportsVisibility = AttendanceAccess::readChoice($siteId);
 $reportsVisibilityIsOwn     = ($ownReportsVisibility !== null);
 
@@ -238,6 +261,23 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 ? 'your organisation\'s own choice.'
                 : 'inherited from the installation-wide default.'; ?>
         </p>
+        <?php if ($retentionHeldDown === true): ?>
+            <?php /* 🚧 #685 — said plainly, because the number above is NOT the
+                     number this organisation chose, and nothing else on the page
+                     would tell anybody. It never says WHO set the limit: the two
+                     levels may be different parties, which is the decision
+                     SettingLimit::refusalWords() already took. */ ?>
+            <p class="mb-1 small text-warning-emphasis">
+                <i class="fa-solid fa-triangle-exclamation me-1"></i>
+                Your organisation is set to
+                <strong><?php echo $ownRetentionMeant === 0
+                    ? 'keep the detail for ever'
+                    : 'keep the detail for ' . (int) $ownRetentionMeant . ' days'; ?></strong>,
+                which is longer than this installation allows, so the shorter period above is what
+                is actually in force and what the nightly clear-out uses. Ask whoever runs this
+                installation if you need longer.
+            </p>
+        <?php endif; ?>
         <p class="mb-0">
             Who may open the reports page at all:
             <strong><?php echo htmlspecialchars(

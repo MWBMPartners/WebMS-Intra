@@ -335,9 +335,60 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="card-body">
                 <h2 class="h6"><i class="fa-solid fa-door-open me-1"></i>Anonymous check-in detail (<code>tblAnonymousCheckins</code>)</h2>
                 <p class="text-muted small mb-2">
-                    Kept for <strong><?php echo (int) (App::settings('attend.detailRetentionDays') ?? 90); ?> days</strong>
-                    by default (setting: <code>attend.detailRetentionDays</code>).
-                    Each organisation uses its own setting, and 0 means keep for ever.
+                    <?php /* 🚧 #685 — ASKED OF THE READER THE SWEEP ITSELF USES, not of the
+                             merged settings array. `readRetentionDays()` holds an organisation
+                             to what the installation allows, so an organisation that stored a
+                             longer period keeps the stored number in `$SETTINGS` while the
+                             sweep uses the shorter one. Printing the merged value here would
+                             have made this card state a period the clear-out does not use —
+                             on the very page whose job is to say what the clear-out will do. */ ?>
+                    <?php
+                    /* 🚧 #685, THE SECOND HALF — AND THE SENTENCE THAT USED TO SIT HERE WAS
+                           FALSE ON EVERY INSTALLATION A CUSTOMER CAN HAVE. It read "Each
+                           organisation uses its own setting, and 0 means keep for ever",
+                           which was true before #685 capped the reader and was left inside
+                           the paragraph #685 rewrote.
+
+                           Measured: 0 is the LARGEST value for this setting, so it survives
+                           ONLY where the installation itself allows for ever. With the
+                           installation at 90 — which is what `full_schema.sql` seeds, so it
+                           is every fresh installation — an organisation storing 0 is cleared
+                           at 90 DAYS, not never. (Installation 90 / own 0 -> 90;
+                           installation 0 / own 1000 -> 1000.)
+
+                           That is this repository's named "a hedge that covers one condition
+                           and ASSERTS the other" shape, on the one page whose job is to say
+                           what the clear-out will do. Both conditions are stated now, and the
+                           installation's own figure is PRINTED rather than described, so the
+                           sentence cannot drift away from it. */
+                    $acInstallationAllows = \Portal\Core\SettingLimit::installationAllows(
+                        \Portal\Core\AnonymousCheckins::RETENTION_KEY,
+                        \Portal\Core\AnonymousCheckins::DEFAULT_RETENTION_DAYS,
+                        \Portal\Core\AnonymousCheckins::MAX_RETENTION_DAYS,
+                        true
+                    );
+                    $acForEverAllowed = \Portal\Core\SettingLimit::installationAllowsForEver(
+                        \Portal\Core\AnonymousCheckins::RETENTION_KEY,
+                        \Portal\Core\AnonymousCheckins::DEFAULT_RETENTION_DAYS,
+                        \Portal\Core\AnonymousCheckins::MAX_RETENTION_DAYS
+                    );
+                    ?>
+                    Kept for <strong><?php echo (int) \Portal\Core\AnonymousCheckins::readRetentionDays(Site::id()); ?> days</strong>
+                    for your organisation (setting: <code>attend.detailRetentionDays</code>,
+                    held to what this installation allows).
+                    Each organisation uses its own setting.
+                    <?php if ($acForEverAllowed === true) { ?>
+                        This installation allows &ldquo;keep for ever&rdquo;, so an organisation
+                        that stores <code>0</code> really does keep this detail indefinitely.
+                    <?php } else { ?>
+                        <strong>This installation allows at most
+                        <?php echo (int) $acInstallationAllows; ?> days, so <code>0</code> does
+                        NOT mean keep for ever here</strong> &mdash; an organisation that stores
+                        <code>0</code> has its detail emptied after
+                        <?php echo (int) $acInstallationAllows; ?> days, like any longer figure.
+                        &ldquo;For ever&rdquo; is the largest value this setting can hold, so it
+                        is allowed only where the installation itself allows it.
+                    <?php } ?>
                 </p>
                 <p class="mb-2">Check-in rows whose detail would be emptied now: <strong><?php echo number_format($preview['checkinDetail']); ?></strong></p>
                 <p class="small text-muted mb-0">

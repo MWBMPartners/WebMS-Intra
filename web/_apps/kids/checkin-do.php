@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -13,10 +14,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . Site::url('ki
 Auth::ensureSession();
 Auth::requireLogin();
 
-// 🛡️ Safeguarding gate (#298 gap fix) — same role check as the checkin.php
-//     terminal it's posted from; without it any logged-in member could
-//     check in ANY child at the site by guessing/enumerating childID.
-if (App::isAdmin() === false && App::hasRole('kids_team') === false) {
+// 🛡️ Safeguarding gate (#298 gap fix) — the same capability as the
+//     checkin.php terminal it's posted from (#727); without it any
+//     logged-in member could check in ANY child at the site by
+//     guessing/enumerating childID.
+if (App::isAdmin() === false && App::can(Capabilities::KIDS_CHECKIN) === false) {
     Router::renderError(403);
     return;
 }

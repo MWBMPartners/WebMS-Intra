@@ -10,24 +10,42 @@
  * empty it, or keep it.
  *
  * -----------------------------------------------------------------------------
- * THE GATE IS THE ONE EXCEPTION IN THIS PORTAL, AND IT IS DELIBERATE
+ * THE GATE IS A CAPABILITY, AND IT DOES NOT FALL OPEN FOR A GLOBAL ADMINISTRATOR
  * -----------------------------------------------------------------------------
- * It asks `Roles::has()` DIRECTLY for the `data_controller` role, and NOT
- * `App::hasRole()`, which every other role gate here uses. The reason (the
- * owner, 3 November 2026): `App::hasRole()` answers TRUE for any global
- * administrator who holds no role row at all — deliberate since #516, where a
- * global administrator is treated as holding every role in every organisation.
- * Gating this page that way would have let a hosting provider's administrator
- * read a member's own words to decide whether they must go, which is the exact
- * thing the role was created to prevent: an installation's administrator and an
- * organisation's may be DIFFERENT PARTIES (the standing rule of 29 October
- * 2026).
+ * It asks `App::can(Capabilities::ERASURE_REVIEW)` — the capability registry
+ * (#727) — and NOT `App::hasRole()`, which every ordinary role gate here uses.
+ * The reason (the owner, 3 November 2026): `App::hasRole()` answers TRUE for
+ * any global administrator who holds no role row at all — deliberate since
+ * #516, where a global administrator is treated as holding every role in every
+ * organisation. Gating this page that way would have let a hosting provider's
+ * administrator read a member's own words to decide whether they must go,
+ * which is the exact thing the role was created to prevent: an installation's
+ * administrator and an organisation's may be DIFFERENT PARTIES (the standing
+ * rule of 29 October 2026).
  *
  * ⚠️ DO NOT "FIX" THIS BACK to `App::hasRole()` for consistency with the other
- *    66 gates. A global administrator who has not been granted the role is
+ *    role gates. A global administrator who has not been granted the role is
  *    refused here on purpose. They are not locked out of putting that right —
  *    granting the role is a global administrator's job on the roles page — only
  *    out of doing the review themselves.
+ *
+ * ⚠️ WHAT MAKES THAT TRUE IS ONE LINE IN `Capabilities::CAPABILITIES`, not
+ *    anything in this file: the `erasure.review` entry declares
+ *    `globalAdminFallsOpen => false`. `App::can()` passes the account's global
+ *    administrator flag to `Capabilities::allows()` as a FACT, and that method
+ *    honours it only where the capability says so. Changing that one word to
+ *    `true` would silently undo #724 with nothing on this page looking
+ *    different — which is why `tools/audit-checks/check_capability_registry.py`
+ *    is a hard gate on it and section C of `tools/capabilities-selftest.php`
+ *    proves the refusal by asking with the flag set.
+ *
+ * ⚠️ IT USED TO ASK `Roles::has($db, $meId, $siteId, 'data_controller')`
+ *    directly, which was right and is now one layer lower down: the registry's
+ *    standard set for this capability is exactly `['data_controller']`, so an
+ *    organisation that never opens the roles page is gated exactly as before.
+ *    What the registry adds is that such an organisation can ALSO name a role
+ *    of its own — a privacy officer, a company secretary — without anybody
+ *    editing PHP.
  *
  * ADDRESSES: every link and form target is built by `Site::url()`, so it stays
  * inside the organisation's own address (#536). Never a bare "/admin/...", and
@@ -50,8 +68,8 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\ErasureReview;
-use Portal\Core\Roles;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -60,10 +78,12 @@ Auth::requireLogin();
 
 $db     = App::db();
 $siteId = Site::id();
-$meId   = (int) ($_SESSION['user_id'] ?? 0);
 
-// 🛡️ See the file header. `Roles::has()` and not `App::hasRole()`, on purpose.
-if (Roles::has($db, $meId, $siteId, 'data_controller') === false) {
+// 🛡️ See the file header. The capability registry, and never `App::hasRole()`.
+// `$meId` used to be read here for the old gate's own look-up and is gone with
+// it: `App::can()` reads the signed-in account itself, and this page writes
+// nothing, so nothing else here needs the number.
+if (App::can(Capabilities::ERASURE_REVIEW) === false) {
     Router::renderError(403);
     return;
 }

@@ -224,8 +224,22 @@ return [
         // against, and the erasure routine therefore skips this table entirely.
         // That is not a gap being ignored — since #525 the scrambled sender
         // address is emptied out on a timer instead (the setting
-        // attend.detailRetentionDays, 90 days by default, 0 to keep for
-        // ever, set per organisation at /admin/settings/attendance).
+        // attend.detailRetentionDays, 90 days by default, set per
+        // organisation at /admin/settings/attendance).
+        //
+        // ⚠️ "0 TO KEEP FOR EVER" USED TO BE WRITTEN HERE AND IN BOTH
+        //    SENTENCES BELOW, AND #685 MADE IT UNTRUE. 0 is the LARGEST
+        //    value for this setting, so since #685 it survives ONLY where
+        //    the installation itself allows for ever. Measured: with the
+        //    installation at 90 — which is what full_schema.sql seeds, so
+        //    every fresh installation — an organisation storing 0 is cleared
+        //    at 90 days. #706's own rule is that a 'period' must be checked
+        //    against the purging code; #685 changed the purging code and
+        //    these two sentences were not revisited. They feed inventory(),
+        //    which is the "what we hold about you" answer a person receives,
+        //    so an overstatement here is a promise made to a data subject.
+        //    Ask AnonymousCheckins::readRetentionDays() for the real figure;
+        //    the sentences below no longer name one that can go stale.
         // Nobody should have to ask for something that cannot be found by
         // asking. See issue #479.
         //
@@ -238,12 +252,15 @@ return [
         'reason'   => 'Somebody checking in at the door without signing in. Nothing on the row links it to an account, '
                     . 'so an erasure request cannot reach it — there is nothing to match the person against. The '
                     . 'scrambled sender address is cleared on a timer instead '
-                    . '(attend.detailRetentionDays, 90 days by default, 0 means keep for ever). See #479, #525 and #530.',
+                    . '(attend.detailRetentionDays, 90 days by default, set by the organisation and held down to '
+                    . 'what this installation allows). See #479, #525, #530 and #685.',
         // Required whenever decision is 'retain' (tools/gdpr-coverage-selftest.php
         // checks every 'retain' entry has one). Not a legal minimum — this row
         // is cleared by a technical timer the organisation controls, not by law
         // — but the self-test's rule is the same either way: say for how long.
-        'period'   => '90 days by default, per the organisation\'s attend.detailRetentionDays setting (0 = keep for ever)',
+        'period'   => '90 days by default, per the organisation\'s attend.detailRetentionDays setting, held down to '
+                    . 'whatever this installation allows (#685). The organisation may choose "keep for ever" only '
+                    . 'where the installation allows it too; otherwise the installation\'s own period applies',
         'columns'  => ['ipHash'],
     ],
     'tblAnonymousCheckinDays' => [
@@ -1203,6 +1220,49 @@ return [
                 . 'person\'s name as free text. Nothing empties it. The same shape as the presenter on a '
                 . 'service plan item',
         ],
+    ],
+    'tblCapabilityMap' => [
+        'decision' => 'unlink',
+        // 🚪 #727, migration 243. One row per organisation per gated
+        //    capability, saying that organisation HAS chosen which of its roles
+        //    open that door. The only thing about a person on it is
+        //    `decidedByID`: who last chose.
+        //
+        //    'unlink' and not 'erase', for the same reason as
+        //    `tblErasureReviewDecisions` one entry away: the ROW is an access
+        //    rule the organisation is relying on, and deleting it would quietly
+        //    put a door back to the role the portal ships with — a change of
+        //    who can open a confidential register, made as a side effect of
+        //    somebody else's erasure request. The number comes off; the rule
+        //    stays.
+        //
+        //    The database already agrees: `fk_capmap_decider` is
+        //    ON DELETE SET NULL, so an account removed outright leaves the
+        //    mapping standing with nobody named against it.
+        'reason'   => 'Which of an organisation\'s roles open one gated feature. The only thing about a person '
+                    . 'here is who last chose. The choice itself is an access rule the organisation relies on, '
+                    . 'so the row stays and the account number comes off it — deleting the row would silently '
+                    . 'put the door back to the role the portal ships with, which would change who can open a '
+                    . 'confidential register as a side effect of somebody else\'s erasure.',
+        'columns'  => ['decidedByID'],
+    ],
+    'tblCapabilityMapRole' => [
+        'decision' => 'not-personal',
+        // 🚪 #727, migration 243. The other half of the pair above: which role
+        //    keys open one capability. A role key ('data_controller',
+        //    'privacy_officer') and the numbers of the organisation and of the
+        //    choice it belongs to. Nothing on it is about a person — not even
+        //    indirectly: a role is a job, and who HOLDS one is in
+        //    `tblUserRoles`, which has its own entry.
+        //
+        //    Written down rather than left out, because an absence looks
+        //    exactly like the #706 fault, where sixty-six tables had no
+        //    decision recorded and the gate that exists to catch that was
+        //    green over every one of them.
+        'reason'   => 'Which roles open one feature for one organisation: a role key and two row numbers. '
+                    . 'Nothing here is about a person — who holds a role is in tblUserRoles, which has its '
+                    . 'own entry.',
+        'columns'  => [],
     ],
     'tblCareAccessLog' => [
         'decision' => 'erase',

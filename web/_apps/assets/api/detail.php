@@ -33,6 +33,7 @@ use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
+use Portal\Core\Capabilities;
 
 ApiAuth::requireRead('assets:read');
 
@@ -51,7 +52,7 @@ if ($asset === null) {
 // 404 (not 403) keeps it from being an existence oracle, matching item.php.
 $privileged = ApiAuth::isBearer() === false
     && (App::isAdmin() === true
-        || App::hasRole('asset_manager') === true
+        || App::can(Capabilities::ASSETS_MANAGE) === true
         || AssetRegister::isResponsibleFor($assetId) === true);
 if ((int) ($asset['isConfidential'] ?? 0) === 1 && $privileged === false) {
     ApiResponse::error('Asset not found', 404);

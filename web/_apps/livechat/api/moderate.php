@@ -4,9 +4,10 @@
  * -----------------------------------------------------------------------------
  * COP Live Chat — admin/moderator approve/hide/flag (#313 Phase 1) 💬
  * -----------------------------------------------------------------------------
- * Routed via ApiRouter as api/livechat/moderate. Logged-in admin OR user
- * with the 'stream_moderator' role (App::hasRole). CSRF required (same-
- * origin admin call).
+ * Routed via ApiRouter as api/livechat/moderate. A logged-in administrator,
+ * OR somebody holding a role this organisation has pointed "Moderate the
+ * livestream chat" at (`App::can()`, #727 — the `stream_moderator` role as
+ * the portal ships it). CSRF required (same-origin admin call).
  *
  * Request body (JSON or form-encoded):
  *   messageID — int, required
@@ -22,6 +23,7 @@ use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
@@ -30,8 +32,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') { ApiResponse::error('POST required',
 ApiResponse::requireAuth();
 Auth::ensureSession();
 
-if (App::isAdmin() === false && App::hasRole('stream_moderator') === false) {
-    ApiResponse::error('Admin or stream_moderator role required', 403);
+if (App::isAdmin() === false && App::can(Capabilities::LIVESTREAM_CONSOLE) === false) {
+    // The message names no role on purpose (#727): the roles that open
+    // this are the organisation's to choose, so naming one would tell
+    // somebody to go and get a role their organisation does not use.
+    ApiResponse::error('You need to be an administrator, or hold a role that may moderate the livestream chat', 403);
 }
 
 $rawBody = (string) file_get_contents('php://input');

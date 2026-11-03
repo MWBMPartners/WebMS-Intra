@@ -70,6 +70,24 @@
  *   4. RECORD THE REFUSAL. A request to exceed the installation's limit crosses
  *      a line between two parties.
  *
+ * THREE QUESTIONS, THREE SOURCES, ONE RULE (#685, #722)
+ * -----------------------------------------------------
+ * The rule is asked in three different situations, and the difference between
+ * them is WHERE the two numbers come from, never what the rule is:
+ *
+ *   `effective()`        the organisation being SERVED by this request. Reads
+ *                        the merged `$SETTINGS`. For drawing a page.
+ *   `cappedForSite()`    one NAMED organisation, for a job that walks them all.
+ *                        The caller reads that organisation's own figure and
+ *                        hands it in. For a clear-out (#685).
+ *   `whyNotAllowedFor()` a SAVE, judged against the installation's row read
+ *                        LIVE and locked inside the transaction (#687).
+ *
+ * All three end in `smallerOfTwo()`, which is the only place the arithmetic —
+ * including the zero rule below — is written. Adding a fourth source means
+ * adding a reader, never a second copy of the rule: two readers that disagree
+ * about what a job will do is the fault `MailQueue::numbers()` had to fix.
+ *
  * WHAT THIS CLASS CANNOT DO
  * -------------------------
  *   - It does not know WHICH settings are limits. There is no list here, and
@@ -157,12 +175,68 @@ final class SettingLimit
      */
     public static function installationAllows(string $dotKey, int $default, int $hardMax, bool $zeroIsLargest = false): int
     {
-        $stored = self::oneLimit(self::fromLayer(InstallationSettings::layer(), $dotKey), $default, $hardMax);
-        if ($zeroIsLargest === true && $stored === 0) {
+        return self::ceilingFrom(
+            self::fromLayer(InstallationSettings::layer(), $dotKey),
+            $default,
+            $hardMax,
+            $zeroIsLargest
+        );
+    }
+
+    /**
+     * 🏢 The same ceiling, worked out from a value the CALLER has read.
+     *
+     * Why this exists, and it is not a convenience: a save handler has to judge
+     * the ceiling LIVE, from the database, inside the transaction that writes
+     * and with the installation's own row locked. `installationAllows()` reads
+     * the REQUEST'S SNAPSHOT, taken at start-up, which is right for drawing a
+     * page and wrong for judging a save — #687 measured two ordinary web
+     * requests storing fifty years under a ceiling of seven, 60 pairs out of
+     * 60, because the gate compared against the snapshot.
+     *
+     * #687 answered that by writing the arithmetic out a second time inside
+     * `GivingRetention`. This method is the alternative: the CALLER decides
+     * where the stored text comes from (the layer, or a locked `SELECT`), and
+     * the RULE stays here, in one place, for both. Nothing about the rule is
+     * repeated anywhere.
+     *
+     * `$stored` is whatever was read: the text out of a settings row, an int,
+     * or null when there is no row at all. Anything unusable falls back to the
+     * default, exactly as a value out of the layer does.
+     *
+     * @param mixed $stored        What the installation has stored, however it was read.
+     * @param int   $default       The built-in default, used when nothing is stored.
+     * @param int   $hardMax       The most this may ever be.
+     * @param bool  $zeroIsLargest True when 0 means "for ever" / "no limit".
+     *
+     * @return int
+     */
+    public static function ceilingFrom(mixed $stored, int $default, int $hardMax, bool $zeroIsLargest = false): int
+    {
+        $value = self::oneLimit($stored, $default, $hardMax);
+        if ($zeroIsLargest === true && $value === 0) {
             return $hardMax;
         }
 
-        return $stored;
+        return $value;
+    }
+
+    /**
+     * ♾️ Does a stored value mean "for ever" — judged from a value the caller read?
+     *
+     * The companion to `ceilingFrom()`, for the same reason: a save handler
+     * reading the row live needs BOTH facts about the ceiling, and must get
+     * them from ONE read, or the two can disagree.
+     *
+     * @param mixed $stored  What the installation has stored, however it was read.
+     * @param int   $default The built-in default.
+     * @param int   $hardMax The most this may ever be.
+     *
+     * @return bool
+     */
+    public static function allowsForEverFrom(mixed $stored, int $default, int $hardMax): bool
+    {
+        return self::oneLimit($stored, $default, $hardMax) === 0;
     }
 
     /**
@@ -181,7 +255,7 @@ final class SettingLimit
      */
     public static function installationAllowsForEver(string $dotKey, int $default, int $hardMax): bool
     {
-        return self::oneLimit(self::fromLayer(InstallationSettings::layer(), $dotKey), $default, $hardMax) === 0;
+        return self::allowsForEverFrom(self::fromLayer(InstallationSettings::layer(), $dotKey), $default, $hardMax);
     }
 
     /**
@@ -213,19 +287,91 @@ final class SettingLimit
         $allowedRaw = self::oneLimit(self::fromLayer(InstallationSettings::layer(), $dotKey), $default, $hardMax);
         $mergedRaw  = self::oneLimit(self::fromLayer(App::settings(), $dotKey), $default, $hardMax);
 
+        return self::smallerOfTwo($mergedRaw, $allowedRaw, $hardMax, $zeroIsLargest);
+    }
+
+    /**
+     * 🧹 One NAMED organisation's limit, held to what the installation allows.
+     *
+     * WHY THIS IS A DIFFERENT METHOD FROM `effective()`, which is the whole
+     * point of #685. `effective()` answers for the organisation being SERVED by
+     * this request, because it reads the merged `$SETTINGS`. A scheduled job has
+     * no served organisation and `$SETTINGS` is merged once for the whole run
+     * (#683, where one organisation's support address reached another's
+     * members), so a clear-out that walks every organisation cannot use it. It
+     * needs a per-organisation answer for an organisation it is not "in".
+     *
+     * THE CALLER READS ITS OWN FIGURE AND HANDS IT IN, and that is deliberate:
+     * what a stored value MEANS differs between settings, and those decisions
+     * are already written down beside each one. `AnonymousCheckins` reads a
+     * negative number of days as "keep for ever", because for a clear-out doing
+     * nothing on a number nobody meant to type is the safe direction;
+     * `TranscriptRetention` reads the same negative as "not chosen". Both are
+     * right for their own setting, neither belongs in here, and folding them
+     * into one rule would silently change one of them.
+     *
+     * What IS here is the three-tier rule, and it is the same arithmetic
+     * `effective()` uses — written once, in `smallerOfTwo()`.
+     *
+     * A SAVE-TIME CAP IS NOT A CAP (#668). This is why: a row written by hand,
+     * restored from a whole-database backup, or simply stored before the
+     * save-time refusal existed is still obeyed by the job unless the READER
+     * caps as well. That was #685 — an organisation holding attendance personal
+     * data for ten years on an installation intending ninety days, with nothing
+     * refusing it, because the only cap was on the form.
+     *
+     * @param int    $own           The figure the caller read for that organisation.
+     * @param string $dotKey        The setting, dotted.
+     * @param int    $default       The built-in default.
+     * @param int    $hardMax       The most this may ever be.
+     * @param bool   $zeroIsLargest True when 0 means "for ever" / "no limit".
+     *
+     * @return int
+     */
+    public static function cappedForSite(int $own, string $dotKey, int $default, int $hardMax, bool $zeroIsLargest = false): int
+    {
+        $allowedRaw = self::oneLimit(self::fromLayer(InstallationSettings::layer(), $dotKey), $default, $hardMax);
+
+        return self::smallerOfTwo($own, $allowedRaw, $hardMax, $zeroIsLargest);
+    }
+
+    /**
+     * ⚙️ The three-tier rule itself, in ONE place: the smaller of the two
+     *    levels, with zero read as the largest value where that is what it
+     *    means.
+     *
+     * Written out here rather than twice because it has already been got wrong
+     * in both directions (see the class comment), and because two copies of it
+     * is how `effective()` and a per-organisation reader would come to
+     * disagree about what a job will do — the fault `MailQueue::numbers()` had
+     * to fix for the four queue numbers.
+     *
+     * Note the hard maximum caps BOTH sides: `$allowed` is already capped by
+     * `oneLimit()`, and `min()` against it caps `$own` too, so a figure above
+     * the hard maximum can never come back out.
+     *
+     * @param int  $own           The organisation's figure.
+     * @param int  $allowed       What the installation allows.
+     * @param int  $hardMax       The most this may ever be.
+     * @param bool $zeroIsLargest True when 0 means "for ever" / "no limit".
+     *
+     * @return int
+     */
+    private static function smallerOfTwo(int $own, int $allowed, int $hardMax, bool $zeroIsLargest): int
+    {
         if ($zeroIsLargest === false) {
-            return min($mergedRaw, $allowedRaw);
+            return min($own, $allowed);
         }
 
         // ♾️ "For ever" survives only where BOTH levels mean it. Otherwise it
         //    stands in as the hard maximum so the comparison is on days.
-        if ($mergedRaw === 0 && $allowedRaw === 0) {
+        if ($own === 0 && $allowed === 0) {
             return 0;
         }
 
         return min(
-            $mergedRaw === 0 ? $hardMax : $mergedRaw,
-            $allowedRaw === 0 ? $hardMax : $allowedRaw
+            $own === 0 ? $hardMax : $own,
+            $allowed === 0 ? $hardMax : $allowed
         );
     }
 
@@ -259,15 +405,54 @@ final class SettingLimit
      */
     public static function whyNotAllowed(int $posted, string $dotKey, int $default, int $hardMax, bool $zeroIsLargest = false): string
     {
+        return self::whyNotAllowedFor(
+            $posted,
+            self::fromLayer(InstallationSettings::layer(), $dotKey),
+            $default,
+            $hardMax,
+            $zeroIsLargest
+        );
+    }
+
+    /**
+     * 🔒 The same refusal, judged against a ceiling the CALLER has read.
+     *
+     * THIS IS THE ONE A SAVE SHOULD BE JUDGED BY, and the reason is #687's,
+     * measured rather than argued. `whyNotAllowed()` reads the request's
+     * settings snapshot, taken at start-up. Two overlapping ordinary web
+     * requests — one setting the ceiling to seven years, one storing fifty —
+     * both succeeded, 60 pairs out of 60, because neither saw what the other
+     * had just committed. No hand-written SQL and no restored backup were
+     * involved, which is exactly what five places in that package had said was
+     * the only way in.
+     *
+     * So a handler re-reads the installation's own row LIVE, `FOR UPDATE`,
+     * INSIDE the transaction that writes, and hands the text in here. A lock
+     * outside a transaction is decoration (#697).
+     *
+     * The rule is not repeated: this method IS the rule, and
+     * `whyNotAllowed()` is a thin wrapper that takes the value out of the
+     * layer instead.
+     *
+     * @param int   $posted        The number somebody typed, exactly as typed.
+     * @param mixed $ceilingStored What the installation has stored, however it was read.
+     * @param int   $default       The built-in default.
+     * @param int   $hardMax       The most this may ever be.
+     * @param bool  $zeroIsLargest True when 0 means "for ever" / "no limit".
+     *
+     * @return string '' when the number may be saved; otherwise a reason.
+     */
+    public static function whyNotAllowedFor(int $posted, mixed $ceilingStored, int $default, int $hardMax, bool $zeroIsLargest = false): string
+    {
         if ($zeroIsLargest === true && $posted === 0) {
-            return self::installationAllowsForEver($dotKey, $default, $hardMax) === true
+            return self::allowsForEverFrom($ceilingStored, $default, $hardMax) === true
                 ? ''
                 : 'above-installation';
         }
         if ($posted > $hardMax) {
             return 'above-hard-max';
         }
-        if ($posted > self::installationAllows($dotKey, $default, $hardMax, $zeroIsLargest)) {
+        if ($posted > self::ceilingFrom($ceilingStored, $default, $hardMax, $zeroIsLargest)) {
             return 'above-installation';
         }
 
@@ -282,16 +467,44 @@ final class SettingLimit
      * the limit: the two levels may be different parties, and an organisation's
      * administrator has no business being told who to argue with.
      *
-     * @param string $reason  What whyNotAllowed() answered.
-     * @param int    $allowed What the installation allows.
-     * @param string $units   The word for the number: 'days', 'megabytes'.
+     * ⚠️ THE ADVICE USED TO CONTRADICT THE REFUSAL FOR A POSTED ZERO, and the
+     *    sentence was wrong in the direction that reads as help. Where 0 means
+     *    "for ever" it is the LARGEST value, so posting 0 under a ceiling of 7
+     *    is refused — and the words then said "This installation allows at
+     *    most 7 days … You can choose 7 or fewer", **and 0 is fewer than 7**.
+     *    Somebody following that advice would post the very number just
+     *    refused. Reachable only outside a browser, because the box's own
+     *    `min` is 1 when for-ever is not allowed (#722) — but a handler is the
+     *    boundary between two parties and must not depend on the form.
+     *
+     *    So the caller says whether the number it refused was the "for ever"
+     *    zero, with `$postedWasForEver`. It is a FOURTH argument with a
+     *    default rather than a new method, because the words must stay in ONE
+     *    place: a second wording method is how a page comes to disagree with a
+     *    handler. A caller that does not pass it gets exactly what it got
+     *    before, which is right for every setting where 0 is simply a small
+     *    number.
+     *
+     * @param string $reason           What whyNotAllowed() answered.
+     * @param int    $allowed          What the installation allows.
+     * @param string $units            The word for the number: 'days', 'megabytes'.
+     * @param bool   $postedWasForEver True when the refused number was 0 AND 0 means "for ever" here.
      *
      * @return string
      */
-    public static function refusalWords(string $reason, int $allowed, string $units): string
+    public static function refusalWords(string $reason, int $allowed, string $units, bool $postedWasForEver = false): string
     {
         if ($reason === 'above-hard-max') {
             return 'That number is larger than this portal will store. Nothing was saved.';
+        }
+        if ($reason === 'above-installation' && $postedWasForEver === true) {
+            // 🚫 "0 or fewer" would be nonsense and "7 or fewer" would include
+            //    the 0 just refused, so neither range is offered: the sentence
+            //    names the one thing that is not allowed and the smallest and
+            //    largest that are.
+            return 'This installation does not allow "keep for ever" for this setting, so nothing was saved. '
+                . 'Choose a number of ' . $units . ' between 1 and ' . $allowed . '. '
+                . 'Ask whoever runs this installation if you need to keep it indefinitely.';
         }
         if ($reason === 'above-installation') {
             return 'This installation allows at most ' . $allowed . ' ' . $units

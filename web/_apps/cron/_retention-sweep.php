@@ -182,7 +182,13 @@ function registration_sweep_sites(): array
  * 201 removed it.)
  *
  * A site that keeps them for ever is left out of the list entirely, so nothing
- * of its is touched.
+ * of its is touched. SINCE #685 "for ever" survives only where the
+ * INSTALLATION allows for ever: `readRetentionDays()` holds every organisation
+ * to the installation's figure, so an organisation that stored 1000 days — or
+ * 0 — while that was allowed is now cleared at the installation's number. The
+ * cap is in the reader rather than only on the form because this job is what
+ * actually clears, and a row written by hand, restored from a backup, or
+ * stored before the save-time refusal existed would otherwise still be obeyed.
  *
  * ONE DELIBERATE DIFFERENCE FROM registration_sweep_sites() ABOVE. There, a
  * negative number of days is turned back into the ordinary 90-day default,
@@ -807,6 +813,18 @@ function run_transcript_sweep(): int
             if ($days <= 0) {
                 // This organisation keeps them for ever, and the installation
                 // allows that. Nothing to do for it.
+                //
+                // ⚠️ THIS BRANCH COULD NOT BE REACHED UNTIL #722, and the
+                //    comment above it was a guarantee the code had forgotten
+                //    to implement. `TranscriptRetention::daysForSite()` worked
+                //    its own three-tier arithmetic out, and the ceiling it
+                //    compared against never answered 0 — `installationAllows()`
+                //    hands back the hard maximum where "for ever" is stored,
+                //    because what a form's `max` needs is a number of days. So
+                //    an installation that chose "keep for ever" had every
+                //    transcript deleted at ten years. It now goes through
+                //    `SettingLimit::cappedForSite()`, where "for ever" survives
+                //    where BOTH levels mean it, which is the rule written once.
                 continue;
             }
             $stmt->bind_param('ii', $siteId, $days);

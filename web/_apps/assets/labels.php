@@ -35,7 +35,7 @@
  * scratch regardless (see that file's own header — never trust a
  * preview's own working-out).
  *
- * GATE: manager-only (admin OR asset_manager), same as every other
+ * GATE: manager-only (an administrator, or "Manage the asset register" — #727), same as every other
  * mutating/administrative Asset Tracker screen — mirrors
  * `found-reports.php`'s `Router::renderError(403)` pattern for a GET page.
  *
@@ -54,14 +54,19 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
 
-// 🛡️ Manager gate — admins or the asset_manager role only. See file header.
-if (App::isAdmin() !== true && App::hasRole('asset_manager') !== true) {
+// 🛡️ Manager gate — an administrator, or whoever this organisation has
+//    pointed "Manage the asset register" at (#727). `Capabilities` is the
+//    ONE place that decides; it ships pointing at the `asset_manager`
+//    role, so this answers exactly what `App::hasRole('asset_manager')`
+//    answered before. See file header.
+if (App::isAdmin() !== true && App::can(Capabilities::ASSETS_MANAGE) !== true) {
     Router::renderError(403);
     return;
 }

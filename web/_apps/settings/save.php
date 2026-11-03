@@ -418,6 +418,51 @@ if ($settingId > 0) {
         exit();
     }
 
+    // 🔒 Nor is the list of capabilities this installation reserves changed
+    //    here (#727), by anybody, a global administrator included. It is
+    //    ticked on the Roles page, which VALIDATES each capability key and
+    //    writes both an audit record and an activity record;
+    //    `Capabilities::installationLocks()` ignores a key it does not
+    //    recognise, so a row typed here as "assets.manag" would reserve
+    //    nothing while reading as a reservation. Not a privilege question —
+    //    the same global administrator may set it either way — but the one
+    //    writer is where the validation and the two records are. See
+    //    Capabilities::lockedInGeneralEditor().
+    if (\Portal\Core\Capabilities::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" lists the capabilities this installation reserves and is written only by the Roles page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\Capabilities::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
+    // 🎙️ And how long transcripts are kept (#722). Refused here for the same
+    //    reason as the line above, and the reason is NOT that the consequence
+    //    is small: an independent check noted the setting had no refusal, and
+    //    the reply "the reader caps it anyway" explains the consequence rather
+    //    than the rule. The gate on its own page is where the three-tier rule
+    //    lives (#668) — an organisation's figure is refused above the
+    //    installation's, the refusal is RECORDED, and the person is told why.
+    //    The general editor skips all three, so a figure written here is a
+    //    number nobody judged and nobody recorded, which the clear-out then
+    //    silently holds down. An unrecorded refusal is indistinguishable from
+    //    no refusal to whoever reads the log afterwards.
+    if (\Portal\Core\TranscriptRetention::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" is how long transcripts are kept and is written only by its own pages',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\TranscriptRetention::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
     if ($isPortalWideRow === true && $isGlobalAdmin === false) {
         Logger::activity(
             'SettingsUpdateRefused',
@@ -802,6 +847,37 @@ if ($settingId > 0) {
             $_SESSION['user_id'] ?? null
         );
         $_SESSION['flash_msg']  = \Portal\Core\Maintenance::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
+    // 🔒 Nor may the reserved-capability list be ADDED here (#727), as the
+    //    installation's row where there is none, nor as an organisation's own
+    //    row — `installationLocks()` reads the installation's layer only, so
+    //    an organisation's row of that name would reserve nothing and merely
+    //    mislead whoever found it. See Capabilities::lockedInGeneralEditor().
+    if (\Portal\Core\Capabilities::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsInsertRefused',
+            'Refused: "' . $settingKey . '" lists the capabilities this installation reserves and is written only by the Roles page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\Capabilities::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
+    // 🎙️ #722, the same refusal on the ADD path. Both paths are needed: a key
+    //    refused on update and allowed on insert is a key anybody can set once.
+    if (\Portal\Core\TranscriptRetention::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsInsertRefused',
+            'Refused: "' . $settingKey . '" is how long transcripts are kept and is written only by its own pages',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\TranscriptRetention::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();

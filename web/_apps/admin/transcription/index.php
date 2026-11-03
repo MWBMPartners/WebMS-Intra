@@ -375,7 +375,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     //    settings would show the open organisation's value while
                     //    Save writes the installation's, so one press of Save on
                     //    an untouched form would make it everybody's.
-                    $installDays = TranscriptRetention::installationAllows();
+                    //    ⚠️ TWO QUESTIONS, NOT ONE, AND THE BOX USED TO ASK ONLY
+                    //       THE WRONG ONE (#722, found 3 November 2026).
+                    //       `installationAllows()` answers a number of DAYS and
+                    //       NEVER 0: where "for ever" is stored it hands back
+                    //       the hard maximum, because that is the ceiling to
+                    //       compare against and to put in a form's `max`. So
+                    //       this box prefilled 3650 on an installation that had
+                    //       chosen "keep for ever", the "Kept for ever."
+                    //       sentence below could never print, and a plain Save
+                    //       over an untouched form turned for-ever into ten
+                    //       years. `installationAllowsForEver()` is the other
+                    //       question, and a page needs both (#668).
+                    $installForEver = TranscriptRetention::installationAllowsForEver();
+                    $installDays    = $installForEver === true ? 0 : TranscriptRetention::installationAllows();
                     ?>
                     <label class="form-label" for="tKeep">Keep transcripts for (days)</label>
                     <input type="number" min="0" max="<?php echo (int) TranscriptRetention::HARD_MAX_DAYS; ?>" class="form-control" id="tKeep" name="transcriptDays" value="<?php echo (int) $installDays; ?>">
@@ -385,6 +398,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             : 'Past ' . (int) $installDays . ' days the written-out words are deleted and the recording is kept.'; ?>
                         A transcript is everything that was said aloud, so this is the only limit on how long
                         the portal holds it. 0 means keep for ever.
+                        <?php /* 🏢 #722 — the third tier, and the link is what makes it reachable:
+                                 an organisation's own administrator may hold their own organisation
+                                 to a SHORTER period, never a longer one. */ ?>
+                        <br><a href="<?php echo htmlspecialchars(Site::url('admin/settings/transcription'), ENT_QUOTES, 'UTF-8'); ?>">An
+                        organisation can choose a shorter period of its own</a>.
                     </div>
                 </div>
                 <div class="col-md-2 d-flex align-items-end">

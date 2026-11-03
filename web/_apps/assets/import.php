@@ -69,15 +69,17 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
 // 🔐 Session + manager gate — mirrors every other mutating Asset Tracker
-// screen (save.php, categories.php, …): admin OR the asset_manager role.
+// screen (save.php, categories.php, …): an administrator, or a role this
+// organisation has pointed "Manage the asset register" at (#727).
 Auth::ensureSession();
 Auth::requireLogin();
-$canManage = App::isAdmin() === true || App::hasRole('asset_manager') === true;
+$canManage = App::isAdmin() === true || App::can(Capabilities::ASSETS_MANAGE) === true;
 if ($canManage === false) {
     Router::renderError(403);
     return;

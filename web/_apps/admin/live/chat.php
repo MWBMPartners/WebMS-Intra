@@ -9,7 +9,9 @@
  *
  * Access:
  *   • Admin — always
- *   • stream_moderator role — yes (via App::hasRole)
+ *   • a role this organisation has pointed "Moderate the livestream chat"
+ *     at — yes (via App::can(); the `stream_moderator` role as the portal
+ *     ships it, so this answers exactly what it answered before — #727)
  *   • everyone else — 403
  *
  * @link https://github.com/MWBMPartners/WebMS-Intra/issues/313
@@ -20,6 +22,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Router;
 use Portal\Core\Settings;
 use Portal\Core\Site;
@@ -27,7 +30,7 @@ use Portal\Core\Site;
 Auth::ensureSession();
 Auth::requireLogin();
 
-if (App::isAdmin() === false && App::hasRole('stream_moderator') === false) {
+if (App::isAdmin() === false && App::can(Capabilities::LIVESTREAM_CONSOLE) === false) {
     http_response_code(403);
     exit('Forbidden');
 }

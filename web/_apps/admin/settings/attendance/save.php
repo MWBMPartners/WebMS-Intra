@@ -305,7 +305,18 @@ if ($retentionRefusal !== '') {
         . ', which is more than this installation allows (' . $retentionAllowed . ' days). Nothing was saved.',
         $userId > 0 ? $userId : null
     );
-    $_SESSION['flash_msg']  = SettingLimit::refusalWords($retentionRefusal, $retentionAllowed, 'days');
+    // 🚫 THE FOURTH ARGUMENT IS WHY THE ADVICE IS NOT NONSENSE. Without it the
+    //    words for a posted 0 read "This installation allows at most 90 days …
+    //    You can choose 90 or fewer" — and 0 IS fewer than 90, so somebody
+    //    following the advice would post the number just refused. `$days === 0`
+    //    here means "keep for ever", which is the largest value, so the class
+    //    is told that and gives the sentence for it instead.
+    $_SESSION['flash_msg']  = SettingLimit::refusalWords(
+        $retentionRefusal,
+        $retentionAllowed,
+        'days',
+        $days === 0
+    );
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('admin/settings/attendance'));
     exit();

@@ -1323,13 +1323,23 @@ $appsDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR 
     . 'admin' . DIRECTORY_SEPARATOR . 'erasure' . DIRECTORY_SEPARATOR;
 foreach (['review.php', 'review-save.php'] as $pageFile) {
     $pageCode = erv_codeOnly($appsDir . $pageFile);
+    // 🚪 SINCE #727 THE GATE IS THE CAPABILITY REGISTRY, not `Roles::has()`
+    //    inline. The meaning is unchanged and that is the whole requirement:
+    //    `Capabilities::CAPABILITIES['erasure.review']` ships with
+    //    `['data_controller']` and declares `globalAdminFallsOpen => false`,
+    //    so an organisation that has never opened the roles page is gated
+    //    exactly as it was. The behaviour — including a global administrator
+    //    without the role being refused — is proved by
+    //    `tools/capabilities-selftest.php`, which asks `Capabilities::allows()`
+    //    with the flag set; what is pinned HERE is that these two files ask
+    //    that one question and refuse on the answer.
     erv_check(
-        $pageFile . ' asks Roles::has() directly, with the whole condition',
-        str_contains($pageCode, "if (Roles::has(\$db, \$meId, \$siteId, 'data_controller') === false) {") === true
+        $pageFile . ' asks the capability registry, with the whole condition',
+        str_contains($pageCode, 'if (App::can(Capabilities::ERASURE_REVIEW) === false) {') === true
     );
     erv_check(
         $pageFile . ' refuses, rather than merely testing',
-        str_contains($pageCode, "if (Roles::has(\$db, \$meId, \$siteId, 'data_controller') === false) {\n    Router::renderError(403);\n    return;\n}") === true
+        str_contains($pageCode, "if (App::can(Capabilities::ERASURE_REVIEW) === false) {\n    Router::renderError(403);\n    return;\n}") === true
     );
     // ⚠️ THE POINT OF THE EXCEPTION: `App::hasRole()` answers true for any
     //    global administrator with no role row (#516), which is exactly the

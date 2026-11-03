@@ -40,6 +40,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\CsvExporter;
 use Portal\Core\I18n;
 use Portal\Core\Logger;
@@ -53,10 +54,11 @@ Auth::requireLogin();
 
 $siteId = Site::id();
 
-// 🛡️ "New asset" + management affordances are gated to admins or the
-// asset_manager role — mirrors the app/settingKey convention used across
-// every other app (see .claude/CLAUDE.md → Code Style).
-$canManage = App::isAdmin() === true || App::hasRole('asset_manager') === true;
+// 🛡️ "New asset" + management affordances are gated to an administrator,
+// or whoever this organisation has pointed "Manage the asset register" at
+// (#727; the `asset_manager` role as the portal ships it). `Capabilities`
+// is the ONE place that decides — never a second role test on a page.
+$canManage = App::isAdmin() === true || App::can(Capabilities::ASSETS_MANAGE) === true;
 
 // 📋 Optional status filter via querystring — kept intentionally simple for
 // the foundation pass; AssetRegister::listForSite() supports more filters

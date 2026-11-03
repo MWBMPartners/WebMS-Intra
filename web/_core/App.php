@@ -417,8 +417,26 @@ class App
      * organisations with a single hand-inserted row). Roles now belong to
      * one organisation each, and `Roles::has()` answers strictly for
      * `Site::id()` — the organisation open right now — which is the
-     * correct scope for every one of the 66 call sites, across 61 files,
-     * that call this method.
+     * correct scope for every call site of this method.
+     *
+     * ⚠️ HOW MANY CALL SITES: RUN `php tools/role-gate-count.php`, and do
+     *    not put the answer back here. This sentence read "every one of the
+     *    66 call sites, across 61 files" until 3 November 2026, when #727
+     *    converted 49 of them to capability gates and left the figure four
+     *    times too large — in the docblock of the very method whose call
+     *    sites it had removed. The two figures were never right anyway:
+     *    65 across 62 was the honest tokeniser count on commit `b12ff44`,
+     *    and the `grep` somebody had used instead counted comments too.
+     *    A count that changes every time a gate is converted does not
+     *    belong in a comment; the command does.
+     *
+     * 🚪 A LITERAL KEY HERE IS A CANDIDATE FOR A CAPABILITY (#727).
+     *    `Portal\Core\Capabilities` is where a door a customer can re-point
+     *    is declared, and `App::can()` is how one is asked. Converting the
+     *    rest is #739. This method stays for the gates that cannot be
+     *    converted — above all the two that work their key out from a row a
+     *    customer filled in (`ReportRegistry::userPassesGates()` and the
+     *    guided-tour list in `web/_apps/tours/api/active.php`).
      *
      * The role KEY is compared case-insensitively at the database
      * (`Roles::has()` normalises it before the query), so a hand-typed key
@@ -447,6 +465,56 @@ class App
         }
 
         return Roles::has(self::db(), (int) $user['userID'], Site::id(), $roleKey);
+    }
+
+    /**
+     * 🚪 May the signed-in person do this, in the organisation that is open
+     * right now? (#727)
+     *
+     * The page-side door to `Portal\Core\Capabilities`, which is the ONE
+     * place a capability's roles are decided. A capability is a thing a
+     * person recognises ("decide the free text an erasure cannot") rather
+     * than a role key, and an organisation may point it at roles of its own
+     * on the roles page without anybody editing PHP.
+     *
+     * ⚠️ THIS IS NOT `hasRole()` WITH A DIFFERENT NAME, and the difference is
+     *    the reason the class exists. `hasRole()` above answers TRUE for any
+     *    global administrator who holds no role row at all — deliberate since
+     *    #516. That is wrong for a capability which is a boundary between two
+     *    PARTIES rather than between two jobs: an installation's
+     *    administrator and an organisation's may be different people (the
+     *    standing rule of 29 October 2026), and #724's erasure review must
+     *    not fall open for a hosting provider's administrator.
+     *
+     *    So the shortcut is NOT applied here. It is passed to
+     *    `Capabilities::allows()` as a fact about the account, and that
+     *    method honours it only when the capability's own declaration says
+     *    `globalAdminFallsOpen`. Never add a `return true` for a global
+     *    administrator to this method: it would undo every such declaration
+     *    in one line.
+     *
+     * @param string $capability A key from `Capabilities::CAPABILITIES`.
+     *
+     * @return bool
+     *
+     * @throws \InvalidArgumentException When the capability is not one this portal offers — a
+     *                                  mistyped key is a fault where it is written, never a door
+     *                                  quietly shut for everybody.
+     */
+    public static function can(string $capability): bool
+    {
+        $user = self::user();
+        if ($user === null) {
+            return false;
+        }
+
+        return Capabilities::allows(
+            self::db(),
+            (int) $user['userID'],
+            Site::id(),
+            $capability,
+            self::flagIsOn($user, 'isRootAdmin')
+        );
     }
 
     /**

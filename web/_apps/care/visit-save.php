@@ -11,11 +11,12 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
-if (App::isAdmin() === false && App::hasRole('care_team') === false) {
+if (App::isAdmin() === false && App::can(Capabilities::CARE_REGISTER) === false) {
     http_response_code(403);
     exit('Forbidden');
 }

@@ -11,7 +11,7 @@
  * house pattern for this shape of small list+action screen — see that file's
  * own header for the precedent.
  *
- * GATE: `Auth::requireLogin()` PLUS admin/asset_manager — same manager gate
+ * GATE: `Auth::requireLogin()` PLUS an administrator or "Manage the asset register" (#727) — same manager gate
  * as every other mutating Asset Tracker screen (`save.php`, `owners-save.php`,
  * …). Unlike item.php's Loans/Maintenance panels, this queue has NO
  * `isResponsibleFor()` bypass — a found-report can name reporter contact
@@ -41,14 +41,19 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
 
-// 🛡️ Manager gate — admins or the asset_manager role only. See file header.
-if (App::isAdmin() !== true && App::hasRole('asset_manager') !== true) {
+// 🛡️ Manager gate — an administrator, or whoever this organisation has
+//    pointed "Manage the asset register" at (#727). `Capabilities` is the
+//    ONE place that decides; it ships pointing at the `asset_manager`
+//    role, so this answers exactly what `App::hasRole('asset_manager')`
+//    answered before. See file header.
+if (App::isAdmin() !== true && App::can(Capabilities::ASSETS_MANAGE) !== true) {
     Router::renderError(403);
     return;
 }

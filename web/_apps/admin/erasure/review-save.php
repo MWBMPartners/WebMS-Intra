@@ -17,13 +17,16 @@
  * transaction. So this file's whole job is the gate, the form token, and saying
  * what happened.
  *
- * ⚠️ THE GATE ASKS `Roles::has()` DIRECTLY, not `App::hasRole()`. See the long
- *    note at the top of `review.php`: `App::hasRole()` answers true for any
- *    global administrator with no role row (#516), which would let a hosting
- *    provider's administrator do exactly what the role exists to stop. Do not
- *    "fix" it back for consistency with the other role gates. AND IT MUST BE ON
- *    BOTH FILES — a gate on the page that draws the buttons is not a gate at
- *    all, because anything can be posted (#672's two-gates lesson).
+ * ⚠️ THE GATE ASKS THE CAPABILITY REGISTRY (#727), not `App::hasRole()`. See
+ *    the long note at the top of `review.php`: `App::hasRole()` answers true
+ *    for any global administrator with no role row (#516), which would let a
+ *    hosting provider's administrator do exactly what the role exists to stop.
+ *    What keeps that out is one word in `Capabilities::CAPABILITIES` — the
+ *    `erasure.review` entry's `globalAdminFallsOpen => false` — and not
+ *    anything in this file. Do not "fix" it back for consistency with the
+ *    other role gates. AND IT MUST BE ON BOTH FILES — a gate on the page that
+ *    draws the buttons is not a gate at all, because anything can be posted
+ *    (#672's two-gates lesson).
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -37,9 +40,9 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\ErasureReview;
 use Portal\Core\Logger;
-use Portal\Core\Roles;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -51,7 +54,7 @@ $siteId = Site::id();
 $meId   = (int) ($_SESSION['user_id'] ?? 0);
 
 // 🛡️ The same gate as the page, and for the same reason.
-if (Roles::has($db, $meId, $siteId, 'data_controller') === false) {
+if (App::can(Capabilities::ERASURE_REVIEW) === false) {
     Router::renderError(403);
     return;
 }

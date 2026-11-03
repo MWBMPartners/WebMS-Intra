@@ -9,7 +9,7 @@
  * hard DELETE, so child rows — resources/owners/loans/audit history — keep
  * a valid assetID to point back at).
  *
- * Manager-gated (admin OR asset_manager role), CSRF-checked, and the
+ * Manager-gated (an administrator, or a role this organisation has pointed "Manage the asset register" at — #727, `asset_manager` as shipped), CSRF-checked, and the
  * trigger on item.php uses `data-confirm data-confirm-destructive="true"`
  * (Portal.Confirm — see web/public_html/assets/js/portal-confirm.js) rather
  * than a native confirm().
@@ -29,13 +29,18 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
 
-// 🛡️ Manager gate — admins or the asset_manager role only.
-if (App::isAdmin() !== true && App::hasRole('asset_manager') !== true) {
+// 🛡️ Manager gate — an administrator, or whoever this organisation has
+//    pointed "Manage the asset register" at (#727). `Capabilities` is the
+//    ONE place that decides; it ships pointing at the `asset_manager`
+//    role, so this answers exactly what `App::hasRole('asset_manager')`
+//    answered before.
+if (App::isAdmin() !== true && App::can(Capabilities::ASSETS_MANAGE) !== true) {
     http_response_code(403);
     exit('Forbidden');
 }

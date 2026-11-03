@@ -14,7 +14,7 @@
  * its caller completely and performs no re-validation — see that class's
  * createAsset()/updateAsset() docblocks.
  *
- * Manager-gated (admin OR asset_manager role) — mirrors every other
+ * Manager-gated (an administrator, or a role this organisation has pointed "Manage the asset register" at — #727, `asset_manager` as shipped) — mirrors every other
  * mutating Asset Tracker handler (#395's isResponsibleFor() ownership
  * bypass is deliberately NOT extended here: editing/deleting the asset
  * record itself is management-only, unlike attaching a resource, which an
@@ -58,13 +58,18 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
 
-// 🛡️ Manager gate — admins or the asset_manager role only.
-if (App::isAdmin() !== true && App::hasRole('asset_manager') !== true) {
+// 🛡️ Manager gate — an administrator, or whoever this organisation has
+//    pointed "Manage the asset register" at (#727). `Capabilities` is the
+//    ONE place that decides; it ships pointing at the `asset_manager`
+//    role, so this answers exactly what `App::hasRole('asset_manager')`
+//    answered before.
+if (App::isAdmin() !== true && App::can(Capabilities::ASSETS_MANAGE) !== true) {
     http_response_code(403);
     exit('Forbidden');
 }

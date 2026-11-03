@@ -15505,3 +15505,264 @@ none. What carries the fix instead is the read-back inside the transaction — t
 asks the database whether a password is really held before anything claims it is.
 
 ---
+
+### Gating a feature on a role an organisation created (#727)
+
+**The distribution is what shaped the design — and the first version of this
+paragraph got every figure in it wrong, which is the more useful lesson.** It
+read: "86 `App::hasRole()` call sites, 62 with a literal key and 24 with a
+variable, and `asset_manager` alone accounts for 37 of the 62", presented as
+measured. Measured properly on commit `b12ff44`, with PHP's tokeniser and
+comments dropped: **65 call sites across 62 files, 61 with a literal key and
+four without** — and two of those four pass a class constant, so only **two**
+work their key out at run time. 86 was what a `grep` answered, which counts
+every mention in a comment and a docblock; 62 was the FILE count standing in for
+the literal count; and 24 was the gap between the two. `asset_manager` really
+did account for **37 of the 61** literal gates, which is the figure that shaped
+the design and the only one that survived checking.
+
+So "make each call site configurable" would have offered a customer sixty-odd
+switches, 37 of them the same answer about the asset register repeated. A
+capability is coarse on purpose: one door, named in code, covering as many call
+sites as it needs to.
+
+**Count them with `php tools/role-gate-count.php`.** That script exists because
+four documents quoted a `grep` figure as a fact. It uses the tokeniser, drops
+comments, splits literal from run-time keys, and prints the comment-inclusive
+`grep` beside its own answer so the gap is visible. **The `grep` does not merely
+over-count — it is the wrong shape:** converting a gate leaves a comment behind
+naming the gate it replaced, so on 3 November 2026
+`grep -rn "App::hasRole('asset_manager')"` returned 19 hits of which **zero were
+calls**, while the tokeniser correctly said none were left.
+
+**Two tables, not one, and the second is not tidiness.** "Chosen, and empty"
+must be distinguishable from "never chosen": the first means "nobody,
+deliberately" and the second means "the role the portal ships with". One table
+cannot say both without a sentinel row holding an empty `roleKey` — and a
+sentinel could not carry `fk_capmaprole_role`, which is what makes a deleted
+role leave every set it was in instead of leaving a door nobody can see is shut.
+
+**There is no "cannot be emptied" flag, and the reason is enforced rather than
+asserted.** An empty set is always recoverable because the page that changes a
+mapping is gated on `App::isAdmin()` and on no capability.
+`check_capability_registry.py` fails if any capability is ever asked from a file
+under `web/_apps/admin/roles/`, which is the one edit that would make an empty
+set permanent. A flag no test could reach would have read as a protection and
+been none.
+
+**`globalAdminPasses()` is a named method, and THE REASON WRITTEN HERE FIRST
+BECAME UNTRUE INSIDE THE SAME DOCUMENT.** It said: "No OFFERED capability
+declares `globalAdminFallsOpen => true` — there is one, #724's, and it declares
+false — so written inline as `$a && $b` the 'true' half would be a branch
+nothing could reach." That was true of part one, which shipped `erasure.review`
+alone. **Part two made it false and did not revisit it**, so this file
+contradicted itself a page later, where its own "THE FIVE" notes say all five
+declare `true`. The registry holds **six** offered capabilities and **five**
+declare `globalAdminFallsOpen => true`; `check_capability_registry.py` prints
+that column on every run, which is where to look rather than at any sentence
+here.
+
+That matters because this is the paragraph somebody would read before inlining
+the rule or deleting the self-test section that exercises it — a comment stating
+a guarantee the code no longer honours, with the correction applied nowhere. The
+reasons the method stays named are different and both still hold: the rule is
+written ONCE where two opposite answers meet, so no page can keep a second copy
+of it, and all four combinations are exercised directly rather than only through
+whichever capabilities happen to be declared today.
+
+**Three faults of my own in building this, each worth recognising.**
+
+1. **A pristine copy taken before later edits is not a pristine copy.** The
+   copies for the planting round were taken before `globalAdminPasses()` was
+   added, so restoring one silently reverted that method — and the next plant
+   then reported "could not plant" while four others went red for a reason that
+   had nothing to do with them. The machine-wide rule says a backup you made
+   yourself is not evidence about the original; it is not evidence about the
+   CURRENT state either. Re-take the copies after every edit, and hash them.
+2. **A test that renames a table must put it back whatever happens.** Section J
+   hides the storage by renaming both tables, to prove a database without
+   migration 243 falls back to the shipped roles. A planted fault stopped the
+   run between the two renames, so the tables stayed hidden and every later run
+   failed in section D. Four plants then looked caught while being caught for
+   the wrong reason — **a plant that goes red for the wrong reason is as
+   useless as one that will not go red, and the passing run cannot tell you
+   which.** The remedy is `brs_tidy()`'s, from #697: a shutdown function that
+   renames back only if the hidden name is really there.
+3. **A value that runs to the start of the next field includes the comment in
+   between.** The audit check reads `CAPABILITIES` by delimiting each field from
+   its own key to the NEXT key (#706's remedy — no bracket counting inside an
+   entry). Read out of the raw source, `standard` came back as
+   `['data_controller'], // ⚠️ FALSE, AND IT IS THE POINT…`, which is not a
+   list. The extent is measured on the MASKED text, where comments are blanked
+   to spaces of the same length, and the value is then read out of the original
+   at those offsets.
+
+**What is not covered.** Nothing drives the roles page over HTTP: the
+confirmation box, the global administrator's card and the refused delete are
+pinned as text in section M of the self-test and have never been pressed. Two
+administrators saving at once is not tested — `save()` replaces the whole set in
+one transaction, so the last one wins.
+
+#### The five, converted (#727, part two — 3 November 2026)
+
+*(This used to be a staging block headed "Entries to be folded into
+`CHANGELOG.md`, `FEATURES.md` and `DEV_NOTES.md` by the commissioning session.
+Nothing here was written into those files." That is a note to a writer, not a
+technical lesson, and #678 gives this document one job — so the content is
+folded in here and the instruction is gone. The same shape was removed from
+`CHANGELOG.md` in the same round.)*
+
+Four things worth keeping, each measured rather than reasoned.
+
+1. **THE FOLDER NAME WAS WRONG ABOUT WHERE A GATE LIVES, TWICE, AND BOTH TIMES
+   IN THE DIRECTION THAT LOSES COVERAGE.** `livestream.console`'s own note said
+   its gates were in `web/_apps/livestream/` and `web/_apps/admin/livestream/`.
+   Measured: the first holds one file, `api/ping.php`, with no role gate at all,
+   and the second is gated on `App::isAdmin()` plus the "we are live" push's own
+   coordinator rule (#612), which is about ONE event and is deliberately not
+   this capability. The real gates are `web/_apps/admin/live/chat.php` and
+   `web/_apps/livechat/api/moderate.php`. The same shape the other way:
+   `assets.manage` has 37 calls, and THREE of them are outside
+   `web/_apps/assets/` — two in `web/_core/AssetRegister.php`
+   (`canApproveLoan()` and `canManageMaintenance()` each fold the manager
+   bypass in themselves, #398) and one in `web/_apps/calendar/event.php` (the
+   Unassign button beside an event's assets). Converting the folder and
+   stopping would have let a customer's own role open every asset page and then
+   be refused the one action on an individual asset. **Find a gate by searching
+   for the role key, never by reading a folder name** — but use
+   `php tools/role-gate-count.php <role>`, not `grep`. A `grep` was what found
+   these three, and it worked only because nothing had been converted yet:
+   afterwards each converted file keeps a comment naming the gate it replaced,
+   so on the working tree of 3 November 2026
+   `grep -rn "App::hasRole('asset_manager')"` returned 19 hits of which ZERO
+   were calls. The same command, run twice a day apart, means two different
+   things.
+
+2. **A MISSING `use` LINE IS INVISIBLE TO `php -l`, TO EVERY ADMINISTRATOR, AND
+   TO EVERY SELF-TEST HERE.** Most of the 49 gates read
+   `App::isAdmin() === false && App::can(…)`, so PHP never evaluates the
+   right-hand side for an administrator. Planted (the `use` line deleted from
+   `web/_apps/care/case.php`): `php -l` clean, the 199-check self-test green,
+   and the first ordinary member to open the page would have got a fatal error.
+   Check O of `tools/audit-checks/check_capability_registry.py` is the only
+   thing that catches it — #536's lesson, in a new place.
+
+3. **MASKING STRING LITERALS IS THIS REPOSITORY'S USUAL REMEDY AND IT WOULD
+   HAVE BLINDED THE NEW GUARD COMPLETELY.** Check M has to find
+   `App::hasRole('asset_manager')`, and the thing it reads IS a string literal:
+   `mask_php()` would hand it `App::hasRole('xxxxxxxxxxxxx')`. A separate
+   `without_comments()` blanks comments and leaves strings alone, still walking
+   the source rather than using a regular expression. Exactly the fault that
+   broke both halves of #716's guard.
+
+4. **THREE OF THE FOUR `treasurer` MATCHES WERE NOT GATES.** `App::hasRole(` was
+   counted with the role key beside it and the count was four for `'treasurer'`;
+   two of those were in COMMENTS, and of the remaining ones `Giving::canManage()`
+   opens the GIVING records — donors' names and home addresses — which is not
+   the expenses treasury. `ExpenseRules::EXPORT_ROLE` is the `approver` role,
+   `ReportRegistry` passes a role key as a variable, `ExpenseMailer` uses the
+   key in SQL to build an AUDIENCE. Only three were the capability. **Count
+   function bodies and gates, not matches.** The deliberate leftovers are named
+   in `HAS_ROLE_ON_PURPOSE` with a reason, and that list fails both ways.
+
+**And a wording fault of my own, which the new section N of the self-test now
+forbids.** The first draft of all five `emptyMeans` sentences said "Only a
+global administrator will be able to…". That is wrong twice: every one of these
+gates ALSO lets an ordinary administrator of the organisation in through
+`App::isAdmin()`, and for the asset register the people an individual asset
+names as responsible keep their access too. An empty set shuts the ROLE out and
+nothing else. Nothing can judge how an assembled sentence reads, so what is
+pinned is that it does not make the claim that was false.
+
+**What is NOT covered.** `App::can()` runs over real HTTP for
+`expenses.treasury` (the treasury pages ask the capability FIRST, so everybody
+evaluates it) and for `livestream.console` (a member is refused by it in
+`tools/live-chat-moderation-selftest.php`). For `assets.manage`,
+`care.register` and `kids.checkin` the only HTTP exercise is by an
+administrator, who short-circuits before the call — so the behaviour of those
+three gates for a non-administrator is proved by `Capabilities::allows()`
+against a real database (section O) and by the static checks, not over HTTP.
+
+
+**Three questions, three sources, one rule.** `Portal\Core\SettingLimit` now
+answers the three-tier rule from three different places, and the difference
+between them is only WHERE the two numbers come from:
+
+| method | the organisation's figure comes from | what it is for |
+|---|---|---|
+| `effective()` | the merged `$SETTINGS` | drawing a page for the organisation being served |
+| `cappedForSite()` | a figure the caller read for one NAMED organisation | a job that walks every organisation (#685) |
+| `whyNotAllowedFor()` | the posted number, judged against a ceiling read LIVE and locked | a save (#687) |
+
+All three end in one private `smallerOfTwo()`, which is the only place the
+arithmetic — including the zero rule — is written. `installationAllows()`,
+`installationAllowsForEver()` and `whyNotAllowed()` are now thin wrappers that
+take the value out of the installation layer. **Adding a fourth source means
+adding a reader, never a second copy of the rule**: two readers that disagree
+about what a job will do is the fault `MailQueue::numbers()` had to fix.
+
+**The caller keeps its own meaning of a stored value, and that is deliberate.**
+`cappedForSite()` takes a figure rather than a key to read, because what a
+stored value MEANS differs per setting and those decisions are already written
+down beside each one: `AnonymousCheckins` reads a negative number of days as
+"keep for ever" (for a clear-out, doing nothing on a number nobody meant to type
+is the safe direction), `TranscriptRetention` reads the same negative as "not
+chosen". Both are right for their own setting and folding them into one rule
+would silently change one of them.
+
+**`installationAllows()` NEVER ANSWERS 0 for a zero-is-largest key**, and
+believing otherwise cost two live faults in one package. It hands back the hard
+maximum, because what a form's `max` and a comparison need is a number of days.
+Two places had worked their own arithmetic out against it:
+`TranscriptRetention::daysForSite()`, where `if ($ceiling === 0)` was dead code
+and "for ever" could never survive even where the installation allowed it; and
+Admin, Transcription, where `$installDays === 0 ? 'Kept for ever.'` could never
+print and the box prefilled 3650 over a stored 0. **Ask
+`installationAllowsForEver()` for the other half — a page needs both, and they
+are different questions.**
+
+**A save-time cap is not a cap, measured.** With the installation allowing 90
+days and organisation 1 holding 1000 put in by SQL, `readRetentionDays(1)`
+answered 1000 before and 90 after; a stored 0 ("for ever") answered 0 before and
+90 after; a stored 30 answered 30 both times, which is what stops the cap being
+a clamp. The full before/after table is in
+`.claude-work/evidence/p685/measure-685-{before,after}.txt`.
+
+**The lock, and what proving it needs.** `TranscriptRetention::saveForSite()`
+re-reads the installation's row `FOR UPDATE` inside the transaction that writes,
+because #687 measured two overlapping ordinary web requests storing fifty years
+under a ceiling of seven, 60 pairs out of 60. Proving that needs two connections
+at once, so it cannot be an HTTP test: the page harnesses run the built-in server
+with one worker, and such a test passes on the broken code. Section D of
+`tools/retention-caps-selftest.php` starts a second PHP process to hold the row.
+With ` FOR UPDATE` deleted, measured: **3000 days stored under a ceiling of 7,
+and the save reported as successful.**
+
+**Two things that section cannot catch, both measured by planting:**
+
+- **"It waited" is not the proof.** With ` FOR UPDATE` deleted the save still
+  took over a second, because the holder's `UPDATE` on `uq_settings_key_site`
+  locks the gap beside its own row and the saver's INSERT blocked there instead.
+  The discriminators are the three checks after it.
+- **Moving the locked read OUTSIDE the transaction leaves every check in that
+  section green.** A `SELECT … FOR UPDATE` still blocks and still reads the
+  committed value; what is lost is that the lock is released at once by the
+  implicit commit, leaving a window between reading the ceiling and writing the
+  figure (#697, "a lock outside a transaction is decoration"). Only the ORDERING
+  check in section E catches that. Both are needed and neither covers the
+  other's half.
+
+**And the hard gate cannot see a save that has stopped refusing.**
+`check_limit_settings_capped.py` asks whether a per-organisation writer MENTIONS
+the rule. Two of its six writers are now core classes that both resolve the limit
+and write the row, and such a class satisfies the test with its own
+`self::installationAllows()` — measured by deleting every `SettingLimit::` call
+from `TranscriptRetention.php` and watching the gate stay green. Tightening the
+token to `::installationAllows` was tried and changes nothing, because `self::`
+carries the `::` too. That is the check's own limitation 2 in its sharpest form,
+and the answer is a behaviour test: section C of
+`tools/retention-caps-selftest.php` asks the method to store a figure above the
+ceiling and requires nothing to be written. Planted (`if (false)` on the
+refusal), the gate stayed green and section C went red on eight checks.
+
+---

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -13,8 +14,11 @@ Auth::requireLogin();
 // 🛡️ Safeguarding gate (#298 gap fix) — this staff terminal lists every
 //     child at the site by name, with allergy/medical flags and live
 //     check-in state, so it must NOT be reachable by any logged-in member.
-//     Mirrors care/index.php's gate exactly: kids_team role OR admin.
-if (App::isAdmin() === false && App::hasRole('kids_team') === false) {
+//     An administrator, or whoever this organisation has pointed "Run
+//     children's check-in" at (#727) — the `kids_team` role as shipped,
+//     so this answers exactly what `App::hasRole('kids_team')` answered
+//     before. checkin-do.php and checkout.php ask the same one.
+if (App::isAdmin() === false && App::can(Capabilities::KIDS_CHECKIN) === false) {
     Router::renderError(403);
     return;
 }

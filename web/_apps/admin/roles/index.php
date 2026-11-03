@@ -24,11 +24,24 @@
  * WHAT THIS PAGE CANNOT DO
  * -------------------------------------------------------------------------
  * It cannot delete a STANDARD role (`isStandard = 1`) — every organisation
- * keeps the same keys every `App::hasRole()` call site (across
- * 61 files) rely on; rename one instead if the standard wording does not
- * fit. It
+ * keeps the same keys every `App::hasRole()` call site relies on; rename one
+ * instead if the standard wording does not fit. (This line used to say "across
+ * 61 files" and the real figure was never checked again; count them with
+ * `grep -rlE "App::hasRole\(" web --include='*.php' | wc -l`.) It
  * cannot delete any role, standard or not, while somebody still holds it —
- * remove it from them first, on the members page.
+ * remove it from them first, on the members page. Nor can it delete a role
+ * that is the LAST one opening a capability (#727): the set would be left
+ * empty without anybody confirming that, so it says which door to point
+ * elsewhere first.
+ *
+ * WHO CAN OPEN WHAT (#727)
+ * -------------------------------------------------------------------------
+ * Below the role list, each gated "capability" named in
+ * `Portal\Core\Capabilities` can be pointed at any of this organisation's
+ * roles, its own ones included. Holding any ONE of the ticked roles opens the
+ * door. Ticking none is allowed and needs its own confirmation, because what
+ * it costs differs from door to door. A global administrator also sees which
+ * doors the INSTALLATION reserves to itself.
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -43,6 +56,8 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Roles;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -70,6 +85,48 @@ $holderCounts = [];
 foreach ($roles as $role) {
     $holderCounts[$role['roleID']] = Roles::countHolders($mysqli, $role['roleID'], $siteId);
 }
+
+// 🚪 WHO CAN OPEN WHAT (#727).
+//
+// The installation-wide layer is read through `InstallationSettings`, NEVER
+// through `App::settings()`. #674's fault is this exact shape: `$SETTINGS` is
+// already merged by the time a page runs, so a box filled from it shows the
+// OPEN ORGANISATION's value while a Save writing `siteID IS NULL` writes the
+// INSTALLATION's — one press of Save on an untouched form and it is
+// everybody's.
+//
+// `layerOrNull()` and not `layer()`, because `Capabilities::installationLocks()`
+// treats "we cannot tell" as everything locked, which is the safe direction
+// between two parties. An empty array would read as "nothing is locked".
+$capInstallationLayer = InstallationSettings::layerOrNull();
+
+// Asked once and used for the notice: the two tables arrive with migration 243,
+// and files reach a server before anybody presses "Run migrations" (#694). Until
+// then every capability is "as shipped" and the page says so plainly rather than
+// offering a Save that could not store anything.
+$capStorageReady = Capabilities::storageExists($mysqli);
+
+$capRows = [];
+foreach (Capabilities::keys() as $capKey) {
+    $capDefinition = Capabilities::definition($capKey);
+    // null = this organisation has chosen nothing, so the roles it ships with
+    // are in force. An empty ARRAY is a different answer: nobody, deliberately.
+    $capChosen  = Capabilities::chosenRoleKeys($mysqli, $siteId, $capKey);
+    $capInForce = $capChosen !== null ? $capChosen : $capDefinition['standard'];
+    $capRows[$capKey] = [
+        'definition' => $capDefinition,
+        'chosen'     => $capChosen,
+        'inForce'    => $capInForce,
+        'whyNot'     => Capabilities::whyNotChangeable($capKey, $capInstallationLayer),
+        // People, not holdings: somebody holding two of the roles counts once.
+        'holders'    => Capabilities::holderCount($mysqli, $siteId, $capInForce),
+    ];
+}
+
+// 🏢 Only a global administrator sees the installation's own card, because the
+//    two levels may be different parties (the standing rule of 29 October 2026).
+$capIsGlobalAdmin = App::isRootAdmin();
+$capLockedKeys    = Capabilities::installationLocks($capInstallationLayer);
 
 // 📋 Flash message from the save handler
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
@@ -159,6 +216,259 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     <?php endforeach; ?>
 </div>
+
+<!-- 🚪 Who can open what (#727) ------------------------------------------- -->
+<!--
+     A "capability" is a door, named in `Portal\Core\Capabilities`, that a role
+     opens. Holding ANY ONE of the roles listed against it is enough — any-of,
+     never all-of. An organisation that never touches this section sees no
+     change at all: with nothing chosen, the roles in force are the ones the
+     portal ships with, which are the roles the gate was written in PHP to
+     before any of this existed.
+
+     Only capabilities something really asks appear here, and that is enforced
+     rather than remembered: a capability whose gate is still hard-coded lives
+     in `Capabilities::NOT_YET_ASKED` instead, and the hard gate
+     `tools/audit-checks/check_capability_registry.py` fails if either list
+     becomes the other. A control that changes nothing anywhere is worse than
+     no control (#671). That list is EMPTY today — all six doors below are
+     really asked — so nothing is being held back.
+
+     Five of the six were converted on 3 November 2026 (#727): the asset
+     register, the pastoral care register, children's check-in, the expenses
+     treasury and the livestream chat. Every one of those five ALSO lets an
+     administrator of this organisation in without any role at all, which is
+     unchanged and is why each one's "what an empty set does" sentence says
+     so. #724's erasure review is the one door that does not.
+-->
+<h2 class="h4 mt-5 mb-2"><i class="fa-solid fa-door-open me-2"></i>Who can open what</h2>
+<p class="text-muted">
+    Each of these is a door in the portal, and the roles ticked against it are the ones that open it.
+    Holding <strong>any one</strong> of them is enough. Leave a door alone and it keeps the role it
+    came with.
+</p>
+
+<?php if ($capStorageReady === false): ?>
+    <div class="alert alert-warning">
+        <i class="fa-solid fa-triangle-exclamation me-1"></i>
+        This part of the database has not been upgraded yet, so nothing can be changed here.
+        Every door below is opened by the role it came with. A global administrator can run the
+        upgrade from
+        <a href="<?php echo htmlspecialchars(Site::url('admin/upgrade'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Upgrade</a>.
+    </div>
+<?php endif; ?>
+
+<?php foreach ($capRows as $capKey => $capRow): ?>
+    <?php
+    $capDef     = $capRow['definition'];
+    $capChosen  = $capRow['chosen'];
+    $capInForce = $capRow['inForce'];
+    $capWhyNot  = (string) $capRow['whyNot'];
+    // Changeable only when the portal and the installation both allow it AND
+    // there is somewhere to store the answer.
+    $capMayEdit = $capWhyNot === '' && $capStorageReady === true;
+    ?>
+    <div class="card mb-3">
+        <div class="card-body">
+            <h3 class="h5 mb-1"><?php echo htmlspecialchars($capDef['label'], ENT_QUOTES, 'UTF-8'); ?></h3>
+            <p class="text-muted mb-2"><?php echo htmlspecialchars($capDef['opens'], ENT_QUOTES, 'UTF-8'); ?></p>
+
+            <p class="mb-2">
+                <?php if ($capChosen === null): ?>
+                    <span class="badge bg-secondary">As the portal ships it</span>
+                <?php else: ?>
+                    <span class="badge bg-info text-dark">Chosen by this organisation</span>
+                <?php endif; ?>
+                <?php if ($capDef['globalAdminFallsOpen'] === false): ?>
+                    <span class="badge bg-dark">A global administrator needs one of these roles too</span>
+                <?php endif; ?>
+            </p>
+
+            <?php if ($capDef['globalAdminFallsOpen'] === false): ?>
+                <!--
+                     Said out loud because it is the opposite of every other door
+                     in the portal, and because somebody who cannot get in needs
+                     to know it is deliberate rather than broken (#724).
+                -->
+                <p class="small text-muted mb-2">
+                    This one does not open for a global administrator who has not been given one of
+                    these roles. That is deliberate: whoever runs this installation may be a
+                    different person from whoever runs this organisation, and this door leads to
+                    members' own words.
+                </p>
+            <?php endif; ?>
+
+            <?php if (count($capInForce) === 0): ?>
+                <div class="alert alert-danger py-2 mb-2">
+                    <i class="fa-solid fa-circle-exclamation me-1"></i>
+                    <strong>No role opens this at the moment.</strong>
+                    <?php echo htmlspecialchars(Capabilities::emptyMeans($capKey), ENT_QUOTES, 'UTF-8'); ?>
+                </div>
+            <?php elseif ((int) $capRow['holders'] === 0): ?>
+                <!--
+                     The issue's own acceptance line: a mapping naming a role
+                     nobody holds must not lock anybody out, and the page must
+                     say what will happen. It is a WARNING and not a refusal,
+                     because "make the mapping, then grant the role" is the
+                     ordinary order of work.
+                -->
+                <div class="alert alert-warning py-2 mb-2">
+                    <i class="fa-solid fa-triangle-exclamation me-1"></i>
+                    Nobody here holds any of these roles yet, so nobody can open this door.
+                    Give somebody one on the
+                    <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>">Users</a>
+                    page.
+                </div>
+            <?php endif; ?>
+
+            <?php if ($capMayEdit === false): ?>
+                <p class="mb-1"><strong>Opened by:</strong></p>
+                <ul class="mb-2">
+                    <?php foreach ($capInForce as $capRoleKey): ?>
+                        <li><code><?php echo htmlspecialchars($capRoleKey, ENT_QUOTES, 'UTF-8'); ?></code></li>
+                    <?php endforeach; ?>
+                    <?php if (count($capInForce) === 0): ?>
+                        <li class="text-muted">nobody, by role</li>
+                    <?php endif; ?>
+                </ul>
+                <?php if ($capWhyNot !== ''): ?>
+                    <p class="small text-muted mb-0">
+                        <i class="fa-solid fa-lock me-1"></i>
+                        <?php echo htmlspecialchars($capWhyNot, ENT_QUOTES, 'UTF-8'); ?>
+                    </p>
+                <?php endif; ?>
+            <?php else: ?>
+                <!--
+                     ⚠️ NO `disabled` CONTROLS HERE. A disabled control is not
+                        submitted (#667/#677), so a form drawn for somebody who
+                        may not change it would post an EMPTY set and read as a
+                        deliberate "nobody". Where it may not be changed, the
+                        form above is not drawn at all — and the handler asks
+                        `whyNotChangeable()` again anyway, because the page is
+                        never the boundary.
+                -->
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/roles/save'), ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                    <input type="hidden" name="action" value="capability">
+                    <input type="hidden" name="capability" value="<?php echo htmlspecialchars($capKey, ENT_QUOTES, 'UTF-8'); ?>">
+                    <div class="row">
+                        <?php foreach ($roles as $capRole): ?>
+                            <?php
+                            $capRoleKey  = strtolower($capRole['roleKey']);
+                            $capTicked   = in_array($capRoleKey, $capInForce, true);
+                            $capRoleHeld = $holderCounts[(int) $capRole['roleID']] ?? 0;
+                            $capBoxId    = 'cap-' . md5($capKey . '|' . $capRoleKey);
+                            ?>
+                            <div class="col-12 col-md-6 col-lg-4">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox"
+                                           name="roleKeys[]"
+                                           value="<?php echo htmlspecialchars($capRoleKey, ENT_QUOTES, 'UTF-8'); ?>"
+                                           id="<?php echo htmlspecialchars($capBoxId, ENT_QUOTES, 'UTF-8'); ?>"
+                                           <?php echo $capTicked === true ? 'checked' : ''; ?>>
+                                    <label class="form-check-label" for="<?php echo htmlspecialchars($capBoxId, ENT_QUOTES, 'UTF-8'); ?>">
+                                        <?php echo htmlspecialchars($capRole['roleName'], ENT_QUOTES, 'UTF-8'); ?>
+                                        <small class="text-muted">
+                                            (<?php echo (int) $capRoleHeld; ?>
+                                            <?php echo $capRoleHeld === 1 ? 'holder' : 'holders'; ?>)
+                                        </small>
+                                    </label>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+
+                    <!--
+                         🫙 THE EMPTY SET IS A DECISION, NOT AN ACCIDENT (the
+                            owner, 3 November 2026). Saving with nothing ticked
+                            needs this box ticked as well, and the handler
+                            refuses without it — so it cannot be reached by a
+                            mis-click or by a form that simply named no role.
+                            The sentence is the capability's own
+                            `emptyMeans`, not a general warning: what zero
+                            roles costs differs from door to door.
+                    -->
+                    <div class="alert alert-light border mt-3 mb-2">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="confirm_empty" value="1"
+                                   id="cap-empty-<?php echo htmlspecialchars(md5($capKey), ENT_QUOTES, 'UTF-8'); ?>">
+                            <label class="form-check-label"
+                                   for="cap-empty-<?php echo htmlspecialchars(md5($capKey), ENT_QUOTES, 'UTF-8'); ?>">
+                                <strong>Tick none of the boxes above?</strong> Then tick this one too, to say you
+                                mean it. <?php echo htmlspecialchars(Capabilities::emptyMeans($capKey), ENT_QUOTES, 'UTF-8'); ?>
+                            </label>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="fa-solid fa-floppy-disk me-1"></i>Save who opens this
+                    </button>
+                </form>
+
+                <?php if ($capChosen !== null): ?>
+                    <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/roles/save'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-2">
+                        <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                        <input type="hidden" name="action" value="capability_reset">
+                        <input type="hidden" name="capability" value="<?php echo htmlspecialchars($capKey, ENT_QUOTES, 'UTF-8'); ?>">
+                        <button type="submit" class="btn btn-outline-secondary btn-sm"
+                                data-confirm="Forget this organisation's choice and go back to the role this door came with?">
+                            <i class="fa-solid fa-rotate-left me-1"></i>Back to the role it came with
+                        </button>
+                    </form>
+                <?php endif; ?>
+            <?php endif; ?>
+        </div>
+    </div>
+<?php endforeach; ?>
+
+<?php if ($capIsGlobalAdmin === true): ?>
+    <!--
+         🏢 THE INSTALLATION'S OWN CARD, for a global administrator only.
+            One installation may serve many organisations, and whoever runs it
+            may be a different person from whoever runs each organisation (the
+            standing rule of 29 October 2026). Reserving a door here stops every
+            organisation on this installation pointing it anywhere else; it does
+            not change who currently opens it.
+    -->
+    <div class="card mb-3 border-dark">
+        <div class="card-body">
+            <h3 class="h5 mb-1"><i class="fa-solid fa-building-lock me-2"></i>Reserved by this installation</h3>
+            <p class="text-muted mb-2">
+                You are seeing this because you are a global administrator. Anything ticked here cannot
+                be changed by an organisation on this installation — including this one. Nothing is
+                ticked to begin with.
+            </p>
+            <?php if ($capInstallationLayer === null): ?>
+                <div class="alert alert-warning py-2 mb-0">
+                    <i class="fa-solid fa-triangle-exclamation me-1"></i>
+                    This installation's own settings were not available on this request, so this cannot
+                    be shown or changed now. Nothing has been lost; try again.
+                </div>
+            <?php else: ?>
+                <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/roles/save'), ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                    <input type="hidden" name="action" value="capability_locks">
+                    <?php foreach ($capRows as $capKey => $capRow): ?>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="lockedKeys[]"
+                                   value="<?php echo htmlspecialchars($capKey, ENT_QUOTES, 'UTF-8'); ?>"
+                                   id="cap-lock-<?php echo htmlspecialchars(md5($capKey), ENT_QUOTES, 'UTF-8'); ?>"
+                                   <?php echo in_array($capKey, $capLockedKeys, true) === true ? 'checked' : ''; ?>>
+                            <label class="form-check-label"
+                                   for="cap-lock-<?php echo htmlspecialchars(md5($capKey), ENT_QUOTES, 'UTF-8'); ?>">
+                                <?php echo htmlspecialchars($capRow['definition']['label'], ENT_QUOTES, 'UTF-8'); ?>
+                                <code class="ms-1"><?php echo htmlspecialchars($capKey, ENT_QUOTES, 'UTF-8'); ?></code>
+                            </label>
+                        </div>
+                    <?php endforeach; ?>
+                    <button type="submit" class="btn btn-dark btn-sm mt-2">
+                        <i class="fa-solid fa-floppy-disk me-1"></i>Save what this installation reserves
+                    </button>
+                </form>
+            <?php endif; ?>
+        </div>
+    </div>
+<?php endif; ?>
 
 <!-- ➕ Add Role Modal -->
 <div class="modal fade" id="addRoleModal" tabindex="-1" aria-labelledby="addRoleLabel" aria-hidden="true">

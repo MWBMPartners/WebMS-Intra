@@ -10,7 +10,7 @@
  * dispatch — releasing is the only state transition a seat assignment has
  * once linked).
  *
- * Gate: admin OR asset_manager role ONLY — same manager-only gate as
+ * Gate: an administrator, or a role this organisation has pointed "Manage the asset register" at (#727; `asset_manager` as shipped) — same manager-only gate as
  * license-save.php (see that file's header for the rationale). The IDOR
  * guard (the assignment must belong to BOTH $assignmentID AND
  * $licenseAssetID on this site) AND the race-safe status='active' state
@@ -33,6 +33,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -46,9 +47,13 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token
     exit();
 }
 
-// 🛡️ Manager gate — admins or the asset_manager role only. See
+// 🛡️ Manager gate — an administrator, or whoever this organisation has
+//    pointed "Manage the asset register" at (#727). `Capabilities` is the
+//    ONE place that decides; it ships pointing at the `asset_manager`
+//    role, so this answers exactly what `App::hasRole('asset_manager')`
+//    answered before. See
 // license-save.php's header for the rationale.
-if (App::isAdmin() !== true && App::hasRole('asset_manager') !== true) {
+if (App::isAdmin() !== true && App::can(Capabilities::ASSETS_MANAGE) !== true) {
     http_response_code(403);
     exit('Forbidden');
 }

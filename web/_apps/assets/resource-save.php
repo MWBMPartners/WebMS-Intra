@@ -13,7 +13,7 @@
  * 159_asset_tracker.sql, so folding delete into this handler avoids adding
  * one.
  *
- * Gate: admin OR asset_manager role OR a responsible owner-party for the
+ * Gate: an administrator, or "Manage the asset register" (#727), OR a responsible owner-party for the
  * asset (`AssetRegister::isResponsibleFor()`) — WIDER than save.php/
  * delete.php's manager-only gate, because attaching a receipt/manual to an
  * asset you're the custodian of is a much lower-stakes action than editing
@@ -50,6 +50,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
@@ -97,7 +98,7 @@ if ($asset === null || (int) $asset['siteID'] !== $siteId) {
 
 // 🛡️ Manager OR responsible owner-party — matches item.php's own
 // visibility gate for the Resources panel this form lives on.
-$canManage = App::isAdmin() === true || App::hasRole('asset_manager') === true;
+$canManage = App::isAdmin() === true || App::can(Capabilities::ASSETS_MANAGE) === true;
 if ($canManage === false && AssetRegister::isResponsibleFor($assetId) === false) {
     http_response_code(403);
     exit('Forbidden');

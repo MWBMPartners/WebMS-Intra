@@ -44,6 +44,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\EventVisibility;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -361,8 +362,11 @@ if (Auth::check() === true && $canSeeFull === true) {
 // row on a page that's mostly about the EVENT, not the assets) — hiding
 // the button for a merely-responsible-but-non-manager viewer here is a UI
 // conservatism only; event-assign.php still independently re-derives and
-// re-checks the WIDER admin/asset_manager/isResponsibleFor() gate itself.
-$canManageAssets = App::isAdmin() === true || App::hasRole('asset_manager') === true;
+// re-checks the WIDER gate itself (an administrator, "Manage the asset
+// register" — #727 — or isResponsibleFor()). This button and that handler
+// ask the SAME capability on purpose: a button drawn for people the
+// handler refuses, or withheld from people it admits, is #675's fault.
+$canManageAssets = App::isAdmin() === true || App::can(Capabilities::ASSETS_MANAGE) === true;
 
 // 📋 Fetch event themes
 $themes = [];

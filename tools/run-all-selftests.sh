@@ -165,8 +165,10 @@ expense-edit|tools/expense-edit-selftest.php|selftest_expenseedit|
 my-volunteering|tools/my-volunteering-selftest.php|selftest_myvolunteering|
 gdpr-eraser|tools/gdpr-eraser-selftest.php|selftest_gdpreraser|web:gdpr-eraser
 erasure-review|tools/erasure-review-selftest.php|selftest_erasurereview|
+capabilities|tools/capabilities-selftest.php|selftest_capabilities|
 held-texts|tools/held-texts-selftest.php|selftest_heldtexts|
 setting-limit|tools/setting-limit-selftest.php|selftest_limit|
+retention-caps|tools/retention-caps-selftest.php|selftest_retcaps|
 rate-limit-privacy|tools/rate-limit-privacy-selftest.php|selftest_ratelimit|
 webhook-retention|tools/webhook-retention-selftest.php|selftest_webhookret|
 reserved-words-live|tools/reserved-words-live-selftest.php|selftest_reservedwords|

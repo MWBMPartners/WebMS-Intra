@@ -29,6 +29,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -60,7 +61,7 @@ if ($asset === null) {
 // 🔒 Confidential-asset gate — a non-privileged viewer can't submit a loan
 // request for an asset they aren't allowed to even see. Mirrors item.php's
 // ACCESS MODEL note (canManage OR isResponsibleFor).
-$canManage     = App::isAdmin() === true || App::hasRole('asset_manager') === true;
+$canManage     = App::isAdmin() === true || App::can(Capabilities::ASSETS_MANAGE) === true;
 $isResponsible = $canManage === false && AssetRegister::isResponsibleFor($assetId, $userId);
 $privileged    = $canManage === true || $isResponsible === true;
 if ((int) $asset['isConfidential'] === 1 && $privileged === false) {

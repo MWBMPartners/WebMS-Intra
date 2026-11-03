@@ -11,13 +11,18 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
 
-// 🛡️ Role gate — care_team or admin only.
-if (App::isAdmin() === false && App::hasRole('care_team') === false) {
+// 🛡️ Role gate — an administrator, or whoever this organisation has
+//    pointed "Open the pastoral care register" at (#727). It ships
+//    pointing at the `care_team` role, so this answers exactly what
+//    `App::hasRole('care_team')` answered before. The other three files
+//    here (case.php, case-save.php, visit-save.php) ask the same one.
+if (App::isAdmin() === false && App::can(Capabilities::CARE_REGISTER) === false) {
     http_response_code(403);
     exit('This area is restricted to the care team.');
 }

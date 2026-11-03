@@ -50,6 +50,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -58,7 +59,7 @@ Auth::requireLogin();
 $siteId = Site::id();
 $userId = (int) ($_SESSION['user_id'] ?? 0);
 
-$canManage = App::isAdmin() === true || App::hasRole('asset_manager') === true;
+$canManage = App::isAdmin() === true || App::can(Capabilities::ASSETS_MANAGE) === true;
 
 // 📋 Filters — kept simple, mirrors index.php's own querystring convention.
 $assetIdFilter = (int) ($_GET['assetID'] ?? 0);

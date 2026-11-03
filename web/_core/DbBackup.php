@@ -461,6 +461,53 @@ class DbBackup
      * rows IT can lose are lost to the restore writing over them rather than to
      * a cascade, and readWaitingHeldRows() is what keeps those.
      *
+     * 🚪 `tblCapabilityMap` AND `tblCapabilityMapRole` ARE DELIBERATELY ABSENT
+     *    (#727, decided 3 November 2026), and the decision is written down here
+     *    because an absence looks exactly like an oversight — #706's lesson.
+     *
+     *    WHAT IS LOST, stated plainly. Both carry ON DELETE CASCADE from
+     *    `tblSites`, and neither is on WHOLE_DATABASE_ONLY. So a whole-database
+     *    restore from a snapshot taken BEFORE migration 243 replaces
+     *    `tblSites`, the cascade empties both, and nothing puts them back:
+     *    every organisation's "who can open what" choice is reset to the roles
+     *    each capability SHIPS with. Seventeen other tables behave the same way
+     *    for the same reason, and the older generic warning — "N table(s) that
+     *    are NOT in this snapshot were changed as well" — does fire, so it is
+     *    not silent. It is also not nothing: an organisation that had
+     *    deliberately NARROWED a capability has it widened back to the shipped
+     *    role, which is a quiet widening of access rather than a lock-out. The
+     *    remedy is the roles page, and `Capabilities::holderCount()` makes the
+     *    reset visible there.
+     *
+     *    WHY NOT RESCUE THEM, and this is a reason rather than a preference.
+     *    These two are a PARENT and CHILD joined by `mapID`, which is an
+     *    AUTO_INCREMENT surrogate key. The rescue keeps whole rows as JSON and
+     *    puts them back by their own key, taking a NEW number where a different
+     *    row holds the old one (#697). So a rescued `tblCapabilityMapRole` row
+     *    could come back pointing at a `mapID` that now belongs to a different
+     *    (organisation, capability) pair — which is not "the choice was lost"
+     *    but "a role now opens a door nobody pointed it at". And rescuing the
+     *    PARENT alone is worse still: a map row with no role rows under it is
+     *    exactly how "chosen, and deliberately nobody" is stored, so every
+     *    capability would read as a confirmed EMPTY set and every door would
+     *    shut. Losing the choice fails safe; half-rescuing it does not.
+     *
+     *    If this is ever wanted, the rescue would have to carry the pair
+     *    TOGETHER and rewrite the child's `mapID` to the parent's new one — a
+     *    different feature from keeping independent rows, and it needs its own
+     *    test. Do not add either name to this list on its own.
+     *
+     *    NOT CHANGED, and worth knowing: a ONE-TABLE restore of
+     *    `tblCapabilityMap` is already refused, because `tblCapabilityMapRole`
+     *    points at it and restoreTable() refuses any table another points at.
+     *    `tblCapabilityMapRole` is not refused, for the same reason as every
+     *    other childless table in the schema — nothing points at it. Putting
+     *    its rows back on their own against `mapID`s that have since moved
+     *    would have the mismatch described above, so it belongs on
+     *    WHOLE_DATABASE_ONLY if anybody judges that reachable; it is left alone
+     *    here because that is a change to restore BEHAVIOUR and needs
+     *    `tools/backup-restore-selftest.php` behind it, not a comment.
+     *
      * @var array<string, array{parent: string, column: string, describe: string}>
      */
     public const CASCADE_RESCUE = [

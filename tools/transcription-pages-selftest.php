@@ -2245,6 +2245,125 @@ ok(
     'a notice that is always shown says nothing'
 );
 
+// =============================================================================
+head('T. An organisation\'s own transcript period, over real HTTP (#722)');
+// =============================================================================
+// `tools/retention-caps-selftest.php` proves the RULE, the readers and the lock
+// against a database. What it cannot do is open the page: it reads it as text.
+// Nothing there would notice a page that threw half way through — which in this
+// repository has already produced an HTTP 200 ending in a tidy `</html>` with
+// the form silently missing (#669's `(string)` on a numeric array key), invisible
+// to `php -l` and to every audit script. So this section opens it.
+//
+// It also covers the two gates that are page-level and nowhere else: that an
+// ORDINARY member cannot reach it at all, and that an organisation's OWN
+// administrator can — the whole point of #722 being a separate page from
+// Admin, Transcription, which only a global administrator may save.
+clearSiteSetting(ORG, 'transcription.retentionDays');
+installSetting('transcription.retentionDays', '90');
+
+$tPage = '/admin/settings/transcription';
+$t1    = req($jar['orgadmin'], 'GET', $tPage);
+ok('T01 an organisation\'s own administrator can open the page', $t1['status'] === 200, 'status ' . $t1['status']);
+ok(
+    'T02 and it really rendered: the box, the Save button and a closing tag',
+    str_contains($t1['body'], 'name="transcriptDays"')
+        && str_contains($t1['body'], 'Save for my organisation')
+        && str_contains($t1['body'], '</html>'),
+    'a page that throws half way still answers 200 and still ends in </html> — all three, not one'
+);
+ok(
+    'T03 the box offers at most what the installation allows, and does not offer "for ever"',
+    str_contains($t1['body'], 'max="90"') && str_contains($t1['body'], 'min="1"'),
+    'max/min as drawn: ' . (preg_match('/<input type="number"[^>]*>/', $t1['body'], $m) === 1 ? $m[0] : 'not found')
+);
+ok(
+    'T04 a member who is no administrator is refused',
+    req($jar['member'], 'GET', $tPage)['status'] === 403,
+    'status ' . req($jar['member'], 'GET', $tPage)['status']
+);
+
+// 🚫 A figure above the installation's ceiling: refused, said so, nothing stored.
+$t5 = req($jar['orgadmin'], 'POST', $tPage . '/save', [
+    'csrf_token'      => freshToken($jar['orgadmin']),
+    'transcriptDays'  => '365',
+]);
+$t5page = req($jar['orgadmin'], 'GET', $tPage);
+ok(
+    'T05 365 days is refused, in words naming the 90 the installation allows',
+    str_contains(text($t5page['body']), 'This installation allows at most 90 days'),
+    'status ' . $t5['status'] . '; page said: ' . mb_substr(text($t5page['body']), 0, 220)
+);
+ok(
+    'T06 …and nothing was written for this organisation',
+    one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = ?', 'si',
+        ['transcription.retentionDays', ORG]) === null,
+    'a refusal that writes anyway is the worst of the four shapes #668 names'
+);
+
+// ✅ A shorter figure: stored, and the page then says it is in force.
+req($jar['orgadmin'], 'POST', $tPage . '/save', [
+    'csrf_token'     => freshToken($jar['orgadmin']),
+    'transcriptDays' => '30',
+]);
+$t7row = one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = ?', 'si',
+    ['transcription.retentionDays', ORG]);
+ok(
+    'T07 a shorter period IS stored for this organisation',
+    $t7row !== null && (string) $t7row['settingValue'] === '30',
+    var_export($t7row['settingValue'] ?? null, true)
+);
+$t8 = req($jar['orgadmin'], 'GET', $tPage);
+ok(
+    'T08 …and the page shows 30 in the box, so the next Save does not change it by accident',
+    str_contains($t8['body'], 'value="30"'),
+    'the box as drawn: ' . (preg_match('/<input type="number"[^>]*>/', $t8['body'], $m) === 1 ? $m[0] : 'not found')
+);
+
+// 🧹 An EMPTY box means "follow the installation" and removes the row. The
+//    handler must tell an ABSENT field from an EMPTY one (#677), so both are
+//    tried: empty clears, absent changes nothing.
+req($jar['orgadmin'], 'POST', $tPage . '/save', [
+    'csrf_token'     => freshToken($jar['orgadmin']),
+    'transcriptDays' => '',
+]);
+ok(
+    'T09 an empty box removes the organisation\'s own row',
+    one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = ?', 'si',
+        ['transcription.retentionDays', ORG]) === null,
+    'it should follow the installation again'
+);
+siteSetting(ORG, 'transcription.retentionDays', '30');
+req($jar['orgadmin'], 'POST', $tPage . '/save', [
+    'csrf_token' => freshToken($jar['orgadmin']),
+]);
+$t10row = one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = ?', 'si',
+    ['transcription.retentionDays', ORG]);
+ok(
+    'T10 a request with NO such field changes nothing (a disabled control is not submitted)',
+    $t10row !== null && (string) $t10row['settingValue'] === '30',
+    var_export($t10row['settingValue'] ?? null, true)
+);
+
+// 🚧 #685's notice half, here for the transcript period: a stored figure that
+//    the installation now holds down must be SAID, not silently replaced.
+siteSetting(ORG, 'transcription.retentionDays', '1000');
+$t11 = req($jar['orgadmin'], 'GET', $tPage);
+ok(
+    'T11 a stored figure above the ceiling is reported as held down, not shown as the choice',
+    str_contains(text($t11['body']), 'longer than this installation allows')
+        && str_contains($t11['body'], 'value="90"'),
+    'page said: ' . mb_substr(text($t11['body']), 0, 260)
+);
+// 🚫 And T11 would pass on a page that always says that, so prove it does not.
+siteSetting(ORG, 'transcription.retentionDays', '30');
+ok(
+    'T12 …and with a figure inside the ceiling that sentence is GONE (T11 is not vacuous)',
+    str_contains(text(req($jar['orgadmin'], 'GET', $tPage)['body']), 'longer than this installation allows') === false,
+    'a sentence that is always shown says nothing'
+);
+clearSiteSetting(ORG, 'transcription.retentionDays');
+
 head('P. The server logged no fault');
 
 $errorLog = $child . $sep . 'php-errors.log';
