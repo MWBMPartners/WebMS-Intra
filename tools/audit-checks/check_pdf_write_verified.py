@@ -201,22 +201,57 @@ def main() -> int:
         )
 
     # 3. A temporary name, derived from the real path and not equal to it.
-    #    Matched against the STRIPPED source, and deliberately stopping at the
-    #    opening quote: the stripper masks a string's CONTENTS, so `'.part-'`
-    #    itself can never be matched, but the quote characters survive. Reading
-    #    the raw source here - which an earlier version did - meant a COMMENTED
-    #    OUT copy of this line satisfied the check while the code below it wrote
-    #    straight to the real path. That is #569's fault exactly, and it was
-    #    measured: the gate went green on it.
-    if re.search(r"\$temporary\s*=\s*\$filePath\s*\.\s*'", code) is None:
+    #    Matched against the STRIPPED source. Reading the raw source here -
+    #    which an earlier version did - meant a COMMENTED OUT copy of this line
+    #    satisfied the check while the code below it wrote straight to the real
+    #    path. That is #569's fault exactly, and it was measured: the gate went
+    #    green on it.
+    #
+    #    TWO FORMS ARE ACCEPTED, and the second is why this was widened on
+    #    3 November 2026 (#721). The mark moved into `Pdf::PART_MARK`, so that
+    #    the writer here and the nightly sweep that removes a stray temporary
+    #    cannot drift apart - two literals would be two places to change, and
+    #    the one that mattered would be the sweep, which would simply stop
+    #    finding anything, silently. THIS CHECK WENT RED ON THAT CHANGE, which
+    #    is the gate doing its job, and the widening is deliberate rather than
+    #    a way round it: both forms still require the name to be built FROM
+    #    `$filePath`, which is the whole invariant - the temporary must be in
+    #    the SAME FOLDER, because `rename()` is only atomic within one
+    #    filesystem.
+    #
+    #    The literal form stops at the opening quote on purpose: the stripper
+    #    masks a string's CONTENTS, so `'.part-'` itself can never be matched,
+    #    but the quote characters survive. The constant form names the constant,
+    #    which is not a string and so survives stripping whole.
+    temporary_from_path = (
+        re.search(r"\$temporary\s*=\s*\$filePath\s*\.\s*'", code) is not None
+        or re.search(r"\$temporary\s*=\s*\$filePath\s*\.\s*self::PART_MARK\b", code) is not None
+    )
+    if temporary_from_path is False:
         problems.append(
-            "The temporary name is not `$filePath . '.part-' . ...`. The PDF "
-            "must be written under another name in the SAME folder and renamed "
-            "into place, so that a failed write leaves the file that is already "
-            "there untouched. Writing straight to the real path and removing it "
-            "on failure deleted a working PDF while the database row went on "
-            "naming it."
+            "The temporary name is not built from `$filePath` - neither "
+            "`$filePath . '.part-' . ...` nor `$filePath . self::PART_MARK . ...`. "
+            "The PDF must be written under another name in the SAME folder and "
+            "renamed into place, so that a failed write leaves the file that is "
+            "already there untouched. Writing straight to the real path and "
+            "removing it on failure deleted a working PDF while the database row "
+            "went on naming it."
         )
+
+    # 3b. If the constant form is used, the constant must exist and must carry
+    #     the mark the sweep looks for. Without this, renaming the constant or
+    #     emptying it would leave check 3 green while `sweepPartFiles()`
+    #     silently matched nothing - and a sweep that finds nothing looks
+    #     exactly like a folder with nothing to find.
+    if re.search(r"\$temporary\s*=\s*\$filePath\s*\.\s*self::PART_MARK\b", code) is not None:
+        if re.search(r"const\s+PART_MARK\s*=\s*'[^']+'", raw) is None:
+            problems.append(
+                "The temporary name is built from `self::PART_MARK`, but this "
+                "file declares no non-empty `PART_MARK` constant. The nightly "
+                "sweep in Pdf::sweepPartFiles() looks for that same mark, so an "
+                "empty or missing one makes the sweep match nothing - which "
+                "looks identical to there being nothing to sweep (#721)."
+            )
 
     # 4. The rename must be checked.
     if re.search(

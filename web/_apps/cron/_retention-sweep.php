@@ -55,7 +55,9 @@ declare(strict_types=1);
 //
 //   App, Logger, Site, Giving, GivingRetention, GdprEraser, AnonymousCheckins,
 //   InstallationSettings -> SettingLimit -> WebhookRetention (#713),
-//   InstallationSettings -> SettingLimit -> TranscriptRetention (#714)
+//   InstallationSettings -> SettingLimit -> TranscriptRetention (#714),
+//   Pdf (#721 — it has no dependencies of its own; dompdf is only loaded by
+//   create(), and sweepPartFiles() never reaches it)
 //
 // Adding a class here without adding it there stops that test dead at the first
 // line that mentions it. That happened twice in one session, which is why the
@@ -67,6 +69,7 @@ use Portal\Core\App;
 use Portal\Core\GdprEraser;
 use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
+use Portal\Core\Pdf;
 use Portal\Core\TranscriptRetention;
 use Portal\Core\WebhookRetention;
 
@@ -816,6 +819,57 @@ function run_transcript_sweep(): int
     return $deleted;
 }
 
+/**
+ * 🧹 Remove part-written PDFs a killed process left behind (#721).
+ *
+ * `Pdf::writeOrWhyNot()` writes under a temporary name and renames it into
+ * place (#711), so a process killed in between leaves a `.part-…` file. Before
+ * this nothing swept them and they accumulated for ever.
+ *
+ * ONE HOUR is the owner's choice (3 November 2026) and the margin is the point:
+ * a statement PDF is written in well under a second, so nothing in flight can
+ * be caught. `Pdf::sweepPartFiles()` holds the walk and is the ONE place such a
+ * file is removed; this function only decides WHERE and HOW OLD.
+ *
+ * ⚠️ THIS IS HOUSEKEEPING, NOT THE PRIVACY FIX, and the difference matters. A
+ *    stray statement holds the donor's name and home address. What reaches it
+ *    on an erasure request is TWO things together: the widened glob in
+ *    `GdprEraser::statementFilesOf()`, and `statementFileIsKept()` refusing to
+ *    treat a part-written file as tax evidence. The glob alone was not enough —
+ *    it found the file and the kept test then KEPT it, and told the
+ *    administrator so. Both land the moment the request runs, not at the next
+ *    nightly sweep. Do not let this function be read as what makes an erasure
+ *    complete.
+ *
+ * `_uploads` is passed as the root, but the sweep does NOT walk all of it:
+ * `Pdf::PART_FOLDERS` is the one list of folders it may touch, and `documents`
+ * and `recordings` are deliberately absent. The first version of this did sweep
+ * everything, and an independent check measured a member's own upload being
+ * deleted an hour after they made it — the two upload pages take the stored
+ * file's extension straight from the client filename, so `report.part-x` became
+ * `20261103_082700_aabbccdd.part-x` and matched. The database row survived, so
+ * the portal went on offering a file that was gone.
+ *
+ * @return array{removed:int,left:int}
+ */
+function run_part_file_sweep(): array
+{
+    $root = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads';
+
+    // 🛡️ A fault here must never stop the rest of the nightly job: this is the
+    //    least important thing it does, and the clear-outs above it hold
+    //    personal data to a deadline.
+    try {
+        return Pdf::sweepPartFiles($root, 3600);
+    } catch (\Throwable $e) {
+        // The fault's own words are not logged: a path can name a person
+        // (a statement's file name carries a donor's account number).
+        error_log('[WebMS-Intra] retention sweep: the part-written PDF sweep could not run.');
+
+        return ['removed' => 0, 'left' => 0];
+    }
+}
+
 function run_retention_sweep(): array
 {
     $activityDays = (int) (App::settings('audit.retentionDays')  ?? '365');
@@ -957,6 +1011,7 @@ function run_retention_sweep(): array
 
     $webhookPayloadsCleared = run_webhook_payload_sweep();
     $transcriptsDeleted    = run_transcript_sweep();
+    $partFiles             = run_part_file_sweep();
 
     return [
         'activityDeleted'      => $activityDeleted,
@@ -991,6 +1046,14 @@ function run_retention_sweep(): array
         //    totalDeleted — unlike every figure above it, which empties rows
         //    that remain.
         'transcriptsDeleted'   => $transcriptsDeleted,
+        // 🧹 Part-written PDFs a killed process left behind (#721). FILES, not
+        //    rows, so NOT added to totalDeleted — that figure is what somebody
+        //    reads to work out what happened to the database, and mixing files
+        //    into it would make it mean nothing. `partFilesLeft` is files that
+        //    matched and would not delete, which is a permissions problem and
+        //    is reported rather than hidden.
+        'partFilesRemoved'     => $partFiles['removed'],
+        'partFilesLeft'        => $partFiles['left'],
         'totalDeleted'         => $activityDeleted + $errorsDeleted + $registrationsDeleted
                                 + $transcriptsDeleted,
     ];

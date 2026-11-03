@@ -2442,8 +2442,21 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     own timer — with the honest condition stated, that the sweep is a scheduled job a customer must set up.
     **NOT reached, each recorded rather than forced:** a salvation card's `prayerRequest` (nothing on the card says
     whose it is) and a room booking's text, which `GdprEraser`'s own guard refuses because `bookedByID` is in
-    `ACTOR_COLUMNS` — **the owner decided on 3 November that it IS the subject, so #723 moves it to `LINK_COLUMNS`;
-    `approvedByID` STAYS an actor column.** A case-by-case review role is #724, built next. **Two lessons from the
+    `ACTOR_COLUMNS` — **#723 IS DONE (3 November 2026): `bookedByID` has LEFT `ACTOR_COLUMNS`** on the owner's decision that a booking is
+    made BY the person it is about, so `purpose` is emptied. **BE EXACT: `purpose` AND NOTHING ELSE.**
+    `tblResourceBooking.notes` is ALSO the booker's own words — `_apps/resources/book.php` is its only writer and
+    reads `$_POST['notes']` from the booker's own form on the same row — and the catalogue claimed it was "the
+    organisation's own note … rather than anything the booker wrote", which was FALSE; the owner was told that and
+    chose to KEEP it, so the reason is now that decision. And `declineReason` is written by NOTHING (the decline
+    branch sets only status, approver and approved-at), so its place in `nullCols` can never match: the limit is
+    recorded in the INSTRUCTION's reason and not in `notEmptiedHere`, because the #635 check fails a column
+    explained as not-emptied while an instruction empties it — the two mechanisms cannot both describe one column.
+    #708's precedent. **`approvedByID` STAYS an actor column, and that pair is the whole point of the two lists** —
+    emptying text on an approver's number is a blanket `= NULL` over every booking they approved. The guard was NOT
+    weakened; the classification was the fault. **The eraser test now holds a booking somebody ELSE made and this
+    person only APPROVED, and without it the reclassification could have been widened to both columns with every
+    check still passing** (planted). No migration: both columns were already nullable.
+    A case-by-case review role is #724, built next. **Two lessons from the
     independent check.** `prayer-requests/index.php` printed `$req['subject']` with NO cast, twice, and the
     congregation feed is not filtered by submitter — so the page would really have thrown
     `htmlspecialchars(): Argument #1 must be of type string, null given`, mid-render, giving an HTTP 200 ending in
@@ -2453,6 +2466,60 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     hard gates green. `MUST_BE_EMPTIED` in `gdpr-eraser-selftest.php` exists for exactly that and its own comment
     says so; #715 had added four columns to the instructions and not to the list.
     *(`.claude/CLAUDE.md` → the #715 bullet.)*
+
+41. **A part-written PDF is reached by an erasure and swept (#721); a part-written upload is never recorded
+    (#720).** `Pdf::PART_MARK` is the ONE place the temporary mark is named — the writer builds the name from it and
+    `Pdf::sweepPartFiles()` looks for it, so two literals would be two places to change and **the half that broke
+    would be the SWEEP**, which would simply stop finding anything: no error, no log line, and a folder with nothing
+    to sweep looks identical. The hard gate `check_pdf_write_verified.py` WENT RED on that change, which is the gate
+    working; it accepts the constant form now AND fails when the constant is missing or empty, and both forms still
+    require the name to be built FROM `$filePath` (the temporary must be in the SAME folder — `rename()` is only
+    atomic within one filesystem). **#721 was a cost of #711's own fix, recorded at the time:** a process killed
+    between the write and the rename leaves `statement-7-2026.pdf.part-…`, and the eraser's glob was
+    `statement-<donorId>-*.pdf`, which does not match it — a giving statement holds the donor's name, home address
+    and every gift. **Before #711 the same crash left a TRUNCATED `…-2026.pdf`, which DID match and was erased**THE PRIVACY HALF TOOK TWO CHANGES AND THE GLOB ALONE WAS NOT ENOUGH:** widening it made the erasure FIND the file
+    and `statementFileIsKept()` then KEPT it — "every gift" answers kept for anything, and under "receipted only"
+    the `-4` chop for `.pdf` left an unparseable period so the "no period means keep" fallback applied to rubble;
+    measured, the genuine statement came back NOT kept and the part file KEPT, and the step then COUNTED it and told
+    the administrator it was tax evidence. A file carrying `PART_MARK` is a write that never finished, so it is
+    refused before the scope is looked at. **Nothing caught it because the test world never wrote a kept-donor row
+    for the erased person, and the proof was inside the test** — its own fixture period does not parse either, so if
+    that branch had run the EXISTING check would already have failed. **AND THE SWEEP DELETED A MEMBER'S OWN
+    UPLOAD:** the first version walked all of `_uploads` for any name CONTAINING the mark, under a docblock saying
+    "nothing else uses this mark today" — false, because `_apps/documents/upload.php` and
+    `_apps/recordings/upload.php` take the stored extension STRAIGHT FROM THE CLIENT FILENAME, so `report.part-x`
+    was stored as `…aabbccdd.part-x` and deleted an hour later while the row survived and the portal went on
+    offering it. **`Pdf::PART_FOLDERS` is the ONE list of folders it may touch (the four `Pdf::create()` writes to;
+    `documents` and `recordings` DELIBERATELY ABSENT) AND the name must END with the mark plus exactly twelve hex
+    characters** — the owner chose both, because this method deletes and a one-condition guard rests on nobody
+    editing that condition: removing the name test alone left all 31 checks green while a day-old statement, an
+    expense PDF, a document and a recording all went. Symbolic links are refused TWO ways, both needed (no
+    `FOLLOW_SYMLINKS` for a linked FOLDER, `isLink()` for a linked FILE), and `CATCH_GET_CHILD` is there because one
+    unreadable subfolder otherwise makes the walk throw and the sweep remove nothing. **FOUR of that section's
+    checks could not fail:** the "real PDF left alone" fixture was never aged so the age guard did the mark test's
+    work; the symlink check planted a link to a FILE, which `isLink()` skips whatever the flags are, so
+    `FOLLOW_SYMLINKS` passed 31/31; and nothing exercised the folder list or an unreadable folder. **Never describe
+    the sweep as what makes an erasure complete** — a request run between the crash and the next sweep would still
+    miss the file.
+    ONE HOUR is the owner's choice (3 November 2026) and
+    **the check that matters is the one that must NOT fire**: section H of `pdf-write-selftest.php` gives the sweep a
+    file written THIS SECOND and requires it to survive, because a sweep that took a write in flight would be worse
+    than the litter it removes. A symbolic link is NOT followed: the method deletes what it finds. **#720 is #711's
+    fault in a second file:** the documents API's base64 branch tested `file_put_contents(...) !== false`, which
+    accepts a SHORT COUNT, so a part-written document got a `tblDocuments` row and was offered for download. The
+    multipart branch was already right (`move_uploaded_file()` answers a boolean), and **the two sharing one
+    `$written` variable is how the wrong test looked like the right one** — they are judged separately now. It does
+    NOT need temp-and-rename, checked rather than assumed: `$storedFilename` is `bin2hex(random_bytes(16))` plus an
+    allowlisted extension, fresh every request, and the only other writer of that folder always has underscores in
+    its names — **if stored filenames ever stop being freshly generated, that reasoning goes with them.** No
+    behavioural test is possible (a short write needs a quota, the page refuses anything but an authenticated POST,
+    and the basename is a fixed 36 characters so the long-name trick is unavailable), so the guard is static and
+    **the guard is itself tested**: fifteen plants, each required to be caught by the expected complaint AND BY NO
+    OTHER, with one case that must stay GREEN (a closing brace inside a string, because a brace walk that cannot
+    step over literals cries wolf). Both are hard gates in `pr-security.yml` rather than left to the pre-push glob
+    (#646). Open: **#725** (nothing exercises the documents API over HTTP at all) and **#726** (whether
+    `move_uploaded_file()` can report success after a partial write — not established either way).
+    *(`.claude/CLAUDE.md` → the #721/#720 bullet.)*
 
 ## A few more things worth knowing
 

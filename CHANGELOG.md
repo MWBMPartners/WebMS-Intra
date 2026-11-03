@@ -2,6 +2,148 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — a room booking's stated reason is emptied on an erasure request now (#723)**
+  - **The classification was the fault, not the guard.** `tblResourceBooking.bookedByID` was in
+    **both** `LINK_COLUMNS` and `ACTOR_COLUMNS`, and the coverage test refuses `nullCols` on an actor
+    column — emptying a column on an actor-matched instruction is a blanket `= NULL` over every row it
+    matches, which is how one person's erasure destroys a third party's details. That guard exists
+    because seven tables were once set to delete a whole row on such a column, and it was **not**
+    weakened to get this.
+  - **A booking is made BY the person it is about**, so the owner decided on 3 November 2026 that the
+    booker is the booking's subject. `bookedByID` has left `ACTOR_COLUMNS`; the booker's stated reason
+    for wanting the room (`purpose`) and the note refusing them (`declineReason`) are emptied. The
+    booking itself is kept, with its times, resource and status, because the room's history belongs to
+    the organisation.
+  - **Be exact about what that amounts to, because the first version of this entry was not.** It said
+    "a room booking's own words", and an independent check showed that overstates it twice.
+    **`tblResourceBooking.notes` is ALSO the booker's own words** — `_apps/resources/book.php` is its
+    only writer and reads `$_POST['notes']` from the booker's own form, on the same row in the same
+    request (`grep -rn "tblResourceBooking" web/ --include='*.php' | grep -iE "INSERT|UPDATE "` finds
+    one INSERT there and two UPDATEs that touch only status, approver and approved-at). The catalogue
+    said it was "the organisation's own note … rather than anything the booker wrote", which was
+    simply false. **The owner was told exactly that on 3 November 2026 and chose to KEEP it**, so the
+    catalogue now gives that as the reason rather than a description of the column that is untrue.
+    And **`declineReason` is written by NOTHING** — the decline branch sets only status, approver and
+    approved-at, and there is no form field for it — so its place in `nullCols` can never match. The
+    limit is recorded in the instruction's own reason, which is the #708 precedent, rather than the
+    column being dropped: if a decline reason is ever stored, the erasure already reaches it. **So
+    what #723 actually empties of the booker's own words is `purpose`.**
+  - **`approvedByID` STAYS an actor column, and that pair is the whole point of the two lists.**
+    Emptying text on an approver's number would wipe the purpose of every booking they ever approved.
+    The eraser self-test now holds a booking somebody **else** made and this person only approved:
+    without it the reclassification could have been widened to both columns and every check would
+    still have passed. Planted exactly that — it fails one check.
+  - Rejected, so nobody re-opens it: a separate "who it is for" column. It models reality better — a
+    booking can be made on somebody else's behalf — but it is a schema change plus every writer and
+    reader, and nothing writes a booking for anybody but its maker. No migration was needed: both
+    columns were already nullable.
+- **Fixed — a part-written PDF an interrupted run left behind is reached by an erasure, and swept
+  (#721)**
+  - **This was a cost of #711's own fix, recorded at the time.** `Pdf::writeOrWhyNot()` writes under a
+    temporary name and renames it into place, which is what stops a failed write destroying a good
+    file. A process killed in between leaves `statement-7-2026.pdf.part-a1b2c3d4e5f6` behind, and
+    `GdprEraser`'s glob was `statement-<donorId>-*.pdf` — which does **not** match it. A giving
+    statement holds the donor's name, home address and every gift they have made.
+  - **Before #711 the same crash left a truncated `statement-7-2026.pdf`, which DID match and was
+    erased**, so this was a narrow regression in erasure reach taken in exchange for not destroying
+    good files. One statement wide, needing a process killed inside a window of microseconds —
+    unlikely rather than impossible, and exactly the kind of file an erasure exists to remove.
+  - **The privacy half took TWO changes, not one, and an independent check is what found that.**
+    Widening the glob to `*.pdf*` made the erasure **find** the stray file — and
+    `statementFileIsKept()` then **kept it**, two ways round: with the keep set to "every gift" it
+    answers "kept" for anything; and with it set to "receipted gifts only", the `-4` chop for `.pdf`
+    left the period as `2026-01-01_2026-12-31.pdf.part-…`, which does not parse, so the "a name that
+    gives no period is kept" fallback applied — to a file that is not a statement at all. Measured on
+    the real method: the genuine statement was *not* kept and the rubble *was*. Worse, the step then
+    **counted it and told the administrator it had been kept with the donor's giving records as tax
+    evidence.** A file carrying `Pdf::PART_MARK` is a write that never finished, so it is evidence of
+    nothing and is now always deleted — tested first, before the scope. **Nothing caught this because
+    the test world never wrote a kept-donor row for the erased person**, so that whole branch was
+    dead; the proof was inside the test, whose own fixture period does not parse either.
+  - `Pdf::sweepPartFiles()` removes stray temporaries older than an hour in the nightly job, so they
+    stop accumulating. The glob is the half with a
+    privacy consequence; the sweep only wasted disk. **Never describe the sweep as what makes an
+    erasure complete** — an erasure between the crash and the next sweep would otherwise still miss
+    the file, which is the whole reason the glob was widened too.
+  - **One hour** is the owner's choice. A statement PDF is written in well under a second, so the
+    margin is some thousands of times over and no write in flight can be caught; the job runs nightly,
+    so a shorter age buys nothing. The test gives it a file written **this second** and requires it to
+    survive — that is the check that matters, because a sweep that took a live write would be worse
+    than the litter it removes.
+  - **`Pdf::PART_MARK` is the ONE place the mark is named**, because the writer and the sweep have to
+    agree: two literals would be two places to change, and the one that mattered would be the sweep —
+    it would simply stop finding anything, with no error, no log line and no symptom. The hard gate
+    `check_pdf_write_verified.py` **went red on that change**, which is the gate doing its job; it now
+    accepts the constant form and additionally fails when the constant is missing or empty.
+  - **THE SWEEP DELETED A MEMBER'S OWN UPLOAD, and that was the worst thing in this package.** The
+    first version swept the whole of `_uploads` for any name *containing* the mark, under a docblock
+    saying "nothing else uses this mark today" — the reassurance, and false.
+    `_apps/documents/upload.php` and `_apps/recordings/upload.php` take the stored file's extension
+    **straight from the client filename** with no allow-list, and
+    `pathinfo('report.part-x', PATHINFO_EXTENSION)` is `part-x`, so a member who uploaded
+    `report.part-x` had it stored as `20261103_082700_aabbccdd.part-x` and **deleted an hour later** —
+    while the database row survived, so the portal went on offering a file that was gone, with nothing
+    logged. `.part` is what download managers call an unfinished file, so an accident was as likely as
+    an attack.
+  - **The owner chose both guards (3 November 2026) and neither is enough alone.**
+    `Pdf::PART_FOLDERS` is the one list of folders the sweep may touch — the four
+    `Pdf::create()` really writes to, read one by one; `documents` and `recordings` are deliberately
+    absent. And the name must **end** with the mark plus exactly twelve hexadecimal characters, the
+    shape the writer builds, so rubble like `notes.part-x` inside a swept folder survives too. Belt
+    and braces on purpose, because this method deletes and a one-condition guard rests on nobody
+    editing that condition.
+  - Symbolic links are **not** followed, in two ways that are both needed: the iterator is built
+    without `FOLLOW_SYMLINKS`, so a symlinked **folder** is not recursed into, and `isLink()` skips a
+    symlinked **file**. Either alone leaves a way out of the root. And `CATCH_GET_CHILD` is there
+    because without it one unreadable subfolder makes the whole walk throw and the sweep removes
+    nothing at all — measured.
+  - **FOUR of section H's checks could not fail, and planting found every one.** The "it leaves a real
+    PDF alone" fixture was created and never aged, so the age guard was doing the mark test's work —
+    removing the mark test left all 31 checks green while a day-old giving statement, an expense PDF,
+    a document and a recording were all deleted. The symlink check planted a link to a *file*, which
+    `isLink()` skips whatever the iterator flags are, so adding `FOLLOW_SYMLINKS` passed. Nothing
+    exercised the folder list, and nothing exercised an unreadable folder. All four are pinned now,
+    and each plant fails the check named for it.
+  - **And the whole suite caught a stale pin that no test in this package could.**
+    `tools/erasure-pages-selftest.php` found the booking on the room page and in the approvals queue
+    by searching for **the booker's own words** — the very text #723 now erases, so finding them would
+    mean the erasure had failed. The CODE was right: `resources/resource.php` prints
+    `$b['purpose'] ?? '(no purpose given)'`, so the slot is still listed and the room does not look
+    free, and `approvals.php` simply omits its "Purpose:" line while the row still awaits a decision.
+    Both checks now pin what they are NAMED for and fail in both directions: red if the booking
+    vanishes, red if the booker's words come back. Nothing in this package renders those pages, which
+    is exactly why the suite runs whole (#695).
+  - Tests: sections H and I of `tools/pdf-write-selftest.php` (31 checks) and the decisive behavioural
+    one in `tools/gdpr-eraser-selftest.php` — a part-written statement belonging to the erased donor
+    goes, and the control person's stays. Planting the old glob back fails that one check.
+- **Fixed — a base64-uploaded document is recorded only when every byte of it was stored (#720)**
+  - `web/_apps/documents/api/create.php` tested `file_put_contents(...) !== false`, which **accepts a
+    short count**, so on a full disk or over a hosting quota a part-written document got a
+    `tblDocuments` row and was offered for download with nothing reporting a problem. It now compares
+    the byte count, removes the part-written file, and refuses **before** the INSERT.
+  - **The multipart branch beside it was already right** — `move_uploaded_file()` answers a boolean and
+    has no count to compare — and is deliberately unchanged. The two sharing one `$written` variable is
+    how the wrong test looked like the right one; they are judged separately now and both feed one
+    reason string, so neither can be "tidied" into the other's shape.
+  - **It does NOT need the temporary-name-and-rename shape, and that was checked rather than assumed.**
+    `$storedFilename` is `bin2hex(random_bytes(16))` plus an allowlisted extension — fresh every
+    request, never from the client — and the only other writer of `_uploads/documents/` is the legacy
+    `_apps/documents/upload.php`, whose names always contain underscores and so can never equal a
+    32-character pure-hex name. A failure therefore has nothing to destroy. **If stored filenames ever
+    stop being freshly generated, that reasoning goes with them.**
+  - **No behavioural test is possible here and the guard is static for stated reasons:** a genuine short
+    write needs a quota or a tiny filesystem, the page refuses anything but an authenticated POST in
+    its first statements, and its destination basename is a fixed 36 characters, so the long-name trick
+    `pdf-write-selftest.php` uses is unavailable. `check_document_write_verified.py` pins whole
+    conditions instead — including that the refusal comes **before** the INSERT, which is the one thing
+    every other pin stays green through — and `tools/document-write-check-selftest.py` plants fifteen
+    weakenings into the real file, requiring each to be caught by the expected complaint **and by no
+    other**. One case must stay green on purpose: a closing brace inside a string in the gate's body,
+    because a brace walk that cannot step over string literals cries wolf on correct code.
+  - Both are wired into `pr-security.yml` as hard gates, rather than left to the pre-push hook's glob:
+    a proof that runs once is not a guard (#646). Raised and not built: **#725** (there is no
+    behavioural test of the documents API at all) and **#726** (whether `move_uploaded_file()` can
+    report success after a partial write — not established either way, and the comment says so).
 - **Changed — a person's own words are emptied on an erasure request, and the fifteen free-text
   columns each have a decision (#715)**
   - **Emptied now, on the owner's decision of 3 November 2026:** a prayer request's `subject` and

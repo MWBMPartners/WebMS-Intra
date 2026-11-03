@@ -34,11 +34,19 @@
  *      derived from the SNIFFED mime, never from the client filename.
  *   4. Enforces a hard size cap (`documents.api.maxUploadBytes` setting).
  *
+ * A DOCUMENT THAT WAS NOT WRITTEN IN FULL IS NEVER RECORDED (#720). The base64
+ * branch used to test `file_put_contents(...) !== false`, which accepts a SHORT
+ * count, so a part-written document got a `tblDocuments` row and was offered
+ * for download. The reasoning, and why this file does NOT need the
+ * temporary-name-and-rename shape that `Pdf::writeOrWhyNot()` does, is beside
+ * the write itself. Guards: `tools/audit-checks/check_document_write_verified.py`
+ * and `tools/document-write-check-selftest.py`.
+ *
  * @package   Portal\API\Documents
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.1.0
+ * @version   0.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/323
  * -----------------------------------------------------------------------------
  */
@@ -230,13 +238,119 @@ if (is_dir($uploadDir) === false) {
 }
 $destPath = $uploadDir . DIRECTORY_SEPARATOR . $storedFilename;
 
+// -----------------------------------------------------------------------------
+// 🪤 THE TWO BRANCHES ANSWER THE SAME QUESTION IN TWO DIFFERENT WAYS (#720)
+// -----------------------------------------------------------------------------
+// They used to share one `$written` boolean, and that is how the fault hid:
+// the multipart test was right, the base64 test was wrong, and they looked
+// alike. The two answers are different KINDS of thing, so they are judged
+// separately now and both feed one reason.
+//
+//   multipart — `move_uploaded_file()` answers a BOOLEAN. There is no byte
+//   count to compare, so `=== false` is the right and only test. This branch
+//   was already correct and is deliberately unchanged. What was NOT
+//   established here, so that nobody reads more into it: whether PHP's own
+//   copy fallback inside `move_uploaded_file()` can ever report success after
+//   writing only part of the file. The clean-up below covers the file it
+//   leaves behind on a reported FAILURE either way.
+//
+//   base64 — `file_put_contents()` answers THE NUMBER OF BYTES IT WROTE.
+//   `!== false` therefore accepted a SHORT count: on a full disk or over a
+//   hosting quota part of the document was written, this test said "written",
+//   and the INSERT below recorded it as stored and offered it for download,
+//   with nothing anywhere reporting a problem. That is #711's fault in this
+//   file, on a separate code path. Compare the count.
+//
+// `strlen($binary)` rather than `$fileSize`, although `$fileSize` is set to
+// exactly `strlen($binary)` above and nothing in between touches `$binary`:
+// written this way the comparison stands on its own and cannot be loosened by
+// an edit far up the page. `$fileSize` is what goes in the row.
+//
+// -----------------------------------------------------------------------------
+// WHY THIS WRITES IN PLACE, where Pdf::writeOrWhyNot() writes under a
+// temporary name and renames (#711) — checked rather than assumed
+// -----------------------------------------------------------------------------
+// That shape exists to stop a failed write destroying a document that is
+// already there, because the PDF paths use STABLE names (`claim_<id>.pdf`,
+// `statement-<donor>-<period>.pdf`) recorded in the database. Here the
+// destination CANNOT name an existing document:
+//
+//   • `$storedFilename` above is `bin2hex(random_bytes(16))` plus an extension
+//     taken from the sniffed-MIME allowlist — 32 hex characters from 16
+//     cryptographically random bytes, made fresh on every request, never read
+//     from the client or from the database.
+//   • The only other writer of `_uploads/documents/` is the legacy form
+//     handler `_apps/documents/upload.php`, whose names are
+//     `date('Ymd_His') . '_' . bin2hex(random_bytes(4))`. That form always
+//     contains underscores, so it can never equal a 32-character pure-hex
+//     name.
+//   • `_apps/documents/download.php` serves whatever `tblDocuments.filePath`
+//     names and invents no filename of its own.
+//   • Those are the only two writers and the only reader of THIS folder.
+//     Established with the narrow command, which is the one that answers the
+//     question:
+//         grep -rn "_uploads' . DIRECTORY_SEPARATOR . 'documents'" web/ --include='*.php'
+//
+//     ⚠️ AN EARLIER VERSION OF THIS NOTE LISTED THE OTHER UPLOAD FOLDERS AS
+//        "`assets`, `noticeboard` and `calendar`" and an independent check
+//        found that wrong: `grep -rn _uploads web --include="*.php"` also
+//        lists `pdfs`, `giving`, `expenses`, `mail-queue`, `photos`,
+//        `recordings`, `venues` and `documents`. The CONCLUSION was right and
+//        the enumeration offered as its evidence was not — which is the shape
+//        this repository keeps being bitten by, so the wrong list is deleted
+//        rather than corrected: nothing here needs a list of every folder.
+//
+// So a failure here has nothing to destroy, which is also what makes the
+// clean-up below safe — the file it removes is certainly the one this request
+// just part-wrote, never somebody's existing document. Writing in place keeps
+// the cost of the other shape away too: a `.part-…` file left by a process
+// killed between write and rename is swept by nothing and cannot be reached by
+// an erasure (#721). DO NOT "IMPROVE" THIS INTO A TEMPORARY-AND-RENAME, and do
+// not take the `@unlink($destPath)` calls after the INSERT below for the same
+// fault either: all three are safe for the one reason above, and only for it.
+// If stored filenames ever stop being freshly generated, this reasoning goes
+// with them.
+$whyNotWritten = '';
 if ($isMultipart === true) {
-    $written = move_uploaded_file($_FILES['file']['tmp_name'], $destPath);
+    if (move_uploaded_file($_FILES['file']['tmp_name'], $destPath) === false) {
+        $whyNotWritten = 'the uploaded file could not be moved into place';
+    }
 } else {
-    $written = file_put_contents($destPath, $binary, LOCK_EX) !== false;
+    $written = file_put_contents($destPath, $binary, LOCK_EX);
+    if ($written !== strlen($binary)) {
+        $whyNotWritten = 'it was not written in full (' . strlen($binary) . ' bytes to write, '
+            . ($written === false ? 'the write failed outright' : $written . ' written') . ')';
+    }
 }
-if ($written === false) {
-    Logger::errorPlatform('PHP', 'Error', 'API_DOC_CREATE_WRITE', 'Failed to persist uploaded file', $destPath);
+if ($whyNotWritten !== '') {
+    // 🧹 Nothing part-written may be left on disk. Same reasoning as
+    //    `Pdf::tidyAway()` (#711), including the honesty of it: say the file
+    //    was removed ONLY when there was one to remove, because telling
+    //    whoever reads `tblErrors` that a stub was tidied away when the write
+    //    never created one sends them looking in the wrong place. `is_file()`
+    //    here decides whether there is anything to delete — it is NOT the
+    //    success test, which is the reason string above; judging success by
+    //    `is_file()` is #711's original fault, because it is true for a file
+    //    that exists and holds nothing.
+    //    `clearstatcache()` first: PHP remembers the answers to file tests
+    //    within one request, and the call that just failed may have asked
+    //    about this very path.
+    clearstatcache(true, $destPath);
+    if (is_file($destPath) === true) {
+        $whyNotWritten .= unlink($destPath) === true
+            ? ', and the part-written file was removed'
+            : ', and the part-written file COULD NOT BE REMOVED and is still on disk'
+                . ' (it is safe to delete)';
+    }
+    // The stored filename is server-generated random hex and the folder is
+    // ours, so neither names a person; the client's own filename is NOT logged.
+    Logger::errorPlatform(
+        'PHP',
+        'Error',
+        'API_DOC_CREATE_WRITE',
+        'An uploaded document could not be stored in full, so it was not recorded',
+        'Intended file: ' . $destPath . ' — ' . $whyNotWritten
+    );
     ApiResponse::error('Failed to save uploaded file', 500);
 }
 

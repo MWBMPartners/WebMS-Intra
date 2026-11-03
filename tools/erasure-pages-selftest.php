@@ -868,7 +868,12 @@ ok('other people\'s records are all still in the database, each with only Mel\'s
         'note'     => ['summary' => 'Rang Vera; she will come on Sunday.', 'contactedByID' => null],
         'visit'    => ['notes' => 'Visited Cal at home; in good spirits.', 'visitedByID' => null],
         'approval' => ['decision' => 'Approved', 'comments' => 'Receipts all present.', 'userID' => null],
-        'booking'  => ['purpose' => 'Welcome team supper', 'status' => 'pending', 'bookedByID' => null],
+        // 🔁 CHANGED BY #723 (3 November 2026): the booker's stated reason is
+        //    emptied now. It used to expect 'Welcome team supper' to survive —
+        //    `bookedByID` was in ACTOR_COLUMNS, so the guard refused nullCols
+        //    on it, and the owner's decision was that the booker is the row's
+        //    SUBJECT. The booking itself, its times and its status are kept.
+        'booking'  => ['purpose' => null, 'status' => 'pending', 'bookedByID' => null],
         'giftAid'  => ['donorID' => CAL, 'address' => '1 Made-up Road'],
     ], json_encode($kept));
 $now = $pages();
@@ -878,10 +883,29 @@ ok('the PASTORAL page still shows the visit and its notes, the same way',
     str_contains($now['visit'], 'Visited Cal at home; in good spirits.') && str_contains($now['visit'], 'Somebody no longer recorded') && str_contains($now['visit'], 'Mel Member') === false, mb_substr($now['visit'], 0, 500));
 ok('the EXPENSE CLAIM\'s page still shows the approval line, with "Approver\'s details removed" where Mel\'s name was',
     str_contains($now['claim'], 'Receipts all present.') && str_contains($now['claim'], 'Approver\'s details removed') && str_contains($now['claim'], 'Mel Member') === false, mb_substr($now['claim'], 0, 500));
+// 🔁 CHANGED BY #723, AND THE POINT OF THE CHECK IS NOW CLEARER. It used to
+//    look for 'Welcome team supper', which was the booker's own words — those
+//    are emptied now, so finding them would mean the erasure had failed. What
+//    must still be true is the thing the check is NAMED for: the room does not
+//    look free. `resources/resource.php` prints `$b['purpose'] ?? '(no purpose
+//    given)'`, so the slot is still listed with that label, which is what this
+//    now requires. The suite caught the stale expectation; no test in the #723
+//    package could, because none of them renders this page.
 ok('the ROOM\'s page still shows the booking, so the room does not look free for a time it is booked for',
-    str_contains($now['room'], 'Welcome team supper') && str_contains($now['room'], 'Somebody no longer recorded') && str_contains($now['room'], 'Mel Member') === false, mb_substr($now['room'], 0, 500));
-ok('the booking is still in the administrator\'s approvals queue, waiting for a decision',
-    str_contains($now['bookings'], 'Welcome team supper') && str_contains($now['bookings'], 'Requested by somebody no longer recorded'), mb_substr($now['bookings'], 0, 500));
+    str_contains($now['room'], '(no purpose given)') && str_contains($now['room'], 'Somebody no longer recorded')
+    && str_contains($now['room'], 'Welcome team supper') === false && str_contains($now['room'], 'Mel Member') === false,
+    mb_substr($now['room'], 0, 500));
+// 🔁 CHANGED BY #723 for the same reason. `resources/approvals.php` prints its
+//    "Purpose:" paragraph only when the column is not empty, so an emptied
+//    booking has no purpose line at all — the ROW is still there and still
+//    awaiting a decision, which is what this check is for. Pinned by the
+//    requester sentence, which survives, AND by the purpose being absent, so
+//    the check fails in both directions: if the booking vanished, and if the
+//    booker's words came back.
+ok('the booking is still in the administrator\'s approvals queue, waiting for a decision, with no trace of what they wrote',
+    str_contains($now['bookings'], 'Requested by somebody no longer recorded')
+    && str_contains($now['bookings'], 'Welcome team supper') === false
+    && str_contains($now['bookings'], 'Purpose:') === false, mb_substr($now['bookings'], 0, 500));
 $back = $signIn('mel', 'mel-again');
 ok('Mel cannot sign in again', $back['status'] !== 302 || str_contains($back['location'], 'login') === true, 'HTTP ' . $back['status'] . ' ' . $back['location']);
 $lines = auditLines($melRequest);

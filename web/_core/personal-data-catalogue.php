@@ -857,20 +857,19 @@ return [
     ],
     'tblResourceBooking' => [
         'decision' => 'unlink',
-        'reason'   => 'Who approved a room or equipment booking. The booking belongs to whoever made it. Deleting it because the approver left would cancel other people\'s bookings.',
+        'reason'   => 'A room or equipment booking. The booking belongs to whoever made it, so on erasure the account link goes and so does the booker\'s stated reason for wanting the room (#723); the booking itself is kept, because the room\'s history belongs to the organisation. Deleting the row because the APPROVER left would cancel other people\'s bookings. Two limits are recorded in notEmptiedHere below: the booker\'s own `notes` are KEPT by decision, and `declineReason` is named by the instruction but nothing writes it.',
         'columns'  => ['notes', 'approvedByID', 'bookedByID', 'purpose', 'declineReason'],
         'notEmptiedHere' => [
-            'purpose' => 'Why somebody wanted the room, in their own words. The owner decided on 3 November '
-                . '2026 that a person\'s own words about themselves should be emptied on request, and it '
-                . 'is NOT done here — the only column that could find the right rows, `bookedByID`, is '
-                . 'classified as "who acted", and the guard against emptying a column on an '
-                . 'actor-matched instruction refuses it. That guard exists because seven tables were '
-                . 'once set to delete a whole row on such a column, and it was not weakened for this. '
-                . 'Whether the booker should count as the booking\'s SUBJECT rather than its actor is '
-                . '#723.',
-            'declineReason' => 'Why the booking was refused, written by whoever refused it. It can describe the person '
-                . 'who asked',
-            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. The organisation\'s record of a room booking. (purpose and declineReason are free text and are named in no entry - #706.)',
+            'notes' => 'KEPT, and this reason was WRONG and is corrected (#723, 3 November 2026). It said the '
+                . 'note was "the organisation\'s own — a caretaker\'s remark about access, a charge to be '
+                . 'made — rather than anything the booker wrote". That is untrue: `_apps/resources/book.php` '
+                . 'is the ONLY writer of this column (grep -rn "tblResourceBooking" web/ | grep -iE '
+                . '"INSERT|UPDATE " finds one INSERT there and two UPDATEs in action.php that touch only '
+                . 'status, approvedByID and approvedAt), and it reads $_POST[\'notes\'] from the booker\'s '
+                . 'own form, on the row whose bookedByID is that booker. So this IS the booker\'s own text, '
+                . 'and it is kept because the owner decided so on 3 November 2026 when told exactly that — '
+                . 'not because it belongs to somebody else. `purpose` IS emptied by the `bookedByID` '
+                . 'instruction in GdprEraser; the difference between the two is a decision, not a principle.',
         ],
     ],
     // 🤝 The next three, and tblTasks and tblVisitor further down, said 'erase'

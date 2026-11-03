@@ -233,9 +233,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                            . ($result['offboardErasuresFailed'] > 0
                                ? ', and ' . $result['offboardErasuresFailed'] . ' could NOT be carried out; '
                                    . 'those requests have been put back for the next run.'
-                               : '.'));
+                               : '.'))
+                   // 🧹 Part-written PDFs (#721). FILES, so its own sentence
+                   //    and never folded into the row figures above — mixing
+                   //    the two is what made the total and the breakdown come
+                   //    apart once already. Said only when there was something
+                   //    to say, because on a healthy installation this is
+                   //    always nothing and a standing "0 files" line trains
+                   //    people to stop reading the message.
+                   . ($result['partFilesRemoved'] > 0 || $result['partFilesLeft'] > 0
+                       ? ' Part-written PDF files left behind by an interrupted run: removed '
+                           . $result['partFilesRemoved']
+                           . ($result['partFilesLeft'] > 0
+                               ? ', and ' . $result['partFilesLeft'] . ' could NOT be removed '
+                                   . '(check the folder\'s permissions under _uploads).'
+                               : '.')
+                       : '');
         // A sweep that could not do part of its work is not a plain success.
-        $flashType = ($result['givingIdentityFailed'] > 0 || $result['offboardErasuresFailed'] > 0)
+        $flashType = ($result['givingIdentityFailed'] > 0 || $result['offboardErasuresFailed'] > 0
+            || $result['partFilesLeft'] > 0)
             ? 'warning'
             : 'success';
     }

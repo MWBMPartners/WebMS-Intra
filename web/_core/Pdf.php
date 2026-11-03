@@ -256,10 +256,18 @@ class Pdf
      *
      * WHAT IT COSTS, since the upsides are easy to list and these are not:
      *   - A process killed between the write and the rename leaves a
-     *     `.part-…` file. Nothing sweeps those, and `GdprEraser`'s glob for a
-     *     donor's statements would not match one, so a killed run could leave a
-     *     donor's name and address in a file an erasure cannot reach. One
-     *     statement wide and unlikely rather than impossible: #721.
+     *     `.part-…` file. BOTH HALVES OF THAT ARE CLOSED NOW (#721, the owner,
+     *     3 November 2026), and they were two separate problems: `GdprEraser`'s
+     *     glob for a donor's statements did not match one, so a killed run
+     *     could leave a donor's name and home address in a file an erasure
+     *     could not reach — the glob is widened AND `statementFileIsKept()`
+     *     now refuses to treat a part-written file as tax evidence, which it
+     *     takes BOTH, because widening the glob alone made the erasure FIND
+     *     the file and then deliberately keep it, telling the administrator so
+     *     (measured by an independent check); and nothing swept them, so they
+     *     accumulated — `sweepPartFiles()` below is called nightly. The
+     *     privacy half was the one that mattered: the housekeeping half only
+     *     wasted disk.
      *   - `rename()` replaces the inode, so a file an administrator had
      *     tightened by hand (say to 0600) comes back at the umask default.
      *     Writing in place kept the old mode. New files are 0644 either way.
@@ -301,7 +309,7 @@ class Pdf
         // 📄 Written under a temporary name IN THE SAME FOLDER, then renamed.
         //    The folder matters: `rename()` is only atomic within one
         //    filesystem, and a temporary directory can be on another.
-        $temporary = $filePath . '.part-' . bin2hex(random_bytes(6));
+        $temporary = $filePath . self::PART_MARK . bin2hex(random_bytes(6));
 
         $written = file_put_contents($temporary, $bytes);
         if ($written !== strlen($bytes)) {
@@ -317,6 +325,164 @@ class Pdf
         }
 
         return '';
+    }
+
+    /**
+     * 🏷️ The mark a part-written file carries, and the ONE place it is named.
+     *
+     * `writeOrWhyNot()` builds a temporary name from it and `sweepPartFiles()`
+     * looks for it. Two literals would be two places to change, and the one
+     * that mattered would be the sweep — it would simply stop finding
+     * anything, silently, which is the shape this repository keeps meeting.
+     */
+    public const PART_MARK = '.part-';
+
+    /**
+     * 📂 The folders `Pdf::create()` writes into, relative to `_uploads`, and
+     *    the ONE list the sweep below is allowed to touch.
+     *
+     * ⚠️ THIS LIST IS WHAT STOPS THE SWEEP DELETING A MEMBER'S OWN UPLOAD, and
+     *    it was added after an independent check measured exactly that
+     *    happening. The first version swept the whole of `_uploads` for any
+     *    name containing `PART_MARK`, under a docblock claiming "nothing else
+     *    uses this mark today". That was the reassurance, and it was false:
+     *    `_apps/documents/upload.php` and `_apps/recordings/upload.php` take
+     *    the stored file's extension STRAIGHT FROM THE CLIENT FILENAME with no
+     *    allow-list, and `pathinfo('report.part-x', PATHINFO_EXTENSION)` is
+     *    `part-x` — so a member who uploaded `report.part-x` had it stored as
+     *    `20261103_082700_aabbccdd.part-x` and DELETED an hour later, while the
+     *    database row survived and the portal went on offering a file that was
+     *    no longer there, with nothing logged. `.part` is what download
+     *    managers call an unfinished file, so an accident was as likely as an
+     *    attack.
+     *
+     *    Every one of the five callers of `Pdf::create()` was read to build
+     *    this, not grepped for: `Giving::renderStatementPdf()` →
+     *    `giving/statements/<siteId>`, `ExpensePdf` → `pdfs`, the two venue
+     *    pages → `venues/tmp`, the asset labels page → `assets/labels`.
+     *    `documents` and `recordings` are DELIBERATELY ABSENT and must stay so.
+     *
+     *    A NEW CALLER WRITING ELSEWHERE IS NOT SWEPT and nothing here will
+     *    notice. That is the right way round: a folder missing from this list
+     *    leaves litter, and a folder wrongly on it deletes somebody's work.
+     */
+    public const PART_FOLDERS = [
+        'giving' . DIRECTORY_SEPARATOR . 'statements',
+        'pdfs',
+        'venues' . DIRECTORY_SEPARATOR . 'tmp',
+        'assets' . DIRECTORY_SEPARATOR . 'labels',
+    ];
+
+    /**
+     * 🧹 Remove part-written PDFs a killed process left behind (#721).
+     *
+     * Walks the folders in `PART_FOLDERS` under `$uploadsRoot` and removes
+     * every file whose name ENDS with `PART_MARK` followed by exactly twelve
+     * hexadecimal characters — the shape `writeOrWhyNot()` builds, and nothing
+     * else — and whose last-changed time is older than `$olderThanSeconds`.
+     * Answers `['removed' => n, 'left' => n]`, `left` being files that matched
+     * and could not be deleted, which is a permissions problem worth reporting
+     * rather than hiding.
+     *
+     * 🛡️ TWO GUARDS, AND NEITHER IS ENOUGH ON ITS OWN (the owner, 3 November
+     *    2026, asked which to use and chose both).
+     *
+     *    The FOLDER list keeps the sweep away from anywhere a member can put a
+     *    file at all. The NAME shape stops rubble inside those folders being
+     *    taken on the strength of a loose match: `str_contains(…, '.part-')`
+     *    would delete `report.part-x`, and a name ending in the mark plus
+     *    twelve hex characters is what this class really writes.
+     *
+     *    Belt and braces on purpose: this method DELETES, and a deletion guard
+     *    that rests on one condition rests on nobody ever editing that
+     *    condition. Removing the name test alone once left all 31 checks of
+     *    `tools/pdf-write-selftest.php` green while a day-old giving statement,
+     *    an expense-claim PDF, an uploaded document and a recording were all
+     *    deleted — measured.
+     *
+     * WHY AN AGE AT ALL, and why one hour (the owner, 3 November 2026).
+     * A live write must never be swept out from under itself. A statement PDF
+     * is written in well under a second, so an hour is a margin of some
+     * thousands of times over. A shorter age buys nothing: the job runs
+     * nightly, so the real delay is a day either way.
+     *
+     * WHAT THIS CANNOT DO, said plainly:
+     *   - It cannot sweep a folder not on `PART_FOLDERS`, by design.
+     *   - It is housekeeping, NOT a privacy guarantee. The privacy half of
+     *     #721 is `GdprEraser::statementFilesOf()`'s widened glob plus
+     *     `statementFileIsKept()` refusing to call a part-written file tax
+     *     evidence, which together reach such a file the moment an erasure
+     *     runs rather than at the next sweep. Never describe this method as
+     *     what makes an erasure complete.
+     *   - A file whose mtime cannot be read is LEFT ALONE, which is the safe
+     *     direction but means `['removed' => 0, 'left' => 0]` has more than one
+     *     cause: nothing matched, or nothing could be judged.
+     *
+     * @param string $uploadsRoot      The `_uploads` folder.
+     * @param int    $olderThanSeconds Leave anything younger than this alone.
+     *
+     * @return array{removed:int,left:int}
+     */
+    public static function sweepPartFiles(string $uploadsRoot, int $olderThanSeconds = 3600): array
+    {
+        $removed = 0;
+        $left    = 0;
+        $cutoff  = time() - $olderThanSeconds;
+
+        // The exact shape `writeOrWhyNot()` builds: the mark, then the twelve
+        // hexadecimal characters of `bin2hex(random_bytes(6))`, at the END of
+        // the name. Built from the constant so there is still ONE place the
+        // mark is written down.
+        $shape = '/' . preg_quote(self::PART_MARK, '/') . '[0-9a-f]{12}$/';
+
+        foreach (self::PART_FOLDERS as $folder) {
+            $root = $uploadsRoot . DIRECTORY_SEPARATOR . $folder;
+            if (is_dir($root) === false) {
+                // Legitimate on a new installation, or where a feature has
+                // never been used. Not a fault.
+                continue;
+            }
+
+            // 🚫 Symbolic links are NOT followed, in two ways that are both
+            //    needed: `RecursiveDirectoryIterator` without
+            //    `FOLLOW_SYMLINKS` does not recurse into a symlinked FOLDER,
+            //    and `isLink()` below skips a symlinked FILE. Either on its own
+            //    leaves a way out of the root, and this method deletes what it
+            //    finds.
+            //
+            // 🧯 `CATCH_GET_CHILD` matters: without it one unreadable
+            //    subfolder makes the whole walk THROW, and the sweep then
+            //    removes nothing at all while reporting nothing — measured.
+            //    With it, the unreadable folder is skipped and the rest is
+            //    still tidied.
+            $walk = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::LEAVES_ONLY,
+                \RecursiveIteratorIterator::CATCH_GET_CHILD
+            );
+
+            foreach ($walk as $item) {
+                if ($item->isFile() === false || $item->isLink() === true) {
+                    continue;
+                }
+                if (preg_match($shape, $item->getFilename()) !== 1) {
+                    continue;
+                }
+                // 🕐 `filemtime()` and not `fileatime()`: a read must not keep
+                //    a dead temporary alive for ever.
+                $when = @filemtime($item->getPathname());
+                if ($when === false || $when > $cutoff) {
+                    continue;
+                }
+                if (@unlink($item->getPathname()) === true) {
+                    $removed++;
+                    continue;
+                }
+                $left++;
+            }
+        }
+
+        return ['removed' => $removed, 'left' => $left];
     }
 
     /**

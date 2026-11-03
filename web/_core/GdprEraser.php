@@ -580,30 +580,37 @@ class GdprEraser
             //    erased; the booking itself stays, so the room's history is
             //    intact.
             //
-            //    ⚠️ THE TEXT IS NOT EMPTIED, AND THE REASON IS A GUARD I WOULD
-            //       NOT WEAKEN. `bookedByID` is in `ACTOR_COLUMNS`, so the
-            //       coverage test refuses `nullCols` on it: emptying a column
+            //    ✅ THE TEXT IS EMPTIED NOW (#723, the owner, 3 November 2026).
+            //       It was not, until that decision, and the reason was a guard
+            //       rather than an oversight: `bookedByID` was in BOTH
+            //       `LINK_COLUMNS` and `ACTOR_COLUMNS`, and the coverage test
+            //       refuses `nullCols` on an actor column — emptying a column
             //       on an actor-matched instruction is a blanket `= NULL` over
             //       every matched row, which is how one person's request
             //       destroys a third party's details. That guard exists because
             //       seven tables were once set to delete a whole row on such a
-            //       column.
+            //       column, so it was NOT weakened to get this.
             //
-            //       For THIS table the emptying would in fact be right, because
-            //       every row `bookedByID` matches is the booker's own — the
-            //       guard cannot tell "the person who did X" from "the person X
-            //       is about", and the classification is arguably wrong here:
-            //       `ACTOR_COLUMNS`' own docblock gives "deleted a room booking
-            //       because of who APPROVED it" as its example, naming
-            //       `approvedByID` and not this column. But reclassifying it
-            //       changes a load-bearing list for every guard that reads it,
-            //       which is more than #715 asked for. It is #723.
+            //       What changed is the CLASSIFICATION, which was wrong: a
+            //       booking is made BY the person it is about, so every row
+            //       `bookedByID` matches is the booker's own. `bookedByID` has
+            //       left `ACTOR_COLUMNS` and stayed in `LINK_COLUMNS`.
+            //       `approvedByID` STAYS an actor column, and that pair is
+            //       exactly why the two lists exist: emptying text on an
+            //       approver's number would wipe the purpose of every booking
+            //       they ever approved.
+            //
+            //       Rejected, so nobody re-opens it: a separate "who it is for"
+            //       column. It models reality better — a booking can be made on
+            //       somebody else's behalf — but it is a schema change plus
+            //       every writer and reader, and nothing writes a booking for
+            //       anybody but its maker.
             //
             //       BOTH LINK COLUMNS ARE WRITTEN OUT HERE ON PURPOSE:
             //       registering a table in this hand-written list makes
             //       `fromPersonalDataCatalogue()` SKIP IT ENTIRELY, so leaving
             //       `approvedByID` to the deriver would silently drop it.
-            ['table' => 'tblResourceBooking', 'userCol' => 'bookedByID',   'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the booking is kept so the room\'s history is intact; who booked it is detached. Their stated reason and the note refusing them are NOT emptied: see #723 and this instruction\'s comment'],
+            ['table' => 'tblResourceBooking', 'userCol' => 'bookedByID',   'action' => 'anonymise', 'nullCols' => ['purpose', 'declineReason'], 'reason' => 'the booking is kept so the room\'s history is intact; who booked it is detached, and so is their stated reason for wanting the room. `declineReason` is named here too and CAN NEVER MATCH, because nothing writes it — the decline branch of resources/action.php sets only status, approvedByID and approvedAt, and there is no form field for it: the limit is recorded rather than the column dropped, the #708 precedent, so that a decline reason stored in future is already reached. The booker\'s own `notes` are KEPT by the owner\'s decision of 3 November 2026, recorded in the catalogue (#723)'],
             ['table' => 'tblResourceBooking', 'userCol' => 'approvedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s booking stays; who approved it is detached'],
             ['table' => 'tblCareVisit',      'userCol' => 'visitedByID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the pastoral visit and its notes are kept with the case; who made the visit is detached'],
             ['table' => 'tblCareVisit',      'userCol' => 'followUpAssignedToID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the pastoral visit and its notes are kept with the case; who its follow-up was given to is detached'],
@@ -1172,7 +1179,19 @@ class GdprEraser
         // somebody the record is about.
         'addedByID', 'markedByID', 'openedByID', 'closedByID',
         'moderatedByID', 'moderatorID', 'presenterID', 'scannedByID',
-        'bookedByID', 'requestedByID', 'revokedByID',
+        // 🔁 `bookedByID` LEFT THIS LIST on 3 November 2026 (#723), on the
+        //    owner's decision. A room booking is made BY the person it is
+        //    about, so it is a LINK column and not an actor column — and the
+        //    difference is load-bearing: while it was here, the guard refused
+        //    `nullCols` on it, so the booker's stated reason and the note
+        //    refusing them could not be emptied on an erasure request.
+        //    `approvedByID` STAYS, and that pair is the whole point of these
+        //    two lists: emptying text on an APPROVER's number is a blanket
+        //    `= NULL` over every booking they approved, which destroys other
+        //    people's records. This list's own docblock already gave "deleted
+        //    a room booking because of who APPROVED it" as its example,
+        //    naming `approvedByID` and never this column.
+        'requestedByID', 'revokedByID',
         'counter1ID', 'counter2ID', 'offboardedByID', 'rehiredByID',
         'grantedByID', 'enrolledByID', 'linkedByID', 'releasedByID',
         'processedByID',
@@ -5006,6 +5025,32 @@ class GdprEraser
      */
     private static function statementFileIsKept(\mysqli $db, int $siteId, int $donorId, string $scope, string $fileName): bool
     {
+        // 🧹 RUBBLE IS NEVER TAX EVIDENCE, and this comes FIRST, before the
+        //    scope test (#721, 3 November 2026).
+        //
+        //    An independent check found that the widened glob did its job — it
+        //    FOUND the stray `…-12-31.pdf.part-a1b2c3d4e5f6` an interrupted run
+        //    left — and then this method KEPT it. Two ways round:
+        //
+        //      - with the keep set to "every gift", the first line below
+        //        answered "kept" for anything at all; and
+        //      - with it set to "receipted gifts only", the `-4` chop for
+        //        `.pdf` left the period as `2026-01-01_2026-12-31.pdf.part-…`,
+        //        which does not parse, so the "a name that gives no period is
+        //        kept" fallback applied — to a file that is not a statement.
+        //
+        //    Measured on the real method by reflection: the real statement was
+        //    `kept=no` and the part file `kept=YES`. Worse, the step then
+        //    COUNTED it and told the administrator it had been "kept with the
+        //    donor's giving records as tax evidence" — a half-written file
+        //    holding the donor's name, home address and every gift.
+        //
+        //    A file carrying `Pdf::PART_MARK` is a write that never finished.
+        //    It is evidence of nothing and is always deleted.
+        if (str_contains($fileName, Pdf::PART_MARK) === true) {
+            return false;
+        }
+
         if ($scope === GivingRetention::SCOPE_ALL) {
             return true;
         }
@@ -5079,8 +5124,25 @@ class GdprEraser
         if (is_dir($base) === false) {
             return [];
         }
+        // 🧹 `*.pdf*` AND NOT `*.pdf`, deliberately (#721, 3 November 2026).
+        //
+        //    `Pdf::writeOrWhyNot()` writes under a temporary name and renames
+        //    (#711), so a process killed in between leaves
+        //    `statement-7-2026.pdf.part-a1b2c3d4e5f6` behind. The old pattern
+        //    did not match that, so an erasure request did NOT reach it — and
+        //    a giving statement holds the donor's name, home address and every
+        //    gift they have made. Before #711 the same crash left a TRUNCATED
+        //    `statement-7-2026.pdf`, which did match and was erased, so this
+        //    was a narrow regression in erasure reach taken in exchange for not
+        //    destroying good files.
+        //
+        //    The donor's number is still bounded by the dashes either side, so
+        //    donor 7's pattern cannot reach donor 70's file. The nightly sweep
+        //    (`Pdf::sweepPartFiles()`) removes such files within a day anyway;
+        //    this is what reaches one the MOMENT an erasure runs, which is the
+        //    half with a privacy consequence.
         $found = glob($base . DIRECTORY_SEPARATOR . ($siteId === null ? '*' : (string) $siteId) . DIRECTORY_SEPARATOR
-            . 'statement-' . $donorId . '-*.pdf');
+            . 'statement-' . $donorId . '-*.pdf*');
 
         return $found === false ? [] : $found;
     }

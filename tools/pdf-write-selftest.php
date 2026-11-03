@@ -65,7 +65,17 @@
 
 declare(strict_types=1);
 
-const PDF_EXPECTED_CHECKS = 23;
+const PDF_EXPECTED_CHECKS = 35; // 23 before #721 added sections H and I. Twelve
+                                // on the nightly sweep, four of them added after
+                                // an independent check found the first version
+                                // could not fail: the real PDF is now really OLD
+                                // (the age guard was doing the mark test's work),
+                                // a loosely-named file must survive, a member's
+                                // own upload must survive, the folder list is
+                                // pinned whole, the symlink case is a symlinked
+                                // FOLDER rather than a file, and an unreadable
+                                // folder must not stop the sweep. Two on the mark
+                                // being in one place.
 
 $root = dirname(__DIR__);
 require_once $root . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core'
@@ -266,6 +276,170 @@ pdf_ok('and no temporary file is left in the folder', pdf_parts($scratch) === []
 // 🪦 A fourth check here asserted the directory in the way was untouched. It
 //    COULD NOT FAIL - neither `rename()` nor `unlink()` can remove a directory -
 //    so it was deleted rather than kept for the look of the thing.
+
+// =============================================================================
+echo PHP_EOL . 'H. The nightly sweep removes a part file a killed run left (#721)' . PHP_EOL;
+// =============================================================================
+// 🧠 WHY. Section G proves the writer tidies up after ITSELF. It cannot prove
+//    anything about a process that was KILLED between the write and the
+//    rename, because nothing then runs the tidy-up at all — and that is the
+//    case #721 is about. `Pdf::sweepPartFiles()` is what deals with it.
+//
+// 🛑 THIS METHOD DELETES FILES, so every check below is written against a
+//    fixture that would really be lost. Three of them exist only because an
+//    independent check found the first version of this section could not fail:
+//
+//      - the "it leaves a real PDF alone" fixture was created and never
+//        `touch`ed, so it was YOUNG and the AGE guard saved it, not the mark
+//        test. Deleting the mark test left all 31 checks green while a day-old
+//        giving statement, an expense PDF, a document and a recording were all
+//        removed. (#645's I7d lesson verbatim: when a check exists to prove
+//        something ORDINARY still works, make sure the fixture is ordinary.)
+//      - the symlink check planted a link to a FILE, which the independent
+//        `isLink()` guard skips whatever the iterator flags are — so it passed
+//        with `FOLLOW_SYMLINKS` added. The dangerous case the comment names is
+//        a symlinked DIRECTORY, and nothing exercised it.
+//      - nothing exercised the FOLDER allow-list, which is what stops a
+//        member's own upload being deleted.
+
+$uploads = $scratch . DIRECTORY_SEPARATOR . 'uploads';
+$statements = $uploads . DIRECTORY_SEPARATOR . 'giving' . DIRECTORY_SEPARATOR . 'statements'
+    . DIRECTORY_SEPARATOR . '1';
+$docs       = $uploads . DIRECTORY_SEPARATOR . 'documents';
+$recordings = $uploads . DIRECTORY_SEPARATOR . 'recordings';
+mkdir($statements, 0755, true);
+mkdir($docs, 0755, true);
+mkdir($recordings, 0755, true);
+
+$mark = \Portal\Core\Pdf::PART_MARK;
+/** A file of a given age, remembered so the checks can ask about it. */
+$make = static function (string $path, int $ageSeconds) : string {
+    file_put_contents($path, 'half a pdf');
+    if ($ageSeconds > 0) {
+        touch($path, time() - $ageSeconds);
+    }
+
+    return $path;
+};
+
+// In a swept folder, named exactly as the writer names one, and two hours old.
+$old = $make($statements . DIRECTORY_SEPARATOR . 'statement-7-2026.pdf' . $mark . 'aabbccddeeff', 7200);
+// The same, written THIS SECOND: it may be a write in flight.
+$young = $make($statements . DIRECTORY_SEPARATOR . 'statement-8-2026.pdf' . $mark . '112233445566', 0);
+// 🪤 A REAL PDF, AND REALLY OLD. The old fixture was young, so the age guard
+//    was doing the work and the mark test was untested.
+$innocent = $make($statements . DIRECTORY_SEPARATOR . 'statement-9-2026.pdf', 7200);
+// 🪤 Rubble in a swept folder whose name merely CONTAINS the mark. The writer
+//    never produces this, and a `str_contains` test would delete it.
+$looseName = $make($statements . DIRECTORY_SEPARATOR . 'notes' . $mark . 'x', 7200);
+
+$swept = \Portal\Core\Pdf::sweepPartFiles($uploads, 3600);
+
+pdf_ok('it removes a part file two hours old from a folder Pdf::create() writes to',
+    is_file($old) === false && $swept['removed'] === 1,
+    json_encode(['still there' => is_file($old), 'answer' => $swept]));
+pdf_ok('IT LEAVES A PART FILE WRITTEN THIS SECOND, because that may be a write in flight',
+    is_file($young) === true, 'the young part file was deleted');
+pdf_ok('and it leaves a TWO-HOUR-OLD real PDF alone, so the mark test is what saves it and not the age',
+    is_file($innocent) === true, 'the old finished PDF was deleted');
+pdf_ok('and it leaves a name that merely CONTAINS the mark: only the exact shape the writer builds is swept',
+    is_file($looseName) === true, 'a loosely-named file was deleted');
+pdf_ok('nothing is reported as un-removable when everything could be removed',
+    $swept['left'] === 0, json_encode($swept));
+
+// 🛡️ THE FOLDER ALLOW-LIST, which is what stops a member losing their own
+//    upload. `_apps/documents/upload.php` and `_apps/recordings/upload.php`
+//    take the stored extension STRAIGHT FROM THE CLIENT FILENAME, so a member
+//    who uploads `report.part-aabbccddeeff` has it stored with that exact
+//    suffix. Both files below are named the way the writer names one AND are
+//    two hours old, so ONLY the folder list saves them.
+$memberDoc = $make($docs . DIRECTORY_SEPARATOR . '20261103_082700_aabbccdd.pdf' . $mark . 'deadbeefcafe', 7200);
+$memberRec = $make($recordings . DIRECTORY_SEPARATOR . '20261103_082700_11223344.mp3' . $mark . 'feedfacefeed', 7200);
+$sweptAgain = \Portal\Core\Pdf::sweepPartFiles($uploads, 3600);
+pdf_ok('A MEMBER\'S OWN UPLOAD IS NEVER SWEPT, however it is named: documents and recordings are not on PART_FOLDERS',
+    is_file($memberDoc) === true && is_file($memberRec) === true && $sweptAgain['removed'] === 0,
+    json_encode(['document' => is_file($memberDoc), 'recording' => is_file($memberRec), 'answer' => $sweptAgain]));
+pdf_ok('...and the folders it may touch are exactly the four Pdf::create() writes to',
+    \Portal\Core\Pdf::PART_FOLDERS === [
+        'giving' . DIRECTORY_SEPARATOR . 'statements',
+        'pdfs',
+        'venues' . DIRECTORY_SEPARATOR . 'tmp',
+        'assets' . DIRECTORY_SEPARATOR . 'labels',
+    ],
+    json_encode(\Portal\Core\Pdf::PART_FOLDERS));
+
+// 🚫 A folder that is not there is not a fault: `_uploads` may legitimately
+//    hold none of these yet on a new installation, and the nightly job must
+//    not fall over on it.
+$missing = \Portal\Core\Pdf::sweepPartFiles($scratch . DIRECTORY_SEPARATOR . 'no-uploads-here', 3600);
+pdf_ok('a root with none of those folders answers nothing rather than failing',
+    $missing === ['removed' => 0, 'left' => 0], json_encode($missing));
+
+// 🔗 A SYMLINKED DIRECTORY, which is the dangerous case. A link to a FILE is
+//    skipped by `isLink()` whatever the iterator flags are, so planting one
+//    proves nothing about the flags; a link to a FOLDER is only skipped
+//    because `RecursiveDirectoryIterator` is built WITHOUT `FOLLOW_SYMLINKS`.
+//    Adding that flag left all 31 checks green while the sweep escaped its
+//    root and deleted two outside files, one a level deeper.
+$outside = $scratch . DIRECTORY_SEPARATOR . 'outside' . DIRECTORY_SEPARATOR . 'deeper';
+mkdir($outside, 0755, true);
+$prizeTop   = $make($scratch . DIRECTORY_SEPARATOR . 'outside' . DIRECTORY_SEPARATOR . 'keep.pdf' . $mark . '0123456789ab', 7200);
+$prizeDeep  = $make($outside . DIRECTORY_SEPARATOR . 'keep-too.pdf' . $mark . 'ba9876543210', 7200);
+$linkMade   = @symlink($scratch . DIRECTORY_SEPARATOR . 'outside', $statements . DIRECTORY_SEPARATOR . 'escape');
+if ($linkMade === true) {
+    $afterLink = \Portal\Core\Pdf::sweepPartFiles($uploads, 3600);
+    pdf_ok('A SYMLINKED FOLDER inside a swept folder is NOT followed, so nothing outside the root is deleted',
+        is_file($prizeTop) === true && is_file($prizeDeep) === true && $afterLink['removed'] === 0,
+        json_encode(['top' => is_file($prizeTop), 'deeper' => is_file($prizeDeep), 'answer' => $afterLink]));
+} else {
+    // Said out loud rather than skipped silently: a check that did not run is
+    // not a check that passed.
+    echo '   THIS FILESYSTEM WOULD NOT MAKE A SYMBOLIC LINK, so the escape case'
+        . ' is UNPROVEN here.' . PHP_EOL;
+    pdf_ok('A SYMLINKED FOLDER inside a swept folder is NOT followed, so nothing outside the root is deleted',
+        false, 'symlink() failed, so this was not tested — treat as unproven');
+}
+
+// 🧯 AN UNREADABLE SUBFOLDER MUST NOT STOP THE SWEEP. Without
+//    `CATCH_GET_CHILD` the walk THROWS on one, and the nightly job then
+//    removes nothing at all and reports nothing — measured.
+$blocked = $statements . DIRECTORY_SEPARATOR . 'locked';
+mkdir($blocked, 0755, true);
+$behind = $make($statements . DIRECTORY_SEPARATOR . 'statement-11-2026.pdf' . $mark . 'cafebabe0001', 7200);
+@chmod($blocked, 0000);
+if (is_readable($blocked) === false) {
+    $afterBlocked = \Portal\Core\Pdf::sweepPartFiles($uploads, 3600);
+    pdf_ok('an UNREADABLE folder does not stop the sweep: the rest is still tidied',
+        is_file($behind) === false && $afterBlocked['removed'] === 1,
+        json_encode(['the other file still there' => is_file($behind), 'answer' => $afterBlocked]));
+    @chmod($blocked, 0755);
+} else {
+    echo '   RUNNING AS A USER WHO CAN READ A 0000 FOLDER (root?), so the'
+        . ' unreadable-folder case is UNPROVEN here.' . PHP_EOL;
+    pdf_ok('an UNREADABLE folder does not stop the sweep: the rest is still tidied',
+        false, 'chmod 0000 did not make it unreadable — treat as unproven');
+    @chmod($blocked, 0755);
+}
+
+// =============================================================================
+echo PHP_EOL . 'I. The mark is in ONE place, so the writer and the sweep agree (#721)' . PHP_EOL;
+// =============================================================================
+// 🧠 WHY THIS IS A CHECK AND NOT A COMMENT. The writer builds its temporary
+//    name from `PART_MARK` and the sweep looks for the same constant. If they
+//    were two literals and one changed, the SWEEP would be the half that
+//    broke — and a sweep that matches nothing looks exactly like a folder with
+//    nothing to sweep. There is no error, no log line and no symptom.
+pdf_ok('PART_MARK is a non-empty mark', is_string($mark) === true && $mark !== '', var_export($mark, true));
+
+// A name built the way the WRITER builds one, from the constant itself, in a
+// folder on the allow-list.
+$markDir = $uploads . DIRECTORY_SEPARATOR . 'pdfs';
+mkdir($markDir, 0755, true);
+$builtLikeTheWriter = $make($markDir . DIRECTORY_SEPARATOR . 'claim-412.pdf' . $mark . 'abcdef123456', 7200);
+$markSweep = \Portal\Core\Pdf::sweepPartFiles($uploads, 3600);
+pdf_ok('a name built from PART_MARK the way the writer builds one IS swept',
+    is_file($builtLikeTheWriter) === false && $markSweep['removed'] === 1,
+    json_encode(['still there' => is_file($builtLikeTheWriter), 'answer' => $markSweep]));
 
 echo PHP_EOL . str_repeat('=', 78) . PHP_EOL;
 $ran = $passed + $failed;

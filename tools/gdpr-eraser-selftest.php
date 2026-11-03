@@ -226,7 +226,7 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 264; // 235 before section 19 (#709) added nine; the fix round
+const EXPECTED_CHECKS = 267; // 235 before section 19 (#709) added nine; the fix round
                              // replaced its single guard check with eight, giving 251.
                              // Section 20 (#707) then added seven: five on which rows the
                              // change-history step reaches, one on the actor link still
@@ -239,7 +239,14 @@ const EXPECTED_CHECKS = 264; // 235 before section 19 (#709) added nine; the fix
                              // 258 + 4 = 262. The fix round added one more — the
                              // `completed` line must not claim none failed — giving 263.
                              // The #715 check round added case D, where the administrator
-                             // IS the person being erased: 264.
+                             // IS the person being erased: 264. #723 added one
+                             // more — the third-party booking control, which is
+                             // what stops the reclassification being widened to
+                             // `approvedByID` unnoticed: 265. #721 added one for
+                             // the part-written statement file: 266. Its check
+                             // round added one more, in the world where the
+                             // donor's records are KEPT — the branch the first
+                             // version could not reach: 267.
 
 // The headings that must all be reached for a pass.
 const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21'];
@@ -367,6 +374,13 @@ const MUST_BE_EMPTIED = [
     'tblPrayerRequests.submitterID' => ['submitterName', 'submitterEmail', 'submitterIP',
                                         'subject', 'body', 'partnerNote'],
     'tblCareCase.personUserID'      => ['personName', 'summary'],
+    // #723, 3 November 2026: the booker's own stated reason for wanting the
+    // room, and the note refusing them. Added here IN THE SAME CHANGE as the
+    // instruction, which is the whole lesson of #715's check round — those
+    // four columns went into the instructions and not into this list, and
+    // dropping two of them again, each with a plausible catalogue excuse, left
+    // every gate green.
+    'tblResourceBooking.bookedByID' => ['purpose', 'declineReason'],
 ];
 
 // Columns the database will not allow to be emptied, so the person's number
@@ -552,6 +566,10 @@ require_once $coreDir . 'InstallationSettings.php';
 require_once $coreDir . 'SettingLimit.php';
 require_once $coreDir . 'WebhookRetention.php';
 require_once $coreDir . 'TranscriptRetention.php';
+// 🧹 #721: the retention sweep removes part-written PDFs, and this test reads
+//    `Pdf::PART_MARK` to build a fixture the way the real writer builds a name.
+//    It has no dependencies of its own — dompdf is only touched by create().
+require_once $coreDir . 'Pdf.php';
 require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_apps' . DIRECTORY_SEPARATOR . 'cron'
     . DIRECTORY_SEPARATOR . '_retention-sweep.php';
 
@@ -559,6 +577,7 @@ use Portal\Core\App;
 use Portal\Core\GdprEraser;
 use Portal\Core\Giving;
 use Portal\Core\GivingRetention;
+use Portal\Core\Pdf;
 
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 // `$mysqli` is a global on purpose: `App::db()` falls back to it.
@@ -1355,6 +1374,23 @@ function ge_buildWorld(int $person, string $email, string $name): array
     file_put_contents($file, 'made-up statement');
     $GLOBALS['ge_files'][] = $file;
 
+    // 🧹 AND A PART-WRITTEN ONE, which is #721 (3 November 2026). `Pdf` writes
+    //    under a temporary name and renames (#711), so a process killed in
+    //    between leaves `statement-<person>-2025.pdf.part-…` behind — holding
+    //    the donor's name, home address and every gift they have made. The old
+    //    glob was `statement-<person>-*.pdf`, which did NOT match it, so an
+    //    erasure request did not reach it.
+    //
+    //    Before #711 the same crash left a TRUNCATED `…-2025.pdf`, which DID
+    //    match and was erased, so this was a narrow regression in erasure
+    //    reach, taken in exchange for not destroying good files.
+    $partFile = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'giving' . DIRECTORY_SEPARATOR
+        . 'statements' . DIRECTORY_SEPARATOR . '1' . DIRECTORY_SEPARATOR . 'statement-' . $person
+        . '-2024.pdf' . Pdf::PART_MARK . 'aabbccddeeff';
+    file_put_contents($partFile, 'half a made-up statement');
+    $GLOBALS['ge_files'][] = $partFile;
+    $GLOBALS['ge_partStatement'][$person] = $partFile;
+
     // 🖼️ A photo file in the uploads folder, a picture address from single
     //    sign-on, a biography, and administrator rights: an erasure has to
     //    take all of them off the account.
@@ -1462,7 +1498,17 @@ function ge_buildLinked(int $p): array
     $r['swapAskedDone']  = ge_linked('tblRotaSwapRequest', ['requestedByID' => $p, 'targetUserID' => D], ['slotID' => ge_id($r['slotOfPerson']), 'status' => 'accepted']);
 
     // 🏠 A room booking the person made, still waiting for a decision.
-    $r['booking']        = ge_linked('tblResourceBooking', ['bookedByID' => $p, 'approvedByID' => D], ['status' => 'pending', 'purpose' => 'Welcome team supper']);
+    $r['booking']        = ge_linked('tblResourceBooking', ['bookedByID' => $p, 'approvedByID' => D], ['status' => 'pending', 'purpose' => 'Welcome team supper', 'declineReason' => 'Too close to the harvest supper.']);
+
+    // 🏠 AND A BOOKING SOMEBODY ELSE MADE, which this person only APPROVED.
+    //    This is the control that makes #723 provable rather than asserted.
+    //    `bookedByID` moved out of ACTOR_COLUMNS so the booker's own words can
+    //    be emptied; `approvedByID` STAYED an actor column, and if that ever
+    //    changed, emptying on it would be a blanket `= NULL` over the purpose
+    //    of every booking this person ever approved — a third party's record.
+    //    Without this row the reclassification could be widened to both
+    //    columns and every check would still pass.
+    $r['bookingApproved'] = ge_linked('tblResourceBooking', ['bookedByID' => C, 'approvedByID' => $p], ['status' => 'approved', 'purpose' => 'Cal wants the hall for a baby shower', 'declineReason' => null]);
 
     // 🎥 Zoom: the person's own connection with a meeting made through it,
     //    and a meeting the person made through C's connection.
@@ -1480,7 +1526,7 @@ function ge_buildLinked(int $p): array
 
     // Everything NOT named here must come through the erasure byte for byte:
     // the whole-database comparison in section 4 holds it to that.
-    $mayChange = ['inviteAccepted', 'inviteSent', 'swapAsked', 'swapAskedDone', 'booking', 'registration', 'visitor', 'noteByPerson', 'visitorIsC', 'visitorIsP', 'noteAboutP', 'card', 'taskGiven', 'taskMade',
+    $mayChange = ['inviteAccepted', 'inviteSent', 'swapAsked', 'swapAskedDone', 'booking', 'bookingApproved', 'registration', 'visitor', 'noteByPerson', 'visitorIsC', 'visitorIsP', 'noteAboutP', 'card', 'taskGiven', 'taskMade',
         'slotOfPerson', 'slotOfC', 'swapWaiting', 'swapAccepted', 'checkin', 'visitByPerson', 'visitFollowUp', 'payment',
         'pledge', 'giftToPledge', 'zoomOfPerson', 'meetingViaPerson', 'meetingViaC'];
 
@@ -1920,6 +1966,16 @@ ge_insert('tblEmailLog', [], ['toRecipients' => 'cal.control@selftest.invalid'])
 $controlFile = $statementDir . DIRECTORY_SEPARATOR . 'statement-' . C . '-2025.pdf';
 file_put_contents($controlFile, 'made-up statement');
 $GLOBALS['ge_files'][] = $controlFile;
+// 🧹 #721's control: a PART-WRITTEN statement belonging to the control person.
+//    Without it the widened glob (`*.pdf*`) could be widened further still —
+//    to every donor's part file, or to a pattern with no donor number in it —
+//    and the only check would be the one saying the erased person's file went.
+//    An erasure must take one person's file and leave the other's.
+$controlPartFile = $statementDir . DIRECTORY_SEPARATOR . 'statement-' . C . '-2024.pdf'
+    . Pdf::PART_MARK . 'ffeeddccbbaa';
+file_put_contents($controlPartFile, 'half a made-up statement');
+$GLOBALS['ge_files'][] = $controlPartFile;
+$GLOBALS['ge_partStatement'][C] = $controlPartFile;
 $mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
 
 $worldA = ge_buildWorld(P_A, 'pat.erased@selftest.invalid', 'Pat Erased');
@@ -2257,7 +2313,7 @@ foreach (MUST_BE_EMPTIED as $where => $columns) {
         }
     }
 }
-ge_ok('typed details about the person are emptied, by name: a prayer request\'s name, e-mail address, sender address, subject, body and partner note, and a pastoral case\'s name and summary (#715)',
+ge_ok('typed details about the person are emptied, by name: a prayer request\'s name, e-mail address, sender address, subject, body and partner note, a pastoral case\'s name and summary (#715), and a room booking\'s stated reason and decline note (#723)',
     $stillThere === [], implode('; ', $stillThere));
 $twoColumnTables = [];
 foreach ($worldA['rows'] as $tracked) {
@@ -2358,10 +2414,35 @@ ge_ok('a SWAP REQUEST the person ASKED for is kept with its message and cancelle
     && $now['swapAsked']['status'] === 'cancelled' && (int) $now['swapAsked']['targetUserID'] === C && $now['swapAsked']['requestMessage'] === 'I am away that week.'
     && ge_same($was['swapAskedDone'], $now['swapAskedDone'], ['requestedByID']) === true && $now['swapAskedDone']['requestedByID'] === null
     && $now['swapAskedDone']['status'] === 'accepted', json_encode([$now['swapAsked'], $now['swapAskedDone']]));
-ge_ok('a ROOM BOOKING the person made is kept, with its times, purpose and status; only who booked it is detached',
-    (int) $was['booking']['bookedByID'] === P_A && ge_same($was['booking'], $now['booking'], ['bookedByID']) === true
-    && $now['booking']['bookedByID'] === null && $now['booking']['purpose'] === 'Welcome team supper' && $now['booking']['status'] === 'pending',
-    json_encode($now['booking']));
+// 🔁 CHANGED BY #723 (3 November 2026). This check used to require the
+//    purpose to SURVIVE — "kept, with its times, purpose and status" — because
+//    `bookedByID` was in ACTOR_COLUMNS and the guard refused `nullCols` on it.
+//    The owner decided the booker is the booking's SUBJECT, so the purpose and
+//    the note refusing them are now emptied. The check went red on the change,
+//    which is what a behavioural pin is for.
+ge_ok('a ROOM BOOKING the person made is kept with its times, resource and status, and loses who booked it, their stated reason AND the note refusing them (#723)',
+    (int) $was['booking']['bookedByID'] === P_A
+    && $was['booking']['purpose'] === 'Welcome team supper'
+    && $was['booking']['declineReason'] === 'Too close to the harvest supper.'
+    && ge_same($was['booking'], $now['booking'], ['bookedByID', 'purpose', 'declineReason']) === true
+    && $now['booking']['bookedByID'] === null
+    && $now['booking']['purpose'] === null
+    && $now['booking']['declineReason'] === null
+    && $now['booking']['status'] === 'pending',
+    json_encode(['before' => $was['booking'], 'after' => $now['booking']]));
+// 🛡️ THE CONTROL, and it is the half that stops real harm. `approvedByID` is
+//    still an actor column: emptying text on it would wipe the purpose of
+//    every booking this person ever approved, which belongs to whoever made
+//    it. Without this row the reclassification could have been widened to
+//    both columns and nothing would have noticed.
+ge_ok('...while a booking SOMEBODY ELSE made and this person only APPROVED keeps its purpose; only the approver is detached (#723)',
+    (int) $was['bookingApproved']['approvedByID'] === P_A
+    && (int) $was['bookingApproved']['bookedByID'] === C
+    && ge_same($was['bookingApproved'], $now['bookingApproved'], ['approvedByID']) === true
+    && $now['bookingApproved']['approvedByID'] === null
+    && (int) $now['bookingApproved']['bookedByID'] === C
+    && $now['bookingApproved']['purpose'] === 'Cal wants the hall for a baby shower',
+    json_encode(['before' => $was['bookingApproved'], 'after' => $now['bookingApproved']]));
 ge_ok('a CHILD\'S EVENT REGISTRATION that somebody else submitted and the person only REVIEWED is kept, with the child\'s name and medical details; only the reviewer is detached',
     (int) $was['registration']['reviewedByID'] === P_A && ge_same($was['registration'], $now['registration'], ['reviewedByID']) === true
     && $now['registration']['reviewedByID'] === null && (int) $now['registration']['submittedByUserID'] === C
@@ -2438,6 +2519,24 @@ ge_ok('the email send log: the person\'s address is gone and the other recipient
     $logNow !== null && $logNow['toRecipients'] === '[erased], dee.control@selftest.invalid', json_encode($logNow));
 ge_ok('the giving statement PDF: the person\'s file is deleted and another person\'s file is still there',
     is_file($worldA['file']) === false && is_file($controlFile) === true);
+// 🧹 #721, and this is the decisive check for the privacy half of it. A
+//    statement holds the donor's name, home address and every gift they have
+//    made. Since #711 the writer renames a temporary into place, so a killed
+//    process leaves `statement-<id>-2024.pdf.part-…` behind — and the glob was
+//    `statement-<id>-*.pdf`, which did NOT match it. Planting that pattern back
+//    is what proves this check: with `*.pdf` the file survives an erasure.
+//
+//    The control is what stops the widened glob over-reaching: donor 7's
+//    pattern must not reach donor 70's file, which the dashes either side of
+//    the number already prevent, and C's own statement must be untouched.
+ge_ok('A PART-WRITTEN statement an interrupted run left behind IS reached by the erasure too (#721), and another person\'s file is still there',
+    is_file($GLOBALS['ge_partStatement'][P_A]) === false
+    && is_file($GLOBALS['ge_partStatement'][C] ?? '/nonexistent') === true,
+    json_encode([
+        'the erased person\'s part file' => $GLOBALS['ge_partStatement'][P_A],
+        'still there' => is_file($GLOBALS['ge_partStatement'][P_A]),
+        'the control\'s part file still there' => is_file($GLOBALS['ge_partStatement'][C] ?? '/nonexistent'),
+    ]));
 
 // -----------------------------------------------------------------------------
 ge_section('4b', 'No delete can cascade into a record that must be kept');
@@ -3364,6 +3463,23 @@ $ownFileH         = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statemen
 // one of 100 days ago, inside the declaration): a copy that could not be made
 // again. The other lists a kept gift AND the gift from before the declaration.
 $ownAllKeptH      = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statement-' . P_H . '-' . $ago(120) . '_' . $ago(90) . '.pdf', 'made-up statement, all kept');
+// 🧹 AND A PART-WRITTEN ONE, in the world where the donor's giving records are
+//    KEPT. This is the branch #721's first version could not reach, and an
+//    independent check is what found it: the widened glob FOUND the stray file
+//    and `statementFileIsKept()` then KEPT it — under "every gift" it answers
+//    kept for anything, and under "receipted gifts only" the `-4` chop for
+//    `.pdf` left the period as `…-12-31.pdf.part-a1b2c3d4`, which does not
+//    parse, so the "a name that gives no period is KEPT" fallback applied to a
+//    file that is not a statement at all. The step then COUNTED it and told the
+//    administrator it was tax evidence.
+//
+//    THE WORLD AROUND SECTION 4 COULD NOT REACH THIS: it never writes a
+//    kept-donor row for the erased person, so the whole kept branch was dead —
+//    and the proof is inside that test, whose own fixture period (`2025`) does
+//    not parse either, so if the branch had run its "the person's file is
+//    deleted" check would already have failed. It passed. This world is the one
+//    that really has kept records, so the branch is live here.
+$ownPartH         = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statement-' . P_H . '-' . $ago(120) . '_' . $ago(90) . '.pdf' . Pdf::PART_MARK . 'a1b2c3d4e5f6', 'half a made-up statement');
 $ownMixedH        = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statement-' . P_H . '-' . $ago(510) . '_' . $ago(290) . '.pdf', 'made-up statement, mixed');
 $h['envelope']    = ge_linked('tblCountEnvelopes', ['giverID' => P_H], ['giverName' => null, 'amount' => '12.50']);
 $h['giftAllOne']  = ge_gift(SITE_G2, P_H, $ago(900), 700, $catG2);
@@ -3460,9 +3576,22 @@ ge_ok('THE STATEMENT FILE IS STILL THERE: the statement the organisation issued 
 ge_ok('A STATEMENT THE DONOR MADE FOR THEMSELVES IS KEPT when every gift on it is a kept gift, and deleted when it lists a gift that lost the donor\'s name, or no gift at all; and the line says how many files were kept and how many deleted',
     is_file($ownAllKeptH) === true && file_get_contents($ownAllKeptH) === 'made-up statement, all kept'
     && is_file($ownMixedH) === false && is_file($ownFileH) === false
-    && count($fileLine) === 1 && $fileLine[0]['action'] === 'delete' && $fileLine[0]['recordKey'] === '2 file(s)'
+    && count($fileLine) === 1 && $fileLine[0]['action'] === 'delete' && $fileLine[0]['recordKey'] === '3 file(s)'
     && str_contains((string) $fileLine[0]['details'], '3 rendered statement PDF(s) kept with the donor\'s giving records as tax evidence'),
     json_encode([is_file($ownAllKeptH), is_file($ownMixedH), is_file($ownFileH), $fileLine]));
+// 🧹 THE DECISIVE #721 CHECK, and it is decisive because the KEPT branch is
+//    live in this world. A half-written statement is a write that never
+//    finished: it is evidence of nothing, so it must be DELETED even where
+//    every real statement beside it is kept as tax evidence — and the kept
+//    COUNT must not grow to include it, because that number is what an
+//    administrator reads as "we kept this much".
+//
+//    Planting the old `statementFileIsKept()` back (no `PART_MARK` test) fails
+//    this, and the plant reported it as tax evidence.
+ge_ok('A PART-WRITTEN statement is DELETED even where the donor\'s records are kept, and is never counted as tax evidence (#721)',
+    is_file($ownPartH) === false
+    && str_contains((string) $fileLine[0]['details'], '4 rendered statement PDF(s) kept') === false,
+    json_encode(['part file still there' => is_file($ownPartH), 'line' => $fileLine]));
 
 $keptG2 = ge_one('SELECT * FROM tblGivingKeptDonors WHERE siteID = ? AND donorID = ?', 'ii', [SITE_G2, P_H]);
 ge_ok('AT THE ORGANISATION THAT KEEPS EVERY GIFT: both gifts keep the donor with no declaration at all, the kept row takes the address from the account, and the statement file there is kept',
