@@ -166,6 +166,8 @@ my-volunteering|tools/my-volunteering-selftest.php|selftest_myvolunteering|
 gdpr-eraser|tools/gdpr-eraser-selftest.php|selftest_gdpreraser|web:gdpr-eraser
 held-texts|tools/held-texts-selftest.php|selftest_heldtexts|
 setting-limit|tools/setting-limit-selftest.php|selftest_limit|
+rate-limit-privacy|tools/rate-limit-privacy-selftest.php|selftest_ratelimit|
+webhook-retention|tools/webhook-retention-selftest.php|selftest_webhookret|
 event-visibility|tools/event-visibility-selftest.php|selftest_visibility|
 feed-resolver|tools/feed-resolver-selftest.php|selftest_resolver|
 import-notifier|tools/import-notifier-selftest.php|selftest_notifier|

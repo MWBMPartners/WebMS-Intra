@@ -513,6 +513,13 @@ require_once $coreDir . 'Giving.php';
 require_once $coreDir . 'Site.php';
 require_once $coreDir . 'Logger.php';
 require_once $coreDir . 'AnonymousCheckins.php';
+// 🧾 The sweep empties webhook payloads past their period (#713) and asks
+//    WebhookRetention how long that is. There is no autoloader here, so the
+//    class has to be loaded by hand like the others above — without it the
+//    whole run stops at the first line of the sweep that mentions it.
+require_once $coreDir . 'InstallationSettings.php';
+require_once $coreDir . 'SettingLimit.php';
+require_once $coreDir . 'WebhookRetention.php';
 require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_apps' . DIRECTORY_SEPARATOR . 'cron'
     . DIRECTORY_SEPARATOR . '_retention-sweep.php';
 

@@ -694,12 +694,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             e-mail address. Who made each change, when, and which record it was are kept, so the
             history still shows the account was changed.
             <br>
-            Two limits, so that nothing here is read as more than it is. An entry about some
+            It now covers an entry about their account and about every kind of membership &mdash;
+            which organisations, departments, groups and roles they belonged to. The last three were
+            added on 2 November 2026; before that they were not reached, which cost nothing at the
+            time because those entries record account numbers and no names, and the account itself
+            is emptied anyway. They are covered so that the day one of them starts recording a name,
+            it is already dealt with.
+            <br>
+            One limit, so that nothing here is read as more than it is. An entry about some
             <em>other</em> record whose text happens to mention them is <strong>not</strong>
-            reached, because nothing on such a row says they are in it. And it covers an entry about
-            their account or about which <em>organisations</em> they belong to &mdash; not entries
-            about their department, group or role membership, which record account numbers only and
-            no names.
+            reached, because nothing on such a row says they are in it &mdash; and searching the
+            text for a name would match somebody else of the same name and miss a nickname.
         </li>
         <li>
             <strong>Kept because emptying it would take something from somebody else.</strong>

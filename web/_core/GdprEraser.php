@@ -1638,10 +1638,17 @@ class GdprEraser
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseEmailLogRecipients($requestId, $erasedEmail));
             // 📜 #707 — the values an audit-trail row kept ABOUT this person.
             //    BEFORE the walk, and that is load-bearing: it finds rows about
-            //    their MEMBERSHIPS by looking their tblUserSites rows up, and
-            //    the walk deletes those. Run after it and that half matches
-            //    nothing while the audit line still says the step ran — #709's
-            //    ordering trap in a new place.
+            //    their MEMBERSHIPS by looking the membership rows up, and the
+            //    walk DELETES those. Run after it and that half matches nothing
+            //    while the audit line still says the step ran — #709's ordering
+            //    trap in a new place.
+            //
+            //    #717 made that MORE load-bearing, not less: the step now looks
+            //    up FOUR membership tables (tblUserSites, tblUserDepts,
+            //    tblUserGroups, tblUserRoles) and the walk deletes the person's
+            //    rows from every one of them, each with `'action' => 'delete'`
+            //    on `userID`. So there are now four ways for a reordering to
+            //    make this step quietly find nothing.
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseAuditTrailAboutPerson($requestId, $userId));
             foreach (self::catalogue() as $entry) {
                 $outcomes[] = self::asOneStep(
@@ -5553,7 +5560,33 @@ class GdprEraser
                 'UPDATE tblAuditTrail SET oldValue = NULL, newValue = NULL, changeSet = NULL '
                 . "WHERE ((tableName = 'tblUsers' AND recordID = ?) "
                 . "OR (tableName = 'tblUserSites' "
-                . 'AND recordID IN (SELECT userSiteID FROM tblUserSites WHERE userID = ?))) '
+                . 'AND recordID IN (SELECT userSiteID FROM tblUserSites WHERE userID = ?)) '
+                // 🧩 The three other membership tables (#717). Each is audited
+                //    by its own class — Departments, UserGroups and Roles —
+                //    and none was reached when this step was written, which
+                //    meant "every row about this person" was not true and had
+                //    to be corrected in several places.
+                //
+                //    BE HONEST ABOUT WHAT THIS EARNS TODAY: those payloads
+                //    carry account numbers and no names, a deliberate choice
+                //    recorded under #518, and the account itself is emptied by
+                //    the main walk. So after an erasure they already said
+                //    "account 4211 was added to department 7", where 4211
+                //    identifies nobody. There was no identifying residue. What
+                //    this closes is the day somebody adds a NAME to one of
+                //    those payloads: #707's fault would be back in a table
+                //    nothing covered, and nothing would have noticed.
+                //
+                //    The guard that makes this stay true is in
+                //    `tools/gdpr-coverage-selftest.php`: it compares the set of
+                //    membership tables anything audits against the set this
+                //    step reaches, so a fourth one cannot be added silently.
+                . "OR (tableName = 'tblUserDepts' "
+                . 'AND recordID IN (SELECT userDeptID FROM tblUserDepts WHERE userID = ?)) '
+                . "OR (tableName = 'tblUserGroups' "
+                . 'AND recordID IN (SELECT userGroupID FROM tblUserGroups WHERE userID = ?)) '
+                . "OR (tableName = 'tblUserRoles' "
+                . 'AND recordID IN (SELECT userRoleID FROM tblUserRoles WHERE userID = ?))) '
                 // Only a row that still holds something. BE HONEST ABOUT WHAT
                 // THIS EARNS: it is belt-and-braces, not the thing that makes
                 // the count truthful. MySQL's affected_rows already counts only
@@ -5568,7 +5601,7 @@ class GdprEraser
             if ($stmt === false) {
                 throw new \RuntimeException((string) $db->error);
             }
-            $stmt->bind_param('ii', $userId, $userId);
+            $stmt->bind_param('iiiii', $userId, $userId, $userId, $userId, $userId);
             if ($stmt->execute() === false) {
                 $failure = new \RuntimeException((string) $stmt->error);
                 $stmt->close();
@@ -5591,7 +5624,7 @@ class GdprEraser
         }
         if ($emptied === 0) {
             self::logAudit($db, $requestId, 'none', 'tblAuditTrail', null, 'the change history holds no '
-                . 'recorded value about this person\'s account or their memberships');
+                . 'recorded value about this person\'s account or any of their memberships');
 
             return self::STEP_UNCHANGED;
         }

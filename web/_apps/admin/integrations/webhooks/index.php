@@ -32,6 +32,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Site;
+use Portal\Core\WebhookRetention;
 
 // 🛡️ Admin gate — identical to api-keys.php.
 Auth::ensureSession();
@@ -121,6 +122,104 @@ if (isset($_SESSION['webhook_secret_minted']) === true) {
         (<code>sha256=hex(hmac_sha256(body, signingSecret))</code>). The signing secret is shown
         ONCE at creation — copy it then.
     </p>
+
+    <?php
+    // 🧾 How long a payload is kept (#713).
+    //
+    //    WHY A FIGURE HERE AT ALL. Both payload columns held a webhook's whole
+    //    body for ever, and nothing removed either: an incoming payment event
+    //    routinely carries a donor's name, e-mail address and postal address,
+    //    and an outgoing notification demonstrably carries a child's name, a
+    //    raw e-mail address or a prayer-request subject. Neither table has a
+    //    column that links a row to a person, so an erasure request cannot
+    //    reach them and never could. A time limit is the only mechanism there
+    //    is.
+    //
+    //    🪤 THE ORGANISATION'S BOX IS FILLED FROM ITS OWN ROW, NOT FROM THE
+    //       MERGED SETTINGS (#674). The merged array already holds the
+    //       installation's value where this organisation has chosen nothing, so
+    //       a box filled from it would show the installation's figure and a
+    //       Save that touched nothing would pin it as this organisation's own.
+    //    🪤 AND THE INSTALLATION'S BOX IS FILLED FROM THE LAYER, never from the
+    //       merged array, for the mirror-image reason (#677).
+    $ownRow = null;
+    $stmtR  = $mysqli->prepare(
+        'SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = ? LIMIT 1'
+    );
+    if ($stmtR !== false) {
+        $keyR = WebhookRetention::KEY;
+        $stmtR->bind_param('si', $keyR, $siteId);
+        $stmtR->execute();
+        $rowR   = $stmtR->get_result()->fetch_assoc();
+        $ownRow = $rowR === null ? null : (string) $rowR['settingValue'];
+        $stmtR->close();
+    }
+    $ceiling      = WebhookRetention::installationAllows();
+    $forEverOk    = WebhookRetention::installationAllowsForEver();
+    $inForce      = WebhookRetention::daysForThisOrganisation();
+    $isGlobalAdm  = App::isRootAdmin();
+    $instOwn      = WebhookRetention::installationAllows();
+
+    // 🪤 NEVER PREFILL A VALUE THE BOX'S OWN `max` FORBIDS (#668): a browser
+    //    then refuses to submit the whole form, and the only way to use the
+    //    page is to shorten the period. The box's max is the ceiling, so a
+    //    stored figure above it is shown as the ceiling.
+    $ownShown = $ownRow === null ? '' : (string) min((int) $ownRow, $ceiling === 0 ? WebhookRetention::HARD_MAX_DAYS : $ceiling);
+    if ($ownRow !== null && (int) $ownRow === 0 && $forEverOk === true) {
+        $ownShown = '0';
+    }
+    ?>
+    <details class="mb-4">
+        <summary class="btn btn-sm btn-outline-secondary"><i class="fa-solid fa-clock-rotate-left me-1"></i>How long payloads are kept</summary>
+        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/webhooks/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 mt-2 p-3 bg-light rounded">
+            <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+            <input type="hidden" name="action" value="payload_retention">
+            <div class="col-12">
+                <p class="small text-secondary mb-2">
+                    A webhook's payload is the event itself, so it can contain somebody's name, e-mail
+                    address or postal address. Past the period below the portal <strong>empties the
+                    payload and keeps the row</strong>, so your delivery history, the attempt counts and
+                    the guard against an event being accepted twice are all untouched.
+                    <strong>A delivery still waiting or still being retried is never emptied</strong>, because
+                    the retry sends from the stored payload.
+                </p>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small" for="ownDays">This organisation keeps payloads for</label>
+                <input type="number" class="form-control form-control-sm" id="ownDays" name="ownDays"
+                       min="0" max="<?php echo (int) WebhookRetention::HARD_MAX_DAYS; ?>"
+                       value="<?php echo htmlspecialchars($ownShown, ENT_QUOTES, 'UTF-8'); ?>"
+                       placeholder="<?php echo (int) $ceiling; ?>">
+                <div class="form-text small">
+                    Days. Leave empty to follow the installation<?php echo $ceiling === 0 ? '' : ' (' . (int) $ceiling . ' days)'; ?>.
+                    <?php if ($forEverOk === true): ?>
+                        0 means keep for ever.
+                    <?php else: ?>
+                        The installation does not allow "keep for ever", so 0 will be refused.
+                    <?php endif; ?>
+                </div>
+            </div>
+            <?php if ($isGlobalAdm === true): ?>
+                <div class="col-md-4">
+                    <label class="form-label small" for="installationDays">The installation allows at most</label>
+                    <input type="number" class="form-control form-control-sm" id="installationDays" name="installationDays"
+                           min="0" max="<?php echo (int) WebhookRetention::HARD_MAX_DAYS; ?>"
+                           value="<?php echo (int) $instOwn; ?>">
+                    <div class="form-text small">
+                        Days, for every organisation on this installation. An organisation may choose
+                        less and can never choose more. 0 means "for ever is allowed".
+                    </div>
+                </div>
+            <?php endif; ?>
+            <div class="col-12">
+                <button class="btn btn-primary btn-sm"><i class="fa-solid fa-floppy-disk me-1"></i>Save</button>
+                <span class="small text-secondary ms-2">
+                    In force here:
+                    <?php echo $inForce === 0 ? 'kept for ever' : (int) $inForce . ' days'; ?>.
+                </span>
+            </div>
+        </form>
+    </details>
 
     <details class="mb-4" <?php echo count($webhooks) === 0 ? 'open' : ''; ?>>
         <summary class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-plus me-1"></i>Create a webhook</summary>

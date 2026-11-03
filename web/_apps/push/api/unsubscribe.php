@@ -29,6 +29,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\AddressFingerprint;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\RateLimiter;
@@ -61,13 +62,18 @@ if (Auth::verifyCsrf($csrf) === false) {
 //    raw REMOTE_ADDR here collapses every visitor behind the same Cloudflare
 //    edge IP into one shared bucket.
 $clientIp = RateLimiter::clientIp();
-$rlBucket = 'pushsub:' . $clientIp;
+// 🔒 Fingerprinted, not stored raw (#712). The bucket only has to be stable
+//    for the limit to work, and nothing reads it back. Written raw, the row kept
+//    a visitor's address indefinitely: the tidy-up matched only this exact
+//    bucket, and a one-off sign-up never produces a second hit, so it was never
+//    tidied. The family prefix on recordHit() below is the other half of that.
+$rlBucket = 'pushsub:' . AddressFingerprint::of($clientIp);
 if (RateLimiter::tooMany($rlBucket, 30, 3600) === true) {
     http_response_code(429);
     echo json_encode(['error' => 'Too many requests. Try again later.']);
     exit();
 }
-RateLimiter::recordHit($rlBucket, 3600);
+RateLimiter::recordHit($rlBucket, 3600, 'pushsub:');
 
 $endpoint = (string) ($payload['endpoint'] ?? '');
 if ($endpoint === '') {

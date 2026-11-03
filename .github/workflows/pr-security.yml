@@ -1197,6 +1197,18 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_pdf_write_verified.py
 
+      # A network address is personal data, and two rate-limit tables held one
+      # unchanged while NOTHING ever cleared either (#712). The two-factor
+      # bucket paired an account number with an address, so the row was a record
+      # of which person signed in from where, kept indefinitely and outside
+      # every retention rule the portal has. Nothing failed while it was there:
+      # the limits worked and the rows simply accumulated, which is why this is
+      # read from the code rather than tested for.
+      - name: 'No rate-limit row holds a network address (hard gate, #712)'
+        id: no_raw_address_stored
+        if: always()
+        run: python3 tools/audit-checks/check_no_raw_address_stored.py
+
       # Nothing under web/ may ask another website to draw a QR picture (#623).
       # The rule existed for PHP and had no guard for JavaScript, which is how
       # the noticeboard bundle's api.qrserver.com fallback went unnoticed. It is

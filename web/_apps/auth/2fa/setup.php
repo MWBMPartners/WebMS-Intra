@@ -280,7 +280,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // reaches the comparison. An empty $stored means the key could not
         // be read back; no code can be right then.
         if ($stored === '' || preg_match('/^[0-9]{6}$/', (string) $typed) !== 1 || Totp::verify($stored, (string) $typed) === false) {
-            RateLimiter::recordHit($limitBucket, $limitWindow);
+            // 🧹 The family prefix (#712). Making a new set of backup codes is
+            //    a once-a-year act, so without it the row never gets tidied.
+            RateLimiter::recordHit($limitBucket, $limitWindow, 'totp_newcodes:');
             Logger::activity('TotpBackupCodesFailed', 'New backup codes refused: the authenticator code was not right', $userId);
             header('Location: ' . Site::url('account') . '?error=totp_code');
             exit();

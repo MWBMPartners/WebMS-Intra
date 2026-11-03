@@ -1,0 +1,96 @@
+-- =============================================================================
+-- Migration 237: a webhook's payload is kept for a bounded time (#713)
+-- =============================================================================
+-- One seeded setting. No table change, nothing deleted here.
+--
+--   webhooks.payload.retentionDays = '90', installation-wide
+--
+-- -----------------------------------------------------------------------------
+-- WHAT WAS WRONG BEFORE
+-- -----------------------------------------------------------------------------
+-- Two tables kept a webhook's whole body for ever.
+--
+--   `tblWebhookEvent.payload` is the ENTIRE raw HTTP body of an incoming
+--   payment webhook, untruncated and unfiltered. A Stripe or PayPal event
+--   routinely carries a donor's name, e-mail address and postal address.
+--
+--   `tblWebhookDeliveries.payload` is the body of an outgoing notification, and
+--   this one demonstrably holds personal details rather than possibly: a
+--   child's name on an event registration, a raw e-mail address on a submitted
+--   event, and a prayer-request subject, which is free text that can name
+--   anybody.
+--
+-- Nothing ever removed either. Measured: no `DELETE` against either table
+-- anywhere under `web/`; `tblWebhookEvent` has no foreign key at all, so no
+-- cascade could reach it; the only removal for a delivery was the cascade when
+-- an administrator deleted the parent webhook; and `cron/webhook-retry.php`
+-- only updates a status and a back-off -- dead-lettering sets `status='dead'`
+-- and leaves the row.
+--
+-- -----------------------------------------------------------------------------
+-- WHY A TIME LIMIT AND NOT AN ERASURE INSTRUCTION
+-- -----------------------------------------------------------------------------
+-- NEITHER TABLE HAS A COLUMN THAT LINKS A ROW TO A PERSON. `tblWebhookEvent`
+-- has none; a delivery has only `webhookID`, which names a customer's endpoint
+-- and not a human being. So an erasure instruction could not match a row, and
+-- an entry promising one would be the #535 fault -- an action with no column to
+-- act on -- which `tools/gdpr-coverage-selftest.php` fails on by design.
+-- Searching the JSON for a name was rejected for #707's reason: it would match
+-- a namesake and miss a nickname.
+--
+-- A time limit is the only mechanism that reaches these rows. The owner chose
+-- it on 2 November 2026, together with "do not store it in the first place" --
+-- which is why `Payments::ingestWebhook()` now keeps an incoming body only once
+-- its signature has verified.
+--
+-- -----------------------------------------------------------------------------
+-- WHY 90 DAYS, AND WHY NOT 0
+-- -----------------------------------------------------------------------------
+-- Ninety days is long enough to investigate a payment dispute or a failed
+-- delivery and short enough that a donor's postal address is not still sitting
+-- there a year later.
+--
+-- 0 means "keep for ever" everywhere in this portal, and it is deliberately NOT
+-- the default here. "We kept every donor's address for ever" must not be what
+-- happens when nobody chooses. An installation may still choose it, and an
+-- organisation may choose it only where the installation allows it -- which is
+-- #668's rule, applied by `Portal\Core\WebhookRetention`.
+--
+-- -----------------------------------------------------------------------------
+-- WHAT THIS CANNOT DO
+-- -----------------------------------------------------------------------------
+-- It seeds a figure. It does not empty anything: the clear-out happens in the
+-- nightly retention sweep, which empties the `payload` of rows past the period
+-- and KEEPS the row -- for an incoming event the row is the replay guard
+-- (`uq_we_provider_ref`), and for a delivery it is the record that something
+-- was sent, when, after how many attempts and with what answer.
+--
+-- A PENDING OR FAILED DELIVERY IS NEVER EMPTIED, because `webhook-retry.php`
+-- re-sends from the stored payload; emptying one would make every later retry
+-- send nothing while reporting that it tried. Only `delivered` and `dead` rows
+-- are emptied.
+--
+-- -----------------------------------------------------------------------------
+-- SAFE TO RUN TWICE
+-- -----------------------------------------------------------------------------
+-- `INSERT ... ON DUPLICATE KEY UPDATE defaultValue = VALUES(defaultValue)` is
+-- the shape every settings seed here uses: it writes the built-in default and
+-- NEVER overwrites a value somebody has chosen. Running it again changes
+-- nothing.
+--
+-- @link https://github.com/MWBMPartners/WebMS-Intra/issues/713
+-- =============================================================================
+
+-- ⚠️ THE COLUMN IS `isSensitive`, NOT `isSecret`. A first version of this
+--    migration wrote `isSecret`, copied from no column at all, and the
+--    end-to-end harness caught it immediately: "Unknown column 'isSecret' in
+--    'field list'", phase 2, on both MySQL 8.0.36 and MariaDB 11.4.13. The
+--    install script was right, because its own seed block names the columns
+--    correctly a few lines above; the migration was the copy that drifted.
+--    Read the column list off the table, never off memory.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'webhooks.payload.retentionDays', '90', '90', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('237_webhook_payload_retention.sql')
+ON DUPLICATE KEY UPDATE `filename` = `filename`;

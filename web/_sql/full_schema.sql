@@ -5569,7 +5569,14 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'push.enabled',         'false', 'false', 0),
     (NULL, 'webhooks.enabled',     'true',  'true',  0),
     (NULL, 'webhooks.timeout',     '10',    '10',    0),
-    (NULL, 'webhooks.maxRetries',  '5',     '5',     0)
+    (NULL, 'webhooks.maxRetries',  '5',     '5',     0),
+    -- 🧾 How long a webhook's payload is kept, in days (#713). 0 would mean
+    --    "for ever" and is deliberately NOT the default: these payloads carry a
+    --    donor's name and postal address on the way in, and a child's name or a
+    --    prayer-request subject on the way out, and nothing else ever removed
+    --    them. Capped by the installation and readable only through
+    --    `Portal\Core\WebhookRetention`.
+    (NULL, 'webhooks.payload.retentionDays', '90', '90', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 -- ── from 166_webhook_retry.sql (#324 v1.1) ──────────────────────────────
@@ -7120,12 +7127,12 @@ CREATE TABLE IF NOT EXISTS `tblLiveRateLimits` (
     `limitID`       INT          NOT NULL AUTO_INCREMENT,
     `siteID`        INT          NOT NULL COMMENT 'For per-tenant audit + cleanup scoping',
     `sessionToken`  VARCHAR(64)  DEFAULT NULL,
-    `senderIP`      VARCHAR(45)  DEFAULT NULL,
+    `senderFingerprint` CHAR(64) DEFAULT NULL COMMENT 'SHA-256 of the sender address, never the address itself (#712) - LiveChat::senderFingerprint() is the one place it is made. NOT the same as tblLiveChatMessages.senderIP, which stays raw for moderation',
     `eventType`     VARCHAR(40)  NOT NULL COMMENT 'e.g. chat.send',
     `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`limitID`),
     KEY `idx_ratelimit_token` (`sessionToken`, `eventType`, `createdAt`),
-    KEY `idx_ratelimit_ip`    (`senderIP`, `eventType`, `createdAt`),
+    KEY `idx_ratelimit_fingerprint` (`senderFingerprint`, `eventType`, `createdAt`),
     KEY `idx_ratelimit_site`  (`siteID`, `eventType`, `createdAt`),
     KEY `idx_ratelimit_prune` (`createdAt`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -10688,4 +10695,23 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('234_giving_retention_ceiling.s
 -- it is here so the installer's replay of every numbered migration finds
 -- nothing left to do.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('235_drop_dead_stocktake_notes.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 236_rate_limit_addresses.sql (#712) ────────────────────────
+-- Nothing to do here: `tblLiveRateLimits` above already declares
+-- `senderFingerprint` rather than `senderIP`, so a fresh install never holds an
+-- address in that table and has no rows for the migration to clear. The mark is
+-- written UNCONDITIONALLY -- the migration only renames a column and an index
+-- and empties a throttle log -- and it is here so the installer's replay of
+-- every numbered migration finds nothing left to do.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('236_rate_limit_addresses.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 237_webhook_payload_retention.sql (#713) ──────────────────
+-- Nothing to do here: `webhooks.payload.retentionDays` is seeded with the other
+-- webhook settings in the block above. The mark is written UNCONDITIONALLY --
+-- the migration only seeds a setting and never overwrites a period somebody has
+-- chosen -- and it is here so the installer's replay of every numbered
+-- migration finds nothing left to do.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('237_webhook_payload_retention.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;

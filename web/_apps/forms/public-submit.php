@@ -44,6 +44,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\AddressFingerprint;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
@@ -137,7 +138,14 @@ if (RateLimiter::isBlocked() === true) {
     Logger::activity('FormPublicBlocked', 'Rate-limited (isBlocked) public-submit for form #' . $formId);
     $successRedirect();
 }
-$rateBucket = 'forms:public-submit:' . hash('sha256', RateLimiter::clientIp());
+// 🔒 SALTED (#712). This was a plain `hash('sha256', …)` of the address.
+//    An address is 32 bits and this machine does 4.87 million SHA-256 a
+//    second, so the whole IPv4 space takes about fifteen minutes - an
+//    independent check reversed such a value in under a second. The salt
+//    is the installation's own key, which is not in the database, so a
+//    database copy on its own no longer tells anybody which addresses
+//    the portal has seen. `AddressFingerprint::of()` is the one place.
+$rateBucket = 'forms:public-submit:' . AddressFingerprint::of(RateLimiter::clientIp());
 if (RateLimiter::tooMany($rateBucket, 5, 900) === true) {
     Logger::activity('FormPublicBlocked', 'Rate-limited (tooMany) public-submit for form #' . $formId);
     $bounce('Too many submissions from this connection — please try again later.');
@@ -173,7 +181,9 @@ if (count($result['errors']) > 0) {
 $ip = RateLimiter::clientIp();
 $ip = mb_substr((string) $ip, 0, 45);
 
-RateLimiter::recordHit($rateBucket, 900);
+// 🧹 The family prefix (#712). Without it a one-off public submission leaves
+//    a row holding a fingerprint of the sender's address for ever.
+RateLimiter::recordHit($rateBucket, 900, 'forms:public-submit:');
 
 // -----------------------------------------------------------------------------
 // 💾 10. Persist — the FORM'S OWN siteID, never Site::id().

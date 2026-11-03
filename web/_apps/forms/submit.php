@@ -111,7 +111,9 @@ if (count($result['errors']) > 0) {
 $answersJson = FormEngine::buildAnswersJson($fields, $result['values']);
 $newId = FormEngine::saveResponse($formId, $siteId, 'internal', $userId, null, $answersJson);
 
-RateLimiter::recordHit($rateBucket, 3600);
+// 🧹 The family prefix (#712). Without it a one-off submission leaves a row
+//    holding an account number that nothing ever deletes.
+RateLimiter::recordHit($rateBucket, 3600, 'forms:submit:');
 
 if ($newId <= 0) {
     $_SESSION['flash_msg']  = 'Something went wrong submitting your response. Please try again.';

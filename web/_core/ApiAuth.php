@@ -300,7 +300,9 @@ final class ApiAuth
                 header('Retry-After: ' . RateLimiter::retryAfter($bucket, $max, $windowSecs));
                 ApiResponse::error('Rate limit exceeded', 429);
             }
-            RateLimiter::recordHit($bucket, $windowSecs);
+            // 🧹 The family prefix (#712). Without it the tidy-up matches only
+            //    THIS key's bucket, so a key used once leaves a row for ever.
+            RateLimiter::recordHit($bucket, $windowSecs, 'apikey:');
         }
     }
 

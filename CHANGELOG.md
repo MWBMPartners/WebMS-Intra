@@ -2,6 +2,127 @@
 
 
 ## [Unreleased] (alpha)
+- **Fixed — the change history about an erased person now covers every kind of membership (#717)**
+  - `GdprEraser::eraseAuditTrailAboutPerson()` (#707) reached an entry about somebody's account and
+    about which **organisations** they belonged to. Three more membership tables are audited and were
+    not reached: `tblUserDepts`, `tblUserGroups` and `tblUserRoles`. All four are covered now.
+  - **Stated fairly: there was no identifying residue.** Those payloads carry account numbers and no
+    names — a deliberate choice recorded under #518 — and the account itself is emptied by the main
+    walk, so after an erasure they already read "account 4211 was added to department 7" where 4211
+    identifies nobody. What this closes is **the day somebody adds a name to one of those payloads**:
+    #707's fault would be back in a table nothing covered, and nothing would have noticed.
+  - **The check is the point, not the three tables.** Nothing anywhere compared the set of membership
+    tables that are audited against the set the step reaches — a guard only ever measured against
+    itself, which is the #706 shape. Section 21 of `tools/gdpr-coverage-selftest.php` reads **both
+    sides out of the code** and goes red if they differ, so a fifth membership table cannot be added
+    silently. Planted by dropping `tblUserRoles` from the step: caught, naming the missing table.
+  - **The ordering got more load-bearing, not less.** The step runs before the catalogue walk because
+    it finds rows by looking the person's membership rows up and the walk **deletes** them. That was
+    true of one table; it is now true of four, each with `'action' => 'delete'` on `userID`, so there
+    are four ways a reordering could make this step quietly find nothing. Recorded at the call site.
+  - The in-app help and the catalogue comment both named the two covered memberships and the three
+    that were not; both are corrected in the same change, because a document that states the
+    limitation a fix has just removed is worse than one that says nothing.
+- **Security — a rate-limit row no longer holds a network address, and both tables are cleared out
+  (#712, migration 236)**
+  - **What was wrong.** A network address is personal data. `tblLiveRateLimits` recorded the viewer's
+    address **unchanged**, and **nothing ever removed a row**: no clear-out anywhere under `web/`, no
+    foreign key that could cascade in, no scheduled job, no admin page — all four measured, not
+    assumed. So every installation kept a growing record of which addresses had used the live chat,
+    for ever, outside every retention rule the portal has. The table even carries an index named
+    `idx_ratelimit_prune`, for a prune that did not exist.
+  - **And the code said otherwise.** `LiveChat::recordSend()`'s docblock read "pruning is done
+    incidentally (next call rolls forward via the time window)". The window only narrows the *count*
+    the throttle reads; it has never deleted anything. That is the shape this project keeps being
+    bitten by — a comment stating the guarantee the code forgot to implement.
+  - **`tblApiRateLimits` was worse in one respect**, because the bucket is a single piece of text and
+    two kinds of bucket built it from the raw address: the two-factor code check and the
+    push-notification sign-up. **The two-factor one paired an account number with an address**, so
+    the row was a record of which person signed in from where. And for exactly those two, the
+    opportunistic tidy-up only ever matched the same bucket again — so a bucket never used a second
+    time, which is the normal case for a one-off code check or a single sign-up, was **never tidied
+    at all**. Four other buckets did hash — but with a plain unsalted SHA-256, which is not the
+    same as being safe (see below).
+  - **The fix.** `Portal\Core\AddressFingerprint::of()` is the one place that decides what the
+    portal stores in place of an address, and `LiveChat::senderFingerprint()` is the chat's own name
+    for it, asked by the writer *and* the reader so they cannot drift. The column is renamed
+    `senderFingerprint CHAR(64)`; the three API call sites hash the address and each passes a family
+    prefix so a later hit tidies every stale bucket of that kind; and `recordSend()` now tidies the
+    throttle log as it writes, keeping twice the window, read from the same setting the throttle
+    reads so the two cannot disagree about which rows still matter.
+  - **The column is renamed, not just widened, and the second reason is the useful one:**
+    `tblLiveChatMessages` has a column of its own called `senderIP`, and **that one stays raw on
+    purpose** — the moderation screen shows it to an administrator deciding whether to block
+    somebody. Two columns of the same name in one feature, one to be hashed and one not, is how the
+    wrong one gets changed.
+  - **The first version used a plain SHA-256, and an independent check measured that away.** IPv4 is
+    32 bits; this machine computes 4.87 million SHA-256 a second, so the **whole address space takes
+    about fifteen minutes** — the checker recovered a stored value back to `192.0.2.44` in under a
+    second by walking one `/8`. The reasoning borrowed from `Logger::sessionFingerprint()` (#622) did
+    not carry across: a session identifier has around 128 bits, and #622's stated reason — that a
+    clean-out must recompute the value in SQL — is **false here**, because this clean-out is purely
+    time-based and every comparison happens in PHP. So there was no constraint to honour and the
+    weaker form bought nothing.
+  - **It is salted with the installation's own key now**, which is not in the database and so is not
+    in a database backup either. `AssetRegister::saltedHash()` had done exactly this since #410, for
+    exactly this purpose, and the first version neither used it nor mentioned it. Asset Register
+    keeps its own copy on purpose — its stored hashes are already on disk and its comment promises
+    they are bit-identical to the pre-#410 values.
+  - **Six buckets were built from an address, not two.** Two used it raw; four hashed it plainly,
+    which was not the same as being safe. All six now go through the one helper — found because the
+    strengthened audit check reported the four, which is the gate doing its job.
+  - **Called a fingerprint, not anonymisation.** Whoever holds the installation's key *and* a list of
+    addresses can still test that list. What it stops is anybody who has only the database — a
+    backup, a copy, a stolen dump — learning which addresses the portal has seen.
+  - **Every one of the eleven places that records a hit now passes a family prefix; eight did not.**
+    Including the per-user second tier of the two-factor limit, which `totp_verify:%` cannot match —
+    so every failed code check left a row holding an account number that nothing deleted, and the
+    catalogue entry this package rewrote claimed otherwise. **A fix applied to one tier of a
+    two-tier limit is half a fix.**
+  - **No new setting.** A rate-limit row has no value once its window has passed, so the clear-out
+    needs no retention figure and no installation cap (#668) — unlike the webhook payloads in #713,
+    where how long to keep the evidence is a real choice.
+  - **Two guards, because they fail differently.** `tools/audit-checks/check_no_raw_address_stored.py`
+    is a new hard gate reading the code; `tools/rate-limit-privacy-selftest.php` (15 checks, real
+    MySQL) proves the throttle **still works** once the value is hashed — the half that would break
+    quietly, since nothing would log it and no page would change, somebody could simply flood the
+    chat. Eight faults planted across the two, each caught by the one that should catch it.
+  - **Two traps worth recording from building the guard.** Matching `hash('sha256', $ip)` against
+    source with string contents masked can never work — the mask turns it into `'xxxxxx'` — and
+    reading the raw file instead lets a commented-out copy satisfy the check (#569). Comments are
+    stripped and strings kept for that one pin. The same mistake hid a second plant: a check for
+    `senderIP` beside `tblLiveRateLimits` read the masked source, where both names live *inside* a
+    SQL string and so had vanished — planted, it missed an `INSERT` naming the old column.
+  - The two personal-data catalogue entries, written by #706 and each citing #712, are rewritten:
+    they asserted "nothing removes it" and "no time limit", which this change makes false.
+  - **The whole suite then caught two regressions neither package's own tests could.**
+    `tools/sign-in-limits-selftest.php` kept its **own copy** of how the password-reset buckets are
+    built (`hash('sha256', $ip)`), so salting the handlers made eight of its checks fail — every one
+    about throttling, none about anything broken. That is this repository's own recorded remedy, in
+    the file the lesson came from: ask the portal's function, never keep a second copy of the rule in
+    a test. Its clean-up also had to stop matching buckets by exact name, which with a new random key
+    each run could never have matched an earlier run's rows anyway. And
+    `tools/gdpr-eraser-selftest.php` requires the retention sweep by hand with no autoloader, so it
+    had to be given the sweep's new dependency — and then that class's dependency. **Requiring a file
+    by hand means owning its whole dependency chain, in order.**
+  - **Three more findings from the check round, each a real fault rather than polish.** The new hard
+    gate **passed the real pre-fix file**: it required the text `clientIp()` inside the bucket
+    assignment, and the live code assigned `$clientIp` on one line and built the bucket from it on
+    the next — proved by restoring the file from `HEAD` and watching the check exit 0. It follows one
+    hop through a local now. The self-test's prune check **could not fail**: every row in its fixture
+    was seconds old, so no positive horizon could remove one, and a prune set to wipe the entire
+    throttle log passed 15 of 15 three runs running. Its fixture now plants rows either side of the
+    horizon — one that must go, one that must survive. And a pre-#712 snapshot **blocked a whole
+    database restore**, because `tblLiveRateLimits.senderIP` was not added to
+    `DbBackup::REMOVED_COLUMNS`; the rule was applied two entries above in the same session and
+    forgotten here.
+  - **One more untrue comment, and it had a real consequence.** The prune was wrapped in
+    `if ($prune === false) { return; }` under a comment claiming it failed open. Under
+    `MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR` both `prepare()` and `execute()` **throw**, and `@`
+    suppresses a diagnostic rather than an exception — both measured. `recordSend()` runs after the
+    message row is inserted and before the success answer, so a lock-wait timeout on the new
+    500-row `DELETE` would have handed the viewer a bare 500 with the message already saved. It is a
+    real `try`/`catch` now.
 - **Fixed — a PDF that was not written in full is no longer handed back as a finished one (#711)**
   - `Pdf::create()` discarded `file_put_contents()`'s answer and decided success with
     `is_file($filePath)`. **`is_file()` is true for a file that is empty or half written**, which is
@@ -280,6 +401,9 @@
     so nothing identifying is left — but "every entry about this person" would not have been true,
     and an independent check measured that rather than taking the word for it. Raised as its own
     issue so that the day one of those payloads gains a name, it is not forgotten.
+    **That limit is gone: #717, later in this same release, covers all four membership tables and
+    adds a check comparing the set that is audited against the set the step reaches.** This
+    paragraph is left as it was written because it records what was true when #707 shipped.
   - **Also recorded (#708).** A pastoral visit's follow-up owner has a correct erasure instruction
     that can never match a row, because nothing writes the column. The limit is now written beside
     it rather than the instruction being deleted or the page changed: whether a visit should have an

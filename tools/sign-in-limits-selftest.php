@@ -196,6 +196,11 @@ foreach (['curl_init', 'proc_open', 'openssl_pkey_new'] as $needed) {
 }
 $repo      = (string) realpath(dirname(__DIR__));
 $webSrc    = $repo . DIRECTORY_SEPARATOR . 'web';
+// 🧂 #712: `bucket()` asks the portal's own fingerprint function rather than
+//    keeping a copy of the rule. Loaded here so it is available wherever it is
+//    called; the salt it reads comes from PORTAL_ROOT, defined further down as
+//    soon as the scratch copy's own key has been written.
+require_once $webSrc . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'AddressFingerprint.php';
 $parentRaw = getenv('SELFTEST_WEB_DIR');
 $parent    = realpath(($parentRaw === false || $parentRaw === '') ? sys_get_temp_dir() : (string) $parentRaw);
 if ($parent === false || is_dir($parent) === false) {
@@ -335,10 +340,25 @@ function mailOf(string $who): string
     return $who . '.signin@selftest.invalid';
 }
 
-/** The limiter's bucket for one visitor address: `ask` for requests for a link, `use` for tries to use one. */
+/**
+ * The limiter's bucket for one visitor address: `ask` for requests for a link,
+ * `use` for tries to use one.
+ *
+ * 🪤 IT ASKS THE PORTAL'S OWN FUNCTION, and a copy of the rule here is what
+ *    broke it. This used to read `hash('sha256', $ip)` — a second copy of how
+ *    the two handlers build their bucket — and when #712 changed them to a
+ *    SALTED fingerprint (a plain SHA-256 of a 32-bit address is reversible in
+ *    about fifteen minutes) this test went on computing the old value. Eight
+ *    checks failed, every one of them about throttling, and not one of them was
+ *    about anything that had actually broken.
+ *
+ *    That is this repository's own recorded lesson, in the very test the lesson
+ *    was written about: a test holding its own copy of the logic it tests is
+ *    not testing anything. Ask the portal.
+ */
 function bucket(string $kind, string $ip): string
 {
-    return 'pwreset:' . $kind . ':' . hash('sha256', $ip);
+    return 'pwreset:' . $kind . ':' . \Portal\Core\AddressFingerprint::of($ip);
 }
 
 function removeWorld(): void
@@ -347,10 +367,20 @@ function removeWorld(): void
     q("DELETE FROM tblEmailLog WHERE toRecipients LIKE '%.signin@selftest.invalid%'");
     q("DELETE FROM tblActivityLogs WHERE userID BETWEEN 919000 AND 919999 OR visitorIP LIKE '203.0.113.%' OR userAgent = ?", 's', [AGENT]);
     q("DELETE FROM tblErrors WHERE userID BETWEEN 919000 AND 919999 OR visitorIP LIKE '203.0.113.%'");
-    // Only the buckets of this test's own made-up addresses.
-    for ($last = 1; $last <= 254; $last++) {
-        q('DELETE FROM tblApiRateLimits WHERE bucket IN (?, ?)', 'ss', [bucket('ask', ip($last)), bucket('use', ip($last))]);
-    }
+    // 🧹 Every password-reset bucket, by prefix.
+    //
+    //    This used to name each of 254 made-up addresses' two buckets exactly.
+    //    Since #712 the address in a bucket is a fingerprint SALTED with the
+    //    installation's own key, and this test writes a NEW RANDOM key into its
+    //    scratch copy on every run - so an exact name can never match a row an
+    //    EARLIER run left behind, which is precisely what a clean-up is for.
+    //    It also ran before the scratch copy existed, so there was no key to
+    //    salt with at all.
+    //
+    //    The prefix needs no salt and no key. `pwreset:` is this test's own
+    //    namespace: the only two places that write it are the forgot-password
+    //    and reset-password handlers, which is what this test drives.
+    q("DELETE FROM tblApiRateLimits WHERE bucket LIKE 'pwreset:%'");
     q('DELETE FROM tblLocalAccounts WHERE userID BETWEEN 919000 AND 919999');
     q('DELETE FROM tblUserSites WHERE userID BETWEEN 919000 AND 919999');
     q('DELETE FROM tblUsers WHERE userID BETWEEN 919000 AND 919999');
@@ -907,6 +937,18 @@ $creds = [
 ];
 file_put_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'auth_creds.php', "<?php\n// Written by tools/sign-in-limits-selftest.php for one run; deleted with its folder.\nreturn " . var_export($creds, true) . ";\n");
 file_put_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'enc.key', bin2hex(random_bytes(32)));
+
+// 🧂 THE SALT HAS TO BE THE SAME ONE THE SERVER USES (#712). `bucket()` above
+//    asks `AddressFingerprint::of()` rather than keeping its own copy of the
+//    rule, and that function salts with the encryption key under PORTAL_ROOT.
+//    The server under test runs from the SCRATCH COPY with the random key just
+//    written, so this process has to point at the same tree — point it at the
+//    repository instead and every bucket name would differ from the server's,
+//    which is a whole class of failure that looks like broken throttling and is
+//    not.
+if (defined('PORTAL_ROOT') === false) {
+    define('PORTAL_ROOT', $child . $sep . 'web');
+}
 
 // ✉️ A made-up Google key file, in the SCRATCH COPY only. The key in it is
 //    made here, opens nothing, and is deleted with the folder. Google's route

@@ -242,7 +242,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $db->rollback();
                         $turn = 0;
                     } else {
-                        RateLimiter::recordHit('pushgolive:' . $siteId, 900);
+                        // 🧹 The family prefix (#712), so an organisation that
+                        //    went live once does not leave a row for ever.
+                        RateLimiter::recordHit('pushgolive:' . $siteId, 900, 'pushgolive:');
                         $db->commit();
                         $turn = 1;
                     }

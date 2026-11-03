@@ -191,6 +191,20 @@ class DbBackup
         // may pass.
         'tblAssetStocktakes'     => ['notes'],
         'tblAssetStocktakeItems' => ['notes'],
+        // #712, migration 236. The live chat's throttle log used to hold the
+        // viewer's network address raw in `senderIP`; the column is now
+        // `senderFingerprint`. Listed here because WITHOUT IT a snapshot taken
+        // before that migration BLOCKS A WHOLE-DATABASE RESTORE outright: the
+        // unknown column reaches the INSERT and `loadTable()` throws, which
+        // stops the entire restore rather than one table. Found by an
+        // independent check; the rule was known and applied two entries above
+        // and forgotten here.
+        //
+        // Discarding the saved values loses nothing anybody would miss: a
+        // throttle row older than twice the chat's window can change no answer
+        // the throttle gives, and these are raw addresses that must not come
+        // back into a column whose name says it holds fingerprints.
+        'tblLiveRateLimits'      => ['senderIP'],
     ];
 
     /**

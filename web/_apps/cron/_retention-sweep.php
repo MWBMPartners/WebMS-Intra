@@ -51,6 +51,7 @@ use Portal\Core\App;
 use Portal\Core\GdprEraser;
 use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
+use Portal\Core\WebhookRetention;
 
 /**
  * 📏 The rule that decides whether one registration is past its keep-by date.
@@ -646,6 +647,80 @@ function run_offboarding_erasure_sweep(): array
     return ['mode' => $mode, 'ran' => $ran, 'failed' => $failed, 'waiting' => $wait];
 }
 
+/**
+ * 🧾 Empty webhook payloads that are past their period. Answers how many rows
+ *    were emptied.
+ *
+ * ITS OWN FUNCTION so that `tools/webhook-retention-selftest.php` can call THE
+ * REAL CODE. A test holding its own copy of the logic it tests is not testing
+ * anything, and the alternative here was a shim repeating these two statements.
+ * The giving and offboarding sweeps in this same file are split out for their
+ * own reasons; this one is split out for that one.
+ */
+function run_webhook_payload_sweep(): int
+{
+    $webhookPayloadsCleared = 0;
+    $db = App::db();
+
+    // 💳 Incoming payment events: one period, because the table has no
+    //    organisation column and the provider's credentials are an
+    //    installation-wide setting. 0 means "keep for ever", so nothing is
+    //    emptied.
+    $incomingDays = WebhookRetention::daysForPaymentEvents();
+    if ($incomingDays > 0) {
+        $stmt = $db->prepare(
+            'UPDATE tblWebhookEvent SET payload = NULL '
+            . 'WHERE payload IS NOT NULL AND receivedAt < DATE_SUB(NOW(), INTERVAL ? DAY)'
+        );
+        if ($stmt !== false) {
+            $stmt->bind_param('i', $incomingDays);
+            $stmt->execute();
+            $webhookPayloadsCleared += (int) $stmt->affected_rows;
+            $stmt->close();
+        }
+}
+
+// 📤 Outgoing deliveries: ONE ORGANISATION AT A TIME, for the reason the
+//    registration sweep above sets out at length. A delivery belongs to a
+//    webhook, which belongs to an organisation, and this job has no current
+//    organisation — so reading the merged settings would apply whichever
+//    organisation the job resolved to, to every organisation's rows (#683).
+//
+//    ⚠️ ONLY `delivered` AND `dead` ROWS, AND THAT IS LOAD-BEARING.
+//       cron/webhook-retry.php re-sends a delivery FROM ITS STORED PAYLOAD.
+//       Empty a pending or failed one and every later retry would send
+//       nothing, for ever, while reporting that it had tried. A `dead` row
+//       has been given up on, so its body is needed for nothing.
+$stmt = $db->prepare(
+    'UPDATE tblWebhookDeliveries AS d '
+    . 'INNER JOIN tblWebhooks AS w ON w.webhookID = d.webhookID '
+    . "SET d.payload = '', d.responseSnippet = NULL "
+    . "WHERE w.siteID = ? AND d.status IN ('delivered', 'dead') "
+    . "AND (d.payload <> '' OR d.responseSnippet IS NOT NULL) "
+    . 'AND d.createdAt < DATE_SUB(NOW(), INTERVAL ? DAY)'
+);
+if ($stmt !== false) {
+    $sites = $db->query('SELECT siteID FROM tblSites');
+    if ($sites !== false) {
+        while ($one = $sites->fetch_assoc()) {
+            $siteId = (int) $one['siteID'];
+            $days   = WebhookRetention::daysForSite($siteId);
+            if ($days <= 0) {
+                // This organisation keeps them for ever, and the
+                // installation allows that. Nothing to do for it.
+                continue;
+            }
+            $stmt->bind_param('ii', $siteId, $days);
+            $stmt->execute();
+            $webhookPayloadsCleared += (int) $stmt->affected_rows;
+        }
+    }
+    $stmt->close();
+}
+
+    return $webhookPayloadsCleared;
+}
+
 function run_retention_sweep(): array
 {
     $activityDays = (int) (App::settings('audit.retentionDays')  ?? '365');
@@ -785,6 +860,8 @@ function run_retention_sweep(): array
     //    passed. Does nothing unless the installation has chosen that mode.
     $offboardErase = run_offboarding_erasure_sweep();
 
+    $webhookPayloadsCleared = run_webhook_payload_sweep();
+
     return [
         'activityDeleted'      => $activityDeleted,
         'errorsDeleted'        => $errorsDeleted,
@@ -811,6 +888,9 @@ function run_retention_sweep(): array
         // not delete, a write that failed). Nothing was changed for them; the
         // reason is in the server's error log and the next run tries again.
         'givingIdentityFailed'  => $givingIdentityFailed,
+        // 🧾 Emptied, not deleted, so NOT added to totalDeleted — same rule as
+        //    the figures above it.
+        'webhookPayloadsCleared' => $webhookPayloadsCleared,
         'totalDeleted'         => $activityDeleted + $errorsDeleted + $registrationsDeleted,
     ];
 }

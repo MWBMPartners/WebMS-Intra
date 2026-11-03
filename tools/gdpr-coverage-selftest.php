@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 90; // 81 before the #709 fix round added section 8d; round 2
+const EXPECTED_CHECKS = 91; // 81 before the #709 fix round added section 8d; round 2
                             // added four more after three plants went uncaught
 
 $failures = 0;
@@ -2396,6 +2396,69 @@ check(
         'subjectVia is not a list at all',
     ],
     'the eight ways are no longer the eight named here: ' . implode(' | ', array_keys($mustRefuse))
+);
+
+// -----------------------------------------------------------------------------
+// 21. EVERY MEMBERSHIP TABLE THAT IS AUDITED IS ALSO REACHED BY THE STEP THAT
+//     EMPTIES THE CHANGE HISTORY ABOUT A PERSON (#717).
+//
+//     `tblAuditTrail.userID` is the ACTOR. What a row is ABOUT is the pair
+//     (tableName, recordID), and no column says who that is — so
+//     `GdprEraser::eraseAuditTrailAboutPerson()` has to name each table it
+//     reaches and look the person's rows up in it.
+//
+//     THE POINT OF THIS CHECK IS THE DAY SOMEBODY ADDS A FIFTH. Until #717 the
+//     step named two tables while four were audited, and there was nothing
+//     anywhere comparing the two sets — a guard only ever compared against
+//     itself, which is the #706 shape. The payloads carry account numbers and
+//     no names today, so there was no identifying residue; the moment one
+//     carries a name, #707's fault is back in a table nothing covers and
+//     nothing would notice.
+//
+//     Both sides are read from the code rather than listed here, so neither can
+//     drift from the other without this going red.
+// -----------------------------------------------------------------------------
+$auditedMembership = [];
+$webRoot = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web';
+$walker  = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($webRoot));
+foreach ($walker as $file) {
+    if ($file->isFile() === false || $file->getExtension() !== 'php') {
+        continue;
+    }
+    $text = (string) file_get_contents($file->getPathname());
+    // Every `Logger::audit(` call, on one line or spread over several, and the
+    // first quoted table name after it.
+    if (preg_match_all('/Logger::audit\(\s*\n?\s*\x27(tblUser\w+)\x27/', $text, $found) === 1
+        || isset($found[1]) === true
+    ) {
+        foreach ($found[1] as $table) {
+            $auditedMembership[$table] = true;
+        }
+    }
+}
+$auditedMembership = array_keys($auditedMembership);
+sort($auditedMembership);
+
+$eraserSource = (string) file_get_contents(
+    dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core'
+    . DIRECTORY_SEPARATOR . 'GdprEraser.php'
+);
+$stepStart = strpos($eraserSource, 'function eraseAuditTrailAboutPerson');
+$stepBody  = $stepStart === false
+    ? ''
+    : substr($eraserSource, $stepStart, 4000);
+preg_match_all('/tableName = \x27(tblUser\w+)\x27/', $stepBody, $reached);
+$reachedMembership = array_values(array_unique($reached[1] ?? []));
+sort($reachedMembership);
+
+check(
+    'every membership table anything audits is also reached by the step that empties the change history about a person (#717)',
+    $auditedMembership !== [] && $auditedMembership === $reachedMembership,
+    'audited: ' . implode(', ', $auditedMembership)
+    . ' -- reached by the step: ' . implode(', ', $reachedMembership)
+    . ' -- add the missing one to GdprEraser::eraseAuditTrailAboutPerson(), with its own key column, '
+    . 'and bind one more userID. An audited membership table the step does not reach is #707\'s fault '
+    . 'waiting for somebody to put a name in that payload.'
 );
 
 echo "\n" . str_repeat('=', 78) . "\n";

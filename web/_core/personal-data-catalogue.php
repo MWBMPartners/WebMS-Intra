@@ -404,9 +404,13 @@ return [
     //    name beside it.
     //
     //    So an entry pointing at a person's own account (tableName 'tblUsers')
-    //    or at one of their memberships ('tblUserSites') is deleted when that
-    //    person is erased, and included in their data export. Entries for
-    //    announcements are not about a person, and are left alone.
+    //    or at one of their memberships is deleted when that person is erased,
+    //    and included in their data export. Since #717 "memberships" means all
+    //    four audited tables - 'tblUserSites', 'tblUserDepts', 'tblUserGroups'
+    //    and 'tblUserRoles' - and section 21 of
+    //    `tools/gdpr-coverage-selftest.php` compares that set against the set
+    //    anything audits, so a fifth cannot be added without being noticed.
+    //    Entries for announcements are not about a person, and are left alone.
     //
     //    The generic handling that reads this list CANNOT do that. It matches
     //    one column against the person's number, and here rowID only means
@@ -2271,31 +2275,59 @@ return [
         'columns'  => [],
     ],
     'tblApiRateLimits' => [
+        // #712, 2 November 2026. This entry used to record a live fault: two
+        // kinds of bucket put the visitor's network address in unchanged, and
+        // for those two the opportunistic tidy-up only ever matched the exact
+        // bucket again — so a bucket never used a second time, which is the
+        // normal case for a one-off code check or a single push sign-up, was
+        // never tidied at all. The two-factor one paired an ACCOUNT NUMBER with
+        // an address, making it a record of which person signed in from where,
+        // kept indefinitely. Both halves are fixed: the address is hashed at
+        // all three call sites, and each passes a family prefix so a later hit
+        // tidies every stale bucket of that kind.
         'decision' => 'retain',
-        'reason'   => 'How many times something was attempted, so a limit can be applied. Almost every '
-                    . 'bucket name is an account number, an API-key number or a one-way fingerprint — but TWO '
-                    . 'KINDS of bucket put the visitor\'s network address in it unchanged (written from three '
-                    . 'places): the two-factor code check '
-                    . '(which pairs it with an account number) and the push-notification sign-up. Nothing '
-                    . 'ties a row to an account in a way an erasure request could match, because the bucket '
-                    . 'is one piece of text. The tidy-up is opportunistic and, for those two kinds of bucket, '
-                    . 'only ever matches the exact bucket again, so a bucket never used a second time is '
-                    . 'never tidied. Tracked as #712',
-        'period'   => 'no time limit today: the tidy-up is chance-based and misses the two kinds of bucket '
-                    . 'that hold an address (#712)',
+        'reason'   => 'How many times something was attempted, so a limit can be applied. Every bucket name '
+                    . 'is an account number, an API-key number or a salted one-way fingerprint: no bucket '
+                    . 'holds a network address. Nothing ties a row to an account in a way an erasure request '
+                    . 'could match, because the bucket is one piece of text, so what reaches these rows is '
+                    . 'the clear-out below and not an erasure. Some buckets DO contain an account NUMBER. '
+                    . 'Nothing here empties that number — the account it points at is emptied by the main '
+                    . 'erasure walk, which is a different thing: the row still says "account 4211 did this", '
+                    . 'and what changes is that account 4211 no longer identifies anybody.',
+        'period'   => 'twice the limit\'s own window, tidied opportunistically (about one request in 64, up '
+                    . 'to 500 rows at a time) and BY FAMILY, so a bucket never used a second time is still '
+                    . 'reached — which is the normal case for a one-off code check, a single push sign-up or '
+                    . 'one form submission (#712). Every one of the eleven places that records a hit passes '
+                    . 'a family; eight did not until #712, including the per-user second tier of the '
+                    . 'two-factor limit, which an earlier version of this entry wrongly described as '
+                    . 'covered. A row older than the period can change no answer the limiter gives.',
         'columns'  => ['bucket'],
     ],
     'tblLiveRateLimits' => [
+        // #712, 2 November 2026, and migration 236. This entry used to record a
+        // live fault: the column held the viewer's address UNCHANGED and
+        // NOTHING removed a row — no clear-out anywhere, no foreign key that
+        // could cascade in, no scheduled job — under an index named
+        // `idx_ratelimit_prune`, for a prune that did not exist. The column is
+        // now a SHA-256 (`senderFingerprint`, made in one place,
+        // `LiveChat::senderFingerprint()`), and `recordSend()` tidies the table
+        // as it writes.
+        //
+        // DO NOT confuse this with `tblLiveChatMessages.senderIP`, which is a
+        // different table and stays RAW on purpose: the moderation screen shows
+        // it to an administrator deciding whether to block somebody. That one
+        // has its own entry further up, and its own reason.
         'decision' => 'retain',
-        'reason'   => 'How often a viewer sent a message to the live chat, so flooding can be stopped. It '
-                    . 'holds the viewer\'s network address unchanged, and the session token beside it is '
-                    . 'also stored next to a typed display name on the chat messages, so the two can be '
-                    . 'joined. Nothing on the row links it to an account, so an erasure request cannot '
-                    . 'reach it, and NOTHING removes it: there is no clear-out anywhere, and no link to '
-                    . 'another table that could remove it either. The table even carries an index named for '
-                    . 'a tidy-up that does not exist. Tracked as #712',
-        'period'   => 'no time limit: nothing clears this table at all (#712)',
-        'columns'  => ['senderIP', 'sessionToken'],
+        'reason'   => 'How often a viewer sent a message to the live chat, so flooding can be stopped. The '
+                    . 'address is kept only as a one-way fingerprint, which is all a limit needs — nothing '
+                    . 'reads it back and nothing displays it. The session token beside it is also stored '
+                    . 'next to a typed display name on the chat messages, so the two can still be joined '
+                    . 'while both rows exist. Nothing on the row links it to an account, so an erasure '
+                    . 'request cannot match it; what reaches these rows is the clear-out below.',
+        'period'   => 'twice the chat\'s own throttle window (`chat.windowSeconds`), tidied as messages are '
+                    . 'sent — about one send in 64, up to 500 rows at a time (#712). A row older than that '
+                    . 'can change no answer the throttle gives.',
+        'columns'  => ['senderFingerprint', 'sessionToken'],
     ],
     'tblTranscript' => [
         'decision' => 'retain',
@@ -2320,6 +2352,18 @@ return [
         'columns'  => ['body'],
     ],
     'tblWebhookDeliveries' => [
+        // #713, 2 November 2026. This entry used to record a live fault: there
+        // was no time limit at all, and only deleting the webhook itself ever
+        // removed a row. The payload and the stored reply are now emptied by
+        // the nightly sweep once the period has passed.
+        //
+        // WHY NOT AN ERASURE INSTRUCTION, since the row plainly holds personal
+        // details: NOTHING ON IT LINKS IT TO A PERSON. The only link is
+        // `webhookID`, which names a customer's endpoint, so an instruction
+        // could not match a row and an entry promising one would be the #535
+        // fault. Searching the JSON for a name was rejected for #707's reason:
+        // it would match a namesake and miss a nickname. A time limit is the
+        // only mechanism there is, and the owner chose it.
         'decision' => 'retain',
         'reason'   => 'A record of each message the portal sent to another system, with the message itself. '
                     . 'Some of those messages really do carry personal details: a registration message '
@@ -2327,21 +2371,41 @@ return [
                     . 'carries their e-mail address, and a prayer-request message carries the subject line, '
                     . 'which is free text. The reply the other system sent back is also kept, and what is '
                     . 'in that reply is decided by whoever runs it. Nothing on the row links it to an '
-                    . 'account, and the retry job never deletes: a message that will never be delivered is '
-                    . 'marked dead and kept. Tracked as #713',
-        'period'   => 'no time limit: only deleting the webhook itself removes these rows (#713)',
+                    . 'account, so an erasure request cannot match it; what reaches these rows is the time '
+                    . 'limit below. The row itself is kept even once emptied, because it is the record that '
+                    . 'something was sent, when, after how many attempts and with what answer.',
+        'period'   => 'the organisation\'s own webhook payload period, capped by the installation '
+                    . '(`webhooks.payload.retentionDays`, 90 days unless changed). Past it the message and '
+                    . 'the stored reply are emptied and the row kept. A delivery still waiting or still '
+                    . 'being retried is NEVER emptied, because the retry sends from the stored payload '
+                    . '(#713).',
         'columns'  => ['payload', 'responseSnippet'],
     ],
     'tblWebhookEvent' => [
+        // #713, 2 November 2026. This entry used to record two live faults, and
+        // both are fixed. The message was stored BEFORE the signature check was
+        // acted on, so anybody who could reach the address had their JSON kept
+        // for ever; `Payments::ingestWebhook()` now keeps a body only once the
+        // signature has verified, and writes the row either way so that the
+        // attempt is still on record. And nothing cleared the table at all;
+        // the nightly sweep now empties bodies past the period.
+        //
+        // The table still has no link to any other table, so no cascade can
+        // reach it and no erasure instruction could match a row — which is why
+        // the period below is the whole of the answer rather than part of it.
         'decision' => 'retain',
         'reason'   => 'The whole message a payment provider sent us, exactly as it arrived, kept as the '
                     . 'record of what we were told. A payment message routinely carries the payer\'s name, '
-                    . 'e-mail address and billing address, so those are here in full. Two things make this '
-                    . 'worse than it looks: the message is stored BEFORE the check on whether it really '
-                    . 'came from the provider is acted on, so a message from anybody at all is kept too; '
-                    . 'and the table has no link to any other table, so nothing can ever remove a row by '
-                    . 'cascade. Tracked as #713',
-        'period'   => 'no time limit: nothing clears this table at all (#713)',
+                    . 'e-mail address and billing address, so those are here in full while the message is '
+                    . 'kept. A message whose signature did not verify is recorded WITHOUT its body, so a '
+                    . 'request from somebody who is not the provider leaves a note and nothing else. '
+                    . 'Nothing on the row links it to an account, so an erasure request cannot match it.',
+        'period'   => 'the installation\'s webhook payload period '
+                    . '(`webhooks.payload.retentionDays`, 90 days unless changed). There is no '
+                    . 'per-organisation figure here, because the table has no organisation column and the '
+                    . 'payment provider\'s credentials are installation-wide. Past the period the body is '
+                    . 'emptied and the row kept, because the row is what stops the same event being '
+                    . 'accepted twice (#713).',
         'columns'  => ['payload'],
     ],
     'tblReadingPlanProgress' => [

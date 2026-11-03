@@ -138,9 +138,41 @@ class Payments
     }
 
     /**
-     * Verify + record an incoming webhook. Returns true on accept, false
-     * on signature mismatch. Always inserts a tblWebhookEvent row for
-     * audit/replay before evaluating side effects.
+     * Verify + record an incoming webhook. Returns true on accept, false on
+     * signature mismatch. A tblWebhookEvent row is always inserted, so that an
+     * attempt is on record either way.
+     *
+     * -------------------------------------------------------------------------
+     * THE BODY IS KEPT ONLY WHEN THE SIGNATURE VERIFIES (#713)
+     * -------------------------------------------------------------------------
+     * This used to store the ENTIRE raw HTTP body, untruncated and unfiltered,
+     * for every request that reached the address - verified or not - and the
+     * insert happened BEFORE the verification result was acted on. Three things
+     * followed from that, and the first is the one that matters:
+     *
+     *  1. A Stripe or PayPal event body routinely carries a donor's name,
+     *     e-mail address and postal address (`billing_details`, `payer`,
+     *     `shipping`). Those were stored verbatim, and NOTHING ever removed
+     *     them: no DELETE anywhere under web/, no foreign key on this table at
+     *     all so no cascade could reach it, and no scheduled job. The table is
+     *     in no erasure instruction either, and could not usefully be - no
+     *     column on the row says whose data is inside the JSON.
+     *  2. Anybody who could reach the address could fill the table, because the
+     *     row was written before the signature was judged. An unverified body
+     *     has no `providerRef` parsed from it, so `INSERT IGNORE` cannot
+     *     recognise a repeat either.
+     *  3. "For audit" does not need a stranger's JSON. What audit wants is that
+     *     something arrived, from whom it claimed to be, and whether it passed.
+     *
+     * So an unverified request still gets a row - provider, time, and
+     * `errorMsg` saying the body was not kept - and its `payload` stays NULL.
+     * A verified body is stored as before, and is now bounded by the retention
+     * rule the backup/retention sweep applies.
+     *
+     * DO NOT "simplify" this by moving the insert after the `return false`
+     * below: the row for a REFUSED request is the only record that somebody is
+     * posting to the address, which is the first thing anybody investigating
+     * would want.
      */
     public static function ingestWebhook(string $provider, string $rawBody, array $headers): bool
     {
@@ -178,12 +210,18 @@ class Payments
         // GoCardless branch → follow-up PR.
 
         $verifiedFlag = $verified === true ? 1 : 0;
+        // 🔒 The body is kept only for a verified event (#713). See this
+        //    method's own header for why, and for why the row is still written.
+        $storedBody = $verified === true ? $rawBody : null;
+        $storedNote = $verified === true
+            ? null
+            : 'signature not verified, so the body was not kept (#713)';
         $ins = $db->prepare(
-            'INSERT IGNORE INTO tblWebhookEvent (provider, eventType, providerRef, payload, verified, receivedAt) '
-            . 'VALUES (?, ?, ?, ?, ?, NOW())'
+            'INSERT IGNORE INTO tblWebhookEvent (provider, eventType, providerRef, payload, verified, errorMsg, receivedAt) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, NOW())'
         );
         if ($ins !== false) {
-            $ins->bind_param('ssssi', $provider, $eventType, $providerRef, $rawBody, $verifiedFlag);
+            $ins->bind_param('ssssis', $provider, $eventType, $providerRef, $storedBody, $verifiedFlag, $storedNote);
             $ins->execute();
             $ins->close();
         }

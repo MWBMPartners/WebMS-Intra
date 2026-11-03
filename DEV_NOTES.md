@@ -14525,3 +14525,172 @@ truncated file is recorded as stored. The audit check above is deliberately scop
 `Pdf.php` rather than widened to catch it, because "a write whose count is not
 compared" matches a great deal of harmless code and a check that cries wolf gets
 switched off (#483).
+
+## A fingerprint is enough for a limit, and nothing was clearing the log (#712, migration 236)
+
+Two rate-limit tables held a network address unchanged and neither was ever
+cleared out. The interesting parts are why it survived so long and what it took
+to guard.
+
+**Nothing failed while it was there.** Every page worked, both limits worked, and
+the rows simply accumulated. There is no symptom to notice, which is why this is
+guarded by reading the code rather than by a test alone.
+
+**A limit only needs a STABLE value, never a readable one.** The throttle has to
+recognise the same client coming back after it cycles session tokens; it never
+has to know the address. So a fingerprint does the job exactly as well.
+
+Counted rather than asserted, because a draft of this said "three buckets
+already hashed" and it was wrong twice. SIX buckets were built from an address.
+TWO used it raw — the two-factor code check, which paired it with an ACCOUNT
+NUMBER and so made the row a record of which person signed in from where, and
+the push sign-up. The other FOUR hashed it (`forms:public-submit`, both
+password-reset buckets, `attend:save:`) — and that was not the same as being
+safe, which is the next lesson.
+
+**Hashing was only half of it.** `RateLimiter::recordHit()` takes an optional
+family prefix, and without one the opportunistic tidy-up matches only the exact
+bucket again. A one-off code check or a single push sign-up never produces a
+second hit, so those rows were never tidied at all. **A clear-out that only
+reaches rows something touches twice does not reach the rows that matter most.**
+
+**`tblLiveRateLimits` had no clear-out of any kind** — no `DELETE` under `web/`,
+no foreign key that could cascade in, no scheduled job, no admin page — under an
+index named `idx_ratelimit_prune`. And `recordSend()`'s docblock said pruning
+"is done incidentally (next call rolls forward via the time window)". The window
+only narrows the COUNT. The #645 shape again: a comment stating the guarantee the
+code forgot to implement.
+
+**Rename the column, do not just widen it.** `tblLiveChatMessages` has its own
+`senderIP`, and that one stays RAW on purpose for the moderation screen. Two
+columns of one name in one feature, one to be hashed and one not, is how the
+wrong one gets changed. They have different names now, and the index was renamed
+too: an index named for an address, on a column that no longer holds one, is a
+small lie that outlives everybody who knew better.
+
+**TWO STRING-MASKING TRAPS IN ONE CHECK, and they pull in opposite directions.**
+The house remedy for a check that must not be fooled by comments is to blank
+comments *and* string contents. But:
+
+- A pin on a LITERAL cannot use the masked source. `hash('sha256', $ip)` becomes
+  `hash('xxxxxx', $ip)`, so the pin can never match. Reading the raw file instead
+  is the other mistake, because a commented-out copy then satisfies it (#569).
+  The answer is a third form: strip comments, keep strings.
+- A check for a COLUMN NAME in SQL cannot use the masked source either, because
+  the name lives inside the string. Planted, a check for `senderIP` beside
+  `tblLiveRateLimits` missed an `INSERT` naming the old column, because both
+  words had been masked away.
+
+So which stripper to use is a per-check decision, not a house default, and
+getting it wrong fails silently in the green direction both times.
+
+**One more, about judging by file:** the column-name check had to be narrowed to
+one statement's worth of text, because `senderIP` is still legitimate on another
+table and the personal-data catalogue names both tables in one file. A whole-file
+test would have reported that for ever, and a check that cries wolf gets switched
+off (#483).
+
+**AND THE PLAIN SHA-256 WAS THE WRONG CALL, measured rather than argued (#712
+round 1).** The first version hashed with `hash('sha256', $ip)` and defended it
+with `Logger::sessionFingerprint()`'s reasoning (#622). Both halves of that
+defence were wrong:
+
+- **An address is 32 bits.** This machine computes about 4.87 million SHA-256 a
+  second in single-threaded PHP, so the entire IPv4 space takes roughly fifteen
+  minutes. The independent checker recovered a stored value back to
+  `192.0.2.44` in under a second by walking one `/8`. A session identifier has
+  around 128 bits, which is why #622's plain hash really is one-way. **Citing a
+  precedent means checking the thing that made it work carries across.**
+- **#622's stated reason did not apply at all.** It keeps a plain hash because
+  its clean-out must recompute the same value *in SQL*. This clean-out is
+  `createdAt < NOW() - INTERVAL ? SECOND` — purely time-based — and every
+  comparison happens in PHP. There was no constraint to honour, so the weaker
+  form bought nothing whatever.
+
+`AssetRegister::saltedHash()` had salted an address with the installation's key
+since #410, for exactly this purpose, and the first version neither used it nor
+mentioned it. `Portal\Core\AddressFingerprint` is now the one place; Asset
+Register deliberately keeps its own copy, because its stored hashes are already
+on disk and its comment promises they are bit-identical to the pre-#410 values.
+
+**The salt's value is specific and worth stating:** the key is not in the
+database, so a database copy — a backup, a dump, a stolen table — no longer
+says which addresses the portal has seen. Whoever has the key *and* a candidate
+list can still test it. That is why this is a fingerprint and not anonymity.
+
+**Three more things that round found, each one a shape to recognise.**
+
+1. **The hard gate passed the real pre-fix file.** It required the literal
+   `clientIp()` inside the bucket assignment; the live code was
+   `$clientIp = RateLimiter::clientIp();` then `$rlBucket = 'pushsub:' . $clientIp;`.
+   Proved by `git show HEAD:<file> > <file>` and watching the check exit 0.
+   **A guard written against the fixed code can miss the shape the fault
+   actually had** — test it by restoring the real broken file, not by inventing
+   a plant. It follows one hop through a local now.
+2. **A check that could not fail, again.** The prune test asked "are any recent
+   rows left?" while every row in its fixture was seconds old, so no positive
+   horizon could ever remove one. A prune set to wipe the whole throttle log
+   passed 15 of 15, three runs running. **Plant rows either side of the horizon**
+   — one that must go, one that must survive — rather than asking a question the
+   fixture cannot answer.
+3. **A removed column has to join `DbBackup::REMOVED_COLUMNS` or a restore
+   STOPS.** Not degrades: the unknown column reaches the `INSERT`, `loadTable()`
+   throws, and the whole restore ends. This rule was applied correctly two
+   entries above in the same session and forgotten here, which is why it is
+   written down rather than remembered.
+
+**And one untrue comment with a real consequence.** The prune was guarded by
+`if ($prune === false) { return; }` under a comment claiming it failed open.
+Under `MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR` — which `DbServer::connect()`
+sets — both `prepare()` and `execute()` **throw**, and `@` suppresses a
+diagnostic, not an exception. Both measured. So the guard could not fire, and
+`recordSend()` is called *after* the chat message is inserted and *before* the
+success answer: a lock-wait timeout on the new 500-row `DELETE`, the realistic
+failure on a busy chat and one this tidy-up itself introduced, would have given
+the viewer a bare 500 with their message already saved. **Failing open takes a
+`try`/`catch`; `@` is not a substitute and neither is a `=== false` test.**
+
+**AND THE WHOLE SUITE CAUGHT TWO REGRESSIONS THE PACKAGE'S OWN TESTS COULD
+NOT**, which is the clearest argument yet for running all of it rather than the
+tests that look related (#695).
+
+**1. A test kept its own copy of the rule — in the very file that lesson came
+from.** `tools/sign-in-limits-selftest.php` had:
+
+```php
+function bucket(string $kind, string $ip): string
+{
+    return 'pwreset:' . $kind . ':' . hash('sha256', $ip);
+}
+```
+
+a second copy of how the two password-reset handlers build their bucket. When
+#712 salted those handlers, the test went on computing the old value and **eight
+checks failed, every one of them about throttling and not one about anything
+that had broken.** This repository already records the remedy, from the
+password-reset page: *ask the portal's own function; never keep a second copy of
+the rule in a test.* It asks `AddressFingerprint::of()` now.
+
+Two things followed that are worth knowing:
+
+- **The salt has to be the same one the server uses.** That test copies `web/`
+  to a scratch tree and writes a NEW RANDOM `enc.key` into it, so the test
+  process must point `PORTAL_ROOT` at the scratch tree. Point it at the
+  repository and every bucket name differs from the server's — a whole class of
+  failure that looks exactly like broken throttling.
+- **Its clean-up could no longer work by exact name, and never could have.**
+  `removeWorld()` deleted 254 addresses' two buckets each, by name — but with a
+  new random key every run, an exact name cannot match a row an EARLIER run left
+  behind, which is the only thing a clean-up is for. It ran before the scratch
+  copy existed, so there was no key to salt with either. It deletes by the
+  `pwreset:` prefix now, which needs no key at all.
+
+**2. A test that loads classes by hand has to load what its dependencies
+need.** `tools/gdpr-eraser-selftest.php` requires `_apps/cron/_retention-sweep.php`
+directly, with no autoloader. #713 made that sweep ask `WebhookRetention`, so the
+whole run stopped at the first line mentioning it — and adding that class alone
+was not enough, because `SettingLimit` needs `InstallationSettings`. **Requiring
+a file by hand means owning its whole dependency chain, in order.**
+
+Neither fault could have been found by the tests for the package that caused
+them: both live in other tests, and both were green before.

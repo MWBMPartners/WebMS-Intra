@@ -30,6 +30,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\AddressFingerprint;
 use Portal\Core\Asset;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
@@ -69,7 +70,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // users' failures. Reuses the generic sliding-window bucket API
     // (tblApiRateLimits) — same mechanism as the API rate limiter and the
     // Assets kiosk PIN throttle.
-    $rateBucket = 'totp_verify:' . $pendingUserId . ':' . RateLimiter::clientIp();
+    // 🔒 THE ADDRESS IS FINGERPRINTED, NOT STORED (#712). The bucket name is
+    //    the only thing kept, and it only has to be STABLE for the limit to
+    //    work - it never has to be readable. Written raw, this row paired an
+    //    ACCOUNT NUMBER with a network address and nothing ever removed it, so
+    //    the portal held a record of which person signed in from where,
+    //    indefinitely, outside every retention rule it has.
+    //
+    //    Counted, because a draft of this comment said "three other buckets
+    //    already hashed" and that was wrong twice over: FOUR others hashed
+    //    (`forms:public-submit`, both password-reset buckets and
+    //    `attend:save:`), and hashing was not the same as being safe — they
+    //    used a plain unsalted SHA-256, which for a 32-bit address is
+    //    reversible in about fifteen minutes. All six now go through
+    //    `AddressFingerprint::of()`, which salts with the installation's own
+    //    key.
+    $rateBucket = 'totp_verify:' . $pendingUserId . ':' . AddressFingerprint::of(RateLimiter::clientIp());
     $rateMax    = 5;
     $rateWindow = 900; // 15 minutes — mirrors the login form's default window
     // 🔒 IP-INDEPENDENT per-user tier (security-review follow-up). The client
@@ -194,8 +210,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($verified === false) {
         // 🚦 Count this guess against the rate-limit bucket opened above
         // (#B3) — covers both TOTP and backup-code attempts.
-        RateLimiter::recordHit($rateBucket, $rateWindow);
-        RateLimiter::recordHit($userBucket, $userRateWindow); // 🔒 per-user tier too
+        // 🧹 The family prefix matters as much as the hashing (#712). Without
+        //    it the opportunistic tidy-up matches only THIS exact bucket, and a
+        //    bucket never used a second time - which is the normal case for a
+        //    one-off code check - was never tidied at all. Its row stayed for
+        //    ever. With the family, any later check tidies every stale
+        //    `totp_verify:` bucket, whoever it belonged to.
+        RateLimiter::recordHit($rateBucket, $rateWindow, 'totp_verify:');
+        // 🔒 The per-user tier too — and WITH ITS OWN FAMILY (#712). This was
+        //    missed when the per-IP bucket beside it was fixed, which made the
+        //    personal-data catalogue's new sentence untrue: `totp_verify:%`
+        //    cannot match `totp_verify_user:…`, so every failed code check
+        //    left a row holding an account number that nothing deleted. An
+        //    independent check found it. A fix applied to one tier of a
+        //    two-tier limit is half a fix.
+        RateLimiter::recordHit($userBucket, $userRateWindow, 'totp_verify_user:');
         Logger::activity('TotpVerifyFailed', 'Failed 2FA verification attempt', $pendingUserId);
         $_SESSION['flash_msg']  = 'Invalid code. Please try again.';
         $_SESSION['flash_type'] = 'danger';

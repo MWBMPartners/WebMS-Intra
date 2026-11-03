@@ -210,7 +210,10 @@ if (RateLimiter::tooMany($rateBucket, $rateMax, $rateWindowSeconds) === true) {
     // OTHER submissions from this visitor succeeded.
     $bounce('Too many submissions from this connection — please try again later.', 'warning');
 }
-RateLimiter::recordHit($rateBucket, $rateWindowSeconds);
+// 🧹 The family prefix (#712). Reporting a found asset is a one-off, so
+//    without it the row — which holds a fingerprint of the reporter's
+//    address — stays for ever.
+RateLimiter::recordHit($rateBucket, $rateWindowSeconds, 'assets:found-save:');
 
 // -----------------------------------------------------------------------------
 // 📥 9. Field validation. AssetRegister::createFoundReport() ALSO trims/

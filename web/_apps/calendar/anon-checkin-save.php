@@ -63,6 +63,7 @@
 // impossible.
 declare(strict_types=1);
 
+use Portal\Core\AddressFingerprint;
 use Portal\Core\Auth;
 use Portal\Core\RateLimiter;
 use Portal\Core\Router;
@@ -92,7 +93,14 @@ if (in_array($source, ['self', 'kiosk', 'qr'], true) === false) { $source = 'sel
 // default instead of silently reading '' and switching the limit off.
 $rateMax     = (int) ($SETTINGS['attend']['rateLimit']['max'] ?? '500');
 $rateWindow  = (int) ($SETTINGS['attend']['rateLimit']['windowSeconds'] ?? '300');
-$rateBucket  = 'attend:save:' . hash('sha256', RateLimiter::clientIp() . '|' . $eventId);
+// 🔒 SALTED (#712). This was a plain `hash('sha256', …)` of the address.
+//    An address is 32 bits and this machine does 4.87 million SHA-256 a
+//    second, so the whole IPv4 space takes about fifteen minutes - an
+//    independent check reversed such a value in under a second. The salt
+//    is the installation's own key, which is not in the database, so a
+//    database copy on its own no longer tells anybody which addresses
+//    the portal has seen. `AddressFingerprint::of()` is the one place.
+$rateBucket  = 'attend:save:' . AddressFingerprint::of(RateLimiter::clientIp() . '|' . $eventId);
 //
 // 🛡️ Codex catch-up B5 + B6 (20 September 2026): TWO separate faults lived
 //    in these four lines, and this comment covers both.

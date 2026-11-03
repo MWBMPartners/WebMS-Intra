@@ -199,7 +199,9 @@ switch ($action) {
             // wrong PIN are all indistinguishable from this response. Every
             // tier records the failed attempt.
             foreach ($buckets as [$bucketKey, , $bucketWindow]) {
-                RateLimiter::recordHit($bucketKey, $bucketWindow);
+                // 🧹 The family prefix (#712) covers all four shapes above,
+                //    because `astkiosk_pin` is a prefix of every one of them.
+                RateLimiter::recordHit($bucketKey, $bucketWindow, 'astkiosk_pin');
             }
             Logger::activity('AssetKioskIdentifyFailed', 'Failed kiosk identify on terminal #' . $tokenId);
             $bounce('Incorrect details — please try again.', 'danger');

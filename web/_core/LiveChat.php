@@ -444,16 +444,20 @@ class LiveChat
         //    (open new tab → new token → spam again).
         if ($ip !== '' && $ip !== '0.0.0.0') {
             $ipMax  = $maxMsgs * 3; // looser IP cap accommodates shared NAT
+            // 🔒 Compared as a fingerprint, because that is what is stored
+            //    (#712). senderFingerprint() is the ONE place that decides what
+            //    the stored form is, so the writer and this reader cannot drift.
             $stmt   = $mysqli->prepare(
                 'SELECT COUNT(*) AS c FROM tblLiveRateLimits '
-                . 'WHERE senderIP = ? AND eventType = ? '
+                . 'WHERE senderFingerprint = ? AND eventType = ? '
                 . 'AND createdAt >= DATE_SUB(NOW(), INTERVAL ? SECOND)'
             );
             if ($stmt === false) {
                 \Portal\Core\Logger::errorPlatform('LiveChat', 'Warning', 'rate-limit-prepare-failed', 'isRateLimited IP-query prepare failed; failing closed', '');
                 return true;
             }
-            $stmt->bind_param('ssi', $ip, $eventType, $windowSecs);
+            $askFor = self::senderFingerprint($ip);
+            $stmt->bind_param('ssi', $askFor, $eventType, $windowSecs);
             $stmt->execute();
             $countByIp = (int) ($stmt->get_result()->fetch_assoc()['c'] ?? 0);
             $stmt->close();
@@ -466,25 +470,155 @@ class LiveChat
     }
 
     /**
-     * 📝 Record a successful send into the throttle log.
+     * 🔒 The ONE place that decides what is STORED in place of a viewer's
+     *    network address in the throttle log (#712). A plain SHA-256, and the
+     *    empty string for "no address", which is kept as NULL.
      *
-     * Idempotency: each row represents ONE send event; pruning is done
-     * incidentally (next call rolls forward via the time window).
+     * WHY IT IS STORED AT ALL: the throttle has to recognise the same client
+     * coming back after it cycles session tokens (open a new tab, get a new
+     * token, carry on flooding). For that the value only has to be STABLE. It
+     * never has to be readable, and nothing displays it.
+     *
+     * WHY IT IS NOT THE ADDRESS ANY MORE: an address is personal data, the
+     * table held it unchanged, and NOTHING ever removed a row - so the portal
+     * kept a record of which addresses had used the live chat, indefinitely,
+     * outside every retention rule it has. The session token beside it is also
+     * stored next to a typed display name on the messages table, so the two
+     * could be joined. `Logger::sessionFingerprint()` (#622) is the precedent
+     * and the reasoning is the same.
+     *
+     * SALTED, and the first version of this was NOT — it used a plain
+     * `hash('sha256', $ip)` and defended it with the reasoning
+     * `Logger::sessionFingerprint()` (#622) gives. An independent check
+     * measured that reasoning away: IPv4 has 32 bits, this machine computes
+     * 4.87 million SHA-256 a second, so the WHOLE address space takes about
+     * fifteen minutes, and the checker reversed a stored value in under a
+     * second by walking one /8. A session identifier has around 128 bits, which
+     * is why #622's plain hash really is one-way; an address is not the same
+     * thing. And #622's stated reason — that a clean-out must recompute the
+     * value in SQL — is false here: this clean-out is purely time-based and
+     * every comparison happens in PHP, so there was no constraint to honour.
+     *
+     * `Portal\Core\AddressFingerprint` is now the ONE place the stored form is
+     * made, so the chat, the API rate limiter and anything added later cannot
+     * drift apart. This method stays as the chat's own name for it, because the
+     * writer and the reader both call it and that is what keeps them in step.
+     *
+     * NOT TO BE CONFUSED WITH `tblLiveChatMessages.senderIP`, which is a
+     * DIFFERENT table and stays raw ON PURPOSE: the moderation screen
+     * (`admin/live/chat.php`) shows it to an administrator deciding whether to
+     * block somebody. Both columns were once called `senderIP`, which is exactly
+     * how the two would be conflated; this one is `senderFingerprint` now.
+     */
+    public static function senderFingerprint(string $ip): string
+    {
+        return AddressFingerprint::of($ip);
+    }
+
+    /**
+     * 📝 Record a successful send into the throttle log, and occasionally tidy
+     *    the log up.
+     *
+     * Each row represents ONE send event.
+     *
+     * THE TIDY-UP IS NEW (#712), AND THIS DOCBLOCK USED TO CLAIM IT ALREADY
+     * HAPPENED: "pruning is done incidentally (next call rolls forward via the
+     * time window)". That was untrue in the way this project has been bitten by
+     * before - a comment stating the guarantee the code forgot to implement.
+     * The time window only narrows the COUNT that `isRateLimited()` reads;
+     * nothing ever deleted a row. There was no clear-out anywhere, no foreign
+     * key that could cascade into this table, and no scheduled job that touched
+     * it - under an index named `idx_ratelimit_prune`, for a prune that did not
+     * exist.
+     *
+     * It is opportunistic, exactly like `RateLimiter::recordHit()`: about one
+     * send in 64 pays for it, and never more than 500 rows, so no single
+     * request pays for a huge sweep. The age it keeps to is TWICE the throttle
+     * window, from the same `chat.windowSeconds` setting `isRateLimited()`
+     * reads.
+     *
+     * SAID EXACTLY, because a draft of this claimed "one place decides the
+     * window, so the two can never disagree" and that is not what the code
+     * does. There are TWO independent `Settings::get('chat.windowSeconds')`
+     * reads and they behave DIFFERENTLY when the value is zero or less:
+     * `isRateLimited()` switches the throttle off, while this one substitutes
+     * 60, so that switching the throttle off does not quietly stop the tidy-up
+     * as well. They agree today because the key and the default are the same,
+     * not because one place decides.
+     *
+     * AND THE TIDY-UP IS NOT SCOPED TO AN ORGANISATION, which is better written
+     * down than discovered. `chat.windowSeconds` is read from the merged
+     * settings, so if one organisation ever held a row of its own, that
+     * organisation's requests would tidy every other organisation's rows to its
+     * own horizon. Not reachable today - the key is seeded installation-wide
+     * only and no page writes a per-organisation row - but the table has a
+     * `siteID` column and an index on it, so scoping it is cheap the moment
+     * that changes.
      */
     public static function recordSend(mysqli $mysqli, int $siteId, string $token, string $ip): void
     {
         $stmt = $mysqli->prepare(
-            'INSERT INTO tblLiveRateLimits (siteID, sessionToken, senderIP, eventType) '
+            'INSERT INTO tblLiveRateLimits (siteID, sessionToken, senderFingerprint, eventType) '
             . 'VALUES (?, ?, ?, ?)'
         );
         if ($stmt === false) {
             return;
         }
-        $ipArg     = $ip !== '' ? $ip : null;
-        $eventType = 'chat.send';
-        $stmt->bind_param('isss', $siteId, $token, $ipArg, $eventType);
+        $fingerprint = self::senderFingerprint($ip);
+        $stored      = $fingerprint !== '' ? $fingerprint : null;
+        $eventType   = 'chat.send';
+        $stmt->bind_param('isss', $siteId, $token, $stored, $eventType);
         $stmt->execute();
         $stmt->close();
+
+        // 🧹 The tidy-up. A row older than twice the window can change no
+        //    answer `isRateLimited()` gives, so it is only a record of who used
+        //    the chat and when.
+        if (random_int(1, 64) !== 1) {
+            return;
+        }
+        $windowSecs = (int) Settings::get('chat.windowSeconds', '60');
+        if ($windowSecs <= 0) {
+            // The throttle is switched off, so no row is load-bearing. One
+            // minute is used rather than nothing, so that switching the
+            // throttle off does not quietly stop the tidy-up as well.
+            $windowSecs = 60;
+        }
+        $keepSeconds = $windowSecs * 2;
+
+        // 🛡️ FAIL OPEN, AND IT TAKES A try/catch TO DO IT — `@` IS NOT ENOUGH.
+        //    `DbServer::connect()` sets `MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR`,
+        //    and under those BOTH `prepare()` and `execute()` THROW rather than
+        //    answering false. Measured: `@$stmt->execute()` still throws, because
+        //    `@` suppresses a diagnostic and not an exception, and
+        //    `prepare()` on a missing table throws instead of returning false.
+        //
+        //    A first version of this code wrote `if ($prune === false) { return; }`
+        //    with a comment claiming it failed open. It was a clause that could
+        //    not fire, and the consequence was real rather than theoretical:
+        //    `recordSend()` is called from `_apps/livechat/api/send.php` AFTER
+        //    the message row is inserted and BEFORE the success answer is sent,
+        //    so a lock-wait timeout or a deadlock on this 500-row DELETE —
+        //    the realistic failure on a busy chat, and one this tidy-up itself
+        //    introduced — would have thrown out of here, handed the viewer a
+        //    bare 500, and left the message in the database anyway.
+        //
+        //    A tidy-up that cannot run must never stop somebody sending a
+        //    message. Nothing is logged here on purpose: this runs on one send
+        //    in 64 and a failing prune would otherwise fill the error table
+        //    faster than it empties the throttle log.
+        try {
+            $prune = $mysqli->prepare(
+                'DELETE FROM tblLiveRateLimits WHERE createdAt < NOW() - INTERVAL ? SECOND LIMIT 500'
+            );
+            if ($prune !== false) {
+                $prune->bind_param('i', $keepSeconds);
+                $prune->execute();
+                $prune->close();
+            }
+        } catch (\Throwable $tidyUpFailed) {
+            // Deliberately swallowed. See above.
+        }
     }
 
     /**

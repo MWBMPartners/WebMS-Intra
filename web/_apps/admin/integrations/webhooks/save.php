@@ -30,7 +30,10 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\InstallationSettings;
+use Portal\Core\SettingLimit;
 use Portal\Core\Site;
+use Portal\Core\WebhookRetention;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: ' . Site::url('admin/integrations/webhooks'), true, 302);
@@ -81,6 +84,148 @@ $validateFields = static function (string $name, string $targetUrl): string {
     }
     return '';
 };
+
+// ============================================================================
+// (a2) HOW LONG A PAYLOAD IS KEPT (#713)
+// ============================================================================
+// A separate action, because it saves a SETTING and not a webhook. Two levels:
+// this organisation's own figure, and - for a global administrator only - the
+// installation's ceiling that every organisation is held to.
+//
+// WHY THE LEVELS ARE DIFFERENT PARTIES. Whoever administers the installation
+// may be a different person from the administrators of the organisations on it
+// (a hosting provider and its customers is the ordinary case). So for a LIMIT
+// the installation's value takes precedence: an organisation may hold itself to
+// a shorter period and may never choose a longer one than the installation
+// allows. `Portal\Core\WebhookRetention` is the one place that decides it, and
+// it asks `Portal\Core\SettingLimit`.
+if ((string) ($_POST['action'] ?? '') === 'payload_retention') {
+    $back = Site::url('admin/integrations/webhooks');
+
+    // 🪤 ASK WHETHER THE FIELD ARRIVED, NEVER WHAT IT CONTAINS (#677, #667).
+    //    The installation box is not rendered at all for an ordinary
+    //    administrator, and a control that is not rendered is not submitted.
+    //    Reading it with `?? ''` would store an empty period for EVERY
+    //    organisation the moment an ordinary administrator saved their own.
+    $ownArrived   = array_key_exists('ownDays', $_POST);
+    $instArrived  = array_key_exists('installationDays', $_POST);
+    $isGlobal     = App::isRootAdmin();
+
+    if ($instArrived === true && $isGlobal === false) {
+        // Somebody posted a field the page never offered them.
+        Logger::activity(
+            'WebhookRetentionRefused',
+            'An installation-wide webhook retention period was posted by an administrator who is not '
+            . 'a global administrator; nothing was saved',
+            $userId
+        );
+        $_SESSION['flash_msg']  = 'Only a global administrator can set the installation\'s own period. '
+            . 'Nothing was saved.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . $back);
+        exit();
+    }
+
+    // 🏛️ The installation's ceiling first, so that the organisation's figure
+    //    below is judged against what was just chosen rather than against what
+    //    it used to be.
+    if ($instArrived === true) {
+        $instDays = (int) $_POST['installationDays'];
+        if ($instDays < 0 || $instDays > WebhookRetention::HARD_MAX_DAYS) {
+            $_SESSION['flash_msg']  = 'The installation\'s period must be between 0 and '
+                . WebhookRetention::HARD_MAX_DAYS . ' days, where 0 means "keep for ever". Nothing was saved.';
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . $back);
+            exit();
+        }
+        $up = $mysqli->prepare(
+            'INSERT INTO tblSettings (siteID, settingKey, settingValue) VALUES (NULL, ?, ?) '
+            . 'ON DUPLICATE KEY UPDATE settingValue = VALUES(settingValue)'
+        );
+        if ($up !== false) {
+            $key   = WebhookRetention::KEY;
+            $value = (string) $instDays;
+            $up->bind_param('ss', $key, $value);
+            $up->execute();
+            $up->close();
+        }
+        // 🔄 THE LAYER HAS TO BE TOLD, IN THIS REQUEST, and that is not
+        //    tidiness: the organisation's figure below is judged by
+        //    `WebhookRetention::whyNotAllowed()`, which reads the installation
+        //    layer. Leave the layer stale and a global administrator who
+        //    lowered the ceiling and set their organisation's figure in one
+        //    press would have the figure judged against the OLD ceiling — #687's
+        //    fault exactly, where a gate compared against the request's
+        //    settings snapshot instead of the live value.
+        //
+        //    There is no `InstallationSettings::put()`; `remember()` replaces
+        //    the whole layer, so the key is set inside a copy of it.
+        $layer = InstallationSettings::layer();
+        $node  = &$layer;
+        $parts = explode('.', WebhookRetention::KEY);
+        $last  = array_pop($parts);
+        foreach ($parts as $part) {
+            if (isset($node[$part]) === false || is_array($node[$part]) === false) {
+                $node[$part] = [];
+            }
+            $node = &$node[$part];
+        }
+        $node[$last] = (string) $instDays;
+        unset($node);
+        InstallationSettings::remember($layer);
+    }
+
+    if ($ownArrived === true) {
+        $ownDays = (int) $_POST['ownDays'];
+
+        // 🚫 REFUSED WITH THE REASON, NEVER CLAMPED (#668). Silently reducing a
+        //    number somebody else typed is how a person comes to believe a
+        //    period is in force when it is not.
+        $why = WebhookRetention::whyNotAllowed($ownDays);
+        if ($why !== '') {
+            Logger::activity(
+                'WebhookRetentionRefused',
+                'A webhook retention period of ' . $ownDays . ' day(s) was refused for organisation #'
+                . $siteId . ' because the installation allows less; nothing was saved',
+                $userId
+            );
+            $_SESSION['flash_msg']  = SettingLimit::refusalWords(
+                $why,
+                WebhookRetention::installationAllows(),
+                'days'
+            ) . ' Nothing was saved.';
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . $back);
+            exit();
+        }
+
+        $up = $mysqli->prepare(
+            'INSERT INTO tblSettings (siteID, settingKey, settingValue) VALUES (?, ?, ?) '
+            . 'ON DUPLICATE KEY UPDATE settingValue = VALUES(settingValue)'
+        );
+        if ($up !== false) {
+            $key   = WebhookRetention::KEY;
+            $value = (string) $ownDays;
+            $up->bind_param('iss', $siteId, $key, $value);
+            $up->execute();
+            $up->close();
+        }
+    }
+
+    Logger::activity(
+        'WebhookRetentionSaved',
+        'Webhook payload retention saved'
+        . ($ownArrived === true ? '; organisation #' . $siteId . ' = ' . (int) $_POST['ownDays'] . ' day(s)' : '')
+        . ($instArrived === true ? '; installation = ' . (int) $_POST['installationDays'] . ' day(s)' : ''),
+        $userId
+    );
+    $_SESSION['flash_msg']  = 'How long webhook payloads are kept has been saved. Payloads past the '
+        . 'period are emptied by the nightly clear-out; the rows themselves stay, so delivery history '
+        . 'and the replay guard are untouched.';
+    $_SESSION['flash_type'] = 'success';
+    header('Location: ' . $back);
+    exit();
+}
 
 $webhookId = (int) ($_POST['webhookID'] ?? 0);
 

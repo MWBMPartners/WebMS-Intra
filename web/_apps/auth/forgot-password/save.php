@@ -56,6 +56,7 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
 
+use Portal\Core\AddressFingerprint;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
@@ -185,7 +186,14 @@ $answerNow = static function (): void {
 //    The third argument lets the counter clear out old rows for every address,
 //    not only this one; every bucket with this prefix uses the same window.
 $resetAskFamily = 'pwreset:ask:';
-$resetAskBucket = $resetAskFamily . hash('sha256', RateLimiter::clientIp());
+// 🔒 SALTED (#712). This was a plain `hash('sha256', …)` of the address.
+//    An address is 32 bits and this machine does 4.87 million SHA-256 a
+//    second, so the whole IPv4 space takes about fifteen minutes - an
+//    independent check reversed such a value in under a second. The salt
+//    is the installation's own key, which is not in the database, so a
+//    database copy on its own no longer tells anybody which addresses
+//    the portal has seen. `AddressFingerprint::of()` is the one place.
+$resetAskBucket = $resetAskFamily . AddressFingerprint::of(RateLimiter::clientIp());
 $resetAskMax    = 5;
 $resetAskWindow = 900; // 15 minutes, in seconds
 

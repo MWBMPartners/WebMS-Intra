@@ -606,7 +606,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_offsite; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_ratelimit selftest_webhookret selftest_offsite; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -982,6 +982,44 @@ jobs:
         env:
           SELFTEST_DB_NAME: selftest_limit
         run: php -d memory_limit=512M tools/setting-limit-selftest.php
+
+      # 🔒 A rate-limit row never holds a network address (#712). Two tables
+      #    held one unchanged and NOTHING ever cleared either of them: no
+      #    clear-out anywhere, no foreign key that could cascade in, no
+      #    scheduled job - under an index named `idx_ratelimit_prune`, for a
+      #    prune that did not exist. The two-factor bucket paired an ACCOUNT
+      #    NUMBER with an address, so the row was a record of which person
+      #    signed in from where, kept for ever.
+      #
+      #    The audit check `check_no_raw_address_stored.py` reads the code and
+      #    would notice an address being stored again. THIS is the other half:
+      #    whether the throttle STILL WORKS once the value is hashed. That is
+      #    the part that would break quietly - nothing would log it and no page
+      #    would change, somebody could just flood the chat. Sections B and C
+      #    are planted against exactly that. Needs a database and nothing else.
+      - name: 'Rate-limit privacy self-test (#712)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_ratelimit
+        run: php tools/rate-limit-privacy-selftest.php
+
+      # 🧾 A webhook's payload is kept for a bounded time (#713). Two tables
+      #    kept a whole body for ever: an incoming payment event carries a
+      #    donor's name, e-mail address and postal address, and an outgoing
+      #    delivery carries a child's name, a raw e-mail address or a
+      #    prayer-request subject. Neither table has a column linking a row to
+      #    a person, so an erasure request cannot reach them and never could -
+      #    a time limit is the only mechanism there is.
+      #
+      #    Its section D is the one to keep: a delivery still PENDING or FAILED
+      #    must never be emptied, because the retry job sends from the stored
+      #    payload. Empty it and every later retry sends nothing, for ever,
+      #    while reporting that it tried. Needs a database and nothing else.
+      - name: 'Webhook payload retention self-test (#713)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_webhookret
+        run: php tools/webhook-retention-selftest.php
 
       # ☁️ The off-site backup's settings really decide what a run does (#671).
       #    WIRED ON 31 OCTOBER 2026: it had never run in any workflow either.
