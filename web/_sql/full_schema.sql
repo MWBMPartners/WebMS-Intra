@@ -2322,7 +2322,14 @@ INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `default
 VALUES ('api.expenses.delete.enabled', 'true', 0, 'true')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
--- ─── Future app toggles (disabled by default) ────────────────────────────────
+-- ─── The app switches ────────────────────────────────────────────────────────
+-- This heading read "Future app toggles (disabled by default)" until
+-- 3 November 2026 (#481), and by then it was untrue of the rows under it: the
+-- apps were built, and migration 225 brought the seeded values into line with
+-- what the portal can actually do. The stale heading mattered because it is
+-- the sentence somebody reads before deciding whether a value here is
+-- deliberate. The apps still shipped off are the ones needing a paid account
+-- or an outside service, and each says so where it is seeded.
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
 VALUES ('attendance.enabled', 'true', 0, 'true')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;

@@ -2,6 +2,122 @@
 
 
 ## [Unreleased] (alpha)
+<!-- #491, #492 and #481 -->
+
+### Fixed
+
+- **One organisation's setting no longer clears out every organisation's
+  history (#491).** The activity-log and error clear-outs read one pair of
+  settings through `App::settings()` — the current organisation's value — and
+  then deleted across the whole installation. An administrator of one
+  organisation choosing "keep activity logs for 7 days" shortened every other
+  organisation's history, including one that had deliberately chosen a year;
+  and run from the scheduled job, which has no current organisation at all,
+  whichever value happened to resolve decided for everybody. Both clear-outs
+  now loop the organisations and ask `log_retention_days()` for each, the same
+  shape the registration, check-in, giving, webhook and transcript sweeps
+  already use. Records belonging to **no** organisation — written before the
+  organisation was decided, written by a scheduled job, or left behind when an
+  organisation was deleted — are cleared by the installation's own figure
+  rather than kept for ever. Each organisation's figure is held to what the
+  installation allows (#668's three tiers), and the cap is in the reader the
+  clear-out uses, because a save-time cap is not a cap. The Retention page now
+  shows the visiting administrator's own organisation's figure and the
+  installation's beside it.
+
+- **Replaying a migration no longer switches an app back on (#481).**
+  `008_calendar_events_schema.sql`, `009_attendance_schema.sql` and
+  `017_leadership.sql` forced four settings with plain `UPDATE` statements, and
+  the installation wizard replays every numbered migration over an existing
+  database — so an administrator who had switched Calendar, Attendance or
+  Leadership off found it on again after an upgrade retry, and a customised
+  calendar icon was replaced by the default. All four are now the house seed
+  idiom (`INSERT … ON DUPLICATE KEY UPDATE settingKey = settingKey`), which
+  leaves an existing row completely alone, exactly as #466 corrected
+  migrations 012 and 021. Nothing is lost: the values they forced are what
+  `full_schema.sql` seeds and what migration 225 corrected the stored default
+  to. **Nothing can be done for a database where a replay has already
+  overwritten a chosen value** — the old statement left no record of what was
+  there before.
+
+### Changed
+
+- The personal-data catalogue's reason for `tblAssetLoans.counterpartyContact`
+  was untrue of the commonest case and is corrected (#492). It said an erasure
+  could not reach the column because an outside borrower need not have an
+  account; in fact the loan form shows that box whichever kind of counterparty
+  is chosen, so it is routinely a member's own telephone number on a row that
+  names their account. The reason now says what really stops it being emptied,
+  and that the decision is on #492.
+
+<!-- #583: the backup and off-site pages, and the disaster-recovery help -->
+
+### Fixed
+
+- **The disaster-recovery help page told a customer to use tools the portal
+  does not have, and one of its instructions would have destroyed every
+  integration secret (#583, item (g)).** `/help/disaster-recovery` is the first
+  page somebody opens when something has gone wrong, and four of the seven
+  items in its "Common failure modes" list were untrue:
+  - "Stolen credentials — clear every session, force password reset, rotate
+    `enc.key` …". There is **no** button that signs everybody out and **none**
+    that makes everybody choose a new password: both are #582, a feature
+    request, not built. And replacing `_auth_keys/enc.key` by hand is the one
+    thing the runbook spends a whole section (7.9) forbidding — nothing
+    re-encrypts what that key protects, so every integration's secret and every
+    person's two-factor sign-in becomes unreadable the moment it is swapped.
+    The item now says what works today, warns against the key swap in bold, and
+    points at the two integration pages that really do let an administrator
+    replace a credential.
+  - It cited "runbook section 4.4", which has not existed since the runbook was
+    reorganised under #488. The link's own anchor had already been corrected to
+    `#7-after-a-break-in`; only the words a reader sees were left behind, so the
+    link text and the page it opened disagreed.
+  - "Disk full — … prune `_uploads/photos/queue/` older than 30 days" told a
+    customer to do exactly what the runbook forbids ("Do not delete anything
+    under `_uploads/` by hand. The database points at those files."). It is not
+    merely stale, it is destructive: a queued photo has a `tblPhoto` row whose
+    `filePath` is `queue/<name>` and whose status is `pending_approval`, so
+    following that advice throws away members' photos still waiting for a
+    moderator and leaves the rows pointing at nothing.
+  - "Compromised account — Disable user + revoke sessions, then run the
+    offboarding flow." "Revoke sessions" names nothing — there is no session
+    revocation anywhere under `web/` — and it is no longer needed, because
+    `Auth::ensureSession()` ends the session of an account that has been
+    switched off. Offboarding is the route for somebody genuinely leaving;
+    pointed at a victim's account it erases their records rather than protecting
+    them.
+  - "DB connection lost — … check DreamHost status" named one customer's
+    hosting company as though it were everybody's (#500).
+- **The same page's first recovery step no longer implies the holding page says
+  what you tell it to (#583).** `Maintenance::renderHoldingPage()` always prints
+  "<portal> is being upgraded" after whatever message is stored, so a portal
+  closed because of an intrusion tells its members it is being upgraded unless
+  the administrator types something of their own. The card now says so. The
+  hard-coded sentence itself is #583 item (f) and is **not** fixed.
+
+---
+
+- **Fixed — the holding page says WHICH of the two reasons the portal is closed for (#583 item f)**
+  - `Maintenance::isActive()` answers true for two different reasons — an explicit flag an
+    administrator or the installer set, or a database upgrade waiting — and the page said
+    **"is being upgraded" in both.** A visitor told the portal is being upgraded when an
+    administrator has simply closed it is told something untrue, and the sentence promised an ending
+    the portal cannot know.
+  - **A waiting upgrade WINS, and my first version had that backwards.** The Upgrade page sets the
+    flag *itself* while it works, so during a real upgrade both reasons are true at once — and asking
+    about the flag alone would have told visitors an administrator had switched the portal off.
+    Found by a test that could then not tell the two sentences apart; measured, not reasoned.
+  - **Nothing tested the wording at all before this**, which is why it could be wrong for however
+    long it was: the existing checks prove the page *appears* (503 and its heading) and that one
+    withdrawn sentence is gone. "It appears" and "it says something true" are different questions,
+    and only the first had an answer.
+  - **It took three tries to make the fixture real**, and that is the lesson worth keeping. Checking
+    both branches at the end of `upgrade-pages-selftest.php` gave **HTTP 302**, because by then every
+    migration is recorded and the portal is correctly *open*. Winding the recorded version back was
+    not enough either — **being behind is not the same as having something waiting**, which is the
+    #499 distinction the portal is built on. The upgrade branch is checked at the one moment the test
+    genuinely has a half-failed migration; the flag branch at the end, where nothing is waiting.
 <!-- #727: gating a feature is a capability, not a hard-coded role -->
 
 ### A feature can be gated on a role an organisation created (#727, migration 243)

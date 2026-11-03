@@ -628,6 +628,42 @@ class GdprEraser
             // just clutter, unlike e.g. an authorship attribution which
             // stays useful once detached.
             ['table' => 'tblAssetOwners',               'userCol' => 'userID',               'action' => 'delete'],
+            // 📞 `counterpartyContact` IS NOT EMPTIED HERE, AND IT IS NOT AN
+            //    OVERSIGHT: it needs a decision only the owner can take
+            //    (#492 part 2, looked at 3 November 2026).
+            //
+            //    WHAT IS REALLY THERE. The loan form's "Contact details
+            //    (optional)" box is shown whichever kind of counterparty is
+            //    chosen — only the three PICKERS are hidden by
+            //    `assets/loan.php` — and `AssetRegister::createLoanRequest()`
+            //    stores whatever is in it regardless of `counterpartyType`.
+            //    So on a loan whose counterparty IS an account holder, that
+            //    box routinely holds that MEMBER's own telephone number or
+            //    e-mail address, and an erasure empties the account number
+            //    while leaving their telephone number on the row beside it.
+            //
+            //    WHY IT CANNOT SIMPLY BE ADDED TO `nullCols`.
+            //    `counterpartyUserID` is in `ACTOR_COLUMNS`, and
+            //    `processEntry()` empties a non-account column in `nullCols`
+            //    with a plain `= NULL` on EVERY row the instruction matched.
+            //    `tools/gdpr-coverage-selftest.php` refuses that pairing
+            //    outright, and it is right to: as a general rule, text emptied
+            //    on an actor's number is a third party's data destroyed on a
+            //    request that was never theirs. It was tried, and that gate
+            //    caught it.
+            //
+            //    SO THE REAL QUESTION IS WHAT THIS COLUMN NAMES, and that is
+            //    the decision. A loan's counterparty is the person the loan is
+            //    ABOUT — the borrower or the lender — rather than somebody who
+            //    acted on somebody else's record, which would make it a link
+            //    column and not an actor column. That is EXACTLY the move the
+            //    owner made for `bookedByID` on 3 November 2026 (#723): "a room
+            //    booking is made BY the person it is about". It is recorded as
+            //    a question on #492 rather than taken here, because a
+            //    reclassification changes what the two lists MEAN and the
+            //    owner took the identical decision himself last time. The
+            //    catalogue entry for this column says the same thing in the
+            //    words a person asking about their own data would read.
             ['table' => 'tblAssetLoans',                'userCol' => 'counterpartyUserID',   'action' => 'anonymise', 'nullCols' => [], 'reason' => 'loan history retained for asset custody chain; borrower/lender identity detached'],
             ['table' => 'tblAssetLicenseAssignments',   'userCol' => 'userID',               'action' => 'anonymise', 'nullCols' => [], 'reason' => 'seat-assignment history retained for licence compliance; assignee identity detached'],
             ['table' => 'tblAssetAudit',                'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'audit history retained (mirrors tblAuditTrail — no FK, immutable record); actor identity detached'],

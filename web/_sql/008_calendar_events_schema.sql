@@ -327,5 +327,50 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 -- =============================================================================
 -- ⚙️ Enable calendar app in settings
 -- =============================================================================
-UPDATE `tblSettings` SET `settingValue` = 'true' WHERE `settingKey` = 'calendar.enabled';
-UPDATE `tblSettings` SET `settingValue` = 'fa-solid fa-calendar-days' WHERE `settingKey` = 'calendar.displayIcon';
+-- 🛑 THESE TWO USED TO BE PLAIN UPDATEs, AND A REPLAY OVERRODE WHAT AN
+--    ADMINISTRATOR HAD CHOSEN (#481, 3 November 2026). They read:
+--
+--      UPDATE `tblSettings` SET `settingValue` = 'true'
+--            WHERE `settingKey` = 'calendar.enabled';
+--      UPDATE `tblSettings` SET `settingValue` = 'fa-solid fa-calendar-days'
+--            WHERE `settingKey` = 'calendar.displayIcon';
+--
+--    The installation wizard replays every numbered migration on top of an
+--    existing database (`web/_install/index.php`), so an administrator who had
+--    deliberately switched the calendar off found it on again after an upgrade
+--    retry, with nothing saying why — and a customised menu icon was replaced
+--    by the default one. Neither statement had any condition at all, so no
+--    uniqueness rule was ever standing between it and the row: unlike
+--    migrations 012 and 021 (corrected in #466), these have behaved this way
+--    since they were written.
+--
+--    THE CURE IS THE HOUSE SEED IDIOM, exactly as #466 used and as the two
+--    seeds a few lines below in migrations 009 and 017 already do: insert the
+--    row when it is missing, and leave an existing one completely alone.
+--    `ON DUPLICATE KEY UPDATE settingKey = settingKey` is a deliberate no-op.
+--
+--    NOTHING IS LOST BY THIS. The value these statements forced is what
+--    `web/_sql/full_schema.sql` now SEEDS for a fresh installation, and
+--    migration 225 corrected the stored default for an existing one — which is
+--    the house answer recorded in DEV_NOTES.md: get the value right at the
+--    seed, so a new installation lands on it without any migration reaching in
+--    and changing somebody's choice.
+--
+--    `siteID` IS DELIBERATELY NOT NAMED. That column does not exist on
+--    `tblSettings` until migration 015, and this is migration 008: naming it
+--    would make the statement fail outright on the real upgrade path. Leaving
+--    it out gives the column's own default (empty, meaning installation-wide)
+--    on any database that has it, which is the row these settings belong on.
+--
+--    WHAT THIS CANNOT DO, said plainly: nothing can put back a value a replay
+--    has ALREADY overwritten. The old statement left no record of what was
+--    there before, so an installation that has already run it cannot be told
+--    apart from one where somebody chose the same value on purpose. This fixes
+--    what a replay does from here on, and no more.
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('calendar.enabled', 'true', 0, 'true')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('calendar.displayIcon', 'fa-solid fa-calendar-days', 0, 'fa-solid fa-calendar-days')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;

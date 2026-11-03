@@ -2595,6 +2595,36 @@ Phase two — converting the remaining standard-role gates, and an audit check
 that fails when a new hard-coded gate appears — is **#739**. That check is the
 part that stops the conversion being undone one feature at a time.
 
+## A question put to the owner must define every term it uses
+
+**A QUESTION PUT TO THE OWNER MUST DEFINE EVERY TERM IT USES.** Set by the owner
+on 3 November 2026, after being asked whether "a loan's counterparty" was the
+person the loan was about, and answering: *"your description isn't written
+plainly enough. What exactly is a 'counterparty'?"*
+
+The plain-English rule already covers replies, comments, commit messages and
+anything an end user reads. This says it binds **questions** hardest of all, and
+why: a question is the one place the owner has to make a decision from nothing
+but my words. If a term in it is unexplained, the answer is either a guess or a
+request to explain, and both waste a round.
+
+So, in any question:
+
+- **Use the word a person would use.** "The person or organisation something is
+  lent to" beats "counterparty". Where a technical term is genuinely the
+  clearest thing — a file name, a column name, a standard — use it and say in
+  ordinary words what it is and why it matters.
+- **Never let a column or table name carry the meaning.** `counterpartyUserID`
+  may be what the code calls it; the question has to say what it HOLDS.
+- **Say what each option would actually do to somebody**, not what it does to
+  the code. "A member's telephone number stays on their own loan for ever" is
+  the decision; "it remains in ACTOR_COLUMNS" is not.
+- **If a term cannot be explained in a short phrase, the question is too big.**
+  Split it, or explain the thing first and ask afterwards.
+
+The test to apply before sending: *could somebody who has never seen this
+codebase answer it?* If not, it is not ready.
+
 ## A few more things worth knowing
 
 - **Branches are meant to be promoted through four steps on the way to

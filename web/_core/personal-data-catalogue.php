@@ -313,16 +313,45 @@ return [
         'decision' => 'unlink',
         'reason'   => 'Who borrowed an item. Deleting the loan would erase the item\'s history, and the organisation still needs to know where its property went. The name goes, the loan stays.',
         'columns'  => ['notes', 'counterpartyUserID', 'approvedByID', 'requestedByID', 'counterpartyName', 'counterpartyContact', 'declineReason', 'conditionOutNotes', 'conditionInNotes'],
+        // 📞 `counterpartyContact`'s REASON WAS UNTRUE OF THE COMMONEST CASE
+        //    and is corrected (#492 part 2, 3 November 2026). It read "How to
+        //    reach that outside borrower. As above", which meant "they need
+        //    not have an account, so nothing links the row to one and an
+        //    erasure request cannot reach it". That is right for a loan to an
+        //    outside person or organisation and WRONG for a loan to a member:
+        //    the loan form shows that box whichever kind of counterparty is
+        //    chosen, so it is routinely a member's own telephone number on a
+        //    row that names their account — a row an erasure does reach. What
+        //    stops it being emptied is not reachability, it is that
+        //    `counterpartyUserID` is classed as a column saying somebody
+        //    ACTED on a record, and emptying text on such a column is a
+        //    blanket `= NULL` over every row it matched. Reclassifying it
+        //    needs the owner's decision; it is on #492 and the reason below
+        //    says so plainly, because this is the file somebody's own request
+        //    is answered from.
         'notEmptiedHere' => [
             'counterpartyName' => 'The name of somebody OUTSIDE the organisation who borrowed a piece of equipment. They '
                 . 'need not have an account, so nothing links the row to one and an erasure request '
-                . 'cannot reach it. An administrator can clear it on the loan',
-            'counterpartyContact' => 'How to reach that outside borrower. As above',
+                . 'cannot reach it. An administrator can clear it on the loan. (Where the borrower IS '
+                . 'an account holder this column is never written at all: the free-text name belongs to '
+                . 'the "someone else" kind of loan only.)',
+            'counterpartyContact' => 'A telephone number or e-mail address for whoever borrowed or lent the item, typed '
+                . 'into the loan by hand. For a loan to somebody outside the organisation nothing links '
+                . 'the row to an account, so an erasure request cannot reach it, and an administrator '
+                . 'clears it on the loan. WHERE THE BORROWER IS A MEMBER the row DOES name their '
+                . 'account and the erasure does reach it, so this column is their own contact details '
+                . 'being kept after the account link has gone. It is not emptied today for one reason: '
+                . 'the column naming them, counterpartyUserID, is classed as "this person acted on the '
+                . 'record", and text emptied on such a column is emptied on every row matched, which '
+                . 'for an approver or a recorder would destroy somebody else\'s details. Whether a '
+                . 'loan\'s counterparty is instead the person the loan is ABOUT - as the owner decided '
+                . 'a room booking\'s booker is, on 3 November 2026 - is a decision recorded on issue '
+                . '#492 and not taken here',
             'declineReason' => 'Why a request to borrow something was refused. The organisation\'s own reasoning about '
                 . 'its own property',
             'conditionOutNotes' => 'What condition an item was in when it went out. About the item',
             'conditionInNotes' => 'What condition it was in when it came back. About the item',
-            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. The organisation\'s record of lending its property out, kept as the loan\'s own history. (counterpartyName and counterpartyContact on this table are an outside person\'s details and are named in no entry at all - #706.)',
+            'notes' => 'The row is the organisation\'s record of a thing, not the person\'s own record, so under the owner\'s rule of 1 November 2026 the note stays. Whoever typed it is detached by cutting the account link; the text itself is not theirs to erase. The organisation\'s record of lending its property out, kept as the loan\'s own history. (The sentence that used to end this reason said counterpartyName and counterpartyContact "are named in no entry at all - #706". Both ARE named in this entry, each with its own reason above; the #706 wording was already stale when it was written here.)',
         ],
     ],
     'tblAssetOrgs' => [

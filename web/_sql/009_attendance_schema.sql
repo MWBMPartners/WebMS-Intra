@@ -163,8 +163,28 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 -- =============================================================================
 -- ⚙️ Enable attendance app in settings + add display metadata
 -- =============================================================================
-UPDATE `tblSettings` SET `settingValue` = 'true'
-    WHERE `settingKey` = 'attendance.enabled';
+-- 🛑 THIS USED TO BE A PLAIN UPDATE, AND A REPLAY SWITCHED THE APP BACK ON
+--    OVER AN ADMINISTRATOR'S CHOICE (#481, 3 November 2026). It read:
+--
+--      UPDATE `tblSettings` SET `settingValue` = 'true'
+--          WHERE `settingKey` = 'attendance.enabled';
+--
+--    The installation wizard replays every numbered migration on top of an
+--    existing database, so an administrator who had deliberately switched
+--    Attendance off found it on again after an upgrade retry, with nothing
+--    saying why. There was no condition on the statement at all, so no
+--    uniqueness rule was ever standing between it and the row.
+--
+--    It is now the same guarded seed idiom as the two settings directly below
+--    it — which were written correctly in this very file, three lines apart —
+--    and as #466 used for migrations 012 and 021. Nothing is lost: 'true' is
+--    what `full_schema.sql` seeds and what migration 225 corrected the stored
+--    default to. `siteID` is not named because that column does not exist on
+--    `tblSettings` until migration 015. Nothing can put back a value an
+--    earlier replay has already overwritten; see migration 008's note.
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('attendance.enabled', 'true', 0, 'true')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
 VALUES ('attendance.displayName', 'Attendance', 0, 'Attendance')

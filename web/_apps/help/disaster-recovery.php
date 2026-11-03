@@ -6,6 +6,7 @@
  *
  * @package   Portal\Help
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/250
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/583
  */
 
 declare(strict_types=1);
@@ -47,7 +48,21 @@ must-know shortcuts.</p>
 <div class="row g-3 mb-3">
     <div class="col-md-4"><div class="card h-100"><div class="card-body">
         <h5><i class="fa-solid fa-1 me-1"></i>Stop the bleeding</h5>
-        <p class="small">Toggle maintenance mode immediately to show a friendly "we'll be back" page.</p>
+        <p class="small">Switch maintenance mode on straight away. Everybody else then sees a
+            holding page while you work; you can still sign in and use every page.</p>
+        <?php /* 🛟 #583. This used to promise "a friendly 'we'll be back' page" and stop
+                 there, which left out the one thing somebody closing the portal after a
+                 break-in needs to know: `Maintenance::renderHoldingPage()` always prints
+                 "<portal> is being upgraded", whatever the real reason, AFTER whatever
+                 message has been stored. So a portal closed because of an intrusion tells
+                 its members it is being upgraded unless the administrator types something
+                 of their own. The hard-coded sentence is #583 item (f) and is not fixed —
+                 it lives in `web/_core/Maintenance.php`, not on this page — so this page
+                 says what is true today rather than implying the message is chosen for
+                 you. Runbook section 4 says the same thing. */ ?>
+        <p class="small"><strong>Type your own message when you do</strong> &mdash; under the
+            message you type, the holding page always says the portal is being upgraded,
+            whatever the real reason.</p>
         <?php /* The toggle lives on Admin, Settings, Maintenance. This button pointed at
                  admin/maintenance/health until 27 October 2026 — the health page has no
                  toggle on it at all, so the first step of a recovery led nowhere. */ ?>
@@ -93,11 +108,87 @@ must-know shortcuts.</p>
     <h5>Common failure modes</h5>
     <ul>
         <li><strong>White page / 500</strong> — Tail the PHP error log; check <a href="<?php echo htmlspecialchars(Site::url('admin/errors'), ENT_QUOTES, 'UTF-8'); ?>">/admin/errors</a>.</li>
-        <li><strong>DB connection lost</strong> — Try <code>mysql … -e "SELECT NOW();"</code>; check DreamHost status.</li>
-        <li><strong>Disk full</strong> — Prune <code>_backups/</code> older than 4 most recent; prune <code>_uploads/photos/queue/</code> older than 30 days.</li>
+        <?php /* 🛟 #583. This item used to end "check DreamHost status". WebMS is a
+                 product on hosting we do not control (#500), so no page may name one
+                 customer's hosting company as though it were everybody's. */ ?>
+        <li><strong>DB connection lost</strong> &mdash; every page says
+            <code>Database connection error.</code> Check your hosting company's status page
+            first, then the five database values in <code>_auth_keys/auth_creds.php</code>
+            against the database page of your hosting panel &mdash; a wrong password there
+            gives exactly this message. <strong>Never move, rename or delete that file on a
+            live portal:</strong> without it the portal offers its installation wizard to
+            every visitor. Runbook section&nbsp;6.1.</li>
+        <?php /* 🛟 #583. This item used to say "prune `_uploads/photos/queue/` older than
+                 30 days", which the runbook forbids in so many words ("Do not delete
+                 anything under `_uploads/` by hand. The database points at those files.").
+                 It is not merely out of date, it is destructive: `_apps/photos/upload.php`
+                 writes a `tblPhoto` row whose `filePath` is `queue/<name>` with
+                 `status = 'pending_approval'`, so deleting those files throws away
+                 members' photos that are still waiting for a moderator and leaves the row
+                 behind pointing at nothing. The snapshot half was right and is kept. */ ?>
+        <li><strong>Disk full</strong> &mdash; uploads fail and "Run snapshot now" fails.
+            Delete old snapshots with the <strong>Delete</strong> button beside each one on the
+            <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/backup'), ENT_QUOTES, 'UTF-8'); ?>">Backup page</a>,
+            keeping at least the newest four. <strong>Do not delete anything under
+            <code>_uploads/</code> by hand</strong> &mdash; the database points at those
+            files, and a photo still waiting for a moderator would leave a row pointing at
+            nothing. Runbook section&nbsp;6.2.</li>
         <li><strong>Bad migration</strong> — Full-restore the latest snapshot via <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/backup'), ENT_QUOTES, 'UTF-8'); ?>">Backups</a>.</li>
-        <li><strong>Stolen credentials</strong> — clear every session, force password reset, rotate <code>enc.key</code>, rotate every encrypted integration credential. Exact SQL in <a href="https://github.com/MWBMPartners/WebMS-Intra/blob/main/docs/disaster-recovery-runbook.md#7-after-a-break-in" target="_blank" rel="noopener">runbook section 4.4</a>.</li>
-        <li><strong>Compromised account</strong> &mdash; Disable user + revoke sessions, then run the offboarding flow.</li>
+        <?php /* 🛟 #583. The old item read "clear every session, force password reset,
+                 rotate `enc.key`, rotate every encrypted integration credential. Exact SQL
+                 in runbook section 4.4." Four things wrong with it, and the third is the
+                 one that could cost a customer everything:
+                 • "clear every session" and "force password reset" are buttons the portal
+                   DOES NOT HAVE. They are #582, which is a feature request, not built —
+                   so this page was telling somebody mid-incident to use tools that do not
+                   exist, and the runbook's own section 7 opens by saying so plainly.
+                 • "rotate `enc.key`" is advice the runbook spends a whole section
+                   (7.9) telling people NOT to follow: replacing that file by hand makes
+                   every integration secret and every person's two-factor sign-in
+                   unreadable at once. There is no tool that re-encrypts them.
+                 • "runbook section 4.4" has not existed since the runbook was
+                   reorganised under #488. The ANCHOR in the link was already updated to
+                   `#7-after-a-break-in`; only the words a reader sees were left behind,
+                   so the link text and the page it opened disagreed.
+                 Rotating the integration credentials IS real and is kept, because 7.9
+                 step 2 is a page an administrator can open today. */ ?>
+        <li><strong>Stolen credentials</strong> &mdash; work through
+            <strong>runbook section&nbsp;7</strong> in the order it gives: that order is what
+            stops you locking yourself out. Two things to know before you start.
+            <strong>The portal has no button that signs everybody out, and none that makes
+            everybody choose a new password</strong> &mdash; section&nbsp;7 gives the steps
+            that work today, some of which need a command line on the server.
+            <strong>Do not replace <code>_auth_keys/enc.key</code> by hand.</strong> Nothing
+            re-encrypts what it protects, so every integration's secret and every person's
+            two-factor sign-in becomes unreadable the moment you swap it, and only putting
+            the old file back makes them readable again. Make a new secret at each outside
+            service instead, cancel the old one, and type the new one into that service's
+            page under
+            <a href="<?php echo htmlspecialchars(Site::url('admin/integrations'), ENT_QUOTES, 'UTF-8'); ?>">Integrations</a>;
+            then revoke and re-issue every key on
+            <a href="<?php echo htmlspecialchars(Site::url('admin/integrations/api-keys'), ENT_QUOTES, 'UTF-8'); ?>">API keys</a>.
+            The exact commands are in
+            <a href="https://github.com/MWBMPartners/WebMS-Intra/blob/main/docs/disaster-recovery-runbook.md#7-after-a-break-in" target="_blank" rel="noopener">runbook section&nbsp;7</a>.</li>
+        <?php /* 🛟 #583. The old item read "Disable user + revoke sessions, then run the
+                 offboarding flow." "Revoke sessions" names nothing: there is no session
+                 revocation anywhere under `web/` (grep for revokeSessions /
+                 signOutEverywhere finds no file), and it is also no longer needed —
+                 `Auth::ensureSession()` ends the session of an account that is switched
+                 off, which runbook 7.7 records as tested (28). And offboarding is the
+                 route for somebody genuinely leaving; pointed at a victim's account it
+                 erases their records rather than protecting them. */ ?>
+        <li><strong>Compromised account</strong> &mdash; open
+            <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>">Users</a>,
+            press <strong>Edit</strong> beside that person, untick <strong>Active</strong> and
+            Save. From then on they cannot sign in with a password, a passkey, Microsoft or
+            Google, and if they are signed in at this moment they are signed out on their next
+            click &mdash; a page already open on their screen stays there until they click.
+            Then look for a way back in that a new password does not close: a passkey they
+            added, a Microsoft or Google account they linked, or global administrator rights
+            they gave themselves. Runbook section&nbsp;7.3 lists all three, and
+            section&nbsp;7.7 is this step in full. Offboarding is for somebody who is
+            genuinely leaving &mdash; it is not the tool for an account that has been taken
+            over.</li>
         <?php // 🛟 #694, and the last three sentences #697. Said HERE because this is
               //    the page somebody opens when they are about to put a backup back, and
               //    the Backup page's own card only appears AFTER the restore has already

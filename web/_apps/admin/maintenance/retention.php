@@ -23,9 +23,15 @@
  * -----------------------------------------------------------------------------
  * Both the sweep and the preview counts above it act on the WHOLE
  * installation, not the one organisation the visiting administrator belongs
- * to: the activity-log and error deletes have no organisation column to limit
- * them to, and the event-registration clean-up loops over every organisation
- * on the server in turn (see registration_sweep_sites()).
+ * to: every clear-out here loops over every organisation on the server in turn
+ * (see registration_sweep_sites() and log_sweep()).
+ *
+ * THIS PARAGRAPH USED TO SAY "the activity-log and error deletes have no
+ * organisation column to limit them to", which was wrong twice over. Both
+ * tables DO carry a `siteID`; what they had was a delete that ignored it while
+ * reading one organisation's setting (#491, fixed 3 November 2026). The
+ * conclusion — a global administrator only — is unchanged, because the sweep
+ * still reaches every organisation's rows whoever presses the button.
  *
  * Until 13 September 2026 the only check was App::isAdmin(), which is true for
  * an administrator of a SINGLE organisation as well as for a global
@@ -39,16 +45,20 @@
  * permission with no organisation boundary.
  *
  * The scheduled job (now /cron/retention-sweep, see above) is untouched by
- * this: it was never gated by App::isAdmin() in the first place, it
- * authenticates with a shared secret token instead of a session, and
- * per-organisation retention is a separate, not-yet-decided question tracked
- * in issue #491 — this change is only about WHO may press the web button, not
- * what the sweep deletes.
+ * this: it was never gated by App::isAdmin() in the first place, and it
+ * authenticates with a shared secret token instead of a session. (This
+ * paragraph used to end "per-organisation retention is a separate,
+ * not-yet-decided question tracked in issue #491". It was decided and built on
+ * 3 November 2026: each organisation's own figure clears its own rows.)
  *
  * Settings:
  *
- *   audit.retentionDays        (default 365) — activity logs
- *   errors.retentionDays       (default 365) — error logs
+ *   audit.retentionDays        (default 365) — activity logs. Each
+ *                               organisation has its own, held to what the
+ *                               installation allows; records belonging to no
+ *                               organisation follow the installation's own
+ *                               figure (#491).
+ *   errors.retentionDays       (default 365) — error logs, the same way
  *   attend.detailRetentionDays (default 90) — how long the scrambled sender
  *                               address is kept on an anonymous check-in
  *                               (#530: a browser-description column used to
@@ -166,10 +176,24 @@ if (App::isRootAdmin() === false) {
     return;
 }
 
-$activityDays = (int) (App::settings('audit.retentionDays')  ?? '365');
-$errorDays    = (int) (App::settings('errors.retentionDays') ?? '365');
-if ($activityDays < 1) { $activityDays = 365; }
-if ($errorDays    < 1) { $errorDays    = 365; }
+// 📝 #491 — THE TWO FIGURES SHOWN ON THIS PAGE ARE NOT THE FIGURES THE SWEEP
+//    USES, because there is no longer one figure for either. These four lines
+//    used to be the whole story:
+//
+//      $activityDays = (int) (App::settings('audit.retentionDays') ?? '365');
+//
+//    and that single number then decided what was deleted for every
+//    organisation on the installation. The clear-out now asks
+//    `log_retention_days()` once per organisation. So this page reads the
+//    VISITING administrator's own organisation through the same function the
+//    sweep uses — never the merged settings array, which would print a figure
+//    the clear-out does not use (the #685 mistake on the check-in card below)
+//    — and prints the installation's own figure beside it, so the two levels
+//    are visible rather than described.
+$activityDays            = log_retention_days('audit.retentionDays', Site::id());
+$errorDays               = log_retention_days('errors.retentionDays', Site::id());
+$activityInstallationDays = log_retention_installation_days('audit.retentionDays');
+$errorInstallationDays    = log_retention_installation_days('errors.retentionDays');
 
 $flashMsg  = '';
 $flashType = '';
@@ -260,7 +284,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // -----------------------------------------------------------------------------
 // 📊 Preview counts (what WOULD be deleted right now)
 // -----------------------------------------------------------------------------
-$preview = preview_retention_counts($activityDays, $errorDays);
+$preview = preview_retention_counts();
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -287,8 +311,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card shadow-sm">
             <div class="card-body">
                 <h2 class="h6"><i class="fa-solid fa-list-check me-1"></i>Activity Logs (<code>tblActivityLogs</code>)</h2>
-                <p class="text-muted small mb-2">Retention: <strong><?php echo $activityDays; ?> days</strong> (setting: <code>audit.retentionDays</code>)</p>
-                <p class="mb-0">Rows that would be deleted now: <strong><?php echo number_format($preview['activity']); ?></strong></p>
+                <p class="text-muted small mb-2">
+                    Kept for <strong><?php echo $activityDays; ?> days</strong> for your organisation
+                    (setting: <code>audit.retentionDays</code>).
+                    Each organisation uses its own figure, held to the
+                    <strong><?php echo $activityInstallationDays; ?> days</strong> this installation
+                    allows. Records that belong to no organisation &mdash; written before the
+                    organisation was decided, or by a scheduled job &mdash; follow the
+                    installation's figure.
+                </p>
+                <p class="mb-0">Rows that would be deleted now, across every organisation: <strong><?php echo number_format($preview['activity']); ?></strong></p>
             </div>
         </div>
     </div>
@@ -296,8 +328,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card shadow-sm">
             <div class="card-body">
                 <h2 class="h6"><i class="fa-solid fa-triangle-exclamation me-1"></i>Error Log (<code>tblErrors</code>)</h2>
-                <p class="text-muted small mb-2">Retention: <strong><?php echo $errorDays; ?> days</strong> (setting: <code>errors.retentionDays</code>)</p>
-                <p class="mb-0">Rows that would be deleted now: <strong><?php echo number_format($preview['errors']); ?></strong></p>
+                <p class="text-muted small mb-2">
+                    Kept for <strong><?php echo $errorDays; ?> days</strong> for your organisation
+                    (setting: <code>errors.retentionDays</code>).
+                    Each organisation uses its own figure, held to the
+                    <strong><?php echo $errorInstallationDays; ?> days</strong> this installation
+                    allows. Faults recorded with no organisation follow the installation's figure.
+                </p>
+                <p class="mb-0">Rows that would be deleted now, across every organisation: <strong><?php echo number_format($preview['errors']); ?></strong></p>
             </div>
         </div>
     </div>

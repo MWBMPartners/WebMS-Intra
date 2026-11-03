@@ -50,6 +50,13 @@
  *   E. the page and its handler, read as text: both of #668's questions asked,
  *      a box never prefilled above its own `max`, a refusal that exits without
  *      writing, and the refusal recorded.
+ *   F. #491 — the ACTIVITY-LOG and ERROR clear-outs, against real rows in both
+ *      tables: each organisation cleared by its own figure, an organisation's
+ *      stored figure held to the installation's, and the rows that belong to
+ *      NO organisation cleared by the installation's own figure rather than
+ *      kept for ever. Before this both read one pair of settings and deleted
+ *      across the whole installation, so one organisation's choice decided
+ *      every organisation's history.
  *
  * WHAT THIS CANNOT PROVE
  *   - Nothing here runs over HTTP, so it says nothing about what the page looks
@@ -72,13 +79,14 @@
  * @license   All Rights Reserved
  * @version   1.0.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/685
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/491
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const RC_EXPECTED_CHECKS = 64;
+const RC_EXPECTED_CHECKS = 80; // 64 until #491 added section F's sixteen.
 
 $dbName = (string) getenv('SELFTEST_DB_NAME');
 if (str_starts_with($dbName, 'selftest_') === false) {
@@ -655,6 +663,175 @@ rc_check('…and the transaction is opened BEFORE that read, because a lock outs
     && $b < $r, 'begin at ' . var_export($b ?? null, true) . ', locked read at ' . var_export($r ?? null, true));
 rc_check('…and the refusal inside the transaction rolls it back',
     preg_match('/if\s*\(\$reason\s*!==\s*\x27\x27\)\s*\{\s*\$db->rollback\(\);/', $rcStrip($rcCore . 'TranscriptRetention.php')) === 1);
+
+// =============================================================================
+rc_head('F. #491 — the activity-log and error clear-outs, one organisation at a time');
+// =============================================================================
+// WHAT WAS WRONG. Both clear-outs read ONE pair of settings through
+// `App::settings()`, which answers the CURRENT organisation's value, and then
+// deleted across the whole installation. So an administrator of one
+// organisation choosing "keep activity logs for 7 days" shortened every other
+// organisation's history, including one that had deliberately chosen a year —
+// and run from the scheduled job, which has no current organisation at all,
+// whichever value happened to resolve decided for everybody.
+//
+// WHY THIS NEEDS REAL ROWS. The fix is not a rule to be read off a fixture: it
+// is which rows a DELETE reaches. Both tables carry a `siteID` (checked in the
+// schema, not assumed), and the checks below are the only thing that can tell
+// a delete limited to one organisation from one that is not.
+//
+// THE THREE KINDS OF ROW, and the third is the one a per-organisation loop
+// quietly loses: a row of organisation 1's, a row of organisation 2's, and a
+// row belonging to NO organisation. `siteID` is empty on both tables for a
+// record written before the organisation was decided, for one written by a
+// scheduled job, and for one whose organisation has since been deleted (both
+// links are `ON DELETE SET NULL`). Those follow the INSTALLATION's figure; a
+// loop over `tblSites` alone would keep them for ever.
+require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_apps'
+    . DIRECTORY_SEPARATOR . 'cron' . DIRECTORY_SEPARATOR . '_retention-sweep.php';
+
+/** Put one row into one of the two log tables, so many days old. */
+$rcLogRow = static function (string $table, string $dateColumn, ?int $siteId, int $daysOld) use ($mysqli): int {
+    $stmt = $mysqli->prepare(
+        'INSERT INTO `' . $table . '` (`siteID`, `' . $dateColumn . '`) '
+        . 'VALUES (?, DATE_SUB(NOW(), INTERVAL ? DAY))'
+    );
+    $stmt->bind_param('ii', $siteId, $daysOld);
+    $stmt->execute();
+    $id = (int) $mysqli->insert_id;
+    $stmt->close();
+
+    return $id;
+};
+
+/** Which of those rows are still there, by their own numbers. */
+$rcStillThere = static function (string $table, string $idColumn, array $ids) use ($mysqli): array {
+    if ($ids === []) {
+        return [];
+    }
+    $left = [];
+    $rows = $mysqli->query(
+        'SELECT `' . $idColumn . '` AS id FROM `' . $table . '` '
+        . 'WHERE `' . $idColumn . '` IN (' . implode(', ', array_map('intval', $ids)) . ') '
+        . 'ORDER BY `' . $idColumn . '`'
+    );
+    while ($one = $rows->fetch_assoc()) {
+        $left[] = (int) $one['id'];
+    }
+    $rows->free();
+
+    return $left;
+};
+
+// 🏢 The installation allows 30 days. Organisation 1 holds ITSELF to 7.
+//    Organisation 2 has 1000 days stored — a figure no page would accept, put
+//    there by SQL as #685's rows are, because that is the state the issue is
+//    about — so it is held to the installation's 30.
+rc_world($mysqli, 'audit.retentionDays', '30', '7');
+$ins = $mysqli->prepare('INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (2, \'audit.retentionDays\', \'1000\', \'\', 0)');
+$ins->execute();
+$ins->close();
+
+rc_check('organisation 1 keeps activity logs for the 7 days it chose for itself',
+    log_retention_days('audit.retentionDays', 1) === 7, (string) log_retention_days('audit.retentionDays', 1));
+rc_check('organisation 2\'s stored 1000 days is held to the installation\'s 30',
+    log_retention_days('audit.retentionDays', 2) === 30, (string) log_retention_days('audit.retentionDays', 2));
+rc_check('rows that belong to no organisation follow the installation\'s own 30',
+    log_retention_installation_days('audit.retentionDays') === 30,
+    (string) log_retention_installation_days('audit.retentionDays'));
+
+$mysqli->query('DELETE FROM `tblActivityLogs`');
+$rcAct = [];
+foreach ([1, 2, null] as $owner) {
+    foreach ([3, 10, 60] as $age) {
+        $rcAct[($owner === null ? 'none' : 'site' . $owner) . '-' . $age] = $rcLogRow('tblActivityLogs', 'timestamp', $owner, $age);
+    }
+}
+
+// 📊 The count an administrator is shown, and the delete, must agree — they go
+//    through the one function, with `$reallyDelete` the only difference.
+$rcPreview = log_sweep('activity', false);
+rc_check('the count is four: organisation 1\'s 10- and 60-day rows at its own 7 days, and one 60-day row each for organisation 2 and for no organisation at 30',
+    $rcPreview === 4, (string) $rcPreview);
+
+$rcDeleted = log_sweep('activity', true);
+rc_check('the delete removes exactly those four', $rcDeleted === 4, (string) $rcDeleted);
+
+$rcLeft = $rcStillThere('tblActivityLogs', 'logID', array_values($rcAct));
+$rcExpectLeft = [$rcAct['site1-3'], $rcAct['site2-3'], $rcAct['site2-10'], $rcAct['none-3'], $rcAct['none-10']];
+sort($rcExpectLeft);
+// 🚨 THE DECISIVE CHECK, and it is the one the old code fails. Organisation
+//    2's 10-day row and the 10-day row belonging to no organisation must
+//    SURVIVE while organisation 1's 10-day row goes: one figure for the whole
+//    installation cannot produce that, whichever figure it picks.
+rc_check('…and organisation 2\'s 10-day row and the 10-day row owned by nobody are still there, while organisation 1\'s is gone',
+    $rcLeft === $rcExpectLeft, 'left: ' . json_encode($rcLeft) . ' expected: ' . json_encode($rcExpectLeft));
+rc_check('nothing was left for organisation 1 past its own seven days',
+    $rcStillThere('tblActivityLogs', 'logID', [$rcAct['site1-10'], $rcAct['site1-60']]) === [],
+    json_encode($rcStillThere('tblActivityLogs', 'logID', [$rcAct['site1-10'], $rcAct['site1-60']])));
+
+// 🪤 AND THE CAP MUST NOT BE A CLAMP TO ONE NUMBER. Organisation 1 holding
+//    itself to 7 days is proved above; this is the other direction — an
+//    organisation with NO figure of its own follows the installation, never
+//    the built-in year (#668's first trap).
+$mysqli->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'audit.retentionDays' AND `siteID` = 1");
+rc_check('an organisation with no figure of its own follows the installation\'s 30, not the built-in 365',
+    log_retention_days('audit.retentionDays', 1) === 30, (string) log_retention_days('audit.retentionDays', 1));
+
+// ♾️ ZERO IS NOT "FOR EVER" FOR THESE TWO SETTINGS, unlike every other period
+//    in this file, and that is deliberate: the code this replaced read
+//    `if ($activityDays < 1) { $activityDays = 365; }`, so a stored 0 has
+//    always meant "nothing usable, fall back to a year". Reading it as "for
+//    ever" would stop a log row ever being cleared again; handing it to the
+//    ceiling machinery as a number of days would clear EVERY row.
+rc_world($mysqli, 'audit.retentionDays', '0', null);
+rc_check('an installation storing 0 falls back to a year rather than keeping logs for ever',
+    log_retention_installation_days('audit.retentionDays') === 365,
+    (string) log_retention_installation_days('audit.retentionDays'));
+rc_world($mysqli, 'audit.retentionDays', '30', '0');
+rc_check('…and an organisation storing 0 follows the installation, rather than clearing everything',
+    log_retention_days('audit.retentionDays', 1) === 30, (string) log_retention_days('audit.retentionDays', 1));
+rc_world($mysqli, 'audit.retentionDays', '99999', null);
+rc_check('a figure above the ten-year hard maximum is held to it',
+    log_retention_installation_days('audit.retentionDays') === 3650,
+    (string) log_retention_installation_days('audit.retentionDays'));
+
+// 🚨 THE ERROR LOG IS A SECOND TABLE WITH A SECOND SETTING AND A DIFFERENT
+//    DATE COLUMN, and it is checked on rows too rather than assumed to follow:
+//    one pairing written wrongly is how a page comes to promise one number and
+//    the job to remove another.
+rc_world($mysqli, 'errors.retentionDays', '30', '7');
+$mysqli->query('DELETE FROM `tblErrors`');
+$rcErr = [];
+foreach ([1, null] as $owner) {
+    foreach ([10, 60] as $age) {
+        $rcErr[($owner === null ? 'none' : 'site' . $owner) . '-' . $age] = $rcLogRow('tblErrors', 'createdAt', $owner, $age);
+    }
+}
+$rcErrCount = log_sweep('errors', false);
+rc_check('the error log is counted by its own setting and its own date column: three of four rows are past their day',
+    $rcErrCount === 3, (string) $rcErrCount);
+rc_check('…and the delete leaves only the 10-day row that belongs to no organisation, which the installation keeps for 30',
+    log_sweep('errors', true) === 3
+    && $rcStillThere('tblErrors', 'errorID', array_values($rcErr)) === [$rcErr['none-10']],
+    json_encode($rcStillThere('tblErrors', 'errorID', array_values($rcErr))));
+
+// 📄 And the two callers, read as text. Weaker than the checks above, and here
+//    for one thing they cannot see: that the sweep and the page go through this
+//    function at all rather than reading the merged settings array again.
+$rcSweepSource = $rcStrip(dirname(__DIR__) . '/web/_apps/cron/_retention-sweep.php');
+rc_check('the sweep and its preview both go through log_sweep()',
+    substr_count($rcSweepSource, "log_sweep('activity'") === 2
+    && substr_count($rcSweepSource, "log_sweep('errors'") === 2,
+    (string) substr_count($rcSweepSource, 'log_sweep('));
+rc_check('…and neither reads the merged settings array for either period any more',
+    str_contains($rcSweepSource, "App::settings('audit.retentionDays')") === false
+    && str_contains($rcSweepSource, "App::settings('errors.retentionDays')") === false);
+$rcRetentionPage = $rcStrip(dirname(__DIR__) . '/web/_apps/admin/maintenance/retention.php');
+rc_check('the page shows its own organisation\'s figure through the same function, and the installation\'s beside it',
+    str_contains($rcRetentionPage, "log_retention_days('audit.retentionDays', Site::id())") === true
+    && str_contains($rcRetentionPage, "log_retention_installation_days('audit.retentionDays')") === true
+    && str_contains($rcRetentionPage, "App::settings('audit.retentionDays')") === false);
 
 // =============================================================================
 echo "\n" . $rcPasses . ' passed, ' . $rcFailures . ' failed, ' . ($rcPasses + $rcFailures)

@@ -736,6 +736,45 @@ class Maintenance
         //    completes (#247).
         header('X-Robots-Tag: noindex, nofollow, noai, noimageai');
 
+        // 🔎 WHY IS THE PORTAL CLOSED? There are TWO reasons and the page used
+        //    to name only one (#583 item f). `isActive()` returns true either
+        //    because an administrator (or the installer) set the explicit flag,
+        //    or because a database upgrade is waiting — and the sentence below
+        //    said "is being upgraded" in both cases.
+        //
+        //    That is not a nicety. A visitor told the portal is being upgraded
+        //    when an administrator has closed it for something else is told
+        //    something untrue, and the sentence also promises an ending it
+        //    cannot know ("we'll be back shortly" is the administrator's
+        //    business, not ours). An administrator who set the flag and reads
+        //    this page has no way to tell whether the portal is closed because
+        //    of their own switch or because an upgrade is stuck — which is
+        //    exactly the moment somebody needs to know.
+        //
+        //    Asked here rather than passed in, because `renderAndExit()` is
+        //    called from more than one place and a caller that forgot the
+        //    argument would silently pick one of the two sentences.
+        //
+        // ⚠️ BOTH REASONS ARE OFTEN TRUE AT ONCE, AND A WAITING UPGRADE WINS.
+        //    My first version asked about the flag alone and got this backwards
+        //    — the Upgrade page sets the flag ITSELF while it works, so during
+        //    a real upgrade the flag is on AND something is waiting, and the
+        //    page would have told a visitor an administrator had switched the
+        //    portal off. Found by a test that could then not tell the two
+        //    sentences apart; measured, not reasoned.
+        //
+        //    So the order is: if a database upgrade is really waiting, say
+        //    that, because it is the actionable thing and the flag is the
+        //    portal's own doing rather than somebody's decision. Only when
+        //    NOTHING is waiting is the flag the whole reason, and only then
+        //    does the page say an administrator closed it.
+        $state        = self::versionState();
+        $upgradeWaits = $state['behind'] === true
+            && ($state['answered'] === false || $state['waiting'] > 0);
+        $explicitFlag = App::settings()['portal']['maintenance']['active'] ?? '0';
+        $closedByFlag = $upgradeWaits === false
+            && ((string) $explicitFlag === '1' || $explicitFlag === true);
+
         $customMessage = App::settings()['portal']['maintenance']['message'] ?? '';
         $messageHtml = '';
         if (is_string($customMessage) && trim($customMessage) !== '') {
@@ -801,11 +840,17 @@ class Maintenance
            . '<body><div class="card">'
            . '<h1>Portal Maintenance</h1>'
            . $messageHtml
-           . '<p>' . $portalName . ' is being upgraded. We\'ll be back shortly.</p>'
+           . '<p>' . ($closedByFlag === true
+                ? $portalName . ' is closed at the moment. An administrator has'
+                    . ' switched it off; it will come back when they switch it on again.'
+                : $portalName . ' is being upgraded. We\'ll be back shortly.')
+             . '</p>'
            . '<p><span class="dot"></span><span class="dot"></span><span class="dot"></span></p>'
            . '<p style="font-size:.85em;color:var(--muted);">'
            . 'This page will reload automatically.<br>'
-           . 'A global administrator can <a href="' . $signInAddress . '">sign in</a> to complete the upgrade.'
+           . ($closedByFlag === true
+                ? 'A global administrator can <a href="' . $signInAddress . '">sign in</a> and switch the portal back on.'
+                : 'A global administrator can <a href="' . $signInAddress . '">sign in</a> to complete the upgrade.')
            . '</p>'
            . '</div></body></html>';
         exit();

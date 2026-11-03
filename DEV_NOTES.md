@@ -15766,3 +15766,110 @@ ceiling and requires nothing to be written. Planted (`if (false)` on the
 refusal), the gate stayed green and section C went red on eight checks.
 
 ---
+
+### A retention period that is read per organisation, and the rows that belong to nobody (#491)
+
+Both log tables carry a `siteID`, which is what made the per-organisation fix
+possible at all — read out of `full_schema.sql` rather than assumed. Three
+things are worth keeping:
+
+1. **A loop over `tblSites` is only two thirds of the answer.** `siteID` is
+   nullable on `tblActivityLogs` and `tblErrors` ("nullable for pre-bootstrap
+   logs"), and both foreign keys are `ON DELETE SET NULL`, so a deleted
+   organisation's rows become nobody's. A per-organisation loop alone would
+   have kept every one of them for ever — and for the activity log that means
+   the sender's address, the browser description and the session facts. They
+   follow the installation's own figure, which is also the right party: those
+   rows are not any customer's.
+2. **Zero is not "for ever" for these two settings**, and that is the opposite
+   of `attend.detailRetentionDays`, `webhooks.payload.retentionDays` and the
+   transcript period. The code this replaced read
+   `if ($activityDays < 1) { $activityDays = 365; }`, so a stored 0 has always
+   meant "nothing usable, fall back to a year". Reading it as "for ever" would
+   stop a log row ever being cleared; handing it to `SettingLimit`'s ceiling
+   machinery as a number of days would clear **every** row on the next run.
+   So `log_retention_installation_days()` refuses a 0 before any comparison,
+   and says why.
+3. **No page can create a per-organisation row for either key.**
+   `_apps/settings/save.php` counts the installation's own row as a clash, so
+   such a row can only arrive by hand-written SQL or a whole-database restore
+   — which is exactly why the cap lives in the reader the clear-out uses and
+   not on a form.
+
+### A help page is the one document nothing here reads (#583)
+
+`tools/backup-restore-selftest.php` already said it, in the "what this cannot
+show" list of proof 28: *"Nothing in this repository reads
+`_apps/help/disaster-recovery.php`, and its sentence about this feature has
+already been turned false once and corrected."* That was measured again for
+#583 and is still true: the only help page any test reads is
+`help/calendar-imports.php`, pinned by check W50 of `feed-admin-selftest.php`.
+
+So the in-app help is the one body of customer-facing text in this repository
+with **no guard of any kind** — and it is the text somebody reads at the worst
+moment of their year. #583 is what that costs: the page kept giving advice for
+#582's unbuilt tools for three weeks after the runbook had been rewritten to
+say those tools do not exist, and it kept telling people to delete files the
+database points at.
+
+**Two shapes worth recognising.**
+
+1. **An anchor can be corrected while the words are not.** The stolen-credentials
+   link's `href` already ended `#7-after-a-break-in` while its visible text
+   still read "runbook section 4.4". Whoever fixed the anchor fixed the half a
+   machine can follow and left the half a person reads. Nothing compares the
+   two, and nothing ever will unless a check is written for it.
+2. **Advice that names a feature request reads exactly like advice that names a
+   feature.** "clear every session, force password reset, rotate `enc.key`" is
+   the three bullets of #582 transcribed as instructions. The issue was raised
+   *because* the tools do not exist; the help page was written *as if* they did.
+   Before quoting a capability in customer-facing text, grep for it: there is no
+   `revokeSessions`, no `signOutEverywhere`, nothing of the kind under `web/`.
+
+**The cheap guard that is still owed, and why it was not built here.** The
+narrow class of fault — a help page citing a runbook section number that is not
+a heading in `docs/disaster-recovery-runbook.md` — is mechanically checkable in
+about thirty lines, fails both ways, and would have caught "section 4.4" the day
+the runbook was reorganised. It was not built in this package because a new
+script in `tools/audit-checks/` is picked up by the pre-push hook's glob and so
+becomes a hard gate for everybody, which is a decision for the owner rather than
+a tidy-up. Raised as a follow-up instead.
+
+### Claims in an issue go stale too (#583)
+
+Two of #583's seven claims were **wrong when measured on 3 November 2026**, and
+both pointed the reassuring way for the wrong reason:
+
+- "links to a GitHub address a customer cannot open". The repository is
+  **public** (`gh repo view --json isPrivate` → `false`) and
+  `https://github.com/MWBMPartners/WebMS-Intra/blob/main/docs/disaster-recovery-runbook.md`
+  answers **200**. A customer can open it. What they get is the **old** runbook,
+  because the rewrite lives on `claude/alpha-wip` and has not merged — which is
+  a timing matter that fixes itself on merge, not a broken link.
+- "cites runbook section 4.4, which no longer exists". On the branch, true. On
+  `main` — which is the page the link actually opens today — section 4.4 **is**
+  still there, headed "Stolen credentials". So for a reader today the section
+  number was right and the anchor was wrong; after the merge the anchor is right
+  and the number is wrong. Either way the link contradicted itself, which is the
+  real fault and is what was fixed.
+
+The lesson is the repository's own: a claim about what something "does not have"
+or "cannot do" needs the command that establishes it, and an issue written three
+weeks ago is as capable of being out of date as the page it complains about.
+
+### A `.php` address hidden inside a PHP string is seen by neither check (#583)
+
+Found by planting, and reported rather than fixed. Written as a literal,
+`<a href="/admin/users.php">` is caught by **both**
+`check_no_php_in_urls.py` and `check_site_aware_addresses.py`. Written as
+
+```php
+<a href="<?php echo htmlspecialchars('/admin/users.php', ENT_QUOTES, 'UTF-8'); ?>">
+```
+
+it is caught by **neither**, and `check_registered_addresses.py` does not see it
+either, because it judges `Site::url()` calls rather than strings. That is the
+exact shape somebody produces by "simplifying" a built address away, and
+`.htaccess` answers 404 for it. Raised as a follow-up.
+
+---

@@ -54,6 +54,10 @@ declare(strict_types=1);
 // file directly and must load each class itself, IN DEPENDENCY ORDER:
 //
 //   App, Logger, Site, Giving, GivingRetention, GdprEraser, AnonymousCheckins,
+//   InstallationSettings -> SettingLimit (the log clear-outs ask it for the
+//   installation's own period, #491; `tools/retention-caps-selftest.php`
+//   section F requires this file with exactly those three loaded and nothing
+//   else, because it calls only the log functions),
 //   InstallationSettings -> SettingLimit -> WebhookRetention (#713),
 //   InstallationSettings -> SettingLimit -> TranscriptRetention (#714),
 //   Pdf (#721 — it has no dependencies of its own; dompdf is only loaded by
@@ -70,8 +74,200 @@ use Portal\Core\GdprEraser;
 use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
 use Portal\Core\Pdf;
+use Portal\Core\SettingLimit;
 use Portal\Core\TranscriptRetention;
 use Portal\Core\WebhookRetention;
+
+/**
+ * 🗒️ The two log clear-outs, each with the column that dates a row and the
+ *     setting that decides how long that organisation keeps them (#491).
+ *
+ * ONE LIST, because the count an administrator is shown and the delete that
+ * then runs must be told the same three things. Written out here rather than
+ * passed in by each caller: a table paired with the wrong date column or the
+ * wrong setting in ONE of the two callers is exactly how a page comes to
+ * promise one number and a job to remove another.
+ *
+ * Both names are literals in this file and never come from a request, which is
+ * what makes it safe to put them into a statement. They are backticked where
+ * they are used, like every other identifier this project writes.
+ *
+ * @return array<string, array{table: string, dateColumn: string, key: string}>
+ */
+function log_sweep_tables(): array
+{
+    return [
+        'activity' => ['table' => 'tblActivityLogs', 'dateColumn' => 'timestamp', 'key' => 'audit.retentionDays'],
+        'errors'   => ['table' => 'tblErrors',       'dateColumn' => 'createdAt', 'key' => 'errors.retentionDays'],
+    ];
+}
+
+/** What an installation that has never chosen keeps logs for. A year. */
+const LOG_RETENTION_DEFAULT_DAYS = 365;
+
+/**
+ * The most either of these may ever be, whatever is in the database. Ten
+ * years, the same ceiling the other retention periods use (#713, #714), so a
+ * figure typed in by hand cannot mean "keep for ever by accident".
+ */
+const LOG_RETENTION_HARD_MAX_DAYS = 3650;
+
+/**
+ * 🏛️ The number of days the INSTALLATION keeps these logs for.
+ *
+ * This is both the period for rows that belong to no organisation, and the
+ * ceiling every organisation is held to — "for a setting that is a LIMIT the
+ * installation's value takes precedence; an organisation may hold itself to a
+ * lower limit and may never raise its own above it".
+ *
+ * ZERO IS NOT A MEANING FOR THESE TWO SETTINGS, and that is why the answer is
+ * not simply `SettingLimit::installationAllows()`. For the attendance, webhook
+ * and transcript periods 0 means "keep for ever", so it is the LARGEST value
+ * and `$zeroIsLargest` is passed. Here 0 has always been read as "nothing
+ * usable, fall back to a year" — the code this replaced did exactly that with
+ * `if ($activityDays < 1) { $activityDays = 365; }` — and reading it as "for
+ * ever" would turn an installation storing 0 into one that never clears a log
+ * row again. Handing 0 to the ceiling machinery would be worse still: a
+ * ceiling of 0 compared as days would clear EVERY row on every run.
+ *
+ * WHAT THIS CANNOT DO. When start-up has not handed over the installation-wide
+ * layer at all (a file arriving late on shared hosting), the layer is empty and
+ * this answers the built-in year rather than what the installation chose. For a
+ * clear-out that errs towards keeping rows longer, which is the recoverable
+ * direction for the organisation's own history and the less careful one for
+ * privacy. Said here rather than left to be discovered.
+ */
+function log_retention_installation_days(string $key): int
+{
+    $ceiling = SettingLimit::installationAllows(
+        $key,
+        LOG_RETENTION_DEFAULT_DAYS,
+        LOG_RETENTION_HARD_MAX_DAYS
+    );
+
+    return $ceiling < 1 ? LOG_RETENTION_DEFAULT_DAYS : $ceiling;
+}
+
+/**
+ * 📄 The number of days ONE organisation keeps these logs for, held to what the
+ *    installation allows.
+ *
+ * Read one organisation at a time, by number, and never from the merged
+ * settings array. `App::settings()` answers the CURRENT organisation's value,
+ * and this sweep is run by a scheduled job that has no current organisation at
+ * all (#683) — so the merged array would apply whichever organisation the job
+ * happened to resolve to, to every organisation's rows. That was #491.
+ *
+ * `App::settingForSite()` falls back to the installation-wide row by itself, so
+ * an organisation that has chosen nothing is already following the
+ * installation; the cap below then compares that figure with itself and changes
+ * nothing. An unusable figure — empty, not a number, zero or negative — is read
+ * as "nothing chosen" for the reason given above
+ * `log_retention_installation_days()`, which is the OPPOSITE of what
+ * `AnonymousCheckins::readRetentionDays()` does with the same shape, because
+ * for that setting 0 is a real answer. The two differ on purpose.
+ *
+ * A SAVE-TIME CAP WOULD NOT BE A CAP (#668). No page can even create a
+ * per-organisation row for either of these keys today — `_apps/settings/save.php`
+ * counts the installation's own row as a clash and refuses — so a row can only
+ * be here because somebody wrote it with SQL or because a whole-database
+ * restore brought it back. Those are precisely the rows a save-time refusal
+ * never sees, which is why the cap is in the reader the clear-out uses.
+ */
+function log_retention_days(string $key, int $siteId): int
+{
+    $ceiling = log_retention_installation_days($key);
+
+    $own  = App::settingForSite($key, $siteId);
+    $text = $own === null ? '' : trim((string) $own);
+    if (preg_match('/^\d{1,18}$/', $text) !== 1 || (int) $text < 1) {
+        return $ceiling;
+    }
+
+    return min((int) $text, $ceiling);
+}
+
+/**
+ * 🧹 Count, or really delete, the old rows of ONE of the two log tables —
+ *    organisation by organisation, each by its own number of days.
+ *
+ * ONE FUNCTION FOR BOTH, with `$reallyDelete` deciding which, for the reason
+ * `registration_sweep_where()` sets out above: an administrator is shown a
+ * number before confirming, and a count worked out by a different rule from the
+ * delete would eventually promise one thing and do another.
+ *
+ * WHAT WAS WRONG BEFORE (#491). Both clear-outs read ONE pair of settings
+ * through `App::settings()` and then deleted across the whole installation. An
+ * administrator of one organisation choosing "keep activity logs for 7 days"
+ * shortened every other organisation's history, including one that had
+ * deliberately chosen a year; and run from the scheduled job, which has no
+ * current organisation, whichever value happened to resolve decided for
+ * everybody. Both tables DO carry a `siteID`, so the rows can be told apart —
+ * that was checked in the schema rather than assumed, and it is what makes the
+ * per-organisation fix possible at all.
+ *
+ * THE ROWS THAT BELONG TO NO ORGANISATION ARE SWEPT TOO, by the INSTALLATION's
+ * own figure, and leaving them out would have been the quiet fault in this
+ * change: `siteID` is empty on both tables for a record written before the
+ * organisation was decided, for one written by a scheduled job, and for one
+ * whose organisation has since been deleted (`fk_logs_site` and `fk_errors_site`
+ * are both `ON DELETE SET NULL`). A loop over `tblSites` alone would have left
+ * every one of them on disk for ever, which for the activity log means the
+ * sender's address, the browser description and the session facts. They belong
+ * to the installation, not to any customer, so the installation's administrator
+ * is the right party to decide how long they are kept.
+ *
+ * @param string $which One of the keys of `log_sweep_tables()`.
+ *
+ * @return int Rows counted, or rows really deleted.
+ */
+function log_sweep(string $which, bool $reallyDelete): int
+{
+    $spec = log_sweep_tables()[$which] ?? null;
+    if ($spec === null) {
+        return 0;
+    }
+
+    $db    = App::db();
+    $total = 0;
+
+    $sql = ($reallyDelete === true ? 'DELETE FROM `' : 'SELECT COUNT(*) AS cnt FROM `')
+        . $spec['table'] . '` WHERE ';
+    $byDate = '`' . $spec['dateColumn'] . '` < DATE_SUB(NOW(), INTERVAL ? DAY)';
+
+    // 🏢 One organisation at a time, each by its own figure.
+    $perSite = $db->prepare($sql . '`siteID` = ? AND ' . $byDate);
+    if ($perSite !== false) {
+        $sites = $db->query('SELECT `siteID` FROM `tblSites`');
+        if ($sites !== false) {
+            while ($one = $sites->fetch_assoc()) {
+                $siteId = (int) $one['siteID'];
+                $days   = log_retention_days($spec['key'], $siteId);
+                $perSite->bind_param('ii', $siteId, $days);
+                $perSite->execute();
+                $total += $reallyDelete === true
+                    ? (int) $perSite->affected_rows
+                    : (int) ($perSite->get_result()->fetch_assoc()['cnt'] ?? 0);
+            }
+            $sites->free();
+        }
+        $perSite->close();
+    }
+
+    // 🏛️ And the rows no organisation owns, by the installation's own figure.
+    $orphans = $db->prepare($sql . '`siteID` IS NULL AND ' . $byDate);
+    if ($orphans !== false) {
+        $days = log_retention_installation_days($spec['key']);
+        $orphans->bind_param('i', $days);
+        $orphans->execute();
+        $total += $reallyDelete === true
+            ? (int) $orphans->affected_rows
+            : (int) ($orphans->get_result()->fetch_assoc()['cnt'] ?? 0);
+        $orphans->close();
+    }
+
+    return $total;
+}
 
 /**
  * 📏 The rule that decides whether one registration is past its keep-by date.
@@ -277,7 +473,10 @@ function giving_identity_sweep_rows(): array
 }
 
 /**
- * Count rows that WOULD be deleted at the current window.
+ * Count rows that WOULD be deleted now — every organisation's, each by its own
+ * period, which is why this takes no arguments any more (#491). It used to be
+ * handed one number of days for the activity log and one for the error log, and
+ * those two numbers then stood for the whole installation.
  *
  * `checkinDetail` is the odd one out and is named differently on purpose:
  * nothing is deleted there. It counts anonymous check-in ROWS that still hold
@@ -298,36 +497,21 @@ function giving_identity_sweep_rows(): array
  *               givingIdentityDue:int,givingIdentityOnHold:int,givingIdentityWaiting:int,givingIdentityNotDue:int,
  *               givingIdentityUnfinished:int}
  */
-function preview_retention_counts(int $activityDays, int $errorDays): array
+function preview_retention_counts(): array
 {
     $db = App::db();
     $out = ['activity' => 0, 'errors' => 0, 'registrations' => 0, 'checkinDetail' => 0,
         'givingIdentityDue' => 0, 'givingIdentityOnHold' => 0, 'givingIdentityWaiting' => 0, 'givingIdentityNotDue' => 0,
         'givingIdentityUnfinished' => 0];
 
-    $stmt = $db->prepare(
-        'SELECT COUNT(*) AS cnt FROM tblActivityLogs '
-        . 'WHERE timestamp < DATE_SUB(NOW(), INTERVAL ? DAY)'
-    );
-    if ($stmt !== false) {
-        $stmt->bind_param('i', $activityDays);
-        $stmt->execute();
-        $row = $stmt->get_result()->fetch_assoc();
-        $out['activity'] = (int) ($row['cnt'] ?? 0);
-        $stmt->close();
-    }
-
-    $stmt = $db->prepare(
-        'SELECT COUNT(*) AS cnt FROM tblErrors '
-        . 'WHERE createdAt < DATE_SUB(NOW(), INTERVAL ? DAY)'
-    );
-    if ($stmt !== false) {
-        $stmt->bind_param('i', $errorDays);
-        $stmt->execute();
-        $row = $stmt->get_result()->fetch_assoc();
-        $out['errors'] = (int) ($row['cnt'] ?? 0);
-        $stmt->close();
-    }
+    // 📝 Activity logs and error rows, counted organisation by organisation
+    //    with each organisation's own figure, plus the rows that belong to no
+    //    organisation by the installation's — the same rule, through the same
+    //    function, as the delete itself (#491). This used to take two numbers
+    //    as arguments, which is what made one organisation's setting decide
+    //    the whole installation's history.
+    $out['activity'] = log_sweep('activity', false);
+    $out['errors']   = log_sweep('errors', false);
 
     // 🧒 Registrations, counted site by site with each site's own setting -
     //    the same rule, and the same WHERE clause, as the delete itself. An
@@ -890,34 +1074,27 @@ function run_part_file_sweep(): array
 
 function run_retention_sweep(): array
 {
-    $activityDays = (int) (App::settings('audit.retentionDays')  ?? '365');
-    $errorDays    = (int) (App::settings('errors.retentionDays') ?? '365');
-    if ($activityDays < 1) { $activityDays = 365; }
-    if ($errorDays    < 1) { $errorDays    = 365; }
-
     $db = App::db();
-    $activityDeleted = 0;
-    $errorsDeleted   = 0;
 
-    $stmt = $db->prepare(
-        'DELETE FROM tblActivityLogs WHERE timestamp < DATE_SUB(NOW(), INTERVAL ? DAY)'
-    );
-    if ($stmt !== false) {
-        $stmt->bind_param('i', $activityDays);
-        $stmt->execute();
-        $activityDeleted = (int) $stmt->affected_rows;
-        $stmt->close();
-    }
-
-    $stmt = $db->prepare(
-        'DELETE FROM tblErrors WHERE createdAt < DATE_SUB(NOW(), INTERVAL ? DAY)'
-    );
-    if ($stmt !== false) {
-        $stmt->bind_param('i', $errorDays);
-        $stmt->execute();
-        $errorsDeleted = (int) $stmt->affected_rows;
-        $stmt->close();
-    }
+    // 📝 Activity logs and error rows, ONE ORGANISATION AT A TIME (#491).
+    //
+    //    These two used to read a single pair of settings through
+    //    `App::settings()` and then delete across the whole installation:
+    //
+    //      $activityDays = (int) (App::settings('audit.retentionDays') ?? '365');
+    //      DELETE FROM tblActivityLogs WHERE timestamp < DATE_SUB(NOW(), …)
+    //
+    //    So an administrator of one organisation who chose "keep activity logs
+    //    for 7 days" shortened every other organisation's history, including
+    //    one that had deliberately chosen a year — and from the scheduled job,
+    //    which has no current organisation at all, whichever value happened to
+    //    resolve decided for everybody. The registration clear-out below has
+    //    explained at length since #479 why that is wrong; these two are now
+    //    the same shape. The rows that belong to no organisation are swept by
+    //    the installation's own figure rather than left for ever; see
+    //    `log_sweep()`.
+    $activityDeleted = log_sweep('activity', true);
+    $errorsDeleted   = log_sweep('errors', true);
 
     // 🧹 Children's event registrations.
     //
@@ -953,8 +1130,10 @@ function run_retention_sweep(): array
 
     // One site at a time, deliberately.
     //
-    //    The two clear-outs above read one set of settings and then delete
-    //    across the whole portal. That is wrong here, and dangerously so. This
+    //    (This note used to begin "the two clear-outs above read one set of
+    //    settings and then delete across the whole portal". They did until
+    //    #491, on 3 November 2026; they no longer do, and the reasoning below
+    //    is what they were changed to follow.) This
     //    sweep is run by a scheduled job that has no current site at all.
     //    (This comment used to add that the staff page was open to ANY
     //    administrator. Since 13 September 2026 it is for global administrators

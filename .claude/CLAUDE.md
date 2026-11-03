@@ -367,6 +367,35 @@ of scope, ask where else its shape exists.
 
 ## Plain English — applies to everything written
 
+**A QUESTION PUT TO THE OWNER MUST DEFINE EVERY TERM IT USES.** Set by the owner
+on 3 November 2026, after being asked whether "a loan's counterparty" was the
+person the loan was about, and answering: *"your description isn't written
+plainly enough. What exactly is a 'counterparty'?"*
+
+The plain-English rule already covers replies, comments, commit messages and
+anything an end user reads. This says it binds **questions** hardest of all, and
+why: a question is the one place the owner has to make a decision from nothing
+but my words. If a term in it is unexplained, the answer is either a guess or a
+request to explain, and both waste a round.
+
+So, in any question:
+
+- **Use the word a person would use.** "The person or organisation something is
+  lent to" beats "counterparty". Where a technical term is genuinely the
+  clearest thing — a file name, a column name, a standard — use it and say in
+  ordinary words what it is and why it matters.
+- **Never let a column or table name carry the meaning.** `counterpartyUserID`
+  may be what the code calls it; the question has to say what it HOLDS.
+- **Say what each option would actually do to somebody**, not what it does to
+  the code. "A member's telephone number stays on their own loan for ever" is
+  the decision; "it remains in ACTOR_COLUMNS" is not.
+- **If a term cannot be explained in a short phrase, the question is too big.**
+  Split it, or explain the thing first and ask afterwards.
+
+The test to apply before sending: *could somebody who has never seen this
+codebase answer it?* If not, it is not ready.
+
+
 Write the way you would explain something to a capable colleague who does not work on this system. The customer asked for this on 2026-09-07 because jargon "can sometimes be confusing even for some technically proficient users/developers". It covers chat replies, code comments and file headers, commit messages, pull request and issue text, every `.md` file, the in-app help under `web/_apps/help/`, and everything an end user sees: labels, buttons, error messages, tooltips.
 
 - Use ordinary words. When a technical term is genuinely needed — a file name, a function name, a standard such as WCAG or OpenAPI — use it, then say in ordinary words what it means and why it matters. No unexplained abbreviations, no impressive-sounding filler.

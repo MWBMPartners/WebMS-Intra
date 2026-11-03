@@ -872,6 +872,20 @@ brs_check(
 $stranger = ups_request('', 'GET', UPS_PAGE);
 $member   = ups_request($jar['member'], 'GET', '/dashboard');
 brs_check(ups_isHoldingPage($stranger) === true && ups_isHoldingPage($member) === true, 'THE PORTAL IS STILL CLOSED for a stranger and a member', "HTTP {$stranger['status']} and {$member['status']}");
+// 🗣️ AND IT SAYS SO. Checked HERE, because this is the one moment in the whole
+//    test where the portal is genuinely closed by a WAITING UPGRADE: a
+//    migration has failed half way, so something is still waiting. By the end
+//    of the test every migration is recorded and `Maintenance::isActive()`
+//    correctly answers false, which is why my first attempt to check this at
+//    the end got a 302 — the portal was open. A fixture in which the branch
+//    cannot be taken tests nothing, and that one could not.
+brs_check(
+    str_contains($stranger['body'], 'is being upgraded') === true
+    && str_contains($stranger['body'], 'closed at the moment') === false
+    && str_contains($stranger['body'], 'complete the upgrade') === true,
+    'CLOSED BY A WAITING UPGRADE: the holding page says an upgrade, not that somebody switched it off (#583 item f)',
+    'says-flag-words=' . (str_contains($stranger['body'], 'closed at the moment') ? 'yes' : 'no')
+);
 brs_check(
     preg_match('/Run 1 Pending Migration\s*</', $pressed['body']) === 1 && ups_token($pressed['body']) !== '' && $recordedAs(UPS_FAILS) === 0,
     'the button is offered again, and the file is not counted as applied'
@@ -1158,6 +1172,54 @@ brs_check(
 
 $errors = trim((string) @file_get_contents($child . '/php-errors.log'));
 brs_check($errors === '', 'PHP\'s own error log is empty after all of that', substr($errors, 0, 600));
+
+// =============================================================================
+// 🗣️ THE HOLDING PAGE SAYS WHICH OF THE TWO REASONS IT IS CLOSED FOR (#583,
+//    item f, 3 November 2026)
+// =============================================================================
+// `Maintenance::isActive()` answers true for TWO different reasons — an
+// explicit flag an administrator (or the installer) set, or a database upgrade
+// waiting — and the page said "is being upgraded" in BOTH. A visitor told the
+// portal is being upgraded when an administrator has simply closed it is told
+// something untrue, and the sentence promised an ending the portal cannot know.
+//
+// 🪤 NOTHING TESTED THE WORDING AT ALL before this, which is why it could be
+//    wrong for however long it was: the checks above prove the page APPEARS
+//    (503 and the heading) and that one withdrawn sentence is gone. "It appears"
+//    and "it says something true" are different questions, and only the first
+//    had an answer.
+//
+// Both branches are exercised, because a check that only ever sees one branch
+// cannot tell the two sentences apart — this repository's commonest defect.
+$upgradeWords = 'is being upgraded';
+$flagWords    = 'closed at the moment';
+
+// 🪤 THE UPGRADE BRANCH IS CHECKED EARLIER, not here, and the reason is worth
+//    keeping: by this point every migration is recorded, so nothing is waiting
+//    and `Maintenance::isActive()` correctly answers FALSE — the portal is
+//    OPEN and a request for this page answers 302. My first version checked
+//    both branches here and the upgrade one failed with "HTTP 302", which is
+//    the "a fixture in which the branch cannot be taken tests nothing" lesson.
+//    Winding the recorded version back is not enough either: being behind is
+//    not the same as having something WAITING, which is exactly the #499
+//    distinction the portal is built on.
+//
+// So the only reason left here is the flag, which is what makes this half
+// unambiguous: if both reasons were true at once the check could not tell which
+// sentence the page had chosen.
+ups_set('portal.maintenance.active', '1');
+$byFlag = ups_request('', 'GET', UPS_PAGE);
+ups_set('portal.maintenance.active', '0');
+
+brs_check(
+    ups_isHoldingPage($byFlag) === true
+    && str_contains($byFlag['body'], $flagWords) === true
+    && str_contains($byFlag['body'], $upgradeWords) === false
+    && str_contains($byFlag['body'], 'switch the portal back on') === true,
+    'CLOSED BY THE FLAG: the page says an administrator switched it off, and does NOT claim an upgrade',
+    'HTTP ' . $byFlag['status'] . '; says-upgrade=' . (str_contains($byFlag['body'], $upgradeWords) ? 'yes' : 'no')
+);
+
 
 // =============================================================================
 $failed = Brs::$proofOk === false;

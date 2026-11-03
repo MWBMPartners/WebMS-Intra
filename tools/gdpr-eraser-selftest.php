@@ -246,7 +246,13 @@ const EXPECTED_CHECKS = 267; // 235 before section 19 (#709) added nine; the fix
                              // the part-written statement file: 266. Its check
                              // round added one more, in the world where the
                              // donor's records are KEPT — the branch the first
-                             // version could not reach: 267.
+                             // version could not reach: 267. (#492 part 2 added two
+                             // and they were taken out again in the same
+                             // sitting: emptying an asset loan's contact
+                             // details needs `counterpartyUserID` reclassified
+                             // as a subject column, which is the owner's
+                             // decision. A test asserting today's behaviour as
+                             // correct would be #709's worst shape.)
 
 // The headings that must all be reached for a pass.
 const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21'];
@@ -4023,7 +4029,13 @@ ge_ok('ALREADY PAST ITS DATE AT ERASURE (a last gift about five and a half years
     && GdprEraser::verifyAuditChain(REQ_O) === true,
     $resultO instanceof Throwable ? $resultO->getMessage() : json_encode([$keptO, $oNow['gift'], $linesO]));
 
-$previewCounts = preview_retention_counts(365, 365);
+// (#491, 3 November 2026: this used to be called as
+// `preview_retention_counts(365, 365)`. The two numbers are gone — one pair of
+// figures for the whole installation is exactly what that issue was about, and
+// the counts are now worked out one organisation at a time inside the
+// function. The per-organisation behaviour itself is proved against real rows
+// by section F of tools/retention-caps-selftest.php.)
+$previewCounts = preview_retention_counts();
 ge_ok('the page\'s preview counts the same records by the same rule: none due now, and the waiting, held and not-yet-due figures add up to every name still kept',
     $previewCounts['givingIdentityDue'] === 0
     && $previewCounts['givingIdentityOnHold'] + $previewCounts['givingIdentityWaiting'] + $previewCounts['givingIdentityNotDue'] === $uncleared()
