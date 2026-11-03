@@ -301,16 +301,51 @@ jobs:
       # and its last command cannot fail, so this step ends with a success
       # status whatever any check in it does.
       # =====================================================================
+      # WHY THE TWO COMMIT NAMES COME IN THROUGH env: AND NOT AS
+      # ${{ ... }} INSIDE THE SCRIPT (#745, 3 November 2026).
+      #
+      # GitHub's Actions service puts a ceiling of 21,000 characters on any
+      # one value that carries a ${{ ... }} in it. This script is about
+      # 24,500 characters long, so the moment it held a single ${{ ... }}
+      # the WHOLE SCRIPT counted as one such value and went over the
+      # ceiling — and GitHub then refused the entire workflow file before
+      # starting any job at all. Every check in this file stopped running
+      # on 27 October 2026 (commit c61211e, which took the script from
+      # 14,910 characters to 24,525) and nothing noticed for a week,
+      # because:
+      #   * the file is valid YAML, so every parser here accepted it;
+      #   * actionlint accepted it too, and still does — the ceiling is
+      #     enforced by GitHub's own service, not by the workflow schema,
+      #     so no local tool can see it;
+      #   * the only sign on GitHub is a run with NO JOBS, the words "This
+      #     run likely failed because of a workflow file issue", and the
+      #     run named after the FILE PATH rather than "PR Security Checks"
+      #     (that last part is the giveaway: GitHub falls back to the path
+      #     when it cannot read the file).
+      #
+      # Passing the two values in as environment variables keeps the
+      # script itself free of ${{ ... }}, so it is an ordinary piece of
+      # text with no ceiling on it. That is also the safer way round:
+      # GitHub's own hardening advice is never to paste a ${{ ... }}
+      # straight into a shell script, because whatever the value holds
+      # becomes part of the script.
+      #
+      # SO: DO NOT PUT A ${{ ... }} BACK INTO THIS SCRIPT. One is enough
+      # to stop every check in this file, silently.
       - name: Heuristic anti-pattern scan
         id: heuristics
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.sha }}
         run: |
           set +e
           REPORT=/tmp/security-report.md
           : > "$REPORT"
 
-          # Files changed in this PR (vs. base)
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.sha }}"
+          # Files changed in this PR (vs. base). Both names arrive as
+          # environment variables — see the note above this step.
+          BASE_SHA="$PR_BASE_SHA"
+          HEAD_SHA="$PR_HEAD_SHA"
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'web/**/*.php' 2>/dev/null || true)
           # SQL files too (#556). Checks 9 to 22 below read the whole
           # repository, web/_sql/ included, and never look at $CHANGED. So
