@@ -126,6 +126,16 @@ MARKER = "AccountGuard::"
 ALLOWED: dict[str, str] = {
     "_apps/admin/maintenance/demo-data.php": "global administrators only (App::isRootAdmin())",
     "_apps/admin/sites/users.php": "global administrators only (App::isUmbrellaAdmin())",
+    # Added 3 November 2026 (#724). The create branch now grants the
+    # data_controller role to the new organisation's first administrator, in
+    # the same transaction as the tblSites INSERT — otherwise an organisation
+    # created after install has the role and no holder, and no erasure request
+    # of its members could ever be completed. It writes tblUserRoles, which is
+    # why this check sees it. The reach is bounded twice over: the page is
+    # global-administrators-only (App::isUmbrellaAdmin(), line 35), and both
+    # halves of the statement are bound to $newSiteId — the organisation
+    # created by this very request — so it cannot touch any other.
+    "_apps/admin/sites/save.php": "global administrators only (App::isUmbrellaAdmin()); writes tblUserRoles only for the organisation created by this same request, bound to $newSiteId on both sides (#724)",
     "_apps/auth/2fa/disable.php": "the signed-in person's own account",
     "_apps/auth/2fa/setup.php": "the signed-in person's own account",
     "_apps/auth/2fa/verify.php": "the person completing their own sign-in",

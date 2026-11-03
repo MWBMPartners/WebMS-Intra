@@ -98,6 +98,34 @@
  *                              prose goes stale, and the entries below are the
  *                              authority.
  *
+ * A SIXTH THING, AND IT IS A MARKER RATHER THAN A REASON: `needsReview`
+ * ---------------------------------------------------------------------
+ * Added 3 November 2026 (#724). Some of the columns `notEmptiedHere` explains
+ * are free text where the right answer depends on the request in front of you.
+ * "Jane's laptop" on a licence seat is a person's name; "spare projector" on
+ * the next row is not, and no rule can tell them apart. So those columns are
+ * MARKED, and a person — whoever holds the `data_controller` role — looks at
+ * each line and decides: empty it, or keep it.
+ *
+ * `needsReview` lists the column names on the entry. The REASON stays where it
+ * already was, in `notEmptiedHere`, so one place still describes one column and
+ * the review page shows the catalogue's own words for why no rule decides it.
+ *
+ * WHY A MARKER AND NOT A RULE READ OUT OF THE REASON TEXT. A reason is prose.
+ * Deciding "is this one for a person to look at?" from the words of a sentence
+ * would drift the first time somebody reworded one, and it would drift
+ * silently. `tools/audit-checks/check_erasure_review_items.py` pins the marked
+ * set BOTH WAYS against the owner's decision of 3 November 2026: a column
+ * marked without that decision fails, and one of the marked columns losing its
+ * marker fails too. It also fails when a marked column is declared NOT NULL,
+ * because a NOT NULL column cannot be emptied and the refusal is quiet (#715).
+ *
+ * A MARKER IS NOT COVERAGE. It says a person will be SHOWN this column where a
+ * row of it can be matched to the person asking. Where nothing on the row says
+ * whose the text is — a small group's home address, a response card's subject —
+ * there is no row to show and the marker is deliberately absent. The reason
+ * beside such a column is the honest answer, and it has not changed.
+ *
  * WHAT STOPS THIS BECOMING AN EXCUSE LIST. Three checks in
  * `tools/gdpr-coverage-selftest.php`: a reason must be long enough to be a
  * reason, an explanation for a column the entry does not name is stale and
@@ -251,6 +279,12 @@ return [
         'decision' => 'unlink',
         'reason'   => 'Who a software licence seat was allotted to. The organisation still needs to know how many seats are in use.',
         'columns'  => ['userID', 'notes', 'releasedByID', 'linkedByID', 'deviceName', 'seatLabel'],
+        // 🧑‍⚖️ #724: both of these are the example the owner gave. "Jane's laptop"
+        //    is a name; "spare projector" on the next row is not, and no rule
+        //    can tell them apart. `notes` is NOT marked: it is the
+        //    organisation's own record of a thing under the rule of
+        //    1 November 2026, which is a decision already taken.
+        'needsReview' => ['deviceName', 'seatLabel'],
         'notEmptiedHere' => [
             'deviceName' => 'What the device is called. In practice this is written as "Jane\'s laptop", so it '
                 . 'carries a name; nothing empties it',
@@ -476,6 +510,34 @@ return [
                     . 'On other people\'s requests that this person handled as an administrator, only who handled '
                     . 'it is cleared.',
         'columns'  => ['userID', 'subjectEmail', 'subjectName', 'notes', 'processedByID'],
+    ],
+    'tblErasureReviewDecisions' => [
+        'decision' => 'unlink',
+        // 🧑‍⚖️ #724, migration 242. One row per line of free text somebody
+        //    LOOKED AT and decided about: which table, which column, which
+        //    row, and which of the two answers. It holds NO TEXT — not the
+        //    words that were emptied, not a typed reason, nothing. That is the
+        //    #710 rule: a box asking somebody to describe what they did invites
+        //    them to quote the words being erased into a record.
+        //
+        //    'unlink' follows the precedent one entry up: when the person who
+        //    DECIDED later asks to be erased, their number comes off the row
+        //    and the decision itself stays, exactly as `processedByID` on a
+        //    request is cleared while the request stays. The row is the
+        //    organisation's record that the judgement was made.
+        //
+        //    ⚠️ NOT in `GdprEraser::DEDICATED_STEP_TABLES` and not hand-written:
+        //       the derived route gives it one instruction on `decidedByID`,
+        //       which is all it needs. And NOT absent from this file, which is
+        //       what `tblErasureAudit` is (#510 rule 7d) — that is the SEALED
+        //       trail; this is a working record, and a working record with no
+        //       decision beside it is the #706 fault.
+        'reason'   => 'One line of free text a person looked at during an erasure, and which of the two answers '
+                    . 'they gave: empty it, or keep it. It holds no text at all — only which row was judged, '
+                    . 'what was decided and who decided. The decision is the organisation\'s record that '
+                    . 'somebody took it, so the row stays; when the person who decided later asks to be erased, '
+                    . 'their account number comes off it.',
+        'columns'  => ['decidedByID'],
     ],
     'tblEventAttendance' => [
         'decision' => 'unlink',
@@ -859,6 +921,12 @@ return [
         'decision' => 'unlink',
         'reason'   => 'A room or equipment booking. The booking belongs to whoever made it, so on erasure the account link goes and so does the booker\'s stated reason for wanting the room (#723); the booking itself is kept, because the room\'s history belongs to the organisation. Deleting the row because the APPROVER left would cancel other people\'s bookings. Two limits are recorded in notEmptiedHere below: the booker\'s own `notes` are KEPT by decision, and `declineReason` is named by the instruction but nothing writes it.',
         'columns'  => ['notes', 'approvedByID', 'bookedByID', 'purpose', 'declineReason'],
+        // 🧑‍⚖️ #724: the booker's OWN words, kept by the owner's decision of
+        //    3 November 2026 rather than by any principle — which is exactly
+        //    why a person may now decide it request by request. `declineReason`
+        //    is not marked: nothing writes it, so there is never anything to
+        //    look at.
+        'needsReview' => ['notes'],
         'notEmptiedHere' => [
             'notes' => 'KEPT, and this reason was WRONG and is corrected (#723, 3 November 2026). It said the '
                 . 'note was "the organisation\'s own — a caretaker\'s remark about access, a charge to be '
@@ -905,6 +973,16 @@ return [
         // and no column ties the card's subject to an account.
         'reason'   => 'A response card filled in by, or about, somebody who came to an event. It is about THAT person, not the follow-up worker it was given to, so it stays and only the worker is detached. A card about the erased person themselves cannot be found: nothing ties a card\'s subject to an account.',
         'columns'  => ['fullName', 'email', 'phone', 'address', 'assignedToID', 'notes', 'prayerRequest'],
+        // 🧑‍⚖️ #724, and BE EXACT ABOUT WHAT THE REVIEW REACHES HERE, because
+        //    the gap looks like coverage. The only account column on this row
+        //    is the follow-up worker it was given to, so the review offers the
+        //    cards THE ERASED PERSON WAS GIVEN — not a card ABOUT them that
+        //    somebody else was given, which still cannot be found by anything
+        //    (see `fullName` below). What the review adds is that a person now
+        //    LOOKS at the prayer request on the cards that can be reached, and
+        //    decides. `notes` is not marked: it is follow-up notes about a
+        //    third party, and that decision stands.
+        'needsReview' => ['prayerRequest'],
         'notEmptiedHere' => [
             'prayerRequest' => 'What the person asked to be prayed for, in their own words, up to a thousand '
                 . 'characters. The owner decided on 3 November 2026 that a person\'s own words about '
@@ -936,6 +1014,10 @@ return [
         'reason'   => 'One item in a service running order. The running order is the organisation\'s own working '
                     . 'document, so the item stays and the number of whoever was down to present it goes.',
         'columns'  => ['presenterID', 'notes', 'presenterText'],
+        // 🧑‍⚖️ #724: a person's name typed by hand. It may be the erased
+        //    person's own name, or somebody else's who happened to take that
+        //    part of the service, so a person reads it and decides.
+        'needsReview' => ['presenterText'],
         'notEmptiedHere' => [
             'presenterText' => 'Who is taking this part of the service, typed by hand instead of chosen from the '
                 . 'member list — so it is a person\'s name as free text. Nothing empties it',
@@ -990,6 +1072,13 @@ return [
         'decision' => 'unlink',
         'reason'   => 'The group itself - its name, its purpose, its members. Deleting it because its founder left would dissolve the group and remove everybody else from it.',
         'columns'  => ['postcode', 'latitude', 'longitude', 'what3words', 'createdByID', 'addressLine1', 'addressLine2', 'description', 'meetingNotes'],
+        // 🧑‍⚖️ #724: notes about a group's meetings, which may or may not be
+        //    about the erased person. Only `meetingNotes` is marked. The home
+        //    address columns beside it are NOT, and the difference matters:
+        //    they are unreachable because nothing records WHOSE home it is, so
+        //    there is no row a person could be shown and asked about. A review
+        //    cannot invent reachability.
+        'needsReview' => ['meetingNotes'],
         'notEmptiedHere' => [
             'addressLine1' => 'Where the group meets. A small group usually meets in somebody\'s HOME, so this is very '
                 . 'often a member\'s home address, and nothing empties it. The postcode beside it is kept '
@@ -1107,6 +1196,8 @@ return [
         // it was never emptied before.
         'reason'   => 'Who uploaded a recording, and who presented it. The recording is the organisation\'s, so it stays and both numbers go.',
         'columns'  => ['uploadedByID', 'presenterID', 'presenterText'],
+        // 🧑‍⚖️ #724: the same shape as the presenter on a service plan item.
+        'needsReview' => ['presenterText'],
             'notEmptiedHere' => [
             'presenterText' => 'Who gave this talk, typed by hand instead of chosen from the member list, so it is a '
                 . 'person\'s name as free text. Nothing empties it. The same shape as the presenter on a '

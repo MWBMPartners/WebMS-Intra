@@ -584,10 +584,27 @@ database has removed it, lock that account out
 
 *Tested (17).* You should see `User "your name" updated successfully.`
 
-**Before 7.5, sign in with the new password in a private window.** The page
-says "updated successfully" even when no password was stored, which happens
-for an account that never had a password of its own. *Seen once while this
-page was being checked, on 12 October 2026; not one of the numbered tests.*
+**Before 7.5, sign in with the new password in a private window.** Do this even
+though the fault below is fixed: you are about to sign everybody out, and
+finding out afterwards that you cannot get back in is the one mistake this
+whole section exists to prevent.
+
+**What used to go wrong here, and what still can.** Until 3 November 2026 the
+page said "updated successfully" even when **no password was stored**, which
+happened for an account that had never had a password of its own — an
+invitation nobody accepted, or an account added with the username box left
+blank. That is fixed (#586): such an account now has its sign-in created, using
+its e-mail address as the sign-in name, and the page says so.
+
+**It is still refused for an account that signs in only with Microsoft, Google
+or a passkey**, and you are told why. That is deliberate — a password would be
+a second way into that account rather than a correction — but it means this
+step cannot help you if that is how you sign in. Go to
+[7.8](#78-no-administrator-can-get-in).
+
+Two other refusals you may meet, each with its reason on the page: an e-mail
+address longer than 50 characters (a sign-in name cannot be longer), and an
+address already in use as somebody's sign-in name.
 
 If you are not signed in, it will not save, or the new password does not let
 you in, do [7.8](#78-no-administrator-can-get-in) instead.

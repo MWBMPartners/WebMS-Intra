@@ -412,13 +412,84 @@ if ($siteID > 0) {
         $newSiteId = (int) $stmt->insert_id;
         $stmt->close();
 
-        // 🏷️ #516: the fourteen standard roles, for this organisation only.
+        // 🏷️ #516: the standard roles, for this organisation only. Count them
+        //    with `count(Roles::STANDARD)` rather than trusting a number here:
+        //    this comment said "fourteen" until #724 made it fifteen.
         Roles::seedStandardSet($db, $newSiteId);
+
+        // 🧑‍⚖️ #724 — THE DATA CONTROLLER ROLE NEEDS A HOLDER, and seeding the
+        //    role is not the same thing as granting it. Its gate asks
+        //    `Roles::has()` DIRECTLY rather than `App::hasRole()`, so a global
+        //    administrator with no role row is refused on purpose — and an
+        //    erasure request for a member of this organisation cannot be
+        //    completed while a line of free text is undecided. Nobody holding
+        //    the role therefore means no erasure request of this organisation
+        //    can ever be finished: the #499 shape, where "fail closed" was
+        //    built first and locked members out.
+        //
+        //    The rule is migration 241 part C's, scoped to this one
+        //    organisation: the FIRST active administrator of it, by the lowest
+        //    account number, with the four admin flags read off the two tables
+        //    they really live on (`isAdmin`/`isRootAdmin` on `tblUsers`,
+        //    `isSiteAdmin`/`isSiteRootAdmin` on `tblUserSites`).
+        //
+        // ⚠️ MEASURED, AND SAID PLAINLY BECAUSE IT MATTERS: ON A BRAND-NEW
+        //    ORGANISATION THIS GRANTS NOBODY, AND IT CANNOT. A new
+        //    organisation has no `tblUserSites` row at all — nobody has been
+        //    added to it yet — so there is no first administrator to find, and
+        //    `$granted` below really is 0 every time this branch runs today.
+        //    It is NOT decoration: `fk_user_role_membership` refuses a role
+        //    for a non-member, so granting the role to the global
+        //    administrator who is creating the organisation would raise error
+        //    1452 and roll the whole creation back. Inventing a membership for
+        //    them would be a product decision, and the standing rule of
+        //    29 October 2026 is that the two administration levels may be
+        //    different parties.
+        //
+        //    So the honest half of this fix is the SENTENCE below, which tells
+        //    the administrator the role has no holder and where to put one.
+        //    The statement is the structural half: it is the one rule, in the
+        //    one shape, so that an organisation created with members already
+        //    in place gets a holder instead of silently getting none.
+        $stmtDc = $db->prepare(
+            'INSERT INTO tblUserRoles (userID, roleID, siteID) '
+            . 'SELECT first_admin.userID, r.roleID, r.siteID '
+            . 'FROM tblRoles r '
+            . 'JOIN ('
+            . '  SELECT us.siteID, MIN(u.userID) AS userID '
+            . '  FROM tblUserSites us '
+            . '  JOIN tblUsers u ON u.userID = us.userID '
+            . '  WHERE us.siteID = ? AND us.isActive = 1 AND u.isActive = 1 '
+            . '    AND (u.isAdmin = 1 OR u.isRootAdmin = 1 '
+            . '         OR us.isSiteAdmin = 1 OR us.isSiteRootAdmin = 1) '
+            . '  GROUP BY us.siteID'
+            . ') first_admin ON first_admin.siteID = r.siteID '
+            . "WHERE r.siteID = ? AND r.roleKey = 'data_controller' "
+            . 'ON DUPLICATE KEY UPDATE userID = tblUserRoles.userID'
+        );
+        if ($stmtDc === false) {
+            throw new \RuntimeException('tblUserRoles prepare failed: ' . $db->error);
+        }
+        $stmtDc->bind_param('ii', $newSiteId, $newSiteId);
+        $stmtDc->execute();
+        $granted = (int) $stmtDc->affected_rows;
+        $stmtDc->close();
 
         $db->commit();
 
         Logger::activity('SiteCreate', 'Created site #' . $newSiteId . ' (' . $siteName . ')');
-        $_SESSION['flash_msg'] = 'Site "' . $siteName . '" created successfully.' . ($zoneNotTaken === true ? $zoneNotTakenWords : '');
+        // 🧑‍⚖️ #724 — never silent about a responsibility nobody holds. A
+        //    global administrator reading this is the person who can put it
+        //    right, and the roles page is where they do it.
+        $dcWords = $granted > 0
+            ? ' The Data Controller role was given to this organisation\'s first administrator; move it on the '
+                . 'roles page if that is not the right person.'
+            : ' NOBODY HOLDS THE DATA CONTROLLER ROLE in this organisation yet, because it has no members. That '
+                . 'role is the only one a global administrator is not given automatically, and an erasure '
+                . 'request for one of its members cannot be completed until somebody holds it. Add members, '
+                . 'then grant it on Admin, Roles.';
+        $_SESSION['flash_msg'] = 'Site "' . $siteName . '" created successfully.'
+            . ($zoneNotTaken === true ? $zoneNotTakenWords : '') . $dcWords;
         $_SESSION['flash_type'] = 'success';
     } catch (\Throwable $e) {
         $db->rollback();

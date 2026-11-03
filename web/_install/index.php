@@ -1711,6 +1711,99 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $stmtSite->close();
                         }
 
+                        // 🛡️ THE DATA CONTROLLER ROLE, GRANTED HERE AND NOWHERE
+                        //    ELSE ON A FRESH INSTALL (#724).
+                        //
+                        //    Migration 241 grants this role to the first
+                        //    administrator of each organisation — but on a
+                        //    fresh install it CANNOT, and that was a real
+                        //    defect found by an independent build rather than
+                        //    by reading: step 3 loads the install script and
+                        //    replays every migration, and this step 4 makes the
+                        //    first administrator AFTERWARDS. So when 241 ran
+                        //    there was no administrator to grant it to, and
+                        //    nobody held the role at all.
+                        //
+                        //    That is not a cosmetic gap. The role's gate asks
+                        //    `Roles::has()` DIRECTLY rather than
+                        //    `App::hasRole()`, so a global administrator with
+                        //    no role row is refused — deliberately, because an
+                        //    installation's administrator and an
+                        //    organisation's may be different parties. And an
+                        //    erasure request cannot be completed while a line
+                        //    of free text is unreviewed. Nobody holding the
+                        //    role therefore means NO ERASURE REQUEST CAN EVER
+                        //    BE FINISHED on a fresh installation: the #499
+                        //    shape, where "fail closed" was built first and
+                        //    locked members out.
+                        //
+                        //    The role itself is already there, seeded by the
+                        //    install script's own fold of 241. This grants it.
+                        //    It is written with the role looked up by key
+                        //    rather than by number, because role numbers are
+                        //    per organisation (#516) and nothing here may
+                        //    assume one.
+                        //
+                        // 🚫 IT IS REALLY SOFT NOW, AND IT WAS NOT BEFORE.
+                        //    This grant sits inside the transaction that makes
+                        //    the administrator, and `installGetDb()` sets
+                        //    `MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR` — it
+                        //    takes BOTH to make a statement error throw. So a
+                        //    failing grant threw into the `catch` below, which
+                        //    rolls the transaction back and says "The
+                        //    administrator account could not be created, and
+                        //    nothing was saved." The comment here promised the
+                        //    opposite. The code is what changed: the grant has
+                        //    its own try/catch, so a failure is written to the
+                        //    error log and the administrator is kept.
+                        //
+                        //    TWO CASES, AND THEY ARE NOT THE SAME THING.
+                        //    1. THE COMMON ONE RAISES NOTHING AT ALL: if the
+                        //       role row is missing, `INSERT … SELECT` simply
+                        //       inserts zero rows. No error, nothing to catch,
+                        //       and the install carries on — which is why
+                        //       "nobody holds the role" was a silent gap
+                        //       rather than a visible failure.
+                        //    2. A STATEMENT ERROR — a missing table, a
+                        //       refused foreign key — is what the catch below
+                        //       is for.
+                        //
+                        //    ⚠️ WHAT IT STILL CANNOT MAKE SOFT, said plainly:
+                        //       a DEADLOCK (1213) or a lock-wait timeout
+                        //       (1205) rolls the whole transaction back in the
+                        //       database itself, so catching it here cannot
+                        //       put the administrator back and the `commit()`
+                        //       further down fails instead. Nothing on a fresh
+                        //       install should contend for these rows, so that
+                        //       is recorded rather than worked around.
+                        try {
+                            $stmtRole = $db->prepare(
+                                'INSERT INTO tblUserRoles (userID, roleID, siteID) '
+                                . 'SELECT ?, r.roleID, r.siteID FROM tblRoles r '
+                                . "WHERE r.siteID = 1 AND r.roleKey = 'data_controller' "
+                                . 'ON DUPLICATE KEY UPDATE userID = tblUserRoles.userID'
+                            );
+                            if ($stmtRole !== false) {
+                                $stmtRole->bind_param('i', $newUserId);
+                                $stmtRole->execute();
+                                $stmtRole->close();
+                            }
+                        } catch (\mysqli_sql_exception $roleProblem) {
+                            // An installation that cannot grant a role is
+                            // still an installation, and the erasure refusal
+                            // says plainly that a global administrator grants
+                            // this role on the roles page. Refusing the whole
+                            // install over a responsibility nobody has
+                            // exercised yet would be the wrong trade — which
+                            // is what the old code did.
+                            error_log(
+                                '[WebMS-Intra] Installer: the Data Controller role could not be granted to the '
+                                . 'first administrator; the installation carries on and a global administrator '
+                                . 'can grant it on the roles page. What the database said: '
+                                . $roleProblem->getMessage()
+                            );
+                        }
+
                         // Update default site settings with the admin's email
                         $stmtSetting = $db->prepare(
                             'UPDATE tblSettings SET settingValue = ? WHERE settingKey = \'site.adminEmail\' AND siteID IS NULL'

@@ -1432,6 +1432,27 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_series_attachments_complete.py
 
+      # The seven lines of free text a PERSON decides about during an erasure
+      # are exactly the seven the owner agreed on 3 November 2026, and every one
+      # of them can really be emptied (#724).
+      #
+      # It fails BOTH ways, and the second direction is the silent one: a column
+      # that LOSES its `needsReview` marker simply stops being offered, so the
+      # erasure stops refusing and a request closes with somebody's own words
+      # still in it and nothing saying so. This check is the only thing that
+      # notices.
+      #
+      # WIRED HERE BECAUSE IT RAN IN NO WORKFLOW AT ALL until this fix round —
+      # the #646 shape re-created. `.githooks/pre-push` globs
+      # `tools/audit-checks/*.py`, so it did run locally before a push, but that
+      # hook is turned on per clone and `git push --no-verify` skips it. The
+      # standing rule after #646 is that these guards are hard gates on every
+      # pull request.
+      - name: 'The free text a person decides about is the agreed seven (hard gate, #724)'
+        id: erasure_review_items
+        if: always()
+        run: python3 -I tools/audit-checks/check_erasure_review_items.py
+
       # =====================================================================
       # Summary in the Actions UI
       # =====================================================================
@@ -1463,6 +1484,9 @@ jobs:
             # this file keeps being caught by.
             echo "- No table name is compared with capitals mattering: ${{ steps.table_name_comparisons.outcome }} (hard gate, #697)"
             echo "- Pages write the shared head tags: ${{ steps.page_head_tags.outcome }} (hard gate, #569)"
+            # Its own line, again deliberately NOT inside the #646 loop below,
+            # which says "ten" and would be wrong the moment anything joined it.
+            echo "- The free text a person decides about is the agreed seven: ${{ steps.erasure_review_items.outcome }} (hard gate, #724)"
             # The ten guards wired by #646, as ONE line unless something failed.
             # Ten separate lines would bury the rest of the summary; what a
             # reader needs is to tell "they all passed" from "they are not

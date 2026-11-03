@@ -98,6 +98,31 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php endif; ?>
                     </div>
                     <div class="col-md-3 text-end">
+                        <?php
+                        // 🛡️ The way in to the free-text review (#724). Shown on
+                        //    every row rather than only where something is
+                        //    waiting, and that is on purpose: THIS PAGE MUST NOT
+                        //    WORK OUT WHETHER A REVIEW IS OUTSTANDING.
+                        //
+                        //    Asking would mean a second copy of
+                        //    `ErasureReview::whyNotReadyToClose()`'s judgement
+                        //    here, and this repository has paid for that shape
+                        //    more than once — a page's copy of a rule drifting
+                        //    from the rule. The review page itself says what is
+                        //    waiting, and says plainly when nothing is.
+                        //
+                        //    It is a LINK and not a gated button because the
+                        //    gate belongs on the page that acts: whoever opens
+                        //    this queue may not hold the Data Controller role,
+                        //    and finding that out by being refused on the review
+                        //    page is honest. Drawing or hiding the link from a
+                        //    role test here would be a second gate to keep in
+                        //    step with the real one.
+                        ?>
+                        <a class="btn btn-outline-secondary btn-sm"
+                           href="<?php echo htmlspecialchars(Router::url('admin/erasure-requests/review') . '?id=' . (int) $r['requestID'], ENT_QUOTES, 'UTF-8'); ?>">
+                            <i class="fa-solid fa-user-shield me-1"></i>Review free text
+                        </a>
                         <?php if ((string) $r['status'] === 'pending_review'): ?>
                             <form method="post" action="<?php echo htmlspecialchars(Router::url('admin/erasure-requests/process'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">

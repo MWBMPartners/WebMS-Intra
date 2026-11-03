@@ -2,6 +2,93 @@
 
 
 ## [Unreleased] (alpha)
+<!-- #724: the Data Controller role and the erasure review -->
+### Added
+
+- **The free text an erasure cannot decide about on its own now gets a human
+  decision, and a request cannot be completed without one (#724).** Seven
+  columns hold text where the right answer depends on the request in front of
+  you: "Jane's laptop" on a licence seat is somebody's name, and "spare
+  projector" on the next row is not. A person holding the new `data_controller`
+  role opens **Erasure review**, sees each line, and chooses — empty it, or keep
+  it. Until every line is decided, pressing Execute on the request changes
+  **nothing at all** and writes a line on the report saying who can deal with it
+  and where.
+  - `Portal\Core\ErasureReview` is the one place that says which columns need a
+    look (read from `_core/personal-data-catalogue.php`, never a second list)
+    and the one place a decision is recorded and acted on.
+  - New table `tblErasureReviewDecisions` (migration 242). It holds **no text**:
+    which row was judged, which of the two answers, who decided and when.
+  - New pages `/admin/erasure-requests/review` and its save handler.
+  - New hard gate `tools/audit-checks/check_erasure_review_items.py`; new test
+    `tools/erasure-review-selftest.php` (91 checks on a real database).
+
+### Changed
+
+- `GdprEraser::execute()` asks before anything changes, and
+  `GdprEraser::closeRequest()` asks again inside the transaction that closes a
+  request.
+- `tools/gdpr-eraser-selftest.php` leaves the seven reviewable columns empty
+  when it builds its made-up world, so its 267 checks still exercise the walk
+  rather than the review (which has its own test).
+
+### Fixed
+
+- The fold block for migration 241 in `full_schema.sql` claimed
+  "`installFinish()` grants it instead". **There is no such function**
+  (`grep -rn installFinish web tools` finds nothing), and the installer creates
+  the first administrator at step 4, *after* step 3 has loaded the install
+  script and replayed every migration — so on a fresh install nobody holds the
+  `data_controller` role. The comment now says so. See the issue below.
+
+---
+
+## For CHANGELOG.md
+
+* **The erasure review counts without a limit and shows a page (#724).** `ErasureReview` separated
+  counting from showing. `whyNotReadyToClose()` asks the new `countUndecided()`, which counts in the
+  database with no limit, so a request refuses while any undecided line remains anywhere; the page
+  shows at most `SHOW_AT_MOST` (500) lines per column, undecided first, and SAYS how many there are
+  and how many it is showing. `record()` looks one line up directly rather than searching that list,
+  so a line past the page-full can still be decided.
+* **The review is narrowed to one organisation (#724, the owner, 3 November 2026).** Every
+  reviewable table that records a `siteID` is narrowed to the organisation the request was filed in.
+  The two that record none are shown and labelled as not tied to one organisation. The cost — a
+  request for somebody in two organisations needs each organisation's own Data Controller — is in
+  `ErasureReview::organisationScopeNote()`, printed on the page and appended to the refusal.
+* **`tblErasureReviewDecisions.decidedByID` is really left empty when the decider is the subject
+  (#724).** The audit line had always masked the number; the row stored it. Migration 242 and
+  `full_schema.sql` changed with it (the column comment, and the header's wrong claim that this is
+  the table that is never erased — `tblErasureAudit` is).
+* **The installer's grant of the Data Controller role is really soft (#724).** A statement error is
+  logged and the administrator is kept; before, it rolled the whole administrator creation back and
+  said "nothing was saved".
+* **An organisation created after install grants the role and says when nobody holds it (#724).**
+* **`check_erasure_review_items.py` is a hard gate on every pull request (#724, #646's shape).**
+* **"Add User" refuses a typed password with no sign-in name (#586 part two).** It used to drop the
+  password and say "created successfully".
+* **`admin/erasure/process.php` says what actually clears a review refusal (#724).**
+
+<!-- #586: a password reported saved but not stored -->
+### Fixed
+
+- **Admin, edit a user: a new password is really stored now (#586).** Typing a new
+  password for an account that had never had one reported `User "…" updated
+  successfully.` and stored nothing: the handler looked for the account's sign-in row
+  (`tblLocalAccounts`) and wrote the password only if it found one. An account made by
+  an invitation nobody accepted, or one that signs in with Microsoft, Google or a
+  passkey, has no such row — so an administrator setting somebody a password during an
+  incident was told it had worked and that person still could not sign in. The handler
+  now works out BEFORE anything is written whether the password can be stored: where the
+  account has no other way in it creates the sign-in row (its e-mail address becomes the
+  sign-in name, which is what the installer and the users API already do), and where it
+  cannot it refuses the whole save and says why. Nothing is written and no success
+  message is shown unless the database really holds a password afterwards, which is now
+  read back inside the same transaction. New test: `tools/admin-password-selftest.php`
+  (39 checks over real HTTP), wired into `portal-selftests.yml` and
+  `tools/run-all-selftests.sh` with the change rather than later.
+
+---
 - **Fixed — a room booking's stated reason is emptied on an erasure request now (#723)**
   - **The classification was the fault, not the guard.** `tblResourceBooking.bookedByID` was in
     **both** `LINK_COLUMNS` and `ACTOR_COLUMNS`, and the coverage test refuses `nullCols` on an actor

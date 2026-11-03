@@ -75,8 +75,19 @@ function expectThrows(string $label, callable $fn, string $expectedClass = \Inva
     }
 }
 
-echo "=== STANDARD — the fourteen roles every organisation starts with ===\n";
-assertTrue('STANDARD has exactly 14 keys', count(Roles::STANDARD) === 14);
+// 🔁 FOURTEEN UNTIL 3 November 2026, FIFTEEN SINCE (#724): `data_controller`
+//    joined the standard set. Both checks below went red on that change, and
+//    both were right to — a fifteenth standard role is a deliberate decision
+//    that has to be made in four places at once (Roles::STANDARD, the role's
+//    own numbered migration, its fold block in full_schema.sql, and here), and
+//    a test that shrugged at the count would have let three of them drift.
+//
+//    The NAMED list is the one that matters, and it is deliberately stricter
+//    than the count: a count cannot tell a role ADDED from a role RENAMED, and
+//    a renamed key is the #516 fault — a key the code asks for that nobody can
+//    hold. Keep both.
+echo "=== STANDARD — the standard roles every organisation starts with ===\n";
+assertTrue('STANDARD has exactly 15 keys', count(Roles::STANDARD) === 15);
 foreach (Roles::STANDARD as $key => $role) {
     assertTrue(
         "key '{$key}' matches ^[a-z][a-z0-9_]{1,49}\$",
@@ -96,9 +107,13 @@ $expectedKeys = [
     'asset_manager', 'venue_manager', 'announcement_approver',
     'groups_coordinator', 'stream_moderator', 'staff', 'volunteer',
     'visitor_coordinator', 'event_coordinator',
+    // #724, 3 November 2026. LAST on purpose: `Roles::STANDARD`'s own docblock
+    // says the order matches the migration's seed and the fold's, and the
+    // check `check_role_keys.py` compares all of them.
+    'data_controller',
 ];
 assertTrue(
-    'STANDARD keys are exactly the fourteen expected keys, in order',
+    'STANDARD keys are exactly the fifteen expected keys, in order',
     array_keys(Roles::STANDARD) === $expectedKeys
 );
 

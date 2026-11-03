@@ -606,7 +606,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_ratelimit selftest_webhookret selftest_reservedwords selftest_offsite; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_ratelimit selftest_webhookret selftest_reservedwords selftest_offsite; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -668,6 +668,20 @@ jobs:
         run: |
           mkdir -p "$SELFTEST_WEB_DIR"
           php -d memory_limit=512M tools/gdpr-eraser-selftest.php
+
+      # 🛡️ The free text an erasure cannot judge on its own (#724). Needs a
+      # database and nothing else — no node, no openssl, no gd. Wired here in
+      # the same change that added it, because a guard that runs nowhere is
+      # the #646 fault: twelve correct guards, each over a fault that had
+      # already happened, invoked by no workflow.
+      - name: Erasure review self-test
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_erasurereview
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/erasure-review
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/erasure-review-selftest.php
 
       # -----------------------------------------------------------------------
       # 🖥️ Tests that drive the real pages through PHP's built-in web server
@@ -768,6 +782,22 @@ jobs:
         run: |
           mkdir -p "$SELFTEST_WEB_DIR"
           php -d memory_limit=512M tools/erasure-pages-selftest.php
+
+      # 🔑 #586 — Admin, edit a user: a new password reported as saved while
+      #    nothing was stored, for an account that had never had one. Every
+      #    check here presses Save on the real form over HTTP, so this is the
+      #    only thing that can see the fault come back; no audit script reads
+      #    a page's answer. Wired in with the test, not later, because a test
+      #    that runs in no workflow is the #646 shape.
+      - name: 'Admin password self-test (#586)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_adminpwd
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/admin-password
+          SELFTEST_WEB_PORT: '9086'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/admin-password-selftest.php
 
       - name: Access pages self-test
         if: ${{ !cancelled() && steps.databases.outcome == 'success' }}

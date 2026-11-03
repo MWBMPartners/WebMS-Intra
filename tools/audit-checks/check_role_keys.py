@@ -216,6 +216,76 @@ def extract_a9_block(text: str, anchor_index: int) -> list[str]:
     return re.findall(r"(?:SELECT|UNION ALL SELECT)\s+'([^']*)'", m.group(1))
 
 
+# 🆕 Roles added to the standard set AFTER migration 202, each by its own
+#    numbered migration. One entry per role, so a role added without a
+#    migration to put it on existing installations fails this check.
+#
+#    ⚠️ MIGRATION 202 IS NEVER EDITED. It has already run on every
+#       installation, so adding a fifteenth key to its A9 seed would be a
+#       change nobody receives — the role would exist in code and in a fresh
+#       install and be missing from every upgraded one. That is the #516 shape
+#       exactly: a key the code asks for and nobody can hold. A later role
+#       therefore gets a later migration, and is listed here.
+LATER_STANDARD_ROLES = {
+    # role key          migration that seeds it into every organisation
+    "data_controller": "241_data_controller_role.sql",
+}
+
+
+def extract_later_roles(sql_dir: Path) -> tuple[list[str], str, list[str]]:
+    """Keys from the post-202 migrations, plus any whose migration is missing."""
+    label = "web/_sql/<later migrations> standard-role seeds"
+    found: list[str] = []
+    missing: list[str] = []
+    for key, filename in LATER_STANDARD_ROLES.items():
+        migration = sql_dir / filename
+        if migration.exists() is False:
+            missing.append(
+                f"the standard role {key} has no migration to put it on EXISTING "
+                f"installations (expected web/_sql/{filename})"
+            )
+            continue
+        text = migration.read_text(encoding="utf-8", errors="ignore")
+        # The seed has to NAME the key, and has to mark it standard: a role
+        # seeded with isStandard = 0 can be DELETED by an organisation, and
+        # then the code asks for a key nobody can hold.
+        if f"'{key}'" not in text:
+            missing.append(f"{filename} does not name the role key {key}")
+            continue
+        if "isStandard" not in text:
+            missing.append(
+                f"{filename} does not mention isStandard, so {key} could be seeded as a "
+                f"CUSTOM role — which an organisation can delete, leaving the code asking "
+                f"for a key nobody can hold"
+            )
+            continue
+        found.append(key)
+
+    # 🧩 AND THE FOLD. A role that only the MIGRATION seeds is missing from a
+    #    FRESH install, which is the mirror of the fault above and just as bad.
+    #    Each later role needs its own `-- ── from <filename>` block in
+    #    full_schema.sql naming the key: its own block, and not an entry added
+    #    to migration 202's seed there, because that block is labelled with the
+    #    migration it came from and 202 never seeded these roles.
+    schema = sql_dir / "full_schema.sql"
+    schema_text = schema.read_text(encoding="utf-8", errors="ignore") if schema.exists() else ""
+    for key, filename in LATER_STANDARD_ROLES.items():
+        anchor = schema_text.find(f"from {filename}")
+        if anchor == -1:
+            missing.append(
+                f"the standard role {key} has no \"from {filename}\" block in "
+                f"full_schema.sql, so a FRESH install would not have the role at all"
+            )
+            continue
+        if f"'{key}'" not in schema_text[anchor:anchor + 4000]:
+            missing.append(
+                f"full_schema.sql's \"from {filename}\" block does not name the role key "
+                f"{key}, so a FRESH install would not have it"
+            )
+
+    return found, label, missing
+
+
 def extract_migration_202(sql_dir: Path) -> tuple[list[str], str]:
     label = "web/_sql/202_roles_per_organisation.sql A9 seed"
     migration = sql_dir / "202_roles_per_organisation.sql"
@@ -258,6 +328,15 @@ def check() -> int:
     standard_keys, standard_label = extract_standard_php(web_dir)
     migration_keys, migration_label = extract_migration_202(sql_dir)
     fold_keys, fold_label = extract_fold_block(sql_dir)
+    later_keys, later_label, later_missing = extract_later_roles(sql_dir)
+    # A role added after 202 lives in THREE places, none of them 202's own
+    # seed: Roles::STANDARD, its own numbered migration, and its own fold block
+    # in full_schema.sql. `extract_later_roles()` has just checked the last two
+    # directly, so both the 202 lists below are topped up with those keys —
+    # otherwise every later role reads as a disagreement with a migration that
+    # was written before it existed.
+    migration_keys = list(migration_keys) + list(later_keys)
+    fold_keys = list(fold_keys) + list(later_keys)
 
     code_refs = find_code_referenced_keys(web_dir)
     code_refs += find_coordinator_role_default(web_dir)
@@ -265,13 +344,34 @@ def check() -> int:
     findings: list[str] = []
     informational: list[str] = []
 
+    # Each gap already says what is wrong with it; the bullet and the shared
+    # explanation go on once. An earlier version prefixed its own "  • " and
+    # appended a sentence about migrations to EVERY gap, so the fold-block case
+    # printed two bullets and then told the reader to add a migration that was
+    # already there.
+    if later_missing:
+        for gap in later_missing:
+            # No bullet of its own: the printer adds one to every finding.
+            findings.append(gap)
+        findings.append(
+            "A role in Roles::STANDARD needs THREE things, and the one that is missing "
+            "decides the symptom: its own numbered migration (or every UPGRADED organisation "
+            "lacks it), its own \"from <that migration>\" block in full_schema.sql (or every "
+            "FRESH install lacks it), and the entry in Roles::STANDARD itself. Either way the "
+            "code ends up asking for a key somebody cannot hold, which is the #516 fault. "
+            "MIGRATION 202 MUST NOT BE EDITED to add a later role: it has already run "
+            "everywhere, so nobody would receive the change."
+        )
+
     standard_set = {k.lower() for k in standard_keys}
     migration_set = {k.lower() for k in migration_keys}
     fold_set = {k.lower() for k in fold_keys}
 
     print(f"{standard_label}: {len(standard_keys)} keys")
-    print(f"{migration_label}: {len(migration_keys)} keys")
-    print(f"{fold_label}: {len(fold_keys)} keys")
+    print(f"{migration_label}: {len(migration_keys) - len(later_keys)} keys"
+          f" (+ {len(later_keys)} from {later_label})")
+    print(f"{fold_label}: {len(fold_keys) - len(later_keys)} keys"
+          f" (+ {len(later_keys)} from the later roles' own fold blocks)")
     print(f"Code-referenced role key literals found: {len(code_refs)}")
     print()
 

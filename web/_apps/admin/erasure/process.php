@@ -41,6 +41,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\ErasureReview;
 use Portal\Core\GdprEraser;
 use Portal\Core\Logger;
 use Portal\Core\Router;
@@ -398,7 +399,23 @@ if ($outcome['failed'] > 0) {
         . 'A reason saying the rows must be CHECKED BY HAND will not be helped by running it again at all: '
         . 'those rows can no longer be found automatically, so they have to be dealt with directly. Once you '
         . 'have, press "Dealt with by hand" on the request — it closes the request and records that you did '
-        . 'that work, but only if every remaining failure is one no further run can fix (#710).';
+        . 'that work, but only if every remaining failure is one no further run can fix (#710). '
+        // 🧑‍⚖️ #724 — THE ONE FAILURE "RUN IT AGAIN" CANNOT CLEAR EITHER, and
+        //    naming it here is the fix of 3 November 2026. A run refused
+        //    because lines of free text are undecided fails identically on
+        //    every retry until somebody DECIDES them, and this message said
+        //    only "run it again". The honest sentence existed — the one
+        //    `GdprEraser::refuseUntilReviewed()` writes — but only on the
+        //    request's own report, which this message points at for a
+        //    different case. It also cannot be closed with "Dealt with by
+        //    hand": that button needs every remaining failure to be one no
+        //    further run can fix, and this one clears the moment somebody
+        //    decides.
+        . 'And a reason saying LINES OF FREE TEXT have not been decided about is not cleared by running it '
+        . 'again either, nor by "Dealt with by hand": somebody holding the Data Controller role has to open '
+        . ErasureReview::PAGE_ROUTE . ', look at each line and choose — empty it, or keep it. Running the '
+        . 'request again works once they have. If nobody holds that role, a global administrator grants it on '
+        . 'the roles page (Admin, Roles).';
     $_SESSION['flash_type'] = 'warning';
     header('Location: ' . Router::url('admin/erasure-requests'));
     exit();

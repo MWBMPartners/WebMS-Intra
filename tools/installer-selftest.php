@@ -192,7 +192,7 @@ declare(strict_types=1);
  * number means a block was skipped or ran twice. With a second server named
  * (SELFTEST_DB_PORT_2) one more is made: see `$expectedChecks`.
  */
-const EXPECTED_CHECKS = 135;
+const EXPECTED_CHECKS = 136;
 
 /** The made-up addresses this run types. `.invalid` never reaches anybody. */
 const ADDRESS_TYPED = 'https://portal.installer-selftest.invalid';
@@ -1467,6 +1467,29 @@ $account = q($databases['a'], 'SELECT u.userID, u.isRootAdmin, u.isActive, l.use
 ok('I11 a good one makes exactly one account: a global administrator, active, with a password it can sign in with and a place in the one organisation; then on to the web addresses',
     $made['status'] === 302 && $made['location'] === '?step=4.5' && count($account) === 1 && (int) $account[0]['isRootAdmin'] === 1 && (int) $account[0]['isActive'] === 1
     && $account[0]['username'] === ADMIN_EMAIL && (int) $account[0]['isVerified'] === 1 && (int) $account[0]['siteID'] === 1 && n($databases['a'], 'SELECT COUNT(*) AS n FROM tblUsers') === 1, said($made) . ' ' . json_encode($account));
+
+// 🧑‍⚖️ #724 — AND THE DATA CONTROLLER ROLE REALLY HAS A HOLDER. Nothing
+//    checked this until 3 November 2026, and it is the one thing that stops a
+//    brand-new installation being unable to finish ANY erasure request: the
+//    role's gate asks `Roles::has()` directly, so a global administrator with
+//    no role row is refused on purpose. Migration 241 grants the role, but on
+//    a fresh install it cannot — step 3 replays the migrations BEFORE step 4
+//    makes the first administrator — so step 4 grants it, and this is the
+//    measurement of that.
+//
+//    `Roles::has()`'s own three conditions are asked for here: the role row,
+//    the holding, and an ACTIVE `tblUserSites` row. A grant with no membership
+//    behind it would satisfy neither that method nor the page's gate.
+$dcHolder = q(
+    $databases['a'],
+    'SELECT ur.userID FROM tblUserRoles ur '
+    . 'JOIN tblRoles r ON r.roleID = ur.roleID AND r.siteID = ur.siteID '
+    . 'JOIN tblUserSites us ON us.userID = ur.userID AND us.siteID = ur.siteID AND us.isActive = 1 '
+    . "WHERE r.roleKey = 'data_controller' AND ur.siteID = 1"
+);
+ok('I11b and that administrator HOLDS the Data Controller role in the one organisation, through an active membership — without which no erasure request on a fresh installation could ever be finished (#724)',
+    count($dcHolder) === 1 && (int) $dcHolder[0]['userID'] === (int) $account[0]['userID'],
+    json_encode($dcHolder) . ' vs account ' . json_encode($account[0]['userID'] ?? null));
 
 $addressPage = req($owner, 'GET', '/?step=4.5');
 ok('I12 the web addresses page offers the address in use for the person to check, and has one heading', page($addressPage) === 'addresses' && substr_count($addressPage['body'], '<h1') === 1

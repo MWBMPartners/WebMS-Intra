@@ -1664,6 +1664,70 @@ class GdprEraser
     {
         $db = App::db();
 
+        // 🧑‍⚖️ #724 — THE LINES A PERSON HAS TO DECIDE ABOUT, CHECKED FIRST, AND
+        //    NOTHING IS CHANGED IF ANY IS STILL UNDECIDED.
+        //
+        //    THE POSITION IS LOAD-BEARING, and it is #709's ordering trap in a
+        //    new place. The table walk EMPTIES the account columns these rows
+        //    are found by (`bookedByID`, `presenterID`, `userID` …), so a check
+        //    made after the walk would find nothing to review — every time —
+        //    and the review page would go blank the moment a run had been
+        //    attempted, leaving a request that could never be finished. Before
+        //    anything changes, a refusal costs a retry; after the walk it would
+        //    cost the rows for ever.
+        //
+        //    It is deliberately NOT a step among the others: it returns here,
+        //    so a refusal leaves the person's records exactly as they were.
+        //
+        //    ⚠️ NO LINE IS WRITTEN WHEN THE REVIEW HAS NOTHING OUTSTANDING.
+        //       The review is not one of the catalogue's instructions, so
+        //       "every instruction writes one line" (rule 1 of THE POLICY at
+        //       the top of this file) does not reach it, and a line per clean
+        //       run would shift every step count in
+        //       tools/gdpr-eraser-selftest.php for no fact that the closing
+        //       line does not already imply: `closeRequest()` asks the same
+        //       question again inside the transaction that closes the request,
+        //       so a CLOSED request cannot have an undecided line.
+        $notReviewedYet = ErasureReview::whyNotReadyToClose($db, $requestId, $userId);
+        if ($notReviewedYet !== '') {
+            try {
+                self::asOneStep(
+                    $db,
+                    static fn (): string => self::refuseUntilReviewed($db, $requestId, $notReviewedYet)
+                );
+            } catch (\Throwable $e) {
+                throw self::stopped($db, $requestId, $e);
+            }
+            $status = self::putBackToPendingReview($db, $requestId);
+            if ($status !== 'pending_review') {
+                throw new \RuntimeException(
+                    'Erasure request #' . $requestId . ' was not run, because lines of free text are waiting for '
+                    . 'somebody to decide about them, and the request could NOT be put back to pending review '
+                    . 'afterwards. It has to be set back by hand before it can be run again. Nothing was erased.'
+                );
+            }
+
+            return [
+                'changed' => false,
+                'steps'   => 1,
+                'failed'  => 1,
+                // Nothing for anybody to do OUTSIDE the portal: the work left
+                // is a decision made INSIDE it, on the review page. Keeping
+                // this empty is what stops "Dealt with by hand" closing such a
+                // request — `finishByHand()` requires every failure of the run
+                // to be one no further run can clear, and this one clears the
+                // moment somebody decides.
+                'handWorkOnly' => [],
+            ];
+        }
+        // 🗂️ The table a decision is kept in arrives with migration 242, and
+        //    files reach a server before anybody presses "Run migrations"
+        //    (#694). The check above answers "ready" in that case ON PURPOSE,
+        //    because refusing would block every erasure on such a server — the
+        //    blocked-recovery shape of #697. What it must not do is pass in
+        //    silence, so the run records that the review could not be checked.
+        $reviewUncheckable = ErasureReview::decisionsTableExists($db) === false;
+
         // 📧 #234 — the address has to be read BEFORE the table walk empties
         //    it on the account row; the email-log step needs it to search by.
         try {
@@ -1702,6 +1766,16 @@ class GdprEraser
             // says so are saved together or not at all.
             $outcomes = [];
             $lastBeat = time();
+            // 🗂️ #724: the database is behind the files, so the review could
+            //    not be checked. A line rather than a failure: a failure would
+            //    stop every erasure on a server waiting for its upgrade, and
+            //    this run is otherwise perfectly able to do its work.
+            if ($reviewUncheckable === true) {
+                $outcomes[] = self::asOneStep(
+                    $db,
+                    static fn (): string => self::noteReviewNotChecked($db, $requestId)
+                );
+            }
             // ✉️ #592 — mail still WAITING to be sent to this person, and
             //    then (#234) their address in the send log. Both find the
             //    person by the e-mail address read above, not by an account
@@ -1840,6 +1914,102 @@ class GdprEraser
      *
      * @throws \Throwable Whatever the step threw, after undoing its change.
      */
+    /**
+     * 🧑‍⚖️ Write down that the run was refused because free text is waiting for
+     *    a person to decide about it (#724), and count as a failed step.
+     *
+     * The words matter as much as the refusal. Somebody reading this on the
+     * request's report has just pressed Execute and been told nothing happened,
+     * so the line says WHAT is waiting, WHO can deal with it, and WHERE — and,
+     * because the role may be held by nobody on a fresh installation, how a
+     * global administrator puts that right.
+     *
+     * It never quotes the text being judged: `$why` is composed in
+     * `ErasureReview` out of table names, column names and counts.
+     */
+    private static function refuseUntilReviewed(\mysqli $db, int $requestId, string $why): string
+    {
+        self::logAudit(
+            $db,
+            $requestId,
+            'failed',
+            'tblErasureRequest',
+            null,
+            'refused before anything was changed: ' . $why . '. These lines of free text are the ones no rule '
+            . 'decides, so a person holding the Data Controller role has to look at each and choose — empty it, '
+            . 'or keep it — on ' . ErasureReview::PAGE_ROUTE . '. Nothing has been erased, and the request is '
+            . 'back at pending review: run it again once they have. If NOBODY holds that role, a global '
+            . 'administrator grants it on the roles page (Admin, Roles); it is the one role a global '
+            . 'administrator is not given automatically, on purpose, because the person answerable for personal '
+            . 'data may not be the person who runs the installation.'
+        );
+
+        return self::STEP_FAILED;
+    }
+
+    /**
+     * 🗂️ Write down that the review could not be checked, because this
+     *    database has not had migration 242 (#724).
+     *
+     * A `skip`, not a failure, and the difference is deliberate: a failure here
+     * would refuse every erasure on a server whose files are ahead of its
+     * database, which is the blocked-recovery shape #697 records. The honest
+     * half is that the line says so, so nobody reads a completed request as
+     * proof that the free text was looked at.
+     */
+    private static function noteReviewNotChecked(\mysqli $db, int $requestId): string
+    {
+        self::logAudit(
+            $db,
+            $requestId,
+            'skip',
+            ErasureReview::DECISIONS_TABLE,
+            null,
+            'the lines of free text that need a person\'s decision were NOT checked on this run: the table a '
+            . 'decision is kept in is not in this database yet, so this portal\'s database upgrade (Admin, '
+            . 'Upgrade) has not been run since the files were updated. The erasure itself ran normally. Run the '
+            . 'upgrade, then open the review page for this request to deal with any such lines.'
+        );
+
+        return self::STEP_UNCHANGED;
+    }
+
+    /**
+     * ✍️ The ONE way anything outside this class adds a line to a request's
+     *    audit trail — used by `ErasureReview` (#724).
+     *
+     * `logAudit()` stays private, because it is where the chained fingerprint
+     * is worked out and there must be exactly one of those. This wrapper exists
+     * so the review's decisions land on the SAME chain, in the same shape, and
+     * `verifyAuditChain()` still answers for them.
+     *
+     * ⚠️ IT ACCEPTS ONLY THE REVIEW'S OWN FOUR WORDS. A general "write me any
+     *    line" door would let a caller write a line claiming a request was
+     *    closed, or that a step ran, into the one record nobody can correct
+     *    afterwards. `closeRequest()` is private for the same reason, and
+     *    #710's docblock says plainly why that matters.
+     *
+     * @throws \RuntimeException For any other action word, or when the trail
+     *   cannot be written (the caller then saves nothing — see
+     *   `ErasureReview::record()`, which has the write inside a transaction).
+     */
+    public static function logReviewLine(
+        \mysqli $db,
+        int $requestId,
+        string $action,
+        string $table,
+        ?string $recordKey,
+        string $details
+    ): void {
+        if (in_array($action, ['anonymise', 'retain', 'skip', 'failed'], true) === false) {
+            throw new \RuntimeException(
+                'A review line may only be written as "anonymise", "retain", "skip" or "failed"; "'
+                . $action . '" was asked for and nothing was written.'
+            );
+        }
+        self::logAudit($db, $requestId, $action, $table, $recordKey, $details);
+    }
+
     private static function asOneStep(\mysqli $db, callable $step): mixed
     {
         if ($db->begin_transaction() === false) {
@@ -2103,6 +2273,37 @@ class GdprEraser
         }
 
         try {
+            // 🧑‍⚖️ #724 — THE ONE PLACE A REQUEST IS CLOSED ASKS THE SAME
+            //    QUESTION AGAIN, inside the transaction that closes it. The
+            //    refusal at the top of `execute()` is what an administrator
+            //    actually meets, with a line telling them what to do; this is
+            //    the structural rule, so that no route to a close can skip it —
+            //    `finishByHand()` reaches this method directly, and anything
+            //    added later would reach it too.
+            //
+            //    IT IS REACHABLE, but only narrowly: a row carrying reviewable
+            //    free text can be WRITTEN while a run is going (a booking made
+            //    in the next room), and a run that has already passed that
+            //    table would not have seen it. Then this refuses, the request
+            //    goes back, the new line shows on the review page, and the next
+            //    run closes.
+            //
+            //    ⚠️ SAID PLAINLY: NO END-TO-END TEST EXERCISES IT, because
+            //       reaching it means inserting a row between the first check
+            //       and this one, and the test harness runs one request at a
+            //       time. What IS tested is `whyNotReadyToClose()` itself, over
+            //       every answer it can give, and that this call is here with
+            //       its whole condition — the plant that deletes it must go
+            //       red. A backstop labelled as a backstop, not a tested path.
+            $notReviewedYet = ErasureReview::whyNotReadyToClose($db, $requestId, $userId);
+            if ($notReviewedYet !== '') {
+                throw new \RuntimeException(
+                    'the request cannot be closed: ' . $notReviewedYet . '. A person holding the Data '
+                    . 'Controller role has to decide about each of those lines on ' . ErasureReview::PAGE_ROUTE
+                    . ' first. Nothing was closed.'
+                );
+            }
+
             // Which organisation this request belongs to, to word the lines
             // on other requests correctly.
             $stmt = $db->prepare('SELECT siteID FROM tblErasureRequest WHERE requestID = ? LIMIT 1');

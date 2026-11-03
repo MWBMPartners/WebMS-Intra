@@ -538,6 +538,12 @@ $coreDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR 
 require_once $coreDir . 'App.php';
 require_once $coreDir . 'GivingRetention.php';
 require_once $coreDir . 'GdprEraser.php';
+// 🧑‍⚖️ #724: before a run changes anything, the erasure asks whether any line of
+//    free text is still waiting for a person to decide about it. There is no
+//    autoloader here, so without this line every run stops at that question
+//    with "class not found" — which is what happened, and is why it is called
+//    out rather than slipped into the list.
+require_once $coreDir . 'ErasureReview.php';
 // Since mail package M3 (#592) the erasure takes the person out of the mail
 // queue, through this class. (The portal finds its classes by itself; this
 // test names each one it needs.)
@@ -574,6 +580,7 @@ require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATO
     . DIRECTORY_SEPARATOR . '_retention-sweep.php';
 
 use Portal\Core\App;
+use Portal\Core\ErasureReview;
 use Portal\Core\GdprEraser;
 use Portal\Core\Giving;
 use Portal\Core\GivingRetention;
@@ -883,7 +890,20 @@ function ge_insert(string $table, array $people, array $fixed = [], int $other =
     $family = ++$GLOBALS['ge_family'];
     $person = ge_personColumns($table);
 
-    $build = static function (bool $fillOptional) use ($table, $people, $fixed, $other, $family, $person): array {
+    // 🧑‍⚖️ #724: the columns a PERSON has to decide about are left empty here, on
+    //    purpose, and the reason is worth knowing. An erasure refuses to run at
+    //    all while one of them holds text nobody has decided about — so filling
+    //    them would make EVERY run in this file refuse, which is what happened
+    //    when this line was not here: 75 of 267 checks went red at once. A
+    //    person with no such free text anywhere is an ordinary state, so the
+    //    world stays realistic; what it no longer covers is the review itself,
+    //    and that has its own test (tools/erasure-review-selftest.php, which
+    //    proves both the refusal and the close after every line is decided).
+    //    Read from the catalogue through ErasureReview, never listed again here.
+    //    A test that wants a value in one of them still gets it: `$fixed` wins.
+    $reviewable = ErasureReview::markedColumns()[$table] ?? [];
+
+    $build = static function (bool $fillOptional) use ($table, $people, $fixed, $other, $family, $person, $reviewable): array {
         $row = [];
         foreach (ge_columns($table) as $col) {
             $name = (string) $col['name'];
@@ -894,6 +914,8 @@ function ge_insert(string $table, array $people, array $fixed = [], int $other =
                 $row[$name] = $fixed[$name];
             } elseif (in_array($name, $person, true) === true) {
                 $row[$name] = $people[$name] ?? $other;
+            } elseif (isset($reviewable[$name]) === true && $col['nullable'] === 'YES') {
+                $row[$name] = null;
             } elseif ($fillOptional === false && $col['nullable'] === 'YES') {
                 $row[$name] = null;
             } else {

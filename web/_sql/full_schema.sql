@@ -10750,3 +10750,104 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('239_transcript_retention.sql')
 -- so the installer's replay of every numbered migration finds nothing left to do.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('240_free_text_emptiable.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 241_data_controller_role.sql (#724) ────────────────────
+-- The FIFTEENTH standard role. Seeded in its OWN block rather than added to
+-- the "from 202_roles_per_organisation.sql" seed above, because that block is
+-- labelled with the migration it came from and migration 202 never seeded this
+-- role: putting it there would make the label untrue, and the next reader would
+-- believe upgraded installations already had it.
+--
+-- `tools/audit-checks/check_role_keys.py` requires this block to exist and to
+-- name the key, so the three lists (Roles::STANDARD, the role's own migration,
+-- and this fold) cannot drift apart.
+--
+-- The GRANT in part C of the migration is deliberately NOT repeated here. A
+-- database built fresh from this file has no administrator yet — the installer
+-- makes the first account at its step 4 (`administrator`), AFTER step 3 has
+-- loaded this file and replayed every numbered migration — so there is nobody
+-- to grant it to. Same reasoning as migration 202's own fold-in block gives for
+-- leaving out its carry-over statements.
+--
+-- ✅ THE INSTALLER GRANTS IT, at step 4, right after it makes the first
+--    administrator — `web/_install/index.php`, beside the `tblUserSites`
+--    insert. Look there, not here, for the grant on a fresh install.
+--
+-- ⚠️ THE WAY THAT GAP WAS NEARLY SHIPPED IS WORTH KEEPING. An earlier version
+--    of this comment said "`installFinish()` grants it instead". THERE IS NO
+--    SUCH FUNCTION: `grep -rn installFinish web tools --include='*.php'`
+--    finds nothing. The command is SCOPED TO PHP FILES on purpose, and that
+--    is a lesson rather than fussiness: the earlier note quoted
+--    `grep -rn installFinish web tools`, which today finds these very comment
+--    lines, so a true claim had been turned into a false one BY BEING WRITTEN
+--    DOWN. A claim about code has to be checked against code, and this
+--    comment lives in a .sql file.
+--
+--    So the comment invented a mechanism, and the step order above is why
+--    migration 241's own grant reaches nobody on a fresh install either. For
+--    a while, therefore, NOBODY would have held this role on a brand-new
+--    installation.
+--
+--    That is not cosmetic. The role's gate asks `Roles::has()` DIRECTLY rather
+--    than `App::hasRole()`, so a global administrator with no role row is
+--    refused — deliberately — and an erasure request cannot be completed while
+--    a line of free text is unreviewed. Nobody holding the role would have
+--    meant NO ERASURE REQUEST COULD EVER BE FINISHED on a fresh install: the
+--    #499 shape, where "fail closed" was built first and locked members out.
+--
+--    Found by an independent build reading the step order, not by any check.
+--    Nothing here can see it: the fold and the migration are both correct in
+--    isolation, and only the ORDER of the installer's steps makes the grant a
+--    no-op. If this is ever broken again, the symptom is an erasure request
+--    that refuses to close on a new installation and no obvious reason why.
+--
+--    The backstop, if a grant ever fails anyway: the line the erasure writes
+--    when it refuses to close a request says a person holding the Data
+--    Controller role has to decide the remaining lines, and that a global
+--    administrator grants that role on the roles page. That line is on the
+--    request's own report, which is where somebody who has just been refused is
+--    already looking.
+INSERT INTO `tblRoles` (`siteID`, `roleKey`, `roleName`, `description`, `isStandard`)
+SELECT s.`siteID`, 'data_controller', 'Data Controller',
+       'Answerable for personal data: reviews the free text an erasure cannot decide about on its own, and decides what goes',
+       1
+FROM `tblSites` s
+WHERE NOT EXISTS (
+    SELECT 1 FROM `tblRoles` r
+    WHERE r.`siteID` = s.`siteID` AND r.`roleKey` = 'data_controller'
+);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('241_data_controller_role.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 242_erasure_review.sql (#724) ──────────────────────────────────────
+-- Where a human decision about free text is kept, and the two addresses of the
+-- review page. See that migration's header for why the table exists, why it
+-- holds NO TEXT at all, and why every part of its unique key is NOT NULL
+-- (#487: a unique key stands aside for a row with an empty part, and
+-- `ON DUPLICATE KEY UPDATE` then adds a second row instead of changing the
+-- first).
+CREATE TABLE IF NOT EXISTS `tblErasureReviewDecisions` (
+    `decisionID`   INT          NOT NULL AUTO_INCREMENT,
+    `requestID`    INT          NOT NULL COMMENT 'The erasure request this decision was taken for. A later request about the same person gets a fresh judgement: a decision is about one request, not about a row for ever',
+    `tableName`    VARCHAR(64)  NOT NULL COMMENT 'Which table the line is in. Written by the portal from its own catalogue, never from a request',
+    `columnName`   VARCHAR(64)  NOT NULL COMMENT 'Which column. Only a column marked `needsReview` in _core/personal-data-catalogue.php can appear here',
+    `rowKey`       INT          NOT NULL COMMENT 'The row''s own key value. The key COLUMN is read from information_schema, so no second list of key columns can drift from the schema',
+    `decision`     ENUM('empty','keep') NOT NULL COMMENT 'The two answers, and there is no third. An ENUM so the database refuses anything else, and so that no free text can ever reach this column',
+    `decidedByID`  INT          DEFAULT NULL COMMENT 'Who decided, or EMPTY when the decider is the person being erased - ErasureReview::record() leaves it out under the same test that masks the audit line. This table IS erased (its catalogue entry unlinks this column), so the reason is not that the record is permanent: it is that the number would sit on the row from the decision until the run nulled it, and a CANCELLED request would leave it there for good',
+    `decidedAtUtc` DATETIME     NOT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP() only - never a time on the server clock, so two installations in different countries agree about the order of things',
+    PRIMARY KEY (`decisionID`),
+    UNIQUE KEY `uq_errd_item` (`requestID`, `tableName`, `columnName`, `rowKey`),
+    KEY `idx_errd_request` (`requestID`),
+    CONSTRAINT `fk_errd_request` FOREIGN KEY (`requestID`) REFERENCES `tblErasureRequest`(`requestID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_errd_decider` FOREIGN KEY (`decidedByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='One line of free text a person looked at during an erasure, and which of the two answers they gave. Holds no text of its own (#724)';
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/erasure-requests/review',      'admin/erasure/review.php',      1),
+    ('admin/erasure-requests/review-save', 'admin/erasure/review-save.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('242_erasure_review.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;

@@ -5,7 +5,7 @@
  * Roles 🏷️ (#516)
  * -----------------------------------------------------------------------------
  * Manage THIS organisation's own list of roles: rename the standard ones
- * (treasurer, expense approver, care team, and the rest of the fourteen
+ * (treasurer, expense approver, care team, and the rest of the standard
  * every organisation starts with), or add roles of the organisation's own.
  *
  * Granting a role to a specific person happens on the members page
@@ -24,7 +24,7 @@
  * WHAT THIS PAGE CANNOT DO
  * -------------------------------------------------------------------------
  * It cannot delete a STANDARD role (`isStandard = 1`) — every organisation
- * keeps the same fourteen keys the 66 `App::hasRole()` call sites (across
+ * keeps the same keys every `App::hasRole()` call site (across
  * 61 files) rely on; rename one instead if the standard wording does not
  * fit. It
  * cannot delete any role, standard or not, while somebody still holds it —

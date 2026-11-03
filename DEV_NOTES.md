@@ -15286,3 +15286,222 @@ branch was dead — and the test's own fixture is `statement-<id>-2025.pdf`, who
 period `2025` does not parse either, so if the branch had run the EXISTING "the
 person's file is deleted" check would already have failed. It passed. A fixture
 uniform in exactly the way this repository keeps being bitten by.
+
+## Deciding about free text an erasure cannot judge (#724)
+
+**What it is.** Seven columns in this schema hold free text that no automatic
+erasure rule touches, because whether it matters depends on the request:
+
+| Table | Column |
+|---|---|
+| `tblResourceBooking` | `notes` |
+| `tblServicePlanItem` | `presenterText` |
+| `tblRecording` | `presenterText` |
+| `tblAssetLicenseAssignments` | `deviceName` |
+| `tblAssetLicenseAssignments` | `seatLabel` |
+| `tblSmallGroups` | `meetingNotes` |
+| `tblSalvationCards` | `prayerRequest` |
+
+**Three of those are not the names #724 uses, and the database's names are the
+right ones.** The issue says `tblServicePlans.presenterText`,
+`tblAssetLicenseSeats.*` and `tblSalvationCard.prayerRequest`. There is no
+`presenterText` on `tblServicePlans`, and no `tblAssetLicenseSeats` or
+`tblSalvationCard` table at all. That is the "name things by the right
+identifier" trap, which is why `check_erasure_review_items.py` compares its
+pinned list against `full_schema.sql` rather than reading prose.
+
+**The marker, and why it is a marker.** A column is marked by its catalogue
+entry's `needsReview` list; the REASON stays in `notEmptiedHere`, so one place
+still describes one column. Judging "is this one for a person to look at?" from
+the words of a reason would drift the first time somebody reworded one, and it
+would drift silently.
+
+**The order is load-bearing, and it is #709's trap in a new place.** The table
+walk EMPTIES the account columns these rows are found by (`bookedByID`,
+`presenterID`, `userID` …). A check made after the walk would find nothing to
+review, every time, and the review page would go blank the moment a run had been
+attempted — leaving a request that could never be finished. So the question is
+the first thing `execute()` does, and a refusal changes nothing.
+
+**It goes further than "cannot close", on purpose.** The owner's words were
+"the request cannot close while an item is unreviewed". Refusing the whole RUN
+is stricter, and the paragraph above is why: refusing only at the close would
+mean the walk had already cut the links, so the review could never be completed.
+
+**A missing table must not block an erasure.** `tblErasureReviewDecisions`
+arrives with migration 242, and files reach a server before anybody presses
+"Run migrations" (#694). With the table absent, `whyNotReadyToClose()` answers
+"nothing in the way" and the run writes a `skip` line saying the free text was
+NOT checked. Refusing instead would be #697's blocked recovery.
+
+**`SHOW TABLES LIKE ?` PREPARES AND MATCHES NOTHING.** MySQL does not take a
+parameter for that pattern. The first version of `decisionsTableExists()` bound
+the name, so it always answered false — and because a missing table means "not
+ready to judge" rather than "not ready to close", THE WHOLE REVIEW SWITCHED
+ITSELF OFF SILENTLY: every request ran straight through with its free text
+undecided. Thirty-one checks went red the first time the test met a real
+database. The name is a constant in the file, checked against
+`/\A[A-Za-z0-9_]+\z/`, and written into the query — the
+`DbBackup::holdingTableExists()` pattern.
+
+**`GROUP_CONCAT` TRUNCATES EVIDENCE AT 1,024 BYTES.** The check "the emptied
+words are nowhere in the audit trail" read the trail with `GROUP_CONCAT`, and a
+planted fault that wrote the text straight into the audit line PASSED ALL 87
+CHECKS, because the evidence was cut off before it. Read the rows and join them
+in PHP. A check whose evidence the database silently shortens is not a check.
+
+**A guard that the strict connection reaches first is not tested by a strict
+connection.** `record()` reads the cell back after emptying it, for the NOT NULL
+case. On a strict connection the UPDATE itself throws, so the read-back never
+gets a turn — and a plant that DELETED it passed all 87 checks. The test now
+also runs that case with `sql_mode = ''`, where the server writes an empty
+string and warns instead of throwing. The portal's own connection is strict
+(`DbServer::connect()`, #593), so the read-back is belt and braces; it is tested
+because a guard nothing exercises is not a guard.
+
+**A clause that could not fail, removed before it shipped.** A draft of
+`record()` refused a "keep" on a line already recorded as emptied. That branch
+can never be reached: an emptied cell is no longer an item, so the "not one of
+this request's items" refusal catches it first. The real guard is inside the
+transaction, where the row is held and the cell read again — which is also the
+only thing that can catch two people deciding at once.
+
+**What the review cannot reach, and it is not a gap that can be closed.** A row
+that is ABOUT the person but carries no account number of theirs is not offered.
+A response card about the erased person, given to somebody else, is the clear
+case: its name, address and prayer request are all typed by hand, and the only
+account column on the row is the follow-up worker. Searching the text for their
+name was refused on 1 November 2026 (it misses a mistyped name and can match a
+different person sharing a mailbox), and nothing here changes that.
+
+**A row reached only through an "acted on it" column is flagged.** The review
+offers exactly the rows the table's own erasure instructions match, which
+includes rows the person merely approved or was given. The page says which
+column matched and warns when every one of them is in
+`GdprEraser::ACTOR_COLUMNS`, because emptying such a line takes away a third
+party's words. That is a judgement for a person with the row in front of them,
+never a rule.
+
+---
+
+## For DEV_NOTES.md — "Counting and showing are two jobs (#724)"
+
+A silent `LIMIT 500` sat in `ErasureReview::rowsHolding()` with no comment, and
+`whyNotReadyToClose()` read that list. Measured on a real MySQL 8.0.36: **501 rows, 500 offered, no
+problem reported, all 500 decided, the close answered `''` and the request closed with one line of
+the person's own words still in it.** Not exotic — somebody who books a room weekly for ten years
+has about 520 such rows.
+
+The rules that came out of it:
+
+1. **A display cap may never be able to change a decision.** Anything that decides whether a request
+   may close counts in the database, with no limit, and never reads a list that has a size.
+2. **A capped page must be a worklist, not a wall.** The list is ordered undecided-first, so
+   deciding a page-full brings the next one into view. Without that a page-full of KEPT lines sits
+   there for ever and the lines behind them are never seen.
+3. **A capped page must not make anything unreachable.** `record()` looks its one line up directly.
+   Searching the capped list would have made the 501st line impossible to decide, so the request
+   could never be closed — #697's blocked recovery.
+4. **One rule, four questions.** `holdingWhere()`/`holdingValues()` is shared by the list, the total,
+   the undecided count and the single look-up, so the deciding half cannot drift from the showing
+   half.
+5. **A plant has to reproduce the WHOLE fault.** Putting only the capped read back left the decisive
+   check green, because the undecided-first ordering rescued it; the pre-fix state is the capped read
+   AND no ordering, and only then did "THE REQUEST STILL REFUSES TO CLOSE" go red — with a blank
+   detail, because the detail is the refusal and the refusal was the empty string.
+
+## For DEV_NOTES.md — "A claim about code checked against a .sql comment (#724)"
+
+`full_schema.sql` said "`grep -rn installFinish web tools` finds nothing", and run today it found
+its own comment. **My first two rewordings were untrue in the same way**: scoping the command to
+`"function installFinish"` made the comment a hit for that too. The claim is now
+`grep -rn installFinish web tools --include='*.php'`, which finds 0 and will keep finding 0 because
+the comment lives in a `.sql` file — and it says so. A claim about code has to be checked against
+code; writing a claim down can be what makes it false.
+
+## For DEV_NOTES.md — additions to the #724 record
+
+* **`record()` put `$db->error` and `$e->getMessage()` into five page-visible sentences**, thirty
+  lines above `rowsHolding()`'s comment explaining why it reports only the error NUMBER ("a database
+  message can quote a value, and this one may be reported on a page"). Fixed, and **the fix shipped
+  with no guard**: the plant that put the leak back left the self-test 126/126 green. The guard is a
+  POSITIVE clause (the refusal must contain `database error 1048` and this class's own reading of
+  it), because a clause forbidding some phrase of MySQL's could not fail.
+* **Error 1048 is translated in our own words over our own names**, so making the message safe did
+  not make it useless on a strict connection, where the UPDATE throws before the read-back runs.
+* **A grant that errors inside a transaction on a strict connection refuses the whole transaction.**
+  Measured both ways. It takes BOTH `MYSQLI_REPORT_STRICT` and `MYSQLI_REPORT_ERROR`. And the COMMON
+  case is different and must be said separately: with no role row, `INSERT … SELECT` inserts zero
+  rows and raises nothing at all — which is why "nobody holds the role" was a silent gap rather than
+  a visible failure.
+* **Granting a role needs a membership.** `fk_user_role_membership` refuses a role for a non-member,
+  so `admin/sites/save.php`'s grant reaches nobody on a brand-new organisation and cannot be made to
+  — the honest remedy is the sentence on the page, not a cleverer statement.
+
+### A success message over a write that did not happen (#586)
+
+`web/_apps/admin/users/save.php` reported a new password as saved when the account had
+never had one. The shape is worth recognising because nothing mechanical could see it:
+the write was inside `if ($localRow !== null)` with no `else`, and the flash message was
+written unconditionally thirty lines later. `php -l` is happy, every audit script is
+happy, and the page answers HTTP 302 exactly as it does on success.
+
+It was that way from the page's first commit —
+`git show a443d6c:web/public_html/admin/users/save.php` (7 March 2026) — and was found
+on 12 October 2026 by the independent check of the recovery runbook (#488), which had to
+carry a warning about it in section 7.4 rather than a fix.
+
+**Three things learned while fixing it.**
+
+1. **An account can have no password for three different reasons, and only one of them
+   is a fault to fix.** Nobody accepted the invitation; the person signs in with
+   Microsoft or Google (`tblLinkedAccounts`); the person signs in with a passkey
+   (`tblWebAuthnCredentials`). Creating a sign-in row for the first is plainly right —
+   without it the account can never be used at all. For the other two it is a **product
+   decision**, because it adds a second way into the account rather than correcting
+   anything, so the page refuses and says so. `Auth::countLoginMethods()` already
+   answers "how many ways in does this person have", and it is asked rather than a
+   second count being written.
+2. **There is no single place that sets a password.** Five files hash and store one —
+   `_install/index.php`, `_apps/invites/accept.php`, `_apps/users/api/create.php`,
+   `_apps/auth/reset-password/save.php`, `_apps/auth/account/change-password.php` — each
+   with its own inline SQL, and `_apps/offboarding/do.php` makes one unusable with
+   `passwordHash = ''`. This fix deliberately did NOT add a sixth "one place": that is a
+   refactor of an authentication path and belongs to its own issue. What it DID do is
+   follow the same route as the rest — `password_hash($password, PASSWORD_DEFAULT)` into
+   `tblLocalAccounts.passwordHash`, nothing invented.
+3. **"Forgot password" is not the way out, and saying it was would have been untrue.**
+   `_apps/auth/forgot-password/save.php` joins `tblLocalAccounts`, so it finds nothing
+   for an account with no sign-in row either. The first draft of the refusal message
+   advised it. There is no route today for an SSO-only or passkey-only account to gain a
+   password, and the message says nothing it cannot stand behind.
+
+**A sign-in row cannot exist without a sign-in name**, and that is the part the obvious
+fix forgets. `tblLocalAccounts.username` is `VARCHAR(50) NOT NULL` with a unique key
+across the whole installation, while `tblUsers.emailAddress` is `VARCHAR(255)`. So two
+more refusals are needed, both honest: an address longer than 50 characters (the
+installer has the same limit and the same wording), and an address already in use as
+somebody's sign-in name. The length is measured with `mb_strlen`, not `strlen`, because
+`VARCHAR(50)` counts characters and counting bytes would refuse an address that fits.
+The refusal over a taken name never says whose it is (#521).
+
+**The guard, and what it can see that nothing else can.**
+`tools/admin-password-selftest.php` presses Save on the real form over real HTTP, with
+nine made-up accounts, and each is without a password for its own reason — a fixture in
+which the branch cannot be taken tests nothing. It then proves the person can REALLY
+SIGN IN with the new password, both with their e-mail address and with the new sign-in
+name, which is the only claim that matters. Part E writes two faults into the scratch
+copy and requires each to be caught: `&& false` on the gate that creates the row, and
+that plus the read-back switched off, which is the original fault. **Measured on the
+real file as well:** planting both into `web/_apps/admin/users/save.php` turns C03, C04,
+C05 and C06 red while C01 and C02 stay green — the page still says it worked, which is
+precisely why a check on the message alone would prove nothing.
+
+**No audit script can guard this.** The invariant is "no success message over a write
+that did not happen", which is about reachability across sixty lines, not about text. So
+no check was added to `tools/audit-checks/`: a text-matching one would have gone green
+on the `&& false` plant, and a check that looks strong and guards nothing is worse than
+none. What carries the fix instead is the read-back inside the transaction — the handler
+asks the database whether a password is really held before anything claims it is.
+
+---

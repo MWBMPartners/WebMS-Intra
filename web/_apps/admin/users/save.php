@@ -19,11 +19,32 @@
  * decides how far a change is allowed to reach; see that class's own
  * docblock for the full story and what it cannot do.
  *
+ * -----------------------------------------------------------------------------
+ * #586 FIX (3 November 2026): "update" reported a new password as saved
+ * when the account had never had one. It looked for the account's sign-in
+ * row and wrote the new password only if it found one, so an account made
+ * by an invitation nobody accepted, or one that signs in with Microsoft,
+ * Google or a passkey, had nothing stored while the page still said
+ * "updated successfully". Step 10b now works out BEFORE anything is
+ * written whether the password can be stored at all: it creates the
+ * sign-in row where the account has no other way in, and refuses the
+ * whole save, saying why, where it cannot. Step 11 reads back that a
+ * password really is held before step 12 claims anything.
+ *
+ * -----------------------------------------------------------------------------
+ * #586 FIX, PART TWO (3 November 2026): the SAME fault was in the "create"
+ * branch, and an independent check of part one found it. The sign-in insert is
+ * wrapped in `if ($username !== '')`, and the Add User form labels that box
+ * "Leave blank to skip local account" — so a typed password with the box left
+ * blank stored nothing and the page said "created successfully". It now
+ * refuses, in words, before anything is written. Same shape, same remedy: a
+ * success message must never sit over a write that did not happen.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.4.0
+ * @version   0.5.0
  * -----------------------------------------------------------------------------
  */
 
@@ -123,6 +144,35 @@ if ($action === 'create') {
     // 🔍 If username provided, password is required
     if ($username !== '' && $password === '') {
         $_SESSION['flash_msg']  = 'Password is required when creating a local account.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('admin/users'));
+        exit();
+    }
+
+    // 🔑 AND THE OTHER WAY ROUND — #586's EXACT FAULT, IN THIS BRANCH (fixed
+    //    3 November 2026, found by an independent check of #586).
+    //
+    //    The sign-in insert further down is wrapped in `if ($username !== '')`,
+    //    and the Sign-in name box on the Add User form is labelled "Leave
+    //    blank to skip local account". So typing a password and leaving that
+    //    box blank stored NO PASSWORD AT ALL and the page said
+    //    'User "…" created successfully.' — a success message over a write
+    //    that did not happen, which is the whole of #586 one branch along.
+    //    An administrator who did that had every reason to believe the person
+    //    could sign in.
+    //
+    //    IT REFUSES RATHER THAN INVENTING A SIGN-IN NAME. Step 10b of the
+    //    update branch does use the e-mail address when it has nobody to ask,
+    //    but that is a CORRECTION to an account that already exists; here the
+    //    administrator is filling a form in and can simply be told. Nothing
+    //    has been written yet — this is before the transaction — so refusing
+    //    costs a retype and the other answer costs a password nobody holds.
+    if ($username === '' && $password !== '') {
+        $_SESSION['flash_msg']  = 'No account was created. A password was typed but the sign-in name box was '
+            . 'left blank, and a password cannot be stored without one — that box is what decides whether this '
+            . 'person gets a password sign-in at all. Type a sign-in name to give them one, or clear both '
+            . 'password boxes to add the account without a password (they can then be invited, or sign in with '
+            . 'Microsoft, Google or a passkey).';
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('admin/users'));
         exit();
@@ -396,6 +446,142 @@ if ($action === 'update') {
         }
     }
 
+    // 🔑 Step 10b (#586): CAN this account be given a password at all?
+    //    Worked out here, before anything is written, for exactly the
+    //    reason step 10 is: the old order changed the account and then
+    //    silently did nothing about the password.
+    //
+    //    WHAT WAS WRONG, and it had been wrong since this page was first
+    //    written. Step 11 looked for the account's sign-in row and set a
+    //    new password ONLY if it found one. An account created by an
+    //    invitation nobody accepted, or one that signs in with Microsoft,
+    //    Google or a passkey, has no such row — so nothing at all was
+    //    stored, and step 12 still said "updated successfully". An
+    //    administrator setting somebody a password during an incident was
+    //    told it had worked and that person still could not sign in.
+    //    Proved to be the original shape with:
+    //        git show a443d6c:web/public_html/admin/users/save.php
+    //    (7 March 2026 — the same `if ($localRow !== null)` with nothing
+    //    after it). The disaster-recovery runbook had to
+    //    carry a warning about it; see docs/disaster-recovery-runbook.md,
+    //    section 7.4.
+    //
+    //    $makeSignIn is the ONE answer this step produces: true means
+    //    step 11 must CREATE the sign-in row, false means set the password
+    //    on the row that is already there. Anything that stops the
+    //    password being stored refuses the WHOLE save, in words, and
+    //    writes nothing — a success message over a write that did not
+    //    happen is the fault being fixed, so it must not be left anywhere
+    //    near here.
+    $makeSignIn = false;
+    $signInName = '';
+    if ($password !== '') {
+        // 🛡️ Nothing has been written yet, so a database fault here
+        //    refuses with the same wording a failed save uses, rather
+        //    than throwing: there is no transaction to roll back and no
+        //    try/catch around this step. It is belt and braces — this
+        //    connection is strict (#593), so prepare() throws rather than
+        //    answering false — but a quiet "false" must never be read as
+        //    "there is no sign-in row", which would create a second one.
+        $stmt = $mysqli->prepare('SELECT localID FROM tblLocalAccounts WHERE userID = ? LIMIT 1');
+        if ($stmt === false) {
+            $_SESSION['flash_msg']  = 'The account could not be saved. Nothing was changed.';
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('admin/users'));
+            exit();
+        }
+        $stmt->bind_param('i', $userID);
+        $stmt->execute();
+        $localRow = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($localRow === null) {
+            // 🔗 Has this person another way in? Auth::countLoginMethods()
+            //    counts the sign-in row, their linked Microsoft and Google
+            //    accounts and their passkeys. There is no sign-in row
+            //    here, so whatever it answers is the number of OTHER ways
+            //    this person gets in.
+            //
+            //    DELIBERATELY NOT DECIDED HERE, and it is the owner's to
+            //    decide: whether an administrator may ADD password sign-in
+            //    to an account that already has one of those. That is a
+            //    second way into the account rather than a correction, and
+            //    the recovery runbook treats the three ways in as separate
+            //    things to find and close one by one (section 7.3). So
+            //    this refuses and says so plainly. It does NOT tell the
+            //    administrator to use "Forgot password" instead: that
+            //    page joins tblLocalAccounts, so it finds nothing for an
+            //    account with no sign-in row either. There is no way round
+            //    this today, which is the honest thing to say and is
+            //    written up as its own issue rather than guessed at here.
+            $otherWays = Auth::countLoginMethods($userID, $mysqli);
+            if ($otherWays > 0) {
+                $_SESSION['flash_msg']  = 'No password was set, and nothing else was saved either. This account has '
+                    . 'no password of its own — it signs in another way, with Microsoft or Google or with a passkey. '
+                    . 'This page does not add a password to such an account, because that would be a second way in '
+                    . 'rather than a correction. Clear the New Password box and press Save again to store your other '
+                    . 'changes.';
+                $_SESSION['flash_type'] = 'warning';
+                header('Location: ' . Site::url('admin/users'));
+                exit();
+            }
+
+            // 🏷️ The sign-in name for the row that is about to be made. A
+            //    row cannot exist without one: tblLocalAccounts.username
+            //    is NOT NULL, holds 50 characters, and is unique across
+            //    the whole installation. The account's e-mail address is
+            //    used, which is what the installer and the users API both
+            //    do when they create a row with nobody to ask. It matters
+            //    less than it looks: Auth::loginLocal() accepts EITHER the
+            //    sign-in name or the account's e-mail address, so the
+            //    person signs in with the address they already know
+            //    whatever this value is. The address as this save will
+            //    store it is used, not the one on file, so the two agree.
+            $signInName = $emailAddress;
+            // 📏 mb_strlen, not strlen: VARCHAR(50) counts CHARACTERS, so
+            //    counting bytes would refuse an address that fits. The
+            //    installer has the same limit and the same wording for it.
+            if (mb_strlen($signInName, 'UTF-8') > 50) {
+                $_SESSION['flash_msg']  = 'No password was set, and nothing else was saved either. This account has '
+                    . 'never had a password, so a sign-in has to be created for it, and its sign-in name would be '
+                    . 'this e-mail address — which is longer than 50 characters, the most a sign-in name can hold. '
+                    . 'Give the account a shorter e-mail address first, then set the password.';
+                $_SESSION['flash_type'] = 'danger';
+                header('Location: ' . Site::url('admin/users'));
+                exit();
+            }
+            // 🔍 Is that sign-in name free? The unique key is what really
+            //    guarantees it — two administrators saving at once would
+            //    still be caught there, and the failure below rolls the
+            //    whole save back — but asking first is what lets this say
+            //    WHY rather than "the account could not be saved". The
+            //    column's collation ignores capitals, and so does this
+            //    comparison, which is what the unique key does too.
+            //    Nothing is said about whose name it is: that is not this
+            //    administrator's to know (#521).
+            $stmt = $mysqli->prepare('SELECT localID FROM tblLocalAccounts WHERE username = ? LIMIT 1');
+            if ($stmt === false) {
+                $_SESSION['flash_msg']  = 'The account could not be saved. Nothing was changed.';
+                $_SESSION['flash_type'] = 'danger';
+                header('Location: ' . Site::url('admin/users'));
+                exit();
+            }
+            $stmt->bind_param('s', $signInName);
+            $stmt->execute();
+            $nameTaken = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($nameTaken !== null) {
+                $_SESSION['flash_msg']  = 'No password was set, and nothing else was saved either. This account has '
+                    . 'never had a password, so a sign-in has to be created for it under its e-mail address, and '
+                    . 'that sign-in name cannot be used. Ask a global administrator to look into it.';
+                $_SESSION['flash_type'] = 'danger';
+                header('Location: ' . Site::url('admin/users'));
+                exit();
+            }
+            $makeSignIn = true;
+        }
+    }
+
     // 💾 Step 11: save everything in one transaction. Nothing above this
     //    point has written anything.
     App::beginTransaction();
@@ -421,25 +607,57 @@ if ($action === 'update') {
         $stmt->execute();
         $stmt->close();
 
+        // 🔑 #586: the password is stored whichever of the two cases step
+        //    10b found. There is no third case and no silent one: a
+        //    password that cannot be stored never reaches here, because
+        //    step 10b has already refused the whole save.
         if ($password !== '') {
             $hash = password_hash($password, PASSWORD_DEFAULT);
-            $stmt = $mysqli->prepare('SELECT localID FROM tblLocalAccounts WHERE userID = ? LIMIT 1');
-            if ($stmt === false) {
-                throw new \RuntimeException('Failed to prepare local account lookup: ' . $mysqli->error);
-            }
-            $stmt->bind_param('i', $userID);
-            $stmt->execute();
-            $localRow = $stmt->get_result()->fetch_assoc();
-            $stmt->close();
-
-            if ($localRow !== null) {
+            if ($makeSignIn === true) {
+                // isVerified is left at the column's default (0), as the
+                // Add User branch above leaves it. It gates nothing at
+                // sign-in — Auth::loginLocal() never reads it — and an
+                // administrator typing a password is not the person
+                // proving their e-mail address, so claiming otherwise
+                // would be untrue.
+                $stmt = $mysqli->prepare(
+                    'INSERT INTO tblLocalAccounts (userID, username, passwordHash) VALUES (?, ?, ?)'
+                );
+                if ($stmt === false) {
+                    throw new \RuntimeException('Failed to prepare sign-in creation: ' . $mysqli->error);
+                }
+                $stmt->bind_param('iss', $userID, $signInName, $hash);
+            } else {
                 $stmt = $mysqli->prepare('UPDATE tblLocalAccounts SET passwordHash = ? WHERE userID = ?');
                 if ($stmt === false) {
                     throw new \RuntimeException('Failed to prepare password update: ' . $mysqli->error);
                 }
                 $stmt->bind_param('si', $hash, $userID);
-                $stmt->execute();
-                $stmt->close();
+            }
+            $stmt->execute();
+            $stmt->close();
+
+            // 🧾 #586: ask the database what is really there, inside the
+            //    same transaction, BEFORE anything says "saved". Saying so
+            //    without looking is the whole fault. Only whether a hash
+            //    is PRESENT is read back — its length, never its value —
+            //    because a password and its hash are never read into this
+            //    page, printed, logged or recorded anywhere.
+            //    A hash of zero length is the "unusable" marker the
+            //    offboarding page and the runbook write, so it counts as
+            //    nothing stored.
+            $stmt = $mysqli->prepare(
+                'SELECT LENGTH(passwordHash) AS held FROM tblLocalAccounts WHERE userID = ? LIMIT 1'
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException('Failed to prepare password read-back: ' . $mysqli->error);
+            }
+            $stmt->bind_param('i', $userID);
+            $stmt->execute();
+            $heldRow = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($heldRow === null || (int) $heldRow['held'] === 0) {
+                throw new \RuntimeException('The new password was not stored for account #' . $userID . '.');
             }
         }
 
@@ -453,10 +671,25 @@ if ($action === 'update') {
         exit();
     }
 
-    // 📝 Step 12: success.
-    Logger::activity('UserUpdated', 'Updated user #' . $userID . ': ' . $fullName, $_SESSION['user_id'] ?? null);
+    // 📝 Step 12: success. #586: when a sign-in was CREATED the message
+    //    says so, because "updated successfully" on its own would not
+    //    tell an administrator that this account can now be signed in to
+    //    with a password where before it could not. The sign-in name is
+    //    named because the person can type either that or their e-mail
+    //    address. Neither the message nor the record ever carries the
+    //    password or any part of its hash.
+    Logger::activity(
+        'UserUpdated',
+        'Updated user #' . $userID . ': ' . $fullName
+            . ($makeSignIn === true ? ' (a password sign-in was created for this account)' : ''),
+        $_SESSION['user_id'] ?? null
+    );
 
-    $_SESSION['flash_msg']  = 'User "' . $fullName . '" updated successfully.';
+    $_SESSION['flash_msg']  = 'User "' . $fullName . '" updated successfully.'
+        . ($makeSignIn === true
+            ? ' A password sign-in was created for this account, under the sign-in name "' . $signInName . '"; '
+              . 'the person can sign in with that or with their e-mail address.'
+            : '');
     $_SESSION['flash_type'] = 'success';
     header('Location: ' . Site::url('admin/users'));
     exit();

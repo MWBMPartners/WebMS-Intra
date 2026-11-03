@@ -25,10 +25,16 @@
  * CHANGES
  * -------------------------------------------------------------------------
  * Every role now belongs to ONE organisation. Each organisation starts with
- * the same fourteen "standard" roles (`STANDARD` below), may RENAME any of
+ * the same "standard" roles (`STANDARD` below — count them with
+ * `count(Roles::STANDARD)` rather than trusting a number in prose; it was
+ * fourteen until #724 made it fifteen, and six places said "fourteen"), may
+ * RENAME any of
  * them, and may add roles of its own. The role's KEY (`roleKey`, e.g.
  * 'treasurer') never changes once a role exists — it is what every one of
- * the 66 `App::hasRole()` call sites, every workflow assignee, every
+ * every `App::hasRole()` call site (count them with
+ * `grep -rhoE "App::hasRole\(" web --include='*.php' | wc -l` — it was
+ * written here as 66 and measured 86 on 3 November 2026, of which 62 pass a
+ * literal key and 24 a variable), every workflow assignee, every
  * newsletter segment and every report gate compares against. The role's
  * LABEL (`roleName`, e.g. "Treasurer") is what a person actually sees, and
  * an organisation may change it freely at any time — see
@@ -84,7 +90,7 @@ use mysqli;
 final class Roles
 {
     /**
-     * The fourteen roles every organisation starts with, in the exact
+     * The standard roles every organisation starts with, in the exact
      * order and with the exact key/label/description text migration 202's
      * A9 seed and `full_schema.sql`'s matching fold-in block use.
      * `tools/audit-checks/check_role_keys.py` compares all three lists
@@ -151,6 +157,34 @@ final class Roles
             'label'       => 'Event Coordinator',
             'description' => 'An audience for newsletters, workflows, reminders and shared calendars. '
                 . 'Coordinating a particular event is set on that event, not here.',
+        ],
+        // 🛡️ ADDED 3 November 2026 (#724). The person answerable for personal
+        //    data under the UK GDPR, which is a named responsibility rather
+        //    than a job title: it may be held by a global administrator, by
+        //    another administrator, or by somebody who administers nothing at
+        //    all, and it moves from one person to another over time. That is
+        //    the whole reason it is a ROLE and not a flag on an account.
+        //
+        //    ⚠️ ITS GATE IS THE ONE EXCEPTION IN THE PORTAL, and the exception
+        //       is deliberate (the owner, 3 November 2026). Every other gate
+        //       asks `App::hasRole()`, which answers TRUE for any global
+        //       administrator without a role row — by design since #516. This
+        //       one asks `Roles::has()` directly, so a global administrator who
+        //       has NOT been granted it is refused. Without that the role would
+        //       change nothing: an installation's administrator and an
+        //       organisation's may be different parties, and a hosting
+        //       provider's administrator should not be the person reading a
+        //       member's own words to decide whether they must go.
+        //
+        //       Migration 241 therefore GRANTS it to the first administrator of
+        //       each organisation. Seeding the role without granting it would
+        //       be the #499 shape: nobody would hold it, the erasure review
+        //       would be unreachable, and requests cannot close while an item
+        //       is unreviewed.
+        'data_controller' => [
+            'label'       => 'Data Controller',
+            'description' => 'Answerable for personal data: reviews the free text an erasure cannot '
+                . 'decide about on its own, and decides what goes',
         ],
     ];
 
@@ -489,7 +523,7 @@ final class Roles
     // =========================================================================
 
     /**
-     * Seed the fourteen standard roles for one organisation — called both
+     * Seed the standard roles for one organisation — called both
      * from migration 202's A9 statement (existing organisations, and every
      * fresh install via the `full_schema.sql` fold) and from
      * `admin/sites/save.php`'s create branch (a brand-new organisation, in

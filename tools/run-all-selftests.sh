@@ -164,6 +164,7 @@ expense-payment-race|tools/expense-payment-race-selftest.php|selftest_expensepay
 expense-edit|tools/expense-edit-selftest.php|selftest_expenseedit|
 my-volunteering|tools/my-volunteering-selftest.php|selftest_myvolunteering|
 gdpr-eraser|tools/gdpr-eraser-selftest.php|selftest_gdpreraser|web:gdpr-eraser
+erasure-review|tools/erasure-review-selftest.php|selftest_erasurereview|
 held-texts|tools/held-texts-selftest.php|selftest_heldtexts|
 setting-limit|tools/setting-limit-selftest.php|selftest_limit|
 rate-limit-privacy|tools/rate-limit-privacy-selftest.php|selftest_ratelimit|
@@ -180,6 +181,7 @@ portal-address|tools/portal-address-selftest.php|selftest_portaladdress|web:port
 site-addresses|tools/site-addresses-selftest.php|selftest_siteaddresses|web:site-addresses SELFTEST_WEB_PORT=9650
 page-scripts|tools/page-scripts-selftest.php|selftest_pagescripts|web:page-scripts SELFTEST_WEB_PORT=9651
 erasure-pages|tools/erasure-pages-selftest.php|selftest_erasurepages|web:erasure-pages SELFTEST_WEB_PORT=9071
+admin-password|tools/admin-password-selftest.php|selftest_adminpwd|web:admin-password SELFTEST_WEB_PORT=9086
 event-repeat-pages|tools/event-repeat-pages-selftest.php|selftest_evrep|web:event-repeat SELFTEST_WEB_PORT=9077
 transcription-pages|tools/transcription-pages-selftest.php|selftest_transcription|web:transcription SELFTEST_WEB_PORT=9081
 settings-secrets|tools/settings-secrets-selftest.php|selftest_settingssecrets|web:settings-secrets SELFTEST_WEB_PORT=9640 SELFTEST_MAIL_PORT=9641
