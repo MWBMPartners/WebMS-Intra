@@ -2642,6 +2642,16 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     on the register's SHAPE and on this file pointing rather than restating; **it cannot tell whether anybody
     searched the register, nor whether a decision is true.**
 
+46. **REPORT AT A COMMIT BOUNDARY, AND KEEP GOING IN THE SAME TURN (the owner, 4 November 2026 — D-045).**
+    A commit is a place to SAY WHAT LANDED, not a place to stop. Commit, give a few lines on what landed and what
+    is next, and **in the same turn make the next tool call**. "A clean working tree" and "everything is committed
+    and pushed" are STATUS LINES, NOT CONCLUSIONS — a clean tree is the cheapest moment to start the next thing,
+    because nothing is half-done. **Why it kept happening, named so it can be caught:** a commit boundary FEELS
+    like a finish — tests green, something satisfying to report — so the report gets written as a closing statement
+    instead of an aside, and the owner then has to nudge for work that was already decided. The only reasons to end
+    a turn remain a question only the owner can answer (ask it and carry on with everything not blocked), or
+    something genuinely destructive needing approval first. Sharpens rule D-009 (never wait for a nudge).
+
 ## Gating a feature is a CAPABILITY, never a hard-coded role (the owner, 3 November 2026 — D-017)
 
 Set when the owner decided #727's scope: *"all remaining features pointable as

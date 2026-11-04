@@ -100,7 +100,8 @@ appended with its real date and a note that it was added later.
 | [D-042](042-a-downloaded-snapshot-is-protected-by-a-selectable-combination.md) | 2026-10-29 | A downloaded snapshot is protected by a selectable combination | in force |
 | [D-043](043-transcription-gets-its-trigger-not-a-notice.md) | 2026-10-29 | Transcription gets its trigger, not a notice | in force |
 | [D-044](044-a-started-series-is-still-published-as-one-entry.md) | 2026-10-29 | A series that has already started is still published as one entry | in force |
+| [D-045](045-report-at-a-commit-boundary-and-keep-going.md) | 2026-11-04 | Report at a commit boundary, and keep going in the same turn | in force |
 
-*44 decisions. This index is checked against the folder by
+*45 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*

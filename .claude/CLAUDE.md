@@ -399,6 +399,26 @@ Three traps matter only in one part of the code, so they live in `.claude/rules/
 The quoted names are the old section headings, kept here because code comments and other documents still point at them by name.
 Codex reads the same rules as rules 13, 14, 15 and 17 of `.OpenAI/CONTEXT.md`. Change both together.
 
+## Report at a commit boundary — and keep going in the same turn (D-045)
+
+The owner, 4 November 2026, having said it more than once: *"as stated
+previously report on those commit boundaries, but continue to run, dont stop!"*
+
+**A commit is a place to say what landed, not a place to stop.** A clean working
+tree is not permission to end the turn — it is the cheapest moment to start the
+next thing, because nothing is half-done. Commit, say in a few lines what landed
+and what is next, and **in the same turn make the next tool call**.
+
+**Why it kept happening**, named so the next reader can catch it: a commit
+boundary FEELS like a finish. The tests are green, there is something
+satisfying to report, and the report gets written as a closing statement instead
+of an aside. The cost falls on the owner, who then has to nudge for work that
+was already decided.
+
+The only reasons to end a turn remain the ones that were always allowed: a
+question only the owner can answer — ask it and carry on with everything not
+blocked — or something genuinely destructive that needs approval first.
+
 ## Every decision is in `.claude/DECISIONS.md`, and it is SEARCHED before any question
 
 Set by the owner on 4 November 2026: *"we need to be firm about recording
