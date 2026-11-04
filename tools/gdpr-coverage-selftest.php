@@ -2091,12 +2091,30 @@ check(
 $processCode = $codeOnly((string) @file_get_contents(__DIR__ . '/../web/_apps/admin/erasure/process.php'));
 $askAt       = strpos($processCode, '$stillWaiting === true && GdprEraser::runHasChangedAnything($requestId) === true');
 $cancelAt    = strpos($processCode, 'UPDATE tblErasureRequest SET status = "cancelled"');
+// 🚫 THE REFUSAL MUST LIE BETWEEN THE QUESTION AND THE WRITE, which is the
+//    property actually being asserted — not "an exit() within 1,100
+//    characters of the question", which is what this used to ask.
+//
+//    Measured on 4 November 2026: the question sits at byte 1,500 and the
+//    `UPDATE … status = "cancelled"` at 2,391, a gap of 891, so the 1,100
+//    window reached **209 characters PAST the write**. Exactly one `exit();`
+//    lies between them — the gate's own. So the old form was sound only
+//    because no other refusal happened to sit in that slack, and any new one
+//    added just after the cancel write would have restored the fault, on the
+//    guard that stops an erasure request being cancelled after it has already
+//    changed somebody's records. This is #742's shape, found in this file by
+//    an independent check rather than by the #742 sweep.
+//
+//    Asking for the position needs no brace walk and no window: a refusal
+//    after the write cannot satisfy it, because it is not before the write.
+$refuseAt    = $askAt === false ? false : strpos($processCode, 'exit();', $askAt);
 $hasRun      = $method($eraserCode, 'givingStepHasRun');
 $hasChanged  = $method($eraserCode, 'runHasChangedAnything');
 $trailLine   = $method($eraserCode, 'trailHasLine');
 check(
     'a request whose run has changed ANYTHING cannot be cancelled: the page asks before it writes "cancelled", leaves with a message, and the question covers a deleted row, an emptied column and a kept name, and answers "yes" when it cannot tell',
-    $askAt !== false && $cancelAt !== false && $askAt < $cancelAt && str_contains(substr($processCode, $askAt, 1100), 'exit();')
+    $askAt !== false && $cancelAt !== false && $askAt < $cancelAt
+    && $refuseAt !== false && $refuseAt < $cancelAt
     && str_contains($processCode, 'This request cannot be cancelled') && str_contains($processCode, 'Run the request again to finish')
     && str_contains($processCode, 'GdprEraser::givingStepHasRun(') === false
     && str_contains($hasChanged, 'self::givingStepHasRun($requestId) === true')

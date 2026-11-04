@@ -37,12 +37,28 @@ both directions: four shapes that must be caught (the `htmlspecialchars` form,
 `Site::url()`, a `header('Location: ')`, and a `Router::url()` with a query
 string) and five that must stay quiet (`require __DIR__`, a leading comment, a
 relative route target, an `is_file(PORTAL_APPS . …)`, and a correct
-`Site::url('admin/users')`). Its header now records four things it still cannot
-see, including one it shares with the patterns that were already there: **a
-trailing comment quoting such an address IS reported**, which was measured and
-left alone on purpose, because stripping a trailing `//` would cut a line at
-the `//` inside any `https://` string — a fault this repository has already
-paid for (#716).
+`Site::url('admin/users')`).
+
+**And the silencing list was matched by SUBSTRING, which an independent check
+measured the cost of.** Of 3,740 lines under `web/` carrying an address
+marker, **13 were silenced and not one of them for a file reason**: `require`
+matched `?err=required`, `dbs_required_for_coordinators` and the ordinary prose
+"are required."; `include` matched help-page prose; and `unlink` matched the
+real **address** `Site::url('account/unlink')` — five lines in
+`web/_apps/auth/account/unlink.php` alone, so the check went quiet on exactly
+the kind of line it exists to read. The markers are whole words now, and calls
+where they are functions. Three more plants prove it: an address followed by
+`?err=required`, a `/account/unlink.php` address, and one on a line ending
+"fields are required." — all three were silenced before and all three are
+caught now, while `require __DIR__`, `is_file(PORTAL_APPS . …)` and
+`basename('/admin/users.php')` on a line containing the word `href` stay
+quiet. Its header lists what it still cannot see — read it
+rather than trusting a count here, because the first version of this sentence
+said "four things" and there were five. One of them it shares with the patterns
+that were already there: **a trailing comment quoting such an address IS
+reported**, measured and left alone on purpose, because stripping a trailing
+`//` would cut a line at the `//` inside any `https://` string — a fault this
+repository has already paid for (#716).
 
 **#742 — two checks proved a refusal by a pattern that could find the NEXT
 refusal in the same file.** `tools/capabilities-selftest.php` asked whether a
@@ -77,11 +93,47 @@ was proved by planting its `exit()` away: five plants, five reds, each restored
 byte-identically.
 
 **Two checks that look like the same shape and are NOT**, so they were left
-alone: `tools/expense-rules-selftest.php` lines 447 and 637 pin the money
-path's refusals with a pattern **anchored** at the start of a slice cut from
-the gate itself, spelling out the whole block. A deleted `exit()` cannot be
-satisfied by a later one there. The other 54 apparent matches across the tests
-are the harness's own built-in-server router, not refusal pins.
+alone: the two in `tools/expense-rules-selftest.php` pinned on
+`ExpenseRules::isOwnClaim(...)`. They are **anchored** at the start of a slice
+cut from the gate itself and spell out the whole block, so a deleted `exit()`
+cannot be satisfied by a later one — proved by planting, which the first
+version of this entry had only argued by reading.
+
+**AND THE SWEEP WAS NOT AS COMPLETE AS THIS ENTRY FIRST CLAIMED.** It said "the
+other 54 apparent matches across the tests are the harness's own
+built-in-server router, not refusal pins". The independent check could not
+reproduce 54 from any search — the natural figure is **53**, `exit('403')` 27
+times plus `exit('404')` 26, which really are the router shims — and, more to
+the point, **the rest are not all router shims.** There are at least **seven**
+other genuine refusal pins across `tools/`:
+
+| Pin | How it cuts its block | Sound? |
+|---|---|---|
+| `capabilities-selftest.php`, the "could not read the role key" branch | was indentation, **now the walk** | yes, planted |
+| `expense-payment-race-selftest.php` | brace walk | yes |
+| `expense-rules-selftest.php` (a third pin) | brace walk to the matching close | yes |
+| `expense-withdraw-selftest.php` | exact squeezed text | yes |
+| `setting-limit-selftest.php` | indentation | yes |
+| `retention-caps-selftest.php` | indentation | yes |
+| `gdpr-coverage-selftest.php` | **was a 1,100-character window** | **changed** |
+
+Two needed action. The **sixth pin in `capabilities-selftest.php` itself** still
+cut by indentation, which made "`cap_blockFrom()` is the one way a block is cut
+in that file" untrue while four documents said it; converted, and it was sound
+before (planted). And **`gdpr-coverage-selftest.php` asked for an `exit();`
+within 1,100 characters of its question** — #742's own shape, on the guard that
+stops an erasure request being cancelled after it has already changed
+somebody's records. Measured: the question sits at byte 1,500 and the
+`UPDATE … "cancelled"` at 2,391, so the window reached **209 characters past
+the write**, with exactly one `exit();` in between. It now asks the question
+actually meant — **is the refusal before the write?** — which needs no window
+and no brace walk, and which a refusal added after the write cannot satisfy.
+**Honest limit: no plant was found that fooled the old window form, so this
+rests on the arithmetic and on the better property, not on a demonstrated
+failure.** Deleting the gate's own `exit();` turns the new form red (planted).
+
+The remaining four are sound and left alone; a shared block-cutting helper
+across the self-tests is its own piece of work.
 
 **Found, not built — raised as its own issue.** The in-string blindness is
 wider than #743: a **bare** address with no `.php` in it is invisible to

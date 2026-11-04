@@ -104,6 +104,22 @@ PATTERNS = [
 #   * It cannot see an address built by joining pieces
 #     (`'/admin/' . $page . '.php'`), which is the same limit the literal
 #     patterns have.
+#   * **A line that genuinely does BOTH is silenced.** The file markers are
+#     now whole words and calls rather than substrings, so ordinary prose no
+#     longer silences anything — but a line that really holds a file operation
+#     AND an address in a string still goes unreported, for example
+#     `echo '<a href="' . htmlspecialchars('/x.php') . '">' . basename($f);`.
+#     Measured; one line, judged not worth the cry-wolf risk of dropping the
+#     list.
+#   * **An address with a fragment is missed** — `'/admin/users.php#frag'`
+#     does not match, because the pattern wants the closing quote straight
+#     after `.php` or after a query string. Measured.
+#   * **`sprintf('/admin/%s.php', $x)` is missed.** It is not joining pieces,
+#     so the line above does not cover it; named here because somebody will
+#     look for it.
+#   * **The in-string rule reads `.php` files only.** The patterns above still
+#     run over `.js` and `.html`, so nothing is lost for them — a PHP string
+#     is the thing being looked for.
 #   * **A TRAILING comment that quotes such an address IS reported.** A line
 #     beginning with a comment marker is skipped, but
 #     `$x = 1; // never write href="/admin/users.php"` is not. Measured on
@@ -134,27 +150,54 @@ ADDRESS_MARKERS = (
 
 # Shows the value is a FILE, not an address. These are the legitimate uses the
 # check must stay quiet about.
-FILE_MARKERS = (
-    "require",
-    "include",
-    "__DIR__",
-    "dirname(",
-    "file_get_contents",
-    "file_put_contents",
-    "file_exists",
-    "is_file",
-    "is_readable",
-    "realpath",
-    "unlink",
-    "basename(",
-    "targetFile",
-    "PORTAL_APPS",
-    "PORTAL_WEBROOT",
-    "opendir",
-    "scandir",
-    "glob(",
-    "token_get_all",
-    "SplFileInfo",
+#
+# MATCHED AS WHOLE WORDS, AND AS CALLS WHERE THEY ARE FUNCTIONS — the first
+# version matched them as plain SUBSTRINGS anywhere on the line, and an
+# independent check measured what that silenced. Of 3,740 lines under `web/`
+# carrying an address marker, **13 were silenced and not one of them for a
+# file reason**:
+#
+#   * `require` matched `?err=required`, `dbs_required_for_coordinators`, and
+#     the ordinary prose "are required.";
+#   * `include` matched prose in the help pages;
+#   * `unlink` matched the real ADDRESS `Site::url('account/unlink')` — five
+#     lines in `web/_apps/auth/account/unlink.php` alone, i.e. the check went
+#     quiet on exactly the kind of line it exists to read.
+#
+# A silencing list matched by substring gets wider every time somebody writes
+# an ordinary English word, and it goes wider silently. Word boundaries and a
+# following `(` cost nothing and keep it meaning what it says.
+FILE_MARKERS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        # Language constructs: whole words, so `required` is not `require`.
+        r"\brequire(?:_once)?\b",
+        r"\binclude(?:_once)?\b",
+        r"__DIR__",
+        r"__FILE__",
+        # Functions: a call, so the ADDRESS `account/unlink` is not `unlink()`.
+        r"\bdirname\s*\(",
+        r"\bbasename\s*\(",
+        r"\bfile_get_contents\s*\(",
+        r"\bfile_put_contents\s*\(",
+        r"\bfile_exists\s*\(",
+        r"\bis_file\s*\(",
+        r"\bis_dir\s*\(",
+        r"\bis_readable\s*\(",
+        r"\bis_writable\s*\(",
+        r"\brealpath\s*\(",
+        r"\bunlink\s*\(",
+        r"\bopendir\s*\(",
+        r"\bscandir\s*\(",
+        r"\bglob\s*\(",
+        r"\btoken_get_all\s*\(",
+        r"\bfopen\s*\(",
+        # Names that only ever mean a file path here.
+        r"\btargetFile\b",
+        r"\bPORTAL_APPS\b",
+        r"\bPORTAL_WEBROOT\b",
+        r"\bSplFileInfo\b",
+    )
 )
 
 SKIP_DIRS = {".git", "node_modules", "_libraries", "vendor", "_backups", "_uploads"}
@@ -194,7 +237,7 @@ def check() -> int:
                 # what else is on the line — see PHP_STRING_ADDRESS above.
                 if path.suffix != ".php":
                     continue
-                if any(marker in line for marker in FILE_MARKERS):
+                if any(marker.search(line) for marker in FILE_MARKERS):
                     continue
                 if not any(marker in line for marker in ADDRESS_MARKERS):
                     continue

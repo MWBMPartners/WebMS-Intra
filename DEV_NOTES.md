@@ -16413,11 +16413,28 @@ the read file's indentation and made the caller supply N, and both blocks in
 question contain braces of their own. **Two ways of doing one thing in one file
 is the fault, even when both happen to work.**
 
-Two checks that look identical and are not: `tools/expense-rules-selftest.php`
-lines 447 and 637 **anchor** their pattern at the start of a slice cut from the
-gate itself and spell out the whole block, so a deleted `exit()` cannot be
-satisfied by a later one. Left alone. The other 54 apparent matches across the
-tests are the harness's own built-in-server router.
+Two checks that look identical and are not: the two in
+`tools/expense-rules-selftest.php` pinned on `ExpenseRules::isOwnClaim(...)`
+**anchor** their pattern at the start of a slice cut from the gate itself and
+spell out the whole block, so a deleted `exit()` cannot be satisfied by a later
+one. Left alone — and proved by planting, not merely by reading.
+
+**And "the other 54 apparent matches are the harness's own router" was wrong
+twice over, which is the lesson.** The figure could not be reproduced from any
+search (53 is the natural one: `exit('403')` 27 plus `exit('404')` 26), and the
+remainder are NOT all router shims — there are at least **seven** other genuine
+refusal pins across `tools/`. **Cite the command, not the answer** — #727's own
+rule, broken in the package that quotes it.
+
+Two of the seven needed action: a **sixth** pin in `capabilities-selftest.php`
+still cut by indentation, which made "one way of cutting a block in this file"
+untrue; and `gdpr-coverage-selftest.php` asked for an `exit();` **within 1,100
+characters** of its question, on the guard that stops an erasure request being
+cancelled after it has already changed records. The question sits at byte 1,500
+and the write at 2,391, so the window reached 209 characters past it. It asks
+the meaningful question now — **is the refusal before the write?** — and **no
+plant was found that fooled the old form, so the change rests on the arithmetic
+and on the better property, not on a demonstrated failure.**
 
 ### #743 — the form a check cannot see is the form the codebase uses
 

@@ -261,11 +261,34 @@ function cap_codeOnly(string $path): string
  * no handling because every caller passes code from `cap_codeOnly()`, which
  * drops them with PHP's own tokeniser.
  *
- * WHAT IT CANNOT DO, said plainly because an overstated guarantee is worse
- * than none: it does not understand heredocs (`<<<SQL`), so a `{` inside one
- * would unbalance the walk — it answers '' in that case, which FAILS the
- * check rather than passing it, which is the safe direction. No handler read
- * here uses one.
+ * HEREDOCS, AND A GUARANTEE THAT WAS FALSE IN THE DANGEROUS DIRECTION
+ * ------------------------------------------------------------------
+ * The first version of this docblock said a heredoc "answers '' in that case,
+ * which FAILS the check rather than passing it, which is the safe direction".
+ * **That was wrong, and wrong the dangerous way round** — found by the
+ * independent check, which measured it rather than reading it.
+ *
+ * A `{` inside a heredoc pushes the walk one level deeper, so the block does
+ * not end at its own closing brace: it ends at the ENCLOSING one, swallowing
+ * whatever lies between — including the NEXT refusal's `exit();`. It answers
+ * '' only when nothing encloses the block, and **all five blocks this is used
+ * on are enclosed** (depth 1 in `roles/save.php` and `settings/save.php`,
+ * depth 2 in `settings/index.php`). Measured: a heredoc holding a `{` added
+ * inside the `$roleKeys` refusal **with its `exit();` deleted** left the whole
+ * self-test GREEN at 225 of 225, over a gate that falls through to the save.
+ *
+ * So the walk now REFUSES when it sees a heredoc opener between the condition
+ * and the brace it matched, which makes the stated safe direction true instead
+ * of merely claimed. No handler read here uses one today (`<<<` appears in
+ * none of the three files, checked), so this costs nothing and is there for
+ * the day one does.
+ *
+ * ONE MORE THING IT CANNOT DO, measured by the same check: the walk steps over
+ * string literals, but the `str_contains($block, 'exit();')` its callers do
+ * afterwards does NOT. A block whose own flash message contained the text
+ * `exit();` would satisfy the caller with the real call gone. Contrived rather
+ * than realistic — no message here contains it — and said out loud rather than
+ * left to be discovered.
  */
 function cap_blockFrom(string $code, string $condition): string
 {
@@ -313,7 +336,18 @@ function cap_blockFrom(string $code, string $condition): string
         if ($ch === '}') {
             $depth--;
             if ($depth === 0) {
-                return substr($code, $at, $i - $at + 1);
+                $block = substr($code, $at, $i - $at + 1);
+
+                // 🚫 A heredoc makes this answer untrustworthy, so refuse it.
+                //    See the docblock: a `{` inside one pushes the walk a level
+                //    deeper and the block runs on to the ENCLOSING brace,
+                //    swallowing the next refusal's `exit();`. Refusing here is
+                //    what makes "it fails rather than passing" true.
+                if (str_contains($block, '<<<') === true) {
+                    return '';
+                }
+
+                return $block;
             }
         }
     }
@@ -1155,15 +1189,13 @@ cap_check(
 //    transient database failure skipped the guard and deleted the role anyway,
 //    emptying a capability's set with nobody confirming it. "We could not tell"
 //    must never become "nobody has, go ahead" (#647's rule).
-$couldNotRead = (static function (string $code): string {
-    $at = strpos($code, 'if ($roleKeyRow === null) {');
-    if ($at === false) {
-        return '';
-    }
-    $close = strpos($code, "\n    }", $at);
-
-    return $close === false ? '' : substr($code, $at, $close - $at);
-})($saveCode);
+// 🧱 This was the SIXTH refusal pin in this file and the last one still
+//    cutting its block by indentation — which made "cap_blockFrom() is the one
+//    way a block is cut in this file" untrue while four documents said it. An
+//    independent check found it. It was sound (planted: deleting its own
+//    `exit();` turned the test red), so nothing was broken; what was wrong was
+//    the claim. One way now, not two.
+$couldNotRead = cap_blockFrom($saveCode, 'if ($roleKeyRow === null) {');
 cap_check(
     'a role key it could not READ refuses the delete, whole condition',
     $couldNotRead !== '',
