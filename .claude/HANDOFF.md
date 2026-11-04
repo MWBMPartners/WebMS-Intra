@@ -50,39 +50,61 @@ push, and no pull request until the Codex review is done.
 ## Next, in this order
 
 The owner reordered on 3 November: **everything critical and high priority
-first, then the rest of the queue.**
+first, then the rest of the queue.** D-024 then settled what had been blocking
+the branch rules, so that comes first.
 
-1. **#654 — a live, measured fault.** A date cancelled with `EXDATE` comes back
+1. **The version number moves to release time — D-024.** `package.yml` sets it
+   once when a release is built; `version-bump.yml` and `changelog.yml` stop
+   writing to `alpha` and `beta`. **This is what closes #476, #748 and the
+   remaining half of #474**, and brings `alpha`'s number back in line (it
+   reports 1.4.0 against 1.4.1 on beta and main).
+2. **The decisions and notes cleanup — #751.** Four items, each small: fold the
+   four memory files' decisions into the register and leave pointers; record
+   each decision on its own relevant issue where it is not already; carry the
+   structure to the other repositories on this device; and the standing
+   maintenance pass — read the register against the code and the instruction
+   files and realign what has drifted. The handoff's own list is already
+   pointers.
+3. **#728 — one place sets a password.** Then **#731** (D-026), which also needs
+   a reading pass of `github.com/MWBMPartners/SIGNula.id` first.
+4. **#654 — a live, measured fault.** A date cancelled with `EXDATE` comes back
    if it falls in the hour that happens twice, in the form Google, Apple and
    Outlook all write. Pre-existing, reproduced against the committed
-   `IcsReader.php`, NOT fixed by #653. `web/_core/IcsReader.php` plus
-   `tools/ics-reader-selftest.php`.
-2. **#732 — no HTTP test for the two erasure-review pages.** The #724 checker
+   `IcsReader.php`, NOT fixed by #653.
+5. **#732 — no HTTP test for the two erasure-review pages.** The #724 checker
    called it the most valuable thing left: removing `AND siteID = ?` from both
    pages and `Auth::verifyCsrf()` from the save left 52 audit scripts and 91/91
-   checks green. A section in `tools/erasure-pages-selftest.php`.
-3. **#475 part 2** — what DreamHost actually offers; a systematic list of the
+   checks green.
+6. **#475 part 2** — what DreamHost actually offers; a systematic list of the
    real differences between the engines; whether the calendar self-tests should
    also run on MySQL 9.7 and MariaDB 12.3.
-4. The rest of the high block: #225, #477, #485, #493, #499, #500, #511, #549,
-   #569, #594, #637, #678, #739, #746, #748, #749.
-5. Then: #582 · #620, #596, #588 · #649, #541 · #703 (decided), #539, #619 ·
-   #476, #146.
-6. Then the comprehensive Codex review of the whole branch, then the merge.
+7. The rest of the high block: #225, #477, #485, #493, #499, #500, #511, #549,
+   #569, #594, #637, #678, #739, #746, #749.
+8. Then: #582 · #620, #596, #588 · #649, #541 · #539, #619 · #146.
+9. Then the comprehensive Codex review of the whole branch, then the merge.
 
-## Decisions in force that a reader needs
+## Decisions in force — POINTERS ONLY
 
-- **Branch rules (3 November).** `main` requires `PHP -l lint` **and**
-  `Static security checks`, and **administrators no longer bypass** its rules.
-  `alpha`/`beta` deliberately unguarded — blocked on #748. #474 stays open.
-- **#744 (4 November).** The runbook-reference check is **binding**, and all 20
-  help pages are loaded over HTTP. Neither judges whether the advice is true.
-- **A capability, never a hard-coded role** (#727). `erasure.review` is the one
-  capability a global administrator does not fall open on.
-- **#703:** keep the name of who made a pastoral visit or safeguarding check.
-- **#723:** the booker IS the booking's subject — `purpose` and nothing else.
-- **Full check depth stays on every package.**
-- **Codex has reviewed none of this.**
+**Every decision lives once, in `docs/decisions/`, one file each** (the owner,
+4 November 2026 — D-027, issue #751). This list used to restate them, which is
+the duplication that caused the problem. It names them instead.
+
+| | Decision |
+|---|---|
+| **D-024** | The version number moves to release time — this is how #474, #476 and #748 close |
+| **D-022** | Administrators no longer bypass the live branch's rules |
+| **D-019** | MySQL 8.0 and MariaDB 10.6 stay accepted, with a warning — **do not raise the minimums** |
+| **D-026** | The SSO fallback password: stricter level wins, #728 first, SIGNula.id read first |
+| **D-025** | The help-page guards are binding, and all twenty pages are loaded |
+| **D-017** | Gating a feature is a capability, never a hard-coded role |
+| **D-016** | #703 keep the worker's name · #723 the booker is the subject · #715 own words emptied |
+| **D-015** | Full check depth on every package |
+| **D-013** | For a limit, the installation's value wins |
+| **D-012** | Packages sharing no files may run side by side |
+| **D-005** | Commit and push after an independent Claude check |
+| **D-027** | Decisions are recorded in `docs/decisions/` and searched before asking |
+
+**Codex has reviewed none of this work.**
 
 ## Nothing has run the new CI on GitHub
 
