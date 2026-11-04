@@ -474,7 +474,24 @@ check(
 // address the person is sent back to is now built by Router::url(), so it
 // stays inside their own organisation's address. The words, the test and the
 // order did not change.
-$noAuthority = "if (\$isAdmin === false && App::hasRole('Approver') === false) {\n"
+//
+// 🚪 AND ONE THING CHANGED ON 4 NOVEMBER 2026 (#739): the role test used to
+//    read `App::hasRole('Approver')` and is now
+//    `App::can(Capabilities::EXPENSES_APPROVE)`. That capability SHIPS
+//    pointing at the `approver` role and falls open for a global
+//    administrator, so for an installation that has never opened the Roles
+//    page it answers exactly what the old line answered — the same two
+//    grounds in the same order. What is new is that a customer may point the
+//    door at a role of their own without editing PHP.
+//
+//    ⚠️ THE PIN IS STILL THE WHOLE BLOCK, AND IT HAD TO BE UPDATED RATHER
+//       THAN LOOSENED. The temptation on seeing this check go red is to match
+//       the inside of the block and let the condition be anything; that would
+//       pass on `if (false && ...)`, and the department fall-back underneath
+//       is the only thing then standing between a signed-in member and the
+//       approvals handler. If this goes red again, read what the condition
+//       has become and decide whether it is right — do not widen the pattern.
+$noAuthority = "if (\$isAdmin === false && App::can(Capabilities::EXPENSES_APPROVE) === false) {\n"
     . "    \$approverDepts = Departments::approverDepts(\$mysqli, \$userId, \$siteId);\n"
     . "    if (count(\$approverDepts) === 0) {\n"
     . "        \$_SESSION['flash_msg']  = 'Access denied — Approver or Admin role required.';\n"

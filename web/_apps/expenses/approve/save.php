@@ -34,6 +34,7 @@ require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEP
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Departments;
 use Portal\Core\ExpenseRules;
 use Portal\Core\Logger;
@@ -87,7 +88,14 @@ $isAdmin = App::isAdmin();
 
 /** @var array<int, array{isDeptLead: bool, isMandatoryApprover: bool, isApprover: bool}>|null */
 $approverDepts = null;
-if ($isAdmin === false && App::hasRole('Approver') === false) {
+// 🚪 #739: was `App::hasRole('Approver')`. It is now the `expenses.approve`
+//    capability, which this organisation may point at roles of its own on the
+//    Roles page. It ships pointing at the `approver` role and falls open for a
+//    global administrator, so this answers exactly what it answered before on
+//    an installation that has never opened that page. The department-flag
+//    branch below is untouched: a lead or approver of a particular department
+//    still decides that department's claims with no role at all.
+if ($isAdmin === false && App::can(Capabilities::EXPENSES_APPROVE) === false) {
     $approverDepts = Departments::approverDepts($mysqli, $userId, $siteId);
     if (count($approverDepts) === 0) {
         $_SESSION['flash_msg']  = 'Access denied — Approver or Admin role required.';

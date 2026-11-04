@@ -29,6 +29,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\SmallGroups;
@@ -44,7 +45,12 @@ if (SmallGroups::isEnabled() === false) {
 }
 
 $siteId = Site::id();
-$isManageAll = App::isAdmin() === true || App::hasRole('groups_coordinator') === true;
+// 🚪 #739: was `App::hasRole('groups_coordinator')`. It is now the
+//    `groups.manage` capability, which this organisation may point at roles of
+//    its own on the Roles page. It ships pointing at `groups_coordinator` and
+//    falls open for a global administrator, so this answers exactly what it
+//    answered before on an installation that has never opened that page.
+$isManageAll = App::isAdmin() === true || App::can(Capabilities::GROUPS_MANAGE) === true;
 
 $groupId    = (int) ($_GET['id'] ?? 0);
 $editGroup  = $groupId > 0 ? SmallGroups::getGroup($siteId, $groupId) : null;

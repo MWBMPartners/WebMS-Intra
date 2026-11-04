@@ -184,16 +184,47 @@ ASK_IMPLEMENTATION = {"web/_core/App.php", "web/_core/Capabilities.php"}
 # different questions, so pointing the second at a custom role must NOT change
 # the first. Writing the reason down is the point: without it, the next reader
 # cannot tell a deliberate exception from one somebody forgot.
-HAS_ROLE_ON_PURPOSE = {
-    "web/_core/Giving.php": "`Giving::canManage()` asks for the `treasurer` role to open the "
-    "GIVING records — donors' names and home addresses. That is not "
-    "`expenses.treasury`, which is paying an approved expense claim, and a "
-    "customer who points the expenses treasury at a finance officer has not "
-    "thereby handed them the donor list. Giving is its own capability when "
-    "somebody asks for one.",
-}
+# 🫙 EMPTY SINCE #739 (4 November 2026), AND THE REASON IS WORTH KEEPING.
+#    It held one entry: `web/_core/Giving.php`, whose `canManage()` asked for
+#    the `treasurer` role directly, with the note that "giving is its own
+#    capability when somebody asks for one". #739 was somebody asking, so that
+#    gate is now `giving.records` and the entry had to GO — this list fails
+#    both ways, and a listed file that no longer makes such a call is itself a
+#    finding. Leaving it would have been a stale exception, which makes a check
+#    look stronger than it is (#641's lesson).
+#
+# ⚠️ DO NOT DELETE THE LIST. It is where the next deliberate same-key call goes.
+#    And note what it is NOT: it covers only a call naming an OFFERED
+#    capability's own `standard` role key. The general rule — no NEW
+#    `App::hasRole()` call anywhere under `web/`, whatever key it names — is
+#    `tools/audit-checks/check_no_new_role_gates.py`, which is where the three
+#    remaining calls are named with their reasons.
+HAS_ROLE_ON_PURPOSE: dict[str, str] = {}
 
 findings: list[str] = []
+# Files that vanished between the glob and the read — a note, never a finding.
+# See read_globbed() for why the two cases are answered differently.
+skipped: list[str] = []
+# Files already reported as unreadable or gone, so three loops over the same
+# tree report one file once.
+_read_problems: set[str] = set()
+
+
+def relative_to_repo(php: Path) -> str:
+    """The path as this repository writes it, so a message reads like every other."""
+    try:
+        return php.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return php.as_posix()
+
+
+def shown(php: Path) -> bool:
+    """True when this file has already been reported; records it if not."""
+    key = php.as_posix()
+    if key in _read_problems:
+        return True
+    _read_problems.add(key)
+    return False
 
 
 def fail(message: str) -> None:
@@ -204,6 +235,64 @@ def refuse(message: str) -> None:
     print("REFUSED: " + message)
     print("Nothing was checked.")
     sys.exit(2)
+
+
+def read_globbed(php: Path) -> str | None:
+    """
+    One file found by a `rglob`, or None when it is no longer there.
+
+    ⚠️ WHY THIS EXISTS: a file can VANISH between the glob and the read, and
+       until 4 November 2026 the three loops below read straight through
+       `read_text()` and died with a Python traceback when one did. That really
+       happened: the pre-push hook globs this folder, a push ran this check
+       while another process was adding and removing a file in the tree, and
+       the output was a `FileNotFoundError` naming a path that has nothing to
+       do with capabilities. In the hook's output that reads as the HOOK being
+       broken, which is the worst kind of failure — nobody can act on it, and
+       the honest answer ("nothing is wrong with the registry") is nowhere in
+       it. A concurrent `git checkout`, an editor's atomic save (write a
+       temporary file, rename over the target) or another tool working in the
+       tree all do the same thing.
+
+       The two cases are deliberately answered DIFFERENTLY, because they mean
+       different things:
+         - GONE: nothing to check. A file that does not exist cannot hold a
+           gate, so this is a note and not a finding. Failing on it would be
+           crying wolf at a race, and a check that cries wolf gets switched
+           off (#483).
+         - THERE BUT UNREADABLE (a permission, a directory in the way, an I/O
+           error): a FINDING. A file this check cannot read is a file it cannot
+           vouch for, and a check that cannot run must never look like a pass.
+       `errors="replace"` already covers unreadable CONTENT; this is the same
+       care for a file that has gone.
+
+    ⚠️ WHAT IS STILL BARE, said plainly rather than left to be discovered: the
+       reads of NAMED files (the three PHP sources, the two SQL files, the two
+       repair-page files and #724's two) do not go through this. Each has an
+       `is_file()` test immediately above it whose failure is already a
+       sentence naming the file, so the only remaining window is a file removed
+       between that test and the read — microseconds, on paths nothing in this
+       repository rewrites. If one of those ever does produce a traceback, the
+       cure is this helper and not a wider `try` round the whole script: a
+       blanket catch would turn a genuine fault into a shrug.
+    """
+    try:
+        return php.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        if shown(php) is False:
+            skipped.append(relative_to_repo(php))
+        return None
+    except OSError as problem:
+        # ONE report per file, however many of the three loops below meet it:
+        # the same path three times reads as three faults.
+        if shown(php) is False:
+            fail(
+                relative_to_repo(php)
+                + " could not be read (" + str(problem) + "), so this check cannot say whether "
+                "it asks a capability or gates on a role key. A file that cannot be read must "
+                "never pass quietly."
+            )
+        return None
 
 
 def mask_php(source: str) -> str:
@@ -241,6 +330,31 @@ def mask_php(source: str) -> str:
             out.append("  ")
             i += 2
             continue
+        # 📜 A HEREDOC OR NOWDOC — the branch that was missing, and whose
+        #    absence is the exact fault this walk exists to avoid. Measured on
+        #    the sibling check (`check_no_new_role_gates.py`, same walk): a
+        #    file holding `<<<'HTML'` … `<p>Don't change this</p>` … `HTML;`
+        #    and then a real gate made it report "Nothing wrong", because the
+        #    apostrophe in "Don't" opened a bogus string literal that swallowed
+        #    the call. Latent rather than live — the one nowdoc in the
+        #    repository today holds an EVEN number of apostrophes — and it
+        #    would fire the first time anybody wrote English prose in one.
+        if ch == "<" and source[i:i + 3] == "<<<":
+            opener = re.match(
+                r'<<<[ \t]*(?:"([A-Za-z_]\w*)"|\'([A-Za-z_]\w*)\'|([A-Za-z_]\w*))\r?\n',
+                source[i:],
+            )
+            if opener is not None:
+                label = opener.group(1) or opener.group(2) or opener.group(3)
+                out.append(opener.group(0))
+                i += opener.end()
+                closer = re.compile(r"^[ \t]*" + re.escape(label) + r"\b", re.M)
+                found = closer.search(source, i)
+                stop = found.start() if found is not None else n
+                for position in range(i, stop):
+                    out.append("\n" if source[position] == "\n" else "x")
+                i = stop
+                continue
         if ch in ("'", '"'):
             quote = ch
             out.append(quote)
@@ -696,7 +810,10 @@ for php in sorted(WEB.rglob("*.php")):
     relative = php.relative_to(REPO_ROOT).as_posix()
     if relative in ASK_IMPLEMENTATION:
         continue
-    text = mask_php(php.read_text(encoding="utf-8", errors="replace"))
+    raw = read_globbed(php)
+    if raw is None:
+        continue
+    text = mask_php(raw)
     if any(call in text for call in ASK_CALLS):
         really_asks.add(relative)
 
@@ -911,7 +1028,9 @@ HAS_ROLE_CALL = re.compile(r"App::hasRole\(\s*(?:'([^']*)'|\"([^\"]*)\"|(?:self|
 old_style: dict[str, list[str]] = {}
 for php in sorted(WEB.rglob("*.php")):
     relative = php.relative_to(REPO_ROOT).as_posix()
-    source = php.read_text(encoding="utf-8", errors="replace")
+    source = read_globbed(php)
+    if source is None:
+        continue
     # Comments blanked, strings KEPT — see without_comments() for why masking
     # them would make this check read nothing at all.
     code = without_comments(source)
@@ -967,7 +1086,10 @@ for php in sorted(WEB.rglob("*.php")):
     relative = php.relative_to(REPO_ROOT).as_posix()
     if relative == "web/_core/Capabilities.php":
         continue
-    code = without_comments(php.read_text(encoding="utf-8", errors="replace"))
+    raw_for_use = read_globbed(php)
+    if raw_for_use is None:
+        continue
+    code = without_comments(raw_for_use)
     # ⚠️ ONLY THE SHORT NAME NEEDS A `use` LINE, and the first version of this
     #    check did not know that — it searched for the text `Capabilities::`,
     #    which a FULLY QUALIFIED `\Portal\Core\Capabilities::` contains as a
@@ -1094,6 +1216,22 @@ print(
     + (", ".join(sorted(HAS_ROLE_ON_PURPOSE)) if len(HAS_ROLE_ON_PURPOSE) > 0 else "none")
 )
 print()
+
+# A file that vanished between the glob and the read is SAID OUT LOUD and is
+# not a finding. Saying it matters: if a real file were being removed under
+# this check again and again, a silent skip would look exactly like a clean
+# run. See read_globbed().
+if len(skipped) > 0:
+    print(
+        "ℹ️  "
+        + str(len(skipped))
+        + " file(s) disappeared between being listed and being read, so nothing was checked in "
+        "them. A file that is not there cannot hold a gate, so this is not a finding — but if "
+        "you see it on a quiet tree, something is removing files under this check: "
+        + ", ".join(skipped[:5])
+        + ("…" if len(skipped) > 5 else "")
+    )
+    print()
 
 if len(findings) == 0:
     print("✅ Nothing wrong.")

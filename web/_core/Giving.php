@@ -21,7 +21,15 @@ namespace Portal\Core;
 
 class Giving
 {
-    public const ROLE_KEY = 'treasurer';
+    // 🚪 `ROLE_KEY = 'treasurer'` USED TO LIVE HERE AND IS GONE (#739).
+    //    `canManage()` was its only reader, and that gate is now the
+    //    `giving.records` capability, whose entry in
+    //    `Portal\Core\Capabilities` records `treasurer` as the role it ships
+    //    with. Keeping the constant as well would be a second place to read
+    //    the shipped role from, and the two could then disagree about who
+    //    opens the donor records. Do not reinstate it: an organisation that
+    //    has re-pointed the capability would still be refused by anything
+    //    that asked for this key.
 
     /**
      * ⏳ What a statement row's `errorMsg` holds while its e-mail is WAITING
@@ -34,12 +42,27 @@ class Giving
     public const MAIL_WAITING = 'waiting in the mail queue';
 
     /**
-     * Whether the current user is allowed to see / record all entries
-     * (treasurer-or-admin). Members without this can only see their own.
+     * Whether the current user is allowed to see / record all entries.
+     * Members without this can only see their own.
+     *
+     * 🚪 #739: was `App::hasRole(self::ROLE_KEY)`, i.e. the `treasurer` role
+     *    written into this file. It is now the `giving.records` capability,
+     *    which an organisation may point at roles of its own on the Roles
+     *    page without anybody editing PHP. It SHIPS pointing at `treasurer`
+     *    and falls open for a global administrator, so on an installation
+     *    that has never opened that page this answers exactly what it
+     *    answered before — the same two grounds, in the same order.
+     *
+     *    It is deliberately NOT the same capability as paying an approved
+     *    expense claim (`expenses.treasury`), although both ship with the
+     *    `treasurer` role: this door is donors' names, home addresses and
+     *    every gift. Folding them together would hand the donor list to
+     *    whoever a customer had made responsible for paying claims, without
+     *    telling them.
      */
     public static function canManage(): bool
     {
-        return App::isAdmin() === true || App::hasRole(self::ROLE_KEY) === true;
+        return App::isAdmin() === true || App::can(Capabilities::GIVING_RECORDS) === true;
     }
 
     /**

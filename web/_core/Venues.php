@@ -184,10 +184,27 @@ class Venues
      * 🌐 Gate & seeding
      * ======================================================================== */
 
-    /** The ONE capability check every manager handler calls. */
+    /**
+     * The ONE capability check every manager handler calls.
+     *
+     * 🚪 #739: was `App::hasRole('venue_manager')`, the role key written into
+     *    this file. It is now the `venues.manage` capability, which an
+     *    organisation may point at roles of its own on the Roles page. It
+     *    SHIPS pointing at `venue_manager` and falls open for a global
+     *    administrator, so on an installation that has never opened that page
+     *    this answers exactly what it answered before.
+     *
+     *    ⚠️ IT IS THE MANAGER'S DOOR ONLY. `canView()` below is the read-only
+     *       test and asks no role, so pointing this capability at nobody
+     *       leaves the year schedule, the exports and the two data endpoints
+     *       working exactly as they did. And the `venue_manager` role is
+     *       separately the AUDIENCE of the booking reminder e-mails, which is
+     *       a list of who is written to rather than a gate, so it is not part
+     *       of this capability and was not changed.
+     */
     public static function canManage(): bool
     {
-        return App::isAdmin() === true || App::hasRole('venue_manager') === true;
+        return App::isAdmin() === true || App::can(Capabilities::VENUES_MANAGE) === true;
     }
 
     /**

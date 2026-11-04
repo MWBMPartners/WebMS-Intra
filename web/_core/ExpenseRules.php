@@ -471,7 +471,15 @@ final class ExpenseRules
      * they came from shows them only their own; that is a deliberate decision
      * left open as its own question, not an oversight here.
      */
-    public const EXPORT_ROLE = 'approver';
+    // 🚪 `EXPORT_ROLE = 'approver'` USED TO BE DECLARED HERE AND IS GONE
+    //    (#739). `mayExportClaims()` below was its only reader, and that gate
+    //    is now the `expenses.approve` capability, whose entry in
+    //    `Portal\Core\Capabilities` records `approver` as the role it ships
+    //    with. Keeping the constant too would be a second place to read the
+    //    shipped role from, and an organisation that re-pointed the
+    //    capability would still be refused by anything that asked for this
+    //    key. The paragraph above still describes the decision correctly —
+    //    the organisation-wide role, not `tblUserDepts.isApprover` (#675).
 
     /**
      * 📤 May the person signed in right now download the claims spreadsheet?
@@ -495,13 +503,26 @@ final class ExpenseRules
      * is no longer offered to people it refuses, and that there is one rule
      * instead of two copies of it.
      *
-     * It takes no arguments on purpose. `App::isAdmin()` and `App::hasRole()`
+     * It takes no arguments on purpose. `App::isAdmin()` and `App::can()`
      * both read the session and the open organisation, so the answer belongs
      * to the request being served; passing either in would invite a caller to
      * supply a stale one.
      *
-     * A global administrator is admitted by `App::hasRole()` itself, which
-     * returns true for every role when `isRootAdmin` is set — so there is no
+     * 🚪 #739: was `App::hasRole(self::EXPORT_ROLE)`, i.e. the `approver` role
+     *    written into this file. It is now the `expenses.approve` capability,
+     *    which an organisation may point at roles of its own on the Roles
+     *    page. It SHIPS pointing at `approver` and falls open for a global
+     *    administrator, so on an installation that has never opened that page
+     *    this answers exactly what it answered before.
+     *
+     *    The spreadsheet is part of the SAME door as deciding a claim, on
+     *    purpose: it is the same people and the same list of claims seen
+     *    another way, so a separate switch would be a second control
+     *    answering one question. Widening it to a department's own approvers
+     *    is still #681 and is still a decision rather than an oversight.
+     *
+     * A global administrator is admitted by the capability itself, because
+     * `expenses.approve` declares `globalAdminFallsOpen` — so there is no
      * separate test for one here, and adding one would be a second rule.
      *
      * @return bool True when this person may download the spreadsheet.
@@ -512,6 +533,6 @@ final class ExpenseRules
             return true;
         }
 
-        return App::hasRole(self::EXPORT_ROLE);
+        return App::can(Capabilities::EXPENSES_APPROVE);
     }
 }

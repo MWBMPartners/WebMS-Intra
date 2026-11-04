@@ -27,6 +27,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Router;
 use Portal\Core\Settings;
 use Portal\Core\Site;
@@ -44,7 +45,12 @@ $siteId = Site::id();
 $user   = App::user();
 $userId = (int) ($user['userID'] ?? 0);
 
-$isManageAll = App::isAdmin() === true || App::hasRole('groups_coordinator') === true;
+// 🚪 #739: was `App::hasRole('groups_coordinator')`. It is now the
+//    `groups.manage` capability, which this organisation may point at roles of
+//    its own on the Roles page. It ships pointing at `groups_coordinator` and
+//    falls open for a global administrator, so this answers exactly what it
+//    answered before on an installation that has never opened that page.
+$isManageAll = App::isAdmin() === true || App::can(Capabilities::GROUPS_MANAGE) === true;
 
 // 🚪 Directory visibility flag — the GENERAL membership only, never
 // managers/coordinators/admins (they always need the full list to work).

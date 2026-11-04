@@ -113,6 +113,29 @@ class Photos
 
     /**
      * Map the current user's roles to the highest tier they have.
+     *
+     * 🚪 #739: the staff rung was `App::hasRole('staff')`, the role key
+     *    written into this file. It is now the `photos.staff` capability,
+     *    which an organisation may point at roles of its own on the Roles
+     *    page. It SHIPS pointing at `staff` and falls open for a global
+     *    administrator, so on an installation that has never opened that page
+     *    this answers exactly what it answered before — and in any case an
+     *    administrator has already been given rank 3 two lines above, so the
+     *    global-administrator half of either test is unreachable here.
+     *
+     *    ⚠️ THE VOLUNTEER RUNG BELOW IS DELIBERATELY STILL `App::hasRole()`,
+     *       AND THE REASON IS A MEASUREMENT. It returns 1, and the
+     *       fall-through at the end of this method returns 1 as well for
+     *       every signed-in member — so holding the `volunteer` role changes
+     *       nothing for anybody, and has not since `8625b9e`. Making it a
+     *       capability would put a switch on the Roles page that cannot
+     *       change what any member sees, which is #671's "a seeded setting
+     *       that nothing reads is a lie with a Save button". It is named,
+     *       with this reason, in
+     *       `tools/audit-checks/check_no_new_role_gates.py`. Whether an
+     *       ordinary member should reach the volunteer tier at all is a
+     *       product question and has to be settled first; converting the gate
+     *       would hide it.
      */
     public static function userTierRank(): int
     {
@@ -122,7 +145,7 @@ class Photos
         if (App::isAdmin() === true) {
             return 3;
         }
-        if (App::hasRole('staff') === true) {
+        if (App::can(Capabilities::PHOTOS_STAFF) === true) {
             return 2;
         }
         if (App::hasRole('volunteer') === true) {

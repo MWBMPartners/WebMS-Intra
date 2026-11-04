@@ -35,7 +35,17 @@ WHAT THIS CHECK LOOKS AT
 Code-referenced keys (source A), gathered from:
   - every literal `hasRole('…')` / `hasRole("…")` call anywhere under
     `web/`;
-  - the `ROLE_KEY` constant in `web/_core/Giving.php`;
+  - the `ROLE_KEY` constant in `web/_core/Giving.php` — WHICH NO LONGER
+    EXISTS, and the reading is kept deliberately rather than deleted. #739
+    turned `Giving::canManage()` into the `giving.records` capability, whose
+    shipped role key (`treasurer`) now lives in
+    `Portal\\Core\\Capabilities::CAPABILITIES` instead, and that list is
+    checked against `Roles::STANDARD` by
+    `tools/audit-checks/check_capability_registry.py` (its check D). So the
+    key is still compared, by the check that owns it. This reading finds
+    nothing today and costs nothing; it is here so that a `ROLE_KEY` constant
+    reintroduced in that file would still be compared rather than silently
+    unchecked;
   - every string literal inside a `'gates' => […]` array in
     `web/_core/ReportRegistry.php` that does not start with `@` (the
     `@siteAdmin`/`@rootAdmin` gate words are not role keys at all);

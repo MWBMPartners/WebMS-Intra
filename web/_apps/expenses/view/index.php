@@ -77,7 +77,13 @@ if ($claim === null) {
 $currentUserId = (int) ($_SESSION['user_id'] ?? 0);
 $isClaimant    = ((int) $claim['userID'] === $currentUserId);
 $isAdmin       = App::isAdmin();
-$hasApprover   = App::hasRole('Approver');
+// 🚪 #739: was `App::hasRole('Approver')`. It is now the `expenses.approve`
+//    capability — the same door as deciding a claim — which this organisation
+//    may point at roles of its own on the Roles page. It ships pointing at the
+//    `approver` role and falls open for a global administrator, so this answers
+//    exactly what it answered before on an installation that has never opened
+//    that page. The department branch below is untouched.
+$hasApprover   = App::can(Capabilities::EXPENSES_APPROVE);
 $hasTreasurer  = App::can(Capabilities::EXPENSES_TREASURY);
 
 // 🏢 #542: a lead, approver or required approver of THIS claim's department,

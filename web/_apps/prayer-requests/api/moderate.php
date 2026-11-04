@@ -19,6 +19,7 @@ declare(strict_types=1);
 use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\Capabilities;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
@@ -29,11 +30,20 @@ ApiAuth::requireMethod('POST');
 // scope (no per-role concept for API keys yet).
 $body = ApiAuth::requireWrite('prayer-requests:write', sessionNeedsAdmin: false);
 
-// Session mode gates on admin OR the prayer_team role; a bearer key is already
-// authorised by its prayer-requests:write scope + site pin, so skip this
-// session-only role gate for bearer (#323 Phase 2 review — dual-mode).
+// Session mode gates on admin OR whoever this organisation has pointed
+// "Moderate prayer requests" at; a bearer key is already authorised by its
+// prayer-requests:write scope + site pin, so skip this session-only gate for
+// bearer (#323 Phase 2 review — dual-mode).
+//
+// 🚪 #739: was `App::hasRole('prayer_team')`. It is now the `prayer.moderate`
+//    capability, which ships pointing at the `prayer_team` role and falls open
+//    for a global administrator, so this answers exactly what it answered
+//    before on an installation that has never opened the Roles page. The
+//    refusal's wording still names the role because that is the role it ships
+//    with, and an organisation that re-points the capability has renamed or
+//    replaced that role itself and will recognise its own name for it.
 if (ApiAuth::source() === 'session'
-    && App::isAdmin() === false && App::hasRole('prayer_team') === false
+    && App::isAdmin() === false && App::can(Capabilities::PRAYER_MODERATE) === false
 ) {
     ApiResponse::error('Forbidden — moderation requires admin or prayer_team role', 403);
 }

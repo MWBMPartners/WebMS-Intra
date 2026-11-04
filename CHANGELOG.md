@@ -4,6 +4,85 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Gating a feature is a capability now, almost everywhere (#739)
+
+Phase two of #727. **Hard-coded role gates went from 16 call sites to 3**, and
+capability gates from 51 to 64 — counted with `php tools/role-gate-count.php`,
+which uses PHP's tokeniser. **Never `grep` for this:** it counts comments, and
+converting a gate *leaves a comment naming the gate it replaced*, so the grep
+figure went **up** to 73.
+
+Six new capabilities cover thirteen gates, grouped by **the door** rather than
+the role: `groups.manage` (six gates — the five small-groups pages and
+`SmallGroups::canManage()`), `expenses.approve`, `giving.records`,
+`prayer.moderate`, `venues.manage`, `photos.staff`. Two single-reader constants
+went with them (`ExpenseRules::EXPORT_ROLE`, `Giving::ROLE_KEY`), because a
+shipped role kept beside the capability's own list is two places to read it
+from.
+
+**Access changed for nobody**, and that is now *pinned* rather than asserted —
+see below. With no stored choice, `App::can(C)` is
+`globalAdminPasses(isRootAdmin, true) || Roles::hasAnyOf([shipped key])`, which
+is the same three joins, the same `isActive = 1` and the same key normalisation
+as `App::hasRole(key)`. Every call site kept its own `App::isAdmin()` ground, so
+an organisation's administrator is never shut out and the Roles page itself is
+always reachable — **no capability can be emptied unrecoverably.**
+
+`giving.records` is deliberately **not** folded into `expenses.treasury`
+although both ship with `treasurer`: folding them would hand the donor list to
+whoever a customer later made responsible for paying claims, without telling
+them.
+
+**The independent check found eleven real problems. The worst is the one worth
+remembering.**
+
+* **The shipped roles were pinned by nothing, so "nobody's access changed"
+  passed on broken code.** Changing one word — `giving.records` shipping with
+  `['approver']` instead of `['treasurer']` — left **all 60 audit scripts
+  green**, reproduced independently. On upgrade that one word would hand
+  donors' names and home addresses to whoever decides expense claims;
+  `photos.staff => ['volunteer']` would open the staff photo tier to every
+  signed-in member. The cause was a list named `$fiveShouldShipWith` while
+  eleven capabilities existed, and a second list of holders named
+  `$fiveHolders` — **a list named after a number is the shape that goes
+  stale.** Both now cover every offered capability and are named for their job;
+  the test went 227 → 287 checks, and planted, that one word now fails two of
+  them, the telling one reading *"capability says true, the old gate said
+  false"*.
+* **A heredoc containing an apostrophe made the new hard gate report "Nothing
+  wrong" over a real hard-coded gate.** `mask_php()` had no heredoc branch, so
+  `<p>Don't change this</p>` opened a bogus string literal that swallowed the
+  call that followed — the exact fault its own docstring claimed to have
+  closed. Latent rather than live (the repository's one nowdoc happens to hold
+  an even number of apostrophes) and it would have fired the first time anybody
+  wrote English prose in a heredoc. Fixed in both checks that share that walk.
+* **Two more ways to write a role gate were caught by nothing and admitted
+  nowhere, and both are live here:** `Roles::hasAnywhere()`
+  (`web/_core/Gatekeeper.php`) and `Roles::keysHeldBy()` with `in_array`
+  (`web/_core/Workflow.php`). The check now matches all four methods on that
+  class, with both call sites named and reasoned — otherwise the whole guard was
+  one method name away from decorative, which is the argument the check already
+  made for the other two.
+* **Six untrue sentences**, every one measured: a docblock naming `canSee()`
+  where the method is `canView()`; "22 files name `tblUserRoles`" where its own
+  command answers **25** and its breakdown summed to **21**, leaving four files
+  uncategorised; "12 remaining gates naming 6 role keys" where it is **14
+  fixed-key gates naming 7**, with `Photos.php`'s staff rung — a real
+  conversion — in no bullet at all; "six offered capabilities and FIVE declare
+  `globalAdminFallsOpen`" where it is **12 and 11**, written one paragraph below
+  that docblock's own lesson about stale counts; "the seven added by #739" where
+  there are six; and a blind spot claimed that **is not one** — a fully
+  qualified `\Portal\Core\App::hasRole()` is caught, because a backslash is a
+  word boundary. The stale-count sentence now names no number at all and points
+  at the registry.
+
+Two pre-existing faults it found are raised rather than fixed here: **#756**
+(the `volunteer` photo tier is a no-op — both branches return the same rank —
+while the comment above it claims the role gates it) and **#757** (a check in
+`expense-rules-selftest.php` interpolates an undefined variable, so it searches
+for `='';` instead of `$decision='';`, blunting the guard for a recorded past
+fault).
+
 ### The erasure review's row lock is exercised now, and getting there took three attempts (#753)
 
 `ErasureReview::record()` takes a row lock so two Data Controllers cannot both

@@ -53,7 +53,8 @@
  *    converted file keeps, saying which gate the capability replaced. Zero
  *    are calls. Use the tokeniser.
  *
- * THE SIX, AND WHO GETS IN WITHOUT A ROLE
+ * WHO GETS IN WITHOUT A ROLE (and do not count the capabilities here — this
+ * heading said "THE SIX" and #739 made it twelve)
  * -------------------------------------------------------------------------
  * The owner settled this on 3 November 2026: "Five, plus #724's review. then
  * all remaining features pointable as gated features, all standard roles'
@@ -68,9 +69,17 @@
  * one place a global administrator is refused. The two answers are opposite,
  * which is why no field has a default: see `DECLARED_FIELDS`.
  *
- * ⚠️ CONVERTING THE REST IS ITS OWN PACKAGE, and nothing here starts it. A
- *    gate not named in an `askedAt` list below is still hard-coded, and the
- *    audit check fails if a gate is converted without being written down.
+ * ⚠️ #739 CONVERTED THE REST (4 November 2026), so the registry now holds
+ *    twelve capabilities rather than six. Three `App::hasRole()` calls are
+ *    left under `web/` and every one of them is named, with its reason, in
+ *    `tools/audit-checks/check_no_new_role_gates.py` — two take their key
+ *    from a row a customer filled in and so cannot be a capability at all,
+ *    and the third is a no-op (see the `photos.staff` entry). That check is
+ *    a hard gate and fails BOTH ways, so a NEW hard-coded gate cannot be
+ *    added and a listed exception cannot quietly stop being true. A gate not
+ *    named in an `askedAt` list below is still hard-coded, and
+ *    `check_capability_registry.py` fails if a gate is converted without
+ *    being written down.
  *
  * ANY-OF, NEVER ALL-OF
  * -------------------------------------------------------------------------
@@ -122,15 +131,16 @@
  *   - It cannot see the `App::hasRole()` call sites that work their key out
  *     at RUN TIME, and there are far fewer of those than an earlier version
  *     of this list implied. Run `tools/role-gate-count.php` for today's
- *     figure; on commit `b12ff44` it was 4 of 65, and TWO of those four pass
- *     a class constant (`ExpenseRules::EXPORT_ROLE`, `Giving::ROLE_KEY`),
- *     which is a fixed key written once rather than a variable one. Only two
- *     are genuinely worked out: `ReportRegistry::userPassesGates()`, which
- *     walks a report's own list of gate names, and
- *     `web/_apps/tours/api/active.php`, which walks a guided tour's
- *     comma-separated `forRoles` column. Both take the key from a row a
- *     customer filled in, so neither is a page gate and neither is a
- *     capability. (The three examples this list used to name — a workflow's
+ *     figure; on commit `b12ff44` it was 4 of 65, and TWO of those four
+ *     passed a class constant (`ExpenseRules::EXPORT_ROLE`,
+ *     `Giving::ROLE_KEY`) — a fixed key written once rather than a variable
+ *     one, which is why #739 could convert both and why neither constant
+ *     exists any more. Only two are genuinely worked out:
+ *     `ReportRegistry::userPassesGates()`, which walks a report's own list
+ *     of gate names, and `web/_apps/tours/api/active.php`, which walks a
+ *     guided tour's comma-separated `forRoles` column. Both take the key
+ *     from a row a customer filled in, so neither is a page gate and
+ *     neither is a capability. (The three examples this list used to name — a workflow's
  *     assignee, a notification audience, a report filter — were not
  *     `App::hasRole()` call sites at all; they are SQL joins against
  *     `tblUserRoles`.)
@@ -176,6 +186,54 @@ final class Capabilities
     public const KIDS_CHECKIN       = 'kids.checkin';
     public const EXPENSES_TREASURY  = 'expenses.treasury';
     public const LIVESTREAM_CONSOLE = 'livestream.console';
+
+    /**
+     * The SIX added by #739, which finished the conversion: every remaining
+     * gate that named a standard role by a fixed key is now one of these,
+     * with one measured exception named below. The owner asked for exactly
+     * that on 3 November 2026 — "all remaining features pointable as gated
+     * features, all standard roles' gates" — and said in the same breath
+     * that this is "the mechanism going forward for all new features", so a
+     * new feature DECLARES one of these rather than writing `App::hasRole()`
+     * again.
+     *
+     * ⚠️ SIX IS NOT "ONE PER CALL SITE", and the difference matters because a
+     *    page of switches nobody can read is its own fault.
+     *
+     *    **The arithmetic, corrected — a first version of this comment said
+     *    "12 remaining gates naming 6 different role keys", and both numbers
+     *    were wrong while the bullets below them summed to thirteen.**
+     *    Measured on HEAD with PHP's tokeniser: 16 `App::hasRole()` calls =
+     *    12 passing a literal + 2 passing a class constant + 2 working the
+     *    key out at run time. So **14 gates passed a FIXED key, naming SEVEN
+     *    role keys, and 13 of the 14 became SIX capabilities**:
+     *      • SIX were the SAME door (`groups_coordinator`: the five
+     *        small-groups pages and `SmallGroups::canManage()`) — one
+     *        capability.
+     *      • THREE were the expense-approval door — two literal
+     *        `App::hasRole('Approver')` gates plus
+     *        `ExpenseRules::EXPORT_ROLE`, the same `approver` role asked
+     *        through a constant. One capability.
+     *      • `treasurer` (through `Giving::ROLE_KEY`), `prayer_team`,
+     *        `venue_manager` and `staff` were one gate each — four
+     *        capabilities. **That last one, the staff rung in `Photos.php`,
+     *        was missing from the first version of this list altogether**,
+     *        which is how twelve came to be written where fourteen belonged.
+     *      • The fourteenth, `App::hasRole('volunteer')` in `Photos.php`, is
+     *        DELIBERATELY NOT CONVERTED. It is a no-op — both branches return
+     *        the same rank — so a switch for it would open nothing (#756).
+     *        See the `photos.staff` entry, which explains it where somebody
+     *        reading the photo tiers will find it.
+     *    Count them with `count(Capabilities::CAPABILITIES)` or
+     *    `php tools/role-gate-count.php`; do not trust a number in prose —
+     *    including these.
+     */
+    public const EXPENSES_APPROVE = 'expenses.approve';
+    public const GIVING_RECORDS   = 'giving.records';
+    public const GROUPS_MANAGE    = 'groups.manage';
+    public const PRAYER_MODERATE  = 'prayer.moderate';
+    public const VENUES_MANAGE    = 'venues.manage';
+    public const PHOTOS_STAFF     = 'photos.staff';
 
     /**
      * Every field an entry in either list MUST declare, in the order the
@@ -473,18 +531,20 @@ final class Capabilities
         ],
 
         // 💷 THE TREASURY SIDE OF EXPENSES, AND NOTHING ELSE THE TREASURER
-        //    ROLE DOES. The `treasurer` role also opens giving records
-        //    (`Giving::canManage()`) and three columns of the giving reports
-        //    (`ReportRegistry`), and it is the audience an expense
-        //    notification goes to (`ExpenseMailer`). None of those is this
-        //    door, so none of them was converted: a customer who points this
-        //    capability at a finance officer has NOT thereby handed them the
-        //    donor records. Each of those is its own capability when somebody
-        //    asks for it.
+        //    ROLE DOES. The `treasurer` role also opens the giving records,
+        //    which since #739 is its OWN capability (`giving.records` below)
+        //    and not this one — so a customer who points this capability at a
+        //    finance officer has NOT thereby handed them the donor records.
+        //    It is also read by three columns of the giving reports
+        //    (`ReportRegistry`) and is the audience an expense notification
+        //    goes to (`ExpenseMailer`); neither of those is a capability,
+        //    because the first takes its gate name from a saved report — a
+        //    row a customer filled in — and the second is a list of who is
+        //    e-mailed rather than a decision about who may do something.
         //
         //    ⚠️ APPROVING A CLAIM IS A DIFFERENT DOOR AGAIN, and the
         //       distinction is one this repository has already paid for:
-        //       `ExpenseRules::EXPORT_ROLE` is the `approver` ROLE (the whole
+        //       `expenses.approve` below is the `approver` ROLE (the whole
         //       organisation) and `tblUserDepts.isApprover` is a flag on ONE
         //       department (#675). Neither is the treasury, and flattening
         //       them together would hand somebody every department's figures.
@@ -532,6 +592,214 @@ final class Capabilities
             'askedAt' => [
                 'web/_apps/admin/live/chat.php',
                 'web/_apps/livechat/api/moderate.php',
+            ],
+        ],
+
+        // =====================================================================
+        // The six added by #739
+        // =====================================================================
+
+        // 💷 DECIDING AN EXPENSE CLAIM — and it is NOT the treasury above.
+        //    `expenses.treasury` is PAYING a claim somebody else approved;
+        //    this is saying yes or no to one. The repository has already paid
+        //    for muddling the two (#675), so they stay separate doors even
+        //    though one organisation may well point both at one role.
+        //
+        //    ⚠️ IT DOES NOT COVER THE PER-DEPARTMENT APPROVER FLAG, and that
+        //       is the whole reason this entry is not simply "approvals".
+        //       `tblUserDepts.isApprover` is a flag on ONE department and is
+        //       read separately in `expenses/approve/save.php` AFTER this
+        //       gate: a department lead with no role at all still decides
+        //       their own department's claims, exactly as before. Pointing
+        //       this capability at nobody therefore shuts out the
+        //       organisation-wide approver and leaves every department's own
+        //       people working.
+        //
+        //    The claims SPREADSHEET is part of this door on purpose:
+        //    `ExpenseRules::mayExportClaims()` asked for the same `approver`
+        //    role through `self::EXPORT_ROLE`, so it is the same set of
+        //    people and the same list of claims seen another way. Splitting
+        //    it would be a new switch that answered the same question.
+        self::EXPENSES_APPROVE => [
+            'label' => 'Decide expense claims',
+            'opens' => 'Approving or rejecting expense claims across the whole organisation, '
+                . 'opening any claim to read it, and downloading the claims spreadsheet.',
+            'standard' => ['approver'],
+            'globalAdminFallsOpen' => true,
+            'organisationMayRepoint' => true,
+            'emptyMeans' => 'No role will decide claims for the whole organisation. Administrators '
+                . 'of this organisation will still be able to, because the gate lets an '
+                . 'administrator in as well, and anybody marked as a lead or an approver of a '
+                . 'particular department keeps the claims of that department. Paying an approved '
+                . 'claim is a different door and is not affected.',
+            'askedAt' => [
+                'web/_apps/expenses/approve/save.php',
+                'web/_apps/expenses/view/index.php',
+                'web/_core/ExpenseRules.php',
+            ],
+        ],
+
+        // 🎁 THE GIVING RECORDS — donors' names, home addresses and every
+        //    gift. #727's own note said this was "its own capability when
+        //    somebody asks for one", and #739 is somebody asking.
+        //
+        //    ⚠️ KEEP IT APART FROM `expenses.treasury`. Both ship with the
+        //       `treasurer` role, so it is tempting to fold them together —
+        //       and folding them would mean that a customer who pointed the
+        //       expenses treasury at a finance officer had handed that person
+        //       the donor list without being told. The two doors protect
+        //       quite different information.
+        //
+        //    It does NOT cover the three giving columns of the reports, which
+        //    `ReportRegistry` gates from a saved report's own list of gate
+        //    names — a row a customer filled in, not a gate in PHP, so it
+        //    cannot be a capability. Nor the expense notification audience in
+        //    `ExpenseMailer`, which is a list of who is e-mailed rather than
+        //    a decision about who may do something.
+        self::GIVING_RECORDS => [
+            'label' => 'Open the giving records',
+            'opens' => "Every donor's giving: their name, their home address where one is held, "
+                . 'each gift, and recording a gift against somebody. Without it a member sees '
+                . 'only their own giving.',
+            'standard' => ['treasurer'],
+            'globalAdminFallsOpen' => true,
+            'organisationMayRepoint' => true,
+            'emptyMeans' => 'No role will open the giving records, and every member will see only '
+                . 'their own giving. Administrators of this organisation will still be able to, '
+                . 'because the gate lets an administrator in as well. Paying an approved expense '
+                . 'claim is a different door and is not affected.',
+            'askedAt' => [
+                'web/_core/Giving.php',
+            ],
+        ],
+
+        // 👥 SMALL GROUPS — six of the twelve remaining gates, and all six
+        //    the same door: the five pages under `web/_apps/small-groups/`
+        //    and `SmallGroups::canManage()`, which the group page and its
+        //    handler ask about ONE group.
+        //
+        //    ⚠️ IT IS "EVERY GROUP", NOT "A GROUP". A group's own leaders and
+        //       co-leaders keep what is theirs through
+        //       `SmallGroups::isLeader()`, which reads the membership rows
+        //       and asks no role at all. So an empty set takes the
+        //       coordinator's view of every group away and changes nothing
+        //       for a leader running their own group — which is also why this
+        //       is not two capabilities.
+        self::GROUPS_MANAGE => [
+            'label' => 'Manage every small group',
+            'opens' => 'Every small group at once: the full directory whether or not it is shown '
+                . 'to members, creating and editing any group, the attendance reports, and the '
+                . 'meeting place of a group whose location is otherwise hidden.',
+            'standard' => ['groups_coordinator'],
+            'globalAdminFallsOpen' => true,
+            'organisationMayRepoint' => true,
+            'emptyMeans' => 'No role will manage every small group. Administrators of this '
+                . 'organisation will still be able to, because every one of these gates lets an '
+                . "administrator in as well, and each group's own leaders keep the running of "
+                . 'their own group.',
+            'askedAt' => [
+                'web/_apps/small-groups/group.php',
+                'web/_apps/small-groups/index.php',
+                'web/_apps/small-groups/manage.php',
+                'web/_apps/small-groups/report.php',
+                'web/_apps/small-groups/save.php',
+                'web/_core/SmallGroups.php',
+            ],
+        ],
+
+        // 🙏 MODERATING PRAYER REQUESTS.
+        //
+        //    ⚠️ IT GATES THE SESSION ROUTE ONLY, and the file says so in as
+        //       many words. A request carrying an API key is authorised by
+        //       that key's `prayer-requests:write` scope instead, because an
+        //       API key holds no roles — so an organisation that empties this
+        //       set has NOT closed the key route. That is unchanged from
+        //       before #739 and is not something this capability can decide.
+        //
+        //    The `prayer_team` role is also the pool a request can be
+        //    ASSIGNED from (`PrayerChain`), which is a list of people rather
+        //    than a gate, so it is deliberately not part of this door.
+        self::PRAYER_MODERATE => [
+            'label' => 'Moderate prayer requests',
+            'opens' => 'Approving, rejecting and hiding the prayer requests people send in.',
+            'standard' => ['prayer_team'],
+            'globalAdminFallsOpen' => true,
+            'organisationMayRepoint' => true,
+            'emptyMeans' => 'No role will moderate prayer requests from inside the portal. '
+                . 'Administrators of this organisation will still be able to, because the gate '
+                . 'lets an administrator in as well. A request sent by another system with its '
+                . 'own API key is not affected, because a key holds no roles.',
+            'askedAt' => [
+                'web/_apps/prayer-requests/api/moderate.php',
+            ],
+        ],
+
+        // 🏛️ MANAGING VENUE BOOKINGS. One gate serves every manager handler
+        //    (`Venues::canManage()`, which that class's own comment calls
+        //    "the ONE capability check every manager handler calls"), so one
+        //    file covers the whole feature.
+        //
+        //    ⚠️ IT IS THE MANAGER'S DOOR, NOT THE READER'S. `Venues` has a
+        //       separate "may this person see this organisation's bookings at
+        //       all?" test that asks no role, so an empty set here leaves the
+        //       read-only year schedule, the exports and the data endpoints
+        //       exactly as they were.
+        self::VENUES_MANAGE => [
+            'label' => 'Manage venue bookings',
+            'opens' => 'Creating, changing and cancelling venue bookings, and managing the venues, '
+                . 'rooms and usage types behind them.',
+            'standard' => ['venue_manager'],
+            'globalAdminFallsOpen' => true,
+            'organisationMayRepoint' => true,
+            'emptyMeans' => 'No role will change venue bookings. Administrators of this '
+                . 'organisation will still be able to, because the gate lets an administrator in '
+                . 'as well, and anybody who may already READ this organisation\'s bookings keeps '
+                . 'that, because reading them asks no role.',
+            'askedAt' => [
+                'web/_core/Venues.php',
+            ],
+        ],
+
+        // 📷 THE STAFF PHOTO TIER — and ONLY the staff one, which is the
+        //    most useful thing in this entry.
+        //
+        //    ⚠️ THERE IS DELIBERATELY NO `photos.volunteer`, AND THE REASON
+        //       IS A MEASUREMENT RATHER THAN A PREFERENCE.
+        //       `Photos::userTierRank()` is a ladder: an administrator is
+        //       rank 3, the `staff` role is rank 2, the `volunteer` role is
+        //       rank 1 — and the line after it returns 1 for EVERY signed-in
+        //       member regardless, deliberately, "to keep portals where role
+        //       rollout is partial functional". So the volunteer branch and
+        //       the fall-through return the same number: holding that role
+        //       changes nothing for anybody, and has not since `8625b9e`.
+        //       Offering it as a capability would put a switch on the roles
+        //       page that cannot change what any member sees, which is #671's
+        //       "a seeded setting that nothing reads is a lie with a Save
+        //       button" wearing a capability's clothes.
+        //       `App::hasRole('volunteer')` therefore STAYS, named in
+        //       `tools/audit-checks/check_no_new_role_gates.py` with that
+        //       reason. Whether an ordinary member should reach the volunteer
+        //       tier at all is a product question, not a tidy-up, and it is
+        //       the thing to settle before this becomes a capability.
+        //
+        //    ⚠️ THE ORDER IS LOAD-BEARING IN THE CODE, NOT HERE. The ranking
+        //       asks staff FIRST, so somebody holding both lands on the
+        //       higher tier. That is in `Photos::userTierRank()`; this list
+        //       does not and cannot express it.
+        self::PHOTOS_STAFF => [
+            'label' => 'See photos shared with staff',
+            'opens' => 'Photo albums an organisation has shared with its staff — the higher of the '
+                . 'two photo tiers, which also includes everything shared with volunteers.',
+            'standard' => ['staff'],
+            'globalAdminFallsOpen' => true,
+            'organisationMayRepoint' => true,
+            'emptyMeans' => 'No role will reach the albums shared with staff. Administrators of '
+                . 'this organisation will still be able to, because the ranking puts an '
+                . 'administrator at the top tier before it asks about any role. Albums shared with '
+                . 'volunteers, and albums shared with every member, are not affected — every '
+                . 'signed-in member already reaches that tier.',
+            'askedAt' => [
+                'web/_core/Photos.php',
             ],
         ],
     ];
@@ -712,11 +980,15 @@ final class Capabilities
      *    it declares false — so written inline the 'true' half would be a
      *    branch no test could reach." That was TRUE when part one of #727
      *    shipped `erasure.review` alone. **Part two made it false and did not
-     *    revisit it.** The registry now holds six offered capabilities and
-     *    FIVE of them declare `globalAdminFallsOpen => true`, so both halves
-     *    of this rule are reached by ordinary pages. Do not read the stale
-     *    sentence as a reason to inline the rule or to delete the test
-     *    section that exercises it.
+     *    revisit it.** And #739 repeated the mistake one paragraph below,
+     *    writing "six offered capabilities and FIVE of them" while there were
+     *    twelve and eleven — in the docblock whose own lesson is that a count
+     *    written here goes stale. **So this sentence names no number.** There
+     *    is more than one of each, so both halves of the rule are reached by
+     *    ordinary pages; exactly one capability declares false (#724's), and
+     *    the way to know the figures is to ask the registry, as the next
+     *    paragraph says. Do not read a stale count as a reason to inline the
+     *    rule or to delete the test section that exercises it.
      *
      *    Ask the registry rather than trusting any count written here:
      *        php -r 'require "web/_core/Capabilities.php";

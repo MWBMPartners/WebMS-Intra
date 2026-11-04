@@ -77,6 +77,7 @@ Foundational classes loaded by every request via `bootstrap.php`. All ✅.
 | Class | Purpose |
 | --- | --- |
 | `App` | Service registry — `db()`, `settings()`, `user()`, `isAdmin()`, `siteId()`, transaction helpers |
+| `Capabilities` | **The one list of what a feature is gated on** (#727, #739). An organisation points a capability at roles of its own on the Roles page, without anybody editing PHP — and one that never opens that page is gated exactly as before, because every capability ships pointing at the role its hard-coded gate used. Hard-coded role gates are down to three, each with a stated reason. An organisation's global administrator reaches everything and can re-assign later; the one deliberate exception is reviewing a member's own words (#724), because the installation's administrator and the organisation's may be different parties. |
 | `Auth` | Sessions, CSRF, local + MS365 + Google OAuth + WebAuthn, password policy, 2FA TOTP, account linking. **The ONE place a password is hashed and stored** (`setPassword()`, `setUnusablePassword()`; #728) — eight places used to do it with their own SQL. It owns the storing, not who may set a password: each caller keeps its own gate. Taking a password away is the one stated exception, because it must reach every row of an account. |
 | `Router`, `ApiRouter` | Front-controller URL dispatch + dedicated JSON API dispatch |
 | `Site` | Multi-site context — detection, branding, per-site settings overrides; product-brand resolution helpers `productName()` / `productTagline()` / `productPublisher()` (#296) |

@@ -1515,6 +1515,23 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_capability_registry.py
 
+      # No NEW hard-coded role gate (#739). #727 and #739 converted every
+      # feature gate from `App::hasRole('some_role')` to a capability an
+      # organisation can point at roles of its own. This is the half that
+      # stops that being undone one feature at a time -- which is the way it
+      # would be undone, because each individual `App::hasRole()` looks
+      # reasonable on its own and matches whatever the file around it used to
+      # do. A HARD GATE on the owner's decision of 3 November 2026 that a
+      # capability is "the mechanism going forward for all new features".
+      # It fails BOTH ways: an unlisted call, and a listed exception that has
+      # stopped being true. It pins `Roles::has()` as well, because that
+      # answers the same question one level down and would otherwise be a
+      # search-and-replace away from making the whole check decorative.
+      - name: 'No new hard-coded role gate (hard gate, 739)'
+        id: no_new_role_gates
+        if: always()
+        run: python3 -I tools/audit-checks/check_no_new_role_gates.py
+
       # What the portal TELLS a customer is tested is what is really tested
       # (#475). `DbServer::TESTED_LINES` names the database release lines the
       # migration harness runs on, and the sentence a customer reads is built

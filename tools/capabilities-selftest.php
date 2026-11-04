@@ -11,9 +11,11 @@
  *
  * WHAT IT PROVES
  * --------------
- *   A  The registry as declared: six capabilities are OFFERED, each ships with
- *      the role its hard-coded gate used, and `NOT_YET_ASKED` is empty — so
- *      the roles page is offering no door that opens nothing.
+ *   A  The registry as declared: twelve capabilities are OFFERED (six until
+ *      #739 converted the last of the hard-coded gates), each ships with the
+ *      role its hard-coded gate used, every one but #724's falls open for a
+ *      global administrator, and `NOT_YET_ASKED` is empty — so the roles page
+ *      is offering no door that opens nothing.
  *   B  AN ORGANISATION THAT NEVER OPENS THE PAGE SEES NO CHANGE. With nothing
  *      chosen, the roles in force are the shipped ones (#499: "fail closed"
  *      was built first and locked members out).
@@ -473,19 +475,38 @@ $capGrant($otherId, $dcRoleB, $siteB);
 //    asset-register role because that is the capability section O re-points:
 //    one whose membership of this organisation is switched OFF, and one who
 //    holds it in organisation B only.
-$fiveHolders = [];
+// 🧑‍🤝‍🧑 ONE PERSON PER CAPABILITY, each holding ONLY the role that capability
+//    ships pointing at. That is what lets section N ask, per capability and
+//    per person, whether `App::can()` answers exactly what `App::hasRole()`
+//    answered — the whole basis of "#739 changed nobody's access".
+//
+//    **#739's six were missing from here, so that equivalence was never asked
+//    about them** — and the list was named `$capHolders` while eleven
+//    capabilities existed. A list named after a number is the shape that goes
+//    stale, so this one is named for its job.
+$capHolders = [];
 foreach ([
     Capabilities::ASSETS_MANAGE      => 'Cap Assets',
     Capabilities::CARE_REGISTER      => 'Cap Care',
     Capabilities::KIDS_CHECKIN       => 'Cap Kids',
     Capabilities::EXPENSES_TREASURY  => 'Cap Treasury',
     Capabilities::LIVESTREAM_CONSOLE => 'Cap Stream',
+    // #739's six. Each person holds that one role and nothing else, so a
+    // capability answering through the WRONG role cannot be mistaken for a
+    // person who happened to hold both (#616's lesson: one account holding
+    // several grounds cannot tell them apart).
+    Capabilities::EXPENSES_APPROVE   => 'Cap Approver',
+    Capabilities::GIVING_RECORDS     => 'Cap Giving',
+    Capabilities::GROUPS_MANAGE      => 'Cap Groups',
+    Capabilities::PRAYER_MODERATE    => 'Cap Prayer',
+    Capabilities::VENUES_MANAGE      => 'Cap Venues',
+    Capabilities::PHOTOS_STAFF       => 'Cap Staff',
 ] as $capabilityKey => $personName) {
     $shippedRole = Capabilities::standardRoleKeys($capabilityKey)[0];
     $personId    = $capNewUser($personName, false);
     $capMember($personId, $siteA, true);
     $capGrant($personId, $capRoleId($siteA, $shippedRole), $siteA);
-    $fiveHolders[$capabilityKey] = $personId;
+    $capHolders[$capabilityKey] = $personId;
 }
 $assetLapsedId = $capNewUser('Cap Assets Lapsed', false);
 $capMember($assetLapsedId, $siteA, false);
@@ -498,14 +519,31 @@ $mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
 
 $CAP = Capabilities::ERASURE_REVIEW;
 
-// The five, in the order they are declared, so a loop below reads in that
-// order too.
-$FIVE = [
+// Every capability EXCEPT #724's, in the order they are declared.
+//
+// ⚠️ WRITE THE WHOLE LIST OUT, NEVER A COUNT, and keep it in declared order:
+//    a count passes when one capability is swapped for another, and
+//    `in_array` passes when one is quietly dropped (#697's remedy). Section A
+//    below compares `Capabilities::keys()` with `$CAP` followed by this list,
+//    which is the only place the expected set is written down.
+//
+// 🧾 It was called `$FIVE` until #739 and NOTHING USED IT — a list named
+//    after a number, declared and then never read, while section A wrote the
+//    same five keys out again by hand. #739 made it eleven and gave it the one
+//    job, so there is one list rather than two.
+$OTHERS = [
     Capabilities::ASSETS_MANAGE,
     Capabilities::CARE_REGISTER,
     Capabilities::KIDS_CHECKIN,
     Capabilities::EXPENSES_TREASURY,
     Capabilities::LIVESTREAM_CONSOLE,
+    // The six #739 added, in declared order.
+    Capabilities::EXPENSES_APPROVE,
+    Capabilities::GIVING_RECORDS,
+    Capabilities::GROUPS_MANAGE,
+    Capabilities::PRAYER_MODERATE,
+    Capabilities::VENUES_MANAGE,
+    Capabilities::PHOTOS_STAFF,
 ];
 
 // =============================================================================
@@ -516,17 +554,35 @@ cap_section('A — the registry as declared');
 //    quietly dropped — #697's remedy, where iterating a list meant deleting a
 //    case stopped testing it while the label still said eight.
 cap_check(
-    'six capabilities are offered: #724\'s, and the five the owner named on 3 November 2026',
-    Capabilities::keys() === [
-        $CAP,
-        Capabilities::ASSETS_MANAGE,
-        Capabilities::CARE_REGISTER,
-        Capabilities::KIDS_CHECKIN,
-        Capabilities::EXPENSES_TREASURY,
-        Capabilities::LIVESTREAM_CONSOLE,
-    ],
+    'twelve capabilities are offered, in declared order: #724\'s, the five the owner named on '
+        . '3 November 2026, and the six #739 converted',
+    Capabilities::keys() === array_merge([$CAP], $OTHERS),
     implode(',', Capabilities::keys())
 );
+// ⚠️ EVERY ONE OF THE OTHER ELEVEN FALLS OPEN FOR A GLOBAL ADMINISTRATOR, AND
+//    #724'S DOES NOT. Both halves are asserted, because the whole reason
+//    `globalAdminFallsOpen` has no default is that the registry holds opposite
+//    answers to one question: a check that only tested the `false` one would
+//    pass on a registry where every other entry had quietly flipped.
+$allOthersFallOpen = true;
+foreach ($OTHERS as $otherCap) {
+    if (Capabilities::fallsOpenForGlobalAdmin($otherCap) === false) {
+        $allOthersFallOpen = false;
+    }
+}
+cap_check(
+    'every capability but #724\'s falls open for a global administrator, as the owner asked',
+    $allOthersFallOpen === true
+);
+// And each one ships with at least one role, which is what makes an
+// installation that never opens the Roles page behave as it did before.
+$allShipARole = true;
+foreach ($OTHERS as $otherCap) {
+    if (count(Capabilities::standardRoleKeys($otherCap)) === 0) {
+        $allShipARole = false;
+    }
+}
+cap_check('every one of them ships with a role, so nothing is closed on upgrade', $allShipARole === true);
 cap_check(
     'it ships with the role its hard-coded gate used',
     Capabilities::standardRoleKeys($CAP) === ['data_controller'],
@@ -1367,7 +1423,7 @@ cap_check(
 );
 
 // =============================================================================
-cap_section('N — the five, as declared (#727)');
+cap_section('N — every offered capability, as declared (#727, #739)');
 // =============================================================================
 // ⚠️ THE TWO ANSWERS TO `globalAdminFallsOpen` ARE OPPOSITE, AND THAT IS WHY
 //    THIS SECTION EXISTS. The owner's decision of 3 November 2026 was that an
@@ -1376,14 +1432,41 @@ cap_section('N — the five, as declared (#727)');
 //    review declares FALSE, deliberately. A single entry copied from the
 //    wrong neighbour would be silent, so every one is asserted by name rather
 //    than by a loop over whatever happens to be there.
-$fiveShouldShipWith = [
+//
+// 🚨 AND THE SIX FROM #739 WERE NOT IN THIS LIST, WHICH IS HOW "NOBODY'S
+//    ACCESS CHANGED" CAME TO BE PINNED BY NOTHING. Measured by an independent
+//    check and reproduced: changing ONE word in the registry —
+//    `giving.records` shipping with `['approver']` instead of
+//    `['treasurer']` — left **all 60 scripts in `tools/audit-checks/` green**,
+//    because `check_capability_registry.py` only requires the key to EXIST in
+//    `Roles::STANDARD`, and section A of this file asserts that every
+//    capability ships with **a** role, never **which**.
+//
+//    The harm is not hypothetical. On upgrade that one word would hand the
+//    donor list — names and home addresses — to whoever decides expense
+//    claims. `photos.staff => ['volunteer']` would open the staff photo tier
+//    to every signed-in member, because the volunteer rung is a no-op (#756).
+//
+//    This list is the ONLY place that says which role each capability ships
+//    pointing at. **Add a capability here in the same change that adds it to
+//    the registry.** The name says "every offered capability" rather than a
+//    number, because a list named after a number is the shape that goes stale
+//    — it was `$shouldShipWith` while eleven existed.
+$shouldShipWith = [
     Capabilities::ASSETS_MANAGE      => 'asset_manager',
     Capabilities::CARE_REGISTER      => 'care_team',
     Capabilities::KIDS_CHECKIN       => 'kids_team',
     Capabilities::EXPENSES_TREASURY  => 'treasurer',
     Capabilities::LIVESTREAM_CONSOLE => 'stream_moderator',
+    // #739's six, each pointing at the role its hard-coded gate really used.
+    Capabilities::EXPENSES_APPROVE   => 'approver',
+    Capabilities::GIVING_RECORDS     => 'treasurer',
+    Capabilities::GROUPS_MANAGE      => 'groups_coordinator',
+    Capabilities::PRAYER_MODERATE    => 'prayer_team',
+    Capabilities::VENUES_MANAGE      => 'venue_manager',
+    Capabilities::PHOTOS_STAFF       => 'staff',
 ];
-foreach ($fiveShouldShipWith as $capabilityKey => $shippedRole) {
+foreach ($shouldShipWith as $capabilityKey => $shippedRole) {
     cap_check(
         $capabilityKey . ' ships with the role its hard-coded gate used (' . $shippedRole . ')',
         Capabilities::standardRoleKeys($capabilityKey) === [$shippedRole],
@@ -1443,9 +1526,9 @@ $oldHasRole = static function (int $userId, int $siteId, string $roleKey, bool $
 
     return Roles::has($mysqli, $userId, $siteId, $roleKey);
 };
-foreach ($fiveShouldShipWith as $capabilityKey => $shippedRole) {
+foreach ($shouldShipWith as $capabilityKey => $shippedRole) {
     $people = [
-        'the holder of the role it ships with' => [$fiveHolders[$capabilityKey], false],
+        'the holder of the role it ships with' => [$capHolders[$capabilityKey], false],
         'somebody with no role at all'         => [$nobodyId, false],
         'somebody whose membership has ended'  => [$assetLapsedId, false],
         'a holder in the OTHER organisation'   => [$assetOtherId, false],
@@ -1500,7 +1583,7 @@ $foId = $capNewUser('Cap FO', false);
 $capMember($foId, $siteA, true);
 $capGrant($foId, $ownRole2Id, $siteA);
 
-$assetHolderId = $fiveHolders[Capabilities::ASSETS_MANAGE];
+$assetHolderId = $capHolders[Capabilities::ASSETS_MANAGE];
 cap_check(
     'before anything is chosen, the asset-register role holder is in',
     Capabilities::allows($mysqli, $assetHolderId, $siteA, Capabilities::ASSETS_MANAGE, false) === true

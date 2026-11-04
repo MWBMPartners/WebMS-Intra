@@ -241,13 +241,28 @@ final class SmallGroups
     }
 
     /**
-     * admin || groups_coordinator || isLeader(). $user defaults App::user().
+     * May this person manage THIS group? An administrator, or whoever this
+     * organisation has pointed "Manage every small group" at, or one of this
+     * group's own leaders. $user defaults to App::user().
+     *
+     * 🚪 #739: the middle ground was `App::hasRole('groups_coordinator')`,
+     *    the role key written into this file. It is now the `groups.manage`
+     *    capability, which an organisation may point at roles of its own on
+     *    the Roles page. It SHIPS pointing at `groups_coordinator` and falls
+     *    open for a global administrator, so on an installation that has
+     *    never opened that page this answers exactly what it answered before.
+     *
+     *    The THIRD ground is untouched and is why pointing the capability at
+     *    nobody is recoverable without anybody editing PHP: `isLeader()`
+     *    reads this group's own membership rows and asks no role at all, so a
+     *    group's leaders keep the running of their own group whatever the
+     *    capability says.
      *
      * @param array<string,mixed>|null $user
      */
     public static function canManage(int $siteId, int $groupId, ?array $user = null): bool
     {
-        if (App::isAdmin() === true || App::hasRole('groups_coordinator') === true) {
+        if (App::isAdmin() === true || App::can(Capabilities::GROUPS_MANAGE) === true) {
             return true;
         }
         $user = $user ?? App::user();

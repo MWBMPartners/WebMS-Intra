@@ -16504,3 +16504,104 @@ Any tool reading docblocks would attribute it wrongly.
 `RESET_LINK_FORM`'s docblock and the constant. The remedy both times is to put
 a new member *after* the one below it, never between a docblock and its subject —
 and the tell is two `*/` … `/**` pairs with no declaration between them.
+
+## Phase two of the capability conversion (#739)
+
+### What moved
+
+Hard-coded role gates: **16 call sites → 3**. Capability gates: 51 → 64.
+Counted with `php tools/role-gate-count.php` (PHP's tokeniser, comments
+dropped). **Never `grep`** — it counts comments, and converting a gate *leaves
+a comment naming the gate it replaced*, so the `grep` figure went **up**, to 73.
+
+The three that remain, each for a stated reason: two take their key from a row a
+customer filled in (a guided tour's `forRoles`, a report's own gate list), so
+neither is a page gate; and `Photos.php`'s `volunteer` rung is a **no-op** —
+both branches return the same rank — so a switch for it would open nothing
+(#756).
+
+Thirteen gates became **six** capabilities, grouped by the door and not the
+role. `groups.manage` alone is six gates. `giving.records` is deliberately
+**not** folded into `expenses.treasury` although both ship with `treasurer`:
+folding them would hand the donor list to whoever a customer later made
+responsible for paying claims, without telling them.
+
+### Why access changed for nobody, and why that sentence was worthless until it was pinned
+
+With no stored choice, `App::can(C)` is
+`globalAdminPasses(isRootAdmin, true) || Roles::hasAnyOf([shipped key])`, and
+`Roles::hasAnyOf([key])` uses the same three joins, the same `us.isActive = 1`
+and the same `normaliseKey()` as `Roles::has(key)`. Every call site kept its own
+`App::isAdmin()` ground, so an organisation's administrator is never shut out and
+the Roles page itself is always reachable — **no capability can be emptied
+unrecoverably.**
+
+**But that guarantee was pinned by nothing, and it passed on broken code.**
+Changing one word in the registry — `giving.records` shipping with
+`['approver']` instead of `['treasurer']` — left **all 60 scripts in
+`tools/audit-checks/` green**. Reproduced independently before anything was
+changed.
+
+The harm is concrete. On upgrade that one word hands donors' **names and home
+addresses** to whoever decides expense claims. `photos.staff => ['volunteer']`
+opens the staff photo tier to every signed-in member, because the volunteer rung
+is a no-op.
+
+**The cause is a naming habit.** The per-capability pin was
+`$fiveShouldShipWith` while **eleven** capabilities existed, beside a second
+list of fixture people called `$fiveHolders`. Neither was extended when six more
+capabilities arrived, and nothing noticed, because
+`check_capability_registry.py` only requires the shipped key to **exist** in
+`Roles::STANDARD`, and section A of the test asserts that every capability ships
+with **a** role, never **which**.
+
+**A list named after a number is the shape that goes stale.** Both are now named
+for their job, cover every offered capability, and the test is 287 checks (from
+227). Planted, that one word fails two of them, and the telling one reads
+*"capability says true, the old gate said false"* — which is access changing for
+somebody, said in those words.
+
+**Add a capability to `$shouldShipWith` and `$capHolders` in the same change
+that adds it to the registry.** Nothing else will tell you.
+
+### Two holes in the new guard, both of which existed in this repository already
+
+`tools/audit-checks/check_no_new_role_gates.py` is the hard gate that stops the
+conversion being undone one feature at a time. It had two:
+
+1. **A heredoc containing an apostrophe made it report "Nothing wrong" over a
+   real hard-coded gate.** `mask_php()` had no heredoc branch, so
+   `<p>Don't change this</p>` opened a bogus string literal that swallowed the
+   `App::hasRole(` that followed. **That is the exact fault the function's own
+   docstring claimed to have closed.** It was latent rather than live only
+   because the repository's single nowdoc happens to hold an *even* number of
+   apostrophes; it would have fired the first time anybody wrote ordinary
+   English prose in a heredoc. Fixed in both checks that share the walk, and the
+   control case — the call appearing *only* inside a heredoc — must stay green.
+2. **It matched two of the four `Roles` methods that answer a role question.**
+   `Roles::hasAnywhere()` and `Roles::keysHeldBy()` walked straight past, and
+   **both are live here** — `Gatekeeper.php` and `Workflow.php`. The check's own
+   argument for covering `has()` and `hasAnyOf()` is that without it "the whole
+   check is one search-and-replace away from being decorative"; that argument
+   applies word for word to the other two methods on the same class.
+
+What it still cannot see, measured by planting each: a class alias, a variable
+class name, and a key built by concatenation. **A fully qualified
+`\Portal\Core\App::hasRole()` IS caught** — the pattern is
+`\bApp\s*::\s*hasRole` and a backslash is a word boundary — and an earlier
+version of the list claimed otherwise. Untrue in the *modest* direction still
+misleads the next reader about what is covered.
+
+### Six untrue sentences, and where they came from
+
+| Claim | Measured |
+|---|---|
+| `canSee()` is the read-only test | the method is `canView()`; `canSee()` does not exist |
+| "22 files name `tblUserRoles` in a query" | its own command answers **25**; two of those name only `tblUserRolesUnplaced`; two mentions are prose or a comment |
+| that paragraph's own breakdown | summed to **21**, leaving four files uncategorised — `Workflow.php` among them |
+| "12 remaining gates naming 6 role keys" | **14** fixed-key gates naming **7**; `Photos.php`'s staff rung, a real conversion, was in no bullet |
+| "six offered capabilities and FIVE declare `globalAdminFallsOpen`" | **12 and 11** — written one paragraph below that same docblock's lesson about stale counts |
+| "The seven added by #739" | six |
+
+The stale-count sentence now **names no number at all** and points at the
+registry, because re-numbering it would only reset the clock.
