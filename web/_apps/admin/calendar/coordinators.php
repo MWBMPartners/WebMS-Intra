@@ -73,10 +73,41 @@ $pageTitle   = 'Coordinators — ' . (string) $event['eventName'];
 $pageSection = 'admin';
 $csrf        = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
 
+// 📣 THE HANDLER'S MESSAGE, AND THIS PAGE PRINTED NONE AT ALL UNTIL 4 NOVEMBER
+//    2026 (#511). `coordinators-save.php` has always set `flash_msg` — for
+//    "Coordinator granted.", for "Invalid email address.", and now for the
+//    refusal when the address is not an active member of this organisation —
+//    and nothing printed any of them. Nothing in this portal prints a flash
+//    centrally: 141 pages print their own, so a handler's message is swallowed
+//    by any page that forgets. That is the shape recorded for
+//    `recordings/view.php` in #276, found here while #511's lookup was being
+//    narrowed.
+//
+//    The cost was not cosmetic: an administrator typed an address, pressed the
+//    button, was redirected back to this page and saw NOTHING — the same
+//    outcome whether the grant worked or was refused. A refusal nobody sees is
+//    not a refusal that helps anybody, which is why the narrowing and this had
+//    to land together.
+//
+//    The type is checked against the four Bootstrap words rather than printed,
+//    because it reaches the page's `class` attribute; anything else becomes
+//    `info`. The message itself is escaped.
+$flashMsg  = (string) ($_SESSION['flash_msg']  ?? '');
+$flashType = (string) ($_SESSION['flash_type'] ?? '');
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+if (in_array($flashType, ['success', 'info', 'warning', 'danger'], true) === false) {
+    $flashType = 'info';
+}
+
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
 <div class="container py-4" style="max-width:720px;">
+<?php if ($flashMsg !== ''): ?>
+    <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?>" role="alert" data-portal-flash>
+        <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
+    </div>
+<?php endif; ?>
     <h1 class="h3 mb-2"><i class="fa-solid fa-users-gear me-2 text-primary"></i>Event Coordinators</h1>
     <p class="text-muted">
         <strong><?php echo htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8'); ?></strong>

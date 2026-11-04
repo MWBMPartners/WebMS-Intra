@@ -187,7 +187,7 @@ const GLB_EVENT_DEL = 920404; // organisation 1's event that has been DELETED
 const GLB_EVENT_IMP = 920405; // organisation 1's event that was copied in from an outside calendar (read-only)
 const GLB_FIRST_EVENT = 920401, GLB_LAST_EVENT = 920409;
 /** How many checks a full run makes (with Node.js; two fewer without it). Bring it up to date whenever a check is added or taken out. */
-const GLB_EXPECTED_CHECKS = 127;
+const GLB_EXPECTED_CHECKS = 134;
 const GLB_ORG_B   = 920901;
 const GLB_CHANNEL = 920601, GLB_CHANNEL_B = 920602;
 /** Subscriptions: ON, OFF, anonymous, reminders only, switched off, then the second organisation's two, then the two people who have left. */
@@ -1595,6 +1595,126 @@ glb_check(
     'the "starting soon" switch is no longer labelled "(anonymous)" (no device without an account is sent anything): it says it goes to everyone who has reminders switched on',
     ''
 );
+
+echo "\nN. Granting a coordinator reaches only this organisation's own active members (#511)\n";
+// 🧑‍🤝‍🧑 WHY THIS IS HERE. `admin/calendar/coordinators/save` resolved the person
+//    by `WHERE emailAddress = ?` and nothing else, so it reached the WHOLE
+//    installation. Three faults in one statement, and #511 names all three:
+//    one organisation's administrator could make a member of ANOTHER
+//    organisation a coordinator of their event; a closed account was accepted;
+//    and the two different replies told the administrator whether an address
+//    has an account anywhere on the installation.
+//
+// 📏 NOTHING EXERCISED THIS HANDLER AT ALL before 4 November 2026 — measured
+//    with `grep -rln coordinators-save tools/`, which answered nothing. That is
+//    why the fix needed a test rather than only a careful statement.
+//
+// 🧪 EACH PERSON HOLDS EXACTLY ONE CONDITION, which is #616's lesson: an
+//    account holding several grounds at once cannot tell them apart, and a
+//    fixture that differs in several ways tests only the first thing the code
+//    looks at. So: GLB_MEMBER_B belongs only to the second organisation;
+//    GLB_GONE's ACCOUNT is switched off while its membership is live;
+//    GLB_LEFT's MEMBERSHIP of this organisation is switched off while its
+//    account is live; and GLB_PLAIN is an ordinary active member, the control.
+$glbEmailOf = static function (int $userId): string {
+    return 'u' . (string) $userId . '.golive@selftest.invalid';
+};
+$glbCoordRows = static function () use ($db): array {
+    $found = [];
+    $result = $db->query(
+        'SELECT userID FROM tblEventCoordinators WHERE eventID = ' . (int) GLB_EVENT
+        . ' AND revokedAt IS NULL ORDER BY userID'
+    );
+    while ($row = $result->fetch_row()) {
+        $found[] = (int) $row[0];
+    }
+    return $found;
+};
+$glbGrant = static function (string $email) use (&$jar): array {
+    $token = glb_metaToken($jar['admin1'], '/');
+    return glb_request($jar['admin1'], 'POST', '/admin/calendar/coordinators/save', [
+        'csrf_token' => $token,
+        'eventID'    => (string) GLB_EVENT,
+        'action'     => 'grant',
+        'userEmail'  => $email,
+    ]);
+};
+$glbSaidAfter = static function () use (&$jar): string {
+    // 📣 THE FLASH ELEMENT ALONE, NOT THE WHOLE PAGE. A first version stripped
+    //    the tags off the entire body and compared that, and it FAILED on two
+    //    identical refusals — because the page carries #625's asset-fallback
+    //    script and `App::cspNonce()` is fresh on every response, so no two
+    //    renders of the same page are ever equal. That is the trap already
+    //    recorded for the password-reset comparison in `mail-pages-selftest.php`
+    //    and `sign-in-limits-selftest.php`.
+    //
+    //    Reading the one element the handler's message lands in is better than
+    //    stripping the nonce: there is nothing else in it to drift, so the
+    //    comparison cannot be blinded by widening a pattern.
+    $page = glb_request($jar['admin1'], 'GET', '/admin/calendar/coordinators?eventID=' . (string) GLB_EVENT);
+    if (preg_match('/<div class="alert alert-[a-z]+" role="alert" data-portal-flash>(.*?)<\/div>/s', (string) $page['body'], $found) !== 1) {
+        return '';
+    }
+    return trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($found[1]), ENT_QUOTES, 'UTF-8')));
+};
+
+$before = $glbCoordRows();
+
+// 1️⃣ A member of the SECOND organisation only. This is the fault #511 proved.
+$answer = $glbGrant($glbEmailOf(GLB_MEMBER_B));
+$saidOther = $glbSaidAfter();
+glb_check(
+    $answer['status'] === 302 && $glbCoordRows() === $before,
+    'N1 the first organisation\'s administrator CANNOT make a member of the second organisation a coordinator of their event, and no row is written',
+    'HTTP ' . (string) $answer['status'] . '; coordinators now ' . json_encode($glbCoordRows())
+);
+
+// 2️⃣ An address with no account anywhere. The reply must be WORD FOR WORD the
+//    same as N1's, or the difference between them is the answer to "does this
+//    address have an account on this installation?" — asked by somebody who may
+//    have no business knowing about that organisation at all.
+$answer = $glbGrant('nobody-at-all.golive@selftest.invalid');
+$saidNone = $glbSaidAfter();
+glb_check(
+    $answer['status'] === 302 && $glbCoordRows() === $before,
+    'N2 an address with no account anywhere is refused too, and no row is written'
+);
+glb_check(
+    $saidOther !== '' && $saidOther === $saidNone,
+    'N3 ... and the two refusals read IDENTICALLY, so the reply never reveals that an address has an account in another organisation',
+    'other organisation: "' . mb_substr($saidOther, 0, 110) . '" / no account: "' . mb_substr($saidNone, 0, 110) . '"'
+);
+
+// 3️⃣ An account switched off, whose membership of THIS organisation is live.
+$answer = $glbGrant($glbEmailOf(GLB_GONE));
+glb_check(
+    $answer['status'] === 302 && $glbCoordRows() === $before,
+    'N4 a member of this organisation whose ACCOUNT is switched off is refused',
+    'coordinators now ' . json_encode($glbCoordRows())
+);
+
+// 4️⃣ A live account whose MEMBERSHIP of this organisation is switched off. A
+//    different state from N4, and either one alone must refuse — which is why
+//    both `u.isActive = 1` and `us.isActive = 1` are in the statement.
+$answer = $glbGrant($glbEmailOf(GLB_LEFT));
+glb_check(
+    $answer['status'] === 302 && $glbCoordRows() === $before,
+    'N5 a live account whose MEMBERSHIP of this organisation is switched off is refused as well',
+    'coordinators now ' . json_encode($glbCoordRows())
+);
+
+// 5️⃣ THE CONTROL, and without it every check above could pass on a handler that
+//    refuses everybody — which is the shape this repository keeps finding.
+$answer = $glbGrant($glbEmailOf(GLB_PLAIN));
+$after  = $glbCoordRows();
+glb_check(
+    $answer['status'] === 302 && in_array(GLB_PLAIN, $after, true) === true,
+    'N6 CONTROL: an ordinary ACTIVE member of this organisation IS granted, so none of N1 to N5 can pass on a handler that simply refuses everybody',
+    'coordinators now ' . json_encode($after)
+);
+// Put the control's grant back, so the run leaves the event as it found it.
+$db->query('DELETE FROM tblEventCoordinators WHERE eventID = ' . (int) GLB_EVENT . ' AND userID = ' . (int) GLB_PLAIN);
+glb_check($glbCoordRows() === $before, 'N7 and the control\'s grant is removed again, leaving the event\'s coordinators as they were found');
 
 echo "\nM. The end\n";
 $statuses = array_values(array_unique(array_filter(array_column(glb_subs(), 1), static fn ($s): bool => $s !== null)));

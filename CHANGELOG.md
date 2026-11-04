@@ -4,6 +4,57 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Granting a coordinator reached the whole installation, and the refusal was invisible (#511)
+
+**Three faults in one statement.** `admin/calendar/coordinators/save` resolved
+the person with `WHERE emailAddress = ?` and nothing else:
+
+1. **It reached the whole installation.** One organisation's administrator could
+   make a member of **another** organisation a coordinator of their event — and a
+   coordinator can see and act on it.
+2. **It accepted a closed account.** `tblUsers.isActive` was never asked.
+3. **The two replies revealed whether an address has an account anywhere**, which
+   is a fact about somebody who may belong to a different customer entirely.
+
+The lookup is now the same join `leadership/assign.php` already uses — an INNER
+JOIN on `tblUserSites` for the event's own organisation with `us.isActive = 1`,
+plus `u.isActive = 1` on the account. **Both halves matter:** a membership
+switched off and an account switched off are different states, and either must
+refuse. Every refusal now reads identically, so nothing is revealed.
+
+**This waited on something else, and the order was the whole difficulty.**
+Narrowing it was refused while `admin/users/save.php` created an account with no
+membership row, because an administrator who had just added somebody could not
+then make them a coordinator. That page adds the row now, so the narrowing is
+safe — which is exactly the order #511 suggested.
+
+**And the page printed no message at all.** `coordinators.php` had **zero**
+mentions of `flash_msg`, so "Coordinator granted.", "Invalid email address." and
+the new refusal had never been shown to anybody: an administrator typed an
+address, pressed the button, was returned to the page and saw **nothing** — the
+same outcome whether it worked or was refused. Nothing in this portal prints a
+flash centrally (141 pages print their own), so a handler's message is swallowed
+by any page that forgets; that is the shape recorded for `recordings/view.php` in
+#276. **A refusal nobody sees is not a refusal that helps anybody**, which is why
+this and the narrowing had to land together.
+
+**Nothing exercised this handler at all** before today — measured with
+`grep -rln coordinators-save tools/`, which answered nothing. Section N of
+`tools/go-live-button-selftest.php` covers it with seven checks, each person
+holding exactly one condition (#616's lesson): a member of the other
+organisation, an address with no account, a closed account whose membership is
+live, a live account whose membership is off, and an ordinary active member as
+the control. **Planted:** the old broad lookup fails N1, N4 and N5 on their own
+merits while the control still passes, so none of them passes vacuously.
+
+**One trap worth recording.** N3's first version stripped the tags off the whole
+page and compared that — and it failed on two identical refusals, because the
+page carries #625's asset-fallback script and `App::cspNonce()` is fresh on every
+response, so no two renders are ever equal. That is the trap already recorded for
+the password-reset comparison. It reads the one flash element now, which is
+better than stripping the nonce: there is nothing else in it to drift, so the
+comparison cannot be blinded by widening a pattern.
+
 ### The installer's six gaps: four were already closed, one is fixed, one is inherent (#594)
 
 Measured each against a real MySQL 8.0.36 rather than read.
