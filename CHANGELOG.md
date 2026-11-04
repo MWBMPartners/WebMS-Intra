@@ -4,6 +4,36 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A check was looking for the wrong text, because PHP interpolated it away (#757)
+
+`tools/expense-rules-selftest.php` asked
+`str_contains($approveTight, "$decision='';")` in **double** quotes, so PHP
+interpolated `$decision` — undefined there — and the needle became `='';`. The
+check looked for *any* `x='';` anywhere in the file, and printed an
+undefined-variable warning on every run.
+
+**Why it matters more than a typo.** The comment above it says the check exists
+*because a reviewer once changed only the initial value*, and that it was
+deliberately written as an assignment rather than plain text so the block's own
+opening condition could not satisfy it. The interpolation undid exactly that
+care: the guard for a recorded past fault was silently blunted.
+
+**Be exact about how bad it was: latent, not live.** That file holds exactly one
+`= '';`, so the weakened needle still happened to catch the fault it was written
+for. Planted — the decision initialised to `'approve'` instead of `''` — the
+corrected needle goes red.
+
+A warning beside it now says **not to widen the pattern** if it ever goes red,
+which is what the original comment was already asking for.
+
+**The sweep for siblings, and why the obvious version of it is useless.**
+Looking for any double-quoted string containing `$` across the self-tests gives
+**797** hits, nearly all of them deliberate (`"{$pass} passed"` and the like) —
+a check that would be switched off within a day (#483). The narrow question —
+a needle *inside* `str_contains()` and friends carrying an unescaped `$` —
+answers **1**, which was this one, and **0** now. All 78 similar needles
+elsewhere are correctly escaped as `\$`.
+
 ### Gating a feature is a capability now, almost everywhere (#739)
 
 Phase two of #727. **Hard-coded role gates went from 16 call sites to 3**, and

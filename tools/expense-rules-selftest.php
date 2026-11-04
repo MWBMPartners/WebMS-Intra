@@ -589,9 +589,28 @@ check(
 //    missing field, an empty value, the wrong case and a list ALL record an
 //    approval again, and the self-test reported 57 of 57. Guarding the inside
 //    of a block is worth nothing if the way in can be closed off.
+// ⚠️ SINGLE QUOTES, AND THAT IS THE WHOLE POINT (#757). This needle was
+//    written in DOUBLE quotes, so PHP interpolated `$decision` — undefined
+//    here — and the needle became `='';`. Measured:
+//
+//        php -r '$n = "$decision=\'\';"; var_dump($n);'
+//        PHP Warning:  Undefined variable $decision
+//        string(4) "='';"
+//
+//    So the check looked for ANY `x='';` anywhere in the tightened file, and
+//    printed an undefined-variable warning on every run. The comment above
+//    explains that this check exists BECAUSE a reviewer once changed only the
+//    initial value, and that it was deliberately written as an assignment
+//    rather than plain text — the interpolation undid exactly that care, so
+//    the guard for a recorded past fault was silently blunted.
+//
+//    **If this ever goes red, do NOT widen the pattern.** Matching less than
+//    the whole assignment is what the original comment warns against, and a
+//    needle that stops matching means the thing it guards has changed, which
+//    is the finding.
 check(
     "...and the decision starts as nothing, so that block is actually reachable",
-    str_contains($approveTight, "$decision='';") === true,
+    str_contains($approveTight, '$decision=\'\';') === true,
     preg_match('/\$decision\s*=\s*[^;]*;/', $rawApprove, $seen) === 1 ? trim($seen[0]) : '(not found)'
 );
 check(
