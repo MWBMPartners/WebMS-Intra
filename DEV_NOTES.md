@@ -1283,370 +1283,48 @@ gh variable set SFTP_ENABLED      --body 'true'
 
 ---
 
-### 3b. The two front doors — SUPERSEDED, and SIX OF ITS SETTING NAMES ARE RETIRED (#493; see the warning)
-
-> ⚠️ **READ THIS BEFORE FOLLOWING ANYTHING IN THIS SECTION. Added 27 October 2026.**
->
-> This describes an arrangement that was planned and then replaced by the workflow
-> package (#499). **Six of the setting names below are retired**: nothing reads
-> `SFTP_PATH_LIVE_ADMIN_DIR`, `SFTP_PATH_LIVE_PUBLIC_DIR`, `SFTP_PATH_BETA_ADMIN_DIR`,
-> `SFTP_PATH_BETA_PUBLIC_DIR`, `SFTP_PATH_ALPHA_ADMIN_DIR` or
-> `SFTP_PATH_ALPHA_PUBLIC_DIR`, and each one still set only produces a warning line in
-> every run. `SFTP_PATH_ROOT_DIR` is still real; the per-channel folder settings are now
-> `SFTP_PATH_ALPHA_DIR`, `SFTP_PATH_BETA_DIR` and `SFTP_PATH_LIVE_DIR`, one folder per
-> channel holding BOTH `admin_html` and the code folders. There is no separate public
-> website folder any more.
->
-> **In particular, do NOT follow the "what to do on the server" table further down**,
-> which tells you to delete `public_html/`, `public_html_beta/` and `public_html_dev/`.
-> It was written for a migration that never happened in this shape. Deleting a live
-> channel's folder on the strength of it would take the site down.
->
-> What is true is in the owner's guide,
-> `.claude-work/resume/rollout-WF--build-evidence/DEPLOY-SET-UP-AND-FIRST-RUN.md`, and in
-> "Remote layout: one folder per channel" above. **Rewriting this section properly is
-> tracked as #637**; it is left here, marked, rather than deleted, because the
-> reasoning in it about why both folders must share a parent is still why the current
-> layout is shaped as it is.
-
-> ⚠️ **Do not set these yet.** The deployment does not read them until the work
-> on #493 lands. They are written down here now so the change can be planned,
-> and so nobody has to work them out again later.
-
-**What is changing.** The portal is becoming two websites that share one set of
-code:
-
-- **`web/admin_html/`** — the management portal. Everything behind a login. This
-  is today's `web/public_html/`, renamed.
-- **`web/public_html/`** — new, and genuinely public. No login, ever. This is what
-  a visitor to the noticeboard or the public calendar sees.
-
-**Why the existing three settings are retired rather than reused.** The folder
-called `public_html` **keeps its name but changes its meaning**. Today it holds
-the management portal; afterwards it holds the public website. If one of the old
-settings were quietly left pointing at the old place, the next deployment would
-copy **the entire management portal into the public web folder** — and it would
-look like it had worked.
-
-A required setting that has not been created yet makes the deployment **stop
-with a clear error**. A setting that still exists but now means something
-different fails silently, in the worst possible direction. So all three go, and
-new, clearly-named ones replace them — ones the deployment insists on, so a missed
-step stops it rather than sending files to the wrong place.
-
-**One setting names the base folder. The rest name only their own folder.**
-
-`SFTP_PATH_ROOT_DIR` holds the shared base — the folder everything else sits inside.
-The six front-door settings hold **just a folder name**, not a full path. The
-deployment joins them.
-
-This is not only tidier. It makes the "both folders must share a parent" rule
-**impossible to break** rather than something the deployment has to check: every
-folder is placed inside `SFTP_PATH_ROOT_DIR` by construction. It also means moving the
-whole installation is a one-setting change.
-
-| Setting | Value (example) |
-| --- | --- |
-| `SFTP_PATH_ROOT_DIR` | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/` |
-
-| Branch  | Front door        | Setting                      | Value               |
-| ------- | ----------------- | ---------------------------- | ------------------- |
-| `main`  | Management portal | `SFTP_PATH_LIVE_ADMIN_DIR`   | `admin_html/`       |
-| `main`  | Public website    | `SFTP_PATH_LIVE_PUBLIC_DIR`  | `public_html/`      |
-| `beta`  | Management portal | `SFTP_PATH_BETA_ADMIN_DIR`   | `admin_html_beta/`  |
-| `beta`  | Public website    | `SFTP_PATH_BETA_PUBLIC_DIR`  | `public_html_beta/` |
-| `alpha` | Management portal | `SFTP_PATH_ALPHA_ADMIN_DIR`  | `admin_html_dev/`   |
-| `alpha` | Public website    | `SFTP_PATH_ALPHA_PUBLIC_DIR` | `public_html_dev/`  |
-
-**How the names are built.** Every one of these starts `SFTP_PATH_`, so in
-GitHub's settings list — which sorts alphabetically — they sit together in one
-block instead of being scattered among the other `SFTP_` settings. Inside that
-block they then fall into order by channel:
-
-```text
-SFTP_PATH_ROOT_DIR                          the base folder, one for every channel
-SFTP_PATH_<CHANNEL>_<FRONT DOOR>_DIR        for example SFTP_PATH_LIVE_ADMIN_DIR
-```
-
-- **`<CHANNEL>`** is `LIVE`, `BETA` or `ALPHA` — the channel, not the branch. The
-  deployment already thinks in channels (`deploy.yml` sets `channel=live` for the
-  `main` branch, `channel=beta`, `channel=alpha`), so this uses the same word for
-  the same thing. `main` is the branch; `live` is what it deploys to.
-- **`_DIR` at the end** says the value is a **folder name**, not a full path. That
-  matters: the old settings held full paths, and a setting that keeps its name
-  while its meaning changes is the exact trap this whole piece of work exists to
-  avoid.
-
-Names from earlier drafts of this plan — `SFTP_ROOT_DIR`, `SFTP_ADMIN_DIR_LIVE`, `SFTP_ADMIN_PATH_LIVE` and so on — were
-never set and are not read. If one turns up somewhere it is simply ignored, and
-the deployment stops for the setting it actually wants.
-
-One deliberate mismatch, so it does not look like a mistake: the alpha settings
-say `ALPHA`, but the folders are still named `..._dev`. They keep their existing
-names so the server needs no renaming for a channel nobody outside the team
-visits. Rename them to `..._alpha` if you prefer — just change the values of the
-two `SFTP_PATH_ALPHA_*` settings to match.
-
-#### Slashes: where they belong, and where they break things
-
-This is the easiest thing to get wrong, and getting it wrong sends a deployment
-somewhere plausible-looking rather than failing outright. The rules are short.
-
-| Setting | Must START with `/`? | May END with `/`? | May contain `/` in the middle? |
-| --- | --- | --- | --- |
-| `SFTP_PATH_ROOT_DIR` | **Yes — required** | Yes, optional (trimmed) | Yes, it is a full path |
-| `SFTP_PATH_*_ADMIN_DIR` | **No** | Yes, optional (trimmed) | **No — refused** |
-| `SFTP_PATH_*_PUBLIC_DIR` | **No** | Yes, optional (trimmed) | **No — refused** |
-| `SFTP_HOST` | **No** | **No** | **No** |
-| `SFTP_USER` | **No** | **No** | **No** |
-
-**In plain terms:**
-
-- **`SFTP_PATH_ROOT_DIR` is a full path and must start with `/`.** A trailing slash is
-  fine either way — the deployment trims it before joining.
-- **The six folder settings are a NAME, not a path.** Just `admin_html` or
-  `admin_html/`. No leading slash, and nothing with another folder inside it.
-- **`SFTP_HOST` is a bare machine name.** No `sftp://` in front, no slash after.
-
-**Right:**
-
-```text
-SFTP_PATH_ROOT_DIR         /home/dh_abcd1234/portal.millrdsdacambridge.uk/
-SFTP_PATH_ROOT_DIR         /home/dh_abcd1234/portal.millrdsdacambridge.uk   ← also fine
-SFTP_PATH_LIVE_ADMIN_DIR   admin_html/
-SFTP_PATH_LIVE_ADMIN_DIR   admin_html                                       ← also fine
-SFTP_HOST                  iad1-shared-12-34.dreamhost.com
-```
-
-**Wrong, and what actually happens:**
-
-| What somebody types | What goes wrong |
-| --- | --- |
-| `SFTP_PATH_ROOT_DIR` = `home/dh_abcd1234/portal...` (no leading slash) | **Refused, with a message.** Without that check it would be treated as relative to wherever the SFTP session starts, and could create a whole `home/dh_abcd1234/...` tree *inside* your home folder — a second copy of everything, in the wrong place, that looks like it worked. |
-| `SFTP_PATH_LIVE_ADMIN_DIR` = `/home/dh_abcd1234/portal.../admin_html` (the old full-path style) | **Refused, with a message.** Joined to the base it would build `/home/dh_abcd1234/portal...//home/dh_abcd1234/portal.../admin_html`. |
-| `SFTP_PATH_LIVE_ADMIN_DIR` = `admin_html/public` | **Refused** — a folder name cannot contain another folder. |
-| `SFTP_PATH_LIVE_ADMIN_DIR` = `/admin_html/` | Accepted. Both slashes are trimmed, leaving `admin_html`. Untidy but unambiguous, so it is allowed rather than refused. |
-| `SFTP_HOST` = `sftp://iad1-shared-12-34.dreamhost.com/` | **Connection fails.** The host is put straight into `sftp://USER@HOST:PORT`, so this becomes `sftp://user@sftp://iad1-...com/:22`. |
-| `SFTP_PATH_ROOT_DIR` ends `//` | Harmless — trimmed to one. |
-
-**Why the deployment refuses rather than tidying up the first two.** Both are the
-signature of somebody pasting the old style into a new setting. Quietly correcting
-that would hide a half-finished changeover, which is the state in which the really
-expensive mistakes happen. A refusal costs a minute; a deployment into the wrong
-folder can publish the management portal.
-
-**Unchanged:** `SFTP_HOST`, `SFTP_USER`, `SFTP_PORT`, and `SFTP_KEY` or
-`SFTP_PASSWORD`.
-
-**Retired:** `SFTP_LIVE_PATH`, `SFTP_BETA_PATH`, `SFTP_DEV_PATH`. Confirmed gone
-from this repository and not inherited from the organisation — checked with the
-GitHub API on 11 September 2026.
-
-```bash
-gh secret set SFTP_PATH_ROOT_DIR         --body '/home/dh_abcd1234/portal.millrdsdacambridge.uk/'
-
-gh secret set SFTP_PATH_LIVE_ADMIN_DIR   --body 'admin_html/'
-gh secret set SFTP_PATH_LIVE_PUBLIC_DIR  --body 'public_html/'
-gh secret set SFTP_PATH_BETA_ADMIN_DIR   --body 'admin_html_beta/'
-gh secret set SFTP_PATH_BETA_PUBLIC_DIR  --body 'public_html_beta/'
-gh secret set SFTP_PATH_ALPHA_ADMIN_DIR  --body 'admin_html_dev/'
-gh secret set SFTP_PATH_ALPHA_PUBLIC_DIR --body 'public_html_dev/'
-
-# Only needed when converting an OLDER installation. Done here on 11 September 2026.
-gh secret delete SFTP_LIVE_PATH
-gh secret delete SFTP_BETA_PATH
-gh secret delete SFTP_DEV_PATH
-```
-
-#### What is set up right now (checked 11 September 2026)
-
-Checked with the GitHub API, not from memory. A secret can be set on this
-repository or inherited from the organisation, and from inside a workflow the two
-look identical — so the only way to know is to ask.
-
-| Setting | Where it is set | Note |
-| --- | --- | --- |
-| The seven `SFTP_PATH_*` | This repository | as in the tables above |
-| `SFTP_HOST`, `SFTP_USER`, `SFTP_PASSWORD` | This repository, **overriding** an organisation value of the same name | see the warning below |
-| `SFTP_PORT` | The organisation only | inherited |
-| `SFTP_KEY` | **Not set anywhere** | this installation signs in with the password |
-| `SFTP_LIVE_PATH`, `SFTP_BETA_PATH`, `SFTP_DEV_PATH` | **Not visible at either level** | the changeover is complete |
-
-> ⚠️ **Change the repository's `SFTP_HOST`, `SFTP_USER` and `SFTP_PASSWORD` — never
-> delete them.** Each one overrides an organisation-wide value that other
-> repositories share. Delete one here and the deployment does NOT stop: it
-> quietly falls back to the organisation's value, which may belong to a different
-> account or a different server. That is the worst way for it to fail — a
-> deployment that reports success against the wrong place.
-
-**Why a leftover retired setting is warned about, not refused.** An earlier draft
-of the deployment refused to run at all if it could see one of the three retired
-names. That would have been wrong here. Organisation secrets are visible to every
-repository in the organisation, and this organisation already shares its SFTP
-settings between repositories. Another repository adding `SFTP_LIVE_PATH` at the
-organisation level would then have stopped every WebMS-Intra deployment, for a
-reason that has nothing to do with WebMS-Intra — and a check that cries wolf gets
-switched off. Nothing reads the retired names any more, so a leftover one cannot
-send a deployment anywhere. The protection that actually matters is the checking
-of the new settings, and that does stop the deployment when something is wrong.
-
-**Where the shared code goes.** Straight into `SFTP_PATH_ROOT_DIR`. The deployment used
-to work this out by taking the folder above the web root, which meant a typo in a
-path quietly relocated the shared code somewhere plausible-looking. Now it is
-stated outright, and an empty setting fails loudly.
-
-#### Where everything ends up
-
-The public front door finds the shared code by looking **one folder up** from
-itself. Because every folder is placed inside `SFTP_PATH_ROOT_DIR`, that is always
-true — there is nothing to get wrong and nothing for the deployment to check.
-
-```text
-/home/dh_abcd1234/portal.millrdsdacambridge.uk/      <- SFTP_PATH_ROOT_DIR
-├── _core/  _apps/  _sql/  _lang/  _vendor/  _install/   <- shared code
-├── _auth_keys/  _uploads/  _backups/                     <- server-managed, never touched
-├── admin_html/          <- main  : the management portal
-├── admin_html_beta/     <- beta  : the management portal
-├── admin_html_dev/      <- alpha : the management portal
-├── public_html/         <- main  : the public website
-├── public_html_beta/    <- beta  : the public website
-└── public_html_dev/     <- alpha : the public website
-```
-
-This account already runs three web roots from one base folder, so the
-arrangement is already proven here.
-
-#### What to set in the DreamHost panel
-
-| Address                             | Web directory                                                    |
-| ----------------------------------- | ---------------------------------------------------------------- |
-| `portal.millrdsdacambridge.uk`      | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/admin_html`       |
-| `public.millrdsdacambridge.uk`      | `/home/dh_abcd1234/portal.millrdsdacambridge.uk/public_html`      |
-
-> 🚨 **Never point a web address at the shared folder itself.** If any domain's
-> web directory is set to `/home/dh_abcd1234/portal.millrdsdacambridge.uk/`, the
-> web server will hand out database snapshots, uploaded files (pastoral
-> attachments, children's photos, expense receipts, Gift Aid addresses) and the
-> installer. The mistake would be in the hosting panel, so every check in the
-> deployment would pass while it was happening. The portal refuses to start if it
-> detects this, and a probe after deployment fetches those addresses and fails the
-> run if they answer — but the panel is the place to get it right.
-
-Serving the public pages at a path on a **separate main domain**
-(`example.org/noticeboard`) needs nothing deployed and no extra setting. That is a
-different mechanism — see `.claude/plans/public-door-3-build-plan.md`.
-
----
-
-### 3c. Changing over a server that already has the old layout (#493)
-
-> 🛑 **Do not deploy until the #493 work has landed.** The deployment does not yet
-> know about `admin_html/`, so the shared upload would copy the entire management
-> portal into the shared folder, where a misconfigured web address could serve it.
-
-#### Does the deployment clean up after itself?
-
-Mostly yes, and it is worth knowing exactly where.
-
-Both uploads run `lftp mirror --reverse --delete`, so **a file removed from the
-repository is removed from the server on the next deployment**. That means the old
-management-portal files sitting in `public_html/` would be cleared out when the
-new public website is uploaded there.
-
-Relying on that alone is still the wrong call for this particular change, for one
-reason: `public_html` is changing **meaning**, not just contents. If a deployment
-stops half way, or an exclusion happens to match, what survives is an
-admin-portal file in a folder the whole world can now read. Deleting the folder
-beforehand removes that possibility rather than guarding against it.
-
-#### What to delete, and what to never touch
-
-| On the server | Do this | Why |
-| --- | --- | --- |
-| `public_html/` | **Delete the whole folder** | Every file in it is the old management portal. Under the new layout this folder is the PUBLIC website. |
-| `public_html_beta/` | **Delete the whole folder** | Same. |
-| `public_html_dev/` | **Delete the whole folder** | Same. |
-| `admin_html/` etc. | Nothing — they do not exist yet | The deployment creates them. |
-| `_core/` `_apps/` `_sql/` `_lang/` `_vendor/` `_install/` | Leave, or delete — either is fine | Fully replaced from the repository every time. |
-| `_libraries/` | Leave alone | Holds dompdf, fetched during the build. |
-| **`_auth_keys/`** | **🚨 NEVER DELETE** | See below. |
-| **`_uploads/`** | **🚨 NEVER DELETE** | Everything anybody has uploaded through the portal — documents, photos, pastoral attachments, expense receipts. |
-| **`_backups/`** | **🚨 NEVER DELETE** | The database snapshots. Deleting these at the same moment as a big structural change removes the one thing that could put it right. |
-
-#### Why `_auth_keys/` is the one that cannot be recovered
-
-It holds two things: the database connection details, and `enc.key` — the key used
-to scramble sensitive settings before they are stored.
-
-The database details can be typed in again. **The key cannot.** Everything
-scrambled with it becomes permanently unreadable if it is lost: saved API keys for
-payments, email and text messaging; every member's two-factor authentication
-secret; the browser-notification signing key; Gift Aid and integration
-credentials. There is no recovery, because that is the entire point of it.
-
-The deployment never uploads or deletes this folder — it is excluded from every
-mirror. The danger is a person tidying up by hand.
-
-#### So: wipe everything, or wipe selectively?
-
-**If the server has never had a real installation** — no database set up, nothing
-uploaded, no `_auth_keys/enc.key` — then wiping the whole base folder is simplest
-and carries no risk. Check for the key file first:
-
-```bash
-ls -la /home/USER/portal.millrdsdacambridge.uk/_auth_keys/
-```
-
-If that folder is missing or empty, there is nothing to lose.
-
-**If there IS a real installation**, delete only the three web-root folders and
-leave the rest:
-
-```bash
-cd /home/USER/portal.millrdsdacambridge.uk/
-# Take a copy of the irreplaceable folder first, somewhere outside the web base.
-cp -a _auth_keys ~/auth_keys_backup_before_public_door
-
-rm -rf public_html public_html_beta public_html_dev
-# _auth_keys, _uploads and _backups are deliberately NOT in that line.
-```
-
-#### The order to do it in
-
-1. Land the #493 work so the deployment understands the new layout.
-2. Copy `_auth_keys/` somewhere safe, outside the web base folder.
-3. Delete the three old web-root folders.
-4. Set `SFTP_PATH_ROOT_DIR` and the six `SFTP_PATH_*_DIR` settings, and delete the
-   three old ones. **Done on 11 September 2026** — see 3b.
-5. Re-point `portal.millrdsdacambridge.uk` at `admin_html` in the DreamHost panel,
-   and point the new public address at `public_html`.
-6. Deploy **alpha first**, with the dry-run option switched on, and read what it
-   says it would delete before letting it run for real.
-7. Check the alpha management portal still signs in, then check the alpha public
-   address answers "not found" for everything — because nothing is published yet.
-8. Only then do beta, then main.
-
-#### One thing the deployment used to get wrong
-
-**This no longer applies, and is kept only so the lesson is not lost.** Until the
-deploy was rewritten (#499, commit `c61211e`), a constant `WEB_ROOT_EXCLUDES` in
-`.github/workflows/deploy.yml` carried a comment saying the shared upload "runs
-without `--delete`, so any other server-managed contents of `_libraries/` are
-preserved". That was untrue: the upload did use `--delete` and `_libraries/` was
-not excluded, so anything put there by hand was removed on the next deploy.
-
-**Neither the constant nor that comment exists any more** — `grep -rn
-WEB_ROOT_EXCLUDES .github/` finds nothing. The lesson that survives the rewrite:
-the mirrored folders are mirrored with `--delete`, so **nothing you place on the
-server by hand inside them survives a deploy**. Check what the current workflow
-excludes before relying on anything staying put.
-```
-
-**Shared-base note.** The shared `_core/`, `_vendor/`, `_sql/` etc. upload to
-`dirname()` of whichever per-branch path applies. When all three paths share
-one parent (the default — recommended for the WebMS-Intra single-site setup),
-all branches' shared code lands in the same place. Point them at different
-parents if you want full isolation.
+### 3b. Where the deploy puts things (#493, #499, #637)
+
+**Sections 3b and 3c used to be here — 365 lines describing an arrangement that
+was planned, replaced, and then left in place behind a warning saying "do not
+follow this".** They are deleted rather than annotated, which is this
+repository's rule: where something no longer applies, delete it instead of
+explaining that it no longer applies. A superseded instruction behind a warning
+is still an instruction, and somebody setting up a server reads the table, not
+the warning above it.
+
+**What they got wrong, so that nobody reinstates them:**
+
+* They described **one shared base folder** with `public_html/`,
+  `public_html_beta/` and `public_html_dev/` as siblings, last push winning.
+  Each channel has had a folder of its own since `c61211e` (27 October 2026),
+  with the staff pages in `admin_html` inside it and nothing shared.
+* Six of their setting names are retired and read by nothing:
+  `SFTP_PATH_LIVE_ADMIN_DIR`, `SFTP_PATH_LIVE_PUBLIC_DIR`,
+  `SFTP_PATH_BETA_ADMIN_DIR`, `SFTP_PATH_BETA_PUBLIC_DIR`,
+  `SFTP_PATH_ALPHA_ADMIN_DIR` and `SFTP_PATH_ALPHA_PUBLIC_DIR`. They sit in
+  `RETIRED_SETTINGS` in `tools/deploy/resolve-settings.sh` (line 207), which
+  warns and carries on.
+* **3c's standing warning was false.** It said "do not deploy until the #493
+  work has landed. The deployment does not yet know about `admin_html/`". It
+  does: `STAFF_WEB_DIR_DEFAULT='admin_html'` at
+  `tools/deploy/resolve-settings.sh:129`, overridable per run with
+  `DEPLOY_STAFF_WEB_DIR`. A warning that tells somebody not to deploy, months
+  after deploying became safe, costs real time.
+
+**Where the truth lives now**, and only in these two places so they cannot
+disagree:
+
+* `README.md` → "Branches and where they deploy", which was corrected in the
+  same package.
+* `.github/workflows/deploy.yml`'s own header, "WHERE THINGS GO, INSIDE ONE
+  CHANNEL'S FOLDER", and `tools/deploy/resolve-settings.sh`, which is the one
+  place that decides where files go and refuses when it is unsure.
+
+**Read the workflow, not a copy of it.** That is the lesson #637 is really
+about: every one of the fourteen wrong statements it uncovered was a document
+describing correct machinery inaccurately, and each had been read as true for
+weeks.
 
 ### 4. Enable the kill switch
 

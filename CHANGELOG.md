@@ -4,6 +4,44 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The documents said the deploy did something it stopped doing in October (#637)
+
+**Fourteen statements across four files described the deploy arrangement as it
+was planned, not as it is.** `README.md`, `DEV_NOTES.md`,
+`docs/offsite-backup-setup.md` and both instruction files all still described
+**one shared base folder** with `public_html/`, `public_html_beta/` and
+`public_html_dev/` as siblings — the arrangement `c61211e` replaced on
+27 October 2026 with a complete, separate installation per channel.
+
+**The two worst were standing warnings telling somebody not to deploy.**
+`DEV_NOTES.md` section 3c said "do not deploy until the #493 work has landed.
+The deployment does not yet know about `admin_html/`". It does, and had for a
+week: `STAFF_WEB_DIR_DEFAULT='admin_html'` at
+`tools/deploy/resolve-settings.sh:129`, overridable per run with
+`DEPLOY_STAFF_WEB_DIR`. And six setting names the documents told a reader to
+configure are retired and read by nothing — they sit in `RETIRED_SETTINGS` at
+`tools/deploy/resolve-settings.sh:207`, which warns and carries on.
+
+**Sections 3b and 3c are deleted, not annotated** — 365 lines of superseded
+instruction replaced by 43 saying what was wrong and where the truth is. That
+is this repository's own rule: where something no longer applies, delete it
+rather than explaining that it no longer applies. **A superseded instruction
+behind a warning is still an instruction**, and somebody setting up a server
+reads the table, not the warning above it.
+
+**Two stale counts went with it**, both of the shape `.claude/CLAUDE.md`'s own
+"counts are not kept in this file" rule exists to stop. It said the version was
+1.4.0 (it is 1.4.1 on `main`, and since D-024 the number is set at release
+time, so the file now says how to read it rather than what it is), and that
+**fourteen** pages were outstanding on `check_install_wide_prefill.pending.txt`
+when the check itself prints **twelve**. Both files now point at the command.
+
+**The transferable part:** every one of the fourteen was a document describing
+correct machinery inaccurately, and each had been read as true for weeks. Read
+the workflow and `tools/deploy/resolve-settings.sh` — which is the one place
+that decides where files go, and refuses when it is unsure — never a document's
+copy of them.
+
 ### The version number is set at release time, and `alpha` and `beta` are guarded at last (#474, #476, #748 — D-024)
 
 **`alpha` had been reporting version 1.4.0 while `beta` and `main` reported

@@ -1,6 +1,6 @@
 # WebMS Intra
 
-> **Version:** 1.4.0 | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | **DreamHost** shared hosting
+> **Version:** 1.4.1 (`web/_core/version.php` is the only source) | **PHP** 8.5 (backward-compatible with 8.4) | **MySQL** 8.0+ | shared hosting, no command line (DreamHost is the reference host)
 
 A modular internal portal platform for organisations, providing centralised access to internal tools, calendar / events, attendance, expenses, leadership directory, prayer requests, announcements, document library, tasks/reminders, multi-site support, and more.
 
@@ -28,11 +28,14 @@ A modular internal portal platform for organisations, providing centralised acce
 ```
 WebMS-Intra/                         # Git repository root (NOT deployed)
 ├── .claude/                         # Claude AI context and project brief
-├── .github/workflows/deploy.yml     # CI/CD pipeline (syncs web/ to server)
-├── CHANGELOG.md                     # Project-wide changelog
+├── .github/workflows/deploy.yml     # Uploads the staff pages and the code
+│                                    # folders to one channel's own folder
+├── CHANGELOG.md                     # Project-wide changelog (also uploaded,
+│                                    # for the release-notes page)
 ├── DEV_NOTES.md                     # Developer guide
 ├── README.md                        # This file
-└── web/                             # ALL deployable server files
+└── web/                             # Everything that can be deployed lives
+                                     # here; not all of it is (see below)
     │
     │  ── Server-side (NOT web-accessible — above DocumentRoot) ──
     ├── _core/                       # Framework classes (Portal\Core namespace)
@@ -117,7 +120,17 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     └── public_html_redir/           # Redirect page
 ```
 
-The single `public_html/` directory is the source for **every** branch's deploy — `alpha` lands at the server's `public_html_dev/`, `beta` at `public_html_beta/`, and `main` at `public_html/`. There's no per-channel front controller in the repo.
+`web/public_html/` is the source of the staff pages for **every** channel, and there is no per-channel
+front controller in the repository. On the server those pages land in a folder called `admin_html`
+inside the channel's own folder — see **Deployment** below for the whole shape.
+
+**Five folders in `web/` are never uploaded**, so "everything deployable lives in `web/`" is not the
+same as "all of `web/` is deployed": `private_html/`, `public_html_landing/` and `public_html_redir/`
+are kept in the repository by the owner's choice (14 September 2026), and `_includes/` and
+`_functions/` are placeholders that may hold nothing but `.gitkeep` and the "refuse everything"
+`.htaccess`. The one list of which is which is `tools/deploy/resolve-settings.sh`, and its "tree"
+check refuses a deploy when it finds a folder in `web/` that is on none of those lists — so a new
+folder cannot be silently left behind.
 
 ## Request Flow
 
@@ -288,6 +301,11 @@ treats itself as the live site, with errors hidden.
   treated as live and has no staff sign-in gate.
 - **Where several copies share one `_core` folder, do NOT create the file**: one file would speak for every copy. Keep
   the three folder names, or give each web folder its own `PORTAL_ENV`.
+- **On a channel put there by `deploy.yml` none of this is needed.** The deploy writes `.channel`
+  itself, first of everything it uploads, and each channel has its own `_core`, so no file ever
+  speaks for more than one copy. The folder-name route does not come into it either: the deployed
+  web folder is called `admin_html`. The shared-`_core` warning above is about an arrangement
+  somebody made by hand, or one left over from the layout the deploy used before October 2026.
 
 ### Manual Configuration (alternative to wizard)
 
@@ -308,14 +326,73 @@ php -S localhost:8080 -t public_html
 
 ## Deployment
 
-CI/CD via GitHub Actions syncs `web/` to DreamHost over **SFTP** (SSH key
-preferred, password fallback) on a three-branch model:
+`deploy.yml` uploads the portal over **SFTP** (SSH key preferred, password fallback) when one of
+the three release branches changes. **No hosting company is assumed**: the host, the login and the
+folders all come from repository secrets, so one login for every channel, a login per channel or a
+server per channel are all supported. The branch decides the channel and nothing else does.
 
-| Branch  | Channel    | Where it lands on the server                     | Auto-bump rule       |
-| ------- | ---------- | ------------------------------------------------ | -------------------- |
-| `alpha` | alpha/dev  | its own folder, named by `SFTP_PATH_ALPHA_DIR`    | PATCH (always)       |
-| `beta`  | beta       | its own folder, named by `SFTP_PATH_BETA_DIR`     | Conventional Commits |
-| `main`  | production | its own folder, named by `SFTP_PATH_LIVE_DIR`     | none on `main`       |
+| Branch  | Channel    | Where it lands on the server                  |
+| ------- | ---------- | --------------------------------------------- |
+| `alpha` | alpha      | its own folder, named by `SFTP_PATH_ALPHA_DIR` |
+| `beta`  | beta       | its own folder, named by `SFTP_PATH_BETA_DIR`  |
+| `main`  | live       | its own folder, named by `SFTP_PATH_LIVE_DIR`  |
+
+Each of those is a folder **name**, never a path, inside the base folder `SFTP_PATH_ROOT_DIR` — or
+inside `SFTP_PATH_LIVE_ROOT_DIR` / `_BETA_` / `_ALPHA_` where a channel has been given a base folder
+of its own. All three channel names are needed on every run, whichever channel is being deployed,
+so that no two can be sent to the same place.
+
+**Every channel is a complete, separate installation in a folder of its own** — its own code, its
+own database login and encryption key, its own uploads and backups. Nothing is shared, so a deploy
+of one channel cannot change what another runs. Inside a channel's folder:
+
+```text
+<SFTP_PATH_ROOT_DIR>/<the channel's folder>/
+  .channel        one word (live, beta or alpha), uploaded first, read by the portal
+  CHANGELOG.md    for the release-notes page
+  admin_html/     <- web/public_html/  (point the website's address HERE and nowhere else)
+  _apps/ _core/ _install/ _lang/ _sql/ _vendor/ _libraries/   <- the same folders in web/
+  _auth_keys/ _uploads/ _backups/   the server's own: created once if missing,
+                                    never uploaded to, never deleted from
+```
+
+Each folder is mirrored on its own, with deletion, so a file removed from the repository is removed
+from that folder on the server. `web/` is never mirrored as a whole, so a deletion can only happen
+inside a folder the repository owns completely; anything else in the channel's folder is simply
+never touched.
+
+**Where the names come from:** `admin_html` is set in one place,
+`STAFF_WEB_DIR_DEFAULT` in `tools/deploy/resolve-settings.sh`. That script makes every decision
+about where files go and which login is used, and the workflow only calls it — so the two cannot
+drift apart. On any refusal the run stops before it connects to anything.
+
+**Before this, the three channels shared one base folder**, with `public_html/`,
+`public_html_beta/` and `public_html_dev/` side by side in it and the code folders uploaded to the
+shared base on *every* branch. The old file said so itself — `git show
+c61211e~1:.github/workflows/deploy.yml` opens with "Three branches map to three web roots on a
+SINGLE shared remote base" and warns that "Whichever branch pushed last wins for shared code".
+`c61211e` (27 October 2026, #499) is the rewrite.
+
+**While a deploy runs, a channel is part old and part new**, from the first folder uploaded to the
+last, and a page may show an error. No order of the folders avoids that. If a run stops part way,
+the channel stays in that state until a run finishes: start the workflow again by hand from the
+same branch, which always uploads.
+
+**On a server's first deploy**, run the workflow by hand with "dry run" ticked and read what it says
+it would upload and delete. A dry run creates nothing, so the channel's folder has to exist already;
+a real run creates it when it is missing. If that folder already holds a portal from the old shared
+layout, tick "adopt existing folder" as well, once.
+
+### Making a release
+
+**The version number is set when a release is prepared, not on every push** (the owner,
+4 November 2026 — [D-024](docs/decisions/024-the-version-number-moves-to-release-time.md)).
+`version-bump.yml` and `changelog.yml` are started **by hand only**, against the working branch a
+release is being prepared on, and both refuse to run against `alpha`, `beta`, `main` or `rc`: a
+branch that requires its tests to pass refuses every direct push, including theirs. The number then
+reaches `main` through the merge like everything else, and `package.yml` refuses to build a release
+whose number was not raised above the last tag — which is what makes the by-hand step impossible to
+forget.
 
 **A merge into `main` BUILDS the release by itself** — `package.yml` works out the version
 and makes the installation zip. Nobody pushes a `v*` tag any more, and a tag pushed by hand
@@ -327,79 +404,95 @@ the run still builds the zip and keeps it on the run, makes no tag, and prints w
 have done. This paragraph said a merge "publishes the release by itself" until 27 October 2026,
 which would have had somebody expecting a release that never appeared.
 
-Each channel now has a folder of its own, and the web address points at `admin_html`
-inside it. The three channels no longer share one base folder, so a deploy of one cannot
-overwrite another's code — which the old shared layout did, last push winning.
+### Workflows in `.github/workflows/`
 
-Inside a channel's folder the deploy makes `admin_html` (the staff pages) and the code
-folders (`_apps`, `_core`, `_install`, `_lang`, `_sql`, `_vendor`, `_libraries`), and
-creates `_auth_keys`, `_uploads` and `_backups` once if they are missing, never touching
-them again.
-
-Workflows in `.github/workflows/`:
-
-- `deploy.yml` — SFTP sync; key-first / password-fallback auth
-- `version-bump.yml` — raises the version number in `web/_core/version.php`
-  on pushes to `alpha` or `beta`
-- `changelog.yml` — appends commit-message entries to CHANGELOG.md
-- `package.yml` — builds the installation zip by itself on every merge into a
-  release branch, and publishes a GitHub Release for `main` and `rc`. It
-  replaced `release.yml`, which made a Release only when somebody pushed a
+- `deploy.yml` — the SFTP upload described above; key-first, password fallback. It ends by asking
+  the channel's own staff address (`ADMIN_BASE_URL_LIVE` / `_BETA` / `_ALPHA`) which channel it
+  thinks it is. That health check is the only proof that the address really points at the folder
+  just uploaded to; with the variable unset it is skipped with a warning, and no address is written
+  into the workflow
+- `version-bump.yml` — works out the next version number and writes it to
+  `web/_core/version.php`. **Started by hand only**, and it refuses to run against `alpha`, `beta`,
+  `main` or `rc`. It used to run on every push to `alpha` and `beta`
+  (`git show c61211e:.github/workflows/version-bump.yml`, which still carries
+  `push: branches: [alpha, beta]`); that stopped on 4 November 2026 in `e50738d`, because a job
+  writing straight to a branch is what stopped those branches from being guarded at all
+- `changelog.yml` — appends commit-message entries to CHANGELOG.md. **Started by hand only**, for
+  the same reason as `version-bump.yml`, and with the same refusal
+- `package.yml` — builds the installation zip by itself on every push to `main`, `rc`, `beta` or
+  `alpha`, and publishes a GitHub Release for `main` and `rc` **only while `PACKAGE_PUBLISH_ENABLED`
+  is on**. It replaced `release.yml`, which made a Release only when somebody pushed a
   `v*` tag by hand; pushing a tag now publishes nothing
 - `auto-merge-alpha.yml` — enables auto-merge on PRs whose base is `alpha`,
   then starts `deploy.yml` and `package.yml` itself. GitHub raises no event
   for a merge it makes with its own token, so nothing that listens for a push
   to `alpha` would otherwise hear these merges
-- `pr-security.yml` — the hard gate. Checks every PHP file for syntax errors,
-  scans for committed secrets, and runs most of the checks in
-  `tools/audit-checks/`. **Seven of the 32 are named in no workflow at all**
-  and run only when somebody runs them by hand, two of them tripwires added
-  this week (#625's inline-script check and #622's session-identifier check);
-  that gap is tracked as #637. Count from the workflow rather than
-  trusting a number written here — an earlier version of this line said "all
-  eleven", which was both stale and untrue
+- `pr-security.yml` — the hard gate. Checks every PHP file for syntax errors, scans for committed
+  secrets, and runs all but two of the scripts in `tools/audit-checks/`, on every pull request into
+  `main`, `rc`, `beta` or `alpha`, with no path filter. **No step in it uses `continue-on-error`**,
+  so any finding turns the run red.
+
+  **Never trust a count written here.** Count them with
+  `ls tools/audit-checks/check_*.py | wc -l`, and check each is wired with
+  `for f in tools/audit-checks/check_*.py; do grep -rq "$(basename "$f")" .github/workflows/ ||
+  echo "not wired: $f"; done`. The reason to count rather than read is that **this file names every
+  audit script individually — no workflow here globs the folder** (`.githooks/pre-push` does, but
+  that hook is turned on per clone and `git push --no-verify` skips it), so a new script is not
+  wired up until somebody names it.
+
+  **The two that do NOT run on every pull request, and why:**
+  - `check_giving_retention_data.py` — named only in `backup-selftest.yml`, which is path-filtered.
+    It validates `web/_core/data/giving-retention-countries.json` against its schema, so it has
+    nothing to say about a pull request that leaves that file alone.
+  - `check_workflow_expression_length.py` — named only in `lint.yml`, which runs when a file under
+    `.github/workflows/` changes. That is the only thing it reads: it guards GitHub's ceiling on how
+    long one `${{ … }}`-bearing value may be, which on 27 October 2026 made GitHub refuse the whole
+    of `pr-security.yml` for a week, so about thirty-five hard gates ran and checked nothing (#745).
 - `portal-selftests.yml`, `mail-selftests.yml`, `calendar-selftests.yml` — the
   repository's own self-tests, on **every** pull request. Some need only PHP;
-  the rest run against a real MySQL. `calendar-selftests.yml` is pinned to
-  MySQL 8.0.36 only, with no matrix
+  the rest run against a real database. `calendar-selftests.yml` runs its tests
+  on **three engines** — `mysql:8.0.36`, `mysql:8.4` and `mariadb:11.4` — which
+  is the one matrix here that covers MariaDB as well as MySQL
 - `backup-selftest.yml` — the backup and restore self-tests, **only when a pull
-  request changes one of about sixteen named paths** (`DbBackup.php`, the backup
-  pages, `web/_sql/**` and so on). This used to be listed above as running on
-  every pull request, which it has never done. **A path-filtered check must
+  request changes one of its named paths** (`DbBackup.php`, the backup
+  pages, `web/_sql/**` and so on; count them from the workflow). This used to be listed above as
+  running on every pull request, which it has never done: the commit that created the file already
+  carried the filter (`git log --diff-filter=A -- .github/workflows/backup-selftest.yml` names
+  `c61211e`, 27 October 2026, and `git show c61211e:.github/workflows/backup-selftest.yml` shows the
+  `paths:` list in it). **A path-filtered check must
   never be made a required status check**: GitHub leaves it pending for ever on
   a pull request that does not touch those paths, and nothing can then merge
 - `e2e-migrations.yml` — loads the database from scratch and replays every
-  change on top, to prove nothing breaks on upgrade. It runs against **both
-  MySQL 8.0.36 and 8.4.11**, as a matrix of exact versions (the harness refuses
-  to run if the server reports anything else). It is path-filtered too, on
+  change on top, to prove nothing breaks on upgrade. It runs **five engine-and-version
+  pairs side by side**: MySQL 8.0.36, 8.4.11 and 9.7.4, and MariaDB 11.4.13 and 12.3.3. The
+  versions are exact — the harness refuses to run if the server reports anything else — and
+  MySQL 8.0.36 is kept on purpose although its support ended in April 2026, because a customer's
+  shared host may still be running it. It is path-filtered too, on
   `web/_sql/` and the harness itself, so the warning above applies to it as well
 - `php-static-analysis.yml` — **a hard gate, not advisory**: `php -l` on every
-  PHP file under `web/`, with no `continue-on-error`, so a syntax error turns the
+  PHP file under `web/`, on **PHP 8.4 (the oldest supported) and PHP 8.5 (the recommended
+  version)**, with no `continue-on-error`, so a syntax error turns the
   run red. It was listed as advisory here until 27 October 2026, which was true
   only while it also carried Psalm; Psalm was removed on 13 October and the
   lint is all that is left
-- `codeql.yml`, `lint.yml`, `repo-config-audit.yml` — advisory. `codeql.yml`
-  keeps a `continue-on-error` on purpose, because GitHub's paid Code Scanning
-  is not enabled here and the upload is refused without it; removing the flag
-  would turn every run red for a billing reason. With Psalm gone, **no
-  code-analysis check here can turn a run red** (#618)
+- `lint.yml` — workflow files only, when one changes. `actionlint` (its embedded shellcheck tuned
+  to `--severity=error`, so cosmetic lint never fails a build) **and** the expression-length gate
+  described above. Neither step carries `continue-on-error`, so both are hard gates
+- `repo-config-audit.yml` — weekly, and on a pull request that touches `.github/workflows/`. It
+  looks for a rule that requires a status check by a name no workflow here produces, which
+  soft-locks every later pull request into waiting for a check that never arrives. It fails the run
+  when it finds one — but **without a repository secret `RULESET_AUDIT_TOKEN`** (a fine-grained
+  token with `Administration: Read`) it cannot see the rules at all and degrades to a no-op summary
+- `codeql.yml` — **advisory, on purpose.** It keeps a `continue-on-error` because GitHub's paid Code
+  Scanning is not enabled here and the upload is refused without it; removing the flag would turn
+  every run red for a billing reason. With Psalm gone, **no code-analysis check here can turn a run
+  red** (#618)
 
-> ⚠️ **Known problem: `version-bump.yml` and `changelog.yml` have not run on
-> `alpha` since 7 July 2026**, across roughly thirty merged pull requests. Both
-> are triggered by a push. Pull requests into `alpha` are merged automatically
-> by `auto-merge-alpha.yml` using the build service's own token, and GitHub
-> deliberately does not let one automated job start another that way. The
-> auto-merge job already works around this for deployment, by starting it
-> explicitly; the other two never got the same treatment, and neither offers a
-> manual trigger. The visible effect is that `alpha` still reports version
-> 1.4.0 while `beta` and `main` report 1.4.1, and the changelog for `alpha` is
-> only current because people have been editing it by hand in each pull
-> request.
-
-dompdf is fetched at deploy time by `tools/download-dompdf.sh` (pinned
-version) and uploaded as part of the shared sync. Other server-managed
-directories (`_auth_keys/`, `_uploads/`, `_backups/`) stay on the server and
-are excluded from upload.
+dompdf is not kept in the repository. It is fetched at deploy time by
+`tools/download-dompdf.sh`, at a pinned version, into `web/_libraries/dompdf/`, and uploaded with
+the `_libraries` folder like any other code. `_auth_keys/`, `_uploads/` and `_backups/` belong to
+the server: the deploy creates each one, empty, if it is missing, and after that never uploads to
+it and never deletes from it.
 
 Required repo configuration (one-time): see **DEV_NOTES.md → CI/CD Secrets
 Setup** for the step-by-step guide (SSH keypair, GitHub secrets, kill switch,

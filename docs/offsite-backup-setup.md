@@ -62,8 +62,8 @@ You need a command line on the server.
 
 1. Get **three** files from the portal's source, all in `tools/offsite-backup/`:
    `sync-offsite.sh.example`, `log-offsite-result.php` and
-   `read-offsite-settings.php`. They are **not** on the server: only the
-   `web/` folder is deployed. Upload them to any folder there.
+   `read-offsite-settings.php`. They are **not** on the server: the deploy uploads only from
+   `web/`, and these three live under `tools/`. Upload them to any folder there.
 
    Take all three from the **same release**. The script and the settings
    reader agree on a format with a number in it; if they come from different
