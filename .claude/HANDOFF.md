@@ -4,8 +4,7 @@
 
 ## Branch
 
-`claude/alpha-wip` at **`6ff7ea5`**, pushed. Working tree holds the #678
-documentation corrections, uncommitted.
+`claude/alpha-wip` at **`1cbf567`**, pushed. Working tree clean.
 
 **The owner gave standing approval on 2 November 2026 to push this working
 branch after each commit** — never a release or protected branch, never a force
@@ -15,19 +14,25 @@ push, and no pull request until the Codex review is done (D-035, D-007).
 
 | | |
 |---|---|
-| **What** | #678 — how work is recorded |
-| **State** | Parts 1 and 2 resolved; the three instruction-file passages about the settings were stale in the OPPOSITE direction and are corrected; #758 opened for the one question that lived only in prose |
-| **Next** | Commit it, then #594 (installer gaps) |
+| **What** | The whole self-test suite, `tools/run-all-selftests.sh` (#695) |
+| **Why** | Eight issues closed this run across six commits. A test broken by one package is invisible to the next, and that has already failed twice (#690, #695) |
+| **Next** | Read its log, fix anything red, then the remaining high block — which is now large standing pieces and items needing owner decisions |
 
 ## Commits this run, newest first
 
 | Commit | What |
 |---|---|
+| `1cbf567` | #511 granting a coordinator reached the whole installation, and the refusal was invisible |
+| `c4470cd` | #594 the installer's six gaps — four already closed, one fixed, one inherent |
+| `bd4776e` | #678 how work is recorded — and two corrections were stale the other way |
 | `6ff7ea5` | #756 the volunteer photo tier is a real gate (D-047) — **a behaviour change** |
-| `5ae05f4` | #735 two erasure races exercised; #730 and #747 stop crying wolf and become hard gates (D-046) |
+| `5ae05f4` | #735 two erasure races exercised; #730 and #747 become hard gates (D-046) |
 | `ef44f5a` | #754 the six workflows that have never run, and the one real gap in them |
-| `3c0a57d` | #757 a check looking for the wrong text, because PHP interpolated it away |
-| `e86d944` | #739 gating a feature is a capability now, almost everywhere |
+
+**Closed this run:** #475 (critical), #511, #594, #678, #730, #735, #747, #756.
+**Opened:** #758 (`assigneeValue` undecided), #759 (#594's item 6, not
+re-measured), #760 (nothing lints the migration harness's shell).
+**Recorded:** D-046, D-047, D-048.
 
 ## Five standing facts a reader needs
 
@@ -55,15 +60,22 @@ push, and no pull request until the Codex review is done (D-035, D-007).
 The owner's order of 3 November: **everything critical and high priority first,
 then the rest of the queue.** Critical is now empty.
 
-1. **#678** — in flight, above.
-2. **#594** — installer and install script: the continue-or-wipe page cannot be
-   used, and five more gaps.
-3. **#511** — being signed in counts as membership of whichever organisation the
-   address opens as.
-4. **#477** — a "check my portal" page for administrators.
-5. **#485** — content translation has no way in; **#493**; **#499**; **#500**.
-6. The three large standing pieces: **#569** (page audit + pre-push browser
-   checks), **#549** (time zones everywhere), **#225** (mobile pass).
+**The high block is now only large pieces and things needing a decision.** Four
+of the eight remaining are features rather than fixes, which is a change in the
+character of the queue and worth saying before picking one.
+
+1. **Read the suite's log** and fix anything red (in flight).
+2. **#477** — a "check my portal" page for administrators. A new feature, and
+   the September audit's point was that almost every fault was invisible from
+   inside the product.
+3. **#485** — content translation is unreachable. The engine, its admin page and
+   the member opt-in exist; nothing a user can reach calls it. **Finishing it or
+   removing it is an owner decision**, not a tidy-up.
+4. **#493** — portal content viewable from the main website. A feature.
+5. **#499** and **#500** — the downloadable package and no built-in addresses.
+   Large, and #500 is partly done (`PortalAddress`).
+6. The three standing audit passes: **#569** (every page + a pre-push browser
+   check), **#549** (time zones everywhere), **#225** (mobile).
 7. Then the medium block (30), then low (30).
 8. Then the comprehensive Codex review of the whole branch, then the merge.
 
@@ -74,6 +86,7 @@ list names them; it never restates them. 47 on file.
 
 | | Decision |
 |---|---|
+| **D-048** | The three safety settings are added to `~/.claude/settings.json` |
 | **D-047** | Only volunteers see the volunteer photo tier — **a behaviour change** |
 | **D-046** | Two checks that only printed a problem now stop the work |
 | **D-045** | Report at a commit boundary, and keep going in the same turn |
@@ -103,6 +116,8 @@ list names them; it never restates them. 47 on file.
 | Issue | What |
 |---|---|
 | #679 | What an approval step becomes when its one person is erased |
+| #759 | Settings with an empty stored default where a fresh install has a value |
+| #760 | Nothing lints `tools/e2e-migrations/run.sh`; two SC2071 in it |
 | #725 | Nothing exercises the documents API over HTTP |
 | #726 | Can `move_uploaded_file()` report success after a partial write? |
 | #729 | The Edit dialog's "leave blank to keep current" for an account with none |
