@@ -138,28 +138,43 @@ Browser -> .htaccess -> index.php -> bootstrap.php -> Router::dispatch()
 ### Supported versions
 
 > ⚠️ **MySQL 8.0 reached the end of its extended support in April 2026** and
-> receives no further fixes. Moving off it is tracked as
-> [#475](https://github.com/MWBMPartners/WebMS-Intra/issues/475). **The table
-> below describes what is true today, not what we would recommend.**
+> receives no further fixes, and **MariaDB 10.6's maintenance ended on
+> 6 July 2026**. The portal still **accepts** both and warns — the owner's
+> decision of 3 November 2026, taken knowing the alternative was refusing to
+> install. **The table below describes what is true today, not what we would
+> recommend.**
 
 **What the code does today, stated precisely:**
 
-| | What actually happens | What is covered by automated tests |
+| | What actually happens | Which versions an automated test really runs on |
 | --- | --- | --- |
-| PHP | The installer's first screen checks for 8.4 or newer and hides "Continue" if it fails. **This can be bypassed** by going straight to a later step of the installer, so treat it as a warning rather than a barrier. The live server was confirmed on **8.5.5** in September 2026. | 8.4 only |
-| Database version | The version is now **read, judged, and acted on** (#489). New `Portal\Core\DbServer` classifies whatever is connected as supported, worth knowing about, or too old for this portal's own database changes to run on. The installer checks it the moment it first connects and **refuses to continue only when the database is too old to install onto** — anything else is shown and never blocks. **Admin → Server Information** (new) reports the same verdict. The admin dashboard and the health page now read that same judgement too, so the three screens that used to disagree — two of them printing the word "MySQL" whatever the database actually was — now agree. Backup files are deliberately left alone: a snapshot records the raw version string the server reported at the time, because a verdict like "supported" would be stale the moment it was written to an archive. | MySQL 8.0.36 only |
-| MariaDB | — | **Not covered.** No MariaDB appears in any workflow or test configuration in this repository. |
+| PHP | The installer's first screen checks for 8.4 or newer and hides "Continue" if it fails. **This can be bypassed** by going straight to a later step of the installer, so treat it as a warning rather than a barrier. `Portal\Core\PhpRuntime` is the one place the version is judged (#640). The live server was confirmed on **8.5.5** in September 2026. | **8.4 and 8.5.** `php -l` runs over every PHP file under `web/` on both, as two steps of one job. Until 3 November 2026 only 8.4 was linted — so the version the portal *recommends* was never checked by the gate that exists to stop a syntax error reaching a customer. |
+| Database version | The version is **read, judged, and acted on** (#489). `Portal\Core\DbServer` classifies whatever is connected as supported, worth knowing about, or too old for this portal's own database changes to run on. The installer checks it the moment it first connects and **refuses to continue only when the database is too old to install onto** — anything else is shown and never blocks. **Admin → Server Information** reports the same verdict, and so do the admin dashboard and the health page, so the screens that used to disagree now agree. Backup files are deliberately left alone: a snapshot records the raw version string the server reported at the time, because a verdict like "supported" would be stale the moment it was written to an archive. | **MySQL 8.0.36, 8.4.11 and 9.7.4.** The end-to-end migration harness loads the install script and replays every numbered database change on each — all seven phases and all 42 checks. |
+| MariaDB | Judged by the same one class, with its own release-line rules. | **MariaDB 11.4.13 and 12.3.3** in the migration harness (all 42 checks on each), and **11.4** in the calendar self-tests (six test files). **Not** 10.6, 10.11 or 11.8, which the portal still accepts. |
 
-On that last row, be careful what you conclude. Every database change here is
-written to a convention meant to work on both MySQL and MariaDB
-(`DEV_NOTES.md` → "Portable DDL convention"), and that rule is followed
-carefully. But **MariaDB is not covered by any automated test in this
-repository**, so its compatibility is unverified. That is not the same as "it
-does not work" — it means nothing here can currently show that it does. The
-same caveat applies to `DbServer`'s own MariaDB judgement: it is checked by a
-dependency-free self-test against version strings that real servers report,
-which tests the *logic*, not a live MariaDB server — it is not the same claim
-as "tested on MariaDB". To see what it covers, run it:
+**Be careful what you conclude from that last row, in both directions.** Until
+28 October 2026 no MariaDB appeared in any workflow here at all (#487), and
+MySQL 9.x and MariaDB 12.x had never been run until 3 November 2026 (#475) —
+so versions this portal called "supported" were called that on the strength of
+nobody having tried. They have been tried now, and they pass. **That is still
+not the same as a customer running the portal on MariaDB in production, which
+nobody does.** Every database change is also written to a convention meant to
+work on both engines (`DEV_NOTES.md` → "Portable DDL convention"), and
+following a convention is not proof either — though it is what makes five
+engines pass.
+
+**Where that claim lives, and why it cannot go stale again.**
+`DbServer::TESTED_LINES` names the release lines the harness runs on, and the
+sentence a customer reads is **derived** from it rather than written by hand.
+Two hand-written ones had gone untrue on a customer-facing page: every MariaDB
+answer said the tests "only ever run against MySQL" eight days after they
+stopped doing so, and every supported-MySQL answer told somebody on 9.7 that
+they were ahead of what is tested. `tools/audit-checks/check_tested_db_lines.py`
+now compares the constant with the workflow's own matrix and fails both ways.
+
+`DbServer`'s own judgement is checked by a dependency-free self-test against
+version strings that real servers report, which tests the *logic* rather than a
+live server. To see what it covers, run it:
 
 ```bash
 php tools/db-server-selftest.php
@@ -187,9 +202,13 @@ say "15 crafted version strings". The count reached 36 within hours, and the
 sentence did not. A number in prose goes stale the moment somebody improves the
 thing it describes; a command cannot.)
 
-**Where we are heading** — issue #475. Support dates below are quoted with the
-category they belong to, because "supported until" means different things for
-each product:
+**Where we are heading** — issue #475. **Both database targets below now pass
+the migration harness** (MySQL 9.7.4 and MariaDB 12.3.3, all 42 checks each, as
+of 3 November 2026), and PHP 8.5 is linted. What remains is a decision about
+what to *require* rather than merely accept: the portal still installs on MySQL
+8.0 and MariaDB 10.6 with a warning, by the owner's choice. Support dates below
+are quoted with the category they belong to, because "supported until" means
+different things for each product:
 
 | | Target | Fallback |
 | --- | --- | --- |

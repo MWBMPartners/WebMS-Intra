@@ -12,13 +12,25 @@
 # a Psalm job is worth having only once it really reads the code, and then it
 # must be able to fail.
 #
-# THE NAMES ARE KEPT ON PURPOSE. The workflow is still called "PHP Static
-# Analysis" and the job "PHP -l lint", although only the lint is left. A
-# branch rule that requires a check finds it by the job's name, and a rule
-# that names a check no workflow produces leaves every pull request waiting
-# for ever (repo-config-audit.yml exists to catch exactly that). Whether a
-# rule names this job could not be looked up when this was written, so
-# nothing was renamed. Rename only after checking the branch rules.
+# THE NAMES ARE KEPT ON PURPOSE, AND NOW IT IS NOT A PRECAUTION — IT IS A
+# FACT. The workflow is still called "PHP Static Analysis" and the job
+# "PHP -l lint", although only the lint is left. A branch rule that requires a
+# check finds it by the job's NAME, and a rule naming a check no workflow
+# produces leaves every pull request waiting for ever
+# (repo-config-audit.yml exists to catch exactly that).
+#
+# **Since 3 November 2026 the ruleset "Protect main branch" REQUIRES
+# `PHP -l lint` by that exact name** (#474), so nothing may reach the live
+# branch until this job is green. This header used to say that whether a rule
+# named this job "could not be looked up"; it has been looked up.
+#
+# **SO DO NOT RENAME THIS JOB, AND DO NOT TURN IT INTO A MATRIX.** A matrix
+# would make the check names "PHP -l lint (8.4)" and "PHP -l lint (8.5)", the
+# required name would match nothing, and every pull request into `main` would
+# wait for a check that never arrives. That is why the two PHP versions below
+# are two STEPS in one job rather than two jobs. If the name ever has to
+# change, change the ruleset in the same action and run
+# `python3 tools/audit-required-checks.py`.
 #
 # The two permissions Psalm's report upload needed (security-events: write
 # and actions: read) went with it. This job only reads the checked-out code.
@@ -44,11 +56,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
+
+      # ====================================================================
+      # BOTH PHP VERSIONS THE PORTAL SUPPORTS, as two steps in one job (#475).
+      #
+      # 8.4.0 is `PhpRuntime::MIN_PHP` — the oldest the portal runs on — and
+      # 8.5 is `PhpRuntime::PREFERRED_SERIES`, the one it recommends. Until
+      # 3 November 2026 **only 8.4 was linted anywhere in this workflow**, so
+      # the recommended version was never checked by the gate that exists to
+      # stop a syntax error reaching a customer.
+      #
+      # Why two steps and not a matrix: see the note at the top of this file —
+      # a matrix renames the check and orphans the branch rule that requires
+      # it.
+      #
+      # `php -l` judges by its exit code, which is 0 for a DEPRECATION, so
+      # this will not go red merely because 8.5 deprecated something. It
+      # catches syntax that one version accepts and the other does not —
+      # which is the whole reason to run it twice.
+      # ====================================================================
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-      - name: Lint every PHP file
+      - name: Lint every PHP file on PHP 8.4 (the oldest supported)
         run: |
+          find web -type f -name "*.php" \
+            -not -path "*/vendor/*" \
+            -not -path "*/_libraries/*" \
+            -print0 \
+          | xargs -0 -n1 -P4 php -l
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+      - name: Lint every PHP file on PHP 8.5 (the recommended version)
+        run: |
+          php -v
           find web -type f -name "*.php" \
             -not -path "*/vendor/*" \
             -not -path "*/_libraries/*" \

@@ -56,12 +56,21 @@
  *           installing would fail part-way through with a confusing error.
  *           This is the one case where the installation wizard stops.
  *
- * An honest caveat that belongs on every MariaDB answer: this project's own
- * automated tests only ever run against MySQL. Every database change is
- * written to a convention meant to work on both, and that convention is
- * followed carefully — but "written carefully for MariaDB" is not the same
- * claim as "tested on MariaDB", and this class says so out loud rather than
- * implying a confidence nobody has earned.
+ * An honest caveat goes on every answer, and it is DERIVED from TESTED_LINES
+ * rather than written by hand — see that constant for the two customer-facing
+ * sentences that were untrue on 3 November 2026 because nobody had updated
+ * them. This paragraph was one of the stale ones: it used to say the project's
+ * automated tests "only ever run against MySQL", which stopped being true on
+ * 28 October 2026 when the migration harness began replaying every database
+ * change on MariaDB 11.4 (#487), and 12.3 followed on 3 November (#475).
+ *
+ * What the caveat says now depends on the LINE, because that is what is true:
+ * the harness runs on MySQL 8.0, 8.4 and 9.7 and on MariaDB 11.4 and 12.3, and
+ * it runs on none of MariaDB 10.6, 10.11 or 11.8, which this class still
+ * accepts. For a line it does run on, the wording is "replays every one of its
+ * database changes on it and checks the result" — never "supported", and
+ * always with the limit stated out loud: no customer runs this portal on
+ * MariaDB in production.
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -162,6 +171,38 @@ final class DbServer
     // 🎯 The release line to recommend moving TO, named in the advice text.
     public const SUPPORTED_MYSQL = '8.4';
     public const SUPPORTED_MARIADB = '11.4';
+
+    // 🧪 THE RELEASE LINES AN AUTOMATED TEST REALLY RUNS ON (#475).
+    //
+    //    WHY THIS EXISTS. Every answer this class gives a customer used to
+    //    carry a sentence about what is tested, and those sentences were
+    //    WRITTEN BY HAND and went stale without anybody noticing. On
+    //    3 November 2026 two of them were untrue on a customer-facing page:
+    //    every MariaDB answer said "this portal's own automated tests only
+    //    ever run against MySQL", eight days after the migration harness
+    //    started replaying every database change on MariaDB 11.4 (#487); and
+    //    every supported-MySQL answer said the tests "run against the MySQL
+    //    8.0 line", so somebody on 9.7 was told they were ahead of what is
+    //    tested when 9.7 is tested. Both were stale in the modest direction,
+    //    which is the safer one — but a customer-facing sentence that is
+    //    untrue is a fault whichever way it points.
+    //
+    //    So the sentence is now DERIVED from this list, and the list is
+    //    CHECKED AGAINST THE WORKFLOW that does the running:
+    //    `tools/audit-checks/check_tested_db_lines.py` compares it with the
+    //    matrix in `.github/workflows/e2e-migrations.yml` and **fails both
+    //    ways** — a line tested and not listed, or listed and not tested.
+    //    That is what stops this going stale a second time.
+    //
+    //    ⚠️ IT IS THE MIGRATION HARNESS THIS DESCRIBES, and nothing else. The
+    //    calendar self-tests run on their own set of engines, which is a
+    //    smaller claim about a smaller body of code, and folding the two
+    //    together would overstate both. Say "every database change is
+    //    replayed on it", never "it is supported".
+    public const TESTED_LINES = [
+        'mysql'   => ['8.0', '8.4', '9.7'],
+        'mariadb' => ['11.4', '12.3'],
+    ];
 
     // 🔒 HOW STRICT THIS PORTAL MAKES ITS OWN CONNECTION (the `sql_mode` setting).
     //
@@ -719,13 +760,20 @@ final class DbServer
      */
     private static function judgeMariaDb(string $engine, string $raw, string $version, string $comment, bool $hasPatch): array
     {
-        // 📌 The same sentence goes on every MariaDB answer, whatever the
-        //    verdict. It is the honest limit of what this project can claim.
-        $caveat = ' Please note: this portal\'s own automated tests only ever run against '
-                . 'MySQL. Its database changes are written to a convention meant to work on '
-                . 'both MySQL and MariaDB, and that convention is followed carefully — but no '
-                . 'test here proves it. That is not the same as saying it is broken; it means '
-                . 'nobody has checked.';
+        // 📌 A sentence goes on every MariaDB answer, whatever the verdict,
+        //    saying the honest limit of what this project can claim. It is
+        //    DERIVED from TESTED_LINES and differs by release line: the
+        //    migration harness really does replay every database change on
+        //    11.4 and 12.3, and really does not touch 10.6, 10.11 or 11.8.
+        //    Until 3 November 2026 this was ONE hand-written sentence saying
+        //    the tests "only ever run against MySQL", which had been untrue
+        //    since #487 eight days earlier — see TESTED_LINES.
+        //
+        //    ⚠️ The line is worked out HERE, before the branches below, because
+        //    two of them answer before the old code reached `self::series()`.
+        //    Moving the call up is safe: it only parses the version string.
+        $series = self::series($version);
+        $caveat = self::testedLinesCaveat('mariadb', $series);
 
         $base = [
             'engine'   => $engine,
@@ -765,8 +813,6 @@ final class DbServer
                             . 'the same line.' . $caveat,
             ];
         }
-
-        $series = self::series($version);
 
         // 🚧 A build from before the line was finished. See MARIADB_FIRST_STABLE.
         if (array_key_exists($series, self::MARIADB_FIRST_STABLE) === true
@@ -877,12 +923,17 @@ final class DbServer
             return $base + [
                 'state'    => 'ok',
                 'headline' => $engine . ' ' . $version . ' — a supported version',
+                // 📌 The second half of this used to read "this portal's own
+                //    automated tests run against the MySQL 8.0 line, so if you
+                //    are on something newer you are ahead of what is routinely
+                //    tested here". That became untrue when 8.4 joined the
+                //    harness and more untrue when 9.7 did — it told somebody on
+                //    a tested version that nobody had tested it. Derived from
+                //    TESTED_LINES now; see that constant.
                 'detail'   => 'The ' . $series . ' line is a long-term MySQL release, so it '
                             . 'receives security fixes for years rather than months. This is a '
-                            . 'good version to be on. Note that this portal\'s own automated '
-                            . 'tests run against the MySQL 8.0 line, so if you are on something '
-                            . 'newer you are ahead of what is routinely tested here — which is '
-                            . 'the right direction to be ahead in, but worth knowing.',
+                            . 'good version to be on.'
+                            . self::testedLinesCaveat('mysql', $series),
             ];
         }
 
@@ -911,7 +962,7 @@ final class DbServer
                 'headline' => $engine . ' ' . $version . ' — works, but no longer getting security fixes',
                 'detail'   => 'The whole MySQL 8.0 line reached the end of its support life in '
                             . 'April 2026. It still runs this portal perfectly well — this is '
-                            . 'the version everything here is tested against — but Oracle no '
+                            . 'one of the versions tested here — but Oracle no '
                             . 'longer issues security fixes for it, so any flaw found from now '
                             . 'on stays unfixed. On shared hosting you usually cannot change '
                             . 'this yourself. It is worth asking your hosting provider when '
@@ -966,6 +1017,44 @@ final class DbServer
      *
      * @return string The first two parts, or an empty string if it cannot be read.
      */
+    /**
+     * 🧪 The sentence about what is really tested, for one engine and line.
+     *
+     * Derived from TESTED_LINES, never written by hand — see that constant for
+     * the two untrue sentences that made this necessary.
+     *
+     * @param string $family 'mysql' or 'mariadb'.
+     * @param string $series The two-part release line, e.g. '11.4'.
+     *
+     * @return string A sentence beginning with a space, to append to `detail`.
+     */
+    private static function testedLinesCaveat(string $family, string $series): string
+    {
+        $tested = self::TESTED_LINES[$family] ?? [];
+        $names  = $family === 'mariadb' ? 'MariaDB' : 'MySQL';
+
+        if (in_array($series, $tested, true) === true) {
+            // 📌 Say what was measured, never "it is supported". A customer
+            //    running it in production is a different claim again, and the
+            //    project has none of those yet.
+            return ' This portal\'s own automated tests replay every one of its database '
+                 . 'changes on ' . $names . ' ' . $series . ' and check the result, so this is '
+                 . 'a line the project really runs against rather than one it merely expects to '
+                 . 'work. That is not the same as somebody running it in production.';
+        }
+
+        if (count($tested) === 0) {
+            return '';
+        }
+
+        return ' Please note: this portal\'s own automated tests do not run on the ' . $names
+             . ' ' . $series . ' line. They run on ' . $names . ' '
+             . implode(' and ', $tested) . '. Its database changes are written to a convention '
+             . 'meant to work on both MySQL and MariaDB, and that convention is followed '
+             . 'carefully — but no test here proves it for ' . $series . '. That is not the same '
+             . 'as saying it is broken; it means nobody has checked.';
+    }
+
     private static function series(string $version): string
     {
         if (preg_match('/^(\d+)\.(\d+)/', $version, $m) === 1) {

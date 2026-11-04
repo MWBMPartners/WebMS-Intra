@@ -1,0 +1,249 @@
+# =============================================================================
+# WebMS-Intra — End-of-life watch
+#
+# Copyright (c) 2026 MWBM Partners Ltd. All rights reserved.
+# Proprietary. Unauthorised copying, modification or distribution prohibited.
+#
+# PURPOSE
+# -------
+# Warns before a PHP, MySQL or MariaDB version this portal says it supports
+# stops being supported (#475).
+#
+# WHY A SCHEDULED JOB AND NOT A CHECK ON EVERY PULL REQUEST. The lists of
+# supported versions live in `Portal\Core\DbServer` and `Portal\Core\PhpRuntime`,
+# and they go stale on their own, with no change to the repository. Nothing that
+# runs only when somebody edits a file can notice that. This is how MySQL 8.0
+# came to be named as the production database in every document here months
+# after its support had ended (#475).
+#
+# WHY IT IS NOT IN tools/audit-checks/. Every script in that folder runs with no
+# network and no database, which is what lets `.githooks/pre-push` run all of
+# them in about nine seconds. This one asks endoflife.date, so it cannot live
+# there.
+#
+# HOW IT AVOIDS BECOMING NOISE. A real finding here stays true for months — PHP
+# 8.4's active support ends on 31 December 2026, so a monthly run would open or
+# comment on an issue every month about the same fact, and the next person would
+# stop reading it. So:
+#
+#   * exactly ONE issue is kept, found by the hidden marker in its body;
+#   * the issue's body is rewritten each run, so it is always current;
+#   * a COMMENT is added only when the set of findings actually CHANGES,
+#     compared by a fingerprint stored in the body.
+#
+# So silence means "nothing has changed since the issue last said this", never
+# "nothing was checked" — a run that cannot reach endoflife.date fails the
+# workflow instead, with a red mark.
+# =============================================================================
+
+name: End-of-life Watch
+
+on:
+  schedule:
+    # 06:30 UTC on the 1st of each month. Not the same minute as any other
+    # scheduled job here (repo-config-audit.yml runs Mondays at 06:00).
+    - cron: '30 6 1 * *'
+  workflow_dispatch:
+  # Also on a pull request that changes the two files holding the version
+  # lists, or the check itself, so a change to a supported-versions constant
+  # is judged as it is made rather than up to a month later.
+  pull_request:
+    paths:
+      - 'web/_core/DbServer.php'
+      - 'web/_core/PhpRuntime.php'
+      - 'tools/check-end-of-life.py'
+      - '.github/workflows/end-of-life-watch.yml'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: end-of-life-watch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    name: End-of-life watch
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      # The script uses nothing but Python's own library, on purpose: a check
+      # that needs packages installed is a check that stops running.
+      - name: Read the supported versions and ask endoflife.date
+        id: check
+        # The event name comes in as an environment variable rather than as a
+        # ${{ ... }} inside the script. The script is nowhere near long enough
+        # for #745's 21,000-character ceiling to bite, but putting one in is
+        # the habit that caused #745, and GitHub's own hardening advice is
+        # never to paste a ${{ ... }} into a shell script — whatever the value
+        # holds becomes part of the script.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set +e
+          python3 tools/check-end-of-life.py | tee /tmp/eol.txt
+          EXIT=${PIPESTATUS[0]}
+          python3 tools/check-end-of-life.py --json > /tmp/eol.json 2>/dev/null
+          echo "exit_code=${EXIT}" >> "$GITHUB_OUTPUT"
+
+          # ============================================================
+          # WHAT MAKES THIS JOB RED, AND WHAT DELIBERATELY DOES NOT.
+          #
+          # Exit 2 — the facts could not be established, normally because
+          # endoflife.date did not answer. On the MONTHLY run that is a
+          # failure, so somebody sees a red mark: a run that could not ask
+          # must never look like a run that found nothing.
+          #
+          # ON A PULL REQUEST IT IS NOT A FAILURE, ON PURPOSE. Somebody
+          # else's website being down is not a fault in the change under
+          # review, and a check that goes red for reasons outside the change
+          # is a check that gets ignored, and then it catches nothing (#483).
+          # The report still reaches the job summary.
+          #
+          # Exit 1 — something we support has ended or ends soon. This NEVER
+          # fails the job, on any event, and that too is deliberate: the
+          # portal accepts MySQL 8.0 and MariaDB 10.6 with a warning by the
+          # owner's decision of 3 November 2026, and PHP 8.4 loses active
+          # support on 31 December 2026 while `MIN_PHP` is 8.4.0. Those are
+          # accepted facts, so a job that went red on them would be red every
+          # day until somebody switched it off. The finding goes to the one
+          # issue instead, which is what gets read.
+          #
+          # DO NOT "TIGHTEN" THIS INTO A BLOCKING GATE without changing those
+          # decisions first.
+          # ============================================================
+          if [ "${EXIT}" -eq 2 ] && [ "${EVENT_NAME}" != "pull_request" ]; then
+            echo "::error::Could not establish the end-of-life facts. This run proves nothing."
+            exit 2
+          fi
+          if [ "${EXIT}" -eq 2 ]; then
+            echo "::warning::Could not reach endoflife.date. This run proves nothing — but it is not failing a pull request over somebody else's website."
+          fi
+          exit 0
+
+      - name: Keep one issue, and comment only when the findings change
+        if: steps.check.outputs.exit_code == '1' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # HOW THE ONE ISSUE IS FOUND: by its EXACT TITLE, not by searching
+          # the body for a marker. **Measured on 4 November 2026: GitHub's
+          # search does not match text inside an HTML comment**, so
+          # `--search '<!-- eol-watch --> in:body'` would have found nothing
+          # every month and opened a NEW issue each time — the very noise this
+          # design exists to avoid, while looking as though it worked. A title
+          # search is loose too (GitHub ignores punctuation, so "end-of-life"
+          # matches issue #475's "end of life"), so the result is filtered on
+          # an EXACT title match.
+          TITLE='A version this portal says it supports is ending (end-of-life watch)'
+          MARKER='<!-- eol-watch -->'
+
+          # The fingerprint is the sorted list of "product|state|series" for
+          # every finding that needs attention. Comparing it is what makes a
+          # quiet month genuinely quiet.
+          FINGERPRINT=$(python3 - <<'PY'
+          import json
+          data = json.load(open('/tmp/eol.json'))
+          rows = sorted(
+              f"{f['product']}|{f['state']}|{f['series']}"
+              for f in data['findings']
+              if f['state'] in ('ended', 'soon', 'unknown')
+          )
+          print(';'.join(rows))
+          PY
+          )
+
+          {
+            echo "${MARKER}"
+            echo "<!-- fingerprint: ${FINGERPRINT} -->"
+            echo
+            echo "## A version this portal says it supports is ending"
+            echo
+            echo "Found by \`tools/check-end-of-life.py\`, which reads the supported-version"
+            echo "lists out of \`web/_core/DbServer.php\` and \`web/_core/PhpRuntime.php\` —"
+            echo "never a second copy of them — and compares them with endoflife.date."
+            echo
+            echo '```'
+            cat /tmp/eol.txt
+            echo '```'
+            echo
+            echo "**This body is rewritten by every run, so it is always current.** A comment"
+            echo "is added only when the set of findings changes."
+            echo
+            echo "What this cannot tell you: whether a customer's host can actually offer a"
+            echo "newer version, and whether a particular server has been patched by its"
+            echo "vendor regardless of its version number (#640's rule). Both need a person."
+          } > /tmp/body.md
+
+          EXISTING=$(gh issue list --repo "$REPO" --state open \
+                       --search 'in:title "end-of-life watch"' \
+                       --json number,title \
+                       --jq "[.[] | select(.title == \"${TITLE}\")] | .[0].number // empty" || true)
+
+          if [ -z "${EXISTING}" ]; then
+            gh issue create --repo "$REPO" \
+              --title "$TITLE" \
+              --label "type: infrastructure" \
+              --body-file /tmp/body.md
+            echo "Opened a new issue."
+            exit 0
+          fi
+
+          WAS=$(gh issue view "${EXISTING}" --repo "$REPO" --json body --jq '.body' \
+                  | sed -n 's/^<!-- fingerprint: \(.*\) -->$/\1/p' | head -1 || true)
+
+          gh issue edit "${EXISTING}" --repo "$REPO" --body-file /tmp/body.md
+
+          if [ "${WAS}" = "${FINGERPRINT}" ]; then
+            echo "Issue #${EXISTING} updated; the findings have not changed, so no comment."
+          else
+            gh issue comment "${EXISTING}" --repo "$REPO" --body \
+              "The end-of-life findings have **changed** since this issue last said what it says. The body above is current. Previous set: \`${WAS:-(none recorded)}\`"
+            echo "Issue #${EXISTING} updated and commented — the findings changed."
+          fi
+
+      - name: Close the issue when nothing needs attention any more
+        if: steps.check.outputs.exit_code == '0' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Found by exact title — see the note in the step above for why.
+          TITLE='A version this portal says it supports is ending (end-of-life watch)'
+          EXISTING=$(gh issue list --repo "$REPO" --state open \
+                       --search 'in:title "end-of-life watch"' \
+                       --json number,title \
+                       --jq "[.[] | select(.title == \"${TITLE}\")] | .[0].number // empty" || true)
+          if [ -n "${EXISTING}" ]; then
+            gh issue comment "${EXISTING}" --repo "$REPO" --body \
+              "Nothing this portal says it supports is now within the warning window. Closing; the watch will reopen an issue if that changes."
+            gh issue close "${EXISTING}" --repo "$REPO"
+            echo "Closed #${EXISTING}."
+          else
+            echo "Nothing to close."
+          fi
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### End-of-life watch"
+            echo
+            case "${{ steps.check.outputs.exit_code }}" in
+              0) echo "✅ Nothing this portal says it supports is within the warning window." ;;
+              1) echo "⚠️ A supported version has ended or ends soon — see the issue." ;;
+              *) echo "🛑 Could not establish the facts. **This run proves nothing.**" ;;
+            esac
+            echo
+            echo '```'
+            cat /tmp/eol.txt 2>/dev/null || echo "(no report — the check did not get that far)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

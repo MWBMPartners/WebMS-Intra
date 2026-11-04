@@ -145,10 +145,68 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
 > the `-log` suffix, Ubuntu packaging, MariaDB's fake `5.5.5-` prefix and full
 > Debian packaging. Nothing needed fixing.
 >
-> Moving to MySQL 9.7 / MariaDB 12.3 (with 8.4 / 11.4 as fallbacks) is tracked
-> as **#475**. Until that lands, keep writing SQL to the MySQL 8.0 ∩ MariaDB
-> convention below. It remains the sensible choice while the target is unsettled
-> — but following a convention is not the same as proving compatibility.
+> **MySQL 9.7 AND MariaDB 12.3 ARE NOW PROVED, AND THE MIGRATION HARNESS RUNS
+> ON FIVE ENGINES (#475 part 1, 3 November 2026).** MySQL 9.7.4 and MariaDB
+> 12.3.3 each pass all seven phases and all 42 checks — **the same 42** that
+> pass on MySQL 8.0.36, 8.4.11 and MariaDB 11.4.13, counted rather than
+> assumed. **Nothing here had ever been run on MySQL 9.x or MariaDB 12.x
+> before**, so `MYSQL_SUPPORTED_SERIES` and `MARIADB_SUPPORTED_SERIES` had been
+> naming them supported on the strength of nobody having tried. Both are in
+> `e2e-migrations.yml`'s matrix now. Keep writing SQL to the MySQL 8.0 ∩
+> MariaDB convention below: following a convention is still not the same as
+> proving compatibility, and the convention is what makes five engines pass.
+>
+> **MySQL 8.0 AND MariaDB 10.6 STAY ACCEPTED, WITH A WARNING — the owner's
+> decision, 3 November 2026. DO NOT "TIDY" `MIN_MYSQL` OR `MIN_MARIADB`
+> UPWARDS.** Asked whether the portal should refuse a database that no longer
+> gets security fixes, the owner chose the warning. MySQL 8.0's support ended
+> 30 April 2026 and MariaDB 10.6's on 6 July 2026, so `MIN_MYSQL` stays
+> `8.0.0` and `MIN_MARIADB` stays `10.6.0` on purpose. **That makes the warning
+> the only protection there is**, which is why its truthfulness stopped being
+> cosmetic.
+>
+> **WHAT THE PORTAL TELLS A CUSTOMER IS TESTED IS NOW DERIVED, AND TWO OF THE
+> OLD SENTENCES WERE UNTRUE ON A CUSTOMER-FACING PAGE.** Every MariaDB answer
+> said the tests "only ever run against MySQL" — **eight days after the harness
+> began running on MariaDB 11.4** (#487) — and every supported-MySQL answer
+> said they "run against the MySQL 8.0 line, so if you are on something newer
+> you are ahead of what is routinely tested here", which told somebody on
+> MySQL 9.7 that nobody had tested their version. Five copies in all, including
+> the class docblock and the 8.0 message. All stale in the MODEST direction,
+> which is the safer one and is not a defence. **`DbServer::TESTED_LINES` is
+> the ONE list of the lines the HARNESS runs on and `testedLinesCaveat()` the
+> ONE place the sentence is built**, differing BY LINE because that is what is
+> true — the harness runs on none of MariaDB 10.6, 10.11 or 11.8, which the
+> portal still accepts. **A constant alone just moves the staleness one step**,
+> so `tools/audit-checks/check_tested_db_lines.py` compares it with the
+> workflow's own matrix and FAILS BOTH WAYS, with no exception list. It
+> describes the harness and NOTHING ELSE: the calendar self-tests run on their
+> own engines, and folding them in would overstate both. Never write
+> "supported" there, and never drop the sentence that nobody runs this portal
+> on MariaDB in production. **How it was found is the transferable part: by
+> PRINTING what `classify()` really says to a customer, not by reading it.** The
+> sentence is correct English, correctly assembled, and wrong only against the
+> world. (And print the WHOLE sentence — a first look truncated to 96
+> characters produced a confident finding about MariaDB 10.6 that was false.)
+>
+> **PHP 8.5 IS LINTED NOW, AND `php-static-analysis.yml` MUST NOT BECOME A
+> MATRIX.** It ran `php -l` on 8.4 only, so `PhpRuntime::PREFERRED_SERIES` —
+> the version the portal RECOMMENDS — was never checked by the gate that exists
+> to stop a syntax error reaching a customer. Both run as **two steps in one
+> job**: a matrix renames the check to `PHP -l lint (8.4)`, and the ruleset
+> "Protect main branch" requires `PHP -l lint` by that exact name (#474), so
+> every pull request into `main` would wait for a check that never arrives.
+>
+> **SOMETHING WATCHES FOR END OF LIFE NOW.** `tools/check-end-of-life.py` reads
+> the supported-version lists OUT OF `DbServer` and `PhpRuntime` and compares
+> them with endoflife.date; `end-of-life-watch.yml` runs it monthly, keeps
+> exactly ONE issue, rewrites its body every run and comments only when the
+> findings CHANGE. It is **not** in `tools/audit-checks/` because it needs the
+> internet and everything in that folder must run offline. It earned its place
+> on the first run: **PHP 8.4 loses active support on 31 December 2026** and
+> `MIN_PHP` is 8.4.0. Also found, neither urgent: **MySQL has moved to
+> year-based release lines** (26.7, 26.10) above the 9.7 we record as newest
+> known, and MariaDB has 13.0.
 
 - **Version:** 1.4.0 (on `main`; bump in `web/_core/version.php` — single source of truth)
 - **Brand layer:** the product name is chosen at install (#296); presets and per-brand assets are set in `web/_core/brand-defaults.php` and read through `Site::productName()`.

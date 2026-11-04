@@ -55,7 +55,11 @@ use Portal\Core\DbServer;
 // -----------------------------------------------------------------------------
 
 $cases = [
-    // --- MySQL, the line everything here is tested against. Supported by this
+    // --- MySQL 8.0. One of the lines tested here, not the only one: since
+    //     3 November 2026 the migration harness runs on 8.0, 8.4 and 9.7, and on
+    //     MariaDB 11.4 and 12.3 (#475). This comment used to say 8.0 was "the
+    //     line everything here is tested against", which is the same stale
+    //     sentence DbServer::TESTED_LINES exists to stop. Supported by this
     //     portal, but Oracle stopped issuing security fixes in April 2026, so
     //     it warns rather than passing silently.
     ['8.0.36', 'MySQL Community Server - GPL', 'MySQL', '8.0.36', 'warn'],

@@ -31,9 +31,15 @@ You also need, from your hosting company's control panel:
 
 - **A website address** for the portal, for example `https://portal.example.org`. Use an address of its own: the
   portal has to be at the top of its address, not in a folder such as `example.org/portal`.
-- **PHP 8.4 or newer** for that website.
-- **A MySQL database**, a database user with full rights to it, and that user's password. The panel has a page for
-  this, usually called "MySQL Databases". Create a new, empty database for the portal alone. Write down what the
+- **PHP 8.4 or newer** for that website. **Pick 8.5 if the panel offers it.** PHP 8.4 stops getting ordinary
+  fixes on 31 December 2026 — after that it gets security fixes only, until the end of 2028 — so 8.5 is the one
+  to be on. The portal runs on either and will tell you which you have on its Server Information page.
+- **A MySQL or MariaDB database**, a database user with full rights to it, and that user's password. The panel has
+  a page for this, usually called "MySQL Databases". Create a new, empty database for the portal alone.
+  **Which version to pick, if the panel lets you choose:** MySQL 8.4 or 9.7, or MariaDB 11.4 or 12.3. Those four
+  are the ones the portal's own tests really run against, and all four are getting security fixes for years yet.
+  The portal will still install on an older one and will say so plainly rather than stopping you — but MySQL 8.0
+  and MariaDB 10.6 stopped getting security fixes in 2026, so avoid them if the choice is yours. Write down what the
   panel shows: the database's host name, its name, the user's name and the password. If the panel also shows a
   **port** (a number, usually 3306), write that down too.
 - **The panel's file manager.** Switch on "show hidden files" in its settings before you upload anything: several

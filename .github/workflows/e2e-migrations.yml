@@ -117,13 +117,35 @@ jobs:
         # version check demanded the server's whole reported string match the
         # number asked for, which "11.4.13-MariaDB-ubu2404" never does. Both
         # are fixed in run.sh; E2E_DB_ENGINE picks the engine.
+        #
+        # FIVE LINES SINCE 3 NOVEMBER 2026 (#475). The two newest long-term
+        # releases were added after being run here first: MySQL 9.7.4 and
+        # MariaDB 12.3.3 each passed all seven phases and all 42 checks —
+        # **the same 42 that pass on MySQL 8.0.36, 8.4.11 and MariaDB
+        # 11.4.13, counted rather than assumed.** Until then nothing in this
+        # repository had ever been run on MySQL 9.x or MariaDB 12.x, so
+        # `DbServer::MYSQL_SUPPORTED_SERIES` and `MARIADB_SUPPORTED_SERIES`
+        # named them as supported on the strength of nobody having tried.
+        #
+        # MySQL 8.0.36 IS STILL HERE ON PURPOSE, and that is a decision, not
+        # an oversight: MySQL 8.0's support ended in April 2026, so it is the
+        # one line in this list that is already past its end of life. It
+        # stays because a customer's shared host may still be running it and
+        # `DbServer::MIN_MYSQL` still accepts it. Whether to refuse it is the
+        # owner's call and is #475's remaining question — take it out of this
+        # list only when that is decided, because the day it leaves is the
+        # day an 8.0 fault stops being caught.
         include:
           - engine: 'mysql'
             version: '8.0.36'
           - engine: 'mysql'
             version: '8.4.11'
+          - engine: 'mysql'
+            version: '9.7.4'
           - engine: 'mariadb'
             version: '11.4.13'
+          - engine: 'mariadb'
+            version: '12.3.3'
 
     steps:
       - name: Checkout

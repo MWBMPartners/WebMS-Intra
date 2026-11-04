@@ -2546,6 +2546,38 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     got. **The exact boundary was not measured**; 21,000 is the figure in GitHub's own error message, and what was
     measured against the real service is that 14,910 characters with an expression was accepted and 24,525 refused.
 
+43. **WHAT THE PORTAL TELLS A CUSTOMER IS TESTED MUST BE DERIVED, NOT WRITTEN — AND TWO OF THE OLD SENTENCES
+    WERE UNTRUE ON A CUSTOMER-FACING PAGE (#475 part 1, 3 November 2026).** `Portal\Core\DbServer` showed a
+    customer a hand-written sentence about which database versions this project's automated tests run on. Every
+    MariaDB answer said they "only ever run against MySQL" — **eight days after the migration harness began
+    replaying every database change on MariaDB 11.4** (#487) — and every supported-MySQL answer said they "run
+    against the MySQL 8.0 line, so if you are on something newer you are ahead of what is routinely tested here",
+    which told somebody on MySQL 9.7 that nobody had tested their version. Five copies in all, including the
+    class's own docblock and the 8.0 message. All stale in the MODEST direction, which is the safer one and is
+    **not** a defence: the next one to go stale could as easily say a version is tested when nothing runs on it.
+    **`DbServer::TESTED_LINES` is the ONE list of the lines the HARNESS runs on, `testedLinesCaveat()` the ONE
+    place the sentence is built**, and it differs BY LINE because that is what is true — the harness runs on none
+    of MariaDB 10.6, 10.11 or 11.8, all of which the portal still accepts. **A constant on its own just moves the
+    staleness one step along**, so `tools/audit-checks/check_tested_db_lines.py` compares it with the `include:`
+    matrix in `.github/workflows/e2e-migrations.yml` and **FAILS BOTH WAYS**, with no exception list, because
+    there is no honest reason for the two to differ. It describes the migration harness and NOTHING ELSE: the
+    calendar self-tests run on their own engines and folding them in would overstate both. Never write
+    "supported" there, and never drop the sentence saying nobody runs this portal on MariaDB in production.
+    **How it was found is the transferable part: by PRINTING what `classify()` really says to a customer, never by
+    reading the code** — the sentence is correct English, correctly assembled, from a variable nobody had reason to
+    re-read, and wrong only against the world. Print the WHOLE sentence: a first look truncated to 96 characters
+    produced a confident finding about MariaDB 10.6 that was false. **MySQL 9.7.4 and MariaDB 12.3.3 now pass all
+    seven phases and all 42 checks** (the same 42 as the other three engines, counted), where nothing here had ever
+    been run on MySQL 9.x or MariaDB 12.x before. **MySQL 8.0 and MariaDB 10.6 STAY accepted with a warning — the
+    owner's decision; do not tidy `MIN_MYSQL` or `MIN_MARIADB` upwards** — which makes the warning the only
+    protection there is. **PHP 8.5 is linted now, and `php-static-analysis.yml` MUST NOT BECOME A MATRIX**: a
+    matrix renames the check to `PHP -l lint (8.4)` and the ruleset "Protect main branch" requires `PHP -l lint`
+    by that exact name (#474), so every pull request into `main` would wait for a check that never arrives.
+    `tools/check-end-of-life.py` plus `end-of-life-watch.yml` now watch for approaching end of support, reading the
+    version lists out of the two classes rather than copying them; it is deliberately **not** in
+    `tools/audit-checks/`, which must run offline. It earned its place at once: **PHP 8.4 loses active support on
+    31 December 2026** and `MIN_PHP` is 8.4.0.
+
 ## Gating a feature is a CAPABILITY, never a hard-coded role (the owner, 3 November 2026)
 
 Set when the owner decided #727's scope: *"all remaining features pointable as

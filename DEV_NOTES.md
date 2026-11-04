@@ -16215,3 +16215,96 @@ Planting also taught something about the guard: putting an expression back into
 the long script produced the real complaint **and** a second one telling the
 reader to delete an allow-list entry that was still perfectly correct. **A
 check that cries wolf beside a true finding teaches the reader to skim both.**
+
+---
+
+## What a customer is told is tested must be derived, not written (#475)
+
+**The shortest version: `Portal\Core\DbServer` showed customers a hand-written
+sentence about which database versions the automated tests run on, and two of
+those sentences were untrue.** They are derived from a constant now, and a hard
+gate compares that constant with the workflow that does the running.
+
+### What was wrong
+
+| Where | What it said | Why it was untrue |
+|---|---|---|
+| Every MariaDB answer | "this portal's own automated tests only ever run against MySQL … no test here proves it" | The migration harness had been replaying every database change on MariaDB 11.4 since 28 October 2026 (#487) |
+| Every supported-MySQL answer | "tests run against the MySQL 8.0 line, so if you are on something newer you are ahead of what is routinely tested here" | 8.4 and 9.7 are tested, so somebody on a tested version was told nobody had tested it |
+| The class docblock | the same "only ever run against MySQL" | as above |
+| The MySQL 8.0 message | "this is the version everything here is tested against" | It is one of five tested lines, not the only one |
+| `tools/db-server-selftest.php` comment | "MySQL, the line everything here is tested against" | as above |
+
+All five were stale in the **modest** direction, which is the safer one. That is
+not a defence. A customer-facing sentence that is untrue is a fault whichever
+way it points, and the next one to go stale could as easily tell somebody a
+version is tested when nothing has ever been run against it.
+
+### How it was found, which is the transferable part
+
+**Not by reading the code — by printing what the code actually says to a
+customer:**
+
+```bash
+php -r 'require "web/_core/DbServer.php";
+  foreach (["8.0.41","9.7.4","10.6.21-MariaDB","11.4.13-MariaDB"] as $v) {
+    $r = Portal\Core\DbServer::classify($v);
+    printf("%-22s %-5s %s\n\n", $v, $r["state"], $r["detail"]);
+  }'
+```
+
+Reading `judgeMariaDb()` would not have shown it: the sentence is correct
+English, assembled correctly, from a variable whose contents nobody had reason
+to re-read. **It is only wrong against the world.** The same applies to any
+message built from a constant that describes something outside the file.
+
+**A warning about reading that output in a hurry.** The first look at it was
+truncated to 96 characters and read as "MariaDB 10.6 is accepted with a
+reassuring message and no mention that its support has ended" — which was
+wrong; the message says so plainly, further along the line. Print the whole
+sentence, or the finding is about the truncation.
+
+### The cure, and why a constant alone would not have been enough
+
+`DbServer::TESTED_LINES` names the release lines the migration harness really
+runs on, and `testedLinesCaveat()` is the one place the sentence is built. It
+differs **by line**, because that is what is true: the harness runs on MySQL
+8.0, 8.4 and 9.7 and on MariaDB 11.4 and 12.3, and on **none** of MariaDB 10.6,
+10.11 or 11.8 — all of which the portal still accepts.
+
+**A constant on its own just moves the staleness one step along.** So
+`tools/audit-checks/check_tested_db_lines.py` compares it with the `include:`
+matrix in `.github/workflows/e2e-migrations.yml` and **fails both ways**:
+
+* a line the harness tests that the constant does not list — the portal
+  under-claims;
+* a line the constant lists that the harness does not test — **the portal tells
+  a customer a version is tested when nothing runs on it.** That is the
+  dangerous direction and the reason it is a hard gate.
+
+**No exception list, deliberately.** There is no honest reason for the two to
+differ: if a line leaves the workflow, the sentence must stop claiming it the
+same day. Four plants, each caught by the message that should catch it: the
+constant over-claiming, the workflow dropping a claimed line, the workflow
+gaining an unclaimed line, and the constant renamed so it cannot be read (which
+fails rather than comparing two empty lists, because two empty lists agree).
+
+### What `TESTED_LINES` deliberately does NOT describe
+
+**The migration harness and nothing else.** The calendar self-tests run on their
+own set of engines, and `portal-selftests.yml` on another. Folding them together
+would overstate what the sentence means — "replays every one of its database
+changes on it" is a specific claim about a specific body of work. A line tested
+only by the calendar self-tests is correctly absent.
+
+And the wording never says "supported". For a tested line it says the project
+"really runs against" it, and then says out loud that this is **not** the same as
+somebody running it in production — which, for MariaDB, nobody does.
+
+### The decision beside it
+
+**MySQL 8.0 and MariaDB 10.6 stay accepted, with a warning** (the owner,
+3 November 2026), although their support ended on 30 April and 6 July 2026. So
+`MIN_MYSQL` stays `8.0.0` and `MIN_MARIADB` stays `10.6.0`. Do not raise them as
+a tidy-up. It also means the warning is the only protection, which is why its
+truthfulness stopped being cosmetic.

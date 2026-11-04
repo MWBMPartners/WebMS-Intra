@@ -2,6 +2,91 @@
 
 
 ## [Unreleased] (alpha)
+<!-- #475 part 1 -->
+
+### The two newest database versions are proved, two customer-facing sentences were untrue, and something now watches for end of life (#475 part 1)
+
+**MySQL 9.7.4 and MariaDB 12.3.3 both pass all seven phases of the migration
+harness and all 42 of its checks** — the same 42 that pass on MySQL 8.0.36,
+8.4.11 and MariaDB 11.4.13, counted rather than assumed. **Nothing in this
+repository had ever been run on MySQL 9.x or MariaDB 12.x before**, so
+`DbServer::MYSQL_SUPPORTED_SERIES` and `MARIADB_SUPPORTED_SERIES` had been
+naming them as supported on the strength of nobody having tried. Both are now
+in `e2e-migrations.yml`'s matrix, which runs five jobs side by side.
+
+**MySQL 8.0 stays accepted, with a warning — the owner's decision, 3 November
+2026.** Offered the choice between refusing a database that no longer gets
+security fixes and carrying on with a warning, the owner chose the warning. So
+`DbServer::MIN_MYSQL` stays `8.0.0` and `MIN_MARIADB` stays `10.6.0`, although
+MySQL 8.0's support ended on 30 April 2026 and MariaDB 10.6's on 6 July 2026.
+**That is a decision, not an oversight: do not "tidy" those two constants
+upwards.** It also makes the warning the only protection there is, which is why
+the next part matters.
+
+**Two sentences the portal shows a customer were untrue, and both were found by
+reading the real output rather than the code.**
+
+* Every MariaDB answer said this project's automated tests "only ever run
+  against MySQL" — **eight days after the migration harness began replaying
+  every database change on MariaDB 11.4** (#487).
+* Every supported-MySQL answer said the tests "run against the MySQL 8.0 line,
+  so if you are on something newer you are ahead of what is routinely tested
+  here" — which told somebody on MySQL 9.7 that nobody had tested their
+  version, when 9.7 is tested.
+
+Both were stale in the modest direction, which is the safer one, and a
+customer-facing sentence that is untrue is a fault whichever way it points —
+the next one to go stale could as easily say a version is tested when nothing
+runs on it. Two more copies of the same claim were in the class's own docblock
+and in the MySQL 8.0 message ("this is the version everything here is tested
+against"), and one in `db-server-selftest.php`'s comments. All five corrected.
+
+**The cure is that the sentence is now DERIVED, and the list is CHECKED.**
+`DbServer::TESTED_LINES` names the release lines the harness really runs on,
+`testedLinesCaveat()` is the one place the sentence is built, and it now
+differs **by line** — because that is what is true: the harness runs on MariaDB
+11.4 and 12.3 and on none of 10.6, 10.11 or 11.8, which the portal still
+accepts. The new hard gate `tools/audit-checks/check_tested_db_lines.py`
+compares the constant with the workflow's own matrix and **fails both ways**,
+with no exception list, because there is no honest reason for the two to
+differ. For a tested line the wording is "replays every one of its database
+changes on it and checks the result", never "supported", and it still says out
+loud that nobody runs this portal on MariaDB in production.
+
+**PHP 8.5 is now linted.** `php-static-analysis.yml` ran `php -l` on 8.4 only,
+so the version the portal *recommends* (`PhpRuntime::PREFERRED_SERIES`) was
+never checked by the gate that exists to stop a syntax error reaching a
+customer. Both versions now run **as two steps in one job**, deliberately not
+as a matrix: a matrix would rename the check to "PHP -l lint (8.4)" and orphan
+the branch rule that requires "PHP -l lint", leaving every pull request into
+`main` waiting for a check that never arrives. All 906 PHP files under `web/`
+are clean on 8.5.11 locally.
+
+**And something watches for end of life now**, which #475 asked for:
+`tools/check-end-of-life.py` reads the supported-version lists **out of**
+`DbServer` and `PhpRuntime` — never a second copy — and compares them with
+endoflife.date. It is not in `tools/audit-checks/` because it needs the
+internet, and everything in that folder must run offline so the pre-push hook
+can run all of them in about nine seconds. `end-of-life-watch.yml` runs it
+monthly, keeps exactly **one** issue, rewrites that issue's body every run so it
+is always current, and comments **only when the findings change** — because a
+real finding here stays true for months, and a monthly comment about the same
+fact is how an issue stops being read. A run that cannot reach endoflife.date
+**fails**, and says the run proves nothing.
+
+It earned its place on the first run: **PHP 8.4 loses active support on
+31 December 2026, 58 days away**, and `PhpRuntime::MIN_PHP` is 8.4.0. Two other
+things it found, neither urgent: MySQL now has year-based release lines (26.7,
+26.10) above the 9.7 we record as newest known, and MariaDB has 13.0.
+
+Planting found a real fault in the watcher itself, and it is the repeat this
+repository keeps recording: with the site unreachable it printed "Nothing we
+support is within the warning window" **directly underneath** "COULD NOT ASK".
+The exit code was right and the words asserted the comforting half of a thing
+it had just said it could not establish. It now says so, for every product, and
+never reassures.
+
+## [Unreleased] (alpha)
 <!-- #745 -->
 
 ### Every security gate stopped running a week ago, and one `${{ }}` was why (#745)

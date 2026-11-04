@@ -2088,7 +2088,21 @@ favicons).
 
 ## Audit scripts (`tools/audit-checks/`)
 
-CI-runnable static audits invoked from PHP-static-analysis workflow:
+Static audits that need no database and no network, so `.githooks/pre-push`
+runs **every one of them** before every push, in about nine seconds, and
+`pr-security.yml` runs them again as hard gates.
+
+**The table below names only a handful of them and is not kept complete** —
+there are far more now. List them from the code, which cannot go stale:
+
+```bash
+ls tools/audit-checks/check_*.py
+for f in tools/audit-checks/check_*.py; do python3 -I "$f"; done
+```
+
+**Read that output rather than trusting the exit codes:** at least one script
+reports a real finding while exiting 0, which is how a missing migration mark
+nearly shipped unnoticed.
 
 | Script | What it catches |
 |---|---|
@@ -2101,7 +2115,10 @@ CI-runnable static audits invoked from PHP-static-analysis workflow:
 | `check_mobile_readiness.py` | Hard-coded widths > 320 px, bare `<table>`, missing `accept=`, modal without `modal-fullscreen-sm-down` |
 | `check_reserved_site_keys.py` | An organisation's site key clashing with an address the portal already answers on (a route, a router special address, or a real file/folder in the web root) — seeded keys, the hand-typed router constant agreeing with the code, and `tblSites` having exactly one writer that still checks `ReservedKeys::` (#515) |
 
-Audit pass status as of 2026-06-03: **0 missing routes · 0 column mismatches · 0 native confirms · 0 CDN tags without SRI**. Mobile readiness reports 29 informational findings (concrete fix targets); migration idempotency reports 19 historical (pre-multi-site cohort, already deployed and Migrator-protected).
+**A pass status used to be quoted here, as of 3 June 2026.** It has been removed
+rather than updated: a tally of findings in a document is out of date the day
+after it is written, and a stale "0 findings" is worse than none because it
+reads as reassurance. Run the loop above — it takes seconds.
 
 ---
 
@@ -2110,7 +2127,9 @@ Audit pass status as of 2026-06-03: **0 missing routes · 0 column mismatches ·
 | Path | Purpose |
 |---|---|
 | `tools/audit-checks/` | Static-analysis scripts (above) |
-| `tools/e2e-migrations/` | docker-compose MySQL 8.0.36 + `run.sh` 3-phase migration smoke test (#248) |
+| `tools/e2e-migrations/` | `run.sh` plus a docker-compose file that starts a throwaway database in memory. **Seven phases and 42 checks, on FIVE engines** — MySQL 8.0.36, 8.4.11 and 9.7.4, and MariaDB 11.4.13 and 12.3.3 (#248, #487, #475). `E2E_DB_ENGINE` and `E2E_MYSQL_VERSION` choose; always an exact version, never a moving tag. (This line said "MySQL 8.0.36 + 3-phase smoke test" until 3 November 2026.) |
+| `tools/check-end-of-life.py` | Warns before a PHP, MySQL or MariaDB version the portal says it supports stops being supported (#475). Reads the lists **out of** `DbServer` and `PhpRuntime`, never a copy, and compares them with endoflife.date. Deliberately **not** under `audit-checks/`: it needs the internet, and everything there must run offline. Run monthly by `end-of-life-watch.yml`, which keeps exactly one issue and comments only when the findings change |
+| `tools/audit-required-checks.py` | A branch rule requiring a check by a name no workflow produces — which leaves every pull request waiting for ever. Run by `repo-config-audit.yml` |
 | `tools/offsite-backup/` | Reference `sync-offsite.sh`, `log-offsite-result.php` and `read-offsite-settings.php` (the bridge that hands the page's settings to the script, #671). An administrator copies all THREE to the server by hand, into `_backups/`, from one release; they are not deployed (#249) |
 | `tools/package/` | Builds and guards the installation zip (#499): `build.sh`, `check-package.py`, a self-test, the settings for the search for secrets, and the file list of the PDF library. A package installs and upgrades (proved 13 October 2026, not on a real hosting panel); the workflow that would publish one is proposed only |
 | `tools/deploy/` | `resolve-settings.sh` decides where a deploy puts files and which login it uses, and refuses when unsure (#500). No workflow uses it yet |
