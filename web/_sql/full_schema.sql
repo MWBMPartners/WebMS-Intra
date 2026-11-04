@@ -25,11 +25,24 @@
 -- present in web/_sql/ are marked as executed in tblMigrations so the
 -- web-based Migrator won't re-run them.
 --
--- Covers migrations: 000-223 (DDL + settings/routes seeds + tblMigrations
--- marks). When you add a new migration, port its DDL/seeds into the
--- appropriate section here AND add its filename to the seed block at the
--- end of this file. CI enforces this via
--- tools/audit-checks/check_schema_seed_parity.py (#364 / #194).
+-- Covers EVERY migration file in web/_sql/ (DDL + settings/routes seeds +
+-- tblMigrations marks) — deliberately not stated as a number. It said
+-- "000-187" while it covered through 210 (#594 item 5), and by 4 November 2026
+-- it said "000-223" while covering through 247: a number here goes stale
+-- silently, because nothing reads a comment. Measured that day, on a real
+-- MySQL 8.0.36: a fresh load writes 244 marks for the 244 files on disk, with
+-- none missing.
+--
+-- To count it yourself rather than trust this line:
+--   ls web/_sql/ | grep -cE '^[0-9]{3}_'
+--   SELECT COUNT(*) FROM tblMigrations;        -- after a fresh load
+--
+-- When you add a new migration, port its DDL/seeds into the appropriate
+-- section here AND add its filename to the seed block at the end of this file.
+-- CI enforces this via tools/audit-checks/check_schema_seed_parity.py
+-- (#364 / #194) — and READ its output as well as its exit code: it names a
+-- missing migration mark while exiting 0, which is how migration 223 nearly
+-- shipped unrecorded (#647).
 -- =============================================================================
 -- @package   Portal\Database
 -- @author    MWBM Partners Ltd (t/a MWservices)
@@ -1070,6 +1083,27 @@ COMMENT='Recurrence rules for event series — generates individual event dates.
 -- back yet (a restore still half done). A pointer at an event missing from a
 -- table that exists is emptied at the end of this file, exactly as migration
 -- 210 does. Restore the whole database before running the installer over it.
+--
+-- AND THE SECOND THING IT CANNOT TELL, WHICH IS INHERENT AND NOT AN OVERSIGHT
+-- (#594 item 4 — item 3 in that issue's own numbering): a tblEvents that has
+-- been LOST while NO session points at an event. This guard asks for a pointer
+-- because a pointer is the ONLY evidence in the database that it ever held
+-- events — and a brand-new database is in exactly the same state, tblEvents
+-- absent and no pointers. The two are indistinguishable from here, so the
+-- choice is between stopping every fresh install and letting this one case
+-- through. It lets it through, and the table is made again EMPTY with the load
+-- reporting success over a database that has lost its calendar.
+--
+-- This is recorded rather than fixed because no extra condition can separate
+-- the two states: whatever is asked, a fresh install answers it the same way.
+-- What WOULD separate them is somebody saying which it is, and the installer
+-- already has that — the "carry on with the existing database" choice, which
+-- is only offered when the database holds tables. A customer who reaches that
+-- page has an existing database by definition; a fresh install never sees it.
+-- Using it here would mean this file knowing which installer step ran it, and
+-- it is also loaded by the migration harness and by hand. So the honest
+-- statement is the one above: restore the WHOLE database before running the
+-- installer over it, and this file cannot save you from a half-restored one.
 --
 -- A brand-new database passes straight through: tblAttendanceSessions was
 -- made, empty, a little above, so no session holds a pointer. The first
@@ -11046,3 +11080,72 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('246_registration_subject.sql')
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('247_self_service_password.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────
+-- WHY THESE ARE HERE AND NOT BESIDE tblEvents. `tblEvents` is declared near the
+-- top of this file; `tblVenues` and `tblVenueRooms` are declared about seven
+-- thousand lines BELOW it. A foreign key cannot name a table that does not
+-- exist yet, so these two cannot be written inline without reordering the whole
+-- file — which is a far bigger change than the gap deserves.
+--
+-- THE GAP THEY CLOSE. Migration 179 adds `fk_event_venue` and `fk_event_room`.
+-- This file did not, so a database built from the install script ALONE lacked
+-- both, while one upgraded through the migrations had them. The end-to-end
+-- harness named exactly that difference in `KNOWN_REPLAY_ONLY_LINKS`, and its
+-- own comment says to delete a line from that list when the difference is
+-- fixed. This is the same gap `fk_att_sess_event` was for #554, closed the same
+-- way in the "from 210_upgrade_gaps.sql" block above.
+--
+-- WHY EACH ONE NEEDS AN UPDATE IN FRONT OF IT, which is the #554 lesson rather
+-- than caution: the installer's "carry on with the existing database" choice
+-- runs this file over a database that may already hold an event pointing at a
+-- venue or room somebody has since deleted. Without the UPDATE the ALTER is
+-- error 1452, and the installer stops at the first error in this file — so a
+-- customer choosing "carry on" would be stopped by a row nobody can see. Both
+-- columns are already `DEFAULT NULL` and the link is `ON DELETE SET NULL`, so
+-- emptying a pointer that names nothing is the same thing the database would
+-- have done itself had the link existed when the venue was deleted. On a
+-- brand-new database both UPDATEs find nothing.
+--
+-- `updatedAt` = `updatedAt` keeps the row's "last changed" date, which
+-- `ON UPDATE CURRENT_TIMESTAMP` would otherwise move for a change nobody made.
+
+SET @fk_exists := (
+    SELECT COUNT(*) FROM information_schema.KEY_COLUMN_USAGE
+    WHERE TABLE_SCHEMA          = DATABASE()
+      AND TABLE_NAME            = 'tblEvents'
+      AND COLUMN_NAME           = 'venueID'
+      AND REFERENCED_TABLE_NAME = 'tblVenues'
+);
+
+SET @sql := IF(@fk_exists = 0,
+    'UPDATE `tblEvents` SET `venueID` = NULL, `updatedAt` = `updatedAt` WHERE `venueID` IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `tblVenues` WHERE `tblVenues`.`venueID` = `tblEvents`.`venueID`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(@fk_exists = 0,
+    'ALTER TABLE `tblEvents` ADD CONSTRAINT `fk_event_venue` FOREIGN KEY (`venueID`) REFERENCES `tblVenues`(`venueID`) ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @fk_exists := (
+    SELECT COUNT(*) FROM information_schema.KEY_COLUMN_USAGE
+    WHERE TABLE_SCHEMA          = DATABASE()
+      AND TABLE_NAME            = 'tblEvents'
+      AND COLUMN_NAME           = 'roomID'
+      AND REFERENCED_TABLE_NAME = 'tblVenueRooms'
+);
+
+SET @sql := IF(@fk_exists = 0,
+    'UPDATE `tblEvents` SET `roomID` = NULL, `updatedAt` = `updatedAt` WHERE `roomID` IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `tblVenueRooms` WHERE `tblVenueRooms`.`roomID` = `tblEvents`.`roomID`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(@fk_exists = 0,
+    'ALTER TABLE `tblEvents` ADD CONSTRAINT `fk_event_room` FOREIGN KEY (`roomID`) REFERENCES `tblVenueRooms`(`roomID`) ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

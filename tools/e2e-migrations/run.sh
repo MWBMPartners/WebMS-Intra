@@ -26,9 +26,16 @@
 #      script ALONE with the install script plus the replay, by name: every
 #      column, index and link, every address and every setting's stored
 #      value (see "the rule" beside compare_replay_with_install_script_alone).
-#      The replay is NOT a complete no-op, and this header used to say it
-#      was: it adds two links and switches three apps on. Those five are
-#      named in that rule. Any other difference in structure, and any address
+#      THE REPLAY IS A COMPLETE NO-OP AGAIN as of 4 November 2026, and the
+#      history matters because this header has now been wrong in BOTH
+#      directions. It first said the replay was a no-op when it was not; it
+#      was corrected to "it adds two links and switches three apps on"; and
+#      all five of those are now fixed — migration 225 made the install script
+#      seed the three apps ON (29 October), and #594 item 4 made it declare
+#      `fk_event_venue` and `fk_event_room` itself (4 November). So both
+#      exception lists beside that rule are EMPTY, and any difference at all
+#      in structure or in a setting's value is a hard failure with nothing
+#      standing in front of it. Any other difference in structure, and any address
 #      or setting value the replay changes or removes, is a hard failure. An
 #      address or setting the replay ADDS is printed and does not fail here
 #      (this used to say "anything else is a hard failure", which was untrue).
@@ -674,13 +681,24 @@ unseen_exceptions() {
 # script seeds, and a check that only runs on a pull request tells you nothing
 # until somebody opens one.
 #
-#   Two links that migration 179 adds and the install script does not declare.
-#   The same gap #554 was for fk_att_sess_event, which the install script now
-#   adds itself.
-KNOWN_REPLAY_ONLY_LINKS=(
-    "tblEvents | fk_event_room | 1 | roomID | tblVenueRooms | roomID | on delete SET NULL | on update NO ACTION/RESTRICT"
-    "tblEvents | fk_event_venue | 1 | venueID | tblVenues | venueID | on delete SET NULL | on update NO ACTION/RESTRICT"
-)
+#   EMPTY SINCE 4 NOVEMBER 2026 (#594 item 4). It held two links that migration
+#   179 adds and the install script did not declare — `fk_event_room` and
+#   `fk_event_venue` on `tblEvents` — the same gap #554 was for
+#   `fk_att_sess_event`. The install script now adds both itself, in a guarded
+#   block at the very end of `full_schema.sql`, because `tblEvents` is declared
+#   about seven thousand lines ABOVE `tblVenues` and `tblVenueRooms` and a
+#   foreign key cannot name a table that does not exist yet.
+#
+#   Each one has an UPDATE in front of it that empties a pointer naming a venue
+#   or room somebody has deleted — the #554 lesson: without it the ALTER is
+#   error 1452, and the installer stops at the first error in that file, so the
+#   "carry on with the existing database" choice would be stopped by a row
+#   nobody can see.
+#
+#   A LINK DIFFERENCE IS NOW A HARD FAILURE WITH NOTHING IN FRONT OF IT, which
+#   is the state this list exists to work towards — the same place
+#   KNOWN_REPLAY_VALUE_CHANGES reached on 29 October.
+KNOWN_REPLAY_ONLY_LINKS=()
 #   Empty since 29 October 2026: migration 225 made the install script seed
 #   the three apps that used to be here as switched ON, so the replay changes
 #   no setting value at all. A value difference is now a hard failure with
@@ -1189,8 +1207,26 @@ check_install_script_wording() {
     done
     # The question spreads over several lines: from "SET @fk_exists := (" to
     # the line that closes it.
-    question_m="$(awk '/^SET @fk_exists := \($/, /^\);$/' "${SQL_DIR}/210_upgrade_gaps.sql")"
-    question_s="$(awk '/^SET @fk_exists := \($/, /^\);$/' "${SQL_DIR}/full_schema.sql")"
+    #
+    # ⚠️ IT MUST BE THE QUESTION ABOUT THIS LINK, NOT EVERY SUCH QUESTION IN THE
+    #    FILE. The first version took the whole awk range, which concatenates
+    #    EVERY `SET @fk_exists := (…)` block in each file, and compared the
+    #    results. That worked only while the install script had exactly one. The
+    #    moment #594 item 4 gave it two more — for `fk_event_venue` and
+    #    `fk_event_room`, which migration 179 adds and the install script did
+    #    not — this check failed, reporting that the two files "no longer say
+    #    the same thing about the link" when both say exactly the same thing
+    #    about the link this check is named for.
+    #
+    #    That is a check CRYING WOLF over a correct change (#483), and the
+    #    report pointed at the wrong fault entirely. Narrowed to the block whose
+    #    body names `tblAttendanceSessions`, it is STRICTER rather than looser:
+    #    it now also fails if a file holds no such block, or more than one.
+    local filter='/^SET @fk_exists := \($/, /^\);$/'
+    question_m="$(awk "${filter}" "${SQL_DIR}/210_upgrade_gaps.sql" \
+        | awk '/^SET @fk_exists := \($/{b=""} {b=b $0 "\n"} /^\);$/{ if (b ~ /tblAttendanceSessions/) printf "%s", b }')"
+    question_s="$(awk "${filter}" "${SQL_DIR}/full_schema.sql" \
+        | awk '/^SET @fk_exists := \($/{b=""} {b=b $0 "\n"} /^\);$/{ if (b ~ /tblAttendanceSessions/) printf "%s", b }')"
     if [[ -z "${question_m}" || "${question_m}" != "${question_s}" ]]; then
         echo "  ✗ migration 210 and the install script do not ask \"is a link already there?\" in the same words (SET @fk_exists := …), so one may add the link where the other would not. Migration 210:" >&2
         sed 's/^/      /' <<< "${question_m:-(not found)}" >&2

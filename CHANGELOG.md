@@ -4,6 +4,80 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The installer's six gaps: four were already closed, one is fixed, one is inherent (#594)
+
+Measured each against a real MySQL 8.0.36 rather than read.
+
+**Item 1 — the continue-or-wipe page could not be used: already fixed.**
+`db_state.php` is `require_once`d for every request now, with a comment
+recording the exact "Undefined constant DB_STATE_FRESH_REQUIRED" fault, and the
+step resolution keeps `$isChoiceStep` alive once the database details are held.
+`installer-selftest.php` passes 136 of 136 and its L20 covers **all ten**
+installer pages including that one.
+
+**Item 2 — every installer pass added three more email templates: already fixed
+by migration 222.** The cause was #487's shape: `(siteID, templateKey)` unique
+with `siteID = NULL`, and in MySQL a unique key stands aside for any row where
+any part is empty, so it refused nothing. Migration 222 added
+`siteScope INT AS (COALESCE(siteID, -1)) VIRTUAL` and
+`uq_template_key_scope (templateKey, siteScope)`. **Measured:** replaying
+migration 051 twice over a fresh install leaves **3** portal-wide rows, not 6 or 9.
+
+**Item 4 — FIXED, and it is the only code change here.** Two links migration 179
+adds, `fk_event_venue` and `fk_event_room` on `tblEvents`, were declared by the
+migrations and not by the install script — so a database built from the install
+script alone lacked both. They cannot be written inline: `tblEvents` is declared
+about **seven thousand lines above** `tblVenues` and `tblVenueRooms`, and a
+foreign key cannot name a table that does not exist yet. They are added in a
+guarded block at the end of `full_schema.sql`, the same way #554's
+`fk_att_sess_event` was, each with an `UPDATE` in front that empties a pointer
+naming a deleted venue or room — without it the `ALTER` is error 1452 and the
+installer stops at the first error in that file, so "carry on with the existing
+database" would be stopped by a row nobody can see.
+
+`KNOWN_REPLAY_ONLY_LINKS` in the harness is now **empty**, so a link difference
+is a hard failure with nothing in front of it. The other half of item 4, three
+apps the install script seeded off while migrations switched them on, was fixed
+by migration 225 on 29 October. **So the replay is a complete no-op again** —
+and that header has now been wrong in *both* directions, which is recorded
+where it says so.
+
+**A check cried wolf over the correct change, and it is worth knowing why.**
+`check_install_script_wording()` compared **every** `SET @fk_exists := (…)`
+block in each file by concatenating an `awk` range. That worked only while the
+install script had exactly one. With two more it reported that the two files
+"no longer say the same thing about the link" — when both say exactly the same
+thing about the link it is named for. Narrowed to the block whose body names
+`tblAttendanceSessions`, it is **stricter**: it now also fails on no such block,
+or more than one.
+
+**Item 5 — the header said "000-223" while covering through 247.** It had said
+"000-187" while covering 210 when #594 was written, so the number has gone stale
+twice. **The number is gone**: the header says it covers every migration file,
+gives the two commands to count it, and records the measurement of the day (244
+marks for 244 files, none missing).
+
+**Item 3 — INHERENT, recorded rather than fixed.** If `tblEvents` is lost and
+**no** session points at an event, the install script makes it again, empty, and
+reports success. The guard requires a pointer because **a pointer is the only
+evidence in the database that it ever held events** — and a brand-new database
+is in the identical state, `tblEvents` absent and no pointers. No extra
+condition can separate them: whatever is asked, a fresh install answers the
+same. The limit is now stated beside the guard, with why the installer's own
+"carry on" choice cannot be used from inside a file that the harness and people
+also load by hand.
+
+**Item 6 — split to #759, deliberately not claimed fixed.** It concerns an
+*upgraded* database against a fresh install; the harness's clean report is
+*install-script versus replay*, a different comparison. It was not re-measured,
+and the figure of 25 is from 12 October with three dozen migrations since.
+
+Checks: the migration harness passes **all 42** on MySQL 8.0.36 with both
+exception lists empty; `full_schema.sql` loads twice over itself unchanged;
+installer self-test 136 of 136; seed parity clean. **Planted:** removing the two
+links while leaving the exception list empty fails phase 2, naming exactly those
+two — so the change is load-bearing rather than decorative.
+
 ### How work is recorded: all three of #678's problems are closed (#678, D-048)
 
 **1. Finished issues were never closed.** `gh issue close` was refused once on
