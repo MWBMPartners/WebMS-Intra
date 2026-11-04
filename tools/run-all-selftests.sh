@@ -186,6 +186,7 @@ page-scripts|tools/page-scripts-selftest.php|selftest_pagescripts|web:page-scrip
 help-pages|tools/help-pages-selftest.php|selftest_helppages|web:help-pages SELFTEST_WEB_PORT=9663
 erasure-pages|tools/erasure-pages-selftest.php|selftest_erasurepages|web:erasure-pages SELFTEST_WEB_PORT=9071
 admin-password|tools/admin-password-selftest.php|selftest_adminpwd|web:admin-password SELFTEST_WEB_PORT=9086
+self-service-password|tools/self-service-password-selftest.php|selftest_sspwd|web:self-service-password SELFTEST_WEB_PORT=9088
 event-repeat-pages|tools/event-repeat-pages-selftest.php|selftest_evrep|web:event-repeat SELFTEST_WEB_PORT=9077
 transcription-pages|tools/transcription-pages-selftest.php|selftest_transcription|web:transcription SELFTEST_WEB_PORT=9081
 settings-secrets|tools/settings-secrets-selftest.php|selftest_settingssecrets|web:settings-secrets SELFTEST_WEB_PORT=9640 SELFTEST_MAIL_PORT=9641

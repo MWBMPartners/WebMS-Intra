@@ -2041,6 +2041,25 @@ INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `default
 VALUES ('auth.passwordReset.tokenExpiry', '60', 0, '60')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
+-- 🔑 May a member give their OWN account a password (#731, migration 247)?
+--    For an account that signs in only through Microsoft, Google or a passkey
+--    this is the only route to one: an administrator may not type a password
+--    for somebody else (decision D-018, #586), and "forgot password" finds
+--    nothing because it joins the sign-in table.
+--
+--    SEEDED INSTALLATION-WIDE (no `siteID`) AND SWITCHED ON, because it is a
+--    recovery route and #499's "fail closed" was built first and locked members
+--    out. **The STRICTER level wins** (D-026, quoting D-013): it is offered only
+--    where the installation AND the organisation both allow it, so an
+--    organisation may add its own row of '0' and may never turn it back on when
+--    this row says '0'. That is why `Portal\Core\SelfServicePassword` reads the
+--    merged settings and the installation's own layer separately — the merged
+--    array lets an organisation's row win, which is right for an ordinary
+--    setting and wrong for this one.
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('auth.password.selfAdd', '1', 0, '1')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
 -- ─── Auth — MS365 OAuth credentials (dormant until configured) ───────────────
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
 VALUES ('auth.ms365.tenantID', '', 1, '')
@@ -2495,6 +2514,18 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('account/change-password', 'auth/account/change-password.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+-- 🔑 "Add a password to my own account" (#731, migration 247): the form and
+--    its handler. Both protected, so only a signed-in person reaches them; each
+--    then asks `Portal\Core\SelfServicePassword` whether THIS person may go on,
+--    which also requires a sign-in no more than five minutes old.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('account/add-password', 'auth/account/add-password.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('account/add-password-save', 'auth/account/add-password-save.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 -- 🪦 account/linked-accounts route removed — target file was never
@@ -10993,4 +11024,25 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('244_transcript_retention_per_s
 -- MySQL 8.0.36, run twice).
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('246_registration_subject.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 247_self_service_password.sql (#731) ───────────────────────────────
+-- One setting and two addresses, all three declared above: `auth.password.selfAdd`
+-- in the auth block and the two `account/add-password…` rows in the address
+-- block. No table, no column, nothing dropped.
+--
+-- WHY IT MATTERS. A member whose account signs in only through Microsoft,
+-- Google or a passkey had no route to a password at all, so losing that one way
+-- in locked them out for good — and an administrator may not set a password for
+-- somebody else (decision D-018, #586). The two addresses are the owner's route
+-- out of that: the account's owner adds the password themselves, after proving
+-- who they are by a method they really hold.
+--
+-- The migration's own inserts are no-ops on a database built from this script,
+-- which is what makes the installer's replay of it safe: the setting's value is
+-- restated as itself rather than overwritten (a customer who has switched it
+-- off must stay switched off), and the two addresses are restated to their
+-- targets.
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('247_self_service_password.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;

@@ -99,6 +99,16 @@ class Auth
      * version of this comment said a page carrying a flash "is not kept"; an
      * independent check showed that was not true.)
      *
+     * `reauth_proof` (#731) is deliberately NOT on this list, and the list's
+     * own design is what makes that the right answer: a proof of a fresh
+     * sign-in holds the ACCOUNT NUMBER it was recorded for, so it says exactly
+     * what this list is about. Being left off means a page is not kept offline
+     * while a proof is in the session, which is the small loss of convenience
+     * the comment above describes. **In practice it changes nothing**, said
+     * plainly rather than claimed as a protection: a proof only ever exists
+     * alongside `user_id` or `2fa_user_id`, neither of which is on this list
+     * either, so such a page was never kept offline anyway.
+     *
      * @var list<string>
      */
     private const SESSION_KEYS_SAFE_TO_KEEP_OFFLINE = [
@@ -1296,6 +1306,71 @@ class Auth
     }
 
     /**
+     * 🔙 Where to send somebody after a sign-in, when the request itself does
+     *    not say — and the ONE place `login_redirect` is taken out of the
+     *    session.
+     *
+     * WHAT THIS FIXED, measured rather than assumed (#731). `login_redirect`
+     * is documented at the top of this class as "where to go back to after
+     * signing in", and FOUR places WRITE it — `_apps/auth/login/index.php`,
+     * `_apps/auth/login/webauthn.php` and the two single-sign-on callbacks in
+     * this file — but every one of them only in its two-factor branch, and
+     * only `_apps/auth/2fa/verify.php` ever READ it. Established with
+     * `git grep -n login_redirect 5f37e4f -- web/`: four writes, one read, and
+     * two mentions in comments. The ordinary
+     * single-sign-on path ended `self::safeRedirectUrl($_GET['redirect'] ?? '/')`,
+     * and nothing puts a `redirect` parameter on a callback address: the
+     * provider sends the person to the one address registered with it. So a
+     * page that wanted somebody brought back to it after a Microsoft or Google
+     * sign-in had no way to ask.
+     *
+     * "Add a password to my own account" needs exactly that: the person is
+     * asked to sign in again by the method they really have, and must come
+     * back to the page they were on.
+     *
+     * IT IS TAKEN, not merely read. Leaving it behind would send the person's
+     * NEXT sign-in to the same place, long after they had given up on it.
+     *
+     * **Be exact about that, because `??` SHORT-CIRCUITS.** Every caller writes
+     * `$_GET['redirect'] ?? self::comeBackAfterSignIn()`, so when the request
+     * DOES carry a `redirect` this method is never called and the stored
+     * address is not taken — it stays for the next sign-in. Nothing can put a
+     * `redirect` on a callback address today, which is why that branch is not
+     * reached in practice; the claim above is "it is taken when it is read",
+     * never "it can never linger".
+     *
+     * WHAT IT DOES NOT DO: it does not judge the address. Every caller already
+     * hands the answer to {@see safeRedirectUrl()}, which is the one place an
+     * address is judged safe, and adding a second test here would be a second
+     * copy of that rule.
+     *
+     * TWO THINGS THIS CANNOT DO, said plainly:
+     *   - It cannot carry a come-back address through a two-factor step on a
+     *     single-sign-on account by itself. That branch overwrites
+     *     `login_redirect` with its own value, which is now built from this
+     *     answer so the address survives — but if that branch is ever changed
+     *     back to a literal, the come-back is lost again and nothing here
+     *     would notice.
+     *   - It is not exercised end to end by any test in this repository,
+     *     because that needs a real Microsoft or Google sign-in. The rule
+     *     itself — take it, answer the fall-back when there is none — is asked
+     *     directly by `tools/self-service-password-selftest.php`.
+     *
+     * @return string The stored address, or '/' when there is none. Pass it
+     *                through {@see safeRedirectUrl()} before using it.
+     */
+    public static function comeBackAfterSignIn(): string
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            return '/';
+        }
+        $kept = $_SESSION['login_redirect'] ?? null;
+        unset($_SESSION['login_redirect']);
+
+        return is_string($kept) === true && $kept !== '' ? $kept : '/';
+    }
+
+    /**
      * 🏢 Would this address keep the visitor in the organisation the request
      * is in? Only asked where organisations are told apart by the first part
      * of the address; in every other set-up the answer is yes, because the
@@ -1598,6 +1673,24 @@ class Auth
         // 🌐 Set active site ID for multi-site context
         self::setSessionSiteId($userId, $mysqli);
 
+        // 🔑 RECORD THAT THIS PERSON HAS JUST PROVED WHO THEY ARE (#731).
+        //    `SelfServicePassword` is the ONE place that records and reads
+        //    that proof, and this is one of the FOUR paths allowed to record
+        //    it, because each of them has really just re-authenticated
+        //    somebody. A proof must NEVER come from an existing session: a
+        //    session can be borrowed, which is the entire reason the gate on
+        //    "add a password to my own account" exists.
+        //
+        //    Recorded HERE, where the identity is granted, rather than after
+        //    the two-factor gate below — that gate takes the sign-in away and
+        //    redirects, so a proof written after it would never be written for
+        //    an account that uses two-factor authentication, and such an
+        //    account could then never add a password. Nothing can USE a proof
+        //    while the session is still waiting for the code, because
+        //    `recentlyProvedThemselves()` compares it against the SIGNED-IN
+        //    person, who at that moment is nobody.
+        SelfServicePassword::recordProof($userId, SelfServicePassword::METHOD_MICROSOFT);
+
         /* ----------------------- 7. 🔐 2FA gate (#B2) ------------------------ */
         // 🛡️ SSO auto-links by email (step 5 above), so WITHOUT this gate a
         // 2FA-enrolled user — or an attacker who has taken over their SSO
@@ -1620,7 +1713,12 @@ class Auth
             //    tidiness here; do not move the unset() back down.
             $_SESSION['2fa_user_id'] = $userId;
             unset($_SESSION['user_id'], $_SESSION['2fa_passed']);
-            $_SESSION['login_redirect'] = self::safeRedirectUrl($_GET['redirect'] ?? '/');
+            // 🔙 The come-back a page asked for survives the two-factor step
+            //    (#731): without this fall-back, this line replaced it with the
+            //    organisation's front page and the person never returned to the
+            //    page that sent them. The ORDER above is untouched and must stay
+            //    as it is — the sign-in is taken away first.
+            $_SESSION['login_redirect'] = self::safeRedirectUrl($_GET['redirect'] ?? self::comeBackAfterSignIn());
             Logger::activity('LoginMS365Pending2fa', 'MS365 login pending 2FA challenge', $userId);
             header('Location: ' . Site::url('auth/2fa/verify'), true, 302);
             exit();
@@ -1630,7 +1728,12 @@ class Auth
         // 📝 Log the successful login
         Logger::activity('LoginMS365', 'User logged in via Microsoft 365');
 
-        $target = self::safeRedirectUrl($_GET['redirect'] ?? '/');
+        // 🔙 `comeBackAfterSignIn()` and not a bare '/' (#731). A provider
+        //    sends the person to the ONE address registered with it, so
+        //    nothing can put a `redirect` parameter here; the session is the
+        //    only way a page can ask to be returned to. The address is still
+        //    judged by `safeRedirectUrl()`, exactly as before.
+        $target = self::safeRedirectUrl($_GET['redirect'] ?? self::comeBackAfterSignIn());
         header('Location: ' . $target, true, 302);
         exit();
     }
@@ -1859,6 +1962,24 @@ class Auth
         // 🌐 Set active site ID for multi-site context
         self::setSessionSiteId($userId, $mysqli);
 
+        // 🔑 RECORD THAT THIS PERSON HAS JUST PROVED WHO THEY ARE (#731).
+        //    `SelfServicePassword` is the ONE place that records and reads
+        //    that proof, and this is one of the FOUR paths allowed to record
+        //    it, because each of them has really just re-authenticated
+        //    somebody. A proof must NEVER come from an existing session: a
+        //    session can be borrowed, which is the entire reason the gate on
+        //    "add a password to my own account" exists.
+        //
+        //    Recorded HERE, where the identity is granted, rather than after
+        //    the two-factor gate below — that gate takes the sign-in away and
+        //    redirects, so a proof written after it would never be written for
+        //    an account that uses two-factor authentication, and such an
+        //    account could then never add a password. Nothing can USE a proof
+        //    while the session is still waiting for the code, because
+        //    `recentlyProvedThemselves()` compares it against the SIGNED-IN
+        //    person, who at that moment is nobody.
+        SelfServicePassword::recordProof($userId, SelfServicePassword::METHOD_GOOGLE);
+
         /* ----------------------- 7. 🔐 2FA gate (#B2) ------------------------ */
         // 🛡️ Same SSO-bypass hole as callbackMS365() above — see the comment
         // there for the full rationale. Mirrors the password login path's
@@ -1876,7 +1997,12 @@ class Auth
             //    tidiness here; do not move the unset() back down.
             $_SESSION['2fa_user_id'] = $userId;
             unset($_SESSION['user_id'], $_SESSION['2fa_passed']);
-            $_SESSION['login_redirect'] = self::safeRedirectUrl($_GET['redirect'] ?? '/');
+            // 🔙 The come-back a page asked for survives the two-factor step
+            //    (#731): without this fall-back, this line replaced it with the
+            //    organisation's front page and the person never returned to the
+            //    page that sent them. The ORDER above is untouched and must stay
+            //    as it is — the sign-in is taken away first.
+            $_SESSION['login_redirect'] = self::safeRedirectUrl($_GET['redirect'] ?? self::comeBackAfterSignIn());
             Logger::activity('LoginGooglePending2fa', 'Google login pending 2FA challenge', $userId);
             header('Location: ' . Site::url('auth/2fa/verify'), true, 302);
             exit();
@@ -1885,7 +2011,8 @@ class Auth
         /* ----------------------- 8. Redirect --------------------------------- */
         Logger::activity('LoginGoogle', 'User logged in via Google OAuth');
 
-        $target = self::safeRedirectUrl($_GET['redirect'] ?? '/');
+        // 🔙 See the matching comment in callbackMS365() (#731).
+        $target = self::safeRedirectUrl($_GET['redirect'] ?? self::comeBackAfterSignIn());
         header('Location: ' . $target, true, 302);
         exit();
     }
@@ -2143,6 +2270,29 @@ class Auth
 
         // 🌐 Set active site ID for multi-site context
         self::setSessionSiteId((int) $row['userID'], $mysqli);
+
+
+        // 🔑 RECORD THAT THIS PERSON HAS JUST PROVED WHO THEY ARE (#731).
+        //    `SelfServicePassword` is the ONE place that records and reads
+        //    that proof, and this is one of the FOUR paths allowed to record
+        //    it, because each of them has really just re-authenticated
+        //    somebody. A proof must NEVER come from an existing session: a
+        //    session can be borrowed, which is the entire reason the gate on
+        //    "add a password to my own account" exists.
+        //
+        //    Recorded HERE, where the identity is granted, rather than after
+        //    the two-factor gate. **For the password route that gate is in
+        //    `_apps/auth/login/index.php`, NOT below in this function** — a
+        //    copied version of this comment said "the gate below", which is
+        //    true of the two callbacks and not of here. Wherever it sits, it
+        //    takes the sign-in away and redirects, so a proof written after it
+        //    would never be written for
+        //    an account that uses two-factor authentication, and such an
+        //    account could then never add a password. Nothing can USE a proof
+        //    while the session is still waiting for the code, because
+        //    `recentlyProvedThemselves()` compares it against the SIGNED-IN
+        //    person, who at that moment is nobody.
+        SelfServicePassword::recordProof((int) $row['userID'], SelfServicePassword::METHOD_PASSWORD);
 
         // 🕐 Update lastLogin timestamp on tblLocalAccounts
         $updateStmt = $mysqli->prepare('UPDATE tblLocalAccounts SET lastLogin = NOW() WHERE localID = ?');

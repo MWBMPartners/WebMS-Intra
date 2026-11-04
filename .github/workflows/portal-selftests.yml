@@ -606,7 +606,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_reservedwords selftest_offsite selftest_helppages selftest_pwwriter; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_reservedwords selftest_offsite selftest_helppages selftest_pwwriter selftest_sspwd; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -838,6 +838,33 @@ jobs:
         run: |
           mkdir -p "$SELFTEST_WEB_DIR"
           php -d memory_limit=512M tools/admin-password-selftest.php
+
+      # 🔑 #731 -- a member whose account signs in ONLY through Microsoft,
+      #    Google or a passkey adds a password to it themselves. Until this
+      #    existed such a person had no route to a password at all, so losing
+      #    that one way in locked them out for good, and an administrator may
+      #    not set one for them (decision D-018, #586).
+      #
+      #    THE PARTS WORTH HAVING are the ones no audit script could see:
+      #    section E posts the save with a perfectly good form token and NO
+      #    fresh sign-in, which is the shape that matters; section F ages and
+      #    spends the proof in the session's own file on disk, because five
+      #    minutes cannot be waited for; and section G sets the setting at both
+      #    levels and proves the INSTALLATION's "no" beats an organisation's
+      #    "yes", which the merged settings array cannot express.
+      #
+      #    Its section I plants six faults in a scratch copy and requires each
+      #    to turn a named check red. Wired in with the test, not later,
+      #    because a test that runs in no workflow is the #646 shape.
+      - name: 'Add a password to your own account, self-test (#731)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_sspwd
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/self-service-password
+          SELFTEST_WEB_PORT: '9088'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/self-service-password-selftest.php
 
       - name: Access pages self-test
         if: ${{ !cancelled() && steps.databases.outcome == 'success' }}

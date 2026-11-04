@@ -16409,3 +16409,98 @@ back.
 It still cannot see a name built by joining pieces or held in a variable, a
 write with no SQL verb of its own, or whether `Auth::setPassword()` is correct —
 only that it is the only thing doing the job.
+
+## Adding a password to your own account (#731)
+
+### The gap, measured
+
+An account that signs in only through Microsoft, Google or a passkey had **no
+route to a password at all**:
+
+| Route | Why it could not help |
+|---|---|
+| Admin, edit a user | refuses it on purpose (#586) |
+| "Forgot password" | joins `tblLocalAccounts`, and `Auth::createUser()` — the first-time single-sign-on path — creates no row there |
+| Change password | there is none to change |
+
+So a lost identity provider, a lost Microsoft or Google account, or a lost
+passkey device meant the member was out, and the disaster-recovery runbook's
+server-level operation was the only way back — for what is one person's problem.
+
+### What proving yourself means here, and what it cannot mean
+
+**Not an e-mail link**: for such an account the e-mail address may *be* the
+single-sign-on account, so a link to it proves nothing a lost provider has not
+already taken away. The person re-signs-in by a method they really hold, and
+that is recorded as a proof carrying the moment and the method.
+
+**`/login` cannot be used for it.** It redirects away whenever `Auth::check()`
+is true, so a signed-in person sent there bounces straight back having proved
+nothing. The add-password page therefore offers the methods itself, which costs a
+**third inline copy of the passkey browser plumbing** — not of the ceremony:
+`login/webauthn.php` is still the one place an assertion is verified, and the
+challenge is session-bound, compared and cleared, so nothing can be replayed.
+
+**The proof is recorded ABOVE the two-factor gate**, deliberately: that gate
+takes the sign-in away and redirects, so a proof written below it would never
+exist for a two-factor account and such an account could never add a password.
+Nothing can *use* one while the session is still waiting for the code, because
+the check compares it against the signed-in person, who at that moment is
+nobody. (For the password route that gate lives in
+`_apps/auth/login/index.php`, **not** below in `loginLocalOneAtATime()` — a
+copied comment claimed "below" and was wrong of that one function.)
+
+### Three guards that nothing pinned, and the one of them that was my own
+
+Each of these left the suite at **88 of 88 green**:
+
+1. **The form-token gate deleted.** Every other check fetches a real token
+   first, and the check that posts "anyway" uses a *good* token with no proof —
+   the opposite case. So the only thing standing between a member and a page
+   that posts this form on their behalf, inside the five-minute window, was
+   guarded by nothing.
+2. **The page renewing the proof's moment.** A sliding window turns five minutes
+   into "five minutes after you stop looking". **And the check written for it
+   could not fail either:** the whole run happens inside a second, so a renewal
+   writes back the same `time()` and compares equal. **Age the proof first,
+   still inside the window** — then a renewal is visible because the moment
+   jumps forward.
+3. **The second rule check inside the transaction deleted.** Which exposed an
+   untrue sentence of the reassuring kind: the test claimed two simultaneous
+   adds are protected by "the transaction and the lock `Auth::setPassword()`
+   takes". **The lock makes them sequential; it does not refuse the second.**
+   `storeHash()`'s existing-row branch would UPDATE and answer success, so the
+   second password would silently replace the first and both members would be
+   told theirs was set. What refuses it is that second ask, on facts read inside
+   the lock. The lock is what makes the read trustworthy; the refusal does the
+   work.
+
+### The setting's organisation half is not reachable, and three places said it was
+
+`auth.password.selfAdd` follows D-026: the stricter level wins, `false` being
+stricter. The class implements that correctly. **But an organisation cannot
+express its own "no" through any page** — measured: nothing under `web/` writes
+the key outside the class, and `_apps/settings/save.php` refuses to *add* a
+per-organisation row for any key the installation already holds, the four
+`mail.queue.*` numbers being the only exception via `$onlyOwnRowClashes`.
+
+This is exactly the shape #668 recorded — *"all 32 limit-shaped candidates are
+seeded INSTALLATION-WIDE … so almost none of them is overridable whatever its
+name suggests"* — re-created by a package that then documented the layer as
+usable. The control is #755. Section G of the test inserts that row with raw
+SQL and now says so, because otherwise the next reader believes a control is
+there.
+
+### And a docblock went to the wrong function, for the second time in a day
+
+The new `comeBackAfterSignIn()` was inserted **between**
+`Auth::safeRedirectUrl()`'s docblock and `safeRedirectUrl()` itself. So
+`safeRedirectUrl()` had no docblock, and its `@param mixed $url` tags — plus
+**the "do not narrow this back to `string`" warning that is the whole lesson of
+the 27 October sign-in bypass** — sat above a function that takes no arguments.
+Any tool reading docblocks would attribute it wrongly.
+
+**#728 made the same mistake in the same sitting**, putting a block between
+`RESET_LINK_FORM`'s docblock and the constant. The remedy both times is to put
+a new member *after* the one below it, never between a docblock and its subject —
+and the tell is two `*/` … `/**` pairs with no declaration between them.

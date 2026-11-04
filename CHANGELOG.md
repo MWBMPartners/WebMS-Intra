@@ -4,6 +4,71 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A member whose only sign-in is Microsoft, Google or a passkey can give themselves a password (#731, migration 247)
+
+**Until now such an account had no route to a password at all.** The
+administrator side refuses it on purpose (#586); "Forgot password" finds nothing,
+because it joins `tblLocalAccounts` and `Auth::createUser()` — the first-time
+single-sign-on path — creates no row there; and there is no password to change.
+So if the identity provider was unreachable, or the Microsoft or Google account
+was lost, or the passkey's only device went, the member was out and only a
+server-level operation got them back.
+
+`Portal\Core\SelfServicePassword` is the one place that decides whether
+somebody may, and the one place the proof that they have **just signed in
+again** is recorded, read and spent. They prove themselves by a method they
+really hold — not an e-mail link, because their e-mail may *be* the single-sign-on
+account. The proof lasts five minutes, is used once, and is refused when it names
+somebody else. **Never put a privilege grant behind nothing but an existing
+session:** a session can be borrowed, which is the whole reason that gate exists.
+
+Nothing is removed — the identity-provider link and every passkey survive, pinned
+by a test rather than merely intended. It is recorded as `PasswordAdded`, never
+`PasswordChanged`, and the account's own address is e-mailed, so a stolen session
+cannot add a way in quietly. The password is stored only through
+`Auth::setPassword()` (#728, which is why that had to land first). An
+administrator still cannot do it for somebody else.
+
+**Three things were guarded by nothing, and the independent check found all
+three.** Each left the suite at **88 of 88 green**:
+
+* **Deleting the handler's form-token gate.** Every other check fetches a real
+  token first, and the one that posts "anyway" does so with a *good* token and no
+  proof — the opposite case. So the only thing standing between a member and a
+  page that posts this form *for* them, inside the five-minute window, was
+  guarded by nothing. That is a second way into the account chosen by somebody
+  who is not its owner, which is exactly what #586 refuses on the other side.
+* **Making the page renew the proof's moment each time it is drawn.** A sliding
+  window turns five minutes into "five minutes after you stop looking", so a
+  borrowed session that reloads the page holds the proof open indefinitely.
+  **And my own first version of that check could not fail either** — the run
+  finishes inside a second, so a renewal writes back the same `time()` and
+  compares equal. The proof has to be *aged* first, still inside the window, for
+  a renewal to be visible at all.
+* **Deleting the second rule check inside the transaction.** Which exposed an
+  untrue sentence: the test said two simultaneous adds are protected by "the
+  transaction and the lock `Auth::setPassword()` takes". **The lock makes them
+  sequential; it does not refuse the second** — `storeHash()` would simply UPDATE
+  and report success, so both members would be told their password was set. What
+  refuses it is that second ask.
+
+**And the organisation half of the rule cannot be reached through any page,
+while three places said it could.** Measured: nothing under `web/` writes
+`auth.password.selfAdd` outside the class, and `_apps/settings/save.php` refuses
+to add a per-organisation row for a key the installation already holds — the four
+`mail.queue.*` numbers are the only exception. That is the shape #668 already
+recorded, re-created. The rule in the class is right; the control is now **#755**,
+and the test's own fixture says plainly that it inserts a row no administrator can
+produce.
+
+Two smaller corrections worth keeping: the new method had been inserted between
+`Auth::safeRedirectUrl()`'s docblock and the function, so that docblock — **including
+the "do not narrow this back to `string`" warning that is the lesson of the
+27 October sign-in bypass** — was documenting the wrong function. (The same
+mistake was made in #728 with `RESET_LINK_FORM`, twice in one sitting.) And the
+documents claimed a seventh planted fault before one existed; the remedy was to
+add the plant, which really does go red, rather than to soften the sentence.
+
 ### The reserved-word list had gone stale for the two engines #475 part 1 had just proved (#475 part 2)
 
 **Part 1 took the migration harness to MySQL 9.7 and MariaDB 12.3. The

@@ -408,6 +408,7 @@ Local + SSO + multi-factor sign-in.
 | Flow | Status |
 | --- | --- |
 | Local username + password login | ✅ |
+| **Add a password to your own account** (#731) — for a member whose account signs in only through Microsoft, Google or a passkey, which until now had **no route to a password at all**: the administrator side refuses it (#586), "Forgot password" finds nothing because it needs a sign-in row, and there is no password to change. `/account/add-password`, offered from the Account page. They sign in again first by a method they really hold; that proof lasts five minutes and is used once. **Nothing is removed** — the identity-provider link and every passkey stay. The installation can switch it off for everybody (`auth.password.selfAdd`), and where the installation and an organisation disagree the **stricter** answer wins. **An organisation cannot yet express its own "no" through any page** — the rule is implemented, the control is #755. | ✅ |
 | MS365 OAuth (PKCE + ID-token validation) | ✅ |
 | Google OAuth | ✅ |
 | WebAuthn / PassKey registration + login | ✅ |

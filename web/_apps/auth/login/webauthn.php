@@ -24,6 +24,7 @@ require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEP
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\SelfServicePassword;
 use Portal\Core\Site;
 use Portal\Core\WebAuthn;
 
@@ -125,6 +126,31 @@ if ($action === 'auth_verify') {
 
             // 🌐 Set active site ID for multi-site context
             Auth::initSessionSite($webauthnUserId, $mysqli);
+
+            // 🔑 RECORD THAT THIS PERSON HAS JUST PROVED WHO THEY ARE (#731).
+            //    `Portal\Core\SelfServicePassword` is the ONE place that
+            //    records and reads that proof, and this is one of the FOUR
+            //    paths allowed to record it, because a passkey assertion has
+            //    just been verified above. A proof must NEVER come from an
+            //    existing session: a session can be borrowed, which is the
+            //    whole reason the gate on "add a password to my own account"
+            //    exists.
+            //
+            //    IT IS RECORDED FOR THE PASSKEY'S OWNER, which may not be the
+            //    person who was signed in a moment ago — this endpoint signs in
+            //    whoever's authenticator answered, and it has just replaced the
+            //    session's identity to say so. `recentlyProvedThemselves()`
+            //    compares the proof against the SIGNED-IN person for exactly
+            //    that reason, so somebody who presents their own passkey into
+            //    somebody else's borrowed session proves themselves for their
+            //    OWN account and nobody else's.
+            //
+            //    Recorded here rather than after the two-factor gate below,
+            //    for the reason given at the matching call in `Auth.php`: that
+            //    gate takes the sign-in away and answers with a redirect, so a
+            //    proof written after it would never exist for an account that
+            //    uses two-factor authentication.
+            SelfServicePassword::recordProof($webauthnUserId, SelfServicePassword::METHOD_PASSKEY);
 
 
             // ------------------------------------------------------------

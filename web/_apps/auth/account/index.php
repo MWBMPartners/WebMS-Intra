@@ -155,6 +155,20 @@ if ($totpEnabled === true) {
     }
 }
 
+// 🔑 CAN THIS PERSON ADD A PASSWORD TO THEIR OWN ACCOUNT (#731)?
+//    Asked of `Portal\Core\SelfServicePassword`, which is the ONE place that
+//    decides it; this page only draws a card pointing at the page that does it.
+//
+//    The card is drawn for the answer "yes" and for the answer "yes, once you
+//    have signed in again" — the second is the ordinary case, because the proof
+//    of identity is good for five minutes. Comparing the answer with the
+//    class's own constant is recognising it, not deciding it again.
+$addPasswordWhy  = \Portal\Core\SelfServicePassword::whyNotAllowed(
+    \Portal\Core\SelfServicePassword::factsFor($mysqli, $userId)
+);
+$canAddPassword  = $addPasswordWhy === ''
+    || $addPasswordWhy === \Portal\Core\SelfServicePassword::MSG_NEEDS_PROOF;
+
 // 📋 Check if local account exists
 $hasLocalAccount = false;
 $laCheck = $mysqli->prepare('SELECT 1 FROM tblLocalAccounts WHERE userID = ? LIMIT 1');
@@ -406,6 +420,47 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </div>
     </div>
+
+    <!-- ========================================================== -->
+    <!-- 🔑 "Add a password" card (#731)                            -->
+    <!-- ========================================================== -->
+    <?php
+    // 🔑 WHY THIS IS A CARD OF ITS OWN, beside "Change Password" rather than
+    //    inside it. An account that signs in only through Microsoft, Google or
+    //    a passkey has NO password, so "Change Password" has nothing to change
+    //    — and such a person had no route to one at all: an administrator may
+    //    not type one for them (D-018, #586), "forgot password" finds nothing
+    //    because it joins the sign-in table, and losing the Microsoft account
+    //    or the one device holding the passkey locked them out for good.
+    //
+    //    It is ADDITIVE on purpose: the "Change Password" card above is left
+    //    exactly as it was, so nothing that works today stops working.
+    ?>
+    <?php if ($canAddPassword === true): ?>
+    <div class="col-12 col-lg-6">
+        <div class="card portal-card border-warning">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="fa-solid fa-key me-1" aria-hidden="true"></i> Add a password
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="mb-2">
+                    Your account has no password. You sign in another way, which works well — but if you
+                    lost that way in, nobody could let you back in, not even an administrator.
+                </p>
+                <p class="small text-muted">
+                    Adding a password gives you a second way in and changes nothing about the way you sign
+                    in now. You will be asked to sign in again first.
+                </p>
+                <a href="<?php echo htmlspecialchars(Site::url('account/add-password'), ENT_QUOTES, 'UTF-8'); ?>"
+                   class="btn btn-warning w-100">
+                    <i class="fa-solid fa-plus me-1" aria-hidden="true"></i> Add a password
+                </a>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <!-- ========================================================== -->
     <!-- 🔐 Two-Factor Authentication Card (#B5a)                   -->
