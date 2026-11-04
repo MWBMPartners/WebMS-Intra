@@ -6,9 +6,26 @@
 
 ### The in-app help is read by something now (#744)
 
-**Nothing in this repository loaded any help page.** The only one under any test
-was `help/calendar-imports.php`, and only its *words*, pinned by check W50 of
-`tools/feed-admin-selftest.php`. The help is what an end user actually reads —
+**The first version of this entry said "nothing in this repository loaded any
+help page", and that was untrue** — caught by the independent check, and it
+broke this repository's own rule that such a claim must carry the command that
+established it.
+
+**Thirteen of the twenty help pages were loaded by nothing.** The other seven
+were already fetched over HTTP, for their *words*, by `feed-admin-selftest.php`
+(`/help`, `/help/calendar`, `/help/approvals`, `/help/calendar-imports`),
+`mail-pages-selftest.php` (`/help/admin`, `/help/admin-first-steps`, both
+asserting HTTP 200), `mail-queue-pages-selftest.php` (`/help/admin`),
+`channel-selftest.php` and `page-head-selftest.php` (`/help`), and
+`portal-address-selftest.php` (`/help/support`, `/help/admin`). **None of the
+seven was checked for whether the page finished**, which is the gap that
+remains.
+
+```bash
+git grep -nE "(req|pw_req|[$]get)[(].*'/help" 55b0f78^ -- tools
+```
+
+The help is what an end user actually reads —
 this project's own plain-English rule says it matters MORE than the developer
 notes, not less — and it is PHP, so a page can throw and nobody would know
 until a member opened it. The worst case is `help/disaster-recovery.php`, which

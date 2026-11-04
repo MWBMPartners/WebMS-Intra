@@ -8,9 +8,27 @@ WHY THIS EXISTS
 ---------------
 The in-app help under `web/_apps/help/` is what an end user actually reads, and
 this repository's own plain-English rule says it matters MORE than the developer
-notes, not less. **Until 4 November 2026 almost nothing read any of it.** The
-only help page under any test was `calendar-imports.php`, pinned by check W50
-of `tools/feed-admin-selftest.php`.
+notes, not less.
+
+**AND THE FIRST VERSION OF THIS PARAGRAPH WAS UNTRUE, in the way this
+repository has a rule against.** It said "nothing read any of it" and that the
+only page under any test was `calendar-imports.php`.
+
+**Thirteen of the twenty help pages were loaded by NOTHING. The other seven
+were already fetched over HTTP** -- for their WORDS -- by
+`feed-admin-selftest.php` (`/help`, `/help/calendar`, `/help/approvals`,
+`/help/calendar-imports`), `mail-pages-selftest.php` (`/help/admin`,
+`/help/admin-first-steps`, both asserting HTTP 200),
+`mail-queue-pages-selftest.php` (`/help/admin`), `channel-selftest.php` and
+`page-head-selftest.php` (`/help`), and `portal-address-selftest.php`
+(`/help/support`, `/help/admin`). **None of the seven was checked for whether
+the page FINISHED**, which is the gap that remains. Established by:
+
+    git grep -nE "(req|pw_req|[$]get)[(].*'/help" 55b0f78^ -- tools
+
+The rule it broke is the repository's own: *"Any statement of the form 'nothing
+reads/prints/calls this' must be accompanied by the command that established
+it."* No command was given, and the command disproves the claim.
 
 What that cost is on record (#583). `help/disaster-recovery.php` told a
 customer, under "Stolen credentials", to rotate `enc.key` — which runbook
@@ -83,6 +101,15 @@ none
     true is nobody's check.
   * It reads one runbook. A help page citing a section of some other document
     by number is not looked at.
+  * **A reference inside an HTML comment IS reported.** `<!-- see runbook 9.9 -->`
+    is in the served source and rot is rot, so this is deliberate — but it means
+    commenting a reference out in HTML does not silence the gate. Only PHP
+    comments are invisible to it.
+  * **Neither half reads a subfolder.** A page at
+    `web/_apps/help/guides/x.php` would be unread. None exists today.
+  * **A heading written `## 4` with nothing after it, or `## 4)`, is not read as
+    a heading.** That direction fails loudly — a good reference would be
+    reported as stale — so it is safe, but it is a shape to know about.
   * **The window is 60 characters and does not cross a `<?php ... ?>` block.**
     So "the runbook" at the start of a long paragraph does not govern a number
     at the end of it. That is deliberate: the first version collapsed each PHP
@@ -245,6 +272,33 @@ def main() -> int:
         f"Help pages read: {len(pages)}; runbook references checked: {checked}; "
         f"runbook headings: {len(headings)}"
     )
+
+    # 🚫 A CHECK MADE ONLY OF ABSENCES PASSES WHEN IT STOPS READING ANYTHING.
+    #    This printed the count and asserted nothing about it, so one character
+    #    removed from PHP_BLOCK's `.*?` made it read NOTHING and print
+    #    "OK: every runbook section a help page names is a real heading" with a
+    #    stale reference live on the page. Measured by an independent check:
+    #    "runbook references checked: 0 … OK … exit=0".
+    #
+    #    That is the shape this repository has named twice — #694's section P,
+    #    "a check made only of ABSENCES passes when the thing stops happening at
+    #    all" — and the same shape this check's own twin
+    #    (`tools/help-pages-selftest.php`, check B99) was given a guard for in
+    #    the SAME package. The lesson was applied to the self-test and not to
+    #    the hard gate.
+    if checked == 0:
+        print("")
+        print(
+            "FAIL: not one runbook reference was found in any of the "
+            f"{len(pages)} help pages. That is almost certainly this check "
+            "having stopped reading them rather than the pages having no "
+            "references — and the two look identical from the outside. At least "
+            "one page cites the runbook (measured on 4 November 2026: seven "
+            "citations across the help, six of them reader-visible). If a change "
+            "has genuinely removed every reference, lower this to a warning "
+            "deliberately and say so here."
+        )
+        return 1
 
     if len(problems) > 0:
         print("")

@@ -10,10 +10,17 @@
  *
  * WHY THIS EXISTS (#744, the owner's decision of 4 November 2026)
  * --------------------------------------------------------------
- * **Nothing in this repository loaded any help page.** The only one under any
- * test was `help/calendar-imports.php`, and only its WORDS, pinned by check
- * W50 of `tools/feed-admin-selftest.php`. The in-app help is what an end user
- * actually reads — this repository's own plain-English rule says it matters
+ * **The first version of this header said "nothing in this repository loaded
+ * any help page". That was untrue**, and the repository's own rule is that a
+ * claim of that shape must carry the command that established it. Thirteen of
+ * the twenty were loaded by nothing; SEVEN were already fetched over HTTP for
+ * their WORDS, by `feed-admin-selftest.php`, `mail-pages-selftest.php`,
+ * `mail-queue-pages-selftest.php`, `channel-selftest.php`,
+ * `page-head-selftest.php` and `portal-address-selftest.php` — none of them
+ * checked for whether the page FINISHED. Established by
+ * `git grep -nE "(req|pw_req|[$]get)[(].*'/help" 55b0f78^ -- tools`.
+ *
+ * The in-app help is what an end user actually reads — this repository's own plain-English rule says it matters
  * MORE than the developer notes, not less — and it is PHP, so a page can throw
  * and nobody would know until a member opened it.
  *
@@ -319,14 +326,59 @@ function token(string $html): string
 }
 
 /**
+ * How much PHP has written to its own error log so far.
+ *
+ * WHY THIS EXISTS, AND IT IS THE HONEST ANSWER TO A CLAIM I GOT WRONG
+ * ------------------------------------------------------------------
+ * The first version of this test called the closing `</html>` "THE CHECK THAT
+ * MATTERS MOST" and said that a page which throws part-way is caught because
+ * only that tag shows the page finished. **That was wrong, and wrong in the
+ * reassuring direction** — found by an independent check, which planted a
+ * `throw` half way down a help page and watched BOTH checks pass:
+ *
+ *     status 200, 63,316 bytes, contains </html>: YES, no PHP error words,
+ *     and the content after the throw simply missing.
+ *
+ * The portal's own error handler prints the footer, so a page that dies
+ * mid-render still ends in an ordinary `</html>`. **`.claude/CLAUDE.md`'s own
+ * record of #669 says exactly that** — "the error handler printed the footer,
+ * so the answer was HTTP 200 ending in an ordinary `</html>` with the preview
+ * silently missing" — so the issue I cited as proof of my claim disproves it.
+ * #669 would have passed the first version of this test.
+ *
+ * So the real detector is the error LOG. The harness points PHP's `error_log`
+ * at a file of its own and `display_errors` off, which is how a customer's
+ * server is set up; an uncaught throw lands there whatever the page sends to
+ * the browser. Watching that file grow across one request catches the shape
+ * `</html>` cannot see.
+ *
+ * WHAT IT STILL CANNOT SEE, said plainly: a page that renders the wrong thing
+ * without erroring, and a fault the portal CATCHES and handles deliberately
+ * (which is not a fault). It also cannot tell WHICH request wrote a line when
+ * two overlap — the harness runs one worker, so they do not.
+ */
+function errorLogSize(): int
+{
+    global $child, $sep;
+    $file = $child . $sep . 'php-errors.log';
+    clearstatcache(true, $file);
+
+    return is_file($file) === true ? (int) filesize($file) : 0;
+}
+
+/**
  * What is wrong with one answer to a help page, in words. An empty list means
  * nothing is wrong WITH THE ANSWER — it says nothing about the words on it.
  *
  * `$mayRefuse` is true for the member, who is allowed to be turned away.
+ * `$loggedBytes` is how much PHP wrote to its error log while this answer was
+ * being made: anything at all means the page threw, however complete the page
+ * that arrived looks. See errorLogSize() for why that is the real test and
+ * `</html>` is not.
  *
  * @return list<string>
  */
-function faultsIn(array $answer, bool $mayRefuse): array
+function faultsIn(array $answer, bool $mayRefuse, int $loggedBytes = 0): array
 {
     $wrong = [];
     $status = $answer['status'];
@@ -356,14 +408,21 @@ function faultsIn(array $answer, bool $mayRefuse): array
 
         return $wrong;
     }
-    // 📌 THE CHECK THAT MATTERS MOST. A page that throws part-way still
-    //    answers 200, because its header has already gone: what arrives is the
-    //    TOP of a page, with nothing wrong in it. Only the closing tag shows
-    //    the page reached its end. #669 recorded exactly this shape — an
-    //    HTTP 200 ending in an ordinary `</html>` with the content silently
-    //    missing — and #715 the other half, a page that threw mid-render.
+    // 📌 WHAT THIS ONE REALLY PROVES, AND WHAT IT DOES NOT. A missing closing
+    //    tag means the answer was cut off before the footer — a hard stop, a
+    //    timeout, a killed worker. It does NOT mean the page is whole: the
+    //    portal's error handler PRINTS the footer, so a page that throws
+    //    half way through still ends in an ordinary `</html>`. That is #669's
+    //    own recorded shape, and the first version of this test cited #669 as
+    //    proof of the opposite. The error-log check below is what catches it.
     if (stripos((string) $answer['body'], '</html>') === false) {
-        $wrong[] = 'the page stops before its end (no </html>): it failed part-way, so what follows was never sent';
+        $wrong[] = 'the answer was cut off before the footer (no </html>)';
+    }
+    // 🔎 The real test for a page that threw: PHP wrote to its error log while
+    //    this answer was being made. See errorLogSize().
+    if ($loggedBytes > 0) {
+        $wrong[] = 'PHP wrote ' . $loggedBytes . ' byte(s) to its error log while making this answer, '
+                 . 'so the page threw — whatever arrived in the browser';
     }
     foreach (['Fatal error', 'Parse error', 'Uncaught ', 'Warning: ', 'Deprecated: ', 'Stack trace:'] as $leak) {
         if (str_contains((string) $answer['body'], $leak) === true) {
@@ -565,8 +624,9 @@ head('A. As an administrator, every help page answers a whole page');
 $seen = [];
 foreach ($routes as $route) {
     $path   = '/' . ltrim((string) $route['routeKey'], '/');
+    $before = errorLogSize();
     $answer = req($jars['admin'], 'GET', $path);
-    $wrong  = faultsIn($answer, false);
+    $wrong  = faultsIn($answer, false, errorLogSize() - $before);
     $seen[$path] = $answer['status'];
     ok(
         'A ' . $path . ' opens for an administrator',
@@ -580,15 +640,20 @@ $memberRead    = 0;
 $memberRefused = [];
 foreach ($routes as $route) {
     $path   = '/' . ltrim((string) $route['routeKey'], '/');
+    $before = errorLogSize();
     $answer = req($jars['member'], 'GET', $path);
-    $wrong  = faultsIn($answer, true);
+    $wrong  = faultsIn($answer, true, errorLogSize() - $before);
     if ($answer['status'] === 200) {
         $memberRead++;
     } else {
         $memberRefused[] = $path . ' (' . $answer['status'] . ')';
     }
+    // 📌 The label is decided from the VERDICT, not from the status. The first
+    //    version composed it from the status, so a 500 printed
+    //    "answers a member with a clean refusal (500)" on a FAILING line — a
+    //    label asserting the opposite of its own result.
     ok(
-        'B ' . $path . ' answers a member ' . ($answer['status'] === 200 ? 'with a whole page' : 'with a clean refusal (' . $answer['status'] . ')'),
+        'B ' . $path . ' answers a member ' . ($wrong !== [] ? 'without failing' : ($answer['status'] === 200 ? 'with a whole page' : 'with a clean refusal (' . $answer['status'] . ')')),
         $wrong === [],
         'HTTP ' . $answer['status'] . ' — ' . implode(' | ', $wrong)
     );
@@ -620,8 +685,10 @@ foreach ($routes as $route) {
 }
 ok('C01 it has a registered address at all', $drRoute !== null, 'no address in tblRoutes answers help/disaster-recovery.php');
 if ($drRoute !== null) {
-    $dr = req($jars['admin'], 'GET', $drRoute);
-    ok('C02 and it opens as a whole page for an administrator', faultsIn($dr, false) === [], 'HTTP ' . $dr['status'] . ' — ' . implode(' | ', faultsIn($dr, false)));
+    $beforeDr = errorLogSize();
+    $dr       = req($jars['admin'], 'GET', $drRoute);
+    $drFaults = faultsIn($dr, false, errorLogSize() - $beforeDr);
+    ok('C02 and it opens as a whole page for an administrator', $drFaults === [], 'HTTP ' . $dr['status'] . ' — ' . implode(' | ', $drFaults));
     // 🛟 #583 removed advice that would have destroyed a customer's data. These
     //    two pins are NOT a judgement of the page's wording — no test can do
     //    that — they are a tripwire on the two specific sentences that were
@@ -657,25 +724,65 @@ if ($plantPath === null || is_file($plantTarget) === false) {
 } else {
     $original = (string) file_get_contents($plantTarget);
 
-    // E01 — a page that throws part-way. The answer is still HTTP 200, because
-    //       the header has already gone. Only the missing closing tag shows it.
-    file_put_contents(
-        $plantTarget,
-        str_replace('<?php', "<?php\n// planted by help-pages-selftest\nregister_shutdown_function(static function (): void { });", $original, $count)
-        . "\n<?php throw new RuntimeException('planted by help-pages-selftest'); ?>\n"
-    );
-    $broken = req($jars['admin'], 'GET', $plantPath);
-    ok(
-        'E01 a help page that throws part-way is reported, not read as clean',
-        faultsIn($broken, false) !== [],
-        'HTTP ' . $broken['status'] . ' and this test found nothing wrong with it'
-    );
+    // ⚠️ E01 — A GENUINE MID-RENDER THROW, AND THE FIRST VERSION WAS NOT ONE.
+    //    It used `str_replace('<?php', …)`, which replaced ALL FOURTEEN `<?php`
+    //    in the file including the one on line 1 — putting a statement before
+    //    `declare(strict_types=1);`, which PHP refuses to compile. So the plant
+    //    produced an HTTP 500 and was caught by the `$status >= 500` branch,
+    //    while its label claimed to be testing a part-way throw. An
+    //    independent check measured it: `php -l` on the mutated file said
+    //    "strict_types declaration must be the very first statement".
+    //
+    //    Worse, the shape it CLAIMED to catch passed: a `throw` half way down
+    //    the page gave 200, 63,316 bytes, a closing `</html>` and no error
+    //    text, because the portal's error handler prints the footer. That is
+    //    #669's own recorded shape — the issue the first version cited as
+    //    proof of the opposite.
+    //
+    //    So the plant now throws AFTER the page has started rendering, and
+    //    what must notice it is the ERROR LOG, not the closing tag. The
+    //    assertion is positive — it names the fault it expects — because a bare
+    //    "something was wrong" would pass on the compile error the old plant
+    //    really produced.
+    $afterHeader = strpos($original, "require");
+    if ($afterHeader === false) {
+        ok('E01 the page used for planting has a require to plant after', false, 'no require in help/faq.php');
+    } else {
+        $lineEnd = strpos($original, "\n", $afterHeader);
+        file_put_contents(
+            $plantTarget,
+            substr($original, 0, $lineEnd + 1)
+            . "throw new RuntimeException('planted by help-pages-selftest');\n"
+            . substr($original, $lineEnd + 1)
+        );
+        $beforeLog = errorLogSize();
+        $broken    = req($jars['admin'], 'GET', $plantPath);
+        $brokenFaults = faultsIn($broken, false, errorLogSize() - $beforeLog);
+        ok(
+            'E01 a help page that throws AFTER rendering has started is reported, by the error log',
+            $brokenFaults !== [] && str_contains(implode(' ', $brokenFaults), 'error log') === true,
+            'HTTP ' . $broken['status'] . ', ' . strlen((string) $broken['body']) . ' bytes, closing tag: '
+            . (stripos((string) $broken['body'], '</html>') === false ? 'no' : 'YES')
+            . ' — faults found: ' . ($brokenFaults === [] ? 'NONE' : implode(' | ', $brokenFaults))
+        );
+        // 📌 AND THE SAME ANSWER PROVES THE CLOSING TAG CANNOT SEE IT. This is
+        //    the check that keeps the header honest: if the portal ever stopped
+        //    printing the footer on an error, this goes red and the wording
+        //    about `</html>` has to be revisited rather than quietly becoming
+        //    true again.
+        ok(
+            'E01b and the closing tag alone does NOT see it — the error handler prints the footer (#669\'s shape)',
+            stripos((string) $broken['body'], '</html>') !== false,
+            'the page did NOT end in </html>, so the footer was not printed: re-read what this test claims about "whole"'
+        );
+    }
 
     // E02 — a page that prints PHP's own error text. A customer must never see
     //       it, and part C must notice.
     file_put_contents($plantTarget, $original . "\n<p>Fatal error: planted by help-pages-selftest</p>\n");
-    $leaky = req($jars['admin'], 'GET', $plantPath);
-    $leakFaults = faultsIn($leaky, false);
+    $beforeLeak = errorLogSize();
+    $leaky      = req($jars['admin'], 'GET', $plantPath);
+    $leakFaults = faultsIn($leaky, false, errorLogSize() - $beforeLeak);
     ok(
         'E02 a help page showing PHP\'s own error text is reported',
         $leakFaults !== [] && str_contains(implode(' ', $leakFaults), 'error text') === true,
@@ -686,11 +793,13 @@ if ($plantPath === null || is_file($plantTarget) === false) {
     // cannot be the leftovers of a plant.
     file_put_contents($plantTarget, $original);
     clearstatcache(true, $plantTarget);
-    $again = req($jars['admin'], 'GET', $plantPath);
+    $beforeAgain = errorLogSize();
+    $again       = req($jars['admin'], 'GET', $plantPath);
+    $againFaults = faultsIn($again, false, errorLogSize() - $beforeAgain);
     ok(
         'E03 and with the page put back it opens cleanly again',
-        faultsIn($again, false) === [],
-        'HTTP ' . $again['status'] . ' — ' . implode(' | ', faultsIn($again, false))
+        $againFaults === [],
+        'HTTP ' . $again['status'] . ' — ' . implode(' | ', $againFaults)
     );
 }
 

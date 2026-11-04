@@ -2593,8 +2593,11 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     **could not fail**.
 
 44. **THE IN-APP HELP IS READ BY SOMETHING NOW, AND NEITHER GUARD JUDGES WHETHER IT IS TRUE (#744, 4 November
-    2026).** Until then **nothing loaded any help page**: the only one under any test was
-    `help/calendar-imports.php`, and only its WORDS (check W50 of `feed-admin-selftest.php`). Twenty pages read by
+    2026).** Until then **THIRTEEN of the twenty were loaded by nothing**, and the other seven were fetched over
+    HTTP only for their WORDS by six other self-tests — **not one of the seven checked whether the page
+    FINISHED**. (An earlier version of this rule said "nothing loaded any help page", which was untrue and
+    carried no command, against the rule about claims of that shape. Established by
+    `git grep -nE "(req|pw_req|[$]get)[(].*'/help" 55b0f78^ -- tools`.) Twenty pages read by
     end users, on code that can throw, and the worst case is `help/disaster-recovery.php` — opened when something
     has ALREADY gone wrong, and which #583 found telling customers to do two things that would have destroyed their
     data. Two guards: `tools/audit-checks/check_help_page_references.py` (a HARD GATE, the owner's choice) requires

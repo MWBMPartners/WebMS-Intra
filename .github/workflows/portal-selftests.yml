@@ -767,9 +767,12 @@ jobs:
           php -d memory_limit=512M tools/page-scripts-selftest.php
 
       # 📖 Every in-app help page really opens (#744, the owner's decision of
-      #    4 November 2026). Until then NOTHING loaded any help page: the only
-      #    one under any test was `help/calendar-imports.php`, and only its
-      #    WORDS, pinned by check W50 of feed-admin-selftest.php.
+      #    4 November 2026). Until then THIRTEEN of the twenty were loaded by
+      #    nothing, and the other seven were fetched only for their WORDS, by
+      #    six other self-tests — none of them checked whether the page
+      #    FINISHED. (An earlier version of this comment said "nothing loaded
+      #    any help page", which was untrue and carried no command. The command
+      #    is in the test's own header.)
       #
       #    The help is what an end user actually reads, and it is PHP, so a
       #    page can throw and nobody would know until somebody opened it. The

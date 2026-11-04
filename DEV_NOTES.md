@@ -16482,10 +16482,26 @@ hard gate with `--strict` and an empty pending list.
 
 ## The in-app help, and two ways a check about it goes wrong (#744)
 
-**Nothing loaded any help page until 4 November 2026.** The only one under any
-test was `help/calendar-imports.php`, and only its words (check W50 of
-`feed-admin-selftest.php`). Twenty pages, read by end users, guarded by nothing
-— on code that can throw.
+**Thirteen of the twenty help pages were loaded by nothing until 4 November
+2026** — and the first version of this note said "nothing loaded any help page",
+which was untrue and carried no command, against this repository's own rule.
+
+**Thirteen of the twenty help pages were loaded by nothing.** The other seven
+were already fetched over HTTP, for their *words*, by `feed-admin-selftest.php`
+(`/help`, `/help/calendar`, `/help/approvals`, `/help/calendar-imports`),
+`mail-pages-selftest.php` (`/help/admin`, `/help/admin-first-steps`, both
+asserting HTTP 200), `mail-queue-pages-selftest.php` (`/help/admin`),
+`channel-selftest.php` and `page-head-selftest.php` (`/help`), and
+`portal-address-selftest.php` (`/help/support`, `/help/admin`). **None of the
+seven was checked for whether the page finished**, which is the gap that
+remains.
+
+```bash
+git grep -nE "(req|pw_req|[$]get)[(].*'/help" 55b0f78^ -- tools
+```
+
+Twenty pages read by end users, on code that can throw, and not one of them
+checked for finishing.
 
 ### Two guards, and what neither does
 
