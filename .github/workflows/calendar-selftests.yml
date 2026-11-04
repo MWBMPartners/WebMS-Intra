@@ -223,7 +223,15 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-          extensions: mysqli, openssl, sodium, curl, mbstring
+          # `intl` is here for ONE reason, and it is not decoration: without it
+          # `ics-reader-selftest.php` SKIPS checks L5 and L6, which are the only
+          # things holding the committed Windows-time-zone list against what this
+          # machine's ICU would really generate (#557). That test's own footer
+          # says "a skipped check is NOT a pass", and those two run NOWHERE else
+          # — no other workflow runs the reader test. Found by #754, by asking
+          # what each test NEEDS and comparing it with what the job provides,
+          # which is #646's lesson rather than a new one.
+          extensions: mysqli, openssl, sodium, curl, mbstring, intl
           coverage: none
 
       # 🧱 One database per test, each from full_schema.sql. The first loop
