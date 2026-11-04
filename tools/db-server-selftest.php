@@ -242,10 +242,73 @@ foreach ($cases as [$raw, $comment, $wantEngine, $wantVersion, $wantState]) {
         $problems[] = 'the explanation was empty';
     }
 
-    // 🍃 Every MariaDB answer must admit that nothing here is tested against
-    //    MariaDB. Dropping that caveat would overstate what this project knows.
-    if ($got['family'] === 'mariadb' && $got['untested'] !== true) {
-        $problems[] = 'a MariaDB answer did not carry the "not tested here" caveat';
+    // 🍃 THE SENTENCE ABOUT WHAT IS TESTED MUST BE THERE, AND MUST MATCH THE
+    //    LINE. Two things were wrong here until 4 November 2026, both found by
+    //    an independent check rather than by reading:
+    //
+    //    1. The comment above this said every MariaDB answer must "admit that
+    //       nothing here is tested against MariaDB". That stopped being true on
+    //       28 October 2026, when the migration harness began replaying every
+    //       database change on MariaDB 11.4 (#487). It was one of five copies
+    //       of the same stale claim, and the one the #475 sweep missed.
+    //
+    //    2. The test itself COULD NOT FAIL. It asked whether
+    //       `$got['untested'] !== true`, and `'untested' => true` is set in
+    //       `$base` for every MariaDB answer, so for `family === 'mariadb'` the
+    //       condition was unfalsifiable — and it was never about the sentence
+    //       anyway. Planting `return '';` at the top of `testedLinesCaveat()`
+    //       removed the caveat from EVERY answer and this test still passed
+    //       36 of 36.
+    //
+    //    So it now reads the sentence itself, and asks the one question that
+    //    matters: does what the customer is told match `TESTED_LINES`? A line
+    //    the harness runs on must say so; a line it does not must say THAT.
+    //    `TESTED_LINES` is read from the class, never copied here.
+    if ($got['family'] === 'mariadb' || $got['family'] === 'mysql') {
+        $series   = implode('.', array_slice(explode('.', (string) $got['version']), 0, 2));
+        $isTested = in_array(
+            $series,
+            DbServer::TESTED_LINES[$got['family']] ?? [],
+            true
+        );
+        $detail = (string) $got['detail'];
+
+        // 📌 A `crit` answer is about a version too old to install at all, and
+        //    a sentence about what is tested would be noise on it. Likewise the
+        //    answers that say nothing about testing by design. So the demand is
+        //    made only where the caveat is supposed to appear — which is itself
+        //    recorded in DbServer's docblock, deliberately narrowly.
+        //    WHICH ANSWERS ARE REQUIRED TO CARRY IT, and the reason each
+        //    other one is let off. DbServer's docblock lists the same three.
+        //    A PREVIEW BUILD is deliberately exempt: its whole message is "do
+        //    not put real data on this, ask for a finished release", and
+        //    telling somebody that the finished line is well tested invites
+        //    them to stay. A `crit` answer is about a version too old to
+        //    install at all, so the sentence would be noise. A database this
+        //    class could not identify has no line to speak about.
+        $isPreRelease = str_contains($detail, 'marked as a preview or a');
+        $shouldCarryIt = $got['state'] !== 'crit'
+            && $isPreRelease === false
+            && ($got['family'] === 'mariadb' || $isTested === true
+                || str_contains($detail, 'reached the end of its support life'));
+
+        if ($shouldCarryIt === true) {
+            if ($isTested === true) {
+                if (str_contains($detail, 'replay every one of its database changes') === false) {
+                    $problems[] = 'a TESTED line (' . $series . ') did not say so: ' . mb_substr($detail, -90);
+                }
+                if (str_contains($detail, 'no test here proves it') === true) {
+                    $problems[] = 'a TESTED line (' . $series . ') claimed nothing had tested it';
+                }
+            } else {
+                if (str_contains($detail, 'do not run on the') === false) {
+                    $problems[] = 'an UNTESTED line (' . $series . ') did not say so: ' . mb_substr($detail, -90);
+                }
+                if (str_contains($detail, 'replay every one of its database changes') === true) {
+                    $problems[] = 'an UNTESTED line (' . $series . ') claimed the tests run on it';
+                }
+            }
+        }
     }
 
     $label = $raw === '' ? '(nothing returned)' : $raw;

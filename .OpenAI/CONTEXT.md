@@ -2577,6 +2577,20 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     version lists out of the two classes rather than copying them; it is deliberately **not** in
     `tools/audit-checks/`, which must run offline. It earned its place at once: **PHP 8.4 loses active support on
     31 December 2026** and `MIN_PHP` is 8.4.0.
+    **AND THE GATE ITSELF RAN IN NO WORKFLOW AT ALL when it was written — the #646 shape re-created in the package
+    that cites #646, and the only one of 56 audit scripts in that state.** The cause is a standing fact worth
+    knowing: **`pr-security.yml` names every audit script INDIVIDUALLY and there is NO folder glob in any workflow
+    here**, while `.githooks/pre-push` DOES glob the folder — which is what misled me, and a hook turned on per
+    clone that `git push --no-verify` skips is not a gate. Test it with
+    `for f in tools/audit-checks/check_*.py; do grep -rqs "$(basename $f)" .github/workflows/ || echo "NOT WIRED: $f"; done`.
+    Two more from the same check, both the usual shapes: **the gate could be switched off by an ordinary COMMENT**
+    (it took the FIRST match in the file, and the house style asks for a comment recording the previous value, so a
+    line the portal claimed and nothing tested passed with OK — comments are blanked now, keeping line and column
+    so numbers stay right, and blanking them immediately broke `^(\s*)include:`, which matched across the blanked
+    lines: use `[ \t]`, never `\s`); and **the customer-facing sentence was pinned by NOTHING** — `return '';` at
+    the top of `testedLinesCaveat()` removed it from every answer with 36 of 36 checks green, because the clause
+    that claimed to guard it tested `$got['untested'] !== true`, which is set for every MariaDB answer and so
+    **could not fail**.
 
 ## Gating a feature is a CAPABILITY, never a hard-coded role (the owner, 3 November 2026)
 

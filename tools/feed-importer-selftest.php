@@ -186,7 +186,13 @@
  *     documented to produce. That is not the same thing.
  *   - It fetches over plain HTTP from a server on this machine, so it says
  *     nothing about an https fetch against a real certificate.
- *   - It has only been run against MySQL 8.0. MariaDB is untested.
+ *   - It is run on MySQL 8.0.36, 8.4.11 and MariaDB 11.4 by
+ *     `calendar-selftests.yml`. (This line said "only been run against
+ *     MySQL 8.0. MariaDB is untested" until 4 November 2026, which stopped
+ *     being true on 28 October when #487 added MariaDB to that workflow --
+ *     the same stale shape #475 found in five other places.) It has NOT
+ *     been run on MySQL 9.7 or MariaDB 12.3, which the migration harness
+ *     does cover.
  *   - Two things are deliberately left to other proofs, because they need a
  *     second running portal rather than a database and a calendar server: the
  *     admin pages at `/admin/calendar/feeds`, and the one-off replay of

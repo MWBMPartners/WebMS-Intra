@@ -56,10 +56,20 @@
  *           installing would fail part-way through with a confusing error.
  *           This is the one case where the installation wizard stops.
  *
- * An honest caveat goes on every answer, and it is DERIVED from TESTED_LINES
- * rather than written by hand — see that constant for the two customer-facing
- * sentences that were untrue on 3 November 2026 because nobody had updated
- * them. This paragraph was one of the stale ones: it used to say the project's
+ * A caveat about what is really tested is DERIVED from TESTED_LINES rather
+ * than written by hand — see that constant for the customer-facing sentences
+ * that were untrue on 3 November 2026 because nobody had updated them.
+ *
+ * **It goes on THREE kinds of answer, not on every answer, and saying "every"
+ * was itself untrue** (found by an independent check on 4 November 2026):
+ * every MariaDB answer, every supported-MySQL answer, and the MySQL 8.0
+ * answer. It is deliberately absent from the rest, and each absence has a
+ * reason: an answer about a version too old to install at all, or about a
+ * preview build nobody should put real data on, is not improved by a sentence
+ * about which lines the tests run on — it would invite somebody to stay where
+ * they are. The same goes for a database this class could not identify.
+ *
+ * This paragraph was one of the stale ones: it used to say the project's
  * automated tests "only ever run against MySQL", which stopped being true on
  * 28 October 2026 when the migration harness began replaying every database
  * change on MariaDB 11.4 (#487), and 12.3 followed on 3 November (#475).
@@ -128,12 +138,27 @@ final class DbServer
     //    its support position and that the hosting provider is the one to ask.
     //    So going stale makes this LESS informative, never wrong.
     //
-    //    A review reported that Oracle has since moved MySQL to a year-based
-    //    numbering scheme and shipped a 26.x line. That has NOT been confirmed
-    //    here, so it is deliberately not written into these lists: putting an
-    //    unverified version number in would risk telling somebody their database
-    //    is supported when it is not, which is the exact fault this class exists
-    //    to prevent. It is recorded on issue #475 for the owner to confirm.
+    //    🔎 CONFIRMED ON 4 NOVEMBER 2026, and this comment used to say it had
+    //    NOT been: Oracle really has moved MySQL to year-based release lines.
+    //    endoflife.date lists 26.10 (current) and 26.7 (support ended
+    //    20 October 2026), both above 9.7. `tools/check-end-of-life.py` reports
+    //    it on every run, so the two were contradicting each other within one
+    //    commit until this was corrected.
+    //
+    //    **IT IS STILL LEFT AT 9.7 ON PURPOSE**, for two reasons, and this is a
+    //    decision rather than an omission. First, 9.7 is the newest LONG-TERM
+    //    line (`lts: true`, supported to 30 April 2034, checked), and the 26.x
+    //    lines are the short-lived kind — 26.7's support had already ended
+    //    within four months. Second, nothing here has been RUN on a 26.x
+    //    server, and this constant's job is to say what the file knows about,
+    //    not what exists.
+    //
+    //    ⚠️ The measurable cost, said plainly: a customer on MySQL 26.7 — a
+    //    line whose support ended on 20 October 2026 — is told `ok` and
+    //    "newer than this portal knows about", with NO warning that it is
+    //    finished. That is the documented going-stale-makes-it-less-informative
+    //    design working as intended, and it is now a real case rather than a
+    //    hypothetical one. Recorded on #475.
     public const MYSQL_NEWEST_KNOWN = '9.7';
 
     // ✅ The same list for MariaDB. 10.11 runs to February 2028, 11.4 to May
@@ -177,7 +202,10 @@ final class DbServer
     //    WHY THIS EXISTS. Every answer this class gives a customer used to
     //    carry a sentence about what is tested, and those sentences were
     //    WRITTEN BY HAND and went stale without anybody noticing. On
-    //    3 November 2026 two of them were untrue on a customer-facing page:
+    //    3 November 2026 THREE of them were untrue on a customer-facing page
+    //    (the first draft of this comment said two, and the MySQL 8.0 message
+    //    is the third -- `_apps/admin/system-info/index.php` and
+    //    `_install/db_server_banner.php` both print it):
     //    every MariaDB answer said "this portal's own automated tests only
     //    ever run against MySQL", eight days after the migration harness
     //    started replaying every database change on MariaDB 11.4 (#487); and
@@ -960,14 +988,26 @@ final class DbServer
             return $base + [
                 'state'    => 'warn',
                 'headline' => $engine . ' ' . $version . ' — works, but no longer getting security fixes',
+                // 📌 THE TESTED-LINES SENTENCE IS DERIVED HERE TOO, and this
+                //    branch is why it matters rather than being tidiness. It
+                //    used to say "this is one of the versions tested here" in
+                //    its own words, which four documents then described as
+                //    coming from the one place that builds it. **#475's stated
+                //    direction is to stop accepting MySQL 8.0** — and the day
+                //    8.0 leaves `e2e-migrations.yml`, the hard gate FORCES
+                //    '8.0' out of TESTED_LINES and goes green, while a
+                //    hand-written sentence here would go on telling every 8.0
+                //    customer their version is tested. The same staleness, in
+                //    the same message, one step along. Found by an independent
+                //    check, not by reading.
                 'detail'   => 'The whole MySQL 8.0 line reached the end of its support life in '
-                            . 'April 2026. It still runs this portal perfectly well — this is '
-                            . 'one of the versions tested here — but Oracle no '
-                            . 'longer issues security fixes for it, so any flaw found from now '
-                            . 'on stays unfixed. On shared hosting you usually cannot change '
+                            . 'April 2026. It still runs this portal perfectly well, but Oracle '
+                            . 'no longer issues security fixes for it, so any flaw found from '
+                            . 'now on stays unfixed. On shared hosting you usually cannot change '
                             . 'this yourself. It is worth asking your hosting provider when '
                             . 'they plan to move to MySQL ' . self::SUPPORTED_MYSQL . ', which '
-                            . 'is a long-term release supported into 2032.',
+                            . 'is a long-term release supported into 2032.'
+                            . self::testedLinesCaveat('mysql', $series),
             ];
         }
 
@@ -1017,6 +1057,14 @@ final class DbServer
      *
      * @return string The first two parts, or an empty string if it cannot be read.
      */
+    private static function series(string $version): string
+    {
+        if (preg_match('/^(\d+)\.(\d+)/', $version, $m) === 1) {
+            return $m[1] . '.' . $m[2];
+        }
+        return '';
+    }
+
     /**
      * 🧪 The sentence about what is really tested, for one engine and line.
      *
@@ -1037,30 +1085,35 @@ final class DbServer
             // 📌 Say what was measured, never "it is supported". A customer
             //    running it in production is a different claim again, and the
             //    project has none of those yet.
-            return ' This portal\'s own automated tests replay every one of its database '
+            // 📌 "ITS DATABASE TESTS", not "its automated tests". The wider
+            //    phrasing overstated what TESTED_LINES describes -- the
+            //    migration harness alone, not the calendar self-tests, which
+            //    run on their own set of engines. An independent check raised
+            //    it: the sentence would have gone untrue the day those tests
+            //    gained a line the harness does not run, with the hard gate
+            //    still green.
+            return ' This portal\'s own database tests replay every one of its database '
                  . 'changes on ' . $names . ' ' . $series . ' and check the result, so this is '
                  . 'a line the project really runs against rather than one it merely expects to '
                  . 'work. That is not the same as somebody running it in production.';
         }
 
+        // 🛡️ A BACKSTOP, NOT A REACHABLE PATH. Neither caller can get here:
+        //    both pass 'mysql' or 'mariadb' and TESTED_LINES has an entry for
+        //    each. It is here so that adding a third engine without adding its
+        //    row gives silence rather than a sentence naming no versions at
+        //    all. An independent check asked whether it was deliberate; it is,
+        //    and nothing said so.
         if (count($tested) === 0) {
             return '';
         }
 
-        return ' Please note: this portal\'s own automated tests do not run on the ' . $names
+        return ' Please note: this portal\'s own database tests do not run on the ' . $names
              . ' ' . $series . ' line. They run on ' . $names . ' '
              . implode(' and ', $tested) . '. Its database changes are written to a convention '
              . 'meant to work on both MySQL and MariaDB, and that convention is followed '
              . 'carefully — but no test here proves it for ' . $series . '. That is not the same '
              . 'as saying it is broken; it means nobody has checked.';
-    }
-
-    private static function series(string $version): string
-    {
-        if (preg_match('/^(\d+)\.(\d+)/', $version, $m) === 1) {
-            return $m[1] . '.' . $m[2];
-        }
-        return '';
     }
 
     /**

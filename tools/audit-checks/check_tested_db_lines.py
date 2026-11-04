@@ -59,6 +59,18 @@ none
     the line.
   * **It does not check that the workflow passes**, or that it runs at all.
     That is #646's job, and #745's.
+  * **An `exclude:` in the matrix is invisible to it.** A line listed under
+    `include:` and then removed by `exclude:` is read as tested, so the portal
+    would over-claim and this check would stay green. Measured by the
+    independent review. No matrix here uses `exclude:`; if one ever does, this
+    must be taught about it.
+  * **It reads the FIRST `include:` block in the file.** One job's matrix
+    today. A second job added above the harness job would be read instead.
+  * **The sentence it protects says "this portal's own automated tests", while
+    this check compares the MIGRATION HARNESS only.** True today, because the
+    harness is the only thing `TESTED_LINES` describes. It goes untrue the day
+    the calendar self-tests add a release line the harness does not run, with
+    this check still green.
   * **It is not a YAML parser.** It reads the `include:` block's
     `engine:`/`version:` pairs by their indentation. A matrix written in flow
     style would be read as empty, which fails loudly rather than passing — the
@@ -86,6 +98,56 @@ def repo_root() -> str:
     return os.path.dirname(os.path.dirname(here))
 
 
+def without_comments(text: str, markers: tuple[str, ...]) -> str:
+    """
+    The same text with comment bodies blanked, keeping every line and column.
+
+    **WHY THIS IS HERE, because it is the fault this check exists to stop,
+    found in the check itself by the independent review.** The first version
+    matched its regular expressions over the whole file and took the FIRST
+    match. The house style actively encourages the edit that defeats that --
+    `.claude/CLAUDE.md` says to "record what was tried and rejected" -- so a
+    perfectly ordinary comment showing the PREVIOUS value of the constant was
+    matched instead of the real one, and a line the constant claimed and
+    nothing tested passed with `OK` and exit 0. That is precisely the direction
+    this file's own header calls "the dangerous direction and the reason this
+    is a hard gate".
+
+    Blanking rather than deleting, because a reported line number must still
+    point at the right line -- #716's guard put its line numbers 370 out by
+    deleting comments instead.
+
+    It does NOT try to tell a comment marker inside a string literal from a
+    real one. For the two files this check reads -- a PHP constant block and a
+    YAML matrix -- there is no such case, and a cheap wrong guess is worse than
+    a cheap honest one.
+
+    @param markers The comment openers for the language ('//' for PHP, '#' for
+                   YAML). PHP block comments are handled separately below.
+    """
+    out: list[str] = []
+    for line in text.split("\n"):
+        cut = len(line)
+        for marker in markers:
+            at = line.find(marker)
+            if at != -1 and at < cut:
+                cut = at
+        out.append(line[:cut] + (" " * (len(line) - cut)))
+    return "\n".join(out)
+
+
+def php_without_comments(text: str) -> str:
+    """PHP with `//` lines and `/* ... */` blocks blanked, line count kept."""
+    # Block comments first, replaced by spaces and their own newlines so that
+    # every later line number is unchanged.
+    def blank(match: re.Match[str]) -> str:
+        body = match.group(0)
+        return "".join("\n" if ch == "\n" else " " for ch in body)
+
+    text = re.sub(r"/\*.*?\*/", blank, text, flags=re.DOTALL)
+    return without_comments(text, ("//",))
+
+
 def lines_from_constant(text: str) -> dict[str, list[str]] | None:
     """
     `DbServer::TESTED_LINES` as {engine: [line, ...]}.
@@ -96,7 +158,9 @@ def lines_from_constant(text: str) -> dict[str, list[str]] | None:
     read as agreement.
     """
     block = re.search(
-        r"public\s+const\s+TESTED_LINES\s*=\s*\[(.*?)\]\s*;", text, re.DOTALL
+        r"public\s+const\s+TESTED_LINES\s*=\s*\[(.*?)\]\s*;",
+        php_without_comments(text),
+        re.DOTALL,
     )
     if block is None:
         return None
@@ -118,7 +182,17 @@ def lines_from_workflow(text: str) -> dict[str, list[str]] | None:
     an audit script here runs with no dependencies and this machine has no
     pyyaml. A shape it cannot read answers None, which fails.
     """
-    include = re.search(r"^(\s*)include:\s*$", text, re.MULTILINE)
+    # Comments blanked for the same reason as the PHP side: a commented-out
+    # matrix entry must not be read as a live one, in either direction.
+    text = without_comments(text, ("#",))
+
+    # `[ \t]` and NOT `\s`, which matches a NEWLINE. Blanking the comments
+    # above `include:` turned them into lines of pure whitespace, and `^(\s*)`
+    # then matched across all of them: the "indentation" came out as 1,918
+    # characters and every later comparison was nonsense, so the check failed
+    # with "could not read the matrix". Caught immediately because it fails
+    # loudly; it would have been nastier in a check that defaulted to passing.
+    include = re.search(r"^([ \t]*)include:[ \t]*$", text, re.MULTILINE)
     if include is None:
         return None
 

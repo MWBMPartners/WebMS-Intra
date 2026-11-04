@@ -37,7 +37,9 @@ You also need, from your hosting company's control panel:
 - **A MySQL or MariaDB database**, a database user with full rights to it, and that user's password. The panel has
   a page for this, usually called "MySQL Databases". Create a new, empty database for the portal alone.
   **Which version to pick, if the panel lets you choose:** MySQL 8.4 or 9.7, or MariaDB 11.4 or 12.3. Those four
-  are the ones the portal's own tests really run against, and all four are getting security fixes for years yet.
+  are the tested versions that are also still getting security fixes for years yet. (The portal's tests also run on
+  MySQL 8.0, which is why that is five rather than four — but 8.0 stopped getting security fixes in April 2026, so
+  it is not one to choose.)
   The portal will still install on an older one and will say so plainly rather than stopping you — but MySQL 8.0
   and MariaDB 10.6 stopped getting security fixes in 2026, so avoid them if the choice is yours. Write down what the
   panel shows: the database's host name, its name, the user's name and the password. If the panel also shows a

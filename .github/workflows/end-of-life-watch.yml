@@ -185,7 +185,16 @@ jobs:
           EXISTING=$(gh issue list --repo "$REPO" --state open \
                        --search 'in:title "end-of-life watch"' \
                        --json number,title \
-                       --jq "[.[] | select(.title == \"${TITLE}\")] | .[0].number // empty" || true)
+                       --jq "[.[] | select(.title == \"${TITLE}\")] | .[0].number // empty") || LOOKUP_FAILED=yes
+
+          # AN API FAILURE IS NOT "NO ISSUE FOUND". With `|| true` on the
+          # lookup, a blip at GitHub's end came back as an empty answer and
+          # this branch opened a SECOND issue — the exact duplication the
+          # whole design exists to avoid. Raised by an independent check.
+          if [ "${LOOKUP_FAILED:-no}" = "yes" ]; then
+            echo "::error::Could not ask GitHub whether the issue already exists. Doing nothing rather than risking a duplicate."
+            exit 1
+          fi
 
           if [ -z "${EXISTING}" ]; then
             gh issue create --repo "$REPO" \
@@ -221,11 +230,22 @@ jobs:
           EXISTING=$(gh issue list --repo "$REPO" --state open \
                        --search 'in:title "end-of-life watch"' \
                        --json number,title \
-                       --jq "[.[] | select(.title == \"${TITLE}\")] | .[0].number // empty" || true)
+                       --jq "[.[] | select(.title == \"${TITLE}\")] | .[0].number // empty") || LOOKUP_FAILED=yes
+          if [ "${LOOKUP_FAILED:-no}" = "yes" ]; then
+            echo "::error::Could not ask GitHub whether an issue is open. Leaving it alone."
+            exit 1
+          fi
+
           if [ -n "${EXISTING}" ]; then
             gh issue comment "${EXISTING}" --repo "$REPO" --body \
               "Nothing this portal says it supports is now within the warning window. Closing; the watch will reopen an issue if that changes."
             gh issue close "${EXISTING}" --repo "$REPO"
+            # Closing is TWO actions here, which is a standing rule in
+            # .claude/CLAUDE.md: a close that is silently refused otherwise
+            # leaves finished work reading as outstanding. A failed label is
+            # not worth failing the job over.
+            gh issue edit "${EXISTING}" --repo "$REPO" --add-label "status: done" || \
+              echo "::warning::Closed #${EXISTING} but could not add the status: done label."
             echo "Closed #${EXISTING}."
           else
             echo "Nothing to close."
@@ -233,11 +253,19 @@ jobs:
 
       - name: Job summary
         if: always()
+        # The exit code comes in through env for the same reason as the event
+        # name above: never a ${{ ... }} inside a shell script (#745). It is
+        # only ever 0, 1 or 2, so nothing was exposed — but an independent
+        # check pointed out that this sat two steps below a comment saying not
+        # to do it, and a habit kept in one place and broken in another is how
+        # the habit goes.
+        env:
+          CHECK_EXIT: ${{ steps.check.outputs.exit_code }}
         run: |
           {
             echo "### End-of-life watch"
             echo
-            case "${{ steps.check.outputs.exit_code }}" in
+            case "${CHECK_EXIT}" in
               0) echo "✅ Nothing this portal says it supports is within the warning window." ;;
               1) echo "⚠️ A supported version has ended or ends soon — see the issue." ;;
               *) echo "🛑 Could not establish the facts. **This run proves nothing.**" ;;

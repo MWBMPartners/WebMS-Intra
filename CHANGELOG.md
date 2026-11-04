@@ -4,7 +4,7 @@
 ## [Unreleased] (alpha)
 <!-- #475 part 1 -->
 
-### The two newest database versions are proved, two customer-facing sentences were untrue, and something now watches for end of life (#475 part 1)
+### The two newest database versions are proved, three customer-facing sentences were untrue, and something now watches for end of life (#475 part 1)
 
 **MySQL 9.7.4 and MariaDB 12.3.3 both pass all seven phases of the migration
 harness and all 42 of its checks** — the same 42 that pass on MySQL 8.0.36,
@@ -72,10 +72,16 @@ monthly, keeps exactly **one** issue, rewrites that issue's body every run so it
 is always current, and comments **only when the findings change** — because a
 real finding here stays true for months, and a monthly comment about the same
 fact is how an issue stops being read. A run that cannot reach endoflife.date
-**fails**, and says the run proves nothing.
+**fails the monthly run**, and says that run proves nothing — but it
+deliberately does **not** fail a pull request, because somebody else's website
+being down is not a fault in the change under review, and a check that goes red
+for reasons outside the change gets ignored. The workflow's own comment says
+so; an earlier draft of this entry asserted the "fails" half unqualified.
 
 It earned its place on the first run: **PHP 8.4 loses active support on
-31 December 2026, 58 days away**, and `PhpRuntime::MIN_PHP` is 8.4.0. Two other
+31 December 2026**, and `PhpRuntime::MIN_PHP` is 8.4.0. (This entry said
+"58 days away" and the commit message said 57. The house rule is not to quote
+a count in prose at all: run the check.) Two other
 things it found, neither urgent: MySQL now has year-based release lines (26.7,
 26.10) above the 9.7 we record as newest known, and MariaDB has 13.0.
 
@@ -85,6 +91,99 @@ support is within the warning window" **directly underneath** "COULD NOT ASK".
 The exit code was right and the words asserted the comforting half of a thing
 it had just said it could not establish. It now says so, for every product, and
 never reassures.
+
+**THE INDEPENDENT CHECK FOUND NINE MORE, AND THE FIRST TWO ARE THE ONES TO
+REMEMBER.**
+
+**1. The new hard gate ran in NO WORKFLOW AT ALL** — the #646 shape re-created
+in the very package that cites #646, and of all 56 audit scripts it was the
+only one. **The cause is a standing fact about this repository that I got
+wrong: `pr-security.yml` names every audit script INDIVIDUALLY, and there is no
+folder glob in any workflow here.** `.githooks/pre-push` *does* glob the
+folder, which is what misled me — but that hook is turned on per clone and
+`git push --no-verify` skips it. So four documents called it "a hard gate"
+while the only thing running it was a local hook. It is now a step in
+`pr-security.yml`. **A new script under `tools/audit-checks/` is not wired up
+until it is named in that file.**
+
+**2. The gate could be switched off by an ordinary COMMENT.** It matched its
+pattern over the whole file and took the first match, so a comment recording
+the constant's previous value — which the house style actively asks for
+("record what was tried and rejected") — was read instead of the real
+constant. A line the portal claimed and nothing tested then passed with `OK`
+and exit 0: precisely the direction the check's own header calls "the
+dangerous direction and the reason this is a hard gate". Comments are blanked
+now, in both readers, keeping every line and column so reported line numbers
+stay right (#716's remedy). Three plants: a `//` block showing the old value, a
+`/* */` block, and a commented-out matrix entry in the YAML. **And blanking
+them introduced a second fault immediately:** the blanked lines became pure
+whitespace and `^(\s*)include:` matched across them, so the "indentation" came
+out as 1,918 characters. `[ \t]` now, never `\s`, which matches a newline.
+
+**3. The sentence this package exists to fix was pinned by NOTHING.** Planting
+`return '';` at the top of `testedLinesCaveat()` removed the caveat from every
+answer, and `db-server-selftest.php` still passed 36 of 36 — because the one
+clause that claimed to guard it **could not fail**: it tested
+`$got['untested'] !== true`, and `'untested' => true` is set for every MariaDB
+answer, so the condition was unfalsifiable, and it was never about the sentence
+anyway. The test now reads the sentence itself and asks the only question that
+matters — does what the customer is told match `TESTED_LINES`? Proved by
+planting: that same `return '';` now fails it.
+
+**4. "`testedLinesCaveat()` is the one place the sentence is built" was untrue,
+and the exception was the one line the gate cannot protect.** The MySQL 8.0
+branch hand-wrote "this is one of the versions tested here". That matters
+beyond tidiness: #475's direction is to stop accepting MySQL 8.0, and **the day
+8.0 leaves the matrix the gate forces `'8.0'` out of `TESTED_LINES` and goes
+green**, while a hand-written sentence would go on telling every 8.0 customer
+their version is tested. Derived now.
+
+**5. "An honest caveat goes on every answer" was untrue in both halves.** Of
+six MySQL branches exactly one carried it. It goes on **three** kinds of answer
+— every MariaDB answer, every supported-MySQL answer, and the MySQL 8.0 answer
+— and each absence now has a stated reason: a version too old to install, or a
+preview build nobody should put real data on, is not improved by a sentence
+about what is tested, because it invites somebody to stay.
+
+**6. `db-server-selftest.php` still carried the untrue sentence this entry said
+had been corrected** ("every MariaDB answer must admit that nothing here is
+tested against MariaDB"), five lines from the claim "all five corrected". The
+shape `.claude/CLAUDE.md` names: a document asserting a fix while stating the
+thing it fixed is worse than one that says nothing.
+
+**7. The watcher would have closed its issue, with an all-clear, on the day the
+thing it warned about happened.** Measured by moving the date: PHP 8.4 answers
+`soon` on 30 December 2026 and `fine` on the 31st, because its security fixes
+run to 2028 — so the run would exit 0, the close step would fire, and the only
+durable record of the finding would go, under the words "Nothing this portal
+says it supports is now within the warning window", while `MIN_PHP` was still
+8.4.0. `security-only` is its own state now and is reportable, as is `unknown`
+— whose exclusion had made the header's "silence is not success" a promise the
+code did not keep.
+
+**8. One commit held two contradictory statements about MySQL 26.x.**
+`DbServer`'s comment said the year-based numbering "has NOT been confirmed
+here" while this package's own documents and its new tool reported it. The
+comment is corrected, and says plainly that `MYSQL_NEWEST_KNOWN` stays at 9.7
+on purpose — 9.7 is the newest *long-term* line, and nothing here has been run
+on a 26.x server — with the measurable cost stated: somebody on MySQL 26.7,
+whose support ended on 20 October 2026, is told `ok`.
+
+**9. A docblock documented the wrong function.** The new method was inserted
+between `series()`'s docblock and `series()`.
+
+Smaller things fixed in the same round: the second lint step now **asserts** PHP
+8.5 is really active rather than printing `php -v` and checking nothing; the
+watcher's issue lookup no longer turns a GitHub API failure into "no issue
+found", which would have opened a duplicate; closing that issue also adds
+`status: done`, as the standing rule requires; the job summary stopped pasting
+an expression into a shell script two steps below a comment saying not to; the
+derived sentence says "its database tests" rather than "its automated tests",
+because `TESTED_LINES` describes the migration harness alone; the install
+guide's "those four are the ones the portal's own tests really run against" was
+wrong (five lines are tested, MySQL 8.0 among them); `feed-importer-selftest.php`
+carried the same stale MariaDB claim in a file the sweep never opened; and an
+unreachable branch now says it is a deliberate backstop.
 
 ## [Unreleased] (alpha)
 <!-- #745 -->

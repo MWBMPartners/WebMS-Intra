@@ -91,7 +91,14 @@ jobs:
           php-version: '8.5'
       - name: Lint every PHP file on PHP 8.5 (the recommended version)
         run: |
+          # ASSERT THE SWITCH REALLY HAPPENED. `php -v` printing on its own
+          # checks nothing: if setup-php ever stopped switching the active
+          # version, this step would lint on 8.4 a second time, print "8.4" and
+          # stay green — a step that looks like coverage and is a duplicate.
+          # Raised by an independent check on 4 November 2026.
           php -v
+          php -r 'exit(PHP_MAJOR_VERSION === 8 && PHP_MINOR_VERSION === 5 ? 0 : 1);' \
+            || { echo "::error::Expected PHP 8.5 to be active here, got $(php -r 'echo PHP_VERSION;')"; exit 1; }
           find web -type f -name "*.php" \
             -not -path "*/vendor/*" \
             -not -path "*/_libraries/*" \

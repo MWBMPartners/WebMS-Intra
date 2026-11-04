@@ -16308,3 +16308,62 @@ somebody running it in production — which, for MariaDB, nobody does.
 `MIN_MYSQL` stays `8.0.0` and `MIN_MARIADB` stays `10.6.0`. Do not raise them as
 a tidy-up. It also means the warning is the only protection, which is why its
 truthfulness stopped being cosmetic.
+
+### The fix round, and the two faults worth carrying forward
+
+An independent check of this package found nine real problems. Two are general.
+
+**A new script in `tools/audit-checks/` is not wired up until
+`pr-security.yml` NAMES it.** That file lists every audit script
+**individually**; there is **no folder glob in any workflow in this
+repository**. `.githooks/pre-push` *does* glob the folder — and that is exactly
+what misled me. The gate described above was written, called "a hard gate" in
+four documents, and was **the only one of 56 scripts in no workflow at all**:
+the #646 shape re-created inside the package that cites #646. A hook that is
+turned on per clone and that `git push --no-verify` skips is not a gate. The
+test takes a second:
+
+```bash
+for f in tools/audit-checks/check_*.py; do
+  grep -rqs "$(basename "$f")" .github/workflows/ || echo "NOT IN ANY WORKFLOW: $f"
+done
+```
+
+**A check that takes the FIRST match in a file can be switched off by a
+comment — and the house style asks for exactly that comment.** `.claude/CLAUDE.md`
+says to "record what was tried and rejected", so a note showing the constant's
+previous value is ordinary good practice. The gate read it instead of the real
+constant, and a release line the portal claimed while nothing tested it passed
+with `OK` and exit 0 — the direction the check's own header calls the dangerous
+one. Comments are blanked now, in both readers, **keeping every line and column**
+so reported line numbers stay right (#716 put its numbers 370 out by deleting
+them instead).
+
+**And blanking them broke the next line immediately.** The blanked comment lines
+became pure whitespace, and `^(\s*)include:` matched *across* them — the
+"indentation" came out as 1,918 characters and the check failed with "could not
+read the matrix". **Use `[ \t]`, never `\s`, for indentation: `\s` matches a
+newline.** It failed loudly, which is the only reason it cost minutes; in a
+check that defaulted to passing it would have been silent.
+
+Three more worth recognising, each a repeat of something already written down:
+
+* **The behaviour this package exists to produce was pinned by nothing.**
+  `return '';` at the top of `testedLinesCaveat()` removed the caveat from every
+  answer with 36 of 36 checks green — because the one clause that claimed to
+  guard it tested `$got['untested'] !== true`, which `$base` sets for every
+  MariaDB answer, so it **could not fail**, and it was never about the sentence
+  anyway.
+* **"The ONE place" was untrue, and the exception was the line the gate cannot
+  protect.** `judgeMySql()`'s 8.0 branch hand-wrote its own version. #475's
+  direction is to stop accepting MySQL 8.0 — and the day 8.0 leaves the matrix,
+  the gate *forces* it out of `TESTED_LINES` and goes green while a hand-written
+  sentence goes on telling every 8.0 customer their version is tested.
+* **A watch that closed its own issue on the day the event happened.** PHP 8.4
+  answers `soon` on 30 December 2026 and `fine` on the 31st, because its
+  security fixes run to 2028. The close step would have fired with the words
+  "Nothing this portal says it supports is now within the warning window", and
+  the only durable record of the finding would have gone, at the moment of the
+  event. `security-only` is its own reportable state now — as is `unknown`,
+  whose exclusion had made the header's "silence is not success" a promise the
+  code did not keep.

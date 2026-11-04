@@ -36,6 +36,11 @@ Three kinds of finding, and the second is the one that matters most:
   2. **SOON** -- within WARN_WITHIN_DAYS of ending. This is the whole point:
      a warning while there is still time to plan, rather than a discovery
      afterwards.
+  2b. **SECURITY-ONLY** -- past its ACTIVE-support date while security fixes
+     continue. Reportable, because ordinary fixes have stopped. Without this
+     as a state of its own, PHP 8.4 would have flipped from "soon" to "fine"
+     on 31 December 2026 and the watch would have reported all clear on the
+     day the thing it was warning about happened -- see `judge()`.
   3. **NEWER LINE EXISTS** -- the vendor has published a line newer than the
      one we record as the newest we know about. Not urgent, and not a fault:
      it is how the constant that says "I know about versions up to here" gets
@@ -98,6 +103,20 @@ import urllib.request
 # How much notice we want. Six months is the owner's figure in #475 ("opens an
 # issue when something we support is within six months of its end of support").
 WARN_WITHIN_DAYS = 183
+
+# WHAT COUNTS AS WORTH REPORTING — one list, used by the findings, the exit
+# code and the workflow's fingerprint, so those three can never disagree.
+#
+# 'unknown' is in it deliberately. This file's own header says "A version line
+# absent from endoflife.date is reported as unknown, not as fine. Silence is
+# not success" — and until 4 November 2026 an `unknown` finding made nothing
+# red and reached no issue, because the exit code looked only at 'ended' and
+# 'soon'. So the header promised something the code did not do.
+#
+# 'newer-line' is NOT in it: a newer release line existing is information, not
+# a problem, and making it reportable would keep an issue open for ever about
+# something nobody needs to act on.
+REPORTABLE = ("ended", "soon", "security-only", "unknown")
 
 API = "https://endoflife.date/api/{product}.json"
 TIMEOUT_SECONDS = 20
@@ -221,19 +240,36 @@ def judge(product: str, series: str, cycles: list[dict], today: datetime.date) -
             ),
         }
 
-    # Active support ending is worth saying even while security fixes continue:
-    # a line in security-fix-only mode is a line to plan away from. PHP is the
-    # one here that publishes both, and the gap is two years.
+    # A line past its ACTIVE-support date has its own state, and that is the
+    # fix for the worst fault an independent check found here on 4 November
+    # 2026. This branch used to answer 'soon' or 'fine' depending on how far
+    # off the security-fix date was — so PHP 8.4, whose active support ends on
+    # 31 December 2026 and whose security fixes run to the end of 2028, would
+    # flip from 'soon' to 'fine' ON 31 DECEMBER. Measured by moving the date:
+    #
+    #   2026-12-30  soon  "loses ACTIVE SUPPORT ... 1 days away"
+    #   2026-12-31  fine  "is in SECURITY FIXES ONLY ... 731 days"
+    #
+    # The workflow would then have closed its one issue, with a comment
+    # reading "Nothing this portal says it supports is now within the warning
+    # window", on the very day the thing it had been warning about happened —
+    # while `MIN_PHP` was still 8.4.0. The only durable record of the finding
+    # would have disappeared at the moment of the event, under words that read
+    # as an all-clear.
+    #
+    # 'security-only' is REPORTABLE (see REPORTABLE below). Ordinary fixes have
+    # stopped, which is a thing to plan away from, not a thing to be told is
+    # fine.
     if support is not None and support <= today and eol is not None:
         days = (eol - today).days
-        state = "soon" if days <= WARN_WITHIN_DAYS else "fine"
         return {
-            "state": state,
+            "state": "security-only",
             "series": series,
             "words": (
                 f"{product} {series} is in SECURITY FIXES ONLY — active support "
                 f"ended {support.isoformat()}; security fixes stop "
-                f"{eol.isoformat()} ({days} days, {detail})."
+                f"{eol.isoformat()} ({days} days away, {detail}). Ordinary fixes "
+                f"have stopped, so this is a line to plan away from."
             ),
         }
 
@@ -384,7 +420,7 @@ def main() -> int:
         for series in series_list:
             verdict = judge(label, series, cycles, today)
             lines.append(f"  [{verdict['state'].upper()}] {verdict['words']}")
-            if verdict["state"] in ("ended", "soon", "unknown"):
+            if verdict["state"] in REPORTABLE:
                 findings.append({"product": label, **verdict})
 
         if newest_known is not None:
@@ -427,7 +463,7 @@ def main() -> int:
         print("")
         for line in lines:
             print(line)
-        urgent = [f for f in findings if f["state"] in ("ended", "soon")]
+        urgent = [f for f in findings if f["state"] in REPORTABLE]
         if len(could_not_ask) > 0:
             # NEVER print the reassuring line beside this. The first version
             # printed "Nothing we support is within the warning window"
@@ -461,7 +497,7 @@ def main() -> int:
     #   0 — nothing urgent. A newer line existing on its own is not urgent.
     if len(could_not_ask) > 0:
         return 2
-    if any(f["state"] in ("ended", "soon") for f in findings) is True:
+    if any(f["state"] in REPORTABLE for f in findings) is True:
         return 1
     return 0
 

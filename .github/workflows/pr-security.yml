@@ -1515,6 +1515,27 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_capability_registry.py
 
+      # What the portal TELLS a customer is tested is what is really tested
+      # (#475). `DbServer::TESTED_LINES` names the database release lines the
+      # migration harness runs on, and the sentence a customer reads is built
+      # from it. This compares the constant with the matrix in
+      # `e2e-migrations.yml` and fails BOTH ways; the dangerous direction is a
+      # line the constant CLAIMS and nothing runs, because the portal then
+      # tells somebody their version is tested when it is not.
+      #
+      # WIRED HERE BECAUSE IT RAN IN NO WORKFLOW AT ALL when it was written —
+      # the #646 shape re-created in the very package that cites #646, and
+      # found by the independent check, not by me. **This file names every
+      # audit script individually; there is NO folder glob in any workflow
+      # here.** `.githooks/pre-push` does glob the folder, which is what misled
+      # me — but that hook is turned on per clone and `git push --no-verify`
+      # skips it. **A new script under `tools/audit-checks/` is not wired up
+      # until it is named in this file.**
+      - name: 'What the portal says is tested is what is tested (hard gate, #475)'
+        id: tested_db_lines
+        if: always()
+        run: python3 -I tools/audit-checks/check_tested_db_lines.py
+
       # =====================================================================
       # Summary in the Actions UI
       # =====================================================================
