@@ -227,6 +227,100 @@ function cap_codeOnly(string $path): string
     return $out;
 }
 
+/**
+ * 🧱 The one `if (...) { ... }` block whose condition is exactly $condition.
+ *
+ * Answers the block INCLUDING its condition and its own closing brace, or ''
+ * when the condition is not there or its braces never balance.
+ *
+ * WHY THIS EXISTS, AND WHY THE TWO EASIER WAYS BOTH FAIL (#742)
+ * -------------------------------------------------------------
+ * These checks exist to prove that a refusal really REFUSES — that the block
+ * ends in `exit()` rather than falling through to the write. Two earlier ways
+ * of asking that were both wrong:
+ *
+ *  1. `'/<condition>\{.{0,900}?exit\(\);\s*\}/s'` — the idiom this file used
+ *     until 4 November 2026. **`.` crosses newlines with the `s` modifier**,
+ *     and `web/_apps/admin/roles/save.php` contains TWENTY-TWO `exit(` calls,
+ *     every refusal on the page looking alike. So with the `exit();` DELETED
+ *     from the block being checked, the search ran past that block's closing
+ *     brace and found the NEXT refusal's `exit();` a few lines down, and the
+ *     check stayed green over a gate that no longer refused. Planted and
+ *     measured. #668's section D "passed on FOUR disabled gates" is the same
+ *     shape, and this is the third time this repository has paid for it.
+ *
+ *  2. Cutting at `"\n" . str_repeat(' ', $indent) . '}'` — better, and still
+ *     wrong in principle: it trusts the indentation of the file being read,
+ *     and it is the caller who has to know the right number. Both blocks in
+ *     `roles/save.php` contain braces of their own (one has a `foreach`), so
+ *     the margin was one level of indentation.
+ *
+ * So this walks the braces, and **steps over string literals** — #647 records
+ * a brace walk that did not, where one `{` inside a log message swallowed the
+ * rest of the function and the check passed on a removed gate. Comments need
+ * no handling because every caller passes code from `cap_codeOnly()`, which
+ * drops them with PHP's own tokeniser.
+ *
+ * WHAT IT CANNOT DO, said plainly because an overstated guarantee is worse
+ * than none: it does not understand heredocs (`<<<SQL`), so a `{` inside one
+ * would unbalance the walk — it answers '' in that case, which FAILS the
+ * check rather than passing it, which is the safe direction. No handler read
+ * here uses one.
+ */
+function cap_blockFrom(string $code, string $condition): string
+{
+    $at = strpos($code, $condition);
+    if ($at === false) {
+        return '';
+    }
+
+    $open = strpos($code, '{', $at + strlen($condition) - 1);
+    if ($open === false) {
+        return '';
+    }
+
+    $depth  = 0;
+    $quote  = '';
+    $length = strlen($code);
+
+    for ($i = $open; $i < $length; $i++) {
+        $ch = $code[$i];
+
+        // 🧵 Inside a string literal nothing counts but the end of it. A
+        //    backslash escapes the next character, including the closing
+        //    quote — `'it\'s'` must not end at the apostrophe.
+        if ($quote !== '') {
+            if ($ch === '\\') {
+                $i++;
+                continue;
+            }
+            if ($ch === $quote) {
+                $quote = '';
+            }
+            continue;
+        }
+
+        if ($ch === "'" || $ch === '"') {
+            $quote = $ch;
+            continue;
+        }
+
+        if ($ch === '{') {
+            $depth++;
+            continue;
+        }
+
+        if ($ch === '}') {
+            $depth--;
+            if ($depth === 0) {
+                return substr($code, $at, $i - $at + 1);
+            }
+        }
+    }
+
+    return '';
+}
+
 // =============================================================================
 // 🌍 The made-up world
 // =============================================================================
@@ -1019,12 +1113,11 @@ cap_check(
     'save.php refuses an empty set that nobody confirmed, whole condition',
     str_contains($saveCode, 'if (count($roleKeys) === 0 && $confirmedEmpty === false) {') === true
 );
+$emptySetBlock = cap_blockFrom($saveCode, 'if (count($roleKeys) === 0 && $confirmedEmpty === false) {');
 cap_check(
     'and that refusal really stops, rather than falling through to the save',
-    preg_match(
-        '/if \(count\(\$roleKeys\) === 0 && \$confirmedEmpty === false\) \{.{0,900}?exit\(\);\s*\}/s',
-        $saveCode
-    ) === 1
+    $emptySetBlock !== '' && str_contains($emptySetBlock, 'exit();') === true,
+    $emptySetBlock === '' ? 'the block could not be cut' : 'block is ' . strlen($emptySetBlock) . ' chars'
 );
 cap_check(
     'the confirmation is read as an exact value, so an unticked box cannot satisfy it',
@@ -1050,9 +1143,11 @@ cap_check(
     'save.php asks whether deleting a role would empty a capability',
     str_contains($saveCode, 'Capabilities::capabilitiesLeftEmptyByRemoving(') === true
 );
+$wouldEmptyBlock = cap_blockFrom($saveCode, 'if (count($wouldEmpty) > 0) {');
 cap_check(
     'and refuses the delete when it would, rather than noting it',
-    preg_match('/if \(count\(\$wouldEmpty\) > 0\) \{.{0,900}?exit\(\);\s*\}/s', $saveCode) === 1
+    $wouldEmptyBlock !== '' && str_contains($wouldEmptyBlock, 'exit();') === true,
+    $wouldEmptyBlock === '' ? 'the block could not be cut' : 'block is ' . strlen($wouldEmptyBlock) . ' chars'
 );
 // ⚠️ AND IT REFUSES WHEN IT CANNOT ASK AT ALL. The first version left the key
 //    null on a failed `prepare()` and wrapped the whole question in
@@ -1170,54 +1265,50 @@ cap_check(
 //
 //    ⚠️ AND THE OBVIOUS WAY TO WRITE THE SECOND HALF DOES NOT WORK — PLANTED
 //       AND MEASURED. The first version of these checks used the idiom this
-//       file already uses elsewhere, `\{.{0,900}?exit\(\);\s*\}` with the
-//       `s` modifier. With the `exit();` DELETED from one of these blocks the
+//       file used elsewhere, `\{.{0,900}?exit\(\);\s*\}` with the `s`
+//       modifier. With the `exit();` DELETED from one of these blocks the
 //       check STAYED GREEN, because `.` crosses newlines and the search simply
-//       ran on past this block's closing brace and found the NEXT refusal's
-//       `exit();` a few lines below. Every refusal on this page looks alike, so
-//       there is always another one within 900 characters.
+//       ran past this block's closing brace and found the NEXT refusal's
+//       `exit();` a few lines below. Every refusal on these pages looks alike —
+//       `roles/save.php` holds TWENTY-TWO `exit(` calls — so there is always
+//       another one within 900 characters.
 //
-//       So the block is CUT FIRST — from the `if (` to the closing brace at its
-//       own indentation — and the `exit()` is then looked for inside what was
-//       cut. None of these three blocks contains a brace of its own, which is
-//       what makes the cut safe; a block that grows one needs a real walk that
-//       steps over string literals (#647's lesson).
+//       So the block is CUT FIRST and the `exit()` looked for inside what was
+//       cut. **That cut is now `cap_blockFrom()`, a brace walk that steps over
+//       string literals** (#647: a walk that did not had one `{` in a log
+//       message swallow the rest of a function, and the check passed on a
+//       removed gate). It replaced an earlier cut at "the closing brace at N
+//       spaces", which worked but trusted the read file's indentation and made
+//       the caller supply N — and the two blocks in `roles/save.php` that
+//       #742 was raised about both contain braces of their own, so the margin
+//       was one level of indentation. One way of cutting a block in this file
+//       now, not two.
 $settingsDir  = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_apps'
     . DIRECTORY_SEPARATOR . 'settings' . DIRECTORY_SEPARATOR;
 $settingsSave  = cap_codeOnly($settingsDir . 'save.php');
 $settingsIndex = cap_codeOnly($settingsDir . 'index.php');
-/**
- * The one `if (...) { ... }` block starting with this exact condition, cut at
- * the closing brace at `$indent` spaces — or '' when there is no such block.
- */
-$capBlockFrom = static function (string $code, string $condition, int $indent): string {
-    $at = strpos($code, $condition);
-    if ($at === false) {
-        return '';
-    }
-    $close = strpos($code, "\n" . str_repeat(' ', $indent) . '}', $at);
-
-    return $close === false ? '' : substr($code, $at, $close - $at);
-};
+// 🧱 These three used `$capBlockFrom`, which cut at the closing brace at a
+//    stated indentation. It worked, and it is gone: it trusted the read file's
+//    indentation and made the CALLER supply the right number, so there were two
+//    ways of cutting a block in this one file and only one of them was sound.
+//    `cap_blockFrom()` walks the braces and steps over string literals — see
+//    its own docblock for the two earlier ways and why each failed (#742).
 foreach ([
     'changing a row' => [
         'if (\\Portal\\Core\\Capabilities::lockedInGeneralEditor($storedKey) === true) {',
         $settingsSave,
-        4,
     ],
     'adding a row' => [
         'if (\\Portal\\Core\\Capabilities::lockedInGeneralEditor($settingKey) === true) {',
         $settingsSave,
-        4,
     ],
     'deleting a row' => [
         'if ($lockedKey !== null && \\Portal\\Core\\Capabilities::lockedInGeneralEditor('
         . '(string) $lockedKey[\'settingKey\']) === true) {',
         $settingsIndex,
-        8,
     ],
-] as $what => [$condition, $where, $indent]) {
-    $block = $capBlockFrom($where, $condition, $indent);
+] as $what => [$condition, $where]) {
+    $block = cap_blockFrom($where, $condition);
     cap_check(
         'the general settings editor refuses the lock key when ' . $what . ', whole condition',
         $block !== '',

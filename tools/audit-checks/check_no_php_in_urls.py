@@ -66,6 +66,97 @@ PATTERNS = [
     (re.compile(r'\.open\(\s*[\'"][A-Z]+[\'"]\s*,\s*[\'"](/[^\'"]*\.php[^\'"]*)[\'"]'), "background request"),
 ]
 
+# An address ending in .php INSIDE A PHP STRING (#743).
+#
+# WHY THE PATTERNS ABOVE CANNOT SEE THIS, AND WHY IT MATTERS MOST
+# ---------------------------------------------------------------
+# All of them expect the address to sit directly inside the attribute, as
+# `href="/admin/users.php"`. The house style for anything built in PHP is not
+# that — it is:
+#
+#     <a href="<?php echo htmlspecialchars('/admin/users.php', ENT_QUOTES, 'UTF-8'); ?>">
+#
+# **Measured on 4 November 2026: that line was invisible to all THREE checks
+# written to catch it** — this one, `check_site_aware_addresses.py` and
+# `check_registered_addresses.py` — while the SAME address written as a plain
+# literal was caught by two of the three. It is the FORM they could not see,
+# not the address. So the shape a check could not see was the shape the
+# codebase mostly uses.
+#
+# HOW IT DECIDES, AND WHY NOT MORE WIDELY
+# ---------------------------------------
+# A `.php` string on its own is usually innocent: `require`, a route's target
+# file, a comment, a test fixture. Reporting those gets the check switched off
+# and then it catches nothing (#483). So a string is reported only when the
+# line it sits on also shows the value being used AS AN ADDRESS, and shows no
+# sign of being a file operation.
+#
+# WHAT THIS CANNOT SEE, said plainly because an overstated guarantee is worse
+# than none:
+#   * **The address must start with "/".** A relative `'admin/users.php'` is
+#     not matched, because that is exactly the shape of `require 'foo.php'`
+#     and telling them apart on one line is guesswork.
+#   * **It reads ONE LINE at a time**, as the rest of this check does. An
+#     address and its `href` split across two lines are missed.
+#   * **It judges by what else is on the line**, not by following the value.
+#     A `.php` address assigned to a variable on one line and echoed into an
+#     `href` ten lines later is missed.
+#   * It cannot see an address built by joining pieces
+#     (`'/admin/' . $page . '.php'`), which is the same limit the literal
+#     patterns have.
+#   * **A TRAILING comment that quotes such an address IS reported.** A line
+#     beginning with a comment marker is skipped, but
+#     `$x = 1; // never write href="/admin/users.php"` is not. Measured on
+#     4 November 2026, and **the patterns above have exactly the same
+#     exposure** — this is not something the in-string rule introduced. It was
+#     left rather than fixed on purpose: stripping a trailing `//` would cut a
+#     line at the `//` inside any `https://` string, which is a fault this
+#     repository has already paid for (#716, where a `//` in a URL ate the rest
+#     of the line). Nothing in the repository trips it today; if something ever
+#     does, the honest fix is to rewrite the comment, not to loosen the check.
+PHP_STRING_ADDRESS = re.compile(r"""['"](/[A-Za-z0-9_\-./]*\.php(?:\?[^'"]*)?)['"]""")
+
+# Shows the value is being used as an address.
+ADDRESS_MARKERS = (
+    "href",
+    "action=",
+    "Location:",
+    "Site::url",
+    "Router::url",
+    "Router::urlForScript",
+    "Portal.url",
+    "window.location",
+    "fetch(",
+    ".open(",
+    "formaction",
+    "src=",
+)
+
+# Shows the value is a FILE, not an address. These are the legitimate uses the
+# check must stay quiet about.
+FILE_MARKERS = (
+    "require",
+    "include",
+    "__DIR__",
+    "dirname(",
+    "file_get_contents",
+    "file_put_contents",
+    "file_exists",
+    "is_file",
+    "is_readable",
+    "realpath",
+    "unlink",
+    "basename(",
+    "targetFile",
+    "PORTAL_APPS",
+    "PORTAL_WEBROOT",
+    "opendir",
+    "scandir",
+    "glob(",
+    "token_get_all",
+    "SplFileInfo",
+)
+
 SKIP_DIRS = {".git", "node_modules", "_libraries", "vendor", "_backups", "_uploads"}
 
 # The only three pages the web server is allowed to serve directly, named in
@@ -98,6 +189,25 @@ def check() -> int:
                         if url.split("?")[0] in ALLOWED:
                             continue
                         findings.append((path, line_no, kind, url))
+
+                # The same address hidden inside a PHP string (#743). Judged by
+                # what else is on the line — see PHP_STRING_ADDRESS above.
+                if path.suffix != ".php":
+                    continue
+                if any(marker in line for marker in FILE_MARKERS):
+                    continue
+                if not any(marker in line for marker in ADDRESS_MARKERS):
+                    continue
+                for m in PHP_STRING_ADDRESS.finditer(line):
+                    url = m.group(1)
+                    if url.split("?")[0] in ALLOWED:
+                        continue
+                    found_already = any(
+                        f[0] == path and f[1] == line_no and f[3] == url for f in findings
+                    )
+                    if found_already:
+                        continue
+                    findings.append((path, line_no, "address inside a PHP string", url))
 
     if not findings:
         print("check_no_php_in_urls: OK — no web address ends in .php.")

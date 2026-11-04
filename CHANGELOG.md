@@ -2,6 +2,99 @@
 
 
 ## [Unreleased] (alpha)
+<!-- #742, #743 -->
+
+### Two checks that proved less than they claimed (#742, #743)
+
+**#743 — a `.php` address hidden inside a PHP string was invisible to all three
+checks written to catch it.** Measured by planting the house style's own form
+into a real page:
+
+```php
+<a href="<?php echo htmlspecialchars('/admin/users.php', ENT_QUOTES, 'UTF-8'); ?>">
+```
+
+| Check | Verdict |
+|---|---|
+| `check_no_php_in_urls.py` | **green** |
+| `check_site_aware_addresses.py` | **green** |
+| `check_registered_addresses.py` | **green** |
+
+The **same address** written as a plain `href="/admin/users.php"` is caught by
+two of the three. **It is the form they could not see, not the address** — and
+the form they could not see is the one the codebase mostly uses, because
+`htmlspecialchars()` round an address is the house style for anything built in
+PHP. The harm is a dead link: `.htaccess` answers "page not found" for every
+address ending in `.php` bar three, so the page looks finished and only the
+person who clicks finds out. That is not hypothetical — this rule found three
+live Expenses forms in September 2026 whose Save button went to a 404.
+
+`check_no_php_in_urls.py` now looks inside PHP strings, and decides by what
+else is on the line rather than by the string alone, because a bare `.php`
+string is usually innocent — `require`, a route's target file, a comment, a
+fixture — and a check that cries wolf gets switched off (#483). Nine plants,
+both directions: four shapes that must be caught (the `htmlspecialchars` form,
+`Site::url()`, a `header('Location: ')`, and a `Router::url()` with a query
+string) and five that must stay quiet (`require __DIR__`, a leading comment, a
+relative route target, an `is_file(PORTAL_APPS . …)`, and a correct
+`Site::url('admin/users')`). Its header now records four things it still cannot
+see, including one it shares with the patterns that were already there: **a
+trailing comment quoting such an address IS reported**, which was measured and
+left alone on purpose, because stripping a trailing `//` would cut a line at
+the `//` inside any `https://` string — a fault this repository has already
+paid for (#716).
+
+**#742 — two checks proved a refusal by a pattern that could find the NEXT
+refusal in the same file.** `tools/capabilities-selftest.php` asked whether a
+gate really stops with `\{.{0,900}?exit\(\);\s*\}` and the `s` modifier, so
+`.` crossed newlines. `web/_apps/admin/roles/save.php` holds **twenty-two**
+`exit(` calls and **twenty-one of them are followed by `}`**, so there is
+almost always another one to find.
+
+**Be exact about what was and was not broken, because the issue overstated it
+and measuring disproved the stronger claim.** Deleting the `exit();` from
+either of the two blocks made the old pattern go **red** — correctly — because
+the nearest other refusal happened to be more than 900 characters away (2,011
+and 1,181). **They were sound by accident of spacing, not by design.** One
+ordinary edit changes that, and this is the plant that shows it: delete the
+`exit();` **and** add a new, perfectly normal refusal just after that block —
+which is what a developer adding a guard does —
+
+```
+    old idiom (bounded dot, /s) : says the refusal is THERE  <-- WRONG
+    new brace walk              : goes RED  <-- correct
+```
+
+and the real self-test goes red with it. `cap_blockFrom()` is now the one way a
+block is cut in that file: it walks the braces and **steps over string
+literals** (#647 records a walk that did not, where one `{` in a log message
+swallowed the rest of a function and the check passed on a removed gate). It
+also replaced a second, newer helper that cut at "the closing brace at N
+spaces" — which worked, but trusted the read file's indentation and made the
+caller supply N, and **both** blocks #742 was raised about contain braces of
+their own. All five refusal checks in that file use the one walk now, and each
+was proved by planting its `exit()` away: five plants, five reds, each restored
+byte-identically.
+
+**Two checks that look like the same shape and are NOT**, so they were left
+alone: `tools/expense-rules-selftest.php` lines 447 and 637 pin the money
+path's refusals with a pattern **anchored** at the start of a slice cut from
+the gate itself, spelling out the whole block. A deleted `exit()` cannot be
+satisfied by a later one there. The other 54 apparent matches across the tests
+are the harness's own built-in-server router, not refusal pins.
+
+**Found, not built — raised as its own issue.** The in-string blindness is
+wider than #743: a **bare** address with no `.php` in it is invisible to
+`check_site_aware_addresses.py` in exactly the same way, and that is #536's
+rule, where the harm is quieter — a bare `/page` drops the organisation's part
+of the address. A probe over every page found **nothing with that fault today**
+(its two candidates were a plain literal and a regular expression's own `/i`
+delimiter, which is itself the cry-wolf trap to avoid), so the gate could be
+tightened with no pending list. Left for its own package because that check is
+a hard gate with `--strict` and an empty pending list, and changing what blocks
+other people's work deserves its own independent check.
+
+## [Unreleased] (alpha)
 <!-- #475 part 1 -->
 
 ### The two newest database versions are proved, three customer-facing sentences were untrue, and something now watches for end of life (#475 part 1)

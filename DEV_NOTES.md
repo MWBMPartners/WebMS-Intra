@@ -16367,3 +16367,96 @@ Three more worth recognising, each a repeat of something already written down:
   event. `security-only` is its own reportable state now — as is `unknown`,
   whose exclusion had made the header's "silence is not success" a promise the
   code did not keep.
+
+---
+
+## A check can be sound by accident, and a string can hide an address (#742, #743)
+
+Two checks that proved less than their names claimed. The lessons are different
+and both transfer.
+
+### #742 — "safe by accident of spacing" is not safe
+
+`tools/capabilities-selftest.php` proved a gate really refuses with:
+
+```php
+'/<condition>\{.{0,900}?exit\(\);\s*\}/s'
+```
+
+With the `s` modifier `.` crosses newlines, and
+`web/_apps/admin/roles/save.php` holds **22** `exit(` calls, **21 of them
+followed by `}`**. So in principle the search can run past the block being
+checked and find the next refusal's `exit();`.
+
+**Measure the stronger claim before repeating it.** Deleting the `exit();` from
+either of the two blocks made the old pattern go **red** — correctly. The
+nearest other refusal was 2,011 and 1,181 characters away, both beyond the 900
+limit. **They were sound by accident of how far apart the refusals happened to
+sit, not by design.** The issue said they were already broken; they were not.
+
+The plant that shows the real risk is the one a developer actually performs —
+delete the `exit();` **and** add an ordinary new refusal just after that block:
+
+```
+    old idiom (bounded dot, /s) : says the refusal is THERE  <-- WRONG
+    new brace walk              : goes RED  <-- correct
+```
+
+So the fix is right and the reason given for it has to be the true one.
+
+**`cap_blockFrom()` is the one way a block is cut in that file now.** It walks
+the braces and **steps over string literals** — #647 records a walk that did
+not, where one `{` inside a log message swallowed the rest of a function and the
+check passed on a removed gate. It also replaced a *second* helper, newer and
+better, that cut at "the closing brace at N spaces": that worked, but it trusted
+the read file's indentation and made the caller supply N, and both blocks in
+question contain braces of their own. **Two ways of doing one thing in one file
+is the fault, even when both happen to work.**
+
+Two checks that look identical and are not: `tools/expense-rules-selftest.php`
+lines 447 and 637 **anchor** their pattern at the start of a slice cut from the
+gate itself and spell out the whole block, so a deleted `exit()` cannot be
+satisfied by a later one. Left alone. The other 54 apparent matches across the
+tests are the harness's own built-in-server router.
+
+### #743 — the form a check cannot see is the form the codebase uses
+
+Planted into a real page:
+
+```php
+<a href="<?php echo htmlspecialchars('/admin/users.php', ENT_QUOTES, 'UTF-8'); ?>">
+```
+
+**All three checks written to catch a `.php` address stayed green.** The same
+address as a plain `href="/admin/users.php"` is caught by two of them. The
+checks expect the address to sit directly in the attribute — and
+`htmlspecialchars()` round an address is the house style for anything built in
+PHP, so **the shape they could not see was the shape most of the codebase
+uses.**
+
+The remedy is the #716 one: **look inside the literal, do not strip it** — the
+value being judged *is* a string, so masking literals is precisely what blinds
+you. And decide by context, because a bare `.php` string is usually innocent
+(`require`, a route target, a comment, a fixture) and a check that cries wolf
+gets switched off (#483). Nine plants, both directions.
+
+**One limit kept rather than fixed, and the reason is worth repeating:** a
+*trailing* comment quoting such an address is reported. The patterns that were
+already there have the same exposure. Stripping a trailing `//` would cut a line
+at the `//` inside any `https://` string — a fault this repository has already
+paid for (#716). Nothing in the tree trips it; if something ever does, rewrite
+the comment rather than loosen the check.
+
+### The sibling finding, measured and left for its own package
+
+The blindness is wider than `.php`. A **bare** address hidden the same way is
+invisible to `check_site_aware_addresses.py`, which is #536's guard — and that
+harm is quieter, because a bare `/page` drops the organisation's part of the
+address and the page still looks normal.
+
+A probe over every `.php` file under `web/` found **no real instance today**.
+Its two candidates were both false positives, and the second is the trap to
+avoid: `'/href="(https?:[^"]+)"/i'` — the probe matched **`/i`**, a regular
+expression's own delimiter and modifier, on a line that contains `href`, so a
+marker test does not save you. Raised as its own issue because that check is a
+hard gate with `--strict` and an empty pending list.
