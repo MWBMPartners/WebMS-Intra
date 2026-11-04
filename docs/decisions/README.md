@@ -84,7 +84,17 @@ appended with its real date and a note that it was added later.
 | [D-032](032-the-giving-records-ceiling-is-opt-in.md) | 2026-10-31 | The giving-records ceiling is opt-in | in force |
 | [D-033](033-a-date-a-repeat-pattern-adds-arrives-as-a-draft.md) | 2026-10-31 | A date a repeat pattern adds arrives as a draft | in force |
 | [D-034](034-a-limit-recorded-beside-the-code-rather-than-forced.md) | 2026-11-02 | A limit recorded beside the code rather than forced | in force |
+| [D-035](035-the-codex-review-is-split-and-not-started-until-the-work-is-done.md) | 2026-11-01 | The Codex review is split across resets, and not started until the release work is done | in force |
+| [D-036](036-branch-protection-goes-on-after-the-merge.md) | 2026-11-01 | Branch protection goes on after the merge | superseded |
+| [D-037](037-branch-protection-goes-on-now-before-the-merge.md) | 2026-11-04 | Branch protection goes on now, before the merge | in force |
+| [D-038](038-ship-on-the-mysql-8-0-convention-and-say-so-plainly.md) | 2026-11-01 | Ship on the MySQL 8.0 convention and say so plainly | in force |
+| [D-039](039-build-the-key-loss-escape-only.md) | 2026-11-01 | Build the key-loss escape only | in force |
+| [D-040](040-a-treasurer-may-export-claims-alongside-an-approver.md) | 2026-11-01 | A treasurer may export claims alongside an approver | in force |
+| [D-041](041-what-goes-into-the-first-usable-release.md) | 2026-10-29 | What goes into the first usable release | in force |
+| [D-042](042-a-downloaded-snapshot-is-protected-by-a-selectable-combination.md) | 2026-10-29 | A downloaded snapshot is protected by a selectable combination | in force |
+| [D-043](043-transcription-gets-its-trigger-not-a-notice.md) | 2026-10-29 | Transcription gets its trigger, not a notice | in force |
+| [D-044](044-a-started-series-is-still-published-as-one-entry.md) | 2026-10-29 | A series that has already started is still published as one entry | in force |
 
-*34 decisions. This index is checked against the folder by
+*44 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
