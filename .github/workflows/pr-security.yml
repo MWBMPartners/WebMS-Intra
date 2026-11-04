@@ -1536,6 +1536,22 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_tested_db_lines.py
 
+      # A help page never points at a runbook section that has gone (#744).
+      # The owner chose on 4 November 2026 to make this binding rather than
+      # advisory, knowing it binds everybody: the in-app help is what an end
+      # user actually reads, and `help/disaster-recovery.php` had been pointing
+      # at a "runbook section 4.4" that #488 removed — found by hand, weeks
+      # later, on the one page somebody opens when something has already gone
+      # wrong (#583).
+      #
+      # It judges ONE mechanical thing. It cannot tell whether any advice is
+      # correct, and its own header says so rather than implying the help is
+      # verified.
+      - name: 'No help page points at a runbook section that has gone (hard gate, #744)'
+        id: help_page_references
+        if: always()
+        run: python3 -I tools/audit-checks/check_help_page_references.py
+
       # =====================================================================
       # Summary in the Actions UI
       # =====================================================================

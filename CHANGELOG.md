@@ -2,6 +2,79 @@
 
 
 ## [Unreleased] (alpha)
+<!-- #744 -->
+
+### The in-app help is read by something now (#744)
+
+**Nothing in this repository loaded any help page.** The only one under any test
+was `help/calendar-imports.php`, and only its *words*, pinned by check W50 of
+`tools/feed-admin-selftest.php`. The help is what an end user actually reads —
+this project's own plain-English rule says it matters MORE than the developer
+notes, not less — and it is PHP, so a page can throw and nobody would know
+until a member opened it. The worst case is `help/disaster-recovery.php`, which
+somebody opens when something has **already** gone wrong, and which #583 found
+telling customers to do two things that would have destroyed their data.
+
+Two things were built, and the owner decided the shape of both on 4 November
+2026.
+
+**1. `tools/audit-checks/check_help_page_references.py` — a hard gate.** Every
+runbook section number a help page shows a reader must be a numbered heading in
+`docs/disaster-recovery-runbook.md`. That one check would have caught the
+"runbook section 4.4" that #488's reorganisation left stale — found by hand,
+weeks later. The owner chose to make it binding rather than advisory, knowing it
+binds everyone.
+
+**It cannot judge whether any advice is correct. No check can**, and its header
+says so rather than implying the help is verified.
+
+Getting it to not cry wolf took measuring, and **my own planting found three
+false alarms in the first version.** It replaced each `<?php … ?>` block with a
+single space, which pulled text hundreds of lines apart into the same
+60-character window — so "Version 4.4 of the portal", "About 4.4 million
+records" and the date "4.4.2026" were each reported as a stale runbook
+reference, governed by a "runbook" nowhere near them. Each block is now a fence
+the window cannot read across. Twelve plants: five that must fail (including
+`section&nbsp;7.99` and a bare `runbook 12.3`) and seven that must stay quiet.
+
+Two findings worth recording from building it. **Every one of the seven live
+references is correct today**, so the check is a tripwire for the future rather
+than a repair. And `help/disaster-recovery.php` really does still contain
+"section 4.4" twice — **inside a PHP comment** recording the #583 correction, so
+a check that read the whole file would fail on the very comment documenting the
+repair. Only the text outside `<?php … ?>` is read.
+
+**2. `tools/help-pages-selftest.php` — all twenty help pages, over HTTP.** 50
+checks. As an administrator every help address must answer a whole page; as an
+ordinary member, a whole page or a clean refusal; no answer may carry PHP's own
+error text; every page on disk must have a registered address and every address
+a file.
+
+**"Whole" is the point.** A page that throws part-way still answers HTTP 200,
+because its header has already gone — what arrives is the top of a page with
+nothing wrong *in* it. Only the closing `</html>` shows it finished. #669 and
+#715 are both on record as that shape.
+
+**And part B would have been vacuous without one more check.** "A whole page or
+a clean refusal" is satisfied completely by twenty refusals, so if every help
+page turned an ordinary member away, all twenty checks would pass while proving
+nothing about a page opening for the person most likely to read it. B99 counts
+how many the member really read — **20 of 20** — and fails if it is none. The
+I7d lesson (#645): when a check exists to prove something ordinary still works,
+check that the fixture is actually ordinary.
+
+Three planted faults prove the test can see a broken page: one that throws
+part-way (still HTTP 200), one that prints PHP's own error text, and the page
+put back so that a later failure cannot be a plant's leftovers.
+
+**One fault of mine, caught by running it.** The first version read
+`tblRoutes.routePath`. The column is **`routeKey`**, and the test died on its
+first run with "Unknown column 'routePath'" — CLAUDE.md's "name things by the
+right identifier" trap, which says to check a name against the thing that uses
+it rather than against what looks similar. The comment at that line now records
+it.
+
+## [Unreleased] (alpha)
 <!-- #742, #743 -->
 
 ### Two checks that proved less than they claimed (#742, #743)

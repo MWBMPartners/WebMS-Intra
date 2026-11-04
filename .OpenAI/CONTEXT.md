@@ -2592,6 +2592,32 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     that claimed to guard it tested `$got['untested'] !== true`, which is set for every MariaDB answer and so
     **could not fail**.
 
+44. **THE IN-APP HELP IS READ BY SOMETHING NOW, AND NEITHER GUARD JUDGES WHETHER IT IS TRUE (#744, 4 November
+    2026).** Until then **nothing loaded any help page**: the only one under any test was
+    `help/calendar-imports.php`, and only its WORDS (check W50 of `feed-admin-selftest.php`). Twenty pages read by
+    end users, on code that can throw, and the worst case is `help/disaster-recovery.php` — opened when something
+    has ALREADY gone wrong, and which #583 found telling customers to do two things that would have destroyed their
+    data. Two guards: `tools/audit-checks/check_help_page_references.py` (a HARD GATE, the owner's choice) requires
+    every runbook section number a help page SHOWS A READER to be a real heading in
+    `docs/disaster-recovery-runbook.md`; `tools/help-pages-selftest.php` (50 checks over HTTP) requires every help
+    address to answer a WHOLE page to an administrator and a whole page or a clean refusal to a member.
+    **NEITHER CAN JUDGE WHETHER THE ADVICE IS CORRECT — no check can, and both say so in their headers rather than
+    implying the help is verified.** **"Whole" is the load-bearing word: a page that throws part-way still answers
+    HTTP 200**, because its header has already gone, so what arrives is the TOP of a page with nothing wrong IN it
+    and only the closing `</html>` shows it finished (#669 and #715 are both that shape). Three traps, each
+    measured rather than reasoned: (a) the reference check reads ONLY the text outside `<?php ... ?>`, because
+    `help/disaster-recovery.php` still holds "section 4.4" TWICE **inside a comment recording the #583 fix** — a
+    check reading the whole file would fail on the very comment documenting the repair; (b) replacing those blocks
+    with a SPACE cried wolf three times, pulling a distant "runbook" into the 60-character window so that "Version
+    4.4 of the portal", "About 4.4 million records" and the date "4.4.2026" were each reported as stale references
+    — **when you remove a region to read what is left, replace it with a FENCE the window cannot read across, never
+    with whitespace**; (c) **"a whole page OR a clean refusal" is satisfied completely by twenty refusals**, so
+    check B99 counts how many a member really READ (20 of 20) and fails if it is none — the I7d lesson (#645): when
+    a check exists to prove something ORDINARY still works, check the fixture is actually ordinary. All seven live
+    runbook references are correct today, so the gate is a tripwire rather than a repair. And one fault of mine,
+    caught by RUNNING it: the first version queried `tblRoutes.routePath`; the column is **`routeKey`** — check a
+    name against the thing that uses it, not against what looks similar.
+
 ## Gating a feature is a CAPABILITY, never a hard-coded role (the owner, 3 November 2026)
 
 Set when the owner decided #727's scope: *"all remaining features pointable as

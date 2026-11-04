@@ -606,7 +606,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_reservedwords selftest_offsite; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_reservedwords selftest_offsite selftest_helppages; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -765,6 +765,32 @@ jobs:
         run: |
           mkdir -p "$SELFTEST_WEB_DIR"
           php -d memory_limit=512M tools/page-scripts-selftest.php
+
+      # 📖 Every in-app help page really opens (#744, the owner's decision of
+      #    4 November 2026). Until then NOTHING loaded any help page: the only
+      #    one under any test was `help/calendar-imports.php`, and only its
+      #    WORDS, pinned by check W50 of feed-admin-selftest.php.
+      #
+      #    The help is what an end user actually reads, and it is PHP, so a
+      #    page can throw and nobody would know until somebody opened it. The
+      #    worst case is `help/disaster-recovery.php`, which is read when
+      #    something has ALREADY gone wrong — and which #583 found telling
+      #    customers to do two things that would have destroyed their data.
+      #
+      #    Its partner is `check_help_page_references.py`, a hard gate in
+      #    pr-security.yml, which catches a pointer to a runbook section that
+      #    has gone. The pair is the point: that one reads the files, this one
+      #    fetches the pages. NEITHER judges whether the advice is TRUE — no
+      #    check can, and both say so.
+      - name: 'Help pages self-test (#744)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_helppages
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/help-pages
+          SELFTEST_WEB_PORT: '9663'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/help-pages-selftest.php
 
       # 🔗 #569 — the description, canonical address and preview card, read off
       #    real pages over HTTP. Its partner is the file-reading check

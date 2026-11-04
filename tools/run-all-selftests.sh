@@ -182,6 +182,7 @@ channel|tools/channel-selftest.php|selftest_channel|web:channel SELFTEST_WEB_POR
 portal-address|tools/portal-address-selftest.php|selftest_portaladdress|web:portal-address SELFTEST_WEB_PORT=9660
 site-addresses|tools/site-addresses-selftest.php|selftest_siteaddresses|web:site-addresses SELFTEST_WEB_PORT=9650
 page-scripts|tools/page-scripts-selftest.php|selftest_pagescripts|web:page-scripts SELFTEST_WEB_PORT=9651
+help-pages|tools/help-pages-selftest.php|selftest_helppages|web:help-pages SELFTEST_WEB_PORT=9663
 erasure-pages|tools/erasure-pages-selftest.php|selftest_erasurepages|web:erasure-pages SELFTEST_WEB_PORT=9071
 admin-password|tools/admin-password-selftest.php|selftest_adminpwd|web:admin-password SELFTEST_WEB_PORT=9086
 event-repeat-pages|tools/event-repeat-pages-selftest.php|selftest_evrep|web:event-repeat SELFTEST_WEB_PORT=9077

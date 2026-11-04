@@ -16477,3 +16477,74 @@ avoid: `'/href="(https?:[^"]+)"/i'` — the probe matched **`/i`**, a regular
 expression's own delimiter and modifier, on a line that contains `href`, so a
 marker test does not save you. Raised as its own issue because that check is a
 hard gate with `--strict` and an empty pending list.
+
+---
+
+## The in-app help, and two ways a check about it goes wrong (#744)
+
+**Nothing loaded any help page until 4 November 2026.** The only one under any
+test was `help/calendar-imports.php`, and only its words (check W50 of
+`feed-admin-selftest.php`). Twenty pages, read by end users, guarded by nothing
+— on code that can throw.
+
+### Two guards, and what neither does
+
+| | What it does | What it does NOT do |
+|---|---|---|
+| `tools/audit-checks/check_help_page_references.py` (hard gate) | Every runbook section number a help page shows must be a real heading in `docs/disaster-recovery-runbook.md` | Judge whether any advice is correct. **No check can** |
+| `tools/help-pages-selftest.php` (50 checks, HTTP) | Every help address answers a WHOLE page to an administrator, and a whole page or a clean refusal to a member | Judge the words, the layout, or whether the help is complete |
+
+Both say that in their own headers. A green run means the pages open and their
+pointers resolve — it is not a statement that the help is right. #583's fault
+was advice that would have destroyed a customer's data, on a page that loaded
+perfectly.
+
+### Trap 1 — collapsing code pulls distant text together
+
+The reference check reads only the text outside `<?php … ?>`, which is what the
+reader sees. The first version replaced each PHP block with **a single space**,
+and that cried wolf three times in my own planting: "Version 4.4 of the
+portal", "About 4.4 million records" and the date "4.4.2026" were each reported
+as a stale runbook reference, because collapsing a long PHP region pulled a
+"runbook" hundreds of lines away into the same 60-character window.
+
+**When you remove a region to read what is left, replace it with a FENCE the
+window cannot read across, not with whitespace.** A space makes two distant
+things adjacent, which is exactly what a proximity rule is reading for.
+
+### Trap 2 — "A or B" is satisfied by all B
+
+The HTTP test asks that every help page answer a member with **a whole page or
+a clean refusal**. Twenty refusals satisfy that completely. So if every help
+page turned an ordinary member away, all twenty checks would pass while proving
+nothing about a page opening for the person most likely to read it.
+
+B99 counts how many the member really read — **20 of 20** today — and fails if
+it is none. This is the I7d lesson (#645) in a new place: *when a check exists
+to prove something ORDINARY still works, check that the fixture is actually
+ordinary.*
+
+### Two things worth knowing about the help itself
+
+**All seven live runbook references are correct**, so the check is a tripwire
+rather than a repair. And `help/disaster-recovery.php` still contains "section
+4.4" twice — **inside a PHP comment** that records the #583 correction. A check
+reading the whole file would fail on the very comment documenting the repair,
+which is why only the reader-facing text is read.
+
+### And a fault of mine, caught by running it rather than by reading
+
+The first version queried `tblRoutes.routePath`. The column is **`routeKey`**,
+and the test died on its first run. That is CLAUDE.md's "name things by the
+right identifier" trap: check a name against the thing that actually uses it —
+here `web/_sql/full_schema.sql` — not against what looks similar. Writing the
+query from memory and running it cost one minute; writing it from memory and
+*not* running it is how a test ships broken.
+
+### What a reader should take from the numbers
+
+`tools/help-pages-selftest.php` makes 50 checks: 20 pages as an administrator,
+20 as a member, B99, two reachability checks, four on the disaster-recovery page
+and three planted faults. **Count them from the run, not from here** — a number
+in prose goes stale the day somebody adds a help page, which is the fault this
+whole package is about.
