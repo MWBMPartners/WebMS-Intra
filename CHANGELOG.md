@@ -4,6 +4,72 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The two erasure-review pages are asked as real requests now (#732)
+
+`/admin/erasure-requests/review` and `/admin/erasure-requests/review-save` are
+where a Data Controller reads a member's own free text in full and decides
+whether it is emptied. **No request was made of either page anywhere** — their
+guards were pinned as TEXT by `tools/erasure-review-selftest.php`, with whole
+conditions and comments stripped by `token_get_all()`.
+
+**The independent check of #724 measured what a text pin is worth.** In one
+edit it removed `AND siteID = ?` from the request look-up on *both* pages and
+`Auth::verifyCsrf()` from the handler. All 52 audit scripts exited 0, the
+class-level test passed 91 of 91, and `php -l` was clean. Nothing noticed. A
+text pin is a claim about the source, not about what a request does.
+
+Section J of `tools/erasure-pages-selftest.php` is the request: fourteen checks
+over real HTTP, taking the test from 66 to 80. Two failure lines prove the harm
+rather than reporting a mismatch — `the other organisation's words on the page:
+YES — THEY LEAKED`, and `B line now: NULL; decisions against B: 1`, which is
+organisation A's Data Controller really destroying organisation B's member's
+own words.
+
+**The fixtures are where the work went.** Five people hold one ground each and
+nothing else (#616: one account carrying two grounds means a gate can be
+deleted green). Organisation B holds a real line of free text, and J6 proves
+B's own Data Controller can read it — without that, J4 and J5 would pass on an
+empty organisation and prove nothing (#645).
+
+**The independent check then found three untrue sentences and a missing press,
+and the missing press is the one worth knowing about.** J9 proves that naming
+*another* organisation's request is refused — but that is refused by the
+handler's own `AND siteID = ?`, before `ErasureReview::record()` is reached. It
+says nothing about the next gate. **Changing `record()`'s own per-row narrowing
+to `$siteColumn = ''` left section J passing 79 of 79 while a Data Controller
+of A really emptied organisation B's card**, by posting his *own* request
+number with B's row key. New check J9b makes that press; planted, the test now
+fails 78 of 80. The product was never exposed — the class test goes red on the
+two checks written for it — but a gap in the HTTP test is still a gap, and that
+is a request only a real POST can make.
+
+The three untrue sentences, each corrected at the point it was written:
+
+* **"The row lock in `ErasureReview::record()` is proved at class level
+  instead" — it is proved by nothing.** Measured: that test opens ONE
+  connection, and `FOR UPDATE` appears in neither test. The ` FOR UPDATE` could
+  be deleted and nothing would go red. Now stated plainly and tracked as #753.
+  **It survived because the other two items in the same list are honestly
+  covered** — an untruth in good company is the hardest kind to see.
+* **`tblCapabilityRoleMap` is not a table here.** The real ones are
+  `tblCapabilityMap` and `tblCapabilityMapRole`, and they mean different
+  things: a row in the first with none in the second means "nobody,
+  deliberately", which is not the same state as "never chosen". Sent to a table
+  that does not exist, a reader cannot tell which state the fixture is in.
+* **"Organisation B holds a real line of this same person's own words" — they
+  are somebody else's.** The only account column on `tblSalvationCards` is
+  `assignedToID`, which IS in `GdprEraser::ACTOR_COLUMNS`, so the card is
+  reached through the worker it was *given to*. The file contradicted itself:
+  J5 nine lines below requires the page to print "only says this person ACTED
+  on the row". What it changes is the section's reach — the one "Empty it"
+  performed is on a third party's words, and the line genuinely in this
+  person's own words is the booking note, whose "Keep it" alone is covered.
+
+Two clauses that **cannot fail** by any single edit are now labelled as the
+belt-and-braces they are rather than left reading as guards, and the
+"four people, one ground each" count is three (it was counting the person the
+requests are *about*).
+
 ### The documents said the deploy did something it stopped doing in October (#637)
 
 **Fourteen statements across four files described the deploy arrangement as it

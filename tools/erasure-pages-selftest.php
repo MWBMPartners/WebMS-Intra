@@ -76,6 +76,19 @@
  *      bare addresses, which land on the default organisation. B's
  *      administrator also carries out one of B's requests: the browser is
  *      sent to B's own list, and that address opens.
+ *   J. (#732, 4 November 2026.) The erasure REVIEW pages — the two that show
+ *      a person's own words in full and let them be emptied — asked as real
+ *      requests, because until then nothing asked them anything at all. A
+ *      Data Controller of this organisation sees this organisation's queue
+ *      and reads its lines; a GLOBAL ADMINISTRATOR who has not been granted
+ *      the role is REFUSED, which is the whole reason the role exists and was
+ *      the one behaviour nothing requested; an administrator of this
+ *      organisation and an ordinary member are refused too; naming the other
+ *      organisation's request by number is refused on both pages; a press
+ *      with no form token, or with one that is not this session's, is
+ *      refused; and a real decision empties the cell, is recorded naming who
+ *      decided, changes what the page then shows, and reaches no record as
+ *      words.
  *
  * TAKING PICTURES OF THE SETTINGS PAGE
  * ------------------------------------
@@ -134,6 +147,17 @@
  * - Part I: the link inside the confirmation EMAIL. It is built in
  *   `GdprEraser::fileRequest()`, not in a page, and carries no organisation
  *   in front; no mail is sent here, so it is not followed.
+ * - Section J: a Data Controller of one organisation opening ANOTHER
+ *   organisation's address. `SiteGate` refuses a non-member on every address
+ *   of an organisation (#511) with the same HTTP 403 the capability gate
+ *   gives, so such a request cannot say which gate refused it. The boundary
+ *   is asked the way it really bites instead: at the person's own address,
+ *   naming the other organisation's request by number.
+ * - Section J: two people deciding the same line at the same moment, and a
+ *   line past `ErasureReview::SHOW_AT_MOST`. The first needs two overlapping
+ *   requests, which one worker cannot give, so such a test would pass on
+ *   broken code; the second needs 501 rows. Both are proved at class level by
+ *   `tools/erasure-review-selftest.php` (its row lock, and its section J).
  * - MariaDB. It has been run on MySQL 8.0.36 and 8.4.11.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_x SELFTEST_DB_PORT=… SELFTEST_DB_PASS=… \
@@ -157,7 +181,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 66;
+const EXPECTED_CHECKS = 80;
 
 function refuse(string $why): never
 {
@@ -259,6 +283,16 @@ const MEL  = 917013; // a member of A, and a busy volunteer: presses "Delete my 
 const NIA  = 917014; // a member of A: her request is stuck at "processing"
 const CAL  = 917015; // a member of A whose records Mel worked on; files an ordinary request
 const ADMB = 917016; // an administrator of B ONLY
+// 🧑‍⚖️ Section J (#732). FOUR PEOPLE, ONE GROUND EACH. The lesson this follows
+//    is #616's: an account holding several grounds at once cannot tell them
+//    apart, so each of these holds exactly one thing and nothing else. ADM
+//    (an administrator of A, and nothing more) and ROOT (a global
+//    administrator, and nothing more) are the other two grounds, and they
+//    already exist above.
+const DAN = 917021; // an ordinary member of A who holds the Data Controller role in A, and nothing else
+const DEB = 917022; // an ordinary member of B who holds the Data Controller role in B, and nothing else
+const FAY = 917024; // an ordinary member of A with no role and no flag at all
+const PIP = 917023; // a member of BOTH organisations, with a line of free text in each. Never signs in
 const GIO  = 917017; // a member of A who gives at A and at B: his run stops part way (section H)
 const BEN  = 917020; // a member of B ONLY: his request is carried out by B's administrator (section I). Made there, not at the start, so B's list is as the earlier sections expect
 const HAL  = 917018; // a member of A who gives at A: his request is never run, and is cancelled (section H)
@@ -284,6 +318,33 @@ const ROOM    = 917207;
 const BOOKING = 917208;
 const GIFTAID = 917209;
 
+// 🧑‍⚖️ Section J's own rows (#732), and why these two tables.
+//    `tblSalvationCards.prayerRequest` is marked `needsReview` in
+//    `_core/personal-data-catalogue.php` AND the table records which
+//    organisation a row belongs to, so it is the one that proves the
+//    organisation boundary: the same person has a card in each organisation
+//    and only one of them may ever be shown.
+//    `tblResourceBooking.notes` is marked too and the table records NO
+//    organisation, so its row is the one the page has to LABEL as possibly
+//    belonging elsewhere. Between them they cover both halves of the rule.
+const CARD_A    = 917210; // a response card in A naming Pip as the follow-up worker
+const CARD_B    = 917211; // the same, in B
+const BOOKING_J = 917212; // Pip's own booking of A's hall, with a note in her own words
+
+// The three lines of free text, written out so that a check can look for them
+// on a page and in a record. Deliberately free of quotes and ampersands: the
+// page escapes those, and a check comparing escaped text with unescaped text
+// fails for a reason that has nothing to do with what is being tested.
+const CARD_TEXT_A = 'ERASURE REVIEW A SIDE please pray for my brother Tom who is in hospital';
+const CARD_TEXT_B = 'ERASURE REVIEW B SIDE my neighbour Ruth has asked for a visit';
+const NOTE_TEXT   = 'ERASURE REVIEW BOOKING NOTE Pip asked for the side room because of her hearing';
+
+const ROLE_DC_A = 917030; // the Data Controller role, A's own copy of it
+const ROLE_DC_B = 917031; // and B's
+
+const REQ_PIP_A = 917910; // Pip's request, filed in A (section J)
+const REQ_PIP_B = 917911; // Pip's request, filed in B
+
 /** Every request this run's organisations hold for one account. */
 function requestsOf(int $user): array
 {
@@ -307,6 +368,21 @@ function removeWorld(): void
     // leaves rows whose links have been emptied, and the order they could be
     // deleted in is not worth working out for a throwaway database.
     $db->query('SET FOREIGN_KEY_CHECKS = 0');
+    // 🧑‍⚖️ Section J's rows (#732). The decisions go FIRST, while the requests
+    //    they hang off are still here to be joined to: the links are switched
+    //    off just above, so nothing cascades and a row that a real server
+    //    would lose with its parent has to be removed deliberately here.
+    //
+    //    **Not all of them BY NAME, which a draft of this comment claimed.**
+    //    Most go by their organisation (`WHERE siteID IN (?, ?)`), and the
+    //    booking goes with its resource (`WHERE resourceID = ?`). Nothing is
+    //    actually left behind — the end-of-run count checks each one — but
+    //    "by name" would send the next reader looking for a line that is not
+    //    there.
+    q('DELETE d FROM tblErasureReviewDecisions d JOIN tblErasureRequest r ON r.requestID = d.requestID WHERE r.siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblSalvationCards WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblUserRoles WHERE siteID IN (?, ?) OR userID BETWEEN 917000 AND 917999', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblRoles WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE a FROM tblErasureAudit a JOIN tblErasureRequest r ON r.requestID = a.requestID WHERE r.siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblErasureRequest WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblVisitorContact WHERE contactID = ?', 'i', [NOTE]);
@@ -1379,6 +1455,443 @@ ok('B\'s administrator presses "Execute" on one of B\'s requests: it is carried 
     'HTTP ' . $pressB['status'] . ' Location: ' . $pressB['location'] . '; request: ' . request(REQ_B_RUN)['status'] . '; following it: HTTP ' . $landed['status'] . ' ' . mb_substr(message($landed['body']), 0, 120));
 
 // =============================================================================
+head('J. The erasure review, as real requests (#732)');
+// =============================================================================
+// WHY THIS SECTION EXISTS, AND WHAT IT IS ANSWERING.
+//
+// `/admin/erasure-requests/review` and `/admin/erasure-requests/review-save`
+// were driven by NO request anywhere until 4 November 2026.
+// `tools/erasure-review-selftest.php` proves the behaviour at class level and
+// pins the two pages' guards as TEXT, which is better than nothing and is not
+// a request. The independent check of #724 measured the gap: it removed, in
+// ONE edit, `AND siteID = ?` from the request look-up on BOTH pages and
+// `Auth::verifyCsrf()` from the handler, and all 52 audit scripts exited 0,
+// that self-test passed 91 of 91, and `php -l` was clean. Nothing noticed.
+//
+// A text pin is a claim about the SOURCE. Three things it cannot see: a gate
+// that runs but on the wrong value, a page reachable by a verb nobody pinned,
+// and an include that goes round the file whose text was checked. So this
+// section asks the running portal instead.
+//
+// THE ONE BEHAVIOUR NOTHING ELSE REQUESTS. This page shows a person's own
+// words IN FULL and lets them be emptied, and its gate is the portal's one
+// deliberate exception: `App::can(Capabilities::ERASURE_REVIEW)`, whose
+// registry entry declares `globalAdminFallsOpen => false`. So A GLOBAL
+// ADMINISTRATOR WHO HAS NOT BEEN GRANTED THE DATA CONTROLLER ROLE MUST BE
+// REFUSED — an installation's administrator and an organisation's may be
+// different parties (the standing rule of 29 October 2026), and that refusal
+// is the whole reason the role was created (#724). Check J2 is that request.
+//
+// THE FIXTURES MATTER MORE THAN THE ASSERTIONS, and two of this repository's
+// own lessons shape them:
+//
+//   - #616: an account holding several grounds at once cannot tell them
+//     apart. So each ground has a person who holds it AND NOTHING ELSE —
+//     Dan (the Data Controller role in A), Deb (the role in B), Fay (an
+//     ordinary member), ADM (an administrator of A) and ROOT (a global
+//     administrator). Had one account carried two of those, a gate could be
+//     deleted with every check still green.
+//   - #645: a check that proves something is NOT shown passes just as
+//     readily when there is nothing to show. So organisation B holds a REAL
+//     line of free text this person can be matched to, and check J6 proves
+//     B's own Data Controller really can read it. Without J6, J4 and J5 would
+//     pass on an empty organisation B and prove nothing at all.
+//
+//     **BE EXACT ABOUT WHOSE WORDS THEY ARE — a draft called them "this same
+//     person's own words" and that is FALSE, caught by the independent
+//     check.** The only account column on `tblSalvationCards` is
+//     `assignedToID`, which IS in `GdprEraser::ACTOR_COLUMNS`, so the card is
+//     reached through the follow-up worker it was GIVEN to and the
+//     `prayerRequest` is whoever filled the card in — a third party. The
+//     file contradicted itself: check J5 nine lines below REQUIRES the page
+//     to print "only says this person ACTED on the row", whose full sentence
+//     is "The text may well be somebody else's, so emptying it would take
+//     away a third party's words."
+//
+//     **What that changes about this section's reach:** the one "Empty it"
+//     performed here (J10) is on a THIRD PARTY's prayer request reached
+//     through an actor column — arguably the more dangerous case, and
+//     legitimate to cover — while the one line genuinely in this person's own
+//     words is the resource booking's note (`bookedByID` LEFT
+//     `ACTOR_COLUMNS` under #723, measured with comments stripped, because it
+//     is still NAMED in a comment inside that block recording its removal).
+//     That line's "Keep it" is covered; its "Empty it" is not.
+//
+// WHY IT IS BUILT HERE AND NOT WITH THE REST OF THE WORLD: section D counts
+// the buttons on A's list and section I pins B's Report links as an exact
+// list, so a request added before them would fail checks that are about
+// something else entirely. Ben is created late in section I for the same
+// reason.
+//
+// WHAT THIS SECTION CANNOT SHOW
+//   - A Data Controller of one organisation opening ANOTHER organisation's
+//     address. `SiteGate` refuses a non-member on every address of an
+//     organisation (#511), with the same HTTP 403 the capability gate gives,
+//     so such a request cannot say WHICH gate refused it. The boundary is
+//     therefore asked the way it really bites: Dan, at his own
+//     organisation's address, naming organisation B's request by number.
+//   - Two people deciding the same line at the same moment. The server runs
+//     one worker (`PHP_CLI_SERVER_WORKERS` is unset above), so two requests
+//     never overlap and such a test would PASS ON BROKEN CODE.
+//     **AND THE ROW LOCK IS EXERCISED BY NOTHING AT ALL — a draft of this
+//     comment said it was "proved at class level instead", which is untrue
+//     and was caught by the independent check.** Measured:
+//     `tools/erasure-review-selftest.php` opens ONE connection
+//     (`grep -c "new mysqli"` answers 1) and one connection cannot exercise a
+//     lock; the string `FOR UPDATE` appears in NEITHER test; and that test's
+//     own "what it cannot prove" list never claims it. So the ` FOR UPDATE`
+//     at `web/_core/ErasureReview.php:775` could be deleted and nothing in
+//     this repository would go red. Covering it needs two real connections,
+//     the way `tools/expense-payment-race-selftest.php` does it. Tracked as
+//     #753. An overstated guarantee is worse than none, and this one sat in
+//     good company: the other two items below ARE honestly covered.
+//   - A line past `ErasureReview::SHOW_AT_MOST`. That needs 501 rows of free
+//     text and is proved in section J of `tools/erasure-review-selftest.php`.
+//   - **THREE clauses here are belt and braces rather than guards, and the
+//     section header must not read as though they were.** J1's two "the words
+//     are not on the queue page" clauses and J2's queue-body clause cannot
+//     fail by ANY single edit under `web/`, because the queue renders no item
+//     text at all (`review.php`'s "COUNTS, NOT ITEMS" block) — so there is no
+//     edit that could put the words there. Likewise J12's
+//     `str_contains($logSaid, CARD_TEXT_A) === false`: `review-save.php` never
+//     has that text in scope. They are worth keeping as tripwires for a FUTURE
+//     change that starts listing items, but a clause that cannot fail today
+//     makes a check look stronger than it is, and saying so is the only remedy
+//     a comment can offer. **J12's audit-trail half IS alive** — a plant that
+//     appended the cell's text to the audit line turned J12 red and nothing
+//     else.
+//   - **A non-zero "still to decide" count.** J13 pins "1 line(s) … 0 of them
+//     still to decide", and nothing ever reads a non-zero one, although J5 is
+//     standing in front of "2 line(s) … 2 of them still to decide". A
+//     `countUndecided()` that always answered zero would leave this section
+//     green. Display only: the rule that actually refuses a close is
+//     `whyNotReadyToClose()`, a different method, covered by the class test.
+//   - Whether an erasure RUN then refuses to close over an undecided line.
+//     Section C of that same class-level test is what proves it.
+
+// 🧑‍⚖️ The people. THREE grounds, one each — Dan (the role in A), Deb (the
+//    role in B), Fay (an ordinary member) — plus Pip, who holds NO ground and
+//    never signs in: the requests are about her. A draft counted "four people,
+//    one ground each", which counted Pip as a ground.
+foreach ([DAN => 'Dan Controller', DEB => 'Deb Controller', FAY => 'Fay Member', PIP => 'Pip Subject'] as $id => $name) {
+    q('INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$id, $name, 'u' . $id . '.erasure@selftest.invalid']);
+}
+// Pip belongs to BOTH organisations, which is the case the boundary is about.
+foreach ([[DAN, ORG_A], [FAY, ORG_A], [DEB, ORG_B], [PIP, ORG_A], [PIP, ORG_B]] as [$user, $site]) {
+    q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, 0, 0)', 'ii', [$user, $site]);
+}
+// 🔑 The Data Controller role, one copy per organisation, exactly as migration
+//    241 seeds it for a real installation. These two organisations are made by
+//    this test with plain SQL, so nothing has seeded it for them.
+//
+//    NOTHING IS WRITTEN TO `tblCapabilityMap` OR `tblCapabilityMapRole` ON
+//    PURPOSE, so `Capabilities::roleKeysInForce()` falls back to the
+//    registry's shipped set `['data_controller']` — an organisation that has
+//    never opened the roles page is gated exactly as it was before #727, and
+//    that is the commonest state a customer is in.
+//
+//    **A draft named one table, `tblCapabilityRoleMap`, WHICH DOES NOT
+//    EXIST.** That is this repository's "name things by the right identifier"
+//    fault: a search for it finds nothing, and nothing found reads exactly
+//    like nothing to fix. It matters more than a typo here, because the two
+//    real tables mean DIFFERENT things — `tblCapabilityMap`'s own schema
+//    comment says a row there with no rows in `tblCapabilityMapRole` means
+//    "nobody, deliberately", which is the empty set and NOT the same state as
+//    "never chosen". A reader sent to a table that does not exist cannot tell
+//    which of the two this fixture is in. It is "never chosen": neither table
+//    holds a row.
+foreach ([[ROLE_DC_A, ORG_A], [ROLE_DC_B, ORG_B]] as [$roleId, $site]) {
+    q(
+        'INSERT INTO `tblRoles` (`roleID`, `siteID`, `roleKey`, `roleName`, `description`, `isStandard`) '
+        . "VALUES (?, ?, 'data_controller', 'Data Controller', 'Answerable for personal data', 1)",
+        'ii',
+        [$roleId, $site]
+    );
+}
+q('INSERT INTO `tblUserRoles` (`userID`, `roleID`, `siteID`) VALUES (?, ?, ?)', 'iii', [DAN, ROLE_DC_A, ORG_A]);
+q('INSERT INTO `tblUserRoles` (`userID`, `roleID`, `siteID`) VALUES (?, ?, ?)', 'iii', [DEB, ROLE_DC_B, ORG_B]);
+
+// 📝 The three lines of free text. One card in each organisation, so that
+//    "A cannot see B's" is a boundary rather than an empty table; and one
+//    booking, on a table that records no organisation at all.
+q(
+    "INSERT INTO `tblSalvationCards` (`cardID`, `siteID`, `fullName`, `prayerRequest`, `assignedToID`, `status`) "
+    . "VALUES (?, ?, 'Someone at A', ?, ?, 'assigned')",
+    'iisi',
+    [CARD_A, ORG_A, CARD_TEXT_A, PIP]
+);
+q(
+    "INSERT INTO `tblSalvationCards` (`cardID`, `siteID`, `fullName`, `prayerRequest`, `assignedToID`, `status`) "
+    . "VALUES (?, ?, 'Someone at B', ?, ?, 'assigned')",
+    'iisi',
+    [CARD_B, ORG_B, CARD_TEXT_B, PIP]
+);
+q(
+    'INSERT INTO `tblResourceBooking` (`bookingID`, `resourceID`, `bookedByID`, `startAt`, `endAt`, `purpose`, `notes`, `status`) '
+    . "VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 5 DAY), DATE_ADD(NOW(), INTERVAL 125 HOUR), 'Hearing loop test', ?, 'pending')",
+    'iiis',
+    [BOOKING_J, ROOM, PIP, NOTE_TEXT]
+);
+// One request in each organisation, both waiting for review.
+$seed(REQ_PIP_A, ORG_A, PIP, 'pending_review', null);
+$seed(REQ_PIP_B, ORG_B, PIP, 'pending_review', null);
+
+// Sign-ins for the three new people, in browsers of their own.
+foreach (['dan' => DAN, 'deb' => DEB, 'fay' => FAY] as $who => $id) {
+    q('INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)', 'iss', [$id, 'selftest-erasure-' . $who, $hash]);
+    $in = $signIn($who);
+    if ($in['status'] !== 302 || str_contains($in['location'], 'login') === true) {
+        refuse("signing in as selftest-erasure-{$who} did not work (HTTP {$in['status']} {$in['location']})");
+    }
+}
+
+$reviewUrlA = ADDR_A . '/admin/erasure-requests/review';
+$reviewUrlB = ADDR_B . '/admin/erasure-requests/review';
+
+/** Open the review page: the queue with no query, or one request with '?id=N'. */
+$open = static fn (string $who, string $query = '', string $address = ADDR_A): array
+    => req($jar[$who], 'GET', '/admin/erasure-requests/review' . $query, null, $address);
+
+/** A form token read FRESH off the review page: `Auth::verifyCsrf()` replaces it on every acceptance. */
+$reviewToken = static fn (string $who, int $requestId, string $address = ADDR_A): string
+    => token($open($who, '?id=' . $requestId, $address)['body']);
+
+/**
+ * One press of "Empty it" or "Keep it". `$token` is sent EXACTLY as given, so
+ * '' is a press carrying no form token at all.
+ */
+$pressReview = static fn (
+    string $who,
+    string $token,
+    int $requestId,
+    string $table,
+    string $column,
+    int $rowKey,
+    string $decision,
+    string $address = ADDR_A
+): array => req($jar[$who], 'POST', '/admin/erasure-requests/review-save', [
+    'csrf_token' => $token, 'requestID' => $requestId, 'tableName' => $table,
+    'columnName' => $column, 'rowKey' => $rowKey, 'decision' => $decision,
+], $address);
+
+// What is really in the three cells, and what has really been recorded. Read
+// from the database, never believed from the page.
+$cardNow     = static fn (int $cardId): ?string => (one('SELECT `prayerRequest` FROM `tblSalvationCards` WHERE `cardID` = ?', 'i', [$cardId]) ?? [])['prayerRequest'] ?? null;
+$noteNow     = static fn (int $bookingId): ?string => (one('SELECT `notes` FROM `tblResourceBooking` WHERE `bookingID` = ?', 'i', [$bookingId]) ?? [])['notes'] ?? null;
+$decisionsOf = static fn (int $requestId): array => q('SELECT `tableName`, `columnName`, `rowKey`, `decision`, `decidedByID` FROM `tblErasureReviewDecisions` WHERE `requestID` = ? ORDER BY `decisionID`', 'i', [$requestId]);
+/** All three lines still exactly as they were written, and nothing recorded about either request. */
+$untouched = static fn (): bool => $cardNow(CARD_A) === CARD_TEXT_A && $cardNow(CARD_B) === CARD_TEXT_B
+    && $noteNow(BOOKING_J) === NOTE_TEXT && $decisionsOf(REQ_PIP_A) === [] && $decisionsOf(REQ_PIP_B) === [];
+
+// ── J1. The Data Controller of A sees A's queue, and only A's ───────────────
+$listA = $open('dan');
+ok('J1 the Data Controller of this organisation opens the review queue: it offers THIS organisation\'s open request, not the other organisation\'s, and shows no free text at all (the queue counts lines, it does not list them)',
+    $listA['status'] === 200
+    && str_contains($listA['body'], $reviewUrlA . '?id=' . REQ_PIP_A) === true
+    && str_contains($listA['body'], '?id=' . REQ_PIP_B) === false
+    && str_contains(text($listA['body']), CARD_TEXT_A) === false
+    && str_contains(text($listA['body']), CARD_TEXT_B) === false,
+    'HTTP ' . $listA['status'] . '; own request offered: '
+    . (str_contains($listA['body'], $reviewUrlA . '?id=' . REQ_PIP_A) ? 'yes' : 'NO')
+    . '; the other organisation\'s offered: ' . (str_contains($listA['body'], '?id=' . REQ_PIP_B) ? 'YES' : 'no'));
+
+// ── J2. The decisive one: a global administrator with no role is refused ────
+// `App::hasRole()` answers TRUE for any global administrator holding no role
+// row (#516). That is why this gate asks the capability registry instead, and
+// why `erasure.review` is the one capability that does NOT fall open for a
+// global administrator. Rae holds that flag and NOTHING else.
+$rootList = $open('root');
+$rootOne  = $open('root', '?id=' . REQ_PIP_A);
+ok('J2 a GLOBAL ADMINISTRATOR who has not been granted the Data Controller role is REFUSED (403) on the queue and on one request alike, and is shown none of the words',
+    $rootList['status'] === 403 && $rootOne['status'] === 403
+    && str_contains(text($rootList['body']), CARD_TEXT_A) === false
+    && str_contains(text($rootOne['body']), CARD_TEXT_A) === false
+    && str_contains(text($rootOne['body']), NOTE_TEXT) === false,
+    'queue HTTP ' . $rootList['status'] . ', one request HTTP ' . $rootOne['status']
+    . '; words shown: ' . (str_contains(text($rootOne['body']), CARD_TEXT_A) ? 'YES' : 'no'));
+
+// ── J3. An administrator of this organisation, and an ordinary member ───────
+$admList = $open('adm');
+$admOne  = $open('adm', '?id=' . REQ_PIP_A);
+$fayList = $open('fay');
+$fayOne  = $open('fay', '?id=' . REQ_PIP_A);
+ok('J3 an administrator of THIS organisation, and an ordinary member, are refused too (403 each, queue and request), and neither is shown the words',
+    [$admList['status'], $admOne['status'], $fayList['status'], $fayOne['status']] === [403, 403, 403, 403]
+    && str_contains(text($admOne['body']), CARD_TEXT_A) === false
+    && str_contains(text($fayOne['body']), CARD_TEXT_A) === false,
+    'administrator: ' . $admList['status'] . '/' . $admOne['status']
+    . ', member: ' . $fayList['status'] . '/' . $fayOne['status']);
+
+// ── J4. The boundary: asking for the other organisation's request by number ─
+// This is the request the #724 checker's plant would have answered. `$siteId`
+// comes from `Site::id()`, so the number in the address is the only thing an
+// outsider controls — and `AND siteID = ?` is what makes it useless.
+$crossed = $open('dan', '?id=' . REQ_PIP_B);
+ok('J4 the Data Controller of A names the OTHER organisation\'s request by number: the page says it is not one of this organisation\'s, and shows neither organisation\'s words',
+    $crossed['status'] === 200
+    && str_contains(message($crossed['body']), 'That erasure request is not one of this organisation') === true
+    && str_contains(text($crossed['body']), CARD_TEXT_B) === false
+    && str_contains(text($crossed['body']), CARD_TEXT_A) === false
+    && str_contains(text($crossed['body']), NOTE_TEXT) === false,
+    'HTTP ' . $crossed['status'] . ' ' . message($crossed['body'])
+    . '; the other organisation\'s words on the page: ' . (str_contains(text($crossed['body']), CARD_TEXT_B) ? 'YES — THEY LEAKED' : 'no')
+    . '; this organisation\'s: ' . (str_contains(text($crossed['body']), CARD_TEXT_A) ? 'YES' : 'no')
+    . '; the booking note: ' . (str_contains(text($crossed['body']), NOTE_TEXT) ? 'YES' : 'no'));
+
+// ── J5. Their own request: the words in full, with the warnings ─────────────
+$mine  = $open('dan', '?id=' . REQ_PIP_A);
+$tMine = text($mine['body']);
+ok('J5 their own organisation\'s request: this organisation\'s line is shown WHOLE with the catalogue\'s reason, the "they only ACTED on this row" warning and the "not tied to one organisation" label, and the other organisation\'s line is not there',
+    $mine['status'] === 200
+    && str_contains($tMine, CARD_TEXT_A) === true
+    && str_contains($tMine, NOTE_TEXT) === true
+    && str_contains($tMine, CARD_TEXT_B) === false
+    && str_contains($tMine, 'Why no rule decides this:') === true
+    && str_contains($tMine, 'only says this person ACTED on the row') === true
+    && str_contains($tMine, 'Not tied to one organisation.') === true
+    && str_contains($tMine, 'Some of it could not be looked at') === false,
+    'HTTP ' . $mine['status'] . '; A line: ' . (str_contains($tMine, CARD_TEXT_A) ? 'shown' : 'MISSING')
+    . '; B line: ' . (str_contains($tMine, CARD_TEXT_B) ? 'SHOWN' : 'not shown')
+    . '; booking note: ' . (str_contains($tMine, NOTE_TEXT) ? 'shown' : 'MISSING'));
+
+// ── J6. And B's own Data Controller really can read B's line ────────────────
+// WITHOUT THIS CHECK J4 AND J5 PROVE NOTHING: "B's words are not on A's page"
+// passes just as well when B has no words. This is the fixture half of the
+// #645 lesson, made into a request.
+$hers  = $open('deb', '?id=' . REQ_PIP_B, ADDR_B);
+$tHers = text($hers['body']);
+ok('J6 the OTHER organisation\'s own Data Controller opens its own request and reads its line in full, and not this organisation\'s — so what J4 and J5 refuse really is a boundary and not an empty table',
+    $hers['status'] === 200
+    && str_contains($tHers, CARD_TEXT_B) === true
+    && str_contains($tHers, CARD_TEXT_A) === false,
+    'HTTP ' . $hers['status'] . '; B line: ' . (str_contains($tHers, CARD_TEXT_B) ? 'shown' : 'MISSING')
+    . '; A line: ' . (str_contains($tHers, CARD_TEXT_A) ? 'SHOWN' : 'not shown'));
+
+// ── J7. The save, with no form token and with one that is not this session's ─
+$noToken  = $pressReview('dan', '', REQ_PIP_A, 'tblSalvationCards', 'prayerRequest', CARD_A, 'empty');
+$badToken = $pressReview('dan', str_repeat('a', 64), REQ_PIP_A, 'tblSalvationCards', 'prayerRequest', CARD_A, 'empty');
+ok('J7 a press carrying NO form token, and one carrying a token that is not this session\'s, are both refused (400); nothing is recorded and all three lines are exactly as they were',
+    $noToken['status'] === 400 && $badToken['status'] === 400 && $untouched() === true,
+    'no token: HTTP ' . $noToken['status'] . ', wrong token: HTTP ' . $badToken['status']
+    . '; A line now: ' . var_export($cardNow(CARD_A), true));
+
+// ── J8. The save, by somebody without the capability ───────────────────────
+// WITH A GOOD FORM TOKEN OF THEIR OWN, deliberately: a press with no token
+// would be refused by the test above it, so the refusal would not tell us the
+// gate is there. Each token is checked to be real for the same reason — a
+// fixture whose condition cannot be true cannot test the guard.
+$pressCodes = [];
+$tokensReal = true;
+foreach (['root', 'adm', 'fay'] as $who) {
+    $ownToken   = token(req($jar[$who], 'GET', '/account/delete')['body']);
+    $tokensReal = $tokensReal && strlen($ownToken) === 64;
+    $pressCodes[$who] = $pressReview($who, $ownToken, REQ_PIP_A, 'tblSalvationCards', 'prayerRequest', CARD_A, 'empty')['status'];
+}
+ok('J8 a global administrator with no role, an administrator of this organisation and an ordinary member each press "Empty it" with a good form token of their own: all three are refused (403), nothing is recorded and no line is changed',
+    $tokensReal === true
+    && $pressCodes === ['root' => 403, 'adm' => 403, 'fay' => 403]
+    && $untouched() === true,
+    'tokens real: ' . ($tokensReal ? 'yes' : 'NO') . '; codes: ' . json_encode($pressCodes)
+    . '; A line now: ' . var_export($cardNow(CARD_A), true));
+
+// ── J9. The save, naming the other organisation's request ──────────────────
+$crossPress = $pressReview('dan', $reviewToken('dan', REQ_PIP_A), REQ_PIP_B, 'tblSalvationCards', 'prayerRequest', CARD_B, 'empty');
+$crossTold  = message($open('dan')['body']);
+ok('J9 the Data Controller of A presses "Empty it" on the OTHER organisation\'s request: it is refused by name, the browser lands back on this organisation\'s own queue, the other organisation\'s line is untouched and nothing is recorded against it',
+    $crossPress['status'] === 302 && $crossPress['location'] === $reviewUrlA
+    && str_contains($crossTold, 'That erasure request is not one of this organisation') === true
+    && $cardNow(CARD_B) === CARD_TEXT_B
+    && $decisionsOf(REQ_PIP_B) === [],
+    'HTTP ' . $crossPress['status'] . ' Location: ' . $crossPress['location'] . '; ' . $crossTold
+    . '; B line now: ' . var_export($cardNow(CARD_B), true)
+    . '; decisions against B: ' . count($decisionsOf(REQ_PIP_B)));
+
+// ── J9b. YOUR OWN request number, the OTHER organisation's ROW ─────────────
+//
+// 🎯 THE PRESS THE SECTION WAS MISSING, and the independent check found it by
+//    planting the one thing nothing else caught. J9 names organisation B's
+//    REQUEST, which `review-save.php`'s own `AND siteID = ?` refuses before
+//    `ErasureReview::record()` is ever reached. So J9 proves that gate and
+//    says nothing about the next one.
+//
+//    This press names Dan's OWN request — which passes that gate — and pairs
+//    it with organisation B's ROW KEY. The only thing left standing between
+//    him and a third party's words is the per-row narrowing `record()` takes
+//    for itself (`$siteColumn = self::siteColumnOf($db, $table);`, its own
+//    look-up, separate from the two in `rowsHolding()` and `countHolding()`).
+//
+//    **Measured: with that one line changed to `$siteColumn = ''`, section J
+//    passed 79 of 79 while this press really emptied organisation B's card.**
+//    The product was never exposed — `tools/erasure-review-selftest.php`
+//    turns red on exactly the two checks written for it — but a gap in the
+//    HTTP test is still a gap, and this is a request only a real POST can
+//    make.
+$ownReqOtherRow = $pressReview('dan', $reviewToken('dan', REQ_PIP_A), REQ_PIP_A, 'tblSalvationCards', 'prayerRequest', CARD_B, 'empty');
+ok('J9b the Data Controller of A presses "Empty it" naming HIS OWN request but the OTHER organisation\'s row: organisation B\'s words are still there and nothing is recorded against his request',
+    $cardNow(CARD_B) === CARD_TEXT_B
+    && $decisionsOf(REQ_PIP_A) === [],
+    'HTTP ' . $ownReqOtherRow['status'] . ' Location: ' . $ownReqOtherRow['location']
+    . '; B line now: ' . var_export($cardNow(CARD_B), true)
+    . '; decisions against A: ' . json_encode($decisionsOf(REQ_PIP_A)));
+
+// ── J10. A real decision really empties the cell ───────────────────────────
+$emptyPress = $pressReview('dan', $reviewToken('dan', REQ_PIP_A), REQ_PIP_A, 'tblSalvationCards', 'prayerRequest', CARD_A, 'empty');
+$afterEmpty = $open('dan', '?id=' . REQ_PIP_A);
+$emptyRows  = $decisionsOf(REQ_PIP_A);
+ok('J10 "Empty it" on this organisation\'s line: the cell really is empty in the database, the decision is recorded naming who gave it, and the OTHER organisation\'s line is untouched',
+    $emptyPress['status'] === 302 && $emptyPress['location'] === $reviewUrlA . '?id=' . REQ_PIP_A
+    && str_contains(message($afterEmpty['body']), 'That line is emptied') === true
+    && $cardNow(CARD_A) === null
+    && $cardNow(CARD_B) === CARD_TEXT_B
+    && count($emptyRows) === 1
+    && $emptyRows[0]['decision'] === 'empty'
+    && (int) $emptyRows[0]['decidedByID'] === DAN,
+    'HTTP ' . $emptyPress['status'] . ' Location: ' . $emptyPress['location'] . '; '
+    . message($afterEmpty['body']) . '; A line now: ' . var_export($cardNow(CARD_A), true)
+    . '; recorded: ' . json_encode($emptyRows));
+
+// ── J11. And the page afterwards shows something different ─────────────────
+$tAfterEmpty = text($afterEmpty['body']);
+ok('J11 the page then shows the change: the words are gone from it, and the line appears under "Decisions recorded" as emptied, by the account that decided',
+    str_contains($tAfterEmpty, CARD_TEXT_A) === false
+    && str_contains($tAfterEmpty, 'Decisions recorded for this request') === true
+    && preg_match('/tblSalvationCards\.prayerRequest\s+row\s+' . CARD_A . '\s+emptied\s+account\s+#' . DAN . '/', $tAfterEmpty) === 1,
+    'words still on the page: ' . (str_contains($tAfterEmpty, CARD_TEXT_A) ? 'YES' : 'no')
+    . '; ' . mb_substr((string) strstr($tAfterEmpty, 'Decisions recorded'), 0, 220));
+
+// ── J12. The words reach no record ─────────────────────────────────────────
+// THE POSITIVE CLAUSES COME FIRST ON PURPOSE. A check made only of absences
+// passes the day the recording stops happening at all, which this repository
+// has already been caught by: so each record is required to EXIST and to say
+// what was decided, and only then required not to quote the words.
+$auditSaid = implode(' ', array_map('strval', array_column(q('SELECT `details` FROM `tblErasureAudit` WHERE `requestID` = ?', 'i', [REQ_PIP_A]), 'details')));
+$logSaid   = implode(' ', array_map('strval', array_column(q('SELECT `activityDescription` FROM `tblActivityLogs` WHERE `userID` = ?', 'i', [DAN]), 'activityDescription')));
+ok('J12 the request\'s own trail and the activity log both record WHICH line was emptied and that a person decided it, and NEITHER holds the words themselves',
+    str_contains($auditSaid, 'reviewed by hand and EMPTIED') === true
+    && str_contains($logSaid, 'was reviewed by hand and EMPTIED') === true
+    && str_contains($auditSaid, CARD_TEXT_A) === false
+    && str_contains($logSaid, CARD_TEXT_A) === false,
+    'trail: ' . mb_substr($auditSaid, 0, 300) . ' | log: ' . mb_substr($logSaid, 0, 300));
+
+// ── J13. "Keep it" changes nothing, and the request is then fully decided ──
+$keepPress = $pressReview('dan', $reviewToken('dan', REQ_PIP_A), REQ_PIP_A, 'tblResourceBooking', 'notes', BOOKING_J, 'keep');
+$afterKeep = $open('dan', '?id=' . REQ_PIP_A);
+$tKeep     = text($afterKeep['body']);
+$keptRows  = array_values(array_filter($decisionsOf(REQ_PIP_A), static fn (array $r): bool => $r['decision'] === 'keep'));
+ok('J13 "Keep it" on the line that is not tied to one organisation: the note is left exactly as it was, the decision is recorded as kept, and the page then says nothing is left to decide for this request',
+    $keepPress['status'] === 302
+    && str_contains(message($afterKeep['body']), 'recorded as kept') === true
+    && $noteNow(BOOKING_J) === NOTE_TEXT
+    && count($keptRows) === 1
+    && (int) $keptRows[0]['rowKey'] === BOOKING_J
+    && str_contains($tKeep, NOTE_TEXT) === true
+    && preg_match('/1 line\(s\) of free text are held for this person,\s*0 of them still to decide/', $tKeep) === 1,
+    'HTTP ' . $keepPress['status'] . '; ' . message($afterKeep['body'])
+    . '; note now: ' . var_export($noteNow(BOOKING_J), true)
+    . '; kept rows: ' . json_encode($keptRows)
+    . '; counts sentence: ' . mb_substr((string) strstr($tKeep, 'line(s) of free text are held'), 0, 160));
+
+// =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');
 // =============================================================================
 $log = (string) @file_get_contents($child . $sep . 'php-errors.log');
@@ -1392,8 +1905,19 @@ $left = (int) (one(
     . '+ (SELECT COUNT(*) FROM tblErasureRequest WHERE siteID IN (?, ?)) + (SELECT COUNT(*) FROM tblSettings WHERE siteID IN (?, ?)) '
     . '+ (SELECT COUNT(*) FROM tblGivingEntry WHERE siteID IN (?, ?)) + (SELECT COUNT(*) FROM tblGivingCategory WHERE siteID IN (?, ?)) '
     . '+ (SELECT COUNT(*) FROM tblGivingKeptDonors WHERE siteID IN (?, ?)) '
+    // 🧑‍⚖️ Section J's own rows (#732). Counted here as well, because the links
+    //    are switched off while the world is removed, so nothing is taken away
+    //    by a parent going: each has to be deleted by name or it is left
+    //    behind, and this is the check that would notice.
+    . '+ (SELECT COUNT(*) FROM tblSalvationCards WHERE siteID IN (?, ?)) '
+    . '+ (SELECT COUNT(*) FROM tblRoles WHERE siteID IN (?, ?)) '
+    . '+ (SELECT COUNT(*) FROM tblUserRoles WHERE siteID IN (?, ?)) '
+    . '+ (SELECT COUNT(*) FROM tblResourceBooking WHERE bookingID = ?) '
+    . '+ (SELECT COUNT(*) FROM tblErasureReviewDecisions WHERE requestID IN (?, ?)) '
     . "+ (SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME LIKE 'selftest\\_erasure\\_pages\\_stop\\_%') AS n",
-    'iiiiiiiiiiii', [ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B]
+    'iiiiiiiiiiiiiiiiiiiii',
+    [ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B,
+        ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B, BOOKING_J, REQ_PIP_A, REQ_PIP_B]
 )['n'] ?? -1);
 $settingsBack = true;
 foreach ($settingsBefore as $key => $row) {
