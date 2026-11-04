@@ -670,10 +670,17 @@ jobs:
           php -d memory_limit=512M tools/gdpr-eraser-selftest.php
 
       # 🛡️ The free text an erasure cannot judge on its own (#724). Needs a
-      # database and nothing else — no node, no openssl, no gd. Wired here in
-      # the same change that added it, because a guard that runs nowhere is
-      # the #646 fault: twelve correct guards, each over a fault that had
-      # already happened, invoked by no workflow.
+      # database, a database user allowed to CREATE TRIGGER, and `proc_open` —
+      # no node, no openssl, no gd. The last two arrived with #735's sections S
+      # and T: S reaches a mid-run state with a trigger, and T needs a second
+      # PROCESS because the decider under test has to be BLOCKED while the test
+      # carries on. The `mysql` service runs as root, which may create a
+      # trigger, and `proc_open` is not disabled on the runner — but each is
+      # now a real requirement rather than "a database and nothing else", and
+      # saying otherwise here is how a job comes to be moved somewhere it
+      # cannot run. Wired here in the same change that added it, because a
+      # guard that runs nowhere is the #646 fault: twelve correct guards, each
+      # over a fault that had already happened, invoked by no workflow.
       - name: Erasure review self-test
         if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
         env:

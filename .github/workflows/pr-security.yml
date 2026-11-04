@@ -1503,6 +1503,33 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_erasure_review_items.py
 
+      # 🚧 TWO CHECKS THAT USED TO PRINT A PROBLEM AND STILL EXIT 0 (the owner,
+      # 4 November 2026 — D-046; #730 and #747). Both reported exactly ONE
+      # complaint and both complaints were measured FALSE, so each sat in every
+      # pull request's output teaching the next reader to stop reading — which
+      # is how `check_schema_seed_parity.py`'s TRUE finding nearly let migration
+      # 223 ship unrecorded (#647).
+      #
+      # The order mattered: the false alarms were fixed FIRST, because gating a
+      # check that cries wolf blocks every push (#483). Both now exit 1 on a
+      # finding whatever arguments they are given, so the pre-push hook — which
+      # globs the folder and passes none — blocks as well. These steps exist so
+      # that a MERGE is also stopped: the hook is turned on per clone and
+      # `git push --no-verify` skips it.
+      #
+      # Both are ALSO read by the heuristic step further down, which puts their
+      # output in the bot comment. That is deliberate: the comment explains, the
+      # gate refuses.
+      - name: 'bind_param() tells the database the right number of values (hard gate, #730)'
+        id: bind_param_arity
+        if: always()
+        run: python3 -I tools/audit-checks/check_bind_param_arity.py
+
+      - name: 'Every key a fresh install declares, an upgrade also gets (hard gate, #747)'
+        id: fk_references_unique_key
+        if: always()
+        run: python3 -I tools/audit-checks/check_fk_references_unique_key.py
+
       # The capability registry and its storage cannot drift (#727). A HARD
       # GATE because the thing it guards is invisible: one word in
       # `Capabilities::CAPABILITIES` decides whether #724's erasure review
@@ -1650,6 +1677,8 @@ jobs:
             # Its own line, again deliberately NOT inside the #646 loop below,
             # which says "ten" and would be wrong the moment anything joined it.
             echo "- The free text a person decides about is the agreed seven: ${{ steps.erasure_review_items.outcome }} (hard gate, #724)"
+            echo "- bind_param() tells the database the right number of values: ${{ steps.bind_param_arity.outcome }} (hard gate, #730)"
+            echo "- Every key a fresh install declares, an upgrade also gets: ${{ steps.fk_references_unique_key.outcome }} (hard gate, #747)"
             # The ten guards wired by #646, as ONE line unless something failed.
             # Ten separate lines would bury the rest of the summary; what a
             # reader needs is to tell "they all passed" from "they are not

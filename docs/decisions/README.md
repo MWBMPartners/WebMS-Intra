@@ -101,7 +101,9 @@ appended with its real date and a note that it was added later.
 | [D-043](043-transcription-gets-its-trigger-not-a-notice.md) | 2026-10-29 | Transcription gets its trigger, not a notice | in force |
 | [D-044](044-a-started-series-is-still-published-as-one-entry.md) | 2026-10-29 | A series that has already started is still published as one entry | in force |
 | [D-045](045-report-at-a-commit-boundary-and-keep-going.md) | 2026-11-04 | Report at a commit boundary, and keep going in the same turn | in force |
+| [D-046](046-two-reporting-checks-become-hard-gates.md) | 2026-11-04 | Two checks that only printed a problem now stop the work | in force |
+| [D-047](047-only-volunteers-see-the-volunteer-photo-tier.md) | 2026-11-04 | Only volunteers may see the volunteer photo tier | in force |
 
-*45 decisions. This index is checked against the folder by
+*47 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*

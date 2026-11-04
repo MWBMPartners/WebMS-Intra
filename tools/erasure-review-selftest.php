@@ -48,15 +48,23 @@
  *      rule are where they are supposed to be, WHOLE CONDITIONS pinned with
  *      comments stripped by `token_get_all()` — so `&& false` on any of them
  *      fails this test.
+ *   R  The row lock is real, and what it buys (#753).
+ *   S  A REVIEWABLE LINE APPEARING DURING A RUN really stops the close (#735).
+ *      This is the second ask inside `closeRequest()`'s transaction, which
+ *      until 4 November 2026 was reached by nothing. Deleting that ask makes
+ *      the request close as COMPLETED with the person's own words still in it,
+ *      which is what S4 and S5 now catch.
+ *   T  TWO DECIDERS AT ONCE: the second is refused, and no record ever says
+ *      "keep" over a cell somebody else emptied (#735). This is the half
+ *      section R could not do — R1 to R4 stay green with the lock deleted,
+ *      and T2 and T3 do not.
  *
  * WHAT IT CANNOT PROVE, said plainly
  * ----------------------------------
- *   - THE RACE AT THE CLOSE. `GdprEraser::closeRequest()` asks the same
- *     question again inside the transaction that closes a request. Reaching it
- *     means a reviewable row being INSERTED between the refusal at the start of
- *     a run and the close at its end, and this test runs one request at a time.
- *     What is proved is the question itself, over every answer it can give, and
- *     that the call is there with its whole condition.
+ *   - THE PAGES' OWN RACE. Sections S and T drive the CLASSES. Nothing here
+ *     presses two buttons on `review.php` at once, so what is proved is that
+ *     `ErasureReview` and `GdprEraser` behave, not that the page cannot submit
+ *     in some way that avoids them.
  *   - THE PAGES OVER HTTP. The gate, the organisation filter and the form
  *     token are pinned AS TEXT here. Nothing in this file starts a web server,
  *     so no 403, no redirect and no rendered page has ever been requested.
@@ -73,6 +81,16 @@
  *
  *         The database is emptied and rebuilt by whoever creates it, and its
  *         name must start with selftest_.
+ *
+ *         Sections S and T need two things more than the rest: the database
+ *         user must be allowed to CREATE TRIGGER (S reaches a mid-run state no
+ *         other way), and `proc_open` must work (T needs a second PROCESS,
+ *         because the decider under test has to be BLOCKED while this one
+ *         carries on, and one process cannot wait on itself). S2 and T1 each
+ *         fail with the requirement named — S2 only since an independent check
+ *         found that it could not fail at all, because this file reports mysqli
+ *         errors as EXCEPTIONS, so `query()` never returned the `false` it was
+ *         testing for.
  *
  * @package   Portal\Tools
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -1560,6 +1578,14 @@ erv_check(
 //    the page ... that is section B's whole job". R1-R4 are the mechanism and
 //    what it buys; R5 is the guard.
 //
+//    ✅ AND SINCE #735 IT IS NO LONGER THE ONLY GUARD. Section T catches the
+//    same removal BEHAVIOURALLY, by holding the row from this connection while
+//    the real `record()` runs in its own process — so the lock cannot be taken
+//    by the test on the method's behalf, which is precisely what made R1-R4
+//    vacuous. Measured three runs out of three with ` FOR UPDATE` deleted: R1
+//    to R4 green, T2 and T3 red. Keep both: R5 reads the text and T reads the
+//    behaviour, and neither covers the other's half.
+//
 //    Comments are stripped by `token_get_all()` first, so a comment mentioning
 //    `FOR UPDATE` — and there is one, directly above the statement — cannot
 //    satisfy this.
@@ -1589,6 +1615,413 @@ erv_run(
     . ' AND `rowKey` = ' . (int) $lockRow
 );
 erv_run('DELETE FROM `tblSalvationCards` WHERE `cardID` = ' . (int) $lockRow);
+
+// =============================================================================
+erv_section('S — a line appearing DURING a run really stops the close (#735)');
+// =============================================================================
+//
+// 🧑‍⚖️ WHAT THIS IS FOR. `GdprEraser` asks `whyNotReadyToClose()` twice: once at
+//    the top of `execute()`, which is the refusal an administrator actually
+//    meets, and again INSIDE the transaction in `closeRequest()`. The second
+//    ask is there for the narrow case the first cannot cover — a row carrying
+//    reviewable free text being WRITTEN while a run is already going, which a
+//    run that has passed that table would never see. Its consequence is the
+//    serious one in #735: a request closing as completed with a line of
+//    somebody's own words undecided inside it.
+//
+// 🧭 WHY IT WAS UNTESTED, AND WHY THAT REASONING WAS WRONG. The code's own
+//    comment said no end-to-end test exercises it "because reaching it means
+//    inserting a row between the first check and this one, and the test harness
+//    runs one request at a time". **The second half of that is true and the
+//    conclusion does not follow.** Two concurrent REQUESTS are not what this
+//    needs. One run is SEQUENTIAL — top check, then every step, then the close
+//    — so a row that appears at any point in the middle of that one run reaches
+//    the second ask. Nothing about it requires two requests, two connections or
+//    two processes.
+//
+//    The row is made to appear by a database TRIGGER, which is this
+//    repository's established way of reaching a state the portal itself cannot
+//    produce on demand (`tools/password-writer-selftest.php` section H uses a
+//    `BEFORE UPDATE` trigger for the same reason, and section G of
+//    `tools/self-service-password-selftest.php` inserts a row by hand for the
+//    same reason). The trigger hangs off `tblErasureAudit`, because every step
+//    of the walk writes a line there, so it fires early in the run and well
+//    before the close.
+//
+// ⚠️ WHAT THIS STILL DOES NOT PROVE: that two people doing this at the same
+//    moment are handled. That is the other half of #735 and is section T.
+
+$midPerson = $newUser('Mid-run Person');
+$midEmail  = (string) erv_one('SELECT `emailAddress` FROM `tblUsers` WHERE `userID` = ?', 'i', [$midPerson]);
+$stmt = $mysqli->prepare(
+    'INSERT INTO `tblErasureRequest` (`siteID`, `userID`, `subjectEmail`, `subjectName`, `status`, `dueBy`) '
+    . "VALUES (1, ?, ?, 'Mid-run Person', 'processing', DATE_ADD(NOW(), INTERVAL 20 DAY))"
+);
+$stmt->bind_param('is', $midPerson, $midEmail);
+$stmt->execute();
+$midRequest = (int) $stmt->insert_id;
+$stmt->close();
+erv_run("UPDATE `tblErasureRequest` SET `claimedAt` = UTC_TIMESTAMP() WHERE `requestID` = " . (int) $midRequest);
+
+// 1️⃣ THE STATE THE CHECK DEPENDS ON: this person holds no reviewable line at
+//    all, so the FIRST ask passes. Without that the test would prove nothing —
+//    a refusal could be the first ask doing its ordinary job, and this section
+//    exists to show the second one working. Asserted rather than assumed,
+//    because a fixture whose premise is untrue tests the wrong thing.
+erv_check(
+    'S1 before the run this person has nothing to review, so the FIRST ask passes '
+        . '(without this the section would prove nothing)',
+    ErasureReview::whyNotReadyToClose($mysqli, $midRequest, $midPerson) === ''
+);
+
+// 2️⃣ The row appears in the middle of the run. `tblSalvationCards.prayerRequest`
+//    is one of the seven marked columns, and section F already proves a card
+//    row the person is linked to survives a whole erasure, so the line is still
+//    there to be counted when the close comes round.
+//
+//    The `NOT EXISTS` guard is not tidiness: the walk writes dozens of audit
+//    lines, and without it the trigger would insert dozens of cards.
+$midText = 'Written while the erasure was running — ' . bin2hex(random_bytes(6));
+$mysqli->query('DROP TRIGGER IF EXISTS `selftest_735_mid_run`');
+// ⚠️ THE TRY/CATCH IS LOAD-BEARING, AND A FIRST VERSION OF THIS CHECK COULD NOT
+//    FAIL. This file sets `MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT`, and it
+//    takes BOTH for mysqli to THROW on a statement error (#694 round 5/6, where
+//    claiming `STRICT` alone did it was a measurement of the wrong code path).
+//    So `query()` never returns false here: `$madeTrigger === true` was true
+//    whatever happened, and `$mysqli->error` was dead text.
+//
+//    It mattered because the header CLAIMS this requirement "says so at the
+//    point of failure rather than skipping quietly". It did not: somebody whose
+//    database user may not create a trigger got an unexplained SQL exception
+//    and a stack trace naming no requirement. Caught by an independent check,
+//    which planted `AFTER ZZINSERT` and watched the run die at this line with
+//    no red check and no summary at all.
+$madeTrigger = false;
+$triggerProblem = '';
+try {
+    $madeTrigger = $mysqli->query(
+        "CREATE TRIGGER `selftest_735_mid_run` AFTER INSERT ON `tblErasureAudit` FOR EACH ROW "
+        . "INSERT INTO `tblSalvationCards` (`siteID`, `fullName`, `assignedToID`, `prayerRequest`) "
+        . "SELECT 1, 'Mid-run card', " . (int) $midPerson . ", '" . $mysqli->real_escape_string($midText) . "' "
+        . "FROM (SELECT 1) AS `x` WHERE NOT EXISTS ("
+        . "SELECT 1 FROM `tblSalvationCards` WHERE `assignedToID` = " . (int) $midPerson . ")"
+    ) === true;
+} catch (\Throwable $ex) {
+    $triggerProblem = $ex->getMessage();
+}
+erv_check(
+    'S2 the mid-run trigger could be created — this section NEEDS the database user to be allowed '
+        . 'to CREATE TRIGGER, because there is no other way to make a row appear in the middle of a run',
+    $madeTrigger === true,
+    $triggerProblem === '' ? 'the database refused it without saying why' : $triggerProblem
+);
+
+// 3️⃣ The run. It must NOT close the request.
+$midThrew   = '';
+$midOutcome = null;
+try {
+    $midOutcome = GdprEraser::execute($midRequest, $midPerson, $deciderId);
+} catch (\Throwable $ex) {
+    $midThrew = $ex->getMessage();
+}
+$mysqli->query('DROP TRIGGER IF EXISTS `selftest_735_mid_run`');
+
+// 4️⃣ The row really did appear mid-run — the premise of everything below. If
+//    the trigger had not fired, every check after this would pass for the wrong
+//    reason, which is the vacuous shape this repository keeps finding.
+$midCards = (int) erv_one(
+    'SELECT COUNT(*) FROM `tblSalvationCards` WHERE `assignedToID` = ? AND `prayerRequest` = ?',
+    'is',
+    [$midPerson, $midText]
+);
+erv_check(
+    'S3 the trigger really did write one reviewable line while the run was going',
+    $midCards === 1,
+    'cards found: ' . (string) $midCards
+);
+
+// 5️⃣ THE POINT OF THE SECTION. The request is not completed.
+$midStatus = (string) erv_one('SELECT `status` FROM `tblErasureRequest` WHERE `requestID` = ?', 'i', [$midRequest]);
+erv_check(
+    'S4 the request did NOT close, although nothing was in the way when the run started',
+    $midStatus !== 'completed',
+    'its status is "' . $midStatus . '"; execute() ' . ($midThrew === '' ? 'returned ' . json_encode($midOutcome) : 'threw')
+);
+
+// 6️⃣ And it stopped for the RIGHT reason. A refusal for some other cause would
+//    satisfy S4 while proving nothing, so the sentence is checked: it must name
+//    the review and the page a Data Controller goes to.
+erv_check(
+    'S5 ... and it stopped because of the review, naming the page somebody has to go to',
+    $midThrew !== '' && str_contains($midThrew, 'cannot be closed') === true
+        && str_contains($midThrew, ErasureReview::PAGE_ROUTE) === true,
+    'it said: ' . substr($midThrew, 0, 220)
+);
+
+// 7️⃣ The words are still there. This is the harm the second ask prevents, so it
+//    is worth asserting directly rather than inferring it from the status.
+erv_check(
+    'S6 the line written mid-run still holds every word, because nothing decided about it',
+    (string) erv_one(
+        'SELECT `prayerRequest` FROM `tblSalvationCards` WHERE `assignedToID` = ? LIMIT 1',
+        'i',
+        [$midPerson]
+    ) === $midText
+);
+
+// 8️⃣ And the way out works: decide the line, run again, and it closes. A
+//    refusal that could never be cleared would be #710 all over again — a
+//    request that can neither be completed nor cancelled — so the recoverable
+//    half is part of the proof, not an extra.
+$midItems = ErasureReview::itemsFor($mysqli, $midRequest, $midPerson);
+$midDecided = 0;
+foreach ($midItems['items'] as $item) {
+    if ((string) $item['decision'] !== '') {
+        continue;
+    }
+    $problem = ErasureReview::record(
+        $mysqli,
+        $midRequest,
+        $midPerson,
+        (string) $item['table'],
+        (string) $item['column'],
+        (int) $item['rowKey'],
+        ErasureReview::DECISION_KEEP,
+        $deciderId
+    );
+    if ($problem === '') {
+        $midDecided++;
+    }
+}
+erv_check('S7 the line is reachable on the review page afterwards, so the refusal can be cleared', $midDecided >= 1, 'decided: ' . (string) $midDecided);
+erv_run("UPDATE `tblErasureRequest` SET `status` = 'processing', `claimedAt` = UTC_TIMESTAMP() WHERE `requestID` = " . (int) $midRequest);
+$midAgain = GdprEraser::execute($midRequest, $midPerson, $deciderId);
+erv_check('S8 and the second run closes it', (int) $midAgain['failed'] === 0
+    && (string) erv_one('SELECT `status` FROM `tblErasureRequest` WHERE `requestID` = ?', 'i', [$midRequest]) === 'completed',
+    json_encode($midAgain));
+
+// =============================================================================
+erv_section('T — two deciders at once: the lock REFUSES the second (#735)');
+// =============================================================================
+//
+// 🔒 WHAT SECTION R LEFT UNDONE, said plainly. R proves the DATABASE locks and
+//    that `record()` contains a `FOR UPDATE`; its own comment admits R1-R4
+//    stayed green on four runs out of four with the lock deleted, so the only
+//    thing catching removal there is a pin on the method's text. A text pin
+//    cannot tell you what the lock BUYS. This section does, behaviourally.
+//
+// 🎯 THE HARM, from reading `record()` rather than guessing. Two Data
+//    Controllers decide one line: one says "empty it", the other "keep it".
+//    `record()` re-reads the cell inside its transaction and refuses when it is
+//    already empty — so the decider who arrives second is told. **With
+//    ` FOR UPDATE` removed, the second decider's read is a consistent-snapshot
+//    read taken before the other one committed, so it still sees the words,
+//    carries on, and writes "keep" — and because the decision is written with
+//    `ON DUPLICATE KEY UPDATE`, that "keep" lands on top of the other
+//    decision.** The record then says the words are still there over a cell
+//    somebody else emptied, which is the one thing the class's own docblock
+//    says must never happen.
+//
+// 🧭 HOW THE ORDER IS FORCED, AND WHY IT IS DETERMINISTIC. Racing two workers
+//    was already tried for R and caught the fault one run in six. So this uses
+//    the shape #687 used for the giving-records ceiling instead: an EXTERNAL
+//    SESSION HOLDS THE LOCK, and the decider runs in its own process against
+//    it. This connection takes the row's lock, the worker starts and blocks on
+//    it, this connection then empties the cell and commits, and the worker
+//    wakes up to a cell that is empty. The blocking is what creates the
+//    ordering, so nothing here depends on two things happening within the same
+//    millisecond.
+//
+//    This connection empties the cell DIRECTLY rather than through `record()`.
+//    That is deliberate and is what the other decider's `record('empty')` does
+//    to the cell; doing it by hand is what lets the lock be held open across
+//    the worker's arrival. Said here because a reader should not have to work
+//    out that the fixture is standing in for the other decider.
+//
+// 🧪 A SEPARATE PROCESS IS REQUIRED. Two connections driven one after the other
+//    from one process cannot do this: the worker has to be BLOCKED while this
+//    process carries on, and a single process cannot wait on itself. Section I
+//    of `tools/password-writer-selftest.php` needed two real processes for the
+//    same reason.
+
+$raceText = 'Race text — ' . bin2hex(random_bytes(6));
+$raceIns  = $mysqli->prepare(
+    'INSERT INTO `tblSalvationCards` (`siteID`, `fullName`, `assignedToID`, `prayerRequest`) VALUES (1, ?, ?, ?)'
+);
+$raceName = 'Race fixture';
+$raceIns->bind_param('sis', $raceName, $personId, $raceText);
+$raceIns->execute();
+$raceRow = (int) $raceIns->insert_id;
+$raceIns->close();
+
+// A request of its own, so nothing here disturbs the requests the other
+// sections finished with.
+$raceStmt = $mysqli->prepare(
+    'INSERT INTO `tblErasureRequest` (`siteID`, `userID`, `subjectEmail`, `subjectName`, `status`, `dueBy`) '
+    . "VALUES (1, ?, ?, 'Review Person', 'pending_review', DATE_ADD(NOW(), INTERVAL 20 DAY))"
+);
+$raceStmt->bind_param('is', $personId, $personEmail);
+$raceStmt->execute();
+$raceRequest = (int) $raceStmt->insert_id;
+$raceStmt->close();
+
+// 🧑‍🏭 The worker: the SECOND decider, saying "keep it", in its own process.
+$workerPath = $scratch . DIRECTORY_SEPARATOR . 'second-decider.php';
+$workerCode = '<?php' . "\n"
+    . 'declare(strict_types=1);' . "\n"
+    . 'define("PORTAL_ROOT", ' . var_export($scratch, true) . ');' . "\n"
+    . '$c = ' . var_export($coreDir, true) . ';' . "\n"
+    . 'foreach (["App","GivingRetention","GdprEraser","ErasureReview","MailQueue","PortalAddress",'
+    . '"Giving","Site","Logger","AnonymousCheckins"] as $f) { require_once $c . $f . ".php"; }' . "\n"
+    . 'mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);' . "\n"
+    . '$mysqli = new mysqli(getenv("W_HOST"), getenv("W_USER"), getenv("W_PASS"), getenv("W_NAME"), (int) getenv("W_PORT"));' . "\n"
+    . '$mysqli->set_charset("utf8mb4");' . "\n"
+    . '\Portal\Core\Site::init($mysqli, ["site" => ["timezoneKeptAt" => ""]], 1);' . "\n"
+    . '$said = \Portal\Core\ErasureReview::record(' . "\n"
+    . '    $mysqli, (int) getenv("W_REQUEST"), (int) getenv("W_USER_ID"),' . "\n"
+    . '    "tblSalvationCards", "prayerRequest", (int) getenv("W_ROW"),' . "\n"
+    . '    \Portal\Core\ErasureReview::DECISION_KEEP, (int) getenv("W_DECIDER")' . "\n"
+    . ');' . "\n"
+    . 'echo $said === "" ? "RECORDED" : "REFUSED: " . $said;' . "\n";
+file_put_contents($workerPath, $workerCode);
+
+// 1️⃣ This connection takes the row's lock, exactly as `record()` does.
+$mysqli->begin_transaction();
+$raceHold = $mysqli->prepare(
+    'SELECT `prayerRequest` FROM `tblSalvationCards` WHERE `cardID` = ? LIMIT 1 FOR UPDATE'
+);
+$raceHold->bind_param('i', $raceRow);
+$raceHold->execute();
+$raceHold->get_result()->fetch_row();
+$raceHold->close();
+
+// 2️⃣ The second decider starts and must block on that lock.
+$workerEnv = [
+    'W_HOST'    => getenv('SELFTEST_DB_HOST') !== false ? (string) getenv('SELFTEST_DB_HOST') : '127.0.0.1',
+    'W_USER'    => getenv('SELFTEST_DB_USER') !== false ? (string) getenv('SELFTEST_DB_USER') : 'root',
+    'W_PASS'    => getenv('SELFTEST_DB_PASS') !== false ? (string) getenv('SELFTEST_DB_PASS') : '',
+    'W_NAME'    => $dbName,
+    'W_PORT'    => getenv('SELFTEST_DB_PORT') !== false ? (string) getenv('SELFTEST_DB_PORT') : '3306',
+    'W_REQUEST' => (string) $raceRequest,
+    'W_USER_ID' => (string) $personId,
+    'W_ROW'     => (string) $raceRow,
+    'W_DECIDER' => (string) $deciderId,
+];
+$pipes  = [];
+$worker = proc_open(
+    [PHP_BINARY, $workerPath],
+    [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+    $pipes,
+    null,
+    $workerEnv
+);
+erv_check('T1 the second decider could be started in its own process', is_resource($worker) === true);
+
+// 3️⃣ Give it time to get to its own `FOR UPDATE` and block there. With the lock
+//    in place it is still waiting at the end of this; with the lock removed it
+//    has already finished, and its ANSWER is what gives that away.
+usleep(1_500_000);
+
+// 🧪 T1b IS WHAT TURNS THE SLEEP ABOVE FROM AN ASSUMPTION INTO A PREMISE, and
+//    without it the whole of section T was VACUOUS AT THE MARGINS — found by an
+//    independent check, which is the same shape this section was written to fix,
+//    one level up.
+//
+//    Measured by that check with ` FOR UPDATE` removed: T2 goes red at a sleep
+//    of 50ms or more and GREEN at 20ms or less, because below that the worker
+//    has not yet reached its read when the cell is emptied. At a sleep of ZERO
+//    the whole section is green in BOTH states. So 1.5 seconds is about a
+//    40-times margin on this machine — comfortable here, narrower on a loaded
+//    runner, and the direction of failure is FALSE GREEN on the one check that
+//    proves the lock behaviourally.
+//
+//    So the premise is asserted rather than hoped for: with the lock in place
+//    the worker MUST still be running, because it is blocked on this
+//    connection's row. If it has finished, the sleep was too long for this
+//    machine OR the lock is not being taken — and either way T2's verdict
+//    below would mean nothing, so this must be known before it is read.
+//
+//    ⚠️ BE EXACT ABOUT WHICH CHECK CLOSES THE HOLE, because a first version of
+//       this comment claimed it was this one and that is NOT what was measured.
+//       At a sleep of zero T1b still passes — the worker has not even been
+//       exec'd yet, so it counts as "running" — and the check that goes red is
+//       T2, because the worker returns the PRE-TRANSACTION refusal. T1b is a
+//       second, independent premise check that catches the case where the
+//       worker got far enough to finish observably. Both are worth having;
+//       neither is the whole guard.
+$stillBlocked = is_resource($worker) === true ? (bool) (proc_get_status($worker)['running'] ?? false) : false;
+erv_check(
+    'T1b the second decider is STILL BLOCKED when the line is emptied — the premise T2 rests on, '
+        . 'and without it T2 passes for the wrong reason',
+    $stillBlocked === true,
+    'the worker had already finished, so it never waited on the lock at all'
+);
+
+// 4️⃣ The other decider's effect: the cell is emptied, and committed.
+$raceEmpty = $mysqli->prepare('UPDATE `tblSalvationCards` SET `prayerRequest` = NULL WHERE `cardID` = ?');
+$raceEmpty->bind_param('i', $raceRow);
+$raceEmpty->execute();
+$raceEmpty->close();
+$mysqli->commit();
+
+// 5️⃣ What the second decider was told.
+// 📏 Guarded, so that a `proc_open` that did not start is the clean refusal the
+//    header promises rather than a `TypeError` on a missing pipe — which would
+//    kill the run before T2, T3 and the summary ever printed.
+$workerSaid = isset($pipes[1]) === true ? (string) stream_get_contents($pipes[1]) : '';
+$workerErr  = isset($pipes[2]) === true ? (string) stream_get_contents($pipes[2]) : '';
+foreach ([1, 2] as $which) {
+    if (isset($pipes[$which]) === true) {
+        fclose($pipes[$which]);
+    }
+}
+if (is_resource($worker) === true) {
+    proc_close($worker);
+}
+
+// 🎯 THE CHECK THAT CATCHES THE LOCK BEING DELETED. Measured both ways: with
+//    ` FOR UPDATE` present the worker is REFUSED; with it deleted the worker
+//    answers RECORDED. Unlike R1-R4 this asks what `record()` itself did, so
+//    the lock cannot be taken by the test on the method's behalf.
+// 🎯 AND IT MUST BE THE REFUSAL FROM INSIDE THE LOCK. `record()` refuses an
+//    already-empty cell in TWO places: before its transaction, where `oneItem()`
+//    finds the line is no longer an item at all ("That line could not be
+//    recorded against this request…"), and inside it under the lock ("that line
+//    is already empty…"). A first version matched only the word `REFUSED`, so it
+//    could not tell them apart — while its own label asserted the second one.
+//    Measured: with the lock removed and a short sleep, the worker returns the
+//    PRE-TRANSACTION refusal and the old check went green. Requiring the
+//    in-transaction wording is the same remedy R3 one section above already
+//    applies to its own refusal.
+erv_check(
+    'T2 the second decider is REFUSED FROM INSIDE THE LOCK — the cell was empty by the time it '
+        . 'held the row, which is a different refusal from "that line is not an item"',
+    str_contains($workerSaid, 'REFUSED') === true
+        && str_contains($workerSaid, 'already empty') === true,
+    'it answered: ' . substr(trim($workerSaid . ' ' . $workerErr), 0, 200)
+);
+
+// 🧾 AND THE INVARIANT THE LOCK EXISTS FOR. Without the lock the worker's
+//    "keep" is written with ON DUPLICATE KEY UPDATE on top of whatever is
+//    there, so the record would say the words are still present over a cell
+//    that is empty. Checked as its own clause because it is the HARM, where
+//    T2 is only the symptom.
+$raceCell = erv_one('SELECT `prayerRequest` FROM `tblSalvationCards` WHERE `cardID` = ?', 'i', [$raceRow]);
+$raceSaid = erv_one(
+    'SELECT `decision` FROM `tblErasureReviewDecisions` WHERE `requestID` = ? AND `rowKey` = ? LIMIT 1',
+    'ii',
+    [$raceRequest, $raceRow]
+);
+erv_check(
+    'T3 so no record says "keep" over a cell somebody else emptied',
+    ($raceCell === null || (string) $raceCell === '') && $raceSaid === null,
+    'the cell is ' . ($raceCell === null || (string) $raceCell === '' ? 'empty' : 'still there')
+    . '; the record says ' . ($raceSaid === null ? 'nothing' : '"' . (string) $raceSaid . '"')
+);
+
+@unlink($workerPath);
+erv_run('DELETE FROM `tblErasureReviewDecisions` WHERE `requestID` = ' . (int) $raceRequest);
+erv_run('DELETE FROM `tblSalvationCards` WHERE `cardID` = ' . (int) $raceRow);
 
 echo "\n";
 echo 'Passed: ' . (string) $GLOBALS['erv_pass'] . "   Failed: " . (string) $GLOBALS['erv_fail'] . "\n";

@@ -5,6 +5,136 @@
 
 ---
 
+## The erasure review's two races (#735)
+
+*4 November 2026.*
+
+Two guards were backstops no test reached. Both are driven by real code now, in
+sections S and T of `tools/erasure-review-selftest.php`.
+
+### "No test can reach this" was a wrong conclusion from a true fact
+
+`GdprEraser::closeRequest()`'s comment said no end-to-end test exercises the
+second `whyNotReadyToClose()` ask "because the test harness runs one request at
+a time". The fact is true. **The conclusion does not follow**, and that is the
+transferable lesson: the thing being described is not two concurrent requests,
+it is a row appearing between two points of ONE run — and that run is
+sequential. Top check, every step, then the close. Anything that writes a
+reviewable row in the middle of it reaches the second ask.
+
+So the question to ask of any "this path cannot be reached" comment is **which
+two events have to be ordered**, not how many actors there are. Here the answer
+was one actor and one run, and the comment had reasoned from actors.
+
+A database trigger on `tblErasureAudit` provides the write, because every step
+of the walk writes a line there. This repository already had the technique:
+`tools/password-writer-selftest.php` section H uses a `BEFORE UPDATE` trigger to
+reach a state the portal cannot produce on demand.
+
+### What the deleted ask really costs
+
+Measured, not reasoned. With the ask removed, a run over 233 steps reports
+`failed: 0`, the request goes to `completed`, and the person's own words are
+still in the row. The review's whole purpose is that this cannot happen.
+
+### Why section R could not catch the lock being deleted, and T can
+
+R1 to R4 take the row lock **in the test**. So they prove the database locks,
+not that `record()` asks it to — deterministic and vacuous, which is worse than
+flaky. Section T never takes the lock on the method's behalf: this connection
+holds the row, and the real `record()` runs in its own process and blocks on it.
+
+**A second process is not a convenience here.** The decider under test has to be
+blocked while the test carries on, and one process cannot wait on itself. Two
+connections driven one after another from one process cannot produce this
+ordering, however carefully they are interleaved.
+
+### The harm, read out of `record()` rather than guessed
+
+Without ` FOR UPDATE`, the second decider's in-transaction read is a
+consistent-snapshot read taken before the other decider committed. It therefore
+still sees the words, carries on, and writes `keep` — and the decision is
+written with `ON DUPLICATE KEY UPDATE`, so that `keep` lands on top of the other
+decision. The record then says the words are still there over a cell somebody
+else emptied.
+
+Note what the unique key `uq_errd_item` does and does not do. No part of it can
+be empty, so unlike the #487 case it really binds — but `record()` writes with
+`ON DUPLICATE KEY UPDATE`, so the key **merges** the second decision rather than
+refusing it. The key is not a substitute for the lock, and a reader who checked
+only the key would conclude it was.
+
+### How the order is forced
+
+The shape #687 used for the giving-records ceiling: an external session holds
+the lock, and the path under test runs against it. This connection empties the
+cell **directly** rather than through `record()` — deliberately, because that is
+what the other decider's `record('empty')` does to the cell, and doing it by
+hand is what lets the lock be held open across the worker's arrival.
+
+Measured three runs out of three with ` FOR UPDATE` deleted: R1 to R4 green,
+T2 and T3 red.
+
+### Keep both kinds of check
+
+R5 pins the method's text; T reads its behaviour. Neither covers the other's
+half, and the temptation after building T is to delete R5 as redundant. It is
+not: T would still pass if `record()` were rewritten to take the lock some other
+way, and R5 would still pass if the lock were taken outside the transaction.
+
+### The section written because R was vacuous was itself vacuous at the margins
+
+Found by the independent check, and it is the most useful thing in the package
+because it is the SAME SHAPE one level up.
+
+`record()` refuses an already-empty line in **two** places: before its
+transaction, where `oneItem()` finds the line is no longer a review item at all,
+and inside it under the lock. T2 matched only the word `REFUSED`, so it could
+not tell them apart — while its own label asserted the second one.
+
+Measured: with a short sleep the worker returns the FIRST refusal, so **at a
+sleep of zero the whole of section T was green in both states, lock or no
+lock.** The 1.5-second sleep was the only thing making T non-vacuous, and
+**nothing asserted it had been long enough.** With the lock removed, T2 went red
+at a sleep of 50ms or more and green at 20ms or less — about a 40-times margin
+on this machine, narrower on a loaded runner, and the direction of failure is
+FALSE GREEN on the one check that proves the lock behaviourally.
+
+Two changes turn the timing assumption into an asserted premise: T2 requires the
+in-transaction wording (`already empty`), and T1b asserts the worker is still
+blocked when the line is emptied. **Be exact about which one closes the hole:**
+at a sleep of zero T1b still passes, because the worker has not been exec'd yet
+and so counts as running; the check that goes red is T2. A first version of
+T1b's comment claimed otherwise, which is a claim about a measurement that was
+never made.
+
+**The transferable rule: when a test's verdict depends on a sleep, assert the
+state the sleep was supposed to produce.** A sleep is a hope; a `proc_get_status`
+or a wording requirement is a premise.
+
+### A clause that cannot fail, in the check meant to name a requirement
+
+`mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT)` makes mysqli THROW
+on a statement error — **it takes both flags**, which this repository had to
+learn twice (#694 rounds 5 and 6, where "measured, not reasoned" was written
+beside a measurement of the wrong code path). So `$db->query('CREATE TRIGGER …')`
+never returns `false`, and `S2`'s `=== true` was true whatever happened.
+
+The harm was not the dead check but the DOCUMENTATION resting on it: four places
+claimed the `CREATE TRIGGER` requirement was "refused loudly" and "says so at
+the point of failure". It said nothing at all — a user without that privilege
+got an uncaught exception and a stack trace naming no requirement, with no red
+check and no summary line. **A check whose failure mode is an uncaught exception
+is not a check that reports; it is a crash with a label.**
+
+### What this still does not prove
+
+Sections S and T drive the CLASSES. Nothing presses two buttons on `review.php`
+at once, so what is proved is that `ErasureReview` and `GdprEraser` behave, not
+that the page cannot submit in a way that avoids them.
+
+---
+
 ## Installing PHP on your own machine
 
 ### Why you need it

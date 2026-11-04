@@ -52,12 +52,14 @@ fiddly enough to risk false positives; the arg-count-vs-type-length check
 above already catches the fatal class on its own.
 
 Exit code:
-  0 — no findings, or findings without --strict (the pull-request run puts
-      them in its comment and blocks nothing)
-  1 — at least one arity mismatch AND --strict was given; or, with
-      --self-test, a made-up call judged wrongly
-  (This used to say "1 — at least one arity mismatch". The code has always
-  needed --strict for that.)
+  0 — no findings
+  1 — at least one arity mismatch; or, with --self-test, a made-up call judged
+      wrongly
+  (D-046, 4 November 2026: a finding now stops the work. This used to need
+  --strict, so it printed a fault that kills a page and still exited 0 —
+  nothing failed and nobody was forced to look. `--strict` is still accepted
+  and now makes no difference. The change was only safe once #730's false
+  alarm was fixed, because gating a check that cries wolf blocks every push.)
 
 Usage:
   python3 tools/audit-checks/check_bind_param_arity.py [--strict]
@@ -85,6 +87,146 @@ PHP_ROOTS = [
 # exactly what a bind_param() type-string literal looks like in this
 # codebase (`'issi'`, "issi", …).
 STRLIT_RE = re.compile(r"^'([^'\\]*)'$|^\"([^\"\\]*)\"$")
+
+
+def mask_php(source: str) -> str:
+    """
+    The same text, with comments blanked and every string literal's contents
+    replaced by `x` — SAME LENGTH, so every offset still lines up with the
+    original, and with newlines kept so reported line numbers stay true.
+
+    🐺 WHY THIS EXISTS, AND IT WAS A LIVE FALSE ALARM (#730). Without it, the
+       quote-tracking in `extract_balanced()` and `split_top_level_args()` was
+       walking the RAW source, and an apostrophe inside a `//` comment opened a
+       string literal that never closed. In
+       `web/_apps/calendar/manage/save.php` the comment
+
+           // 📅 The series' OWN first date, not the one typed on the …
+
+       sits between two of the call's arguments, so from "series'" onwards every
+       later quote was out of step: the walk ran past the real closing
+       parenthesis and swallowed the rest of the function. An eleven-argument
+       call — eleven columns, eleven placeholders, eleven letters, eleven values,
+       all correct — was reported as "type-string length 11 but 23 bound
+       argument(s)" on every push and in every pull request's comment.
+
+       **That is the fault this repository has recorded most often**, and it has
+       broken `check_page_head_tags.py` (an apostrophe in `// don't`),
+       `check_no_brotli_decode.py` (a `//` inside a URL) and
+       `check_no_new_role_gates.py` (an apostrophe inside a heredoc). A check
+       that cries wolf gets switched off (#483), and then it catches nothing.
+
+    ⚠️ BLANKING, NEVER DELETING. Deleting comments once put reported line
+       numbers 370 out (#716). Every replacement is the same length as what it
+       replaces, and a newline stays a newline.
+
+    ⚠️ AND THE TYPE-STRING IS READ FROM THE ORIGINAL, NOT FROM THIS. Masking is
+       what makes a comment and a string disappear, but the type-string IS a
+       string literal, so reading it here would give `bind_param('xxxxxxxxxxx')`
+       — the right LENGTH by luck, and the wrong letters in the message. Exactly
+       that mistake broke both halves of #716's guard. `check_text()` finds the
+       call in the masked text and slices the original at the same offset.
+
+    WHAT IT STILL CANNOT SEE: a type-string built by concatenation or held in a
+    variable (those are skipped anyway, deliberately), and PHP it cannot
+    tokenise — this is a walk, not a parser.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(source)
+    while i < n:
+        ch = source[i]
+        nxt = source[i + 1] if i + 1 < n else ""
+        # A line comment. `#[` is an attribute, not a comment.
+        if (ch == "/" and nxt == "/") or (ch == "#" and nxt != "["):
+            while i < n and source[i] != "\n":
+                out.append(" ")
+                i += 1
+            continue
+        if ch == "/" and nxt == "*":
+            while i < n and not (source[i] == "*" and i + 1 < n and source[i + 1] == "/"):
+                out.append("\n" if source[i] == "\n" else " ")
+                i += 1
+            out.append("  " if i < n else "")
+            i += 2
+            continue
+        # 📜 A heredoc or nowdoc. Its body is masked like any other string
+        #    literal; the labels are kept so offsets hold. This branch's absence
+        #    was a real hole in `check_no_new_role_gates.py` (#739): a nowdoc
+        #    holding `<p>Don't change this</p>` made that check report
+        #    "Nothing wrong" over a live finding.
+        if ch == "<" and source[i:i + 3] == "<<<":
+            opener = re.match(
+                r'<<<[ \t]*(?:"([A-Za-z_]\w*)"|\'([A-Za-z_]\w*)\'|([A-Za-z_]\w*))\r?\n',
+                source[i:],
+            )
+            if opener is not None:
+                label = opener.group(1) or opener.group(2) or opener.group(3)
+                out.append(opener.group(0))
+                i += opener.end()
+                closer = re.compile(r"^[ \t]*" + re.escape(label) + r"\b", re.M)
+                found = closer.search(source, i)
+                stop = found.start() if found is not None else n
+                for position in range(i, stop):
+                    out.append("\n" if source[position] == "\n" else "x")
+                i = stop
+                continue
+            # `<<<` that is not a heredoc opener: ordinary text.
+        if ch in ("'", '"'):
+            quote = ch
+            out.append(ch)
+            i += 1
+            while i < n and source[i] != quote:
+                if source[i] == "\\" and i + 1 < n:
+                    out.append("xx")
+                    i += 2
+                    continue
+                out.append("\n" if source[i] == "\n" else "x")
+                i += 1
+            if i < n:
+                out.append(quote)
+                i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def split_top_level_arg_spans(s: str) -> list[tuple[int, int]]:
+    """Where each top-level comma-separated argument starts and ends in `s`.
+
+    Spans rather than text, because the type-string has to be read from the
+    UNMASKED source at the same offset — see `mask_php()`. Commas inside (),
+    [] or a quoted string do not split.
+    """
+    spans: list[tuple[int, int]] = []
+    depth = 0
+    quote: str | None = None
+    start = 0
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if quote:
+            if c == "\\" and i + 1 < len(s):
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+            i += 1
+            continue
+        if c in "'\"":
+            quote = c
+        elif c in "([":
+            depth += 1
+        elif c in ")]":
+            depth -= 1
+        elif c == "," and depth == 0:
+            spans.append((start, i))
+            start = i + 1
+        i += 1
+    if s[start:].strip():
+        spans.append((start, len(s)))
+    return spans
 
 
 def extract_balanced(text: str, start: int) -> tuple[str | None, int]:
@@ -181,21 +323,31 @@ def check_text(text: str) -> tuple[list[tuple[int, str]], int]:
     """
     findings: list[tuple[int, str]] = []
     with_spread = 0
-    for m in re.finditer(r"bind_param\s*\(", text):
+    # 🎭 Comments blanked and string contents masked FIRST, or an apostrophe in
+    #    a comment runs the argument walk past the end of the call (#730). The
+    #    mask is the same length as the source, so every offset below indexes
+    #    both.
+    masked = mask_php(text)
+    for m in re.finditer(r"bind_param\s*\(", masked):
         paren = m.end() - 1
-        inner, _ = extract_balanced(text, paren)
+        inner, _ = extract_balanced(masked, paren)
         if inner is None:
             continue
-        args = split_top_level_args(inner)
-        if not args:
+        base = paren + 1
+        spans = split_top_level_arg_spans(inner)
+        if not spans:
             continue
-        type_match = STRLIT_RE.match(args[0].strip())
+        # ⚠️ The type-string comes from the ORIGINAL at the same offset. Read
+        #    from the mask it would be `'xxxxxxxxxxx'` — the right length by
+        #    luck and the wrong letters in the message (#716).
+        first_start, first_end = spans[0]
+        type_match = STRLIT_RE.match(text[base + first_start:base + first_end].strip())
         if not type_match:
             # Dynamic type-string (variable, str_repeat(), concatenation,
             # …) — not statically checkable, skip to stay false-positive-free.
             continue
         type_str = type_match.group(1) if type_match.group(1) is not None else type_match.group(2)
-        bound = args[1:]
+        bound = [inner[s:e].strip() for s, e in spans[1:]]
         written_out = sum(1 for arg in bound if not is_spread(arg))
         line_no = text.count("\n", 0, m.start()) + 1
         if written_out != len(bound):
@@ -255,6 +407,30 @@ SELF_TEST_CASES = [
     ("the letters are not written out as a text: not judged", "$s->bind_param($types, $a, $b, $c);", 0),
     ("the letters are put together: not judged", "$s->bind_param('i' . str_repeat('i', count($ids)), $siteId, ...$ids);", 0),
     ("two calls in one text, the second wrong", "$s->bind_param('i', $a);\n$t->bind_param('ii', $a);", 1),
+    # 🐺 THE #730 SHAPES. Each is here TWICE, right and wrong, because a fix
+    #    that simply stopped reporting would pass the "right" half on its own —
+    #    which is the "louder silence" the issue warned about.
+    ("an apostrophe in a comment between the arguments, and the call is RIGHT (the live false alarm)",
+     "$s->bind_param(\n    'ii',\n    $a,\n    // The series' OWN first date, not the one typed\n    $b\n);", 0),
+    ("the same comment, and the call is WRONG: masking must not blind it",
+     "$s->bind_param(\n    'i',\n    $a,\n    // The series' OWN first date, not the one typed\n    $b\n);", 1),
+    ("a `//` inside a string is not a comment, and the call is RIGHT",
+     "$s->bind_param('ss', $a, 'https://example.invalid/x');", 0),
+    ("a `//` inside a string, and the call is WRONG",
+     "$s->bind_param('s', $a, 'https://example.invalid/x');", 1),
+    ("a block comment holding an apostrophe, and the call is RIGHT",
+     "$s->bind_param('ii', $a, /* the series' date */ $b);", 0),
+    ("a block comment holding an apostrophe, and the call is WRONG",
+     "$s->bind_param('iii', $a, /* the series' date */ $b);", 1),
+    # 📜 A heredoc whose body holds an ODD number of apostrophes. This is the
+    #    shape that made check_no_new_role_gates.py report "Nothing wrong" over
+    #    a live finding (#739), and it is latent here for the same reason: with
+    #    the heredoc branch removed, "Don't" opens a string that swallows the
+    #    call below it.
+    ("a heredoc holding an apostrophe, then a WRONG call below it",
+     "$html = <<<'HTML'\n<p>Don't change this</p>\nHTML;\n$s->bind_param('i', $a, $b);", 1),
+    ("a heredoc holding an apostrophe, then a RIGHT call below it",
+     "$html = <<<'HTML'\n<p>Don't change this</p>\nHTML;\n$s->bind_param('ii', $a, $b);", 0),
 ]
 
 
@@ -267,12 +443,31 @@ def self_test() -> int:
         print(f"  {'ok  ' if ok else 'FAIL'}  {label}: {len(findings)} finding(s), {expected} expected")
         if not ok:
             wrong += 1
+    # 🔤 THE LETTERS IN THE MESSAGE COME FROM THE SOURCE, NOT FROM THE MASK —
+    #    and this needs its own check because EVERY count-based case above
+    #    passes either way. Masking replaces a string's contents with `x` of
+    #    the SAME LENGTH, so `len($type_str)` is right whichever text it is read
+    #    from; only the letters printed to a developer are wrong. Measured:
+    #    reading from the mask leaves all 24 cases above green while the message
+    #    reads `bind_param('xxx', …)`.
+    #
+    #    A first version of this file added a case shaped like the others for
+    #    it — same PHP, expected count 0 — and that case COULD NOT FAIL. It is
+    #    the shape this repository keeps finding, written while fixing another
+    #    instance of it.
+    message = check_text("$s->bind_param('iss', $a, $b);")[0]
+    lettered = len(message) == 1 and "'iss'" in message[0][1]
+    print(f"  {'ok  ' if lettered else 'FAIL'}  the letters in the message come from the source, not the mask: "
+          f"{message[0][1] if message else '(no finding at all)'}")
+    if not lettered:
+        wrong += 1
+
     spreads = sum(check_text(php)[1] for _, php, _ in SELF_TEST_CASES)
     counted = spreads == 7
     print(f"  {'ok  ' if counted else 'FAIL'}  calls with a literal type-string and a spread-out list are counted: {spreads}, 7 expected")
     if not counted:
         wrong += 1
-    print(f"\n{len(SELF_TEST_CASES) + 1 - wrong} of {len(SELF_TEST_CASES) + 1} self-test checks passed.")
+    print(f"\n{len(SELF_TEST_CASES) + 2 - wrong} of {len(SELF_TEST_CASES) + 2} self-test checks passed.")
     print("SELF-TEST REACHED THE END")
     return 0 if wrong == 0 else 1
 
@@ -310,8 +505,23 @@ def check() -> int:
             "variable, in the same order."
         )
 
-    strict = "--strict" in sys.argv
-    if findings and strict:
+    # 🚧 A FINDING STOPS THE WORK (the owner, 4 November 2026 — D-046).
+    #    This used to need `--strict`, so it printed a fatal-class fault and
+    #    exited 0: nothing failed and nobody was forced to look. That is the
+    #    #647 shape — `check_schema_seed_parity.py` named a missing migration
+    #    mark while exiting 0, which is how migration 223 nearly shipped
+    #    unrecorded.
+    #
+    #    It could only become a gate once the false alarm was gone (#730): an
+    #    apostrophe in a comment made this report an eleven-argument call as
+    #    "23 bound arguments" on every run, and gating THAT would have blocked
+    #    every push. Fixing the wolf-crying comes first; the gate second.
+    #
+    #    `--strict` is still accepted so older invocations keep working, and it
+    #    now makes no difference. The pre-push hook passes NO arguments and
+    #    judges the exit code, which is exactly why the default had to change
+    #    rather than a flag being added somewhere.
+    if findings:
         return 1
     return 0
 

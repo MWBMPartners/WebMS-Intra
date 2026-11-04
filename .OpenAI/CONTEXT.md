@@ -2378,6 +2378,38 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     is DEV_NOTES.md, "Reaching a row that nothing says is about anybody (#707)".
     *(`.claude/CLAUDE.md` → the #707 bullet.)*
 
+    **The erasure review's two races are exercised now, and keep BOTH kinds of check (#724, #753,
+    #735).** `ErasureReview::record()` is the one place a decision about a line of free text is
+    recorded; it opens its transaction and THEN reads the cell with `FOR UPDATE` (#697: a lock
+    outside a transaction is decoration). `GdprEraser` asks `whyNotReadyToClose()` twice — at the top
+    of `execute()`, the refusal an administrator meets, and again inside `closeRequest()`'s
+    transaction, which covers a reviewable row being written while a run is already going. "No test
+    can reach this" was a wrong CONCLUSION from a true fact, and that is the transferable part: the
+    comment said no end-to-end test could reach the second ask "because the test harness runs one
+    request at a time", which is true and does not follow — one run is SEQUENTIAL (top check, every
+    step, then the close), so a row appearing anywhere in the middle of that one run reaches it, with
+    no second request, connection or process. Ask which two events have to be ORDERED, never how many
+    actors there are. A trigger on `tblErasureAudit` provides the write (every step writes a line
+    there), the same technique as `password-writer-selftest.php` section H. Measured with the second
+    ask deleted: 233 steps, `failed: 0`, the request `completed`, and the person's own words still in
+    the row. And section R provably could not catch the lock being deleted — R1-R4 take the lock IN
+    THE TEST, so they prove the database locks rather than that `record()` asks it to; section T
+    never takes it on the method's behalf (this connection holds the row, the real `record()` runs in
+    its own process and blocks on it, which one process cannot do to itself). The harm, read out of
+    `record()` rather than guessed: without the lock the second decider's in-transaction read is a
+    consistent-snapshot read taken before the other committed, so it still sees the words, writes
+    `keep`, and because the decision is written `ON DUPLICATE KEY UPDATE` that `keep` lands on top —
+    the record then says the words are there over a cell somebody else emptied. `uq_errd_item` is
+    not a substitute for the lock: no part of it can be empty so it really binds (unlike #487), but
+    `ON DUPLICATE KEY UPDATE` makes it merge the second decision rather than refuse it. Measured
+    three of three with ` FOR UPDATE` deleted: R1-R4 green, T2 and T3 red. Do not delete R5 as
+    redundant now T exists: T would still pass if the lock were taken some other way, and R5 would
+    still pass if it were taken outside the transaction. Sections S and T drive the classes — nothing
+    presses two buttons on `review.php` at once. Test: `tools/erasure-review-selftest.php` (145
+    checks, real MySQL; needs `CREATE TRIGGER` and `proc_open`, each refused loudly rather than
+    skipped). **AND THE SECTION WRITTEN BECAUSE R WAS VACUOUS WAS ITSELF VACUOUS AT THE MARGINS — the same shape one level up, found by the independent check.** `record()` refuses an already-empty line in TWO places — before its transaction (`oneItem()`: not a review item) and inside it under the lock — and T2 matched only the word `REFUSED`, so it could not tell them apart while its own label asserted the second. Measured: with a short sleep the worker returns the FIRST refusal, so **at a sleep of ZERO the whole of section T was green in BOTH states**, and nothing asserted the 1.5-second sleep had been long enough (with the lock removed T2 went red at 50ms and green at 20ms — a 40-times margin here, narrower on a loaded runner, failing in the FALSE-GREEN direction). T2 now requires the in-transaction wording and T1b asserts the worker is still blocked. **Be exact about which closes it: at sleep zero T1b still PASSES** (the worker is not yet exec'd, so it counts as running) and T2 is what goes red — a first comment claimed the opposite, which is a claim about a measurement never made. **When a test's verdict depends on a sleep, ASSERT THE STATE THE SLEEP WAS MEANT TO PRODUCE:** a sleep is a hope, a `proc_get_status` is a premise. **And S2 was a clause that could not fail:** `MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT` makes mysqli THROW (it takes BOTH — #694 rounds 5 and 6), so `query()` never returned the `false` it tested for, while four documents claimed the CREATE TRIGGER requirement was "refused loudly" — it gave an uncaught exception, no red check and no summary. **A check whose failure mode is an uncaught exception is a crash with a label, not a check that reports.** The technical record is DEV_NOTES.md, "The erasure review's two races (#735)". Claude
+    reads the same rule in `.claude/CLAUDE.md`; change both together.
+
 37. **Nothing asks for a reply it would decode with BROTLI (#716, CVE-2026-111497 "HTTP2Shell").**
     An out-of-bounds write in Google's Brotli decoder (1.0.3-1.2.0; fixed 1.0.10 / 1.1.1 / 1.2.1), remote,
     unauthenticated, CVSS 9.8, on CISA's actively-exploited list since 27 October 2026. The portal holds NO Brotli code,

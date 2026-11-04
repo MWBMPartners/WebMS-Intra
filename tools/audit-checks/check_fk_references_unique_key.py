@@ -76,10 +76,14 @@ happens to create. Four passes, run together, cover this properly:
   "The `CREATE TABLE IF NOT EXISTS` rule, shared by Rule 1b and Rule 2" below.
 
 * Rule 2 — UPGRADE, IN ORDER. An upgrade never runs `full_schema.sql`. This
-  rule starts from `STARTING_SET` below: 32 recorded keys. Thirty belong to
-  the 14 original tables, which predate the numbered migrations. The other
-  two are `tblTrustedDevices` keys that migration 047 creates under
-  different names; they are listed as known drift (#553). See "The
+  rule starts from `STARTING_SET` below: 30 recorded keys, ALL of which
+  belong to the 14 original tables that predate the numbered migrations.
+  (It held 32 until #747. The other two were `tblTrustedDevices` keys that
+  migration 047 creates under different names and migration 210 section F
+  RENAMES to the names a fresh install uses — so an upgraded database really
+  has them, and once this check could see a rename the entries were simply
+  redundant. The check's own staleness rule said so the moment it was taught.)
+  See "The
   starting set is now a fixed list, not a guess" further down.
   Two further original UNIQUE keys, `tblRoles.roleKey` and
   `tblSettings.settingKey`, are NOT on that list. The reason is simple:
@@ -188,11 +192,10 @@ migration — the one that brings `tblMigrations`, the tracking table the
 whole numbered system depends on, into being — and it creates nothing else
 at all. That confirms these 14 tables already existed before migration 000
 ever ran; there is no migration earlier than 000, so nothing in the numbered
-system could have created them either. The remaining 2
-(`tblTrustedDevices.uq_td_token_hash` and `.idx_td_user_active`) are NOT
-primordial at all — migration 047 creates that whole table — and are listed
-for a DIFFERENT, narrower reason: see their own comment in `STARTING_SET`,
-and "WHAT FIX ROUND 2 FOUND ALONG THE WAY" below.
+system could have created them either. **All 30 are now of that one kind.**
+Two further entries used to sit here for a narrower reason — two
+`tblTrustedDevices` keys — and they went in #747; the note where they were
+says why.
 
 Nothing is inferred from the file list any more. Any key `full_schema.sql`
 declares that is NEITHER created by a numbered migration NOR on this list is
@@ -367,11 +370,13 @@ Classifying `STARTING_SET` by hand (see above) turned up two things that are
 NOT part of #552 and were NOT fixed here, because this round may only change
 comments, never a SQL statement:
 
-* `tblTrustedDevices.uq_td_token_hash` / `.idx_td_user_active` — declared in
-  `full_schema.sql` under those names, but migration 047 (which creates the
-  WHOLE table) creates the SAME columns under DIFFERENT names instead
-  (`uq_token_hash`, `idx_user_active`). The parser reads BOTH files correctly
-  — this is genuine drift between the two files, not a reading fault. It is
+* `tblTrustedDevices.uq_td_token_hash` / `.idx_td_user_active` — FIXED, and
+  the fix predates #747 by some months: migration 210 section F renames both
+  from migration 047's names (`uq_token_hash`, `idx_user_active`) to the names
+  a fresh install uses. This passage described it as unfixed until 4 November
+  2026, because this check could not see a `RENAME INDEX` and so nothing
+  contradicted the words. What follows is kept as the record of what the drift
+  WAS. It was
   harmless for what this check protects: MySQL 8.4's rule, and every rule
   above, match a foreign key's target by its COLUMN LIST, never by the key's
   own name, and nothing anywhere in this codebase has a foreign key pointing
@@ -488,10 +493,12 @@ WHAT THIS CANNOT SEE
   not this check, and not the end-to-end test. Migration 009's
   `fk_att_sess_event` is a real link that exists only that way (#554); it
   points at a primary key, so it is harmless for this check.
-  A second, harmless difference of the same kind: migration 047 creates two
+  A second difference of the same kind, now FIXED: migration 047 creates two
   `tblTrustedDevices` keys that `full_schema.sql` names differently
   (`uq_token_hash` and `idx_user_active`, against `uq_td_token_hash` and
-  `idx_td_user_active`). See `STARTING_SET`'s own entries and #553.
+  `idx_td_user_active`), and migration 210 section F renames them. This used
+  to cite #553 as the issue to fix it — wrongly twice over: #553 is closed,
+  and it is about event-category names, not this table (#747).
 * Two further shapes cannot be seen, both proved on a real MySQL 8.4
   upgrade (#552) and deliberately left unfixed, because fixing them would
   mean modelling something new rather than writing down a real limit:
@@ -567,7 +574,11 @@ awaiting the owner's decision. It is not planned and not under way.
 
 EXIT CODES
 ----------
-  0 — clean, or findings exist but `--strict` was not given.
+  0 — clean. (D-046, 4 November 2026: a finding now stops the work. This used
+      to exit 0 unless `--strict` was given, which is how its one FALSE
+      finding — an index reached by `RENAME INDEX`, #747 — sat in every pull
+      request's output teaching the next reader to stop reading. `--strict` is
+      still accepted and now makes no difference.)
   1 — at least one finding under any rule above, OR a problem with
       `STARTING_SET` itself, AND `--strict` was given.
   2 — the schema file named (by default, or by `--schema`) does not exist,
@@ -639,24 +650,6 @@ _PREDATES_REASON = (
     "TABLE for this table (grepped case-insensitively against all 204 files)."
 )
 
-_TRUSTED_DEVICES_REASON = (
-    "NOT primordial — migration 047 creates the WHOLE `tblTrustedDevices` "
-    "table, including a unique key on the same column and a plain key on the "
-    "same columns as this one. But it names them differently "
-    "(`uq_token_hash` / `idx_user_active`, not `uq_td_token_hash` / "
-    "`idx_td_user_active`) — genuine, pre-existing drift between "
-    "full_schema.sql and migration 047, unrelated to #552, found while "
-    "classifying this list (fix round 2). Harmless for what this check "
-    "protects: every rule here matches a foreign key's target by its COLUMN "
-    "LIST, never by the key's own name, and nothing anywhere in this "
-    "codebase has a foreign key pointing at `tblTrustedDevices` at all "
-    "(checked: zero REFERENCES clauses name it). Listed here rather than "
-    "left as an unexplained finding because an automatic rule cannot safely "
-    "equate two differently-named keys on its own; #553 is open to fix "
-    "migration 047/full_schema.sql's naming properly, rather than folding "
-    "that fix into #552's own scope."
-)
-
 @dataclass(frozen=True)
 class StartingSetEntry:
     """One Rule 2 starting-set entry — WHICH (table, key) pair predates the
@@ -719,10 +712,10 @@ def _idx(
 # `sql/full_schema.sql` — the file has since moved twice, to
 # `web/sql/full_schema.sql` and then today's `web/_sql/full_schema.sql`)
 # and a real MySQL 8.4.11 database upgraded from alpha. The two
-# `tblTrustedDevices` entries are the one expected difference: they are
-# absent from the first 28 of those 93 versions, because migration 047
-# (see `_TRUSTED_DEVICES_REASON`) had not been written yet — exactly what
-# that entry's own reason already says.
+# `tblTrustedDevices` entries WERE the one expected difference — absent from
+# the first 28 of those 93 versions, because migration 047 had not been
+# written yet. Both entries left this list in #747, so the comparison no
+# longer has that exception at all.
 STARTING_SET: tuple[StartingSetEntry, ...] = (
     _pk("tblActivityLogs", ("logID",), _PREDATES_REASON),
     _idx("tblActivityLogs", "claimID", False, ("claimID",), _PREDATES_REASON),
@@ -743,14 +736,20 @@ STARTING_SET: tuple[StartingSetEntry, ...] = (
     _pk("tblRoutes", ("routeID",), _PREDATES_REASON),
     _idx("tblRoutes", "uq_routeKey", True, ("routeKey",), _PREDATES_REASON),
     _pk("tblSettings", ("settingID",), _PREDATES_REASON),
-    _idx("tblTrustedDevices", "uq_td_token_hash", True, ("tokenHash",), _TRUSTED_DEVICES_REASON),
-    _idx(
-        "tblTrustedDevices",
-        "idx_td_user_active",
-        False,
-        ("userID", "revokedAt", "expiresAt"),
-        _TRUSTED_DEVICES_REASON,
-    ),
+    # 🔁 `tblTrustedDevices`.`uq_td_token_hash` and `.idx_td_user_active`
+    #    USED TO BE LISTED HERE and are not any more (#747, 4 November
+    #    2026). Migration 047 creates the table with the keys named
+    #    `uq_token_hash` / `idx_user_active`; migration 210 section F
+    #    RENAMES both to the names a fresh install uses. So an upgraded
+    #    database really does have them, and no starting-set entry is
+    #    needed — this check simply could not see a rename until #747.
+    #
+    #    Their reason text had gone stale TWICE over, which is why this
+    #    note names both: it still called the naming drift unfixed after
+    #    migration 210 had fixed it, and it cited #553 as "open to fix"
+    #    that drift — #553 is closed, and is about event-category names,
+    #    not this table at all. The check's OWN staleness rule is what
+    #    surfaced them, the moment it was taught about renames.
     _pk("tblUserDepts", ("userDeptID",), _PREDATES_REASON),
     _idx("tblUserDepts", "deptID", False, ("deptID",), _PREDATES_REASON),
     _idx("tblUserDepts", "userID", False, ("userID",), _PREDATES_REASON),
@@ -865,6 +864,29 @@ CREATE_INDEX_RE = re.compile(
 # `INDEX`/`KEY` keyword this pattern demands right after "DROP" never lines
 # up with "FOREIGN" sitting there instead.
 DROP_INDEX_RE = re.compile(r"DROP\s+(?:INDEX|KEY)\s+`?(?P<name>[^`\s(,;]+)`?", re.IGNORECASE)
+
+# 🔁 `RENAME INDEX old TO new` — A THIRD WAY A NAME COMES TO EXIST, and until
+#    #747 this check knew only two (created by a migration, or predating the
+#    migrations). Migration 236 (#712) reaches
+#    `tblLiveRateLimits`.`idx_ratelimit_fingerprint` by renaming
+#    `idx_ratelimit_ip`, so no migration CREATES that name — and the check
+#    reported it as a key an upgraded database would not have, while exiting 0.
+#    It was a FALSE finding: an upgraded database does get the index.
+#
+#    Why that mattered more than one wrong line: a check that cries wolf gets
+#    switched off (#483), and a standing false line in the output is what
+#    teaches the next reader to stop reading — which is how
+#    `check_schema_seed_parity.py`'s true finding nearly let migration 223
+#    ship unrecorded (#647).
+#
+#    The statement sits inside a quoted string, because the migrations wrap it
+#    in `PREPARE`/`EXECUTE` to be safe to run twice. That costs nothing here:
+#    comments are stripped but string literals are kept, so both the
+#    `ALTER TABLE` that names the table and this clause are visible.
+RENAME_INDEX_RE = re.compile(
+    r"RENAME\s+(?:INDEX|KEY)\s+`?(?P<old>[^`\s(,;]+)`?\s+TO\s+`?(?P<new>[^`\s(,;]+)`?",
+    re.IGNORECASE,
+)
 
 # A foreign key, named or not, with or without backticks around the table it
 # references. MySQL allows both: `CONSTRAINT name FOREIGN KEY (...)` names
@@ -1067,6 +1089,8 @@ class Event:
     unique: bool = False
     prefixed: bool = False
     fk_name: str | None = None
+    # The name an index had BEFORE a "rename" event. Only a "rename" sets it.
+    old_name: str | None = None
     ref_table: str | None = None
     ref_cols: tuple[str, ...] | None = None
     from_create_table: bool = False
@@ -1235,6 +1259,17 @@ def parse_migration_file(path: Path) -> list[Event]:
             Event(kind="drop", pos=m.start(), table=owner, file=rel, line=line_of(text, m.start()), name=m.group("name"))
         )
 
+    for m in RENAME_INDEX_RE.finditer(blanked):
+        owner = table_for(m.start())
+        if owner is None:
+            continue  # a RENAME INDEX with no preceding ALTER TABLE never happens in this codebase; skip rather than guess.
+        events.append(
+            Event(
+                kind="rename", pos=m.start(), table=owner, file=rel, line=line_of(text, m.start()),
+                name=m.group("new"), old_name=m.group("old"),
+            )
+        )
+
     for m in FK_RE.finditer(blanked):
         owner = table_for(m.start())
         if owner is None:
@@ -1263,6 +1298,12 @@ def collect_created_names(all_events: list[Event]) -> tuple[set[tuple[str, str]]
     pk_tables: set[str] = set()
     for e in all_events:
         if e.kind == "key" and e.name is not None:
+            names.add((e.table, e.name))
+        elif e.kind == "rename" and e.name is not None:
+            # 🔁 A rename brings the NEW name into being as surely as a
+            #    `CREATE` does (#747). The OLD name is deliberately NOT removed
+            #    from this set: it names what the migrations did create at some
+            #    point, which is the question this set answers.
             names.add((e.table, e.name))
         elif e.kind == "pk":
             pk_tables.add(e.table)
@@ -1576,6 +1617,18 @@ def run_walk(
             elif cur_e.kind == "drop":
                 assert cur_e.name is not None
                 live.setdefault(cur_e.table, TableKeys()).indexes.pop(cur_e.name, None)
+            elif cur_e.kind == "rename":
+                # 🔁 The same index under a new name (#747). The columns and
+                #    the UNIQUE flag are unchanged — that is what a rename IS —
+                #    so the entry MOVES rather than being rebuilt. A rename of
+                #    a name that is not there does nothing, exactly as the
+                #    guarded migration does nothing on a database that has
+                #    already been renamed.
+                assert cur_e.name is not None and cur_e.old_name is not None
+                entry = live.setdefault(cur_e.table, TableKeys())
+                moved = entry.indexes.pop(cur_e.old_name, None)
+                if moved is not None:
+                    entry.indexes[cur_e.name] = moved
             elif cur_e.kind == "pk":
                 live.setdefault(cur_e.table, TableKeys()).primary_key = cur_e.cols
             i += 1
@@ -1876,7 +1929,11 @@ def main(argv: list[str]) -> int:
         "See DEV_NOTES.md → \"Portable DDL convention (MySQL 8.0 ∩ MariaDB)\" for the guarded "
         "ADD UNIQUE KEY idiom that fixes this without risking data on an existing database."
     )
-    return 1 if args.strict else 0
+    # 🚧 A FINDING STOPS THE WORK (the owner, 4 November 2026 — D-046). It used
+    #    to need `--strict`, so a real finding printed and exited 0; see this
+    #    file's "Exit code" note and #747 for why the false alarm had to go
+    #    first. `--strict` is still accepted and now makes no difference.
+    return 1
 
 
 if __name__ == "__main__":

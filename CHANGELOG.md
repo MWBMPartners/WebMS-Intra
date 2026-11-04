@@ -4,6 +4,183 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Six workflows have never run on GitHub, and two of them cannot (#754)
+
+`portal-selftests.yml`, `calendar-selftests.yml`, `mail-selftests.yml`,
+`backup-selftest.yml`, `package.yml` and `end-of-life-watch.yml` exist only on
+the working branch, so GitHub has never registered them. **"Wired into
+`portal-selftests.yml`" is therefore true of the file and false as a claim about
+what is being checked today**, and several recent packages said it without the
+qualifier. Five such claims across the two instruction files are corrected.
+
+**Two are worse than "never run": they CANNOT run.** `package.yml` — which
+builds the customer's installation zip — triggers only on a push to
+`main`/`rc`/`beta`/`alpha` or a `v*` tag, and on `workflow_dispatch`, which needs
+the file on the DEFAULT branch. So pushing this branch fires nothing and nothing
+can dispatch it: GitHub will first execute the release build at the merge.
+`end-of-life-watch.yml`'s `schedule` is in the same position, so "runs it
+monthly" was untrue; its path-filtered `pull_request` trigger can reach it.
+
+**One real provisioning gap, found by asking what each test NEEDS rather than
+whether it passes here.** `calendar-selftests.yml` did not request the `intl`
+extension, and `ics-reader-selftest.php` SKIPS checks L5 and L6 without it — the
+only guards on the committed Windows-time-zone list (#557) — and no other
+workflow runs that test. Its own footer says a skipped check is not a pass.
+
+Three candidates were **false alarms**, named so the next sweep is narrower
+rather than wider: `rclone` in `backup-page-selftest.php` is a stored setting
+value and not a program; `package-selftest.sh` builds a stand-in when `gitleaks`
+is absent and three of its cases need it absent; and `build.sh`'s outright
+refusal without `shasum` is satisfied, because the runner image ships Perl 5.38.2
+and `shasum` comes with Perl — measured against the image's own README, which is
+why `build.sh` was left alone rather than changed on a guess.
+
+No audit check was added: one that failed on any workflow absent from `main`
+would go red on every new workflow added on a branch, which is the normal case
+here. Both instruction files carry the one-line command to list the gap instead.
+
+### Two checks cried wolf and exited 0; both are now silent and both are gates (#730, #747, D-046)
+
+**The owner's decision, 4 November 2026 — D-046:** once the false complaints
+were gone, make both checks stop the work. The order mattered: gating a check
+that cries wolf blocks every push (#483), so the wolf-crying was fixed first.
+
+**`check_bind_param_arity.py` (#730).** It reported
+`web/_apps/calendar/manage/save.php:981` as "type-string length 11 but **23**
+bound argument(s)". The call is correct — eleven columns, eleven placeholders,
+eleven letters, eleven values.
+
+The cause is this repository's most-repeated trap: an **apostrophe inside a `//`
+comment**. Between two of the call's arguments sits
+
+```php
+// 📅 The series' OWN first date, not the one typed on the
+```
+
+and from "series'" onwards every later quote was out of step, so the walk ran
+past the closing parenthesis and swallowed the rest of the function — 24
+"arguments", most of them fragments of prose. The same cause has broken
+`check_page_head_tags.py` (an apostrophe in `// don't`),
+`check_no_brotli_decode.py` (a `//` inside a URL) and
+`check_no_new_role_gates.py` (an apostrophe inside a heredoc).
+
+The remedy is the one the repository already knows: **blank comments and mask
+string contents before pairing quotes, never delete them** — same length, with
+newlines kept, so reported line numbers stay true (#716: deleting them put line
+numbers 370 out). Heredocs and nowdocs are handled, because that branch's
+absence was a live hole in another check (#739).
+
+**And the type-string is read from the ORIGINAL, not from the mask.** Masking
+replaces a string's contents with `x` of the same length, so the LENGTH is right
+either way and only the letters printed to a developer are wrong. That is why a
+first attempt to pin it was a **clause that could not fail**: a case shaped like
+the others passed with the mask read, because every case compares counts.
+Measured: reading from the mask leaves all 24 count cases green while the message
+reads `bind_param('xxx', …)`. A dedicated check on the MESSAGE closes it.
+
+Nine new self-test cases, each shape twice — right and wrong — because a fix
+that simply stopped reporting would pass the "right" half on its own. Proved by
+planting: with the heredoc branch disabled the wrong-direction case is missed;
+with a real one-letter-short type string in the very call that was falsely
+reported, it is caught and the message now names the real letters and the right
+count.
+
+**`check_fk_references_unique_key.py` (#747).** It reported
+`tblLiveRateLimits`.`idx_ratelimit_fingerprint` as a key an upgraded database
+would not have. False: migration 236 reaches that name by **renaming**
+`idx_ratelimit_ip`. A rename is a **third** way a name comes to exist, besides
+"created by a migration" and "predates the migrations", and the check knew only
+two.
+
+**Teaching it about `RENAME INDEX` then surfaced two TRUE findings**, which is
+the check working rather than a new false alarm: two `STARTING_SET` entries for
+`tblTrustedDevices` claimed their keys predate the migration history, when
+migration 210 section F renames both to the names a fresh install uses. Their
+reason text had gone stale **twice over** — it still called the naming drift
+unfixed months after migration 210 fixed it, and it cited #553 as "open to fix"
+that drift, when #553 is closed and is about event-category names, not this
+table. Both entries are gone, the starting-set count is 30 rather than 32, and
+five stale passages in the module docstring are corrected.
+
+Proved by planting: with the rename parsing disabled, three findings appear
+instead of none; with a key added to `full_schema.sql` that no migration
+creates, it is still reported and the script now exits 1.
+
+### The erasure review's two races are exercised now, and one "untestable" claim was wrong (#735)
+
+Two guards in the erasure review were backstops no test reached. Both are
+driven by real code now, and **each was proved by planting the fault it exists
+to catch** — the plant applied with `diff`, the test confirmed red, the file
+restored and checked byte-identical with `shasum -a 256`.
+
+**A line appearing DURING a run (section S).** `GdprEraser` asks
+`ErasureReview::whyNotReadyToClose()` twice — once at the top of `execute()`,
+and again inside the transaction in `closeRequest()`. The second ask covers the
+case the first cannot: a row carrying reviewable free text being written while a
+run is already going. Nothing reached it.
+
+**The reason given for that was wrong, and that is the part worth keeping.** The
+code's comment said no end-to-end test could reach it "because the test harness
+runs one request at a time". True, and it does not follow: **one run is
+sequential** — top check, every step, then the close — so a row appearing
+anywhere in the middle of that one run reaches the second ask. It needs no
+second request, no second connection and no second process. The row is made to
+appear by a database trigger on `tblErasureAudit`, which every step writes to —
+the same technique `tools/password-writer-selftest.php` section H uses to reach
+a state the portal cannot produce on demand.
+
+Measured with that second ask deleted: the request **closes as `completed`**
+with the person's own words still in the row, and `execute()` reports
+`failed: 0` over 233 steps. S4 and S5 catch it; section I's text pins catch it
+too, so four checks go red.
+
+**Two deciders at once (section T).** Section R (#753) already admitted that
+R1 to R4 stay green with ` FOR UPDATE` deleted from `record()`, because **R
+takes the lock in the test, so it proves the database locks rather than that
+`record()` asks it to**. T closes that: this connection holds the row while the
+real `record()` runs in **its own process**, so the lock cannot be taken on the
+method's behalf. A separate process is required — the decider under test has to
+be blocked while the test carries on, and one process cannot wait on itself.
+
+The harm is specific, and was read out of `record()` rather than guessed:
+without the lock, the second decider's in-transaction read is a
+consistent-snapshot read taken before the other one committed, so it still sees
+the words, carries on, and writes `keep` — and because the decision is written
+with `ON DUPLICATE KEY UPDATE`, that `keep` lands on top of the other decision.
+**The record then says the words are still there over a cell somebody else
+emptied**, which the class's own docblock says must never happen. Measured three
+runs out of three with ` FOR UPDATE` deleted: R1 to R4 green, T2 and T3 red,
+T3 reporting "the cell is empty; the record says 'keep'".
+
+**Keep both kinds of check.** R5 reads the method's text; T reads its
+behaviour; neither covers the other's half.
+
+**Measured LOCALLY on both engines `portal-selftests.yml` runs** — MySQL 8.0.36
+and 8.4.11, 145 checks, 0 failed, three consecutive runs on 8.0.36 to show it is
+not timing-dependent. **Not measured by that workflow, which has never run on
+GitHub at all (#754)**; an earlier draft of this entry said "green on both
+engines `portal-selftests.yml` runs", which reads as a CI result and would have
+broken this project's own rule never to claim the automatic check ran.
+
+Sections S and T need two things the rest does not — the database user must be
+allowed to `CREATE TRIGGER`, and `proc_open` must work — and each now fails with
+the requirement named. "Now", because an independent check found **S2 could not
+fail at all**: this test reports mysqli errors as EXCEPTIONS, so `query()` never
+returned the `false` it was testing for, and a user without that privilege got
+an unexplained stack trace naming no requirement while the docs claimed a loud
+refusal.
+
+**That same check found section T vacuous at the margins — the shape this
+package was written to fix, one level up.** T2 matched only the word `REFUSED`,
+and `record()` refuses an already-empty line in TWO places: before its
+transaction (the line is no longer an item) and inside it under the lock. With
+a short sleep the worker returned the FIRST of those, so at a sleep of zero the
+whole of section T was green **in both states**, lock or no lock — and nothing
+asserted the 1.5-second sleep had been long enough. T2 now requires the
+in-transaction wording, and T1b asserts the worker is still blocked when the
+line is emptied. Measured with the lock removed and the sleep at zero: T2 red,
+where before it was green.
+
 ### A check was looking for the wrong text, because PHP interpolated it away (#757)
 
 `tools/expense-rules-selftest.php` asked

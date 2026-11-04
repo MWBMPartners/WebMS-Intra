@@ -2433,13 +2433,23 @@ class GdprEraser
             //    goes back, the new line shows on the review page, and the next
             //    run closes.
             //
-            //    ⚠️ SAID PLAINLY: NO END-TO-END TEST EXERCISES IT, because
-            //       reaching it means inserting a row between the first check
-            //       and this one, and the test harness runs one request at a
-            //       time. What IS tested is `whyNotReadyToClose()` itself, over
-            //       every answer it can give, and that this call is here with
-            //       its whole condition — the plant that deletes it must go
-            //       red. A backstop labelled as a backstop, not a tested path.
+            //    ✅ IT IS EXERCISED NOW (#735, 4 November 2026), and the
+            //       reason it was not is worth keeping, because the reasoning
+            //       was wrong rather than the conclusion merely out of date.
+            //       This comment used to say no end-to-end test could reach it
+            //       "because the test harness runs one request at a time".
+            //       That is true and it does not follow: ONE run is
+            //       SEQUENTIAL — top check, every step, then this close — so a
+            //       row that appears anywhere in the middle of that one run
+            //       reaches this ask. It needs no second request, no second
+            //       connection and no second process.
+            //
+            //       Section S of `tools/erasure-review-selftest.php` makes the
+            //       row appear with a database TRIGGER on `tblErasureAudit`,
+            //       which every step writes to. Deleting this ask makes that
+            //       request close as COMPLETED with the person's own words
+            //       still in the row — measured, and that is the harm, not a
+            //       tidiness point.
             $notReviewedYet = ErasureReview::whyNotReadyToClose($db, $requestId, $userId);
             if ($notReviewedYet !== '') {
                 throw new \RuntimeException(
