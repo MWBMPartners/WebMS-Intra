@@ -4,6 +4,49 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The erasure review's row lock is exercised now, and getting there took three attempts (#753)
+
+`ErasureReview::record()` takes a row lock so two Data Controllers cannot both
+decide one line. **Nothing exercised it**, and a comment claimed it was "proved
+at class level instead" — untrue: that test opened one connection, and
+`FOR UPDATE` appeared in neither test.
+
+**The three attempts are the lesson, because the second looked best and was the
+worst.**
+
+1. **Racing two real processes** for opposite decisions on one line. It worked —
+   and caught the fault **one run in six**, measured. A guard that fires one in
+   six reads like proof and is not.
+2. **Demonstrating the mechanism from two connections, interleaved
+   deliberately** — this repository's established pattern, from
+   `tools/expense-payment-race-selftest.php`. Deterministic, and **vacuous for
+   the thing it was written for**: it takes the lock *in the test*, so it proves
+   the database locks, not that `record()` asks it to. Measured: with
+   ` FOR UPDATE` deleted, four runs of four stayed **green**. Worse than flaky,
+   because it reads like proof while passing on the broken code.
+3. **A pin on the method's own text** — plus one that the transaction still
+   opens *before* the lock (#697: "a lock outside a transaction is
+   decoration"). Both go red on **every** run.
+
+All of it is kept, with each part labelled for what it does: R1–R4 show the
+mechanism and what the lock buys (a second decider arriving after the line was
+emptied is refused, and the record can never say "the words are still there"
+over an emptied cell), and **R5–R6 are the guard**. The section says in terms
+that R1–R4 provably do not catch removal, so nobody reads them as the guard.
+
+Two smaller corrections found while building it. The racing version first asked
+that "exactly one was recorded", which is **wrong and flaky with it** — it
+failed once with the lock in place, because a "keep it" does not change the cell
+and keep-then-empty is a legitimate sequence in which both are recorded. That is
+the same mistake #731's own race check made. And a check looked for the method's
+internal words ("already empty") where the real refusal is deliberately general
+— "already emptied, or the row changed, removed, or in another organisation" —
+because `record()` cannot tell those apart and this repository's rule is to say
+"the likeliest reason is…" rather than assert one.
+
+Also: `record()` really does reach `Portal\Core\GdprEraser` at run time, which
+a static scan with comments stripped said it did not. Ask the run, not the regex.
+
 ### A member whose only sign-in is Microsoft, Google or a passkey can give themselves a password (#731, migration 247)
 
 **Until now such an account had no route to a password at all.** The

@@ -1541,10 +1541,20 @@ head('J. The erasure review, as real requests (#732)');
 //     lock; the string `FOR UPDATE` appears in NEITHER test; and that test's
 //     own "what it cannot prove" list never claims it. So the ` FOR UPDATE`
 //     at `web/_core/ErasureReview.php:775` could be deleted and nothing in
-//     this repository would go red. Covering it needs two real connections,
-//     the way `tools/expense-payment-race-selftest.php` does it. Tracked as
-//     #753. An overstated guarantee is worse than none, and this one sat in
-//     good company: the other two items below ARE honestly covered.
+//     this repository would go red.
+//
+//     **#753 COVERED IT, in section R of `tools/erasure-review-selftest.php`,
+//     and HOW took three attempts worth knowing about.** Racing two processes
+//     worked but caught the fault only ONE RUN IN SIX — a guard that fires
+//     one in six reads like proof and is not. Demonstrating the mechanism from
+//     two connections, interleaved deliberately (the
+//     `tools/expense-payment-race-selftest.php` pattern), is deterministic but
+//     was VACUOUS for removal: it takes the lock in the TEST, so it proves the
+//     database locks, not that `record()` asks it to — measured, four runs of
+//     four stayed green with ` FOR UPDATE` deleted. What catches removal is a
+//     PIN on the method's own text, plus one that the transaction still opens
+//     BEFORE the lock (#697). Both go red on every run. The mechanism checks
+//     stay, because they are what shows the harm.
 //   - A line past `ErasureReview::SHOW_AT_MOST`. That needs 501 rows of free
 //     text and is proved in section J of `tools/erasure-review-selftest.php`.
 //   - **THREE clauses here are belt and braces rather than guards, and the

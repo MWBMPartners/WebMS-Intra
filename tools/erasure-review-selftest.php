@@ -1405,6 +1405,191 @@ erv_check(
     str_contains($pageCode, '$csrf = Auth::csrfToken();') === true
 );
 
+// =============================================================================
+erv_section('R — the row lock is real, and what it protects (#753)');
+// =============================================================================
+//
+// 🔒 WHY THIS SECTION EXISTS. `ErasureReview::record()` takes a row lock
+//    (`FOR UPDATE`) so that two Data Controllers cannot both decide one line.
+//    **Until #753 that lock was exercised by NOTHING, and a comment in
+//    `tools/erasure-pages-selftest.php` claimed it was "proved at class level
+//    instead" — which was untrue.** Measured at the time: this file opened ONE
+//    connection, and the string `FOR UPDATE` appeared in neither test.
+//
+// 🧭 HOW IT IS TESTED, AND WHY NOT BY RACING TWO PROCESSES. Racing was tried
+//    first: two `proc_open` workers asking for opposite decisions on one line.
+//    It worked, and it was NOT GOOD ENOUGH — measured over six runs with the
+//    lock deliberately removed, it caught the fault ONCE. A guard that fires
+//    one run in six reads like proof and is not, which is worse than none.
+//
+//    So this follows `tools/expense-payment-race-selftest.php` instead, which
+//    is this repository's established answer to the same question: run the
+//    statements in the method's own order from TWO CONNECTIONS, interleaved
+//    DELIBERATELY. That proves the MECHANISM — the lock really makes a second
+//    reader wait — and it is deterministic.
+//
+//    What it does NOT prove: that `record()` still CONTAINS those statements.
+//    Section A's text pins do that, and this is why both kinds exist.
+
+$lockText = 'Lock test — ' . bin2hex(random_bytes(6));
+$lockName = 'Lock fixture';
+$lockIns  = $mysqli->prepare(
+    'INSERT INTO `tblSalvationCards` (`siteID`, `fullName`, `assignedToID`, `prayerRequest`) VALUES (1, ?, ?, ?)'
+);
+$lockIns->bind_param('sis', $lockName, $personId, $lockText);
+$lockIns->execute();
+$lockRow = (int) $lockIns->insert_id;
+$lockIns->close();
+
+// 🔌 A SECOND connection. This file otherwise opens one, which is exactly why
+//    it could not test a lock before.
+$second = new mysqli(
+    getenv('SELFTEST_DB_HOST') !== false ? (string) getenv('SELFTEST_DB_HOST') : '127.0.0.1',
+    getenv('SELFTEST_DB_USER') !== false ? (string) getenv('SELFTEST_DB_USER') : 'root',
+    getenv('SELFTEST_DB_PASS') !== false ? (string) getenv('SELFTEST_DB_PASS') : '',
+    $dbName,
+    getenv('SELFTEST_DB_PORT') !== false ? (int) getenv('SELFTEST_DB_PORT') : 3306
+);
+// ⏱️ Three seconds, so a blocked read fails fast instead of waiting the
+//    server's default fifty.
+$second->query('SET SESSION innodb_lock_wait_timeout = 3');
+
+// 1️⃣ The first decider holds the row, exactly as `record()` does.
+$mysqli->begin_transaction();
+$holdStmt = $mysqli->prepare(
+    'SELECT `prayerRequest` FROM `tblSalvationCards` WHERE `cardID` = ? LIMIT 1 FOR UPDATE'
+);
+$holdStmt->bind_param('i', $lockRow);
+$holdStmt->execute();
+$holdStmt->get_result()->fetch_row();
+$holdStmt->close();
+
+// 2️⃣ The second decider asks for the same row the same way. It must WAIT and
+//    then time out. Without `FOR UPDATE` on the first read it would answer at
+//    once — which is the whole fault.
+$blocked = false;
+$answered = '';
+try {
+    $tryStmt = $second->prepare(
+        'SELECT `prayerRequest` FROM `tblSalvationCards` WHERE `cardID` = ? LIMIT 1 FOR UPDATE'
+    );
+    $tryStmt->bind_param('i', $lockRow);
+    $tryStmt->execute();
+    $row = $tryStmt->get_result()->fetch_row();
+    $answered = $row === null ? '(no row)' : (string) $row[0];
+    $tryStmt->close();
+} catch (\Throwable $ex) {
+    $blocked = str_contains($ex->getMessage(), 'Lock wait timeout') === true;
+    $answered = $ex->getMessage();
+}
+erv_check(
+    'R1 a second decider asking for the same row WAITS and times out, so the lock is real rather than decoration',
+    $blocked === true,
+    'the second connection answered: ' . substr($answered, 0, 90)
+);
+
+// 3️⃣ The first decider finishes the job, through the real method.
+$mysqli->rollback();
+$lockProblem = ErasureReview::record(
+    $mysqli,
+    $requestId,
+    $personId,
+    'tblSalvationCards',
+    'prayerRequest',
+    $lockRow,
+    ErasureReview::DECISION_EMPTY,
+    $deciderId
+);
+erv_check('R2 and with the row free the first decision is recorded', $lockProblem === '', $lockProblem);
+
+// 4️⃣ The second decider now tries the OPPOSITE decision on the same line. It
+//    must be refused, because by the time it holds the row the cell is empty —
+//    which is the thing the lock buys: a record can never say "the words are
+//    still there" over a cell somebody else emptied.
+$lateProblem = ErasureReview::record(
+    $second,
+    $requestId,
+    $personId,
+    'tblSalvationCards',
+    'prayerRequest',
+    $lockRow,
+    ErasureReview::DECISION_KEEP,
+    $deciderId
+);
+// 📣 The sentence it is refused WITH is deliberately general — "already
+//    emptied, or the row changed, removed, or in another organisation — or it
+//    could not be read just now" — because `record()` cannot tell those apart
+//    from the outside, and this repository's rule is to say "the likeliest
+//    reason is…" rather than assert one. A draft of this check looked for the
+//    method's own internal words ("already empty") and went red on a correct
+//    refusal.
+erv_check(
+    'R3 a second decider arriving after the line was emptied is REFUSED, and the reason names that possibility',
+    $lateProblem !== '' && str_contains($lateProblem, 'already emptied') === true,
+    'it answered: ' . $lateProblem
+);
+
+// 5️⃣ And the record agrees with the cell — the invariant all of this is for.
+$lockCell = erv_one('SELECT `prayerRequest` FROM `tblSalvationCards` WHERE `cardID` = ?', 'i', [$lockRow]);
+$lockSaid = (string) erv_one(
+    'SELECT `decision` FROM `tblErasureReviewDecisions` WHERE `requestID` = ? AND `tableName` = '
+    . "'tblSalvationCards' AND `rowKey` = ? LIMIT 1",
+    'ii',
+    [$requestId, $lockRow]
+);
+erv_check(
+    'R4 the cell and the record agree: emptied, and recorded as emptied',
+    ($lockCell === null || (string) $lockCell === '') && $lockSaid === 'empty',
+    'the cell is ' . ($lockCell === null || (string) $lockCell === '' ? 'empty' : 'still there')
+    . '; the record says "' . $lockSaid . '"'
+);
+
+// 🎯 R5 IS THE ONE THAT CATCHES REMOVAL, AND R1-R4 ARE NOT — this is the most
+//    important sentence in the section.
+//
+//    **Measured: with ` FOR UPDATE` deleted from `record()`'s own SELECT, R1 to
+//    R4 stayed GREEN on four runs out of four.** Of course they did: R1 takes
+//    the lock IN THIS TEST, so it proves the DATABASE locks, not that
+//    `record()` asks it to. Deterministic and vacuous, which is worse than
+//    flaky — and it is exactly the shape this repository keeps finding, a check
+//    that passes on the broken code while reading like proof.
+//
+//    So the guard against removal is a pin on the method's own text, the way
+//    `tools/expense-payment-race-selftest.php` splits the same question: its
+//    section A proves the mechanism and says in terms that it "does NOT load
+//    the page ... that is section B's whole job". R1-R4 are the mechanism and
+//    what it buys; R5 is the guard.
+//
+//    Comments are stripped by `token_get_all()` first, so a comment mentioning
+//    `FOR UPDATE` — and there is one, directly above the statement — cannot
+//    satisfy this.
+$recordCode = erv_codeOnly($coreDir . 'ErasureReview.php');
+erv_check(
+    'R5 `record()` still reads the cell with FOR UPDATE — the pin that catches the lock being deleted, '
+        . 'which R1 to R4 provably do not',
+    str_contains(
+        $recordCode,
+        "'SELECT `' . \$column . '` FROM `' . \$table . '` WHERE `' . \$keyColumn . '` = ? LIMIT 1 FOR UPDATE'"
+    ) === true
+);
+// 📏 And the transaction must still open BEFORE it, or the lock is decoration
+//    (#697: "a lock outside a transaction is decoration", which shipped once
+//    with an eleven-line comment claiming otherwise).
+$beginAt = strpos($recordCode, '$db->begin_transaction()');
+$lockAt  = strpos($recordCode, 'LIMIT 1 FOR UPDATE');
+erv_check(
+    'R6 ... and the transaction still opens BEFORE the lock is taken, without which the lock releases at once',
+    $beginAt !== false && $lockAt !== false && $beginAt < $lockAt,
+    'begin_transaction at ' . var_export($beginAt, true) . ', the lock at ' . var_export($lockAt, true)
+);
+
+$second->close();
+erv_run(
+    'DELETE FROM `tblErasureReviewDecisions` WHERE `requestID` = ' . (int) $requestId
+    . ' AND `rowKey` = ' . (int) $lockRow
+);
+erv_run('DELETE FROM `tblSalvationCards` WHERE `cardID` = ' . (int) $lockRow);
+
 echo "\n";
 echo 'Passed: ' . (string) $GLOBALS['erv_pass'] . "   Failed: " . (string) $GLOBALS['erv_fail'] . "\n";
 exit($GLOBALS['erv_fail'] === 0 ? 0 : 1);
