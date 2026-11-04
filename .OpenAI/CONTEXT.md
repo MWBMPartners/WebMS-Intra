@@ -2837,6 +2837,15 @@ codebase answer it?* If not, it is not ready.
   session itself had created. **Report the exact id to the owner and leave it.** Do not look for a way
   round it, and never reach for `prune`: that is the thing the refusal exists to protect, and it would
   take other projects' volumes with it.
+- **Deny rules for force-push, `git reset --hard` and both `prune` commands ARE in
+  `~/.claude/settings.json` since 4 November 2026 — D-048** (the owner added them, together with
+  `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=6`), and **that does not change which rule binds.** They were
+  recorded as in force on 5 October, were measured ABSENT on 1 November, and are there again now — so
+  open the file before claiming a deny rule stops you, in either direction. The WRITTEN rules bind
+  regardless, for three reasons: a deny rule cannot catch every form of a command (`bash -c '…'`,
+  `/usr/bin/git …`), **it does not bind Codex at all**, and a file can change. Established by reading
+  the file, never by running one of the commands to see whether it is refused — that would be
+  destructive if the rule did not hold (#678).
 
 ## A few more things worth knowing
 

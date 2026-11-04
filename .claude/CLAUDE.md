@@ -1035,7 +1035,21 @@ capability you do not have.
 hard reset, the deny rules for `docker volume prune` / `docker system prune`, and
 `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=6`. `~/.claude/settings.json` had no `permissions` block and
 no `env` block at all. The written rules had been followed, so no harm came of it — what was
-missing was the backstop, not the practice. Tracked as #678.
+missing was the backstop, not the practice.
+
+**THEY EXIST NOW (the owner, 4 November 2026 — D-048, they chose "Add all three"), AND THAT DOES NOT CHANGE
+WHICH RULE BINDS.** `~/.claude/settings.json` holds a `permissions.deny` block with twelve entries
+(force-push in four forms, `--force-with-lease` in two, `git reset --hard` in two, and
+`docker volume prune` / `docker system prune` in two each) and an `env` block setting
+`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` to `6`. **Established by opening the file and reading it, which
+is the evidence this rule demands — NOT by running any of the commands.** Running one to see whether
+it is refused would be destructive if the rule did not hold, and a test you must not repeat is not a
+test.
+
+**So the written rule still binds, for the three reasons it always did:** a deny rule cannot catch
+every form of a command (`bash -c '…'`, `/usr/bin/git …`), it does not bind Codex at all, and a file
+can change under you. The settings are a backstop behind the rule, never a replacement for it —
+which is exactly what the 5 October note said before it went stale in the opposite direction.
 
 ## The documentation sweep is a standing task
 
@@ -1101,7 +1115,7 @@ Set by the owner on 24 September 2026. Every agent here starts MySQL containers 
   take other projects' volumes with it.
 - Name each after its work (`p514p6chk-mysql`), so it can be identified later.
 - **Report the count of left-behind volumes before and after** (`docker volume ls -q -f dangling=true | wc -l`), and `docker ps -a`. Your own work must add none. Remove only your own containers and volumes, by name.
-- Never remove another project's container, a running one, or a NAMED volume without asking — `g2ml-mysql` and `wrapper-v2` belong to other projects. Never run `docker volume prune` or `docker system prune`: they remove every unused unnamed volume, other projects' included. A deny rule for both was recorded on 5 October 2026 as being in force; on 1 November 2026 `~/.claude/settings.json` had no `permissions` block, so **the written rule above is what binds** — check the file before claiming a deny rule stops you, and note it would not bind Codex even if it were there (#678).
+- Never remove another project's container, a running one, or a NAMED volume without asking — `g2ml-mysql` and `wrapper-v2` belong to other projects. Never run `docker volume prune` or `docker system prune`: they remove every unused unnamed volume, other projects' included. **A deny rule for both IS in `~/.claude/settings.json` since 4 November 2026** (the owner chose to add it; read in the file rather than assumed) — but **the written rule above is what binds**, because a deny rule cannot catch every form of a command and does not bind Codex at all. It was recorded as in force on 5 October, was absent on 1 November, and is there again now: check the file before claiming it stops you, in either direction (#678).
 
 ## Code style (house rules that differ from the usual defaults)
 
@@ -1273,6 +1287,6 @@ until the security comment is clean. This applies regardless of session.
 - Shared dirs (`_core/`, `_vendor/`, `_sql/`, `_includes/`, `_functions/`, `_libraries/`) mirror with `--delete` — manual server-side edits to these dirs vanish on the next deploy (see DEV_NOTES.md → Troubleshooting)
 - Branch-based deploy (one customer's set-up — see `DEV_NOTES.md` for the full table): `alpha` → `public_html_dev/`, `beta` → `public_html_beta/`, `main` → `public_html/`.
 - `web/public_html/` is the only web root, and the web server answers directly for just three PHP addresses: `/index.php`, `/error.php` and `/api-docs/index.php`. Every app page lives under `web/_apps/`, outside the web root (#159), and is reached only through the router.
-- Never force-push, hard-reset or change a remote without an explicit instruction, and never push straight to a release or protected branch. A deny rule for force-push and hard reset was recorded on 5 October 2026 as being in force; on 1 November 2026 `~/.claude/settings.json` had no `permissions` block. **The written rule is what binds**, for three separate reasons: a deny rule cannot catch every form of the command, it does not bind Codex, and it may not be there at all. Open the file before relying on one (#678).
+- Never force-push, hard-reset or change a remote without an explicit instruction, and never push straight to a release or protected branch. Deny rules for force-push (four forms), `--force-with-lease` (two) and `git reset --hard` (two) **ARE in `~/.claude/settings.json` since 4 November 2026** — the owner added them; read in the file, not assumed, and not tested by running one, which would be destructive if the rule did not hold. **The written rule is still what binds**, for the three reasons it always was: a deny rule cannot catch every form of the command, it does not bind Codex, and the file can change. Open it before relying on one, in either direction (#678).
 
 Keep replies and reports reasonably short.

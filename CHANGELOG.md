@@ -4,6 +4,43 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### How work is recorded: all three of #678's problems are closed (#678, D-048)
+
+**1. Finished issues were never closed.** `gh issue close` was refused once on
+30 October and that single refusal was recorded as a standing block. It is not:
+it has worked every time since, and **six issues were closed today** (#475,
+#730, #735, #747, #756, and #754's half). Closing is still two actions on
+purpose — `gh issue close` **and** the `status: done` label — so a refused close
+is still visible.
+
+**2. Three safety settings recorded as "DONE and PROVED" did not exist.** They
+exist now: the owner chose to add all three (**D-048**), so
+`~/.claude/settings.json` holds a `permissions.deny` block of twelve entries and
+an `env` block setting `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` to `6`.
+
+**And the three passages describing this were stale in the OPPOSITE direction**,
+which is the more interesting half. Each said the settings were absent and that
+the written rule was therefore what binds. The first clause is now false. All
+three are corrected to say both things: the rules are there, **and the written
+rule still binds** — because a deny rule cannot catch every form of a command,
+does not bind Codex at all, and a file can change under you.
+
+**How that was established, and how it must not be:** by opening the file and
+reading it, which is what this rule has always demanded. **Never by running one
+of the commands to see whether it is refused** — destructive if the rule does
+not hold, and a test you must not repeat is not a test.
+
+**3. Deferrals living only in prose.** The one genuinely open question #678 found
+buried in a finished handoff entry — what `tblWorkflowSteps.assigneeValue` may
+hold — now has its own issue, **#758**. The handoff is rewritten to current
+state: 116 lines, pointers only for decisions, and every unscheduled item has an
+issue number beside it.
+
+**The register's own drift gate caught me doing the thing it guards.** Writing
+"the owner, 4 November 2026 — they chose 'Add all three'" into `.claude/CLAUDE.md`
+with no `D-NNN` nearby failed `check_decisions_recorded.py`, correctly: it was a
+decision stated in prose and recorded nowhere. That is what produced D-048.
+
 ### The volunteer photo tier is a real gate now, and it takes photos away (#756, D-047)
 
 **A behaviour change the owner decided on 4 November 2026, not a tidy-up.** The
