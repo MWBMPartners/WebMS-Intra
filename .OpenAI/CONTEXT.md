@@ -566,7 +566,7 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     every statement that moves a held text; `sendHeld()` is called only by
     `/cron/mail-queue`, after the mail step, and can never stop it.
     `Sms::NEVER_HELD` is the ONE list of what quiet hours never hold (a
-    critical alert, an emergency notice: the owner, 13 October 2026). A
+    critical alert, an emergency notice: the owner, 13 October 2026 — D-028). A
     held text is `status = 'queued'` with `errorMsg = 'quiet-hours'` and a
     use-by moment (`heldUseBy`, UTC); it is taken once, by filling
     `claimedAt` in one statement, and a claim is never undone. Never twice
@@ -1406,7 +1406,7 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     a date nobody can see, for all 34 tables. `'no rule'` is the worst of
     the three only if something later really DELETEs the row.** A date the
     pattern ADDS takes the series' name, venue and settings and NONE of one
-A date the pattern ADDS **arrives as a DRAFT** (#692, the owner, 31 October 2026) — it does NOT
+A date the pattern ADDS **arrives as a DRAFT** (#692, the owner, 31 October 2026 — D-033) — it does NOT
 The dates it adds are **published from the series' BULK EDIT page**, which the handler redirects to
     — it lists every date including drafts with a tick-box each and a bulk `Status` control, so a
     whole change's worth goes in one step. **Do not claim it is one at a time** (#696 was raised on
@@ -2291,7 +2291,7 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     "contains the word name" matches `categoryName`, `deptName`, `typeName`, `themeName`, `tuneName`, `eventName`,
     `locationName`, `groupName` and `seriesName` — not one a person. A check that cries wolf gets switched off, and
     then it catches nothing (#483, and `check_limit_settings_capped.py`'s own lesson). As written it finds 37 and
-    every one is real. **Free-text columns are an INVENTORY, not a gate** (the owner, 2 November 2026): they are
+    every one is real. **Free-text columns are an INVENTORY, not a gate** (the owner, 2 November 2026 — D-030): they are
     printed with a count (do not write the number down here - it moves every time a column is named), because most hold nothing personal while a few certainly do, and a written reason for each
     would be mostly boilerplate. **So a green run means every CONTACT-SHAPED column is named, NOT that every personal
     column is**, and the check says so itself. Three rules the catalogue enforces, each learnt the hard way here: a
@@ -2349,7 +2349,7 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     a creation as the WHOLE new row and a deletion as the WHOLE old one, so a change to somebody's own account wrote their
     NAME AND E-MAIL ADDRESS in there — measured, and NOT the telephone or postal address my first version claimed.
     `GdprEraser::eraseAuditTrailAboutPerson()` empties the three value
-    columns; ANONYMISE, not delete (the owner, 2 November 2026) — who acted, when, which table and which record all stay.
+    columns; ANONYMISE, not delete (the owner, 2 November 2026 — D-031) — who acted, when, which table and which record all stay.
     **DO NOT "SIMPLIFY" IT BY ADDING THOSE COLUMNS TO THE ORDINARY INSTRUCTION'S `nullCols`:** that instruction matches
     `userID`, so it would empty the before-and-after of every change this person made to SOMEBODY ELSE'S record AND still
     reach no row about the person — wrong in both directions, #709's lesson in a new table. One check in section 20 of
@@ -2367,7 +2367,7 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     `ge_insert()` answers `{table, key}` with the key BY NAME, so `['id']` is 0. Adding a step shifts SIX hard-coded counts
     in that test. **#708:** `tblCareVisit.followUpAssignedToID`'s instruction is correct and can NEVER MATCH — nothing
     writes the column — so the limit is recorded beside it rather than the instruction being deleted or the page changed
-    (the owner, 2 November 2026). `tblKidCheckins.pickupName` was already recorded on 1 November 2026. The technical record
+    (the owner, 2 November 2026 — D-034). `tblKidCheckins.pickupName` was already recorded on 1 November 2026. The technical record
     is DEV_NOTES.md, "Reaching a row that nothing says is about anybody (#707)".
     *(`.claude/CLAUDE.md` → the #707 bullet.)*
 
@@ -2621,7 +2621,28 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     caught by RUNNING it: the first version queried `tblRoutes.routePath`; the column is **`routeKey`** — check a
     name against the thing that uses it, not against what looks similar.
 
-## Gating a feature is a CAPABILITY, never a hard-coded role (the owner, 3 November 2026)
+45. **EVERY DECISION THE OWNER MAKES LIVES IN `docs/decisions/` — ONE FILE EACH — AND ON ITS GITHUB ISSUE, AND THE
+    REGISTER IS SEARCHED BEFORE ANY QUESTION IS ASKED (the owner, 4 November 2026 — D-027).** The folder is at the
+    top of the repository, **outside `.claude/` and `.OpenAI/` deliberately**: a record inside one assistant's
+    folder is invisible to every other tool unless it is copied, and copies are the fault being fixed. **This file
+    carries POINTERS — a `D-NNN` number — never a restatement of a decision.**
+    **Why:** whether `alpha` should refuse a change until the tests pass was put to the owner THREE times on
+    3-4 November 2026 and answered three different ways (D-020, D-021, D-024). The second ask was defensible — a
+    measured fact had unseated the first answer — and the third was the owner's own prompt. But three answers now
+    exist for one question, and the owner's words for the cost are the reason this is a rule: it "delays
+    development and release readiness but also risks convoluted/fragmented code". The structural cause was that
+    decisions were recorded in FOUR places and none was complete — the project instruction file, several memory
+    files, the handoff, and issue comments. **Scattered records read as no record, because there is nothing to
+    search.**
+    **A re-ask is legitimate only when a MEASURED fact makes the recorded answer unworkable**, and then the
+    question must quote the decision, state the fact, and ask whether it still stands.
+    **Never edit a decision file** — a decision taken again is a NEW file naming the one it supersedes.
+    **Maintenance is part of the rule:** at every documentation sweep, check the register against the code and
+    against this file and realign what has drifted. `tools/audit-checks/check_decisions_recorded.py` is a hard gate
+    on the register's SHAPE and on this file pointing rather than restating; **it cannot tell whether anybody
+    searched the register, nor whether a decision is true.**
+
+## Gating a feature is a CAPABILITY, never a hard-coded role (the owner, 3 November 2026 — D-017)
 
 Set when the owner decided #727's scope: *"all remaining features pointable as
 gated features, all standard roles' gates. with organisational global admin

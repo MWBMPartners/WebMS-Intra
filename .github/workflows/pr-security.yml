@@ -1552,6 +1552,31 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_help_page_references.py
 
+      # The decision register is kept, and a decision taken twice is VISIBLE
+      # (the owner, 4 November 2026 — D-027).
+      #
+      # Said after noticing the same question had been asked more than once. It
+      # had: whether `alpha` should refuse a change until the tests pass was
+      # asked THREE times on 3-4 November and answered three different ways
+      # (D-020, D-021, D-024). The cause was structural — decisions were
+      # recorded in four places and none was complete, so there was nothing to
+      # search.
+      #
+      # `docs/decisions/` holds one file per decision, OUTSIDE any assistant's
+      # folder, because a record in `.claude/` is invisible to every other tool
+      # unless it is copied — and copies are the fault. This gate tests the
+      # register's SHAPE (rows well formed, numbers never reused,
+      # supersessions pointing both ways, the index complete) and that the
+      # instruction files POINT rather than restate.
+      #
+      # It CANNOT tell whether anybody searched the register before asking, nor
+      # whether a decision is true. Those are habits, not checks, and its own
+      # header says so.
+      - name: 'The decision register is kept and pointed to, not restated (hard gate)'
+        id: decisions_recorded
+        if: always()
+        run: python3 -I tools/audit-checks/check_decisions_recorded.py
+
 
       # =====================================================================
       # Summary in the Actions UI
