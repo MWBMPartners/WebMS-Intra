@@ -4,6 +4,62 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A cancelled date came back if it fell in the hour that happens twice (#654)
+
+**Fixed.** A date cancelled with `EXDATE` was not removed when it fell in the
+repeated hour on the night the clocks go back — in the form Google, Apple and
+Outlook all write. `RECURRENCE-ID` (a "this one date is different" block) had
+the same fault and worse: the date appeared at **both** its old time and its
+new one, so a congregation could see one service twice.
+
+**The cause.** A date's identity is its start turned into UTC. In the repeated
+hour one wall-clock reading names TWO moments, so one date has two possible
+identities. The repeat pattern carried the previous day's offset forward and
+keyed the date as the earlier moment; a cancellation went through a different
+route and took PHP's own pick. Nothing compared the two.
+
+`keysForDate()` is now the one place that says which identities a date can be
+known by. **Only the date being identified is widened, never the `EXDATE`
+set** — widening the set would remove a service the line never named, and that
+reasoning was measured rather than argued.
+
+**Nothing stored is renamed.** `keysForDate()[0]` is always the exact identity,
+so `externalRecurrenceKey` does not move — verified by reading all 64 fixtures
+through both the old and the new reader in three organisation zones: **2,363
+stored keys, byte-identical.** A renamed key would make the importer delete and
+re-add every date of this shape.
+
+**The independent check found three real problems, and the first is the one
+worth knowing about: the fix was incomplete, and a comment said it was not.**
+
+* **The cancelled service still went ahead at its moved time in 3 of the 9 ways
+  the two lines can be written** — measured independently, 1 of 9 right on the
+  committed reader, 6 of 9 with the fix as first written, 9 of 9 now. The cause:
+  a value ending in `Z` states an instant, so its own zone is UTC, and UTC has
+  no repeated hour — the block got ONE identity where the series date had two.
+  The changed-date block is now also named in the series' own zone. **The
+  comment claimed the cancellation wins "whichever way round they were
+  written", which was false**, and the suite was green because the fixture used
+  only the one form.
+* **The written-zone rule was pinned by nothing.** Swapping the zone a reading
+  was written in for the *organisation's* zone — one token — left all 396
+  checks green while a real date vanished from a diary with no warning. That is
+  the mistake `.claude/CLAUDE.md` names in capitals and which #653 shipped as a
+  no-op three times. New check **I35n** closes it.
+* **"Reachable only by an `RDATE` written in UTC" was false**, in the
+  reassuring direction, in four places. An `RDATE` in the series' own zone —
+  the form Google and Outlook write — reaches the same state, so the documented
+  cost of this fix is ordinary rather than exotic. Measured and corrected
+  everywhere it was claimed.
+
+Two new checks, **I35m** and **I35n**, each catching exactly the plant written
+for it and nothing else; the test is 398 checks, up from 375. Twelve planted
+faults in all, and the "which check catches what" table now names the two that
+passed all 396.
+
+**Cost:** a 2,000-date calendar goes from about 9.0 ms to 12.1 ms — roughly
+1.5 microseconds a date, recorded rather than called free.
+
 ### The two erasure-review pages are asked as real requests now (#732)
 
 `/admin/erasure-requests/review` and `/admin/erasure-requests/review-save` are

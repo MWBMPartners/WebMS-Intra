@@ -4470,6 +4470,639 @@ st_check(
 );
 unset($repeatedDaily, $repeatedOneOff, $repeatedLong, $repeatedDuration, $endsInIt, $oneOffPair, $seriesPair, $endsStart, $endsEnd, $utcWarnings);
 
+// =============================================================================
+// I35: A DATE CANCELLED OR MOVED IN THE HOUR THAT HAPPENS TWICE (#654).
+// =============================================================================
+//
+// I34 above is about what a reading in the repeated hour MEANS. This part is
+// about which date such a reading is NAMING, which is a different question and
+// had a different, live fault.
+//
+// WHAT WAS WRONG, measured against the committed class on 4 November 2026. A
+// date's identity is `recurrenceKeyFor()`: its start turned into UTC. On the
+// night the clocks go back one clock reading names two moments an hour apart,
+// so that one date has TWO possible identities — and the two halves of the
+// reader produced different ones. The repeat pattern carries the previous
+// date's offset forward, so it named the date `20261025T003000Z`; an `EXDATE`
+// goes through `makeDate()`, which takes PHP's own pick of the two, so it named
+// the same date `20261025T013000Z`. Nothing compared the two, so the
+// cancellation matched nothing:
+//
+//   EXDATE;TZID=Europe/London:20261025T013000   3 dates — NOT removed
+//   EXDATE:20261025T003000Z                     2 dates — removed
+//   EXDATE:20261025T013000Z                     3 dates — NOT removed
+//
+// The first of those is the form **Google, Apple and Outlook all write**. So a
+// service somebody had deliberately cancelled was shown on the portal as going
+// ahead, one night a year, and nothing warned because from the reader's point
+// of view nothing had gone wrong.
+//
+// `RECURRENCE-ID` names a date the same way and had the same fault, worse in
+// what a member saw: a date moved to the afternoon attached to nothing, so the
+// portal showed the event at its ORIGINAL time AND at its new one. Measured in
+// London — four dates where the calendar holds three.
+//
+// IT IS ZONE-DEPENDENT, WHICH IS HOW IT SURVIVED #653. PHP resolves such a
+// reading to the LATER moment in Europe and the EARLIER one across the
+// Americas, so in America/New_York the `TZID` form matched by luck while the
+// UTC form naming the later instant did not. Both zones have the fault; they
+// have it on different lines of the same file. The note left on
+// `buildOccurrence()` by #653 said only that the `TZID` form fails, which is
+// true in London and false in New York — so every form is checked here, in both
+// kinds of zone.
+//
+// WHERE THE FIX LIVES. `IcsReader::keysForDate()` is the ONE place that says
+// which identities a date could be known by. The first is always
+// `recurrenceKeyFor()`'s answer, so the STORED identity does not change — check
+// I34b pins that, and I35d pins it for the dates that survive a cancellation.
+// That matters more than it looks: the identity goes on the row as
+// `externalRecurrenceKey`, so a change to it would make the importer remove
+// every already-imported date of this shape and add it again.
+//
+// WHICH CHECK CATCHES WHAT. Twelve faults were planted one at a time, each
+// proved applied, each check that went red recorded, and the file restored
+// byte-identically after every one. Five of the twelve are caught by a single
+// check:
+//
+//   TWO OF THE TWELVE WERE ADDED BY AN INDEPENDENT CHECK, AND BOTH PASSED ALL
+//   396 CHECKS WHEN IT PLANTED THEM — the two below marked ADDED LATER. They
+//   are the reason I35m and I35n exist. A fix's own coverage is the easiest
+//   thing to forget, because the suite goes green the moment the fix lands.
+//
+//   the whole fix off (`keysForDate()`     I35a, I35c, I35d, I35e, I35f, I35h,
+//   narrowed to the stored identity)       I35i, I35j, I35l
+//   the cancellation look-up in            I35a, I35c, I35d, I35e, I35f, I35j
+//   `occurrencesForMaster()` narrowed
+//   back to the stored identity
+//   `instantsCarryingReading()` giving     nineteen checks across I34 and I35 —
+//   back only the moment it was given      it is the floor the whole of both
+//                                          parts stands on
+//   the second pass in `findOverride()`    I35h, I35i, I35l
+//   removed
+//   `keyWasExcluded()` narrowed back,      I35j ALONE, and only its SECOND
+//   or the orphan loop handing it one      case — see the note there
+//   identity instead of both
+//   one changed-date block used for        I35l ALONE
+//   both moments of one reading
+//   matching widened TOO FAR (a key for    I35k ALONE — which is what makes the
+//   the moment an hour earlier, whether    controls there live checks rather
+//   the reading is ambiguous or not)       than decoration
+//   resolving the reading BEFORE the       I34b (with I34, I34d, I34e, I34i,
+//   identity is built                      I34j, I34k, I35h, I35i, I35k, I35l).
+//                                          NOT I35d, although it looks like the
+//                                          check for it: the dates I35d names
+//                                          are the two that SURVIVE, and both
+//                                          of those readings are unambiguous.
+//   ADDED LATER — the changed-date block   I35m ALONE. Without the series' own
+//   named ONLY in the zone its own value   zone added as a second widening, the
+//   was written in                         cancelled service goes ahead at its
+//                                          moved time in 3 of the 9 ways the
+//                                          two lines can be written. It passed
+//                                          all 396 checks.
+//   ADDED LATER — the ORGANISATION's zone  I35n ALONE. This is the mistake
+//   used in place of the zone the reading  `.claude/CLAUDE.md` names in
+//   was WRITTEN in                         capitals, which #653 shipped as a
+//                                          no-op three times. The identity half
+//                                          of that rule had NO guard: planted,
+//                                          a real date vanished from the diary
+//                                          with all 396 checks green.
+//
+// WHAT IS NOT GUARDED HERE, said plainly. The dedupe by instant inside
+// `instantsCarryingReading()` is a defence against a zone listing one offset
+// twice; no fixture produces that, and removing it leaves every check green —
+// planted and measured, not assumed. And nothing here reads a calendar from a
+// real Google, Apple or Outlook account — part M is still skipped — so "the
+// form they all write" is taken from the standard and from their published
+// output, not measured against an export.
+$cancelled = st_read('repeated-hour-cancelled.ics');
+st_lines(
+    'I35a repeated-hour-cancelled.ics: the form Google, Apple and Outlook write removes the date in the repeated hour (it used to come back)',
+    [
+        '2026-10-24 01:30:00|2026-10-24 02:30:00|timed|key=20261024T003000Z|series|priv=no|canc=no|dup=no'
+        . '|Cancelled in the hour that happens twice',
+        '2026-10-26 01:30:00|2026-10-26 02:30:00|timed|key=20261026T013000Z|series|priv=no|canc=no|dup=no'
+        . '|Cancelled in the hour that happens twice',
+    ],
+    st_lines_of($cancelled['expand']['occurrences'])
+);
+st_check(
+    'I35a and nothing was reported as a problem, because nothing went wrong',
+    $cancelled['expand']['warnings'] === [],
+    implode(' | ', $cancelled['expand']['warnings'])
+);
+
+/**
+ * Read one inline calendar for an organisation in a named zone, over a window
+ * around the night in question.
+ *
+ * The I34 checks each build this by hand, which is four lines of the same
+ * thing every time; this part needs it fifteen times over, in five zones.
+ * `st_read()` cannot be used because it always reads in `$orgZone`
+ * (Europe/London) and half of these checks exist precisely because the answer
+ * depends on the zone.
+ */
+$i35read = static function (string $zoneName, string $from, string $to, string $events): array {
+    $zone = new DateTimeZone($zoneName);
+
+    return IcsReader::expand(
+        IcsReader::parse("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" . $events . "END:VCALENDAR\r\n", microtime(true) + 30.0),
+        $zone,
+        $zone,
+        new DateTimeImmutable($from, $zone),
+        new DateTimeImmutable($to, $zone),
+        microtime(true) + 30.0,
+        500
+    );
+};
+
+/** A daily 01:30-02:30 series of three dates, with one line of the caller's choosing added. */
+$i35series = static function (string $zoneName, string $firstDate, string $extraLine, string $title): string {
+    return "BEGIN:VEVENT\r\nUID:i35-" . hash('crc32b', $zoneName . $firstDate . $extraLine) . "@fixtures.webms.test\r\n"
+        . "DTSTART;TZID=" . $zoneName . ':' . $firstDate . "T013000\r\n"
+        . "DTEND;TZID=" . $zoneName . ':' . $firstDate . "T023000\r\n"
+        . "RRULE:FREQ=DAILY;COUNT=3\r\n"
+        . ($extraLine === '' ? '' : $extraLine . "\r\n")
+        . 'SUMMARY:' . $title . "\r\nEND:VEVENT\r\n";
+};
+
+// I35b and I35c: the OTHER two ways of writing the same cancellation, both in
+// UTC. One of them — the EARLIER instant — is the only form that worked before
+// this fix, so it is a control: it must still work. The other named the later
+// instant and was ignored.
+//
+// Worked out by hand: London goes back at 02:00 BST on 25 October 2026, so
+// 01:00-01:59 happens twice and the two moments reading 01:30 that night are
+// 00:30Z (on BST) and 01:30Z (on GMT).
+$londonSurvivors = [
+    '2026-10-24 01:30:00|2026-10-24 02:30:00|timed|key=20261024T003000Z|series|priv=no|canc=no|dup=no'
+    . '|Cancelled in UTC',
+    '2026-10-26 01:30:00|2026-10-26 02:30:00|timed|key=20261026T013000Z|series|priv=no|canc=no|dup=no'
+    . '|Cancelled in UTC',
+];
+st_lines(
+    'I35b a cancellation written in UTC naming the EARLIER moment still removes the date (the one form that worked before)',
+    $londonSurvivors,
+    st_lines_of($i35read(
+        'Europe/London',
+        '2026-10-18 00:00:00',
+        '2026-11-01 00:00:00',
+        $i35series('Europe/London', '20261024', 'EXDATE:20261025T003000Z', 'Cancelled in UTC')
+    )['occurrences'])
+);
+st_lines(
+    'I35c a cancellation written in UTC naming the LATER moment removes it too (it used to be ignored)',
+    $londonSurvivors,
+    st_lines_of($i35read(
+        'Europe/London',
+        '2026-10-18 00:00:00',
+        '2026-11-01 00:00:00',
+        $i35series('Europe/London', '20261024', 'EXDATE:20261025T013000Z', 'Cancelled in UTC')
+    )['occurrences'])
+);
+
+// I35d: THE STORED IDENTITY OF THE SURVIVING DATES, asserted on its own so
+// that a failure says which value moved rather than printing three lines of
+// difference. The identities are now compared more widely, and the one that is
+// STORED must not change: it goes on the row as `externalRecurrenceKey`, so a
+// change to it makes the next refresh remove every already-imported date of
+// this shape and add it again, taking anything attached to it.
+//
+// BE EXACT ABOUT WHAT THIS DOES AND DOES NOT CATCH, because its name invites
+// the wrong reading. The two dates it names are the ones that SURVIVE the
+// cancellation, and both of their readings are unambiguous — so resolving the
+// reading before the identity is built leaves this check GREEN. Planted and
+// measured: `I34b` is what catches that, on the ambiguous date itself. What
+// this check does catch is the cancellation failing to match at all, because
+// the list then has three entries rather than two.
+$cancelledKeys = [];
+foreach ($cancelled['expand']['occurrences'] as $occurrence) {
+    $cancelledKeys[] = (string) $occurrence['recurrenceKey'];
+}
+st_check(
+    'I35d and the surviving dates keep the identity they were stored under, so no import deletes and re-adds them',
+    $cancelledKeys === ['20261024T003000Z', '20261026T013000Z'],
+    'identities ' . json_encode($cancelledKeys)
+);
+
+// I35e: THE SAME THREE FORMS IN A ZONE THAT RESOLVES THE OTHER WAY. This is
+// the check #653's hole teaches us to write: in America/New_York PHP picks the
+// EARLIER of the two moments, so the `TZID` form matched by luck there and the
+// UTC-written LATER one did not — the mirror image of London. All three must
+// remove the date.
+//
+// Worked out by hand: New York goes back at 02:00 EDT on 1 November 2026, so
+// the two moments reading 01:30 that night are 05:30Z (EDT) and 06:30Z (EST).
+$nyExpected = [
+    '2026-10-31 01:30:00|2026-10-31 02:30:00|timed|key=20261031T053000Z|series|priv=no|canc=no|dup=no'
+    . '|New York cancelled',
+    '2026-11-02 01:30:00|2026-11-02 02:30:00|timed|key=20261102T063000Z|series|priv=no|canc=no|dup=no'
+    . '|New York cancelled',
+];
+foreach ([
+    'with the event\'s own zone (the form Google, Apple and Outlook write)' => 'EXDATE;TZID=America/New_York:20261101T013000',
+    'in UTC, the earlier moment'                                           => 'EXDATE:20261101T053000Z',
+    'in UTC, the later moment'                                             => 'EXDATE:20261101T063000Z',
+] as $how => $line) {
+    st_lines(
+        'I35e America/New_York — a zone where PHP resolves the reading the OTHER way — a cancellation written ' . $how . ' removes the date',
+        $nyExpected,
+        st_lines_of($i35read(
+            'America/New_York',
+            '2026-10-25 00:00:00',
+            '2026-11-08 00:00:00',
+            $i35series('America/New_York', '20261031', $line, 'New York cancelled')
+        )['occurrences'])
+    );
+}
+
+// I35f: A THIRTY-MINUTE CHANGE, so nothing here assumes the repeated hour is
+// an hour. Australia/Lord_Howe puts its clocks back by thirty minutes at 02:00
+// on 4 April 2027, so 01:30-01:59 is the repeated half-hour; the two moments
+// reading 01:45 that night are 14:45Z (+11:00) and 15:15Z (+10:30) on 3 April.
+$lhCancelled = $i35read(
+    'Australia/Lord_Howe',
+    '2027-03-28 00:00:00',
+    '2027-04-10 00:00:00',
+    "BEGIN:VEVENT\r\nUID:i35-lord-howe@fixtures.webms.test\r\n"
+    . "DTSTART;TZID=Australia/Lord_Howe:20270403T014500\r\nDTEND;TZID=Australia/Lord_Howe:20270403T024500\r\n"
+    . "RRULE:FREQ=DAILY;COUNT=3\r\nEXDATE;TZID=Australia/Lord_Howe:20270404T014500\r\n"
+    . "SUMMARY:Lord Howe cancelled\r\nEND:VEVENT\r\n"
+);
+st_lines(
+    'I35f a THIRTY-minute change (Australia/Lord_Howe): the cancellation removes the date in the repeated half-hour',
+    [
+        '2027-04-03 01:45:00|2027-04-03 02:45:00|timed|key=20270402T144500Z|series|priv=no|canc=no|dup=no'
+        . '|Lord Howe cancelled',
+        '2027-04-05 01:45:00|2027-04-05 02:45:00|timed|key=20270404T151500Z|series|priv=no|canc=no|dup=no'
+        . '|Lord Howe cancelled',
+    ],
+    st_lines_of($lhCancelled['occurrences'])
+);
+
+// I35g: A COUNTRY THAT MOVED ITS CLOCKS FOR GOOD — standard time on both
+// sides, no summer time anywhere near it, which is the shape that defeated an
+// earlier version of the resolver (I34j). America/Metlakatla went from -08:00
+// to -09:00 on 1 November 2015, so the two moments reading 01:30 that night are
+// 09:30Z and 10:30Z.
+//
+// THIS CHECK STAYS GREEN WITH THE FIX TAKEN OUT — planted and measured, not
+// assumed — and it is here anyway. PHP resolves Metlakatla's repeated hour to
+// the EARLIER moment, which is the one the repeat pattern produces, so the two
+// identities coincided by luck and this form always worked in that zone. It
+// earns its place as a CONTROL: it is the shape in this part whose answer must
+// not change, and a "fix" that moved the problem rather than removing it would
+// show up here. Nobody should read it as a guard.
+st_lines(
+    'I35g a permanent base-offset move (America/Metlakatla, 2015): the cancellation removes the date there too',
+    [
+        '2015-10-31 01:30:00|2015-10-31 02:30:00|timed|key=20151031T093000Z|series|priv=no|canc=no|dup=no'
+        . '|Metlakatla cancelled',
+        '2015-11-02 01:30:00|2015-11-02 02:30:00|timed|key=20151102T103000Z|series|priv=no|canc=no|dup=no'
+        . '|Metlakatla cancelled',
+    ],
+    st_lines_of($i35read(
+        'America/Metlakatla',
+        '2015-10-25 00:00:00',
+        '2015-11-08 00:00:00',
+        $i35series('America/Metlakatla', '20151031', 'EXDATE;TZID=America/Metlakatla:20151101T013000', 'Metlakatla cancelled')
+    )['occurrences'])
+);
+
+/**
+ * A daily 01:30-02:30 series of three dates, with a changed-date block moving
+ * the middle one — the date in the repeated hour — to two in the afternoon.
+ *
+ * `$firstDate` is the night BEFORE the clocks change, so the series' own first
+ * date is an ordinary unambiguous reading. That is deliberate: a series whose
+ * own `DTSTART` is the ambiguous reading takes its identity from
+ * `makeDate()`'s pick rather than from the pattern, which is a different shape
+ * and is covered by I34k. The first version of this helper used the moved date
+ * for both and tested that other shape by accident.
+ */
+$i35moved = static function (string $zoneName, string $firstDate, string $movedDate, string $recurrenceIdLine): string {
+    return "BEGIN:VEVENT\r\nUID:i35-moved-" . hash('crc32b', $zoneName . $recurrenceIdLine) . "@fixtures.webms.test\r\n"
+        . "DTSTART;TZID=" . $zoneName . ':' . $firstDate . "T013000\r\n"
+        . "DTEND;TZID=" . $zoneName . ':' . $firstDate . "T023000\r\n"
+        . "RRULE:FREQ=DAILY;COUNT=3\r\nSUMMARY:Night prayer\r\nEND:VEVENT\r\n"
+        . "BEGIN:VEVENT\r\nUID:i35-moved-" . hash('crc32b', $zoneName . $recurrenceIdLine) . "@fixtures.webms.test\r\n"
+        . $recurrenceIdLine . "\r\n"
+        . "DTSTART;TZID=" . $zoneName . ':' . $movedDate . "T140000\r\n"
+        . "DTEND;TZID=" . $zoneName . ':' . $movedDate . "T150000\r\n"
+        . "SUMMARY:Moved to the afternoon\r\nEND:VEVENT\r\n";
+};
+
+// I35h: A DATE **MOVED** IN THE REPEATED HOUR. The same identity question, and
+// the worse symptom: before the fix the changed-date block attached to nothing,
+// so it was kept on its own as an orphan AND the original date came through
+// unmoved. The member saw the event twice — once at 01:30 and once at 14:00.
+//
+// The moved date's identity is the identity of the date it replaces — the
+// series date's, `20261025T003000Z` — and NOT the block's own
+// `RECURRENCE-ID`. That is a deliberate change of what is stored for this one
+// shape, and it is the only way round: a changed date that attaches to a series
+// date takes that date's identity, exactly as every other changed date in this
+// file does. The cost is that a calendar which had already imported such a
+// block as an orphan has that one row replaced by the next refresh. Nothing
+// else is renamed.
+$londonMoved = [
+    '2026-10-24 01:30:00|2026-10-24 02:30:00|timed|key=20261024T003000Z|series|priv=no|canc=no|dup=no'
+    . '|Night prayer',
+    '2026-10-25 14:00:00|2026-10-25 15:00:00|timed|key=20261025T003000Z|series|priv=no|canc=no|dup=no'
+    . '|Moved to the afternoon',
+    '2026-10-26 01:30:00|2026-10-26 02:30:00|timed|key=20261026T013000Z|series|priv=no|canc=no|dup=no'
+    . '|Night prayer',
+];
+foreach ([
+    'with the event\'s own zone'  => 'RECURRENCE-ID;TZID=Europe/London:20261025T013000',
+    'in UTC, the earlier moment' => 'RECURRENCE-ID:20261025T003000Z',
+    'in UTC, the later moment'   => 'RECURRENCE-ID:20261025T013000Z',
+] as $how => $line) {
+    st_lines(
+        'I35h a date MOVED in the repeated hour attaches to the date it replaces when the change is written ' . $how
+            . ' (it used to appear at BOTH times)',
+        $londonMoved,
+        st_lines_of($i35read(
+            'Europe/London',
+            '2026-10-18 00:00:00',
+            '2026-11-01 00:00:00',
+            $i35moved('Europe/London', '20261024', '20261025', $line)
+        )['occurrences'])
+    );
+}
+
+// I35i: the same in the zone that resolves the other way, for the reason I35e
+// gives. In New York the `TZID` form attached by luck and the UTC-written later
+// moment did not.
+$nyMoved = [
+    '2026-10-31 01:30:00|2026-10-31 02:30:00|timed|key=20261031T053000Z|series|priv=no|canc=no|dup=no'
+    . '|Night prayer',
+    '2026-11-01 14:00:00|2026-11-01 15:00:00|timed|key=20261101T053000Z|series|priv=no|canc=no|dup=no'
+    . '|Moved to the afternoon',
+    '2026-11-02 01:30:00|2026-11-02 02:30:00|timed|key=20261102T063000Z|series|priv=no|canc=no|dup=no'
+    . '|Night prayer',
+];
+foreach ([
+    'with the event\'s own zone'  => 'RECURRENCE-ID;TZID=America/New_York:20261101T013000',
+    'in UTC, the earlier moment' => 'RECURRENCE-ID:20261101T053000Z',
+    'in UTC, the later moment'   => 'RECURRENCE-ID:20261101T063000Z',
+] as $how => $line) {
+    st_lines(
+        'I35i America/New_York — a date MOVED in the repeated hour attaches to the date it replaces when the change is written ' . $how,
+        $nyMoved,
+        st_lines_of($i35read(
+            'America/New_York',
+            '2026-10-25 00:00:00',
+            '2026-11-08 00:00:00',
+            $i35moved('America/New_York', '20261031', '20261101', $line)
+        )['occurrences'])
+    );
+}
+
+// I35j: A CANCELLATION AND A CHANGED-DATE BLOCK FOR THE SAME DATE, each
+// written the other way round. The cancellation must win — a removal is an
+// explicit act by whoever keeps the calendar, and that is the rule this reader
+// already follows for every other date.
+//
+// Before the fix this calendar came back with FOUR dates where it holds two:
+// the cancellation matched nothing, so the date came through from the pattern,
+// and the block matched nothing either, so it was kept as an orphan as well.
+//
+// TWO CASES, AND THE FIRST ONE I WROTE COULD NOT FAIL. The comparison that has
+// to be widened for an orphan is `keyWasExcluded()` — the cancellation against
+// the leftover block — and in the first case below the cancellation and the
+// block resolve to the SAME name, so that comparison is answered by the stored
+// identity alone and narrowing it back changes nothing. Planting proved it:
+// the whole of #654's widening could be taken out of `keyWasExcluded()` with
+// every one of the 395 checks still green. It is the SECOND case that pins it,
+// because there the cancellation names the earlier moment and the block names
+// the later one, so the two must be recognised as one date through two
+// different names. The lesson is the repository's own: a fixture where two
+// values coincide cannot tell them apart.
+$i35cancelledAndMoved = static function (string $exdateLine) use ($i35read): array {
+    return $i35read(
+        'Europe/London',
+        '2026-10-18 00:00:00',
+        '2026-11-01 00:00:00',
+        "BEGIN:VEVENT\r\nUID:i35-cancelled-and-moved-" . hash('crc32b', $exdateLine) . "@fixtures.webms.test\r\n"
+        . "DTSTART;TZID=Europe/London:20261024T013000\r\nDTEND;TZID=Europe/London:20261024T023000\r\n"
+        . "RRULE:FREQ=DAILY;COUNT=3\r\n" . $exdateLine . "\r\nSUMMARY:Night prayer\r\nEND:VEVENT\r\n"
+        . "BEGIN:VEVENT\r\nUID:i35-cancelled-and-moved-" . hash('crc32b', $exdateLine) . "@fixtures.webms.test\r\n"
+        . "RECURRENCE-ID;TZID=Europe/London:20261025T013000\r\n"
+        . "DTSTART;TZID=Europe/London:20261025T140000\r\nDTEND;TZID=Europe/London:20261025T150000\r\n"
+        . "SUMMARY:Moved to the afternoon\r\nEND:VEVENT\r\n"
+    );
+};
+$i35cancelledSurvivors = [
+    '2026-10-24 01:30:00|2026-10-24 02:30:00|timed|key=20261024T003000Z|series|priv=no|canc=no|dup=no'
+    . '|Night prayer',
+    '2026-10-26 01:30:00|2026-10-26 02:30:00|timed|key=20261026T013000Z|series|priv=no|canc=no|dup=no'
+    . '|Night prayer',
+];
+st_lines(
+    'I35j a cancellation beats a changed-date block for the same date in the repeated hour (both naming the later moment)',
+    $i35cancelledSurvivors,
+    st_lines_of($i35cancelledAndMoved('EXDATE:20261025T013000Z')['occurrences'])
+);
+st_lines(
+    'I35j and it beats it when the cancellation names the EARLIER moment and the block the LATER one — the case that pins keyWasExcluded()',
+    $i35cancelledSurvivors,
+    st_lines_of($i35cancelledAndMoved('EXDATE:20261025T003000Z')['occurrences'])
+);
+
+// I35k: THE CONTROLS. Two of them, and without them every check above would
+// still pass with the matching widened far too far — a cancellation that
+// removed the whole night, or every date at that reading.
+//
+// The first: a cancellation naming the date BEFORE the change night removes
+// that one and leaves the ambiguous one alone. The second: a series at 02:30,
+// an ordinary unambiguous reading on the same night, is untouched by a
+// cancellation naming 01:30.
+st_lines(
+    'I35k CONTROL a cancellation naming the night BEFORE removes only that date, and leaves the one in the repeated hour alone',
+    [
+        '2026-10-25 01:30:00|2026-10-25 02:30:00|timed|key=20261025T003000Z|series|priv=no|canc=no|dup=no'
+        . '|Control, the night before',
+        '2026-10-26 01:30:00|2026-10-26 02:30:00|timed|key=20261026T013000Z|series|priv=no|canc=no|dup=no'
+        . '|Control, the night before',
+    ],
+    st_lines_of($i35read(
+        'Europe/London',
+        '2026-10-18 00:00:00',
+        '2026-11-01 00:00:00',
+        $i35series('Europe/London', '20261024', 'EXDATE;TZID=Europe/London:20261024T013000', 'Control, the night before')
+    )['occurrences'])
+);
+st_lines(
+    'I35k CONTROL a date at 02:30 on the same night — an ordinary reading — is untouched by a cancellation naming 01:30',
+    [
+        '2026-10-24 02:30:00|2026-10-24 03:30:00|timed|key=20261024T013000Z|series|priv=no|canc=no|dup=no'
+        . '|Control, an ordinary reading',
+        '2026-10-25 02:30:00|2026-10-25 03:30:00|timed|key=20261025T023000Z|series|priv=no|canc=no|dup=no'
+        . '|Control, an ordinary reading',
+        '2026-10-26 02:30:00|2026-10-26 03:30:00|timed|key=20261026T023000Z|series|priv=no|canc=no|dup=no'
+        . '|Control, an ordinary reading',
+    ],
+    st_lines_of($i35read(
+        'Europe/London',
+        '2026-10-18 00:00:00',
+        '2026-11-01 00:00:00',
+        "BEGIN:VEVENT\r\nUID:i35-control-ordinary@fixtures.webms.test\r\n"
+        . "DTSTART;TZID=Europe/London:20261024T023000\r\nDTEND;TZID=Europe/London:20261024T033000\r\n"
+        . "RRULE:FREQ=DAILY;COUNT=3\r\nEXDATE;TZID=Europe/London:20261025T013000\r\n"
+        . "SUMMARY:Control, an ordinary reading\r\nEND:VEVENT\r\n"
+    )['occurrences'])
+);
+
+// I35l: ONE CHANGED-DATE BLOCK REPLACES ONE DATE, even when the series really
+// holds BOTH moments of one reading.
+//
+// That shape is reached by an `RDATE` naming that reading — in UTC, or in the
+// series' OWN zone, where PHP's pick differs from the offset the pattern
+// carries forward. The series then has two dates an hour apart whose clock
+// readings are identical, and a changed-date block naming that reading could
+// attach to either.
+//
+// **An earlier version of this comment said "and only one way: an `RDATE`
+// written in UTC", which is false.** Measured: London, daily 01:30 over
+// 25 October 2026 plus `RDATE;TZID=Europe/London:20261025T013000` gives four
+// dates, two reading 01:30 with different keys — and that same-zone form is
+// what Google and Outlook write, so it is the ordinary case, not the exotic
+// one. The fixture below still uses the UTC form because that is what it was
+// built with and it reaches the same state; the claim about reachability is
+// what was wrong, not the fixture.
+//
+// Measured while this was being built: with the "already used" test in the
+// widened pass only, the FIRST of the two matched the block through its other
+// identity and the SECOND still matched it exactly, so the same change was
+// applied twice and a member saw the moved event at 14:00 TWICE. This is the
+// only check that catches that, and it is why the test is in both passes of
+// `findOverride()`.
+//
+// Which of the two keeps its original time is decided by the order the dates
+// come out in and nothing else — the file says no more than that there are two
+// of them. The check asserts the whole answer rather than a count, so a change
+// of mind there is visible rather than silent.
+st_lines(
+    'I35l one changed-date block replaces ONE date, even where the series holds both moments of one reading',
+    [
+        '2026-10-24 01:30:00|2026-10-24 02:30:00|timed|key=20261024T003000Z|series|priv=no|canc=no|dup=no'
+        . '|Both moments of one reading',
+        '2026-10-25 01:30:00|2026-10-25 02:30:00|timed|key=20261025T013000Z|series|priv=no|canc=no|dup=no'
+        . '|Both moments of one reading',
+        '2026-10-25 14:00:00|2026-10-25 15:00:00|timed|key=20261025T003000Z|series|priv=no|canc=no|dup=no'
+        . '|Moved to the afternoon',
+        '2026-10-26 01:30:00|2026-10-26 02:30:00|timed|key=20261026T013000Z|series|priv=no|canc=no|dup=no'
+        . '|Both moments of one reading',
+    ],
+    st_lines_of($i35read(
+        'Europe/London',
+        '2026-10-18 00:00:00',
+        '2026-11-01 00:00:00',
+        "BEGIN:VEVENT\r\nUID:i35-both-moments@fixtures.webms.test\r\n"
+        . "DTSTART;TZID=Europe/London:20261024T013000\r\nDTEND;TZID=Europe/London:20261024T023000\r\n"
+        . "RRULE:FREQ=DAILY;COUNT=3\r\nRDATE:20261025T013000Z\r\n"
+        . "SUMMARY:Both moments of one reading\r\nEND:VEVENT\r\n"
+        . "BEGIN:VEVENT\r\nUID:i35-both-moments@fixtures.webms.test\r\n"
+        . "RECURRENCE-ID;TZID=Europe/London:20261025T013000\r\n"
+        . "DTSTART;TZID=Europe/London:20261025T140000\r\nDTEND;TZID=Europe/London:20261025T150000\r\n"
+        . "SUMMARY:Moved to the afternoon\r\nEND:VEVENT\r\n"
+    )['occurrences'])
+);
+// I35m: THE CANCELLATION WINS WHEN THE TWO LINES ARE WRITTEN DIFFERENT WAYS.
+//
+// 🎯 THIS IS THE CHECK THE FIRST VERSION OF #654 DID NOT HAVE, and an
+//    independent check found the gap by measuring all nine combinations
+//    instead of the one the fixture happened to use.
+//
+//    A cancellation and a changed-date block can each be written three ways:
+//    in the event's own zone (what Google, Apple and Outlook write), or in UTC
+//    naming either of the two moments the repeated hour's reading can mean.
+//    That is nine pairings, and the right answer in every one is the same —
+//    the cancellation wins, so the date is simply gone.
+//
+//    Measured on the committed reader: 1 of 9 right. With the identity widened
+//    only in the zone the `RECURRENCE-ID` VALUE was written in: 6 of 9. The
+//    three still wrong all showed **the cancelled service going ahead at its
+//    moved time**, which is the whole fault #654 is about, surviving in the
+//    package that fixed it.
+//
+//    Why those three: a value ending in `Z` states an instant, so its own zone
+//    is UTC, and UTC has no repeated hour — the block gets ONE identity where
+//    the series date has two. The series date is removed by the cancellation
+//    and stepped past, so the block is never marked used and is emitted as an
+//    orphan.
+//
+//    This check takes the pairing that is both commonest and was broken: the
+//    `EXDATE` in the event's own zone (the form every major calendar writes)
+//    and the `RECURRENCE-ID` in UTC. Without the series' own zone added as a
+//    second widening it answers THREE dates, the third being 14:00.
+st_lines(
+    'I35m a cancellation written in the event\'s own zone beats a changed-date block written in UTC',
+    [
+        '2026-10-24 01:30:00|2026-10-24 02:30:00|timed|key=20261024T003000Z|series|priv=no|canc=no|dup=no'
+        . '|Night service',
+        '2026-10-26 01:30:00|2026-10-26 02:30:00|timed|key=20261026T013000Z|series|priv=no|canc=no|dup=no'
+        . '|Night service',
+    ],
+    st_lines_of($i35read(
+        'Europe/London',
+        '2026-10-18 00:00:00',
+        '2026-11-01 00:00:00',
+        "BEGIN:VEVENT\r\nUID:i35m-cancel-beats-move@fixtures.webms.test\r\n"
+        . "DTSTART;TZID=Europe/London:20261024T013000\r\nDTEND;TZID=Europe/London:20261024T023000\r\n"
+        . "RRULE:FREQ=DAILY;COUNT=3\r\nEXDATE;TZID=Europe/London:20261025T013000\r\n"
+        . "SUMMARY:Night service\r\nEND:VEVENT\r\n"
+        . "BEGIN:VEVENT\r\nUID:i35m-cancel-beats-move@fixtures.webms.test\r\n"
+        . "RECURRENCE-ID:20261025T003000Z\r\n"
+        . "DTSTART;TZID=Europe/London:20261025T140000\r\nDTEND;TZID=Europe/London:20261025T150000\r\n"
+        . "SUMMARY:Moved to the afternoon\r\nEND:VEVENT\r\n"
+    )['occurrences'])
+);
+
+// I35n: A CALENDAR THAT STATES INSTANTS, READ BY AN ORGANISATION WHOSE OWN
+// ZONE HAS A REPEATED HOUR — the over-reach direction, and the one this file
+// warns about in capitals.
+//
+// 🚨 `.claude/CLAUDE.md` says of this exact fix: judge a reading in the zone it
+//    was WRITTEN in, **NEVER the organisation's**. #653 shipped as a no-op
+//    three times, each with every check green, and the identity half of the
+//    rule had NO guard at all until this check — an independent check planted
+//    `$orgZone` in place of the written zone at one line and the suite stayed
+//    396 green while a real date vanished from the diary.
+//
+//    The calendar below states every date as an instant (`...Z`), which is
+//    what a feed exported from a server usually does. A time ending in `Z` is
+//    an instant, not a reading on a clock, so there is NOTHING to resolve —
+//    and judging it in London's zone invents an ambiguity that is not there,
+//    so one `EXDATE` matches TWO dates and removes a service it never named.
+//
+//    The `EXDATE` names `20261025T013000Z` and must take exactly that one.
+//    With the organisation's zone planted in, the date at `20261024T233000Z`
+//    goes too — with no warning, which is what makes it worth a check rather
+//    than a comment.
+st_lines(
+    'I35n a calendar stating instants, read where the clocks go back: a cancellation takes only the instant it names',
+    [
+        '2026-10-25 00:30:00|2026-10-25 01:30:00|timed|key=20261024T233000Z|series|priv=no|canc=no|dup=no'
+        . '|Stated as instants',
+        '2026-10-25 01:30:00|2026-10-25 01:30:00|timed|key=20261025T003000Z|series|priv=no|canc=no|dup=no'
+        . '|Stated as instants',
+    ],
+    st_lines_of($i35read(
+        'Europe/London',
+        '2026-10-18 00:00:00',
+        '2026-11-01 00:00:00',
+        "BEGIN:VEVENT\r\nUID:i35n-instants@fixtures.webms.test\r\n"
+        . "DTSTART:20261024T233000Z\r\nDTEND:20261025T003000Z\r\n"
+        . "RDATE:20261025T003000Z\r\nRDATE:20261025T013000Z\r\n"
+        . "EXDATE:20261025T013000Z\r\n"
+        . "SUMMARY:Stated as instants\r\nEND:VEVENT\r\n"
+    )['occurrences'])
+);
+
+unset($cancelled, $cancelledKeys, $londonSurvivors, $londonMoved, $nyExpected, $nyMoved, $lhCancelled);
+unset($i35read, $i35series, $i35moved, $i35cancelledAndMoved, $i35cancelledSurvivors);
+
 // I30: the per-feed ceiling, which the owner decided on 23 September 2026
 // should be something a customer can change. The reader still reads no
 // setting; the number arrives as an argument, and part P6 is what reads the
