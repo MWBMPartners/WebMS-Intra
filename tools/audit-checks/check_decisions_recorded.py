@@ -104,7 +104,7 @@ NUMBER_NEARBY = re.compile(r"\bD-\d{3}\b")
 
 # Raised BY HAND when rows are added. The register is append-only, so this can
 # only ever go up — it is what makes a rewrite that drops history fail.
-MINIMUM_ROWS = 48
+MINIMUM_ROWS = 49
 
 # `## D-014 · 2026-10-30 · One job per document`
 ROW = re.compile(r"^##\s+(D-(\d{3}))\s+·\s+(\d{4}-\d{2}-\d{2})\s+·\s+(.+?)\s*$")

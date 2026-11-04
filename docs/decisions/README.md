@@ -104,7 +104,8 @@ appended with its real date and a note that it was added later.
 | [D-046](046-two-reporting-checks-become-hard-gates.md) | 2026-11-04 | Two checks that only printed a problem now stop the work | in force |
 | [D-047](047-only-volunteers-see-the-volunteer-photo-tier.md) | 2026-11-04 | Only volunteers may see the volunteer photo tier | in force |
 | [D-048](048-the-three-safety-settings-are-added.md) | 2026-11-04 | The three safety settings are added to `~/.claude/settings.json` | in force |
+| [D-049](049-content-translation-is-finished-for-the-first-release.md) | 2026-11-04 | Content translation is finished for the first release | in force |
 
-*48 decisions. This index is checked against the folder by
+*49 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
