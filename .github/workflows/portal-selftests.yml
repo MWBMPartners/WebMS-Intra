@@ -606,7 +606,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_reservedwords selftest_offsite selftest_helppages; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_reservedwords selftest_offsite selftest_helppages selftest_pwwriter; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -1052,6 +1052,27 @@ jobs:
         env:
           SELFTEST_DB_NAME: selftest_limit
         run: php -d memory_limit=512M tools/setting-limit-selftest.php
+
+      # 🔑 ONE PLACE HASHES AND STORES A PASSWORD (#728), proved against a real
+      #    database. tools/audit-checks/check_one_password_writer.py proves
+      #    nothing ELSE stores one; this proves the one that does, does it
+      #    right. A guard pointing at the only writer while that writer is
+      #    wrong is worse than no guard, because it stops anybody looking.
+      #
+      #    Its section H is the part worth having, and it exists because the
+      #    fault was PLANTED and sections A-G did not catch it: weakening the
+      #    read-back to "does a row exist" -- exactly the question the old
+      #    admin/users/save.php asked with LENGTH(passwordHash) -- left the
+      #    test at 49 passed, 0 failed. Section H makes the one state that can
+      #    tell them apart, with a database trigger, and goes red on it.
+      #
+      #    It SKIPS rather than passes where the database will not let it
+      #    create a trigger, and says so.
+      - name: 'One place stores a password, self-test (#728)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_pwwriter
+        run: php -d memory_limit=512M tools/password-writer-selftest.php
 
       # 🧹 The other half of #668, which the test above cannot reach: that the
       #    readers the nightly clear-out ACTUALLY USES apply the rule, against

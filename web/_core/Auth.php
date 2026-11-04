@@ -2180,6 +2180,400 @@ class Auth
     private const RESET_LINK_FORM = 'reset-link-utc:';
 
     /**
+     * 🔐 How long a sign-in name may be, and why the limit is here and not
+     *    guessed at the call site.
+     *
+     * `tblLocalAccounts.username` is `VARCHAR(50) NOT NULL` and UNIQUE across
+     * the whole installation, while `tblUsers.emailAddress` is `VARCHAR(255)`.
+     * Every caller that creates a row uses the e-mail address as the sign-in
+     * name, so an address of 51 characters or more cannot become one — and the
+     * database's answer to that is a truncation or an error depending on how
+     * strict it is, neither of which is a sentence anybody can act on.
+     */
+    public const SIGN_IN_NAME_MAX = 50;
+
+    /**
+     * 🔑 THE ONE PLACE A PASSWORD IS HASHED AND STORED (#728).
+     *
+     * WHY THIS EXISTS
+     * ---------------
+     * Seven places across six files each hashed a password and wrote it with
+     * their own SQL: the installer, `invites/accept.php`,
+     * `users/api/create.php`, `auth/reset-password/save.php`,
+     * `auth/account/change-password.php`, and TWO sites in
+     * `admin/users/save.php`. Every one of them was correct. The cost was that
+     * **a rule about passwords could not be enforced in one place** — and #586
+     * was exactly such a rule: a password cannot be stored for an account with
+     * no `tblLocalAccounts` row. That fault existed because the rule lived
+     * nowhere, and its fix was a read-back inside one page's transaction,
+     * which protected that page and nothing else.
+     *
+     * This repository's whole approach is "ONE place decides":
+     * `DbServer::connect()` for a connection, `PhpRuntime` for the PHP
+     * version, `SettingLimit` for a limit, `MailRoutes` for the mail route.
+     * Each of those is recorded because a second copy had already gone wrong
+     * somewhere. An authentication path with seven copies was the same
+     * exposure, not yet paid for.
+     *
+     * WHAT IT OWNS, AND WHAT IT DELIBERATELY DOES NOT
+     * -----------------------------------------------
+     * It owns the STORING: the hashing algorithm, whether the row has to be
+     * created, the sign-in name's two honest refusals, and the read-back that
+     * proves the write happened.
+     *
+     * **It does not own WHO may set a password, or when.** Each caller has its
+     * own rules — an administrator's gate, a reset link's validity, the
+     * person's own current password — and those stay with the caller. Moving
+     * them here would be a behaviour change dressed as a refactor.
+     *
+     * WHAT IT ANSWERS
+     * ---------------
+     * `['ok' => bool, 'created' => bool, 'why' => string]`. `why` is a sentence
+     * for a person, empty when `ok` is true. **It never contains the password,
+     * any part of the hash, or whose sign-in name is already in use** (#521:
+     * telling somebody whose address is taken tells them that address has an
+     * account).
+     *
+     * WHAT IT CANNOT DO, said plainly because an overstated guarantee is worse
+     * than none
+     * -----------------------------------------------------------------------
+     *   - **It does not open or close a transaction.** A caller that needs the
+     *     password write to stand or fall with other writes must wrap it, as
+     *     `auth/reset-password/save.php` does. Doing it here would nest inside
+     *     callers that already have one, and MySQL has no nested
+     *     transactions — the inner `begin_transaction()` would silently commit
+     *     the outer one's work.
+     *   - **It does not check the password's strength.** That is the caller's
+     *     form, and the rules differ between the installer and a member's own
+     *     page.
+     *   - **It THROWS rather than answering when the database itself refuses.**
+     *     `DbServer::connect()` sets `MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR`
+     *     — it takes BOTH, measured — so a failed `prepare()` or `execute()`
+     *     raises `mysqli_sql_exception` instead of returning false. That is
+     *     deliberate and matches the rest of `web/_core`, but it means **a
+     *     caller inside a transaction must keep its own try/catch**: an
+     *     exception escaping here leaves that transaction open.
+     *   - **It refuses an account with MORE THAN ONE set of sign-in details**
+     *     rather than choosing between them, because setting one would leave
+     *     the other usable. Nothing here creates that state; taking a password
+     *     away does reach every row, which is why
+     *     `_apps/offboarding/do.php` clears the hash itself with
+     *     `WHERE userID = ?` and is a stated exception to "one place stores a
+     *     password", not an oversight.
+     *   - **Creating a row is serialised by a lock on the account's own row,
+     *     and that lock is only real inside a caller's transaction** (#697: a
+     *     lock outside one is decoration). Every caller that can create a row
+     *     is inside a transaction today; a future one that is not would have
+     *     no protection, and nothing here can tell. Without the lock two
+     *     requests at once really did create two sets of sign-in details —
+     *     measured, with both reporting success. The unique key on `username`
+     *     catches only the case where the two names MATCH.
+     *
+     * @param \mysqli     $db       The connection to write through.
+     * @param int         $userId   The account the password belongs to.
+     * @param string      $plain    The password as typed. Refused when empty —
+     *                              an empty password is never a password, and
+     *                              an unusable one goes through
+     *                              {@see setUnusablePassword()}.
+     * @param string|null $signName The sign-in name to use IF a row has to be
+     *                              created. Null means "only update an
+     *                              existing row, and refuse if there is none".
+     * @param bool|null   $verified What to write to `isVerified` when creating
+     *                              a row. Null leaves the column's own default
+     *                              (0). It is never changed on an UPDATE: a new
+     *                              password does not prove an address.
+     *
+     * @return array{ok:bool, created:bool, why:string}
+     */
+    public static function setPassword(
+        \mysqli $db,
+        int $userId,
+        string $plain,
+        ?string $signName = null,
+        ?bool $verified = null
+    ): array {
+        if ($userId <= 0) {
+            return ['ok' => false, 'created' => false, 'why' => 'No account was named, so no password was stored.'];
+        }
+        if ($plain === '') {
+            return ['ok' => false, 'created' => false, 'why' => 'No password was given, so nothing was stored.'];
+        }
+
+        return self::storeHash($db, $userId, password_hash($plain, PASSWORD_DEFAULT), $signName, $verified);
+    }
+
+    /**
+     * 🚫 Give an account a password NOBODY CAN USE.
+     *
+     * Used where an account is created for somebody who will sign in another
+     * way, or set their own password later through the reset link. It has
+     * exactly ONE caller, `_apps/users/api/create.php` — a draft of this
+     * docblock also claimed offboarding, which is wrong in the reassuring
+     * direction: `_apps/offboarding/do.php` writes the marker with its own SQL
+     * and is this class's one stated exception, for the reason given under
+     * {@see setPassword()}. The row has to exist and `passwordHash` is
+     * `NOT NULL`, so something must go in it.
+     *
+     * **IT WRITES THE EMPTY STRING, BECAUSE THAT IS THE MARKER THIS PORTAL
+     * ALREADY ENFORCES — and the first version of this method got it wrong.**
+     * It wrote a hash of random bytes, on the reasoning that an empty marker
+     * "could be made to succeed by a caller that got its own logic wrong".
+     * **That reasoning is false, measured on PHP 8.5:** `password_verify()`
+     * answers false for `''`, `'0'`, `'x'` and `'*'` against both a real
+     * password and an empty one. More to the point, it is not the only guard —
+     * {@see loginLocal()} REFUSES an empty hash outright, before
+     * `password_verify()` is ever reached:
+     *
+     *     if ($row === null || (int) $row['isActive'] !== 1
+     *         || ($row['passwordHash'] ?? '') === '') {
+     *
+     * **The real cost of a random hash is that nothing can TELL.**
+     * **FOUR places READ it and ONE WRITES it**, and an earlier version of this
+     * sentence got the count, the direction and one of the names wrong:
+     *   - READ: `Auth::loginLocal()` refuses an empty hash before
+     *     `password_verify()` is reached; `_apps/auth/account/change-password.php`
+     *     and `_apps/auth/2fa/disable.php` both refuse on
+     *     `($row['passwordHash'] ?? '') === ''`; and
+     *     `docs/disaster-recovery-runbook.md` reads `passwordHash <> ''` as
+     *     "this account has a password".
+     *   - WRITES: `_apps/offboarding/do.php`, to take a sign-in away.
+     *
+     * The earlier version said "three places read" and cited
+     * `admin/users/save.php`'s #586 read-back as one of them — **which THIS
+     * change deleted**, so it was citing as evidence the very thing it
+     * removed. It also missed two real readers and called the writer a reader.
+     *
+     * A random hash passes every one of those readers as a working password
+     * that nobody can use — which is the state `users/api/create.php` had been
+     * leaving accounts in, and which this conversion fixes rather than moves.
+     *
+     * @return array{ok:bool, created:bool, why:string}
+     */
+    public static function setUnusablePassword(
+        \mysqli $db,
+        int $userId,
+        ?string $signName = null,
+        ?bool $verified = null
+    ): array {
+        if ($userId <= 0) {
+            return ['ok' => false, 'created' => false, 'why' => 'No account was named, so nothing was stored.'];
+        }
+
+        return self::storeHash($db, $userId, '', $signName, $verified);
+    }
+
+    /**
+     * The write itself: update the row where there is one, create it where
+     * there is not and a name was given, and REFUSE rather than report success
+     * where neither is possible.
+     *
+     * **The refusal is the point of #728.** Before this existed, a caller that
+     * updated a row which was not there affected nought rows and carried on —
+     * the page said the password was saved and nothing had been stored. That is
+     * #586's fault, and it could only be fixed per-page because the rule lived
+     * nowhere.
+     *
+     * **The read-back is what makes "stored" true rather than attempted.**
+     * `affected_rows` is 0 both for "no such row" and for "the same hash was
+     * already there", so it cannot be trusted on its own; the row is read back
+     * and the hash compared.
+     *
+     * @return array{ok:bool, created:bool, why:string}
+     */
+    private static function storeHash(
+        \mysqli $db,
+        int $userId,
+        string $hash,
+        ?string $signName,
+        ?bool $verified
+    ): array {
+        // 🔍 `tblLocalAccounts.userID` carries a plain KEY, NOT a unique one,
+        //    so the schema does not stop an account having two rows. Nothing
+        //    in this portal creates a second one — but if one exists, this
+        //    method REFUSES rather than choosing.
+        //
+        //    **Choosing is the dangerous option, and a draft of this did
+        //    choose.** It took `MIN(localID)`, which is at least
+        //    deterministic — `LIMIT 1` with no ordering is not even that. But
+        //    deterministic is not safe: setting the password on one row leaves
+        //    the OTHER row's old password working, so a member who resets
+        //    because they fear their account is compromised would still be
+        //    signable-in with the password they just replaced. Refusing says
+        //    so; choosing says "saved".
+        //
+        //    `_apps/offboarding/do.php` is the counter-example that settled
+        //    it: it clears the hash with `WHERE userID = ?`, reaching EVERY
+        //    row, which is right for taking a password AWAY and is why that
+        //    step is deliberately not routed through here.
+        // 🔒 LOCK THE ACCOUNT'S OWN ROW BEFORE COUNTING, or two requests at once
+        //    really do create two sets of sign-in details — MEASURED, not
+        //    reasoned, and a first version of this method said it was
+        //    impossible.
+        //
+        //    What was measured, on MySQL 8.0.36 with two connections, each in
+        //    its own transaction, both setting a password for the SAME account
+        //    with DIFFERENT sign-in names: **both reported success and the
+        //    account ended with TWO rows.** Under REPEATABLE READ neither
+        //    transaction can see the other's insert, so neither `COUNT(*)`
+        //    finds a clash. Afterwards that account can never have a password
+        //    set through this method again — it refuses, correctly — while
+        //    BOTH old passwords go on working. That is precisely the harm the
+        //    refusal below exists to prevent, caused by the method itself.
+        //
+        //    **The unique key does NOT cover this.** It is on `username`, so it
+        //    catches the case where the two names MATCH — one administrator
+        //    double-clicking Save — and nothing where they differ, which is
+        //    the case that does damage. A unique key on
+        //    `tblLocalAccounts.userID` would be the structural answer and is a
+        //    schema change for the owner to decide, not a tidy-up.
+        //
+        //    **A lock outside a transaction is decoration** (#697), and this
+        //    method deliberately opens none. So this bites only inside a
+        //    caller's transaction — and every caller that can CREATE a row is
+        //    inside one: the installer, `invites/accept.php`,
+        //    `users/api/create.php` and both sites in `admin/users/save.php`.
+        //    The one caller with no transaction,
+        //    `auth/account/change-password.php`, passes no sign-in name, so it
+        //    can only ever update. **If a future caller creates a row outside a
+        //    transaction, this protection is not there for it**, and nothing
+        //    here can tell.
+        //
+        //    `tblUsers` is the row locked rather than `tblLocalAccounts`,
+        //    because the row being guarded against is one that does not exist
+        //    yet: locking the parent is what two requests can both wait on.
+        $lock = $db->prepare('SELECT userID FROM tblUsers WHERE userID = ? FOR UPDATE');
+        $lock->bind_param('i', $userId);
+        $lock->execute();
+        $lock->get_result();
+        $lock->close();
+
+        $count = 0;
+        $existing = null;
+        // 🧮 `$row !== null` below is a backstop, not a live branch: a COUNT
+        //    always returns exactly one row. It is kept so the variables are
+        //    never read unset, and said to be a backstop so nobody reads it as
+        //    a guard that fires.
+        $read = $db->prepare(
+            'SELECT COUNT(*) AS howMany, MIN(localID) AS lowest FROM tblLocalAccounts WHERE userID = ?'
+        );
+        $read->bind_param('i', $userId);
+        $read->execute();
+        $row = $read->get_result()->fetch_assoc();
+        $read->close();
+        if ($row !== null) {
+            $count = (int) $row['howMany'];
+            if ($row['lowest'] !== null) {
+                $existing = (int) $row['lowest'];
+            }
+        }
+
+        if ($count > 1) {
+            return [
+                'ok'      => false,
+                'created' => false,
+                'why'     => 'This account has more than one set of sign-in details, which it should never have. '
+                           . 'No password was stored, because storing one would leave the other set usable. '
+                           . 'Please report this to whoever looks after the portal.',
+            ];
+        }
+
+        $created = false;
+        $wroteRow = 0;
+
+        if ($existing !== null) {
+            // 🔄 An existing row. `isVerified` is NOT touched: a new password
+            //    does not prove an e-mail address, and silently setting it
+            //    would hand a verification nobody earned.
+            $write = $db->prepare('UPDATE tblLocalAccounts SET passwordHash = ? WHERE localID = ?');
+            $write->bind_param('si', $hash, $existing);
+            $write->execute();
+            $write->close();
+            $wroteRow = $existing;
+        } else {
+            if ($signName === null || trim($signName) === '') {
+                return [
+                    'ok'      => false,
+                    'created' => false,
+                    'why'     => 'This account has no sign-in details, so a password cannot be stored for it. '
+                               . 'Nothing was changed.',
+                ];
+            }
+            $name = trim($signName);
+            if (mb_strlen($name) > self::SIGN_IN_NAME_MAX) {
+                return [
+                    'ok'      => false,
+                    'created' => false,
+                    'why'     => 'That sign-in name is too long: it may be at most ' . self::SIGN_IN_NAME_MAX
+                               . ' characters, and this one is ' . mb_strlen($name) . '. Nothing was changed.',
+                ];
+            }
+            // 🙈 The name is unique across the WHOLE installation, so a clash
+            //    is possible with somebody this caller cannot see. The refusal
+            //    NEVER says whose it is (#521): naming them would tell a
+            //    stranger that address has an account here.
+            $taken = $db->prepare('SELECT 1 FROM tblLocalAccounts WHERE username = ? LIMIT 1');
+            $taken->bind_param('s', $name);
+            $taken->execute();
+            $clash = $taken->get_result()->fetch_assoc();
+            $taken->close();
+            if ($clash !== null) {
+                return [
+                    'ok'      => false,
+                    'created' => false,
+                    'why'     => 'That sign-in name is already in use. Nothing was changed.',
+                ];
+            }
+
+            if ($verified === null) {
+                $write = $db->prepare(
+                    'INSERT INTO tblLocalAccounts (userID, username, passwordHash) VALUES (?, ?, ?)'
+                );
+                $write->bind_param('iss', $userId, $name, $hash);
+            } else {
+                $flag  = $verified === true ? 1 : 0;
+                $write = $db->prepare(
+                    'INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified) VALUES (?, ?, ?, ?)'
+                );
+                $write->bind_param('issi', $userId, $name, $hash, $flag);
+            }
+            $write->execute();
+            $wroteRow = (int) $write->insert_id;
+            $write->close();
+            $created = true;
+        }
+
+        // ✅ READ IT BACK, BY THE ROW THAT WAS WRITTEN. `affected_rows`
+        //    answers 0 both for "no such row" and for "the value was already
+        //    that", so it cannot tell a successful write from a missing one.
+        //    The row itself can — but only if the right row is asked. Reading
+        //    back by `userID` would ask an arbitrary one of an account's rows,
+        //    which is the fault this method exists to stop, one level down.
+        $check = $db->prepare('SELECT passwordHash FROM tblLocalAccounts WHERE localID = ?');
+        $check->bind_param('i', $wroteRow);
+        $check->execute();
+        $stored = $check->get_result()->fetch_assoc();
+        $check->close();
+
+        if ($stored === null || (string) $stored['passwordHash'] !== $hash) {
+            // 🙅 The wording does NOT say "nothing was changed", because that
+            //    is not known. The likeliest cause is that the write did not
+            //    land at all; but another request setting a password for the
+            //    same account between the write and this read would look
+            //    exactly the same, and in THAT case something did change — just
+            //    not to this value. Asserting the comfortable half of a
+            //    sentence nobody can verify is how an untrue message ships.
+            return [
+                'ok'      => false,
+                'created' => false,
+                'why'     => 'The password could not be confirmed as stored, so it should be treated as not set. '
+                           . 'Please try again.',
+            ];
+        }
+
+        return ['ok' => true, 'created' => $created, 'why' => ''];
+    }
+
+    /**
      * What is stored for a reset link: a SHA-256 fingerprint, never the link
      * itself. Somebody who reads the table cannot work a link back out of it.
      *

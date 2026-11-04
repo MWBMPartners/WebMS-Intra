@@ -168,6 +168,7 @@ erasure-review|tools/erasure-review-selftest.php|selftest_erasurereview|
 capabilities|tools/capabilities-selftest.php|selftest_capabilities|
 held-texts|tools/held-texts-selftest.php|selftest_heldtexts|
 setting-limit|tools/setting-limit-selftest.php|selftest_limit|
+password-writer|tools/password-writer-selftest.php|selftest_pwwriter|
 retention-caps|tools/retention-caps-selftest.php|selftest_retcaps|
 rate-limit-privacy|tools/rate-limit-privacy-selftest.php|selftest_ratelimit|
 webhook-retention|tools/webhook-retention-selftest.php|selftest_webhookret|

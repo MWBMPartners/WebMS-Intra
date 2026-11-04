@@ -105,22 +105,26 @@ if ($validation['valid'] === false) {
 // 5. 🔐 Hash and update the password
 // -----------------------------------------------------------------------------
 
-$newHash = password_hash($newPassword, PASSWORD_DEFAULT);
-$localId = (int) $local['localID'];
-
-$updateStmt = $mysqli->prepare(
-    'UPDATE tblLocalAccounts SET passwordHash = ? WHERE localID = ?'
-);
-
-if ($updateStmt === false) {
-    Logger::errorPlatform('MySQL', 'Error', 'CHANGEPW_UPDATE_FAIL', $mysqli->error, '');
+// 🔑 ONE PLACE STORES A PASSWORD (#728). This page used to hash it and write
+//    its own UPDATE. What it gains by asking `Auth::setPassword()` is the
+//    READ-BACK: the old code never looked, and `affected_rows` could not have
+//    told it anything either, because that answers 0 both for "no such row"
+//    and for "the hash was already that".
+//
+//    No `$signName` is passed, which means "update an existing row and refuse
+//    if there is none". That is right here: step 4 above has already read this
+//    person's own `tblLocalAccounts` row, so a missing row at this point is a
+//    row deleted in the last few milliseconds, and inventing a sign-in name
+//    for somebody changing a password would be a new account, not a change.
+$stored = Auth::setPassword($mysqli, $userId, $newPassword);
+if ($stored['ok'] === false) {
+    // The sentence is NOT shown to the person: this page speaks in codes the
+    // account page turns into words, and `why` can say more about the account
+    // than a sign-in page should. It is recorded instead.
+    Logger::errorPlatform('Auth', 'Error', 'CHANGEPW_UPDATE_FAIL', $stored['why'], '');
     header('Location: ' . Site::url('account') . '?error=db', true, 302);
     exit();
 }
-
-$updateStmt->bind_param('si', $newHash, $localId);
-$updateStmt->execute();
-$updateStmt->close();
 
 // 🔄 Regenerate session ID after credential change (security best practice)
 // See: https://owasp.org/www-community/attacks/Session_fixation

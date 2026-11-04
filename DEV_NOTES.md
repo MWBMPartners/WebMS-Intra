@@ -16242,3 +16242,170 @@ query from memory and running it cost one minute; writing it from memory and
 and three planted faults. **Count them from the run, not from here** — a number
 in prose goes stale the day somebody adds a help page, which is the fault this
 whole package is about.
+
+## One place hashes and stores a password (#728)
+
+**Eight writers, each correct, and that was the problem.** The installer,
+`invites/accept.php`, `users/api/create.php`, `auth/reset-password/save.php`,
+`auth/account/change-password.php`, two sites in `admin/users/save.php`, and
+`offboarding/do.php` each hashed a password and wrote it with their own SQL.
+None of them was wrong about hashing. What no one could do was enforce a rule
+about passwords in one place — and #586 was such a rule.
+
+`Auth::setPassword()` / `setUnusablePassword()` own the storing;
+`storeHash()` behind them is the only writer. They do **not** own who may set a
+password: that stays with each caller, which has its own gate.
+
+### The empty string is the unusable marker, and it is ENFORCED
+
+Five places depend on it — **four read it and one writes it**, which is why a
+random hash was wrong:
+
+| Where | What it does with `''` |
+|---|---|
+| `Auth::loginLocal()` | **reads** — refuses the account *before* `password_verify()` |
+| `_apps/auth/account/change-password.php` | **reads** — refuses on `($row['passwordHash'] ?? '') === ''` |
+| `_apps/auth/2fa/disable.php` | **reads** — the same test, and now says "no password" rather than "wrong password" |
+| `docs/disaster-recovery-runbook.md` | **reads** `passwordHash <> ''` as "has a password" |
+| `_apps/offboarding/do.php` | **writes** it, to take a sign-in away |
+
+**A first version of this table said "three places read" and cited
+`admin/users/save.php`'s #586 read-back as one of them — which this very change
+DELETED.** So it offered as evidence the thing it had removed, missed two real
+readers, and described the one writer as a reader. (No line numbers here on
+purpose: this package moved code inside `Auth.php`, and the repository's own
+rule is to cite issues and commits, which do not move.)
+
+`users/api/create.php` wrote `password_hash(bin2hex(random_bytes(32)))` — nobody
+can match it, but **nothing can recognise it**, so every account created through
+that API read as having a working password. The claim that an empty marker
+"could be made to succeed by a caller that got its own logic wrong" is false,
+measured on PHP 8.5: `password_verify()` answers false for `''`, `'0'`, `'x'`
+and `'*'`, against both a real password and an empty one.
+
+Before adopting it, measured that `_apps/auth/forgot-password/save.php` joins
+`tblLocalAccounts` with **no condition on the hash**, so the reset route stays
+open for such an account — which is the only route it has.
+
+### I claimed a race was impossible, and it was not
+
+`storeHash()` said "nothing in this portal creates a second one", in five
+places. **Measured false** on MySQL 8.0.36: two connections, each in its own
+transaction, both setting a password for the same account with *different*
+sign-in names — **both reported success, and the account ended with two rows.**
+Under REPEATABLE READ neither transaction can see the other's insert, so
+neither `COUNT(*)` finds a clash.
+
+The harm is not the duplicate row; it is what follows. That account can never
+have a password set through the one writer again — it refuses, correctly — while
+**both** old passwords keep working. So the member who most needs to change
+their password, because they fear their account is compromised, is the one who
+cannot.
+
+**The unique key does not cover it.** It is on `username`, so it catches the
+case where the two names *match* — one administrator double-clicking Save, which
+rolls back — and nothing where they differ.
+
+The fix is a lock on the account's own `tblUsers` row before the count. The
+parent is locked because the row being guarded against does not exist yet, so
+there is nothing else two requests can both wait on. **That lock is real only
+inside a caller's transaction** (#697), and every caller that can create a row
+is inside one; the only caller without a transaction passes no sign-in name and
+can therefore only update. If a future caller creates a row outside a
+transaction, this protection is not there for it and nothing can tell.
+
+Making the lock real made a new path reachable that the broken version never
+could — the #694 round-3 shape. A lock-wait timeout throws
+`mysqli_sql_exception`, which would escape with the caller's transaction open;
+checked rather than assumed, every creating caller catches it and rolls back
+(the app pages catch `\Throwable`, the installer catches
+`\mysqli_sql_exception`).
+
+**Section I takes two real processes**, because two connections driven one after
+the other from a single process simply deadlock — measured while building it.
+
+### Refusing beats choosing, and a draft chose
+
+`tblLocalAccounts.userID` carries a plain `KEY`, not a unique one, so the schema
+does not stop one account having two rows. A draft read `MIN(localID)` — at
+least deterministic, where `LIMIT 1` with no ordering is not even that. **But
+deterministic is not safe:** setting the password on one row leaves the other
+row's old password working, so a member who resets because they fear their
+account is compromised is still signable-in with the password they just
+replaced. It refuses now, and says why.
+
+`offboarding/do.php` is the counter-example that settled it: clearing the hash
+with `WHERE userID = ?` reaches **every** row, which is right for taking a
+password away. That is why it is a stated exception rather than a conversion.
+
+### The installer has no autoloader, and `php -l` cannot see it
+
+`web/_install/index.php` requires every class by hand — its own comment says it
+"can't autoload `\Portal\Core\Migrator`". So `\Portal\Core\Auth::setPassword()`
+there would have been a fatal "class not found" **on every installation**. Found
+by asking what loads the class, not by reading. Safe to require, measured:
+`Auth.php` loads standalone, and `setPassword()`, `setUnusablePassword()` and
+`storeHash()` reference no class but `self` — which section A of the self-test
+pins, because that is what the one `require_once` rests on.
+
+### A test that could not tell the read-back from LENGTH()
+
+**Sections A–G of `tools/password-writer-selftest.php` passed 49 of 49 with the
+read-back weakened** to `if ($stored === null)` — exactly the question the old
+`admin/users/save.php` asked with `LENGTH(passwordHash)`, and the thing the
+whole section was written to prove was stronger.
+
+They all check the database before and after, so they prove the write *landed*.
+The read-back only matters in the state they never produce: the write lands, a
+row exists, and the value is not the hash we made. **Section H makes that state
+with a `BEFORE UPDATE` trigger** that overwrites the column — standing in for a
+truncation, a stale replica, or a column altered underneath. It goes red on the
+weakened read-back (51 of 53) and skips honestly where the database will not
+allow a trigger.
+
+The transferable part: **when a check exists to prove one question is stronger
+than another, build the one case where the two answers differ.** Everything
+else passes on both.
+
+**Two faults in the test itself came out of this, and both are named shapes.**
+Its brace walk stepped over string literals but read a `//` comment as ordinary
+code, so the apostrophe in "a caller's transaction" opened a quote that never
+closed; the walk ran three methods past `storeHash()` and reported it reaching
+`App::settings()`, which lives in `validatePassword()`. That is the fault
+`check_page_head_tags.py` and `check_no_outside_qr_service.py` each had, found
+here the only way it can be — by a comment in the code under test gaining an
+apostrophe. Comments are blanked before the walk now.
+
+And check I2 first demanded that one of the two racing requests be **refused**.
+That is the pessimistic answer: with the lock in place the loser waits and then
+correctly **updates**, so nobody is turned away. A check demanding a failure the
+fix removes has to be weakened the day the code improves, which is how a test
+ends up fighting its own subject. It asserts that at most one of them *created*
+a row.
+
+### The guard, and what it cannot see
+
+`tools/audit-checks/check_one_password_writer.py`, a hard gate in
+`pr-security.yml`. It fails both ways. It replaces comments with spaces of the
+same length while **keeping** string literals — the opposite of the masking
+checks in that folder, because the SQL it looks for lives inside them.
+
+**Its first version used distance windows and three shapes got past it**, each
+measured by the independent check: `REPLACE INTO` (a verb it did not know); a
+joined `UPDATE tblUsers U JOIN tblLocalAccounts LA … SET LA.passwordHash` (the
+table named is not the one it looked for, and the column is reached through an
+alias); and an INSERT whose column list runs past 300 characters before the
+column — **which defeats the window, not the pattern**, so the guard's own
+"cannot see a name built by joining pieces" admission did not cover it.
+
+There are no windows now: it splits a file at each SQL write verb and flags any
+span naming both the table and the column, so a long column list, an alias and a
+join are all inside reach. The cost is a possible false alarm — a span that
+writes some other table and merely *reads* this column — which no file here
+does, measured. A check that cries wolf gets switched off (#483), so if that
+changes the answer is to narrow it with evidence, never to put the windows
+back.
+
+It still cannot see a name built by joining pieces or held in a variable, a
+write with no SQL verb of its own, or whether `Auth::setPassword()` is correct —
+only that it is the only thing doing the job.

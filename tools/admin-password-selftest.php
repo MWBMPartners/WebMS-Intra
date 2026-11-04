@@ -745,10 +745,22 @@ function plant(array $swaps): string
     return $after;
 }
 
-// Plant 1: `&& false` on the gate that creates the row. This is the shape that
-// has defeated several checks in this repository, and it is the obvious way
-// somebody "turns off" the new branch while leaving every line of it in place.
-plant(['if ($makeSignIn === true) {' => 'if ($makeSignIn === true && false) {']);
+// Plant 1: the sign-in name is never handed over, so no row is ever created.
+//
+// 🔁 RE-AIMED FOR #728, NOT WEAKENED. This used to be `&& false` on
+//    `if ($makeSignIn === true) {`, the page's own create-or-update gate.
+//    #728 moved that choice into `Auth::setPassword()`, which decides it from
+//    what is in the database rather than from a flag — so the old plant
+//    matched nothing and this test REFUSED, which is how it should fail when
+//    the code moves out from under it (#667: removing a feature must not
+//    remove the test guarding a past fault).
+//
+//    The purpose is unchanged: stop the sign-in row from being created and
+//    the save must NOT report success. Passing `null` as the sign-in name is
+//    exactly how you say "update an existing row and refuse if there is
+//    none", so for an account with no row this reproduces the same harm by
+//    the same route the new code really takes.
+plant(['$makeSignIn === true ? $signInName : null' => 'null']);
 $saved = pressSave(PLANT1, $newPassword);
 ok('E01 with "&& false" on the gate that creates the sign-in row, the save does NOT report success',
     $saved['type'] !== 'success' && str_contains($saved['flash'], 'A password sign-in was created') === false,
@@ -760,13 +772,24 @@ ok('E02 and nothing was stored, so C01-C04 would have failed on it',
 // Plant 2: the same, plus the read-back switched off. THIS IS THE ORIGINAL
 // #586 FAULT — the page says "updated successfully" over a password that was
 // never stored — and it is what part C exists to catch.
+// 🔁 ALSO RE-AIMED. The read-back itself now lives in `Auth::setPassword()`,
+//    where every caller gets it, so the page cannot switch it off — what the
+//    page CAN do is ignore the answer, which is the same fault seen from the
+//    page's side and is what `if ($stored['ok'] === false)` exists to stop.
+//    Both halves together put the original #586 behaviour back exactly: the
+//    page says "updated successfully" over a password that was never stored.
 $planted = plant([
-    'if ($makeSignIn === true) {'                              => 'if ($makeSignIn === true && false) {',
-    'if ($heldRow === null || (int) $heldRow[\'held\'] === 0) {' => 'if (false) {',
+    '$makeSignIn === true ? $signInName : null' => 'null',
+    // ⚠️ The condition alone appears TWICE in the handler (the Add branch has
+    //    its own), and `plant()` refuses a swap that is not unique — rightly,
+    //    because a plant that changes two places proves neither. The throw
+    //    below it differs between the two branches, so the pair is the anchor.
+    "if (\$stored['ok'] === false) {\n                throw new \\RuntimeException(\$stored['why']);"
+        => "if (false) {\n                throw new \\RuntimeException(\$stored['why']);",
 ]);
-ok('E03 the second plant really went in: the create gate is off and the read-back no longer asks anything',
-    str_contains($planted, 'if ($makeSignIn === true && false) {') === true
-    && str_contains($planted, '$heldRow[\'held\'] === 0') === false
+ok('E03 the second plant really went in: no row is ever created and the refusal is ignored',
+    str_contains($planted, 'if (false) {') === true
+    && str_contains($planted, '$makeSignIn === true ? $signInName : null') === false
     && $planted !== $asShipped
     && (string) file_get_contents($scratchHandler) === $planted);
 $saved = pressSave(PLANT2, $newPassword);

@@ -151,15 +151,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt->close();
                 }
 
-                // Local account
-                $hash = password_hash($password, PASSWORD_DEFAULT);
-                $stmt = $db->prepare(
-                    'INSERT INTO tblLocalAccounts (userID, username, passwordHash) VALUES (?, ?, ?)'
-                );
-                if ($stmt !== false) {
-                    $stmt->bind_param('iss', $newUserId, $username, $hash);
-                    $stmt->execute();
-                    $stmt->close();
+                // 🔑 ONE PLACE STORES A PASSWORD (#728).
+                //
+                //    The old code here was `if ($stmt !== false) { ... }` with
+                //    NOTHING in the else — so a failed `prepare()` skipped the
+                //    password write, and the page went on to mark the
+                //    invitation accepted and SIGN THE PERSON IN. They would
+                //    have an account they could never sign in to again, and
+                //    their one-use invitation would be spent. Under strict mode
+                //    `prepare()` throws, so that branch was unreachable; but
+                //    the shape is the fault #728 is about, and the refusal
+                //    below is now real rather than implied.
+                $stored = Auth::setPassword($db, $newUserId, $password, $username);
+                if ($stored['ok'] === false) {
+                    // Inside the transaction, so the person, their membership
+                    // and the acceptance all go back with it. The invitation
+                    // stays usable, which is the whole point.
+                    throw new \RuntimeException('The password could not be stored: ' . $stored['why']);
                 }
 
                 // Mark invitation accepted

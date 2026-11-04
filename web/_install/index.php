@@ -137,6 +137,24 @@ require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR 
 require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Channel.php';
 require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'PortalAddress.php';
 
+// 🔐 Portal\Core\Auth, for ONE method only: Auth::setPassword(), which is the
+//    one place a password is hashed and stored (#728). **THIS WIZARD HAS NO
+//    AUTOLOADER** — every class it uses is required by hand, which is why the
+//    comment further down says it "can't autoload \Portal\Core\Migrator".
+//    Without this line the first administrator's password write would be a
+//    fatal "class not found" on EVERY installation, and `php -l` cannot see
+//    that: it was found by asking what loads the class, not by reading.
+//
+//    Loading it here is safe, and that was MEASURED rather than assumed:
+//    `Auth.php` declares the class with only two `use` lines (both resolved
+//    inside method bodies), it loads standalone, and `setPassword()`,
+//    `setUnusablePassword()` and the private `storeHash()` behind them
+//    reference no class but `self` — so none of the portal's own start-up is
+//    needed. **Do not call anything else on it from here:** the rest of the
+//    class expects a session, a settings array and the portal's own
+//    bootstrap, exactly as the note on `PortalAddress` above says of that one.
+require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Auth.php';
+
 // 🔑 The ownership code, and (through it) the helpers this wizard shares with
 //    the upgrade page: the private folders' "refuse everything" file and the
 //    words for the channel.
@@ -1652,11 +1670,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // step 3 above for the rationale. A duplicate-email INSERT,
                 // an FK violation, or any other constraint failure would
                 // otherwise throw an uncaught mysqli_sql_exception and
-                // fatal the request. The `$stmt === false` and
-                // `if ($stmtLocal !== false)` guards below are kept as
-                // belt-and-braces — under strict mode they're effectively
-                // dead code, but they keep the handler safe if a future
+                // fatal the request. The `$stmt === false` guard below is
+                // kept as belt and braces: under strict mode it is dead code,
+                // but it keeps THIS handler's own statement safe if a future
                 // change toggles mysqli_report back to silent.
+                //
+                // ⚠️ IT NO LONGER COVERS THE PASSWORD. `$stmtLocal` is gone —
+                //    #728 moved that write into `Auth::setPassword()`, which
+                //    does NOT test `prepare()` for false (checked, not
+                //    assumed). So with reporting silent it would call
+                //    `bind_param()` on a boolean and fatal inside this
+                //    transaction. An earlier version of this comment still
+                //    named `$stmtLocal` and still promised the safety, which
+                //    was untrue in the reassuring direction twice over. The
+                //    protection that IS real is the `try`/`catch` around all
+                //    of this, which rolls back.
                 //
                 // 🧾 ALL OR NOTHING. The account is four writes (the person,
                 // their password, their place in the organisation, the
@@ -1673,7 +1701,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // `siteID = 1` directly on tblUsers, which fatalled the
                     // installer step 4 with "Unknown column 'siteID'" on every
                     // fresh install. See issue #200.
-                    $hash = password_hash($adminPass, PASSWORD_DEFAULT);
                     $stmt = $db->prepare(
                         'INSERT INTO tblUsers (fullName, emailAddress, isAdmin, isRootAdmin, isActive, createdAt) '
                         . 'VALUES (?, ?, 1, 1, 1, NOW())'
@@ -1689,15 +1716,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $newUserId = $stmt->insert_id;
                         $stmt->close();
 
-                        // Create local auth account
-                        $stmtLocal = $db->prepare(
-                            'INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified, createdAt) '
-                            . 'VALUES (?, ?, ?, 1, NOW())'
+                        // 🔑 ONE PLACE STORES A PASSWORD (#728).
+                        //
+                        //    The old code was `if ($stmtLocal !== false)` with
+                        //    nothing in the else, so a failed `prepare()`
+                        //    SKIPPED the password and the installation carried
+                        //    on and committed — leaving a first administrator
+                        //    nobody can sign in as, holding the one e-mail
+                        //    address a second attempt would need. The
+                        //    transaction's own comment already said that
+                        //    outcome must not happen; the branch that would
+                        //    have caused it is gone rather than merely
+                        //    unreachable.
+                        //
+                        //    `isVerified` is 1 here and ONLY here: the person
+                        //    typing this is at the console doing the install,
+                        //    and the column's comment records that installer
+                        //    administrators are auto-verified. `createdAt`
+                        //    is left out because the column's own
+                        //    `DEFAULT CURRENT_TIMESTAMP` stamps it.
+                        $storedPw = \Portal\Core\Auth::setPassword(
+                            $db,
+                            (int) $newUserId,
+                            $adminPass,
+                            $adminEmail,
+                            true
                         );
-                        if ($stmtLocal !== false) {
-                            $stmtLocal->bind_param('iss', $newUserId, $adminEmail, $hash);
-                            $stmtLocal->execute();
-                            $stmtLocal->close();
+                        if ($storedPw['ok'] === false) {
+                            throw new \RuntimeException(
+                                'The administrator password could not be stored: ' . $storedPw['why']
+                            );
                         }
 
                         // Assign to default site

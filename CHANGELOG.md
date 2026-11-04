@@ -4,6 +4,113 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### One place hashes and stores a password (#728)
+
+**EIGHT places did it, each with its own SQL:** the installer,
+`invites/accept.php`, `users/api/create.php`, `auth/reset-password/save.php`,
+`auth/account/change-password.php`, **two** sites in `admin/users/save.php`,
+and `offboarding/do.php`. Every one of them was correct about the hashing.
+
+**What could not be done was enforce a rule about passwords anywhere** — and
+#586 was exactly such a rule: a password cannot be stored for an account with
+no sign-in row. Its fix was a read-back inside one page's transaction, which
+protected that page and nothing else, and even there asked only whether a hash
+was *present*.
+
+`Auth::setPassword()` and `Auth::setUnusablePassword()` now own the storing:
+the hashing, whether the row must be created, two honest refusals on the
+sign-in name, and a read-back that compares the hash. **They deliberately do
+not own who may set a password** — each caller has its own rule, and moving
+those would be a behaviour change dressed as a refactor.
+
+**Three live faults the conversion fixes rather than moves:**
+
+* **`users/api/create.php` left every account it created looking as though it
+  had a password nobody could use.** It wrote `password_hash()` of random
+  bytes — unmatchable, but *unrecognisable*. **FOUR places read it and ONE writes it.** READ: `Auth::loginLocal()` refuses an empty hash before `password_verify()` is reached; `_apps/auth/account/change-password.php` and `_apps/auth/2fa/disable.php` both refuse on `($row['passwordHash'] ?? '') === ''`; and the disaster-recovery runbook reads `passwordHash <> ''` as "this account has a password". WRITES: `_apps/offboarding/do.php`, to take a sign-in away. So the empty
+  marker is the one the portal enforces, and a random hash defeated every
+  reader. Measured first that the forgot-password flow puts no condition on the
+  hash, so the reset route stays open.
+* **`invites/accept.php` and the installer could skip the password write
+  silently.** Both were `if ($stmt !== false) { … }` with nothing in the else.
+  The invite path would then mark the invitation accepted and sign the person
+  in — an account they could never sign in to again, with their one-use
+  invitation spent. Unreachable under strict mode, but the shape is the fault.
+* **`admin/users/save.php` could create a SECOND sign-in row for one account**
+  — two names, two passwords, either working — because `userID` carries no
+  unique key and the branch chose INSERT from a hidden form field rather than
+  from what was there. The flash message now follows what *happened* rather
+  than what was asked for.
+
+**`offboarding/do.php` is deliberately NOT converted**, and the reason is in
+`Auth::setPassword()`'s own docblock: taking a password away must reach **every**
+row, where this method refuses an account with more than one set of sign-in
+details rather than choosing between them. Choosing is the dangerous option — a
+draft took `MIN(localID)`, which is deterministic but still leaves the other
+row's old password working, so a member who resets because they fear their
+account is compromised would still be signable-in with the password they just
+replaced.
+
+**The guard is `tools/audit-checks/check_one_password_writer.py`**, a hard gate
+in `pr-security.yml` (a new script is not a gate here until that file *names*
+it). It fails both ways: an unlisted writer, and a named exception that has
+stopped being one. Every converted call site was reverted one at a time and
+each was caught; count the plants from the commit message, not from here (#671).
+
+**The independent check got three shapes past the first version of that guard**,
+each measured: `REPLACE INTO` (a verb it did not know), a joined
+`UPDATE tblUsers … SET LA.passwordHash` (the table named is not
+`tblLocalAccounts`, and the column is reached through an alias), and an INSERT
+whose column list runs past 300 characters — which defeated the **window**, not
+the pattern, so the guard's own "cannot see a name built by joining pieces"
+admission did not cover it. The distance windows are gone: it now splits a file
+at each SQL write verb and flags a span naming both the table and the column, so
+a long list, an alias and a join are all inside reach. A read-only file stays
+green, which was checked.
+
+**It also caught a stale exception the moment the conversion landed:**
+`check_account_writes_guarded.py` went red because `change-password.php` no
+longer writes the table it was listed for. That is the both-ways half working.
+
+**`tools/password-writer-selftest.php` proves the writer itself** against a real
+MySQL — 53 checks. **Its section H exists because the fault was planted and
+sections A–G did not catch it:** weakening the read-back to "does a row exist",
+exactly the old `LENGTH(passwordHash)` question, left the test at **49 passed, 0
+failed**. Sections A–G all check the database before and after, so they prove
+the write *landed*; the read-back only matters in the state they never produce
+— the write lands, a row exists, and the value is not the one we made. Section H
+makes that state with a database trigger and goes red on it.
+
+**And I claimed a race was impossible when it was not** — the shape the owner's
+own standing note calls out. `storeHash()` said "nothing in this portal creates
+a second one" in five places. Measured on MySQL 8.0.36 with two connections,
+each in its own transaction, both setting a password for the **same** account
+with **different** sign-in names: **both reported success and the account ended
+with two rows.** Under REPEATABLE READ neither transaction sees the other's
+insert, so neither `COUNT(*)` finds a clash. The harm is what follows — that
+account can never have a password set through the one writer again, while
+**both** old passwords go on working, so a member who changes their password
+because they fear their account is compromised cannot. The unique key is on
+`username`, so it catches only the case where the two names *match*, which is
+the harmless one.
+
+It now locks the account's own row before counting. That lock is real only
+inside a caller's transaction (#697: a lock outside one is decoration), and
+every caller that can create a row is inside one — the one that is not passes
+no sign-in name and so can only update. New **section I** runs two real
+processes, because two connections driven one after another from a single
+process just deadlock; planted, removing the lock turns all three of its checks
+red with `2 row(s)` and `created, created` on the failure lines.
+
+Two faults in my own test came out of building that: its brace walk read a `//`
+comment as code, so the apostrophe in "a caller's transaction" opened a quote
+that never closed and the walk ran three methods past its target — **the exact
+fault this repository names, found the only way it can be, by a comment gaining
+an apostrophe**. And check I2 first demanded that one of the two requests be
+*refused*, which is the pessimistic answer: with the lock in place the loser
+waits and then correctly *updates*, so the check now asserts that at most one of
+them **created** a row.
+
 ### A cancelled date came back if it fell in the hour that happens twice (#654)
 
 **Fixed.** A date cancelled with `EXDATE` was not removed when it fell in the

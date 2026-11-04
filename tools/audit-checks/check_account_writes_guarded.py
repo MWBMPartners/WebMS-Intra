@@ -139,7 +139,6 @@ ALLOWED: dict[str, str] = {
     "_apps/auth/2fa/disable.php": "the signed-in person's own account",
     "_apps/auth/2fa/setup.php": "the signed-in person's own account",
     "_apps/auth/2fa/verify.php": "the person completing their own sign-in",
-    "_apps/auth/account/change-password.php": "own account",
     "_apps/auth/account/notifications-save.php": "own account",
     "_apps/auth/account/save.php": "own account",
     "_apps/auth/account/webauthn-delete.php": "own account",
@@ -157,7 +156,7 @@ ALLOWED: dict[str, str] = {
     # _apps/auth/account/delete-confirm.php went the same day: "Delete my
     # account" no longer writes to any account table, it files a request.)
     "_core/GdprEraser.php": "the erasure engine: it empties only the account named on an erasure request that the account's own holder filed while signed in. The request must also have been confirmed, in one of three ways: by the holder from a link sent to their address, by the holder typing a phrase on 'Delete my account', or by an administrator of the request's organisation, whose account number and claim to have checked the person's identity are written to the audit trail. admin/erasure/process.php runs a request only for the organisation it was filed at",
-    "_core/Auth.php": "sign-in: updates the signed-in person's own record, links and devices, and adds a new single-sign-on account to the organisation where they signed in",
+    "_core/Auth.php": "sign-in: updates the signed-in person's own record, links and devices, and adds a new single-sign-on account to the organisation where they signed in. SINCE #728 it is also the ONE place a password is hashed and stored, for callers that have decided reach themselves \u2014 the helper-only shape, as Roles.php and UserGroups.php are: Auth::setPassword() deliberately does NOT decide WHO may set a password, because each caller has its own rule (an administrator's gate in admin/users/save.php, which runs AccountGuard::check(); a reset link's validity; the person's own current password; the installer, which has no accounts yet). _apps/auth/account/change-password.php used to be on this list in its own right and no longer writes the table at all \u2014 this check caught that entry going stale the moment #728 converted it, which is the both-ways half working",
     "_core/I18n.php": "own language choice",
     "_core/Ical.php": "own calendar token",
     "_core/Roles.php": "helper only — every caller decides reach first (admin/users/roles-save.php runs AccountGuard::check(); roles-unplaced-save.php and admin/sites/save.php are for global/organisation administrators); see the class docblock",

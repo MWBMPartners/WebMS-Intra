@@ -186,21 +186,35 @@ if ($validation['valid'] === false) {
 // 5. 🔐 Hash and update the password in tblLocalAccounts
 // -----------------------------------------------------------------------------
 
-$newHash = password_hash($password, PASSWORD_DEFAULT);
-
 $mysqli->begin_transaction();
 
 try {
-    // 🔄 Update the password hash
-    $updateStmt = $mysqli->prepare(
-        'UPDATE tblLocalAccounts SET passwordHash = ? WHERE userID = ?'
-    );
-    if ($updateStmt === false) {
-        throw new \RuntimeException('DB prepare failed: ' . $mysqli->error);
+    // 🔑 ONE PLACE STORES A PASSWORD (#728).
+    //
+    //    What this gains is the READ-BACK. The old code ran
+    //    `UPDATE tblLocalAccounts SET passwordHash = ? WHERE userID = ?` and
+    //    never asked whether a row had been changed — and `affected_rows`
+    //    could not have told it, because that answers 0 both for "no such row"
+    //    and for "the hash was already that". So an account with no sign-in
+    //    row would have had its token consumed, every other token
+    //    invalidated, its trusted devices revoked and the person told the
+    //    reset had worked, with nothing stored.
+    //
+    //    **Be exact about how reachable that was: narrowly.**
+    //    `_apps/auth/forgot-password/save.php` joins `tblLocalAccounts` to
+    //    issue the link at all, so the row would have to be deleted between
+    //    the link being sent and being used. It is not a live leak; it is a
+    //    guarantee that was claimed and not implemented, which is the shape
+    //    this repository keeps finding.
+    //
+    //    No `$signName` is passed, so a missing row is a REFUSAL rather than a
+    //    new account: whoever follows a reset link is not creating sign-in
+    //    details, and inventing a name here would turn a failed reset into an
+    //    account nobody asked for.
+    $stored = Auth::setPassword($mysqli, $userId, $password);
+    if ($stored['ok'] === false) {
+        throw new \RuntimeException('The password could not be stored: ' . $stored['why']);
     }
-    $updateStmt->bind_param('si', $newHash, $userId);
-    $updateStmt->execute();
-    $updateStmt->close();
 
     // ✅ Mark the token as used
     $consumeStmt = $mysqli->prepare(

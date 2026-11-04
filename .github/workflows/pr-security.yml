@@ -1578,6 +1578,27 @@ jobs:
         run: python3 -I tools/audit-checks/check_decisions_recorded.py
 
 
+      # 🔑 ONE PLACE HASHES AND STORES A PASSWORD (#728).
+      #
+      # Before #728 eight places did it with their own SQL. Every one was
+      # correct about the hashing; what could not be done was enforce a RULE
+      # about passwords anywhere. #586 was exactly such a rule - a password
+      # cannot be stored for an account with no sign-in row - and its fix was a
+      # read-back inside ONE page's transaction, which protected that page
+      # alone and asked only whether a hash was PRESENT.
+      #
+      # Without this gate the conversion gets undone one feature at a time,
+      # which is #739's lesson in a path where the cost is a member who cannot
+      # sign in, or a password the portal said it saved and did not.
+      #
+      # It fails BOTH ways: an unlisted writer, and a named exception that has
+      # stopped being one. Its own header states what it cannot see.
+      - name: 'One place hashes and stores a password (hard gate)'
+        id: one_password_writer
+        if: always()
+        run: python3 -I tools/audit-checks/check_one_password_writer.py
+
+
       # =====================================================================
       # Summary in the Actions UI
       # =====================================================================

@@ -217,18 +217,19 @@ if ($action === 'create') {
             throw new \RuntimeException('User insert returned invalid ID.');
         }
 
-        // 🔑 Create local account if username provided
+        // 🔑 Create the sign-in details if a name was given. ONE PLACE
+        //    STORES A PASSWORD (#728): `Auth::setPassword()` hashes it,
+        //    creates the row, refuses a name that is too long or already in
+        //    use, and READS THE WRITE BACK — which this branch never did.
+        //    `isVerified` is left at the column's default (0) deliberately: an
+        //    administrator typing a password is not the person proving their
+        //    e-mail address. The whole save is in a transaction, so a refusal
+        //    takes the new account back with it.
         if ($username !== '') {
-            $hash = password_hash($password, PASSWORD_DEFAULT);
-            $stmt = $mysqli->prepare(
-                'INSERT INTO tblLocalAccounts (userID, username, passwordHash) VALUES (?, ?, ?)'
-            );
-            if ($stmt === false) {
-                throw new \RuntimeException('Failed to prepare local account insert: ' . $mysqli->error);
+            $stored = Auth::setPassword($mysqli, (int) $newUserId, $password, $username);
+            if ($stored['ok'] === false) {
+                throw new \RuntimeException('The password could not be stored: ' . $stored['why']);
             }
-            $stmt->bind_param('iss', $newUserId, $username, $hash);
-            $stmt->execute();
-            $stmt->close();
         }
 
         // 🛡️ #518: "Add User" used to create an account with NO
@@ -611,54 +612,68 @@ if ($action === 'update') {
         //    10b found. There is no third case and no silent one: a
         //    password that cannot be stored never reaches here, because
         //    step 10b has already refused the whole save.
-        if ($password !== '') {
-            $hash = password_hash($password, PASSWORD_DEFAULT);
-            if ($makeSignIn === true) {
-                // isVerified is left at the column's default (0), as the
-                // Add User branch above leaves it. It gates nothing at
-                // sign-in — Auth::loginLocal() never reads it — and an
-                // administrator typing a password is not the person
-                // proving their e-mail address, so claiming otherwise
-                // would be untrue.
-                $stmt = $mysqli->prepare(
-                    'INSERT INTO tblLocalAccounts (userID, username, passwordHash) VALUES (?, ?, ?)'
-                );
-                if ($stmt === false) {
-                    throw new \RuntimeException('Failed to prepare sign-in creation: ' . $mysqli->error);
-                }
-                $stmt->bind_param('iss', $userID, $signInName, $hash);
-            } else {
-                $stmt = $mysqli->prepare('UPDATE tblLocalAccounts SET passwordHash = ? WHERE userID = ?');
-                if ($stmt === false) {
-                    throw new \RuntimeException('Failed to prepare password update: ' . $mysqli->error);
-                }
-                $stmt->bind_param('si', $hash, $userID);
-            }
-            $stmt->execute();
-            $stmt->close();
+        // 📣 Whether a sign-in was really CREATED, as opposed to asked for.
+        //    Defined before the branch so it is never undefined: the message
+        //    below reads it whatever happened, and an undefined variable under
+        //    `strict_types` is a warning on a page that has already begun
+        //    printing — the shape that answers HTTP 200 with half a page.
+        $signInWasCreated = false;
 
-            // 🧾 #586: ask the database what is really there, inside the
-            //    same transaction, BEFORE anything says "saved". Saying so
-            //    without looking is the whole fault. Only whether a hash
-            //    is PRESENT is read back — its length, never its value —
-            //    because a password and its hash are never read into this
-            //    page, printed, logged or recorded anywhere.
-            //    A hash of zero length is the "unusable" marker the
-            //    offboarding page and the runbook write, so it counts as
-            //    nothing stored.
-            $stmt = $mysqli->prepare(
-                'SELECT LENGTH(passwordHash) AS held FROM tblLocalAccounts WHERE userID = ? LIMIT 1'
+        if ($password !== '') {
+            // 🔑 ONE PLACE STORES A PASSWORD (#728). This branch used to
+            //    choose between an INSERT and an UPDATE itself, from
+            //    `$makeSignIn`, and then read the write back with
+            //    `LENGTH(passwordHash)`.
+            //
+            //    **Three things improve, and the third is a real fault going
+            //    away.** The read-back now compares the HASH rather than its
+            //    length, so "a hash is present" cannot stand in for "the hash
+            //    we just made is present". The refusals for a too-long or
+            //    already-used sign-in name are honest sentences instead of a
+            //    duplicate-key exception. And the choice between creating and
+            //    updating is made INSIDE the transaction, from what is there
+            //    at the moment of writing.
+            //
+            //    **BE EXACT ABOUT WHAT WAS WRONG BEFORE — a draft of this said
+            //    "rather than from a hidden form field", and that is FALSE.**
+            //    `$makeSignIn` is not posted and there is no hidden input
+            //    behind it: step 10b sets it from a `SELECT localID FROM
+            //    tblLocalAccounts WHERE userID = ?` that found nothing (it is
+            //    assigned at exactly two places, `= false` and `= true`, and
+            //    read nowhere else). The real old exposure was the gap between
+            //    that read and the write: a row created in between turned the
+            //    INSERT into a SECOND row for one account — two sign-in names,
+            //    two passwords, either of them working, because `userID`
+            //    carries no unique key. Narrow, and now closed by the lock
+            //    `Auth::setPassword()` takes inside this transaction.
+            //
+            //    `isVerified` is left at the column's default (0), as the Add
+            //    User branch does. It gates nothing at sign-in —
+            //    `Auth::loginLocal()` never reads it — and an administrator
+            //    typing a password is not the person proving their e-mail
+            //    address, so claiming otherwise would be untrue.
+            $stored = Auth::setPassword(
+                $mysqli,
+                $userID,
+                $password,
+                $makeSignIn === true ? $signInName : null
             );
-            if ($stmt === false) {
-                throw new \RuntimeException('Failed to prepare password read-back: ' . $mysqli->error);
+            if ($stored['ok'] === false) {
+                throw new \RuntimeException($stored['why']);
             }
-            $stmt->bind_param('i', $userID);
-            $stmt->execute();
-            $heldRow = $stmt->get_result()->fetch_assoc();
-            $stmt->close();
-            if ($heldRow === null || (int) $heldRow['held'] === 0) {
-                throw new \RuntimeException('The new password was not stored for account #' . $userID . '.');
-            }
+            // 📣 What the person is TOLD comes from what happened, not from
+            //    what was asked for. `$makeSignIn` is a request; `created` is
+            //    the outcome. Saying "a sign-in was created" over an update
+            //    would tell an administrator this account could not be signed
+            //    in to before, which may be false.
+            $signInWasCreated = $stored['created'];
+
+            // 🧾 #586's read-back now lives in `Auth::setPassword()`, where
+            //    every caller gets it. It asks a STRICTLY STRONGER question
+            //    than the code that was here: this page read
+            //    `LENGTH(passwordHash)` and accepted any non-zero answer, so
+            //    an old hash left in place by a write that never landed would
+            //    have passed. The method compares the hash it just made.
         }
 
         App::commit();
@@ -681,12 +696,12 @@ if ($action === 'update') {
     Logger::activity(
         'UserUpdated',
         'Updated user #' . $userID . ': ' . $fullName
-            . ($makeSignIn === true ? ' (a password sign-in was created for this account)' : ''),
+            . ($signInWasCreated === true ? ' (a password sign-in was created for this account)' : ''),
         $_SESSION['user_id'] ?? null
     );
 
     $_SESSION['flash_msg']  = 'User "' . $fullName . '" updated successfully.'
-        . ($makeSignIn === true
+        . ($signInWasCreated === true
             ? ' A password sign-in was created for this account, under the sign-in name "' . $signInName . '"; '
               . 'the person can sign in with that or with their e-mail address.'
             : '');

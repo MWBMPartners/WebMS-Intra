@@ -52,6 +52,7 @@ use Portal\Core\AccountGuard;
 use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
@@ -155,20 +156,34 @@ try {
     $newUserId = (int) $stmt->insert_id;
     $stmt->close();
 
-    // 🔐 Random, unusable password hash — this account can ONLY gain a real
-    //    password via the existing forgot-password reset flow (or SSO).
-    $unusableHash = password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT);
-    $laStmt = $db->prepare(
-        'INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified) VALUES (?, ?, ?, 0)'
-    );
-    if ($laStmt === false) {
-        throw new \RuntimeException('Failed to prepare local account insert: ' . $db->error);
+    // 🔐 A SIGN-IN ROW WITH NO USABLE PASSWORD (#728). The account can only
+    //    gain a real password through the forgot-password reset flow, or sign
+    //    in another way. The row has to exist for the reset flow to find it:
+    //    `_apps/auth/forgot-password/save.php` joins `tblLocalAccounts` and
+    //    puts NO condition on the hash, which was measured rather than assumed
+    //    before this changed.
+    //
+    //    **What this changes, and it is a fix rather than a move.** It used to
+    //    store `password_hash(bin2hex(random_bytes(32)))` — a hash nobody can
+    //    match, but one nothing can RECOGNISE either. So a random hash made
+    //    every account created through this API read as HAVING a sign-in
+    //    password that nobody could use.
+    //
+    //    FOUR places read the EMPTY string as "no password" and ONE writes it:
+    //    `Auth::loginLocal()` refuses an empty hash before `password_verify()`
+    //    is reached, `_apps/auth/account/change-password.php` and
+    //    `_apps/auth/2fa/disable.php` both refuse on it, and the
+    //    disaster-recovery runbook reads `passwordHash <> ''` as "this account
+    //    has a password"; `_apps/offboarding/do.php` writes it.
+    //
+    //    **An earlier version of this comment said "three places read" and
+    //    named `admin/users/save.php`'s #586 read-back as one — which #728
+    //    DELETED**, so it cited as evidence the thing it removed, missed two
+    //    real readers, and called the one writer a reader.
+    $stored = Auth::setUnusablePassword($db, $newUserId, $emailAddress, false);
+    if ($stored['ok'] === false) {
+        throw new \RuntimeException('Failed to create the sign-in row: ' . $stored['why']);
     }
-    $laStmt->bind_param('iss', $newUserId, $emailAddress, $unusableHash);
-    if ($laStmt->execute() === false) {
-        throw new \RuntimeException('Failed to insert local account: ' . $laStmt->error);
-    }
-    $laStmt->close();
 
     $usStmt = $db->prepare(
         'INSERT INTO tblUserSites (userID, siteID, isSiteAdmin, isActive) VALUES (?, ?, ?, 1)'
