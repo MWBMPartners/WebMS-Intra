@@ -5,6 +5,76 @@
 
 ---
 
+### The volunteer photo tier is a real gate now, and that takes photos away (#756, D-047)
+
+**A behaviour change, decided by the owner on 4 November 2026 — D-047 — and not
+a tidy-up.** `Photos::userTierRank()` checked for the `volunteer` role and
+returned 1; the line immediately below it returned 1 as well, for every
+signed-in member, "to keep portals where role rollout is partial functional".
+So the gate decided nothing, and had not since `8625b9e`.
+
+The comment beside the fall-through said access was granted "ONLY if you've
+explicitly granted them — the role check above gates that". **That was untrue in
+the reassuring direction**, which is the shape this repository keeps being burned
+by. Asked which of the two was intended, the owner chose the comment.
+
+So the fall-through returns 0, the rung became real, and a real rung is a
+capability (D-017): `Capabilities::PHOTOS_VOLUNTEER`, shipping pointed at
+`volunteer`, falling open for a global administrator like the rest.
+
+**What it costs somebody:** a signed-in member holding neither tier now sees what
+a visitor sees. Nothing shared with everybody is lost — `canView()` lets a
+`public` photo through before it asks about rank at all, checked in that method
+and in the three pages that read the ladder (`photos/index.php`,
+`photos/album.php`, and `canView()` for `view.php` and `serve.php`).
+
+**Hard-coded role gates are down to two**, both taking their key from a row a
+customer filled in, so neither is a page gate.
+
+### Why #739 was right to leave it, and why converting it alone would have been wrong
+
+#739 deliberately did not convert this one, and that was correct: making it a
+capability while both branches returned 1 would have put a switch on the Roles
+page that **cannot change what any member sees** — #671's "a seeded setting that
+nothing reads is a lie with a Save button" wearing a capability's clothes. It
+would also have **hidden the real question**, which was a product decision and
+not a refactor.
+
+**The order matters: settle what the gate should DO, then convert it.**
+
+### Nothing drove the ladder, which is how the no-op survived
+
+Measured with `grep -rln userTierRank tools/`, which answered only
+`check_no_new_role_gates.py` — and that reads it as TEXT. No test anywhere called
+`Photos::userTierRank()`. That is how a rung that decided nothing lived from
+`8625b9e` to 4 November 2026 with a comment claiming the opposite.
+
+It cannot be driven cheaply from the capability test either: the method asks
+`Auth::check()`, `App::isAdmin()` and `App::can()`, all of which read the
+session. So what is pinned is the fall-through's own value, with comments
+stripped. **Both plants were measured:** putting `return 1;` back fails one
+check, and bringing `App::hasRole('volunteer')` back fails three here and the
+hard gate as well.
+
+**And section O must not be read as proof this changed nothing.** It proves
+`photos.volunteer` answers exactly what `App::hasRole('volunteer')` answered,
+which is true of the GATE and says nothing about the ladder — before #756 the
+line after the gate returned 1 regardless. A note beside the new checks says so,
+because reading section O the other way is the "a check that pins a reassurance"
+shape.
+
+### Two wording faults found while doing it
+
+`PHOTOS_STAFF`'s `emptyMeans` ended "Albums shared with volunteers … are not
+affected — every signed-in member already reaches that tier", which this change
+makes false. And a check in the capability self-test was labelled "**twelve**
+capabilities are offered", which went red on the thirteenth — the check working,
+but **the label was a list named after a number**, the shape #739 recorded as the
+one that goes stale. Two things in that file had already been renamed for exactly
+that reason and this label was missed; it is named for its job now.
+
+---
+
 ## The erasure review's two races (#735)
 
 *4 November 2026.*

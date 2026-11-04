@@ -234,6 +234,7 @@ final class Capabilities
     public const PRAYER_MODERATE  = 'prayer.moderate';
     public const VENUES_MANAGE    = 'venues.manage';
     public const PHOTOS_STAFF     = 'photos.staff';
+    public const PHOTOS_VOLUNTEER = 'photos.volunteer';
 
     /**
      * Every field an entry in either list MUST declare, in the order the
@@ -760,27 +761,34 @@ final class Capabilities
             ],
         ],
 
-        // 📷 THE STAFF PHOTO TIER — and ONLY the staff one, which is the
-        //    most useful thing in this entry.
+        // 📷 THE TWO PHOTO TIERS. There are two entries now, and until
+        //    4 November 2026 there was one — because the volunteer rung was a
+        //    NO-OP and offering a switch for it would have been #671's "a
+        //    seeded setting that nothing reads is a lie with a Save button"
+        //    wearing a capability's clothes.
         //
-        //    ⚠️ THERE IS DELIBERATELY NO `photos.volunteer`, AND THE REASON
-        //       IS A MEASUREMENT RATHER THAN A PREFERENCE.
-        //       `Photos::userTierRank()` is a ladder: an administrator is
-        //       rank 3, the `staff` role is rank 2, the `volunteer` role is
-        //       rank 1 — and the line after it returns 1 for EVERY signed-in
-        //       member regardless, deliberately, "to keep portals where role
-        //       rollout is partial functional". So the volunteer branch and
-        //       the fall-through return the same number: holding that role
-        //       changes nothing for anybody, and has not since `8625b9e`.
-        //       Offering it as a capability would put a switch on the roles
-        //       page that cannot change what any member sees, which is #671's
-        //       "a seeded setting that nothing reads is a lie with a Save
-        //       button" wearing a capability's clothes.
-        //       `App::hasRole('volunteer')` therefore STAYS, named in
-        //       `tools/audit-checks/check_no_new_role_gates.py` with that
-        //       reason. Whether an ordinary member should reach the volunteer
-        //       tier at all is a product question, not a tidy-up, and it is
-        //       the thing to settle before this becomes a capability.
+        //    ⚠️ WHAT CHANGED IS A PRODUCT DECISION, NOT A TIDY-UP (the owner,
+        //       4 November 2026 — D-047; #756). `Photos::userTierRank()` is a
+        //       ladder: administrator 3, staff 2, volunteer 1 — and the line
+        //       after the volunteer branch used to return 1 for EVERY
+        //       signed-in member as well, deliberately, "to keep portals where
+        //       role rollout is partial functional". So the two branches
+        //       returned the same number and holding the role changed nothing
+        //       for anybody, which had been true since `8625b9e`. Worse, the
+        //       comment beside it said access was granted "ONLY if you've
+        //       explicitly granted them — the role check above gates that",
+        //       which was untrue in the REASSURING direction.
+        //
+        //       Asked which of the two was intended, the owner chose the
+        //       comment: **only volunteers reach the volunteer tier.** So the
+        //       fall-through returns 0, the rung became real, and a real rung
+        //       is a capability (D-017). A signed-in member with no tier now
+        //       sees exactly what a stranger sees, because `canView()` lets a
+        //       `public` photo through before it asks about rank at all.
+        //
+        //       **This takes photos away from people who can see them today.**
+        //       It is the one change in the capability conversion that does, and
+        //       the owner was told so before choosing.
         //
         //    ⚠️ THE ORDER IS LOAD-BEARING IN THE CODE, NOT HERE. The ranking
         //       asks staff FIRST, so somebody holding both lands on the
@@ -796,8 +804,27 @@ final class Capabilities
             'emptyMeans' => 'No role will reach the albums shared with staff. Administrators of '
                 . 'this organisation will still be able to, because the ranking puts an '
                 . 'administrator at the top tier before it asks about any role. Albums shared with '
-                . 'volunteers, and albums shared with every member, are not affected — every '
-                . 'signed-in member already reaches that tier.',
+                . 'volunteers are reached through the separate "See photos shared with volunteers" '
+                . 'setting and are not affected by this one; albums shared with every member are '
+                . 'not affected either.',
+            'askedAt' => [
+                'web/_core/Photos.php',
+            ],
+        ],
+
+        self::PHOTOS_VOLUNTEER => [
+            'label' => 'See photos shared with volunteers',
+            'opens' => 'Photo albums an organisation has shared with its volunteers — the lower '
+                . 'of the two photo tiers. Albums shared with everybody are not affected: those '
+                . 'are visible to anyone, signed in or not.',
+            'standard' => ['volunteer'],
+            'globalAdminFallsOpen' => true,
+            'organisationMayRepoint' => true,
+            'emptyMeans' => 'No role will reach the albums shared with volunteers. Administrators '
+                . 'of this organisation will still be able to, because the ranking puts an '
+                . 'administrator at the top tier before it asks about any role, and so will '
+                . 'anybody who reaches the higher staff tier. Albums shared with everybody are '
+                . 'not affected.',
             'askedAt' => [
                 'web/_core/Photos.php',
             ],

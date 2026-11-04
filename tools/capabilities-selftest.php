@@ -501,6 +501,14 @@ foreach ([
     Capabilities::PRAYER_MODERATE    => 'Cap Prayer',
     Capabilities::VENUES_MANAGE      => 'Cap Venues',
     Capabilities::PHOTOS_STAFF       => 'Cap Staff',
+    // #756: the volunteer photo rung became a real gate and so a capability
+    // (D-047). Added HERE in the same change that added it to the registry,
+    // because `check_capability_registry.py` only requires the key to EXIST in
+    // `Roles::STANDARD` and section A asserts only that a capability ships with
+    // A role, never WHICH — so a capability missing from these two lists ships
+    // pointing at anything at all with every check green. That is #739's worst
+    // finding, and it nearly handed the donor list to the wrong role.
+    Capabilities::PHOTOS_VOLUNTEER   => 'Cap Volunteer',
 ] as $capabilityKey => $personName) {
     $shippedRole = Capabilities::standardRoleKeys($capabilityKey)[0];
     $personId    = $capNewUser($personName, false);
@@ -544,6 +552,9 @@ $OTHERS = [
     Capabilities::PRAYER_MODERATE,
     Capabilities::VENUES_MANAGE,
     Capabilities::PHOTOS_STAFF,
+    // #756 / D-047: the volunteer photo rung is a real gate now, so it is a
+    // capability like the rest.
+    Capabilities::PHOTOS_VOLUNTEER,
 ];
 
 // =============================================================================
@@ -553,9 +564,17 @@ cap_section('A — the registry as declared');
 //    capability is swapped for another, and `in_array` passes when one is
 //    quietly dropped — #697's remedy, where iterating a list meant deleting a
 //    case stopped testing it while the label still said eight.
+// ⚠️ AND THE LABEL IS NOT A NUMBER EITHER. It read "twelve capabilities are
+//    offered" and went red the day a thirteenth was added (#756) — which is the
+//    check working, but the NAME was the same shape #739 recorded as the one
+//    that goes stale: a list named after a number. Two things in this file had
+//    already been renamed for exactly that reason (`$fiveShouldShipWith` and
+//    `$fiveHolders`), and this label was missed. It is named for its job now, so
+//    adding a capability means editing ONE list rather than a list and a word.
 cap_check(
-    'twelve capabilities are offered, in declared order: #724\'s, the five the owner named on '
-        . '3 November 2026, and the six #739 converted',
+    'every offered capability is declared, in order, and nothing has been added, '
+        . 'dropped or swapped: #724\'s, the five the owner named on 3 November 2026, '
+        . 'the six #739 converted, and #756\'s',
     Capabilities::keys() === array_merge([$CAP], $OTHERS),
     implode(',', Capabilities::keys())
 );
@@ -1465,6 +1484,8 @@ $shouldShipWith = [
     Capabilities::PRAYER_MODERATE    => 'prayer_team',
     Capabilities::VENUES_MANAGE      => 'venue_manager',
     Capabilities::PHOTOS_STAFF       => 'staff',
+    // #756 / D-047 — see the note beside `$capHolders`.
+    Capabilities::PHOTOS_VOLUNTEER   => 'volunteer',
 ];
 foreach ($shouldShipWith as $capabilityKey => $shippedRole) {
     cap_check(
@@ -1501,6 +1522,55 @@ foreach ($shouldShipWith as $capabilityKey => $shippedRole) {
 cap_check(
     'and #724\'s is still the one that does NOT fall open',
     Capabilities::fallsOpenForGlobalAdmin($CAP) === false
+);
+
+// 📷 THE PHOTO LADDER'S FALL-THROUGH (#756, D-047) — and this is here because
+//    NOTHING ELSE WOULD NOTICE IT GOING BACK.
+//
+//    `Photos::userTierRank()` is the only converted gate whose BEHAVIOUR
+//    changed. Section O proves `photos.volunteer` answers exactly what
+//    `App::hasRole('volunteer')` answered, which is true and is NOT the same as
+//    "nothing changed for anybody": before #756 the line AFTER that gate
+//    returned 1 as well, for every signed-in member, so the gate decided
+//    nothing. Reading section O as proof that this package changed nothing
+//    would be the "a check that pins a reassurance" shape.
+//
+//    ⚠️ NOTHING DRIVES THE LADDER ITSELF. No test anywhere called
+//       `Photos::userTierRank()` before this one — measured with
+//       `grep -rln userTierRank tools/`, which answered only
+//       `check_no_new_role_gates.py`, and that reads it as TEXT. That is how a
+//       no-op rung survived from `8625b9e` to 4 November 2026 with a comment
+//       beside it claiming the opposite. It cannot be driven cheaply from here
+//       either: the method asks `Auth::check()`, `App::isAdmin()` and
+//       `App::can()`, all of which read the session.
+//
+//    So what is pinned is the fall-through's OWN VALUE, with comments stripped
+//    so the explanation above it cannot satisfy the check. A regression to
+//    `return 1;` is the exact fault #756 fixed, and it would otherwise be
+//    invisible to all 297 checks in this file.
+$photosCode = cap_codeOnly(dirname(__DIR__) . '/web/_core/Photos.php');
+cap_check(
+    '#756 the photo ladder still asks the capability for the volunteer rung',
+    str_contains($photosCode, 'App::can(Capabilities::PHOTOS_VOLUNTEER) === true') === true
+);
+// 📏 WHITESPACE-TOLERANT ON PURPOSE. `cap_codeOnly()` strips a comment's TEXT
+//    but leaves the indentation that preceded it, so the stripped ladder holds
+//    a run of blank-looking lines between the rung and the fall-through — a
+//    literal `str_contains` was tried first and failed on exactly that, which is
+//    a check crying wolf over its own formatting. What matters is the ORDER of
+//    the two returns, not the spacing between them.
+cap_check(
+    '#756 ... and a signed-in member with no tier gets 0, not 1 — the no-op this fixed',
+    preg_match(
+        '/PHOTOS_VOLUNTEER\)\s*===\s*true\s*\)\s*\{\s*return\s+1;\s*\}\s*return\s+0;/',
+        $photosCode
+    ) === 1,
+    'the volunteer rung is not immediately followed by "return 0;" — if it returns 1 again, '
+        . 'the rung decides nothing and #756 is undone'
+);
+cap_check(
+    '#756 ... and the old hard-coded role gate has not come back',
+    str_contains($photosCode, "App::hasRole('volunteer')") === false
 );
 
 // =============================================================================

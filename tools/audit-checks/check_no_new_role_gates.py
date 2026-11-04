@@ -202,25 +202,6 @@ HAS_ROLE_REMAINING: dict[str, dict] = {
             }
         ]
     },
-    "web/_core/Photos.php": {
-        "calls": [
-            {
-                "line": 151,
-                "key": "volunteer",
-                "why": "A NO-OP, and that is the whole reason it is still here. "
-                "`Photos::userTierRank()` is a ladder — administrator 3, the `staff` "
-                "capability 2, this rung 1 — and the line after it returns 1 for EVERY "
-                "signed-in member regardless, deliberately, 'to keep portals where role "
-                "rollout is partial functional'. So holding the `volunteer` role changes "
-                "nothing for anybody, and has not since `8625b9e`. Making it a capability "
-                "would put a switch on the Roles page that cannot change what any member "
-                "sees, which is #671's 'a seeded setting that nothing reads is a lie with a "
-                "Save button'. Whether an ordinary member should reach the volunteer tier at "
-                "all is a product question; it has to be settled before this becomes a "
-                "capability, and converting the gate would hide it.",
-            }
-        ]
-    },
 }
 
 # Every remaining `Roles::has()` / `Roles::hasAnyOf()` call under `web/`, same
@@ -246,7 +227,12 @@ ROLES_HAS_REMAINING: dict[str, dict] = {
     "web/_core/Capabilities.php": {
         "calls": [
             {
-                "line": 1380,
+                # 1380 until #756 added the `photos.volunteer` entry above it,
+                # which moved this line. The check reports a drifted number as
+                # information rather than a finding, on purpose: the line is a
+                # convenience for the reader and a wrong one must never be the
+                # thing that fails a push. It is still worth keeping true.
+                "line": 1422,
                 "method": "hasAnyOf",
                 "why": "This IS `Capabilities::allows()`'s own body — the one place a "
                 "capability's roles are turned into an answer about a person. Every "

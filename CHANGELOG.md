@@ -4,6 +4,33 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The volunteer photo tier is a real gate now, and it takes photos away (#756, D-047)
+
+**A behaviour change the owner decided on 4 November 2026, not a tidy-up.** The
+volunteer photo rung checked for the `volunteer` role and returned tier 1 — and
+the line immediately below returned 1 as well for every signed-in member, so the
+gate decided nothing, and had not since `8625b9e`. The comment beside it claimed
+access was granted "ONLY if you've explicitly granted them", which was untrue in
+the reassuring direction.
+
+Asked which of the two was intended, the owner chose the comment. The
+fall-through returns 0, the rung is real, and a real rung is a capability
+(D-017): `Capabilities::PHOTOS_VOLUNTEER`, shipping pointed at `volunteer`.
+
+**What it costs somebody:** a signed-in member holding neither photo tier now
+sees what a visitor sees. **Albums shared with everybody are unaffected** — a
+public photo is let through before any tier is considered.
+
+Hard-coded role gates are down to two, both taking their key from a row a
+customer filled in. `PHOTOS_STAFF`'s "an empty set costs…" sentence is corrected:
+it said albums shared with volunteers were unaffected "because every signed-in
+member already reaches that tier", which this change makes false.
+
+Pinned by three new checks in `tools/capabilities-selftest.php` (300 checks, 0
+failed, real MySQL), each proved by planting. **Nothing drove the ladder before
+this** — measured with `grep -rln userTierRank tools/`, which answered only an
+audit script that reads it as text, and that is how the no-op survived.
+
 ### Six workflows have never run on GitHub, and two of them cannot (#754)
 
 `portal-selftests.yml`, `calendar-selftests.yml`, `mail-selftests.yml`,

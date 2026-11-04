@@ -123,19 +123,36 @@ class Photos
      *    administrator has already been given rank 3 two lines above, so the
      *    global-administrator half of either test is unreachable here.
      *
-     *    ⚠️ THE VOLUNTEER RUNG BELOW IS DELIBERATELY STILL `App::hasRole()`,
-     *       AND THE REASON IS A MEASUREMENT. It returns 1, and the
-     *       fall-through at the end of this method returns 1 as well for
-     *       every signed-in member — so holding the `volunteer` role changes
-     *       nothing for anybody, and has not since `8625b9e`. Making it a
-     *       capability would put a switch on the Roles page that cannot
-     *       change what any member sees, which is #671's "a seeded setting
-     *       that nothing reads is a lie with a Save button". It is named,
-     *       with this reason, in
-     *       `tools/audit-checks/check_no_new_role_gates.py`. Whether an
-     *       ordinary member should reach the volunteer tier at all is a
-     *       product question and has to be settled first; converting the gate
-     *       would hide it.
+     *    🙋 THE VOLUNTEER RUNG IS REAL NOW, AND THAT IS A BEHAVIOUR CHANGE
+     *       (the owner, 4 November 2026 — D-047; #756). It used to return 1
+     *       and the fall-through below it returned 1 as well, for every
+     *       signed-in member — deliberately, "to keep portals where role
+     *       rollout is partial functional" — so holding the `volunteer` role
+     *       changed nothing for anybody, and had not since `8625b9e`. The
+     *       comment beside the fall-through said access was granted "ONLY if
+     *       you've explicitly granted them — the role check above gates
+     *       that", which was UNTRUE IN THE REASSURING DIRECTION: the line
+     *       immediately below it gave every member the same tier.
+     *
+     *       Asked which of the two was intended, the owner chose the comment.
+     *       So the fall-through returns 0 and the rung became real — and a
+     *       real rung is a capability (D-017), so it is
+     *       `Capabilities::PHOTOS_VOLUNTEER`, shipping pointing at
+     *       `volunteer`.
+     *
+     *       ⚠️ THIS TAKES PHOTOS AWAY FROM PEOPLE WHO CAN SEE THEM TODAY.
+     *          Every signed-in member reaches the volunteer tier before this
+     *          change; afterwards only those holding the role (or whatever
+     *          role the organisation points the capability at) do. It is the
+     *          one part of the capability conversion that changes what
+     *          somebody sees, and the owner was told that before deciding.
+     *
+     *       What rank 0 means for a signed-in member with no tier: exactly
+     *       what a stranger sees. `canView()` lets a `public` photo through
+     *       before it asks about rank at all, so nothing public is lost —
+     *       checked rather than assumed, in that method and in the three
+     *       pages that read this one (`photos/index.php`, `photos/album.php`,
+     *       and `canView()` for `view.php` and `serve.php`).
      */
     public static function userTierRank(): int
     {
@@ -148,14 +165,19 @@ class Photos
         if (App::can(Capabilities::PHOTOS_STAFF) === true) {
             return 2;
         }
-        if (App::hasRole('volunteer') === true) {
+        if (App::can(Capabilities::PHOTOS_VOLUNTEER) === true) {
             return 1;
         }
-        // Any authenticated user gets volunteer-tier read on `volunteers` photos
-        // ONLY if you've explicitly granted them — the role check above gates that.
-        // Default authenticated tier matches `volunteers` to keep portals where
-        // role rollout is partial functional, but stays below `staff`.
-        return 1;
+        // 🚪 SIGNED IN, AND NO TIER. This used to `return 1` — the same number
+        //    the branch above returns — so the branch above decided nothing.
+        //    See this method's docblock: the owner settled which of the two was
+        //    intended (D-047), and it was the gate.
+        //
+        //    0 is "no tier", the same answer a stranger gets, and that is
+        //    deliberate rather than a sentinel: `canView()` lets a `public`
+        //    photo through before it asks about rank, so a member with no tier
+        //    still sees everything shared with everybody.
+        return 0;
     }
 
     /**
