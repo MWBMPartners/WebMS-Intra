@@ -9,10 +9,20 @@
  * bootstrap-free installer (web/_install/index.php → INSTALL_VERSION)
  * read this file to derive their displayed version.
  *
- * 🛠️ Release process:
- *   1. Bump the string returned below
- *   2. Update CHANGELOG.md entry header
- *   3. Tag the release commit
+ * 🛠️ Release process — THE NUMBER IS SET AT RELEASE TIME, NOT ON EVERY PUSH
+ *    (the owner, 4 November 2026 — docs/decisions/024-...md, issues #476 and
+ *    #474):
+ *   1. Run the "Version Bump" workflow BY HAND against the branch being
+ *      prepared, or edit the string below. It used to be raised automatically
+ *      on every push to `alpha` and `beta`; that stopped, because a job
+ *      writing straight to a branch is what prevented those branches from
+ *      being guarded at all — and because it had not actually run since
+ *      7 July 2026, which is why `alpha` reported a LOWER number than `beta`
+ *      and `main` for four months.
+ *   2. Update the CHANGELOG.md entry header.
+ *   3. The number travels to `main` through the merge, like everything else.
+ *      `package.yml` REFUSES to build a release whose number was not raised
+ *      above the last tag, which is what makes step 1 impossible to forget.
  * Nothing else needs to change to keep the installer + runtime in sync.
  *
  * 📐 Design notes:
@@ -32,11 +42,11 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.4.0
+ * @version   1.4.1
  * @link      https://github.com/MWBMPartners/WebMS-Intra
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
-return '1.4.0';
+return '1.4.1';

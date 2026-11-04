@@ -2,6 +2,58 @@
 
 
 ## [Unreleased] (alpha)
+<!-- #474, #476, #748 -->
+
+### The version number is set at release time, and `alpha` and `beta` are guarded at last (#474, #476, #748 — D-024)
+
+**`alpha` had been reporting version 1.4.0 while `beta` and `main` reported
+1.4.1, for four months.** The cause (#476): `version-bump.yml` and
+`changelog.yml` ran on push, and `auto-merge-alpha.yml` merges pull requests
+with GitHub's built-in token — which GitHub deliberately does not let start
+another job. Measured: **three runs in `version-bump.yml`'s whole history, the
+last on `alpha` on 7 July 2026.**
+
+```bash
+gh api --paginate '.../actions/workflows/version-bump.yml/runs?per_page=100' \
+  -q '.workflow_runs[] | [.created_at[0:10], .conclusion, .event, .head_branch] | @tsv'
+```
+
+**And those two jobs were the one thing standing between `alpha`/`beta` and the
+branch rules #474 asks for**, because a ruleset that requires tests refuses any
+direct push. `changelog.yml`'s own header had already recorded that shape for
+`main` ("gets rejected with GH013"). The obvious fix — have them open a pull
+request — **does not work**: GitHub starts no checks on anything the built-in
+token creates, so such a request could never merge.
+
+So, the owner's decision (D-024): **the number is set at release time.** Both
+jobs now run on `workflow_dispatch` only, and **refuse to run against `alpha`,
+`beta`, `main` or `release-candidate`** — a confusing push failure is worse than
+an honest refusal, and the refusal says where to run them instead. The number
+travels through the merge, and `package.yml` still refuses to build a release
+whose number was not raised above the last tag, which is what makes the
+hand-run step impossible to forget. `web/_core/version.php` is raised to 1.4.1
+here, so the merge brings `alpha` in line rather than anybody pushing to a
+release branch.
+
+**Two faults this would otherwise have introduced, caught before committing.**
+Both jobs read `github.event.head_commit.message`, and **there is no
+`head_commit` on a `workflow_dispatch` event**. So `beta` would have taken a
+**patch** bump for ever — no message means no "BREAKING CHANGE" and no
+"feat(" — and a release that should have been 2.0.0 would quietly have been
+1.4.2, with nothing saying so. The bump is now worked out from every commit
+since `web/_core/version.php` last changed, which is the right basis for a
+number set at release time rather than on one push. And both carried
+`if: !contains(github.event.head_commit.message, '[skip ci]')`, which on a
+dispatch can never fire: a condition that cannot fail, removed rather than left
+to mislead the next reader.
+
+**With that settled, #474 is complete.** `PHP -l lint` and `Static security
+checks` are now required on `alpha`, `beta`, `release-candidate` and `main`.
+Administrators keep their bypass on the core ruleset — D-022 removed it for the
+live branch only, deliberately. `tools/audit-required-checks.py` reports both
+names matching a real workflow job, no orphans.
+
+## [Unreleased] (alpha)
 <!-- #744 -->
 
 ### The in-app help is read by something now (#744)

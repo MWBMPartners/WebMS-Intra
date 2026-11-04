@@ -44,16 +44,56 @@
 # (via INSTALL_VERSION constant) read this same file.
 # =============================================================================
 
+# =============================================================================
+# THE VERSION NUMBER IS SET AT RELEASE TIME NOW, NOT ON EVERY PUSH
+# (the owner, 4 November 2026 — D-024, issues #476, #474, #748)
+# =============================================================================
+# This used to run on every push to `alpha` and `beta` and write
+# `web/_core/version.php` straight to the branch. Three things were wrong with
+# that, and the first is why it was raised:
+#
+#   * IT HAD NOT ACTUALLY RUN SINCE 7 JULY 2026. Three runs in its whole
+#     history, the last on `alpha` on 7 July — which is why `alpha` reported
+#     1.4.0 while `beta` and `main` reported 1.4.1 (#476). The cause:
+#     `auto-merge-alpha.yml` merges pull requests with GitHub's built-in token,
+#     and GitHub deliberately does not let a job acting with that token start
+#     another job. So the merge never triggered this.
+#   * A DIRECT WRITE TO A BRANCH BLOCKS GUARDING IT. A ruleset that requires
+#     tests refuses any direct push, so this job and `changelog.yml` were the
+#     one thing standing between `alpha`/`beta` and the branch rules #474 asks
+#     for. `changelog.yml`'s own header already recorded that shape for `main`
+#     ("gets rejected with GH013").
+#   * AND THE OBVIOUS FIX DOES NOT WORK: having it open a pull request instead
+#     leaves the pull request with NO CHECKS AT ALL, because GitHub starts no
+#     workflow for anything the built-in token creates — so it could never
+#     merge. Measured before the owner was asked.
+#
+# So the number is raised ONCE, when a release is prepared, and it travels to
+# `main` the way everything else does — through the merge. `package.yml` is what
+# makes that impossible to forget: it REFUSES to build a release whose number
+# was not raised above the last tag, and says so in words.
+#
+# WHAT THIS COSTS, said plainly: the number no longer creeps up with every alpha
+# push, so `web/_core/version.php` on `alpha` is the number of the last release
+# prepared rather than a running count. The owner accepted that, on the view
+# that a version number which changes when a release is made is easier to reason
+# about.
+#
+# RUN IT BY HAND when preparing a release: Actions → "Version Bump" → Run
+# workflow, against the branch you are preparing. It still works out the bump
+# from the branch and the commit messages exactly as before.
+# =============================================================================
 name: Version Bump
 
 on:
-  push:
-    branches:
-      - alpha
-      - beta
-    paths:
-      - 'web/**'
-      - 'CHANGELOG.md'
+  # workflow_dispatch ONLY — see the note above. It used to be
+  # `push: branches: [alpha, beta]`.
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Why this is being run (shown in the run list)'
+        required: false
+        default: 'preparing a release'
 
 concurrency:
   group: version-bump-${{ github.ref_name }}
@@ -68,9 +108,39 @@ jobs:
     runs-on: ubuntu-latest
 
     # Skip self-triggered bumps and changelog auto-commits
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    # (The old `if: !contains(github.event.head_commit.message, '[skip ci]')`
+    #  is gone. On a workflow_dispatch there is no head_commit, so it could
+    #  never fire — and a condition that cannot fail is a condition that
+    #  misleads the next reader. A hand-started run is deliberate by
+    #  definition; there is nothing to skip.)
 
     steps:
+      # -----------------------------------------------------------------------
+      # 🚫 NOT AGAINST A GUARDED BRANCH, and this refusal is the design rather
+      #    than a limitation.
+      #
+      #    `alpha`, `beta`, `main` and `release-candidate` require their tests
+      #    to pass (#474), and a ruleset that requires tests refuses ANY direct
+      #    push — including this job's. Run against one of them, this would
+      #    work out the number, write the file, try five times and fail with a
+      #    push error, which reads like a fault in this job rather than the
+      #    rule it ran into.
+      #
+      #    So it refuses up front and says where to run it instead: a WORKING
+      #    branch. The number then travels to the release branches the way
+      #    everything else does — through the merge — which is exactly what
+      #    D-024 asks for.
+      # -----------------------------------------------------------------------
+      - name: Refuse to run against a guarded branch
+        run: |
+          case "${{ github.ref_name }}" in
+            alpha|beta|main|release-candidate|rc)
+              echo "::error::This cannot write to ${{ github.ref_name }}: that branch requires its tests to pass, and such a rule refuses every direct push (#474). Run this against the WORKING branch you are preparing the release on, then let the number travel through the merge. Or edit web/_core/version.php in that branch's pull request by hand."
+              exit 1
+              ;;
+          esac
+          echo "Branch ${{ github.ref_name }} is not a guarded release branch; carrying on."
+
       - name: Checkout repository
         uses: actions/checkout@v7.0.1
         with:
@@ -94,16 +164,40 @@ jobs:
           echo "Current version: $CURRENT"
 
       # -----------------------------------------------------------------------
-      # Determine bump type from branch + commit message
+      # Determine bump type from the branch and EVERY commit since the number
+      # last changed.
+      #
+      # ⚠️ THIS HAD TO CHANGE WITH THE TRIGGER, AND NOT CHANGING IT WOULD HAVE
+      #    BEEN A SILENT FAULT. It used to read
+      #    `${{ github.event.head_commit.message }}` — the one pushed commit.
+      #    **There is no `head_commit` on a `workflow_dispatch` event**, so
+      #    after the trigger changed that would have been EMPTY, and `beta`
+      #    would have taken a PATCH bump for ever: no message, so no
+      #    "BREAKING CHANGE" and no "feat(", so the `else` branch every time.
+      #    A release that should have been 2.0.0 would quietly have been
+      #    1.4.2, and nothing would have said so.
+      #
+      #    It now reads every commit message since `web/_core/version.php` last
+      #    changed, which is the right basis for a number set at release time
+      #    rather than on one push: a release carries all the work since the
+      #    last release, not just the last commit of it. Where the file has no
+      #    history to go on, it falls back to the last 50 commits and SAYS so,
+      #    rather than reading one commit and looking confident.
       # -----------------------------------------------------------------------
       - name: Determine bump type
         id: bump
-        env:
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           BRANCH="${{ github.ref_name }}"
+          SINCE=$(git log -1 --format=%H -- web/_core/version.php || true)
+          if [[ -n "$SINCE" && -n "$(git rev-list "${SINCE}..HEAD" 2>/dev/null)" ]]; then
+            COMMIT_MSG=$(git log "${SINCE}..HEAD" --pretty=%B)
+            echo "Reading every commit since the number last changed (${SINCE:0:12})."
+          else
+            COMMIT_MSG=$(git log -50 --pretty=%B)
+            echo "::warning::web/_core/version.php has no earlier change to read from (or nothing has happened since), so the bump is worked out from the last 50 commits."
+          fi
           echo "Branch:  $BRANCH"
-          echo "Commit:  $COMMIT_MSG"
+          echo "Commits read: $(echo "$COMMIT_MSG" | grep -c '' ) line(s)"
 
           if [[ "$BRANCH" == "alpha" ]]; then
             # alpha always bumps patch
@@ -114,6 +208,10 @@ jobs:
             if echo "$COMMIT_MSG" | grep -qiE 'BREAKING CHANGE|!:'; then
               echo "type=major" >> "$GITHUB_OUTPUT"
               echo "Bump type: MAJOR (conventional commits)"
+            # `-m` is not needed: grep already matches per line, and
+            # COMMIT_MSG now holds many messages rather than one, so "^feat("
+            # matches a feat commit ANYWHERE in the range. That is the
+            # intention — one new feature in the release makes it a minor.
             elif echo "$COMMIT_MSG" | grep -qE '^feat(\(|:)'; then
               echo "type=minor" >> "$GITHUB_OUTPUT"
               echo "Bump type: MINOR (conventional commits)"
