@@ -11,6 +11,9 @@ everything and can re-assign. This is the mechanism for all new features.
 global administrator.
 **Where:** `Portal\Core\Capabilities`; `.claude/CLAUDE.md`.
 
+**Issue:** [#752](https://github.com/MWBMPartners/WebMS-Intra/issues/752) —
+the standing issue for decisions that are not about a feature.
+
 ---
 
 *One decision per file, under `docs/decisions/`, so that every assistant and

@@ -18,6 +18,9 @@ an administrator to look after one more secret with no choice in it.
 
 **Where:** `DbBackup`; the Backup page.
 
+**Issue:** [#752](https://github.com/MWBMPartners/WebMS-Intra/issues/752) —
+the standing issue for decisions that are not about a feature.
+
 ---
 
 *One decision per file, under `docs/decisions/`, so that every assistant and

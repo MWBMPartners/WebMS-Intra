@@ -9,6 +9,9 @@ ok". When a step finishes, start the next in the same turn.
 **Rules out:** ending a turn with a report when work could be advanced.
 **Where:** `.claude/CLAUDE.md` → "Working with the owner".
 
+**Issue:** [#752](https://github.com/MWBMPartners/WebMS-Intra/issues/752) —
+the standing issue for decisions that are not about a feature.
+
 ---
 
 *One decision per file, under `docs/decisions/`, so that every assistant and

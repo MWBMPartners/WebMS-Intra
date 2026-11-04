@@ -11,6 +11,9 @@ change hour, follow RFC 5545 §3.8.5.3 (same exact length).
 hours; a hard-coded zone.
 **Where:** `.claude/CLAUDE.md` → "Times always respect the time zone".
 
+**Issue:** [#752](https://github.com/MWBMPartners/WebMS-Intra/issues/752) —
+the standing issue for decisions that are not about a feature.
+
 ---
 
 *One decision per file, under `docs/decisions/`, so that every assistant and

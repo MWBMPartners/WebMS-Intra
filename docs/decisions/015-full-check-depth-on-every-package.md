@@ -10,6 +10,9 @@ fresh agent, fix, re-plant, commit, however many rounds that takes.
 **Rules out:** skipping a check round because a change looks small.
 **Where:** memory `release-decisions-3-november`.
 
+**Issue:** [#752](https://github.com/MWBMPartners/WebMS-Intra/issues/752) —
+the standing issue for decisions that are not about a feature.
+
 ---
 
 *One decision per file, under `docs/decisions/`, so that every assistant and

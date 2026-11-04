@@ -16,6 +16,9 @@ same code would have to be reviewed twice.
 
 **Where:** `.claude/CLAUDE.md` → "Codex review"; the queue's last item.
 
+**Issue:** [#752](https://github.com/MWBMPartners/WebMS-Intra/issues/752) —
+the standing issue for decisions that are not about a feature.
+
 ---
 
 *One decision per file, under `docs/decisions/`, so that every assistant and

@@ -10,6 +10,9 @@ check and the security checks.
 **Rules out:** a red mark on `main` that stops nobody.
 **Where:** ruleset "Protect main branch" (id 14829642), `bypass_actors: []`.
 
+**Issue:** [#752](https://github.com/MWBMPartners/WebMS-Intra/issues/752) —
+the standing issue for decisions that are not about a feature.
+
 ---
 
 *One decision per file, under `docs/decisions/`, so that every assistant and

@@ -9,6 +9,9 @@ has checked it, with the commit message saying plainly that Codex has not.
 **Rules out:** holding finished work until Codex is available.
 **Where:** `.claude/CLAUDE.md` → "When to run it".
 
+**Issue:** [#752](https://github.com/MWBMPartners/WebMS-Intra/issues/752) —
+the standing issue for decisions that are not about a feature.
+
 ---
 
 *One decision per file, under `docs/decisions/`, so that every assistant and

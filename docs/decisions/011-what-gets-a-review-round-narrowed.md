@@ -10,6 +10,9 @@ Not documentation, renames or comment-only changes.
 **Rules out:** a review round for an instruction rewrite.
 **Where:** `.claude/CLAUDE.md` → "Codex review".
 
+**Issue:** [#752](https://github.com/MWBMPartners/WebMS-Intra/issues/752) —
+the standing issue for decisions that are not about a feature.
+
 ---
 
 *One decision per file, under `docs/decisions/`, so that every assistant and

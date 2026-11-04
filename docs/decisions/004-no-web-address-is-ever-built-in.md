@@ -10,6 +10,9 @@ real customers)."
 **Rules out:** a quiet fallback to our own address.
 **Where:** `Portal\Core\PortalAddress`; `check_no_hardcoded_domains.py`.
 
+**Issue:** [#752](https://github.com/MWBMPartners/WebMS-Intra/issues/752) —
+the standing issue for decisions that are not about a feature.
+
 ---
 
 *One decision per file, under `docs/decisions/`, so that every assistant and

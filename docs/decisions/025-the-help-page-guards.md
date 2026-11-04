@@ -11,6 +11,9 @@ twenty** pages loaded, not just the disaster-recovery one.
 **Where:** `tools/audit-checks/check_help_page_references.py`,
 `tools/help-pages-selftest.php`.
 
+**Issue:** [#752](https://github.com/MWBMPartners/WebMS-Intra/issues/752) —
+the standing issue for decisions that are not about a feature.
+
 ---
 
 *One decision per file, under `docs/decisions/`, so that every assistant and

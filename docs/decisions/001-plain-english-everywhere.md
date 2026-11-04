@@ -12,6 +12,9 @@ users/developers".
 standard of the work to simplify the words.
 **Where:** `~/.claude/CLAUDE.md`, `.claude/CLAUDE.md` → "Plain English".
 
+**Issue:** [#752](https://github.com/MWBMPartners/WebMS-Intra/issues/752) —
+the standing issue for decisions that are not about a feature.
+
 ---
 
 *One decision per file, under `docs/decisions/`, so that every assistant and

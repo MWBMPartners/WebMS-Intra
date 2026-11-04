@@ -1,8 +1,14 @@
 # Decisions — one file each
 
-**Issue: [#751](https://github.com/MWBMPartners/WebMS-Intra/issues/751).** Every
-decision also belongs on the GitHub issue it relates to; this folder is the
-record that travels with the code.
+**Issues: [#751](https://github.com/MWBMPartners/WebMS-Intra/issues/751)** (why
+this exists and how it is maintained) and
+**[#752](https://github.com/MWBMPartners/WebMS-Intra/issues/752)** (the
+decisions that are not about a feature).
+
+Every decision is reachable **both ways**: each record names the issue it
+governs, and each open issue a decision governs carries a comment naming the
+decision. This folder is the record that travels with the code; the issues are
+where it is discussed.
 
 **This file is APPEND-ONLY, and it is SEARCHED BEFORE ANY QUESTION IS PUT TO THE
 OWNER.** Set by the owner on 4 November 2026: *"we need to be firm about
